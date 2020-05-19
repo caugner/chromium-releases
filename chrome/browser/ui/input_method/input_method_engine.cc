@@ -32,8 +32,8 @@ const char kErrorReachMaxWindowCount[] =
     "Cannot create more than 5 normal IME windows.";
 const char kErrorSentKeyEventsNotAllowed[] =
     "input.ime.sendKeyEvents API is not allowed on non-text fields.";
-const char kErrorSpecialKeysNotAllowed[] =
-    "ENTER et al. keys are allowed only on http:, https: etc.";
+const char kErrorAllKeysNotAllowed[] =
+    "All keys have been disabled for this API on windows and linux.";
 
 const int kMaxNormalWindowCount = 5;
 
@@ -149,15 +149,17 @@ bool InputMethodEngine::SendKeyEvent(ui::KeyEvent* event,
   }
 
   // ENTER et al. keys are allowed to work only on http:, https: etc.
-  if (!IsValidKeyForAllPages(event)) {
-    if (IsSpecialPage(input_context->GetInputMethod())) {
-      *error = kErrorSpecialKeysNotAllowed;
-      return false;
-    }
+  if (!IsValidKeyEvent(event)) {
+    *error = kErrorAllKeysNotAllowed;
+    return false;
   }
 
   input_context->SendKeyEvent(event);
   return true;
+}
+
+bool InputMethodEngine::IsValidKeyEvent(const ui::KeyEvent* ui_event) {
+  return false;
 }
 
 bool InputMethodEngine::IsActive() const {
@@ -291,7 +293,7 @@ bool InputMethodEngine::IsSpecialPage(ui::InputMethod* input_method) {
   return true;
 }
 
-bool InputMethodEngine::IsValidKeyForAllPages(ui::KeyEvent* ui_event) {
+bool InputMethodEngine::IsValidKeyForAllPages(const ui::KeyEvent* ui_event) {
   // Whitelists all character keys except for Enter and Tab keys.
   std::vector<ui::KeyboardCode> invalid_character_keycodes{ui::VKEY_TAB,
                                                            ui::VKEY_RETURN};
@@ -305,5 +307,4 @@ bool InputMethodEngine::IsValidKeyForAllPages(ui::KeyEvent* ui_event) {
       ui::VKEY_BACK, ui::VKEY_LEFT, ui::VKEY_RIGHT, ui::VKEY_UP, ui::VKEY_DOWN};
   return base::Contains(whitelist_keycodes, ui_event->key_code());
 }
-
 }  // namespace input_method

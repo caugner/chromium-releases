@@ -44,13 +44,6 @@ GetTLSSequenceManagerImpl() {
 
 }  // namespace
 
-// This controls how big the the initial for
-// |MainThreadOnly::task_execution_stack| should be. We don't expect to see
-// depths of more than 2 unless cooperative scheduling is used on Blink, where
-// we might get up to 6. Anyway 10 was chosen because it's a round number
-// greater than current anticipated usage.
-static constexpr const size_t kInitialTaskExecutionStackReserveCount = 10;
-
 std::unique_ptr<SequenceManager> CreateSequenceManagerOnCurrentThread(
     SequenceManager::Settings settings) {
   return internal::SequenceManagerImpl::CreateOnCurrentThread(
@@ -135,13 +128,14 @@ class SequenceManagerImpl::NativeWorkHandleImpl : public NativeWorkHandle {
   NativeWorkHandleImpl(SequenceManagerImpl* sequence_manager,
                        TaskQueue::QueuePriority priority)
       : sequence_manager_(sequence_manager->GetWeakPtr()), priority_(priority) {
-    TRACE_EVENT_ASYNC_BEGIN1("sequence_manager", "NativeWork", this, "priority",
-                             TaskQueue::PriorityToString(priority_));
+    TRACE_EVENT_NESTABLE_ASYNC_BEGIN1("sequence_manager", "NativeWork", this,
+                                      "priority",
+                                      TaskQueue::PriorityToString(priority_));
     sequence_manager_->main_thread_only().pending_native_work.insert(priority_);
   }
 
   ~NativeWorkHandleImpl() final {
-    TRACE_EVENT_ASYNC_END0("sequence_manager", "NativeWork", this);
+    TRACE_EVENT_NESTABLE_ASYNC_END0("sequence_manager", "NativeWork", this);
     if (!sequence_manager_)
       return;
     TaskQueue::QueuePriority prev_priority = effective_priority();
@@ -251,7 +245,6 @@ SequenceManagerImpl::MainThreadOnly::MainThreadOnly(
     random_generator = std::mt19937_64(RandUint64());
     uniform_distribution = std::uniform_real_distribution<double>(0.0, 1.0);
   }
-  task_execution_stack.reserve(kInitialTaskExecutionStackReserveCount);
 }
 
 SequenceManagerImpl::MainThreadOnly::~MainThreadOnly() = default;

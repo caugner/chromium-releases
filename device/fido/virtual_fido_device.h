@@ -247,12 +247,22 @@ class COMPONENT_EXPORT(DEVICE_FIDO) VirtualFidoDevice : public FidoDevice {
       base::span<const uint8_t> key_handle,
       base::span<const uint8_t, kRpIdHashLength> application_parameter);
 
+  // Simulates flashing the device for a press and potentially receiving one.
+  // Returns true if the "user" pressed the device (and the request must
+  // continue) or false if the user didn't, and the request must be dropped.
+  // Internally calls |state_->simulate_press_callback|, so |this| may be
+  // destroyed after calling this method, in which case it will return false.
+  bool SimulatePress();
+
   // FidoDevice:
   void TryWink(base::OnceClosure cb) override;
   std::string GetId() const override;
   FidoTransportProtocol DeviceTransport() const override;
 
  private:
+  static std::string MakeVirtualFidoDeviceId();
+
+  const std::string id_ = MakeVirtualFidoDeviceId();
   scoped_refptr<State> state_ = base::MakeRefCounted<State>();
 
   DISALLOW_COPY_AND_ASSIGN(VirtualFidoDevice);

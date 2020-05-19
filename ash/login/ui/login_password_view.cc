@@ -24,6 +24,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/dom/dom_code.h"
+#include "ui/events/types/event_type.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/text_constants.h"
@@ -110,6 +111,7 @@ class LoginTextfield : public views::Textfield {
     views::Textfield::OnFocus();
     SelectAll(/*reversed=*/false);
   }
+
  private:
   // Closures that will be called when the element receives and loses focus.
   base::RepeatingClosure on_focus_closure_;

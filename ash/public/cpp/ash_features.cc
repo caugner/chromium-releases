@@ -4,13 +4,31 @@
 
 #include "ash/public/cpp/ash_features.h"
 
+#include <vector>
+
 #include "ash/public/cpp/ash_switches.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
+#include "base/strings/string_split.h"
+#include "base/system/sys_info.h"
 #include "build/build_config.h"
 #include "chromeos/constants/chromeos_switches.h"
 
 namespace ash {
 namespace features {
+
+namespace {
+
+bool IsBoardKukui() {
+  std::vector<std::string> board =
+      base::SplitString(base::SysInfo::GetLsbReleaseBoard(), "-",
+                        base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  if (board.empty())
+    return false;
+  return board[0] == "kukui";
+}
+
+}  // namespace
 
 const base::Feature kAllowAmbientEQ{"AllowAmbientEQ",
                                     base::FEATURE_DISABLED_BY_DEFAULT};
@@ -18,8 +36,14 @@ const base::Feature kAllowAmbientEQ{"AllowAmbientEQ",
 const base::Feature kAutoNightLight{"AutoNightLight",
                                     base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kCornerShortcuts{"CornerShortcuts",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kContextualNudges{"ContextualNudges",
+                                      base::FEATURE_ENABLED_BY_DEFAULT};
+
 const base::Feature kDisplayChangeModal{"DisplayChangeModal",
-                                        base::FEATURE_DISABLED_BY_DEFAULT};
+                                        base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kDockedMagnifier{"DockedMagnifier",
                                      base::FEATURE_ENABLED_BY_DEFAULT};
@@ -58,13 +82,13 @@ const base::Feature kMediaSessionNotification{"MediaSessionNotification",
 const base::Feature kMultiDisplayOverviewAndSplitView{
     "MultiDisplayOverviewAndSplitView", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kNewOverviewLayout{"NewOverviewLayout",
-                                       base::FEATURE_ENABLED_BY_DEFAULT};
-
 const base::Feature kNightLight{"NightLight", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kNotificationExpansionAnimation{
     "NotificationExpansionAnimation", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kNotificationExperimentalShortTimeouts{
+    "NotificationExperimentalShortTimeouts", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kNotificationScrollBar{"NotificationScrollBar",
                                            base::FEATURE_DISABLED_BY_DEFAULT};
@@ -102,7 +126,7 @@ const base::Feature kEnableBackgroundBlur{"EnableBackgroundBlur",
                                           base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kSwipingFromLeftEdgeToGoBack{
-    "SwipingFromLeftEdgeToGoBack", base::FEATURE_DISABLED_BY_DEFAULT};
+    "SwipingFromLeftEdgeToGoBack", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kDragFromShelfToHomeOrOverview{
     "DragFromShelfToHomeOrOverview", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -153,6 +177,10 @@ bool IsNotificationExpansionAnimationEnabled() {
 
 bool IsNotificationScrollBarEnabled() {
   return base::FeatureList::IsEnabled(kNotificationScrollBar);
+}
+
+bool IsNotificationExperimentalShortTimeoutsEnabled() {
+  return base::FeatureList::IsEnabled(kNotificationExperimentalShortTimeouts);
 }
 
 bool IsPipRoundedCornersEnabled() {
@@ -206,11 +234,7 @@ bool IsBackgroundBlurEnabled() {
 }
 
 bool IsSwipingFromLeftEdgeToGoBackEnabled() {
-  // The kSwipingFromLeftEdgeToGoBack feature is only enabled on the devices
-  // that have hotseat enabled (i.e., on Krane and on Dogfood devices) in M80.
-  // See crbug.com/1030122 for details.
-  return base::FeatureList::IsEnabled(kSwipingFromLeftEdgeToGoBack) ||
-         chromeos::switches::ShouldShowShelfHotseat();
+  return base::FeatureList::IsEnabled(kSwipingFromLeftEdgeToGoBack);
 }
 
 bool IsDragFromShelfToHomeOrOverviewEnabled() {
@@ -226,12 +250,31 @@ bool IsReduceDisplayNotificationsEnabled() {
 }
 
 bool IsHideShelfControlsInTabletModeEnabled() {
-  return base::FeatureList::IsEnabled(kHideShelfControlsInTabletMode) &&
-         IsDragFromShelfToHomeOrOverviewEnabled();
+  if (!IsDragFromShelfToHomeOrOverviewEnabled())
+    return false;
+
+  // Enable shelf navigation buttons by default on kukui.
+  // TODO(https://crbug.com/1084226): A better approach would be to have login
+  // manager enable the feature by setting an appropriate enable_features flag.
+  static const bool is_kukui = IsBoardKukui();
+  if (is_kukui)
+    return true;
+
+  return base::FeatureList::IsEnabled(kHideShelfControlsInTabletMode);
 }
 
 bool IsDisplayChangeModalEnabled() {
   return base::FeatureList::IsEnabled(kDisplayChangeModal);
+}
+
+bool AreContextualNudgesEnabled() {
+  if (!IsHideShelfControlsInTabletModeEnabled())
+    return false;
+  return base::FeatureList::IsEnabled(kContextualNudges);
+}
+
+bool IsCornerShortcutsEnabled() {
+  return base::FeatureList::IsEnabled(kCornerShortcuts);
 }
 
 bool IsSystemTrayMicGainSettingEnabled() {

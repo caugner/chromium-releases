@@ -20,6 +20,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/time/time.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/test/test_windows.h"
@@ -1915,12 +1916,18 @@ TEST_F(WorkspaceWindowResizerTest, ResizeHistogram) {
 
   // A resize should generate a histogram.
   EXPECT_NE(gfx::Size(400, 60), window_->bounds().size());
-  ui::WaitForNextFrameToBePresented(window_->GetHost()->compositor());
+  EXPECT_TRUE(
+      ui::WaitForNextFrameToBePresented(window_->GetHost()->compositor()));
   histograms.ExpectTotalCount("Ash.InteractiveWindowResize.TimeToPresent", 1);
 
   // Completing the drag should not generate another histogram.
   resizer->CompleteDrag();
-  ui::WaitForNextFrameToBePresented(window_->GetHost()->compositor());
+
+  // Flush pending draws until there is no frame presented for 100ms (6 frames
+  // worth time) and check that histogram is not updated.
+  while (ui::WaitForNextFrameToBePresented(
+      window_->GetHost()->compositor(), base::TimeDelta::FromMilliseconds(100)))
+    ;
   histograms.ExpectTotalCount("Ash.InteractiveWindowResize.TimeToPresent", 1);
 }
 
@@ -1953,6 +1960,24 @@ TEST_F(MultiDisplayWorkspaceWindowResizerTest, Magnetism) {
 TEST_F(WorkspaceWindowResizerTest, DoesNotWorkInAppMode) {
   GetSessionControllerClient()->SetIsRunningInAppMode(true);
   EXPECT_FALSE(CreateResizerForTest(window_.get(), gfx::Point(), HTCAPTION));
+}
+
+TEST_F(WorkspaceWindowResizerTest, DoNotCreateResizerIfNotActiveSession) {
+  GetSessionControllerClient()->SetSessionState(
+      session_manager::SessionState::OOBE);
+  EXPECT_FALSE(CreateResizerForTest(window_.get(), gfx::Point(), HTCAPTION));
+
+  GetSessionControllerClient()->SetSessionState(
+      session_manager::SessionState::LOCKED);
+  EXPECT_FALSE(CreateResizerForTest(window_.get(), gfx::Point(), HTCAPTION));
+
+  GetSessionControllerClient()->SetSessionState(
+      session_manager::SessionState::LOGIN_PRIMARY);
+  EXPECT_FALSE(CreateResizerForTest(window_.get(), gfx::Point(), HTCAPTION));
+
+  GetSessionControllerClient()->SetSessionState(
+      session_manager::SessionState::ACTIVE);
+  EXPECT_TRUE(CreateResizerForTest(window_.get(), gfx::Point(), HTCAPTION));
 }
 
 }  // namespace ash

@@ -131,9 +131,15 @@ std::unique_ptr<WindowResizer> CreateWindowResizer(
   if (window_state->drag_details())
     return nullptr;
 
-  // When running in single app mode, we should not create window resizer.
-  if (Shell::Get()->session_controller()->IsRunningInAppMode())
+  // When running in single app mode or not in an active user session, we
+  // should not create window resizer.
+  SessionControllerImpl* session_controller =
+      Shell::Get()->session_controller();
+  if (session_controller->IsRunningInAppMode() ||
+      session_controller->GetSessionState() !=
+          session_manager::SessionState::ACTIVE) {
     return nullptr;
+  }
 
   if (window_state->IsPip()) {
     window_state->CreateDragDetails(point_in_parent, window_component, source);
@@ -1032,11 +1038,19 @@ void WorkspaceWindowResizer::UpdateSnapPhantomWindow(
   if (!did_move_or_resize_ || details().window_component != HTCAPTION)
     return;
 
-  const display::Display& display =
-      details().source == ::wm::WINDOW_MOVE_SOURCE_TOUCH
-          ? display::Screen::GetScreen()->GetDisplayNearestWindow(GetTarget())
-          : Shell::Get()->cursor_manager()->GetDisplay();
+  display::Screen* screen = display::Screen::GetScreen();
+  display::Display display;
+  if (details().source == ::wm::WINDOW_MOVE_SOURCE_TOUCH) {
+    display = screen->GetDisplayNearestWindow(GetTarget());
+  } else {
+    // The |Display| object returned by |CursorManager::GetDisplay| may be
+    // stale, but will have the correct id.
+    // TODO(oshima): Change the API so |GetDisplay| just returns a display id.
+    screen->GetDisplayWithDisplayId(
+        Shell::Get()->cursor_manager()->GetDisplay().id(), &display);
+  }
   SnapType last_type = snap_type_;
+  DCHECK(display.is_valid());
   snap_type_ = GetSnapType(display, location_in_screen);
   if (snap_type_ == SNAP_NONE || snap_type_ != last_type) {
     snap_phantom_window_controller_.reset();

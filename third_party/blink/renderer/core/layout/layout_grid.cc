@@ -194,7 +194,12 @@ bool LayoutGrid::ExplicitGridDidResize(const ComputedStyle& old_style) const {
 bool LayoutGrid::NamedGridLinesDefinitionDidChange(
     const ComputedStyle& old_style) const {
   return old_style.NamedGridRowLines() != StyleRef().NamedGridRowLines() ||
-         old_style.NamedGridColumnLines() != StyleRef().NamedGridColumnLines();
+         old_style.NamedGridColumnLines() !=
+             StyleRef().NamedGridColumnLines() ||
+         old_style.ImplicitNamedGridRowLines() !=
+             StyleRef().ImplicitNamedGridRowLines() ||
+         old_style.ImplicitNamedGridColumnLines() !=
+             StyleRef().ImplicitNamedGridColumnLines();
 }
 
 void LayoutGrid::ComputeTrackSizesForDefiniteSize(
@@ -499,17 +504,13 @@ LayoutUnit LayoutGrid::GuttersSize(
   return gap_accumulator;
 }
 
-void LayoutGrid::ComputeIntrinsicLogicalWidths(
-    LayoutUnit& min_logical_width,
-    LayoutUnit& max_logical_width) const {
-  LayoutUnit scrollbar_width = LayoutUnit(ScrollbarLogicalWidth());
-  min_logical_width = scrollbar_width;
-  max_logical_width = scrollbar_width;
+MinMaxSizes LayoutGrid::ComputeIntrinsicLogicalWidths() const {
+  MinMaxSizes sizes;
+  sizes += BorderAndPaddingLogicalWidth() + ScrollbarLogicalWidth();
 
   if (HasOverrideIntrinsicContentLogicalWidth()) {
-    min_logical_width += OverrideIntrinsicContentLogicalWidth();
-    max_logical_width = min_logical_width;
-    return;
+    sizes += OverrideIntrinsicContentLogicalWidth();
+    return sizes;
   }
 
   std::unique_ptr<Grid> grid = Grid::Create(this);
@@ -535,8 +536,9 @@ void LayoutGrid::ComputeIntrinsicLogicalWidths(
   LayoutUnit total_gutters_size = GuttersSize(
       algorithm.GetGrid(), kForColumns, 0, number_of_tracks, base::nullopt);
 
-  min_logical_width += algorithm.MinContentSize() + total_gutters_size;
-  max_logical_width += algorithm.MaxContentSize() + total_gutters_size;
+  sizes.min_size += algorithm.MinContentSize() + total_gutters_size;
+  sizes.max_size += algorithm.MaxContentSize() + total_gutters_size;
+  return sizes;
 }
 
 void LayoutGrid::ComputeTrackSizesForIndefiniteSize(
@@ -1216,22 +1218,11 @@ Vector<LayoutUnit> LayoutGrid::TrackSizesForComputedStyle(
   DCHECK(!grid_->NeedsItemsPlacement());
   bool has_collapsed_tracks = grid_->HasAutoRepeatEmptyTracks(direction);
   LayoutUnit gap = !has_collapsed_tracks ? GridGap(direction) : LayoutUnit();
-  size_t explicit_start = -grid_->SmallestTrackStart(direction);
-  size_t explicit_end = explicit_start +
-                        (is_row_axis ? StyleRef().GridTemplateColumns()
-                                     : StyleRef().GridTemplateRows())
-                            .size() +
-                        AutoRepeatCountForDirection(direction);
-  // Usually we have `explicit_end <= num_positions - 1`, but the latter may be
-  // smaller when the maximum number of tracks is reached.
-  explicit_end = std::min(explicit_end, num_positions - 1);
-  tracks.ReserveCapacity(explicit_end - explicit_start);
-  size_t loop_end = std::min(explicit_end, num_positions - 2);
-  for (size_t i = explicit_start; i < loop_end; ++i)
+  tracks.ReserveCapacity(num_positions - 1);
+  for (size_t i = 0; i < num_positions - 2; ++i)
     tracks.push_back(positions[i + 1] - positions[i] - offset_between_tracks -
                      gap);
-  if (loop_end < explicit_end)
-    tracks.push_back(positions[explicit_end] - positions[explicit_end - 1]);
+  tracks.push_back(positions[num_positions - 1] - positions[num_positions - 2]);
 
   if (!has_collapsed_tracks)
     return tracks;
@@ -1241,7 +1232,7 @@ Vector<LayoutUnit> LayoutGrid::TrackSizesForComputedStyle(
   size_t last_line = tracks.size();
   gap = GridGap(direction);
   for (size_t i = 1; i < last_line; ++i) {
-    if (grid_->IsEmptyAutoRepeatTrack(direction, i - 1 + explicit_start)) {
+    if (grid_->IsEmptyAutoRepeatTrack(direction, i - 1)) {
       --remaining_empty_tracks;
     } else {
       // Remove the gap between consecutive non empty tracks. Remove it also
@@ -1250,7 +1241,7 @@ Vector<LayoutUnit> LayoutGrid::TrackSizesForComputedStyle(
       bool all_remaining_tracks_are_empty =
           remaining_empty_tracks == (last_line - i);
       if (!all_remaining_tracks_are_empty ||
-          !grid_->IsEmptyAutoRepeatTrack(direction, i + explicit_start))
+          !grid_->IsEmptyAutoRepeatTrack(direction, i))
         tracks[i - 1] -= gap;
     }
   }

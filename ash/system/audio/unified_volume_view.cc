@@ -33,9 +33,6 @@ namespace ash {
 
 namespace {
 
-// Threshold to ignore update on the slider value.
-const float kSliderIgnoreUpdateThreshold = 0.01;
-
 // References to the icons that correspond to different volume levels.
 const gfx::VectorIcon* const kVolumeLevelIcons[] = {
     &kUnifiedMenuVolumeLowIcon,     // Low volume.
@@ -92,7 +89,8 @@ class MoreButton : public views::Button {
     SetTooltipText(l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_AUDIO));
     TrayPopupUtils::ConfigureTrayPopupButton(this);
 
-    views::InstallPillHighlightPathGenerator(this);
+    views::InstallRoundRectHighlightPathGenerator(this, gfx::Insets(),
+                                                  kTrayItemCornerRadius);
     focus_ring()->SetColor(UnifiedSystemTrayView::GetFocusRingColor());
   }
 
@@ -100,14 +98,14 @@ class MoreButton : public views::Button {
 
   // views::Button:
   void PaintButtonContents(gfx::Canvas* canvas) override {
-    gfx::Rect rect(GetContentsBounds());
+    gfx::RectF rect(GetContentsBounds());
     cc::PaintFlags flags;
     flags.setAntiAlias(true);
     flags.setColor(AshColorProvider::Get()->DeprecatedGetControlsLayerColor(
         AshColorProvider::ControlsLayerType::kInactiveControlBackground,
         kUnifiedMenuButtonColor));
     flags.setStyle(cc::PaintFlags::kFill_Style);
-    canvas->DrawRoundRect(rect, kTrayItemSize / 2, flags);
+    canvas->DrawRoundRect(rect, kTrayItemCornerRadius, flags);
   }
 
   std::unique_ptr<views::InkDrop> CreateInkDrop() override {
@@ -182,9 +180,10 @@ void UnifiedVolumeView::Update(bool by_user) {
   // there will be a small discrepancy between slider's value and volume level
   // on audio side. To avoid the jittering in slider UI, use the slider's
   // current value.
-  if (std::abs(level - slider()->GetValue()) < kSliderIgnoreUpdateThreshold)
+  if (std::abs(level - slider()->GetValue()) <
+      kAudioSliderIgnoreUpdateThreshold) {
     level = slider()->GetValue();
-
+  }
   // Note: even if the value does not change, we still need to call this
   // function to enable accessibility events (crbug.com/1013251).
   SetSliderValue(level, by_user);

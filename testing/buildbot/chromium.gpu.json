@@ -30,7 +30,8 @@
               "os": "Android"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -60,7 +61,8 @@
               "os": "Android"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -90,7 +92,8 @@
               "os": "Android"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -120,7 +123,8 @@
               "os": "Android"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -154,7 +158,8 @@
               "os": "Android"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -166,10 +171,10 @@
           "-v",
           "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -178,11 +183,11 @@
         },
         "name": "maps_pixel_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -208,12 +213,12 @@
           "--browser=android-chromium",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -222,11 +227,11 @@
         },
         "name": "pixel_skia_gold_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -268,7 +273,8 @@
               "device_type": "bullhead",
               "os": "Android"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test_target": "//chrome/test:rendering_representative_perf_tests"
       },
@@ -300,7 +306,8 @@
               "os": "Android"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -330,7 +337,8 @@
               "os": "Android"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -362,6 +370,7 @@
             }
           ],
           "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
           "shards": 6
         }
       }
@@ -371,6 +380,7 @@
   "GPU Linux Builder (dbg)": {},
   "GPU Mac Builder": {},
   "GPU Mac Builder (dbg)": {},
+  "GPU Mac Builder Code Coverage": {},
   "Linux Debug (NVIDIA)": {
     "gtest_tests": [
       {
@@ -389,11 +399,12 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "angle_unittests",
         "test_target": "//third_party/angle/src/tests:angle_unittests"
@@ -411,11 +422,12 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_tests",
         "test_target": "//gpu:gl_tests"
@@ -434,11 +446,12 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_unittests",
         "test_target": "//ui/gl:gl_unittests"
@@ -466,12 +479,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -495,12 +509,44 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "screenshot_sync",
+          "--show-stdout",
+          "--browser=debug",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --disable-features=UseSkiaRenderer",
+          "--dont-restore-color-profile-after-test"
+        ],
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "gl_renderer_screenshot_sync_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -524,12 +570,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -553,12 +600,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -586,12 +634,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -603,10 +652,10 @@
           "-v",
           "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -615,11 +664,11 @@
         },
         "name": "maps_pixel_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -628,9 +677,9 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -644,12 +693,12 @@
           "--browser=debug",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -658,11 +707,11 @@
         },
         "name": "pixel_skia_gold_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -671,9 +720,9 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -702,42 +751,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
-        }
-      },
-      {
-        "args": [
-          "screenshot_sync",
-          "--show-stdout",
-          "--browser=debug",
-          "--passthrough",
-          "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --enable-features=UseSkiaRenderer",
-          "--dont-restore-color-profile-after-test"
-        ],
-        "isolate_name": "telemetry_gpu_integration_test",
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
-        },
-        "name": "skia_renderer_screenshot_sync_tests",
-        "should_retry_with_patch": false,
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "containment_type": "AUTO",
-          "dimension_sets": [
-            {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
-            }
-          ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -761,12 +781,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -791,12 +812,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
           "shards": 2
         }
       }
@@ -820,11 +842,12 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "angle_unittests",
         "test_target": "//third_party/angle/src/tests:angle_unittests"
@@ -842,11 +865,12 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_tests",
         "test_target": "//gpu:gl_tests"
@@ -865,11 +889,12 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_unittests",
         "test_target": "//ui/gl:gl_unittests"
@@ -897,12 +922,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -926,12 +952,44 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "screenshot_sync",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --disable-features=UseSkiaRenderer",
+          "--dont-restore-color-profile-after-test"
+        ],
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "gl_renderer_screenshot_sync_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -955,12 +1013,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -984,12 +1043,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1017,12 +1077,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1034,10 +1095,10 @@
           "-v",
           "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -1046,11 +1107,11 @@
         },
         "name": "maps_pixel_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -1059,9 +1120,9 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -1075,12 +1136,12 @@
           "--browser=release",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -1089,11 +1150,11 @@
         },
         "name": "pixel_skia_gold_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -1102,9 +1163,9 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -1133,42 +1194,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
-        }
-      },
-      {
-        "args": [
-          "screenshot_sync",
-          "--show-stdout",
-          "--browser=release",
-          "--passthrough",
-          "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --enable-features=UseSkiaRenderer",
-          "--dont-restore-color-profile-after-test"
-        ],
-        "isolate_name": "telemetry_gpu_integration_test",
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
-        },
-        "name": "skia_renderer_screenshot_sync_tests",
-        "should_retry_with_patch": false,
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "containment_type": "AUTO",
-          "dimension_sets": [
-            {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
-            }
-          ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1192,12 +1224,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1222,12 +1255,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-ubuntu-stable",
-              "os": "linux-nvidia-stable",
-              "pool": "chromium.tests.gpu"
+              "gpu": "10de:1cb3-418.56",
+              "os": "Ubuntu-19.04",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
           "shards": 2
         }
       }
@@ -1251,9 +1285,10 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "angle_unittests",
         "test_target": "//third_party/angle/src/tests:angle_unittests"
@@ -1272,9 +1307,10 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_tests",
         "test_target": "//gpu:gl_tests"
@@ -1293,9 +1329,10 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_unittests",
         "test_target": "//ui/gl:gl_unittests"
@@ -1324,10 +1361,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1352,10 +1390,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1380,10 +1419,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1408,10 +1448,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1440,10 +1481,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1455,10 +1497,10 @@
           "-v",
           "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -1467,11 +1509,11 @@
         },
         "name": "maps_pixel_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -1481,7 +1523,7 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
           "idempotent": false,
@@ -1495,12 +1537,12 @@
           "--browser=debug",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -1509,11 +1551,11 @@
         },
         "name": "pixel_skia_gold_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -1523,7 +1565,7 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
           "idempotent": false,
@@ -1553,10 +1595,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1581,10 +1624,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1610,10 +1654,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
           "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
           "shards": 2
         }
       }
@@ -1637,9 +1682,10 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "angle_unittests",
         "test_target": "//third_party/angle/src/tests:angle_unittests"
@@ -1662,9 +1708,10 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "browser_tests",
         "test_target": "//chrome/test:browser_tests"
@@ -1683,9 +1730,10 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_tests",
         "test_target": "//gpu:gl_tests"
@@ -1704,9 +1752,10 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_unittests",
         "test_target": "//ui/gl:gl_unittests"
@@ -1735,10 +1784,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1763,10 +1813,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1791,10 +1842,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1819,10 +1871,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1851,10 +1904,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -1866,10 +1920,10 @@
           "-v",
           "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -1878,11 +1932,11 @@
         },
         "name": "maps_pixel_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -1892,7 +1946,7 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
           "idempotent": false,
@@ -1906,12 +1960,12 @@
           "--browser=release",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -1920,11 +1974,11 @@
         },
         "name": "pixel_skia_gold_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -1934,7 +1988,7 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
           "idempotent": false,
@@ -1946,7 +2000,6 @@
           "../../tools/perf/run_benchmark",
           "--benchmarks=rendering.desktop"
         ],
-        "experiment_percentage": 100,
         "isolate_name": "rendering_representative_perf_tests",
         "merge": {
           "args": [],
@@ -1959,9 +2012,10 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test_target": "//chrome/test:rendering_representative_perf_tests"
       },
@@ -1988,10 +2042,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2016,10 +2071,11 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2045,10 +2101,473 @@
           "dimension_sets": [
             {
               "gpu": "8086:0a2e",
-              "os": "mac-intel-stable"
+              "os": "Mac-10.14.6"
             }
           ],
           "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 2
+        }
+      }
+    ]
+  },
+  "Mac Release (Intel) Code Coverage": {
+    "gtest_tests": [
+      {
+        "args": [
+          "--use-gpu-in-tests",
+          "--test-launcher-retry-limit=0"
+        ],
+        "isolate_coverage_data": true,
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        },
+        "test": "angle_unittests",
+        "test_target": "//third_party/angle/src/tests:angle_unittests"
+      },
+      {
+        "args": [
+          "--enable-gpu",
+          "--test-launcher-bot-mode",
+          "--test-launcher-jobs=1",
+          "--gtest_filter=CastStreamingApiTestWithPixelOutput.EndToEnd*:TabCaptureApiPixelTest.EndToEnd*"
+        ],
+        "isolate_coverage_data": true,
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "name": "tab_capture_end2end_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        },
+        "test": "browser_tests",
+        "test_target": "//chrome/test:browser_tests"
+      },
+      {
+        "args": [
+          "--use-gpu-in-tests"
+        ],
+        "isolate_coverage_data": true,
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        },
+        "test": "gl_tests",
+        "test_target": "//gpu:gl_tests"
+      },
+      {
+        "args": [
+          "--use-gpu-in-tests"
+        ],
+        "isolate_coverage_data": true,
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        },
+        "test": "gl_unittests",
+        "test_target": "//ui/gl:gl_unittests"
+      }
+    ],
+    "isolated_scripts": [
+      {
+        "args": [
+          "context_lost",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "context_lost_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "depth_capture",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "depth_capture_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "gpu_process",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "gpu_process_launch_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "hardware_accelerated_feature",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "hardware_accelerated_feature_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "info_collection",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--expected-vendor-id",
+          "8086",
+          "--expected-device-id",
+          "0a2e"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "info_collection_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "maps",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
+          "--dont-restore-color-profile-after-test",
+          "--test-machine-name",
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "maps_pixel_test",
+        "precommit_args": [
+          "--gerrit-issue",
+          "${patch_issue}",
+          "--gerrit-patchset",
+          "${patch_set}",
+          "--buildbucket-id",
+          "${buildbucket_build_id}"
+        ],
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chrome-gpu-gold@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "pixel",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
+          "--dont-restore-color-profile-after-test",
+          "--test-machine-name",
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "pixel_skia_gold_test",
+        "precommit_args": [
+          "--gerrit-issue",
+          "${patch_issue}",
+          "--gerrit-patchset",
+          "${patch_set}",
+          "--buildbucket-id",
+          "${buildbucket_build_id}"
+        ],
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chrome-gpu-gold@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "../../tools/perf/run_benchmark",
+          "--benchmarks=rendering.desktop"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "rendering_representative_perf_tests",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "rendering_representative_perf_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        },
+        "test_target": "//chrome/test:rendering_representative_perf_tests"
+      },
+      {
+        "args": [
+          "screenshot_sync",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
+          "--dont-restore-color-profile-after-test"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "screenshot_sync_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "trace_test",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "trace_test",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "webgl_conformance",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--read-abbreviated-json-results-from=../../content/test/data/gpu/webgl_conformance_tests_output.json"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "webgl_conformance_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "8086:0a2e",
+              "os": "Mac-10.14.6"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
           "shards": 2
         }
       }
@@ -2073,10 +2592,11 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "angle_unittests",
         "test_target": "//third_party/angle/src/tests:angle_unittests"
@@ -2096,10 +2616,11 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_tests",
         "test_target": "//gpu:gl_tests"
@@ -2119,10 +2640,11 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_unittests",
         "test_target": "//ui/gl:gl_unittests"
@@ -2152,11 +2674,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2182,11 +2705,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2212,11 +2736,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2242,11 +2767,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2276,11 +2802,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2292,10 +2819,10 @@
           "-v",
           "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -2304,11 +2831,11 @@
         },
         "name": "maps_pixel_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -2319,8 +2846,8 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -2334,12 +2861,12 @@
           "--browser=debug",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -2348,11 +2875,11 @@
         },
         "name": "pixel_skia_gold_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -2363,8 +2890,8 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -2395,11 +2922,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2425,11 +2953,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2456,11 +2985,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
           "shards": 2
         }
       }
@@ -2485,10 +3015,11 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "angle_unittests",
         "test_target": "//third_party/angle/src/tests:angle_unittests"
@@ -2512,10 +3043,11 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "browser_tests",
         "test_target": "//chrome/test:browser_tests"
@@ -2535,10 +3067,11 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_tests",
         "test_target": "//gpu:gl_tests"
@@ -2558,10 +3091,11 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_unittests",
         "test_target": "//ui/gl:gl_unittests"
@@ -2591,11 +3125,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2621,11 +3156,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2651,11 +3187,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2681,11 +3218,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2715,11 +3253,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2731,10 +3270,10 @@
           "-v",
           "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -2743,11 +3282,11 @@
         },
         "name": "maps_pixel_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -2758,8 +3297,8 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -2773,12 +3312,12 @@
           "--browser=release",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -2787,11 +3326,11 @@
         },
         "name": "pixel_skia_gold_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -2802,8 +3341,8 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -2815,7 +3354,6 @@
           "../../tools/perf/run_benchmark",
           "--benchmarks=rendering.desktop"
         ],
-        "experiment_percentage": 100,
         "isolate_name": "rendering_representative_perf_tests",
         "merge": {
           "args": [],
@@ -2829,10 +3367,11 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test_target": "//chrome/test:rendering_representative_perf_tests"
       },
@@ -2860,11 +3399,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2890,11 +3430,12 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -2921,11 +3462,504 @@
             {
               "gpu": "1002:6821",
               "hidpi": "1",
-              "os": "mac-amd-stable",
-              "pool": "chromium.tests.gpu"
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 2
+        }
+      }
+    ]
+  },
+  "Mac Retina Release (AMD) Code Coverage": {
+    "gtest_tests": [
+      {
+        "args": [
+          "--use-gpu-in-tests",
+          "--test-launcher-retry-limit=0"
+        ],
+        "isolate_coverage_data": true,
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        },
+        "test": "angle_unittests",
+        "test_target": "//third_party/angle/src/tests:angle_unittests"
+      },
+      {
+        "args": [
+          "--enable-gpu",
+          "--test-launcher-bot-mode",
+          "--test-launcher-jobs=1",
+          "--gtest_filter=CastStreamingApiTestWithPixelOutput.EndToEnd*:TabCaptureApiPixelTest.EndToEnd*"
+        ],
+        "isolate_coverage_data": true,
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "name": "tab_capture_end2end_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        },
+        "test": "browser_tests",
+        "test_target": "//chrome/test:browser_tests"
+      },
+      {
+        "args": [
+          "--use-gpu-in-tests"
+        ],
+        "isolate_coverage_data": true,
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        },
+        "test": "gl_tests",
+        "test_target": "//gpu:gl_tests"
+      },
+      {
+        "args": [
+          "--use-gpu-in-tests"
+        ],
+        "isolate_coverage_data": true,
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        },
+        "test": "gl_unittests",
+        "test_target": "//ui/gl:gl_unittests"
+      }
+    ],
+    "isolated_scripts": [
+      {
+        "args": [
+          "context_lost",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "context_lost_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "depth_capture",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "depth_capture_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "gpu_process",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "gpu_process_launch_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "hardware_accelerated_feature",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "hardware_accelerated_feature_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "info_collection",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--expected-vendor-id",
+          "1002",
+          "--expected-device-id",
+          "6821"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "info_collection_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "maps",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
+          "--dont-restore-color-profile-after-test",
+          "--test-machine-name",
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "maps_pixel_test",
+        "precommit_args": [
+          "--gerrit-issue",
+          "${patch_issue}",
+          "--gerrit-patchset",
+          "${patch_set}",
+          "--buildbucket-id",
+          "${buildbucket_build_id}"
+        ],
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chrome-gpu-gold@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "pixel",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
+          "--dont-restore-color-profile-after-test",
+          "--test-machine-name",
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "pixel_skia_gold_test",
+        "precommit_args": [
+          "--gerrit-issue",
+          "${patch_issue}",
+          "--gerrit-patchset",
+          "${patch_set}",
+          "--buildbucket-id",
+          "${buildbucket_build_id}"
+        ],
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chrome-gpu-gold@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "../../tools/perf/run_benchmark",
+          "--benchmarks=rendering.desktop"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "rendering_representative_perf_tests",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "rendering_representative_perf_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        },
+        "test_target": "//chrome/test:rendering_representative_perf_tests"
+      },
+      {
+        "args": [
+          "screenshot_sync",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
+          "--dont-restore-color-profile-after-test"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "screenshot_sync_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "trace_test",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "trace_test",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "webgl_conformance",
+          "--show-stdout",
+          "--browser=release",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--read-abbreviated-json-results-from=../../content/test/data/gpu/webgl_conformance_tests_output.json"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "webgl_conformance_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "1002:6821",
+              "hidpi": "1",
+              "os": "Mac-10.14.6",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
           "shards": 2
         }
       }
@@ -2948,11 +3982,12 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "angle_unittests",
         "test_target": "//third_party/angle/src/tests:angle_unittests"
@@ -2974,11 +4009,12 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "browser_tests",
         "test_target": "//chrome/test:browser_tests"
@@ -2996,11 +4032,12 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_tests",
         "test_target": "//gpu:gl_tests"
@@ -3018,11 +4055,12 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_unittests",
         "test_target": "//ui/gl:gl_unittests"
@@ -3041,11 +4079,12 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "xr_browser_tests",
         "test_target": "//chrome/test:xr_browser_tests"
@@ -3059,7 +4098,7 @@
           "--browser=debug_x64",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc"
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --no-sandbox"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -3073,12 +4112,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -3088,7 +4128,7 @@
           "--browser=debug_x64",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc"
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --no-sandbox"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -3102,12 +4142,44 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        }
+      },
+      {
+        "args": [
+          "screenshot_sync",
+          "--show-stdout",
+          "--browser=debug_x64",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --disable-features=UseSkiaRenderer",
+          "--dont-restore-color-profile-after-test"
+        ],
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "gl_renderer_screenshot_sync_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "10de:1cb3-26.21.14.3102",
+              "os": "Windows-10",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -3117,7 +4189,7 @@
           "--browser=debug_x64",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc"
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --no-sandbox"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -3131,12 +4203,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -3160,12 +4233,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -3175,7 +4249,7 @@
           "--browser=debug_x64",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu --no-sandbox",
           "--expected-vendor-id",
           "10de",
           "--expected-device-id",
@@ -3193,12 +4267,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -3210,10 +4285,10 @@
           "-v",
           "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -3222,11 +4297,11 @@
         },
         "name": "maps_pixel_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -3235,9 +4310,9 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -3251,12 +4326,12 @@
           "--browser=debug_x64",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -3265,11 +4340,11 @@
         },
         "name": "pixel_skia_gold_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -3278,9 +4353,9 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -3309,42 +4384,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
-        }
-      },
-      {
-        "args": [
-          "screenshot_sync",
-          "--show-stdout",
-          "--browser=debug_x64",
-          "--passthrough",
-          "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --enable-features=UseSkiaRenderer",
-          "--dont-restore-color-profile-after-test"
-        ],
-        "isolate_name": "telemetry_gpu_integration_test",
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
-        },
-        "name": "skia_renderer_screenshot_sync_tests",
-        "should_retry_with_patch": false,
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "containment_type": "AUTO",
-          "dimension_sets": [
-            {
-              "gpu": "nvidia-quadro-p400-win10-stable",
-              "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
-            }
-          ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -3368,12 +4414,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         }
       },
       {
@@ -3398,12 +4445,13 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
           "shards": 2
         }
       }
@@ -3426,18 +4474,19 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "angle_unittests",
         "test_target": "//third_party/angle/src/tests:angle_unittests",
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -3461,18 +4510,19 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "browser_tests",
         "test_target": "//chrome/test:browser_tests",
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -3492,18 +4542,19 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_tests",
         "test_target": "//gpu:gl_tests",
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -3523,18 +4574,19 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_unittests",
         "test_target": "//ui/gl:gl_unittests",
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -3555,18 +4607,19 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "xr_browser_tests",
         "test_target": "//chrome/test:xr_browser_tests",
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -3596,17 +4649,18 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -3634,17 +4688,58 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
+            "--multiple-dimension-script-verbose",
+            "True"
+          ],
+          "script": "//testing/trigger_scripts/trigger_multiple_dimensions.py"
+        }
+      },
+      {
+        "args": [
+          "screenshot_sync",
+          "--show-stdout",
+          "--browser=release_x64",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --disable-features=UseSkiaRenderer",
+          "--dont-restore-color-profile-after-test"
+        ],
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "gl_renderer_screenshot_sync_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "10de:1cb3-26.21.14.3102",
+              "os": "Windows-10",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        },
+        "trigger_script": {
+          "args": [
+            "--multiple-trigger-configs",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -3672,17 +4767,18 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -3710,17 +4806,18 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -3752,17 +4849,18 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -3778,10 +4876,10 @@
           "-v",
           "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -3790,11 +4888,11 @@
         },
         "name": "maps_pixel_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -3803,9 +4901,9 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -3814,7 +4912,7 @@
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -3828,12 +4926,12 @@
           "--browser=release_x64",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_name": "telemetry_gpu_integration_test",
         "merge": {
@@ -3842,11 +4940,11 @@
         },
         "name": "pixel_skia_gold_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -3855,9 +4953,9 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -3866,7 +4964,7 @@
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -3891,17 +4989,18 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test_target": "//chrome/test:rendering_representative_perf_tests",
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -3930,56 +5029,18 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
-            "--multiple-dimension-script-verbose",
-            "True"
-          ],
-          "script": "//testing/trigger_scripts/trigger_multiple_dimensions.py"
-        }
-      },
-      {
-        "args": [
-          "screenshot_sync",
-          "--show-stdout",
-          "--browser=release_x64",
-          "--passthrough",
-          "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --enable-features=UseSkiaRenderer",
-          "--dont-restore-color-profile-after-test"
-        ],
-        "isolate_name": "telemetry_gpu_integration_test",
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
-        },
-        "name": "skia_renderer_screenshot_sync_tests",
-        "should_retry_with_patch": false,
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "containment_type": "AUTO",
-          "dimension_sets": [
-            {
-              "gpu": "nvidia-quadro-p400-win10-stable",
-              "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
-            }
-          ],
-          "idempotent": false
-        },
-        "trigger_script": {
-          "args": [
-            "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4007,17 +5068,18 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4046,18 +5108,19 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
           "shards": 2
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4084,18 +5147,19 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "angle_unittests",
         "test_target": "//third_party/angle/src/tests:angle_unittests",
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4120,18 +5184,19 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "browser_tests",
         "test_target": "//chrome/test:browser_tests",
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4152,18 +5217,19 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_tests",
         "test_target": "//gpu:gl_tests",
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4184,18 +5250,19 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "gl_unittests",
         "test_target": "//ui/gl:gl_unittests",
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4217,18 +5284,19 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "xr_browser_tests",
         "test_target": "//chrome/test:xr_browser_tests",
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4259,17 +5327,18 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4298,17 +5367,59 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
+            "--multiple-dimension-script-verbose",
+            "True"
+          ],
+          "script": "//testing/trigger_scripts/trigger_multiple_dimensions.py"
+        }
+      },
+      {
+        "args": [
+          "screenshot_sync",
+          "--show-stdout",
+          "--browser=release_x64",
+          "--passthrough",
+          "-v",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --disable-features=UseSkiaRenderer",
+          "--dont-restore-color-profile-after-test"
+        ],
+        "isolate_coverage_data": true,
+        "isolate_name": "telemetry_gpu_integration_test",
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
+        },
+        "name": "gl_renderer_screenshot_sync_tests",
+        "should_retry_with_patch": false,
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "containment_type": "AUTO",
+          "dimension_sets": [
+            {
+              "gpu": "10de:1cb3-26.21.14.3102",
+              "os": "Windows-10",
+              "pool": "chromium.tests.gpu.template"
+            }
+          ],
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
+        },
+        "trigger_script": {
+          "args": [
+            "--multiple-trigger-configs",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4337,17 +5448,18 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4376,17 +5488,18 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4419,17 +5532,18 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4445,10 +5559,10 @@
           "-v",
           "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_coverage_data": true,
         "isolate_name": "telemetry_gpu_integration_test",
@@ -4458,11 +5572,11 @@
         },
         "name": "maps_pixel_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -4471,9 +5585,9 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -4482,7 +5596,7 @@
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4496,12 +5610,12 @@
           "--browser=release_x64",
           "--passthrough",
           "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --force_high_performance_gpu",
+          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc",
           "--dont-restore-color-profile-after-test",
-          "--build-revision",
-          "${got_revision}",
           "--test-machine-name",
-          "${buildername}"
+          "${buildername}",
+          "--git-revision",
+          "${got_revision}"
         ],
         "isolate_coverage_data": true,
         "isolate_name": "telemetry_gpu_integration_test",
@@ -4511,11 +5625,11 @@
         },
         "name": "pixel_skia_gold_test",
         "precommit_args": [
-          "--review-patch-issue",
+          "--gerrit-issue",
           "${patch_issue}",
-          "--review-patch-set",
+          "--gerrit-patchset",
           "${patch_set}",
-          "--buildbucket-build-id",
+          "--buildbucket-id",
           "${buildbucket_build_id}"
         ],
         "should_retry_with_patch": false,
@@ -4524,9 +5638,9 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
@@ -4535,7 +5649,7 @@
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4565,57 +5679,18 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
-            "--multiple-dimension-script-verbose",
-            "True"
-          ],
-          "script": "//testing/trigger_scripts/trigger_multiple_dimensions.py"
-        }
-      },
-      {
-        "args": [
-          "screenshot_sync",
-          "--show-stdout",
-          "--browser=release_x64",
-          "--passthrough",
-          "-v",
-          "--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc --enable-features=UseSkiaRenderer",
-          "--dont-restore-color-profile-after-test"
-        ],
-        "isolate_coverage_data": true,
-        "isolate_name": "telemetry_gpu_integration_test",
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
-        },
-        "name": "skia_renderer_screenshot_sync_tests",
-        "should_retry_with_patch": false,
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "containment_type": "AUTO",
-          "dimension_sets": [
-            {
-              "gpu": "nvidia-quadro-p400-win10-stable",
-              "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
-            }
-          ],
-          "idempotent": false
-        },
-        "trigger_script": {
-          "args": [
-            "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4644,17 +5719,18 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
-          "idempotent": false
+          "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],
@@ -4684,18 +5760,19 @@
           "containment_type": "AUTO",
           "dimension_sets": [
             {
-              "gpu": "nvidia-quadro-p400-win10-stable",
+              "gpu": "10de:1cb3-26.21.14.3102",
               "os": "Windows-10",
-              "pool": "chromium.tests.gpu"
+              "pool": "chromium.tests.gpu.template"
             }
           ],
           "idempotent": false,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
           "shards": 2
         },
         "trigger_script": {
           "args": [
             "--multiple-trigger-configs",
-            "[{\"gpu\": \"nvidia-quadro-p400-win10-stable\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu\"}]",
+            "[{\"gpu\": \"10de:1cb3-26.21.14.3102\", \"os\": \"Windows-10\", \"pool\": \"chromium.tests.gpu.template\"}]",
             "--multiple-dimension-script-verbose",
             "True"
           ],

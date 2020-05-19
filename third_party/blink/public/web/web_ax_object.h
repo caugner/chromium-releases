@@ -139,7 +139,6 @@ class WebAXObject {
   BLINK_EXPORT bool IsHovered() const;
   BLINK_EXPORT bool IsLineBreakingObject() const;
   BLINK_EXPORT bool IsLinked() const;
-  BLINK_EXPORT bool IsLoaded() const;
   BLINK_EXPORT bool IsModal() const;
   BLINK_EXPORT bool IsMultiSelectable() const;
   BLINK_EXPORT bool IsOffScreen() const;
@@ -180,7 +179,6 @@ class WebAXObject {
   BLINK_EXPORT ax::mojom::InvalidState InvalidState() const;
   // Only used when invalidState() returns WebAXInvalidStateOther.
   BLINK_EXPORT WebString AriaInvalidValue() const;
-  BLINK_EXPORT double EstimatedLoadingProgress() const;
   BLINK_EXPORT int HeadingLevel() const;
   BLINK_EXPORT int HierarchicalLevel() const;
   BLINK_EXPORT WebAXObject HitTest(const gfx::Point&) const;
@@ -229,6 +227,17 @@ class WebAXObject {
   // HTML Title is typically used as a tooltip.
   BLINK_EXPORT WebString Title(ax::mojom::NameFrom) const;
 
+  //
+  // Document-level interfaces.
+  //
+  // These are intended to be called on the root WebAXObject.
+  //
+
+  BLINK_EXPORT bool IsLoaded() const;
+  BLINK_EXPORT double EstimatedLoadingProgress() const;
+
+  BLINK_EXPORT WebAXObject RootScroller() const;
+
   // The following selection functions get or set the global document
   // selection and can be called on any object in the tree.
 
@@ -271,7 +280,6 @@ class WebAXObject {
 
   BLINK_EXPORT WebNode GetNode() const;
   BLINK_EXPORT WebDocument GetDocument() const;
-  BLINK_EXPORT bool HasComputedStyle() const;
   BLINK_EXPORT WebString ComputedStyleDisplay() const;
   BLINK_EXPORT bool AccessibilityIsIgnored() const;
   BLINK_EXPORT bool AccessibilityIsIncludedInTree() const;
@@ -355,7 +363,10 @@ class WebAXObject {
                                       WebVector<int>& ends) const;
 
   // Scrollable containers.
+  // Programmatically scrollable.
   BLINK_EXPORT bool IsScrollableContainer() const;
+  // Also scrollable by user.
+  BLINK_EXPORT bool IsUserScrollable() const;
   BLINK_EXPORT gfx::Point GetScrollOffset() const;
   BLINK_EXPORT gfx::Point MinimumScrollOffset() const;
   BLINK_EXPORT gfx::Point MaximumScrollOffset() const;
