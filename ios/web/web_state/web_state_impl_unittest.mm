@@ -166,8 +166,7 @@ class WebStateImplTest : public web::WebTest {
     web_state_->GetNavigationManagerImpl().InitializeSession();
     web_state_->GetNavigationManagerImpl().AddPendingItem(
         GURL::EmptyGURL(), web::Referrer(), ui::PAGE_TRANSITION_LINK,
-        NavigationInitiationType::RENDERER_INITIATED,
-        NavigationManager::UserAgentOverrideOption::DESKTOP);
+        NavigationInitiationType::RENDERER_INITIATED);
     web_state_->GetNavigationManagerImpl().CommitPendingItem();
   }
 
@@ -313,7 +312,7 @@ TEST_F(WebStateImplTest, ObserverTest) {
 
   // Test that WebFrameDidBecomeAvailable() is called.
   ASSERT_FALSE(observer->web_frame_available_info());
-  web::FakeWebFrame main_frame("main", true, GURL());
+  web::FakeMainWebFrame main_frame(GURL::EmptyGURL());
   web_state_->OnWebFrameAvailable(&main_frame);
   ASSERT_TRUE(observer->web_frame_available_info());
   EXPECT_EQ(web_state_.get(), observer->web_frame_available_info()->web_state);
@@ -694,7 +693,7 @@ TEST_F(WebStateImplTest, PolicyDeciderTest) {
           RunOnceCallback<2>(WebStatePolicyDecider::PolicyDecision::Allow()));
 
   policy_decision = WebStatePolicyDecider::PolicyDecision::Cancel();
-  auto callback = base::Bind(
+  auto callback = base::BindRepeating(
       [](WebStatePolicyDecider::PolicyDecision* policy_decision,
          WebStatePolicyDecider::PolicyDecision result) {
         *policy_decision = result;
@@ -743,10 +742,11 @@ TEST_F(WebStateImplTest, AsyncShouldAllowResponseTest) {
   __block bool callback_called = false;
 
   base::RepeatingCallback<void(WebStatePolicyDecider::PolicyDecision)>
-      callback = base::Bind(^(WebStatePolicyDecider::PolicyDecision result) {
-        policy_decision = result;
-        callback_called = true;
-      });
+      callback =
+          base::BindRepeating(^(WebStatePolicyDecider::PolicyDecision result) {
+            policy_decision = result;
+            callback_called = true;
+          });
 
   // Case 1: All deciders allow the navigation.
   EXPECT_CALL(sync_decider, ShouldAllowResponse(response, true, _))
@@ -815,7 +815,7 @@ TEST_F(WebStateImplTest, ScriptCommand) {
   value_1.SetString("a", "b");
   const GURL kUrl1("http://foo");
   bool is_called_1 = false;
-  web::FakeWebFrame main_frame("main", true, GURL());
+  web::FakeMainWebFrame main_frame(GURL::EmptyGURL());
   auto subscription_1 = web_state_->AddScriptCommandCallback(
       base::BindRepeating(&HandleScriptCommand, &is_called_1, &value_1, kUrl1,
                           /*expected_user_is_interacting*/ false, &main_frame),
@@ -838,7 +838,7 @@ TEST_F(WebStateImplTest, ScriptCommand) {
   value_3.SetString("e", "f");
   const GURL kUrl3("http://iframe");
   bool is_called_3 = false;
-  web::FakeWebFrame subframe("subframe", false, GURL());
+  web::FakeChildWebFrame subframe(GURL::EmptyGURL());
   auto subscription_3 = web_state_->AddScriptCommandCallback(
       base::BindRepeating(&HandleScriptCommand, &is_called_3, &value_3, kUrl3,
                           /*expected_user_is_interacting*/ false, &subframe),
@@ -1062,8 +1062,7 @@ TEST_F(WebStateImplTest, ShowAndClearInterstitialWithNoCommittedItems) {
   // Existence of a pending item is a precondition for a transient item.
   web_state_->GetNavigationManagerImpl().AddPendingItem(
       GURL::EmptyGURL(), web::Referrer(), ui::PAGE_TRANSITION_LINK,
-      NavigationInitiationType::BROWSER_INITIATED,
-      NavigationManager::UserAgentOverrideOption::DESKTOP);
+      NavigationInitiationType::BROWSER_INITIATED);
 
   // Show the interstitial.
   ASSERT_FALSE(web_state_->IsShowingWebInterstitial());
