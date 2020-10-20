@@ -62450,11 +62450,11 @@ END:VCARD</pre>
   <pre class=idl>[ReplaceableNamedProperties]
 interface <dfn id=window>Window</dfn> : <a href=#eventtarget>EventTarget</a> {
   // the current browsing context
-  [Unforgeable] readonly attribute <a href=#windowproxy>WindowProxy</a> <a href=#dom-window title=dom-window>window</a>;
+  [LegacyUnforgeable] readonly attribute <a href=#windowproxy>WindowProxy</a> <a href=#dom-window title=dom-window>window</a>;
   [Replaceable] readonly attribute <a href=#windowproxy>WindowProxy</a> <a href=#dom-self title=dom-self>self</a>;
-  [Unforgeable] readonly attribute <a href=#document>Document</a> <a href=#dom-document title=dom-document>document</a>;
+  [LegacyUnforgeable] readonly attribute <a href=#document>Document</a> <a href=#dom-document title=dom-document>document</a>;
            attribute DOMString <a href=#dom-name title=dom-name>name</a>; <!-- not [Replaceable] per WebKit and IE8 -->
-  [PutForwards=<a href=#dom-location-href title=dom-location-href>href</a>, Unforgeable] readonly attribute <a href=#location>Location</a> <a href=#dom-location title=dom-location>location</a>;
+  [PutForwards=<a href=#dom-location-href title=dom-location-href>href</a>, LegacyUnforgeable] readonly attribute <a href=#location>Location</a> <a href=#dom-location title=dom-location>location</a>;
   readonly attribute <a href=#history-0>History</a> <a href=#dom-history title=dom-history>history</a>;
 <!--FIND-->
   boolean <a href=#dom-find title=dom-find>find</a>(optional DOMString aString, optional boolean aCaseSensitive, optional boolean aBackwards, optional boolean aWrapAround, optional boolean aWholeWord, optional boolean aSearchInFrames, optional boolean aShowDialog);
@@ -62475,7 +62475,7 @@ interface <dfn id=window>Window</dfn> : <a href=#eventtarget>EventTarget</a> {
   // other browsing contexts
   [Replaceable] readonly attribute <a href=#windowproxy>WindowProxy</a> <a href=#dom-frames title=dom-frames>frames</a>;
   [Replaceable] readonly attribute unsigned long <a href=#dom-length title=dom-length>length</a>;
-  [Unforgeable] readonly attribute <a href=#windowproxy>WindowProxy</a> <a href=#dom-top title=dom-top>top</a>;
+  [LegacyUnforgeable] readonly attribute <a href=#windowproxy>WindowProxy</a> <a href=#dom-top title=dom-top>top</a>;
            attribute <a href=#windowproxy>WindowProxy</a> <a href=#dom-opener title=dom-opener>opener</a>;
   readonly attribute <a href=#windowproxy>WindowProxy</a> <a href=#dom-parent title=dom-parent>parent</a>;
   readonly attribute <a href=#element>Element</a>? <a href=#dom-frameelement title=dom-frameElement>frameElement</a>;

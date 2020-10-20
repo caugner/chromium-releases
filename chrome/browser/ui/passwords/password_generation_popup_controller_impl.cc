@@ -196,6 +196,7 @@ void PasswordGenerationPopupControllerImpl::PasswordAccepted() {
     return;
 
   base::WeakPtr<PasswordGenerationPopupControllerImpl> weak_this = GetWeakPtr();
+  CHECK(driver_);
   driver_->GeneratedPasswordAccepted(form_data_, generation_element_id_,
                                      current_password_);
   // |this| can be destroyed here because GeneratedPasswordAccepted pops up
@@ -224,8 +225,11 @@ void PasswordGenerationPopupControllerImpl::Show(GenerationUIState state) {
       return;
     }
     key_press_handler_manager_->RegisterKeyPressHandler(base::BindRepeating(
-        &PasswordGenerationPopupControllerImpl::HandleKeyPressEvent,
-        base::Unretained(this)));
+        [](base::WeakPtr<PasswordGenerationPopupControllerImpl> weak_this,
+           const content::NativeWebKeyboardEvent& event) {
+          return weak_this && weak_this->HandleKeyPressEvent(event);
+        },
+        GetWeakPtr()));
     view_->Show();
   } else {
     view_->UpdateState();

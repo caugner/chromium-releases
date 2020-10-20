@@ -37,31 +37,8 @@ int SaveDataToFd(int fd,
 
 }  // namespace
 
-// static
-AwPrintManager* AwPrintManager::CreateForWebContents(
-    content::WebContents* contents,
-    std::unique_ptr<printing::PrintSettings> settings,
-    int file_descriptor,
-    PrintManager::PdfWritingDoneCallback callback) {
-  AwPrintManager* print_manager = new AwPrintManager(
-      contents, std::move(settings), file_descriptor, std::move(callback));
-  contents->SetUserData(UserDataKey(), base::WrapUnique(print_manager));
-  return print_manager;
-}
-
-AwPrintManager::AwPrintManager(
-    content::WebContents* contents,
-    std::unique_ptr<printing::PrintSettings> settings,
-    int file_descriptor,
-    PdfWritingDoneCallback callback)
-    : PrintManager(contents),
-      settings_(std::move(settings)),
-      fd_(file_descriptor) {
-  DCHECK(settings_);
-  pdf_writing_done_callback_ = std::move(callback);
-  DCHECK(pdf_writing_done_callback_);
-  cookie_ = 1;  // Set a valid dummy cookie value.
-}
+AwPrintManager::AwPrintManager(content::WebContents* contents)
+    : PrintManager(contents) {}
 
 AwPrintManager::~AwPrintManager() = default;
 
@@ -83,11 +60,23 @@ void AwPrintManager::OnGetDefaultPrintSettings(
     IPC::Message* reply_msg) {
   // Unlike the printing_message_filter, we do process this in UI thread.
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  PrintMsg_Print_Params params;
+  printing::mojom::PrintParams params;
   printing::RenderParamsFromPrintSettings(*settings_, &params);
   params.document_cookie = cookie_;
   PrintHostMsg_GetDefaultPrintSettings::WriteReplyParams(reply_msg, params);
   render_frame_host->Send(reply_msg);
+}
+
+void AwPrintManager::UpdateParam(
+    std::unique_ptr<printing::PrintSettings> settings,
+    int file_descriptor,
+    PrintManager::PdfWritingDoneCallback callback) {
+  settings_ = std::move(settings);
+  DCHECK(settings_);
+  fd_ = file_descriptor;
+  pdf_writing_done_callback_ = std::move(callback);
+  DCHECK(pdf_writing_done_callback_);
+  cookie_ = 1;  // Set a valid dummy cookie value.
 }
 
 void AwPrintManager::OnScriptedPrint(
@@ -105,12 +94,12 @@ void AwPrintManager::OnScriptedPrint(
 
 void AwPrintManager::OnDidPrintDocument(
     content::RenderFrameHost* render_frame_host,
-    const PrintHostMsg_DidPrintDocument_Params& params,
+    const printing::mojom::DidPrintDocumentParams& params,
     std::unique_ptr<DelayedFrameDispatchHelper> helper) {
   if (params.document_cookie != cookie_)
     return;
 
-  const printing::mojom::DidPrintContentParams& content = params.content;
+  const printing::mojom::DidPrintContentParams& content = *params.content;
   if (!content.metafile_data_region.IsValid()) {
     NOTREACHED() << "invalid memory handle";
     web_contents()->Stop();

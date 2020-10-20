@@ -7,6 +7,7 @@ package org.chromium.weblayer.test;
 import android.app.Activity;
 import android.app.Instrumentation.ActivityMonitor;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.net.Uri;
@@ -31,6 +32,7 @@ import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.net.test.EmbeddedTestServerRule;
 import org.chromium.weblayer.CookieManager;
+import org.chromium.weblayer.NavigationController;
 import org.chromium.weblayer.Tab;
 import org.chromium.weblayer.WebLayer;
 import org.chromium.weblayer.shell.InstrumentationActivity;
@@ -72,10 +74,12 @@ public class InstrumentationActivityTestRule
     }
 
     public WebLayer getWebLayer() {
-        return TestThreadUtils.runOnUiThreadBlockingNoException(() -> {
-            return WebLayer.loadSync(
-                    InstrumentationRegistry.getTargetContext().getApplicationContext());
-        });
+        return TestThreadUtils.runOnUiThreadBlockingNoException(
+                () -> { return WebLayer.loadSync(getContextForWebLayer()); });
+    }
+
+    public Context getContextForWebLayer() {
+        return InstrumentationRegistry.getTargetContext().getApplicationContext();
     }
 
     /**
@@ -102,7 +106,7 @@ public class InstrumentationActivityTestRule
         Assert.assertNotNull(activity);
         try {
             TestThreadUtils.runOnUiThreadBlocking(
-                    () -> activity.loadWebLayerSync(activity.getApplicationContext()));
+                    () -> activity.loadWebLayerSync(getContextForWebLayer()));
         } catch (ExecutionException e) {
             throw new RuntimeException(e);
         }
@@ -256,7 +260,23 @@ public class InstrumentationActivityTestRule
 
     // Returns the URL that is currently being displayed to the user.
     public String getCurrentDisplayUrl() {
-        return getActivity().getCurrentDisplayUrl();
+        InstrumentationActivity activity = getActivity();
+        return TestThreadUtils.runOnUiThreadBlockingNoException(() -> {
+            NavigationController navigationController =
+                    activity.getBrowser().getActiveTab().getNavigationController();
+
+            if (navigationController.getNavigationListSize() == 0) {
+                return null;
+            }
+
+            // TODO(crbug.com/1066382): This will not be correct in the case where the initial
+            // navigation in |tab| was a failed navigation and there have been no more navigations
+            // since then.
+            return navigationController
+                    .getNavigationEntryDisplayUri(
+                            navigationController.getNavigationListCurrentIndex())
+                    .toString();
+        });
     }
 
     public void setRetainInstance(boolean retain) {
