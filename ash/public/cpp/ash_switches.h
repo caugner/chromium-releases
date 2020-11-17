@@ -18,10 +18,6 @@ namespace switches {
 
 // Please keep alphabetized.
 // TODO(sky): fix order!
-ASH_PUBLIC_EXPORT extern const char kAshClearFastInkBuffer[];
-ASH_PUBLIC_EXPORT extern const char kAshColorMode[];
-ASH_PUBLIC_EXPORT extern const char kAshColorModeDark[];
-ASH_PUBLIC_EXPORT extern const char kAshColorModeLight[];
 ASH_PUBLIC_EXPORT extern const char kAshConstrainPointerToRoot[];
 ASH_PUBLIC_EXPORT extern const char kAshContextualNudgesInterval[];
 ASH_PUBLIC_EXPORT extern const char kAshContextualNudgesResetShownCount[];
@@ -29,7 +25,6 @@ ASH_PUBLIC_EXPORT extern const char kAshDebugShortcuts[];
 ASH_PUBLIC_EXPORT extern const char kAshDeveloperShortcuts[];
 ASH_PUBLIC_EXPORT extern const char kAshDisableTouchExplorationMode[];
 ASH_PUBLIC_EXPORT extern const char kAshEnableCursorMotionBlur[];
-ASH_PUBLIC_EXPORT extern const char kAshEnableV1AppBackButton[];
 ASH_PUBLIC_EXPORT extern const char kAshEnableMagnifierKeyScroller[];
 ASH_PUBLIC_EXPORT extern const char kAshEnablePaletteOnAllDisplays[];
 ASH_PUBLIC_EXPORT extern const char kAshEnableTabletMode[];
@@ -55,7 +50,6 @@ ASH_PUBLIC_EXPORT extern const char kTouchscreenUsableWhileScreenOff[];
 ASH_PUBLIC_EXPORT base::Optional<base::TimeDelta> ContextualNudgesInterval();
 ASH_PUBLIC_EXPORT bool ContextualNudgesResetShownCount();
 ASH_PUBLIC_EXPORT bool IsUsingShelfAutoDim();
-ASH_PUBLIC_EXPORT bool ShouldClearFastInkBuffer();
 
 }  // namespace switches
 }  // namespace ash

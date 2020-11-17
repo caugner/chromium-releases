@@ -7,7 +7,6 @@ package org.chromium.weblayer.test;
 import android.app.Activity;
 import android.app.Instrumentation.ActivityMonitor;
 import android.content.ComponentName;
-import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.net.Uri;
@@ -74,12 +73,10 @@ public class InstrumentationActivityTestRule
     }
 
     public WebLayer getWebLayer() {
-        return TestThreadUtils.runOnUiThreadBlockingNoException(
-                () -> { return WebLayer.loadSync(getContextForWebLayer()); });
-    }
-
-    public Context getContextForWebLayer() {
-        return InstrumentationRegistry.getTargetContext().getApplicationContext();
+        return TestThreadUtils.runOnUiThreadBlockingNoException(() -> {
+            return WebLayer.loadSync(
+                    InstrumentationRegistry.getTargetContext().getApplicationContext());
+        });
     }
 
     /**
@@ -106,7 +103,7 @@ public class InstrumentationActivityTestRule
         Assert.assertNotNull(activity);
         try {
             TestThreadUtils.runOnUiThreadBlocking(
-                    () -> activity.loadWebLayerSync(getContextForWebLayer()));
+                    () -> activity.loadWebLayerSync(activity.getApplicationContext()));
         } catch (ExecutionException e) {
             throw new RuntimeException(e);
         }

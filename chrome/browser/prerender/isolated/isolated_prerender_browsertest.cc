@@ -28,8 +28,10 @@
 #include "chrome/browser/history/history_test_utils.h"
 #include "chrome/browser/navigation_predictor/navigation_predictor_keyed_service.h"
 #include "chrome/browser/navigation_predictor/navigation_predictor_keyed_service_factory.h"
+#include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/net/profile_network_context_service.h"
 #include "chrome/browser/net/profile_network_context_service_factory.h"
+#include "chrome/browser/policy/policy_test_utils.h"
 #include "chrome/browser/prerender/isolated/isolated_prerender_features.h"
 #include "chrome/browser/prerender/isolated/isolated_prerender_origin_prober.h"
 #include "chrome/browser/prerender/isolated/isolated_prerender_params.h"
@@ -58,6 +60,7 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
 #include "components/data_reduction_proxy/proto/client_config.pb.h"
 #include "components/language/core/browser/pref_names.h"
+#include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
 #include "components/prerender/browser/prerender_handle.h"
 #include "components/prerender/browser/prerender_manager.h"
@@ -745,7 +748,8 @@ class IsolatedPrerenderBrowserTest
     std::unique_ptr<net::test_server::BasicHttpResponse> resp =
         std::make_unique<net::test_server::BasicHttpResponse>();
     resp->set_code(net::HTTP_OK);
-    resp->set_content("OK");
+    // Make sure whitespace is ok, especially trailing newline.
+    resp->set_content("   OK\n");
     return resp;
   }
 
@@ -1727,6 +1731,70 @@ IN_PROC_BROWSER_TEST_F(IsolatedPrerenderBrowserTest,
   run_loop.Run();
 }
 
+class PolicyTestIsolatedPrerenderBrowserTest : public policy::PolicyTest {
+ public:
+  void SetUp() override {
+    scoped_feature_list_.InitAndEnableFeature(features::kIsolatePrerenders);
+    policy::PolicyTest::SetUp();
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    PolicyTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch("enable-spdy-proxy-auth");
+  }
+
+  content::WebContents* GetWebContents() const {
+    return browser()->tab_strip_model()->GetActiveWebContents();
+  }
+
+  void MakeNavigationPrediction(const GURL& doc_url,
+                                const std::vector<GURL>& predicted_urls) {
+    NavigationPredictorKeyedServiceFactory::GetForProfile(browser()->profile())
+        ->OnPredictionUpdated(
+            GetWebContents(), doc_url,
+            NavigationPredictorKeyedService::PredictionSource::
+                kAnchorElementsParsedFromWebPage,
+            predicted_urls);
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+// Predictions should be ignored when the preload setting is disabled by policy.
+IN_PROC_BROWSER_TEST_F(PolicyTestIsolatedPrerenderBrowserTest,
+                       DISABLE_ON_WIN_MAC_CHROMEOS(NoPrefetching)) {
+  policy::PolicyMap policies;
+  policies.Set(
+      policy::key::kNetworkPredictionOptions, policy::POLICY_LEVEL_MANDATORY,
+      policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
+      base::Value(chrome_browser_net::NETWORK_PREDICTION_NEVER), nullptr);
+  UpdateProviderPolicy(policies);
+
+  IsolatedPrerenderTabHelper* tab_helper =
+      IsolatedPrerenderTabHelper::FromWebContents(GetWebContents());
+
+  GURL doc_url("https://www.google.com/search?q=test");
+  MakeNavigationPrediction(doc_url, {GURL("https://test.com/")});
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(tab_helper->srp_metrics().predicted_urls_count_, 0U);
+}
+
+// A negative test where the only thing missing is the policy change from
+// default, ensure that predictions are getting used.
+IN_PROC_BROWSER_TEST_F(PolicyTestIsolatedPrerenderBrowserTest,
+                       DISABLE_ON_WIN_MAC_CHROMEOS(PrefetchingWithDefault)) {
+  IsolatedPrerenderTabHelper* tab_helper =
+      IsolatedPrerenderTabHelper::FromWebContents(GetWebContents());
+
+  GURL doc_url("https://www.google.com/search?q=test");
+  MakeNavigationPrediction(doc_url, {GURL("https://test.com/")});
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(tab_helper->srp_metrics().predicted_urls_count_, 1U);
+}
+
 class SSLReportingIsolatedPrerenderBrowserTest
     : public IsolatedPrerenderBrowserTest {
  public:
@@ -2267,17 +2335,10 @@ IN_PROC_BROWSER_TEST_F(
 IN_PROC_BROWSER_TEST_F(
     ProbingEnabled_CanaryOn_TLSCanaryGood_DNSCanaryBad_IsolatedPrerenderBrowserTest,
     DISABLE_ON_WIN_MAC_CHROMEOS(DNSProbeOK)) {
-  base::HistogramTester histogram_tester;
-
   RunProbeTest(/*probe_success=*/true,
                /*expect_successful_tls_probe=*/false,
                /*expected_status=*/1,
                /*expect_probe=*/true);
-
-  histogram_tester.ExpectTotalCount(
-      "Availability.Prober.FinalState.IsolatedPrerenderDNSCanaryCheck", 1);
-  histogram_tester.ExpectTotalCount(
-      "Availability.Prober.FinalState.IsolatedPrerenderTLSCanaryCheck", 1);
 }
 
 IN_PROC_BROWSER_TEST_F(
@@ -2292,17 +2353,10 @@ IN_PROC_BROWSER_TEST_F(
 IN_PROC_BROWSER_TEST_F(
     ProbingEnabled_CanaryOn_TLSCanaryBad_DNSCanaryBad_IsolatedPrerenderBrowserTest,
     DISABLE_ON_WIN_MAC_CHROMEOS(TLSProbeOK)) {
-  base::HistogramTester histogram_tester;
-
   RunProbeTest(/*probe_success=*/true,
                /*expect_successful_tls_probe=*/true,
                /*expected_status=*/1,
                /*expect_probe=*/true);
-
-  histogram_tester.ExpectTotalCount(
-      "Availability.Prober.FinalState.IsolatedPrerenderDNSCanaryCheck", 1);
-  histogram_tester.ExpectTotalCount(
-      "Availability.Prober.FinalState.IsolatedPrerenderTLSCanaryCheck", 1);
 }
 
 IN_PROC_BROWSER_TEST_F(
@@ -2517,6 +2571,50 @@ IN_PROC_BROWSER_TEST_F(IsolatedPrerenderWithNSPBrowserTest,
       "IsolatedPrerender.Prefetch.Subresources.RespCode", 200, 2);
   histogram_tester.ExpectUniqueSample(
       "IsolatedPrerender.AfterClick.Subresources.UsedCache", true, 2);
+}
+
+IN_PROC_BROWSER_TEST_F(IsolatedPrerenderWithNSPBrowserTest,
+                       DISABLE_ON_WIN_MAC_CHROMEOS(StartsSpareRenderer)) {
+  // Enable low-end device mode to turn off automatic spare renderers. Note that
+  // this will also prevent NSPs from triggering, but the logic under test
+  // happens before that anyways.
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableLowEndDeviceMode);
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      "isolated-prerender-start-spare-renderer");
+
+  SetDataSaverEnabled(true);
+  GURL starting_page = GetOriginServerURL("/simple.html");
+  ui_test_utils::NavigateToURL(browser(), starting_page);
+  WaitForUpdatedCustomProxyConfig();
+
+  IsolatedPrerenderTabHelper* tab_helper =
+      IsolatedPrerenderTabHelper::FromWebContents(GetWebContents());
+
+  GURL eligible_link =
+      GetOriginServerURL("/prerender/isolated/prefetch_page.html");
+
+  TestTabHelperObserver tab_helper_observer(tab_helper);
+  tab_helper_observer.SetExpectedSuccessfulURLs({eligible_link});
+
+  base::RunLoop prefetch_run_loop;
+  tab_helper_observer.SetOnPrefetchSuccessfulClosure(
+      prefetch_run_loop.QuitClosure());
+
+  GURL doc_url("https://www.google.com/search?q=test");
+  MakeNavigationPrediction(doc_url, {eligible_link});
+
+  base::HistogramTester histogram_tester;
+
+  // This run loop will quit when all the prefetch responses have been
+  // successfully done and processed.
+  prefetch_run_loop.Run();
+
+  // Navigate to trigger the histogram recording.
+  ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
+
+  histogram_tester.ExpectUniqueSample(
+      "IsolatedPrerender.SpareRenderer.CountStartedOnSRP", 1, 1);
 }
 
 namespace {
