@@ -58,6 +58,8 @@ void RecordOptInAndOptOutRates(const bool user_opted_in,
 
   base::UmaHistogramEnumeration("OOBE.MarketingOptInScreen.Event." + country,
                                 event);
+  // Generic event aggregating data from all countries.
+  base::UmaHistogramEnumeration("OOBE.MarketingOptInScreen.Event", event);
 }
 
 void RecordGeolocationResolve(MarketingOptInScreen::GeolocationEvent event) {
@@ -96,12 +98,6 @@ MarketingOptInScreen::MarketingOptInScreen(
 
 MarketingOptInScreen::~MarketingOptInScreen() {
   view_->Bind(nullptr);
-}
-
-// static
-MarketingOptInScreen* MarketingOptInScreen::Get(ScreenManager* manager) {
-  return static_cast<MarketingOptInScreen*>(
-      manager->GetScreen(MarketingOptInScreenView::kScreenId));
 }
 
 bool MarketingOptInScreen::MaybeSkip(WizardContext* context) {

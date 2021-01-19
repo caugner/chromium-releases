@@ -9,7 +9,7 @@ GEN('#include "chrome/common/buildflags.h"');
 GEN('#include "build/branding_buildflags.h"');
 GEN('#include "content/public/test/browser_test.h"');
 GEN('#include "chromeos/constants/chromeos_features.h"');
-GEN('#include "chrome/browser/browser_features.h"');
+GEN('#include "chrome/browser/nearby_sharing/common/nearby_share_features.h"');
 
 /** Test fixture for shared Polymer 3 elements. */
 // eslint-disable-next-line no-var
@@ -38,41 +38,24 @@ var OSSettingsV3BrowserTest = class extends PolymerTest {
   }
 };
 
+// TODO(crbug/1109431): Remove this test once migration is complete.
 // eslint-disable-next-line no-var
-var OSSettingsInputPageV3Test = class extends OSSettingsV3BrowserTest {
+var OSSettingsOsLanguagesPageV3Test = class extends OSSettingsV3BrowserTest {
   /** @override */
   get browsePreload() {
-    return 'chrome://os-settings/test_loader.html?module=settings/chromeos/input_page_test.m.js';
+    return 'chrome://os-settings/test_loader.html?module=settings/chromeos/os_languages_page_tests.m.js';
   }
 
   /** @override */
   get featureList() {
     return {
-      enabled: super.featureList.enabled.concat(
-          ['chromeos::features::kLanguageSettingsUpdate'])
+      enabled: super.featureList.enabled,
+      disabled: ['chromeos::features::kLanguageSettingsUpdate']
     };
   }
 };
 
-TEST_F('OSSettingsInputPageV3Test', 'All', () => mocha.run());
-
-// eslint-disable-next-line no-var
-var OSSettingsOsLanguagesPageV2V3Test = class extends OSSettingsV3BrowserTest {
-  /** @override */
-  get browsePreload() {
-    return 'chrome://os-settings/test_loader.html?module=settings/chromeos/os_languages_page_v2_tests.m.js';
-  }
-
-  /** @override */
-  get featureList() {
-    return {
-      enabled: super.featureList.enabled.concat(
-          ['chromeos::features::kLanguageSettingsUpdate'])
-    };
-  }
-};
-
-TEST_F('OSSettingsOsLanguagesPageV2V3Test', 'All', () => mocha.run());
+TEST_F('OSSettingsOsLanguagesPageV3Test', 'All', () => mocha.run());
 
 // eslint-disable-next-line no-var
 var OSSettingsNearbyShareSubPageV3Test = class extends OSSettingsV3BrowserTest {
@@ -95,21 +78,31 @@ TEST_F('OSSettingsNearbyShareSubPageV3Test', 'All', () => mocha.run());
  ['BluetoothPage', 'bluetooth_page_tests.m.js'],
  ['CellularSetupDialog', 'cellular_setup_dialog_test.m.js'],
  ['DateTimePage', 'date_time_page_tests.m.js'],
+ ['GoogleAssistantPage', 'google_assistant_page_test.m.js'],
  ['InputMethodOptionPage', 'input_method_options_page_test.m.js'],
+ ['InputPage', 'input_page_test.m.js'],
  ['InternetConfig', 'internet_config_test.m.js'],
  ['InternetDetailPage', 'internet_detail_page_tests.m.js'],
  ['InternetKnownNetworksPage', 'internet_known_networks_page_tests.m.js'],
+ ['InternetSubpage', 'internet_subpage_tests.m.js'],
+ ['InternetPage', 'internet_page_tests.m.js'],
  ['LocalizedLink', 'localized_link_test.m.js'],
  ['MultideviceFeatureItem', 'multidevice_feature_item_tests.m.js'],
  ['MultideviceFeatureToggle', 'multidevice_feature_toggle_tests.m.js'],
  ['MultidevicePage', 'multidevice_page_tests.m.js'],
  ['MultideviceSmartLockSubPage', 'multidevice_smartlock_subpage_test.m.js'],
  ['MultideviceSubPage', 'multidevice_subpage_tests.m.js'],
+ [
+   'MultideviceWifiSyncDisabledLink',
+   'multidevice_wifi_sync_disabled_link_tests.m.js'
+ ],
+ ['MultideviceWifiSyncItem', 'multidevice_wifi_sync_item_tests.m.js'],
  ['NetworkProxySection', 'network_proxy_section_test.m.js'],
  ['NetworkSummary', 'network_summary_test.m.js'],
  ['NetworkSummaryItem', 'network_summary_item_test.m.js'],
  ['OsEditDictionaryPage', 'os_edit_dictionary_page_test.m.js'],
- ['OsLanguagesPage', 'os_languages_page_tests.m.js'],
+ ['OsLanguagesPageV2', 'os_languages_page_v2_tests.m.js'],
+ ['OsSearchPage', 'os_search_page_test.m.js'],
  ['NearbyShareReceiveDialog', 'nearby_share_receive_dialog_tests.m.js'],
  ['ParentalControlsPage', 'parental_controls_page_test.m.js'],
  ['PeoplePage', 'os_people_page_test.m.js'],

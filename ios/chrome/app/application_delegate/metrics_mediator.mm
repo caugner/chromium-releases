@@ -17,6 +17,7 @@
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_service.h"
 #include "components/prefs/pref_service.h"
+#import "components/previous_session_info/previous_session_info.h"
 #include "components/ukm/ios/features.h"
 #import "ios/chrome/app/application_delegate/metric_kit_subscriber.h"
 #import "ios/chrome/app/application_delegate/startup_information.h"
@@ -25,14 +26,15 @@
 #include "ios/chrome/browser/crash_report/breakpad_helper.h"
 #include "ios/chrome/browser/main/browser.h"
 #include "ios/chrome/browser/metrics/first_user_action_recorder.h"
-#import "ios/chrome/browser/metrics/previous_session_info.h"
 #import "ios/chrome/browser/net/connection_type_observer_bridge.h"
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/chrome/browser/system_flags.h"
 #import "ios/chrome/browser/ui/main/browser_interface_provider.h"
 #import "ios/chrome/browser/ui/main/connection_information.h"
 #import "ios/chrome/browser/ui/main/scene_state.h"
+#import "ios/chrome/browser/ui/ntp/ntp_util.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
+#import "ios/chrome/browser/widget_kit/widget_metrics_util.h"
 #include "ios/chrome/common/app_group/app_group_metrics_mainapp.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/public/provider/chrome/browser/distribution/app_distribution_provider.h"
@@ -110,6 +112,10 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
 + (void)recordNumTabAtStartup:(int)numTabs;
 // Logs the number of tabs with UMAHistogramCount100 and allows testing.
 + (void)recordNumTabAtResume:(int)numTabs;
+// Logs the number of NTP tabs with UMAHistogramCount100 and allows testing.
++ (void)recordNumNTPTabAtStartup:(int)numTabs;
+// Logs the number of NTP tabs with UMAHistogramCount100 and allows testing.
++ (void)recordNumNTPTabAtResume:(int)numTabs;
 
 @end
 
@@ -150,6 +156,7 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
             (id<StartupInformation>)startupInformation
                                connectedScenes:(NSArray<SceneState*>*)scenes {
   int numTabs = 0;
+  int numNTPTabs = 0;
   for (SceneState* scene in scenes) {
     if (!scene.interfaceProvider) {
       // The scene might not yet be initiated.
@@ -157,19 +164,32 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
       // counted in sessions instead of scenes.
       continue;
     }
-    numTabs += scene.interfaceProvider.mainInterface.browser->GetWebStateList()
-                   ->count();
+
+    const WebStateList* web_state_list =
+        scene.interfaceProvider.mainInterface.browser->GetWebStateList();
+    numTabs += web_state_list->count();
+    for (int i = 0; i < web_state_list->count(); i++) {
+      if (IsURLNewTabPage(web_state_list->GetWebStateAt(i)->GetVisibleURL())) {
+        numNTPTabs++;
+      }
+    }
   }
 
   if (startupInformation.isColdStart) {
     [self recordNumTabAtStartup:numTabs];
+    [self recordNumNTPTabAtStartup:numNTPTabs];
   } else {
     [self recordNumTabAtResume:numTabs];
+    [self recordNumNTPTabAtResume:numNTPTabs];
   }
 
   if (UIAccessibilityIsVoiceOverRunning()) {
     base::RecordAction(
         base::UserMetricsAction("MobileVoiceOverActiveOnLaunch"));
+  }
+
+  if (@available(iOS 14, *)) {
+    [WidgetMetricsUtil logInstalledWidgets];
   }
 
   // Create the first user action recorder and schedule a task to expire it
@@ -425,6 +445,14 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
 
 + (void)recordNumTabAtResume:(int)numTabs {
   base::UmaHistogramCounts100("Tabs.CountAtResume", numTabs);
+}
+
++ (void)recordNumNTPTabAtStartup:(int)numTabs {
+  base::UmaHistogramCounts100("Tabs.NTPCountAtStartup", numTabs);
+}
+
++ (void)recordNumNTPTabAtResume:(int)numTabs {
+  base::UmaHistogramCounts100("Tabs.NTPCountAtResume", numTabs);
 }
 
 - (void)setBreakpadUploadingEnabled:(BOOL)enableUploading {

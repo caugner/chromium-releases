@@ -126,7 +126,6 @@ class ASH_PUBLIC_EXPORT AppListConfig {
     return folder_name_border_thickness_;
   }
   int folder_name_padding() const { return folder_name_padding_; }
-  SkColor folder_name_border_color() const { return folder_name_border_color_; }
   int folder_icon_dimension() const { return folder_icon_dimension_; }
   int folder_unclipped_icon_dimension() const {
     return folder_unclipped_icon_dimension_;
@@ -193,9 +192,6 @@ class ASH_PUBLIC_EXPORT AppListConfig {
   }
   double results_list_container_score() const {
     return results_list_container_score_;
-  }
-  double answer_card_container_score() const {
-    return answer_card_container_score_;
   }
 
   gfx::Size grid_icon_size() const {
@@ -401,9 +397,6 @@ class ASH_PUBLIC_EXPORT AppListConfig {
   // The inner padding for folder name.
   const int folder_name_padding_;
 
-  // The color of the folder name border.
-  const SkColor folder_name_border_color_;
-
   // The icon dimension of folder.
   const int folder_icon_dimension_;
 
@@ -507,7 +500,6 @@ class ASH_PUBLIC_EXPORT AppListConfig {
   // always be the first item underneath the search box.
   const double privacy_container_score_ = 4.0;
   const double app_tiles_container_score_ = 3.0;
-  const double answer_card_container_score_ = 2.0;
   const double results_list_container_score_ = 1.0;
 
   // Cardified app list background properties

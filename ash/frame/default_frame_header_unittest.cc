@@ -2,20 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/public/cpp/default_frame_header.h"
+#include "chromeos/ui/frame/default_frame_header.h"
 
 #include <memory>
 
 #include "ash/frame/non_client_frame_view_ash.h"
-#include "ash/public/cpp/caption_buttons/frame_back_button.h"
-#include "ash/public/cpp/caption_buttons/frame_caption_button_container_view.h"
 #include "ash/public/cpp/shell_window_ids.h"
-#include "ash/public/cpp/window_properties.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/desks/desks_util.h"
 #include "base/i18n/rtl.h"
 #include "base/stl_util.h"
 #include "base/test/icu_test_util.h"
+#include "chromeos/ui/base/window_properties.h"
+#include "chromeos/ui/frame/caption_buttons/frame_back_button.h"
+#include "chromeos/ui/frame/caption_buttons/frame_caption_button_container_view.h"
 #include "ui/aura/window.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/gfx/animation/animation_test_api.h"
@@ -25,6 +25,12 @@
 #include "ui/views/window/non_client_view.h"
 #include "ui/wm/core/window_util.h"
 
+using chromeos::DefaultFrameHeader;
+using chromeos::FrameBackButton;
+using chromeos::FrameCaptionButtonContainerView;
+using chromeos::FrameHeader;
+using chromeos::kFrameActiveColorKey;
+using chromeos::kFrameInactiveColorKey;
 using views::NonClientFrameView;
 using views::Widget;
 
@@ -277,6 +283,33 @@ TEST_F(DefaultFrameHeaderTest, ResizeAndReorderDuringAnimation) {
         original_layers_count_1);
     EXPECT_TRUE(checker.destroyed());
   }
+}
+
+// Make sure that the animation request while animating will not
+// create another animation.
+TEST_F(DefaultFrameHeaderTest, AnimateDuringAnimation) {
+  const auto bounds = gfx::Rect(100, 100);
+  auto win_0 = CreateAppWindow(bounds, AppType::BROWSER);
+  // A frame will not animate until it is painted first.
+  FramePaintWaiter(win_0.get()).Wait();
+
+  auto* widget = Widget::GetWidgetForNativeWindow(win_0.get());
+
+  auto lock = widget->LockPaintAsActive();
+  auto win_1 = CreateAppWindow(bounds, AppType::BROWSER);
+  FramePaintWaiter(win_1.get()).Wait();
+
+  EXPECT_TRUE(wm::IsActiveWindow(win_1.get()));
+
+  ui::ScopedAnimationDurationScaleMode non_zero_duration_mode(
+      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+
+  auto layer_bounds = win_0->layer()->bounds();
+  lock.reset();
+  win_1.reset();
+  EXPECT_TRUE(wm::IsActiveWindow(win_0.get()));
+  // Makes sure that the layer has full damaged bounds.
+  EXPECT_TRUE(win_0->layer()->damaged_region().Contains(layer_bounds));
 }
 
 }  // namespace ash

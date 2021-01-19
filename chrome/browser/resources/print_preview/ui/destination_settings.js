@@ -27,7 +27,10 @@ import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behav
 import {beforeNextRender, html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {CloudPrintInterfaceImpl} from '../cloud_print_interface_impl.js';
-import {createDestinationKey, createRecentDestinationKey, Destination, DestinationOrigin, makeRecentDestination, RecentDestination} from '../data/destination.js';
+import {CloudOrigins, createDestinationKey, createRecentDestinationKey, Destination, DestinationOrigin, makeRecentDestination, RecentDestination} from '../data/destination.js';
+// <if expr="chromeos">
+import {SAVE_TO_DRIVE_CROS_DESTINATION_KEY} from '../data/destination.js';
+// </if>
 import {getPrinterTypeForDestination, PrinterType} from '../data/destination_match.js';
 import {DestinationErrorType, DestinationStore} from '../data/destination_store.js';
 import {InvitationStore} from '../data/invitation_store.js';
@@ -135,10 +138,7 @@ Polymer({
     // </if>
 
     /** @private {?InvitationStore} */
-    invitationStore_: {
-      type: Object,
-      value: null,
-    },
+    invitationStore_: Object,
 
     /** @private {boolean} */
     isDialogOpen_: {
@@ -173,6 +173,15 @@ Polymer({
       },
       readOnly: true,
     },
+
+    /** @private */
+    saveToDriveFlagEnabled_: {
+      type: Boolean,
+      value() {
+        return loadTimeData.getBoolean('printSaveToDrive');
+      },
+      readOnly: true,
+    },
     // </if>
   },
 
@@ -186,7 +195,6 @@ Polymer({
   attached() {
     this.destinationStore_ =
         new DestinationStore(this.addWebUIListener.bind(this));
-    this.invitationStore_ = new InvitationStore();
     this.tracker_.add(
         this.destinationStore_, DestinationStore.EventType.DESTINATION_SELECT,
         this.onDestinationSelect_.bind(this));
@@ -217,16 +225,23 @@ Polymer({
 
   /** @override */
   detached() {
-    this.invitationStore_.resetTracker();
+    if (!this.cloudPrintDisabled_) {
+      this.invitationStore_.resetTracker();
+    }
     this.destinationStore_.resetTracker();
     this.tracker_.removeAll();
   },
 
   /** @private */
   updateDriveDestination_() {
-    const key = createDestinationKey(
+    let key = createDestinationKey(
         Destination.GooglePromotedId.DOCS, DestinationOrigin.COOKIES,
         this.activeUser_);
+    // <if expr="chromeos">
+    if (this.saveToDriveFlagEnabled_) {
+      key = SAVE_TO_DRIVE_CROS_DESTINATION_KEY;
+    }
+    // </if>
     this.driveDestinationKey_ =
         this.destinationStore_.getDestinationByKey(key) ? key : '';
   },
@@ -302,6 +317,8 @@ Polymer({
   /**
    * @param {string} defaultPrinter The system default printer ID.
    * @param {boolean} pdfPrinterDisabled Whether the PDF printer is disabled.
+   * @param {boolean} isDriveMounted Whether Google Drive is mounted. Only used
+        on Chrome OS.
    * @param {string} serializedDefaultDestinationRulesStr String with rules
    *     for selecting a default destination.
    * @param {?Array<string>} userAccounts The signed in user accounts.
@@ -310,23 +327,53 @@ Polymer({
    *     to always send requests to the Google Cloud Print server.
    */
   init(
-      defaultPrinter, pdfPrinterDisabled, serializedDefaultDestinationRulesStr,
-      userAccounts, syncAvailable) {
+      defaultPrinter, pdfPrinterDisabled, isDriveMounted,
+      serializedDefaultDestinationRulesStr, userAccounts, syncAvailable) {
     const cloudPrintInterface = CloudPrintInterfaceImpl.getInstance();
-    if (cloudPrintInterface.isConfigured()) {
-      this.cloudPrintDisabled_ = false;
-      this.destinationStore_.setCloudPrintInterface(cloudPrintInterface);
-      this.invitationStore_.setCloudPrintInterface(cloudPrintInterface);
-    }
     this.pdfPrinterDisabled_ = pdfPrinterDisabled;
-    this.$.userManager.initUserAccounts(userAccounts, syncAvailable);
     let recentDestinations =
         /** @type {!Array<!RecentDestination>} */ (
             this.getSettingValue('recentDestinations'));
+
+    if (cloudPrintInterface.isConfigured()) {
+      this.cloudPrintDisabled_ = false;
+      this.destinationStore_.setCloudPrintInterface(cloudPrintInterface);
+      this.invitationStore_ = new InvitationStore();
+      this.invitationStore_.setCloudPrintInterface(cloudPrintInterface);
+      beforeNextRender(this, () => {
+        this.shadowRoot.querySelector('#userManager')
+            .initUserAccounts(userAccounts, syncAvailable);
+        recentDestinations = recentDestinations.slice(
+            0, this.getRecentDestinationsDisplayCount_(recentDestinations));
+        this.destinationStore_.init(
+            this.pdfPrinterDisabled_, isDriveMounted, defaultPrinter,
+            serializedDefaultDestinationRulesStr, recentDestinations);
+      });
+      return;
+    }
+
+    // Remove unsupported cloud and privet printers from the sticky settings,
+    // to free up these spots for supported printers.
+    // TODO (rbpotter): Remove this logic a milestone after the policy and flag
+    // below have been removed, as it is unlikely for users to still have stale
+    // cloud and privet printers after that point.
+    if (!loadTimeData.getBoolean('cloudPrintDeprecationWarningsSuppressed')) {
+      const privetEnabled =
+          loadTimeData.getBoolean('forceEnablePrivetPrinting');
+      const filteredRecentDestinations = recentDestinations.filter(d => {
+        return !CloudOrigins.includes(d.origin) &&
+            (privetEnabled || d.origin !== DestinationOrigin.PRIVET);
+      });
+      if (filteredRecentDestinations.length !== recentDestinations.length) {
+        this.setSetting('recentDestinations', filteredRecentDestinations);
+        recentDestinations = filteredRecentDestinations;
+      }
+    }
+
     recentDestinations = recentDestinations.slice(
         0, this.getRecentDestinationsDisplayCount_(recentDestinations));
     this.destinationStore_.init(
-        this.pdfPrinterDisabled_, defaultPrinter,
+        this.pdfPrinterDisabled_, isDriveMounted, defaultPrinter,
         serializedDefaultDestinationRulesStr, recentDestinations);
   },
 
@@ -583,7 +630,9 @@ Polymer({
    * @private
    */
   onAccountChange_(e) {
-    this.$.userManager.updateActiveUser(e.detail, true);
+    assert(!this.cloudPrintDisabled_);
+    this.shadowRoot.querySelector('#userManager')
+        .updateActiveUser(e.detail, true);
     this.updateDriveDestination_();
   },
 
@@ -637,11 +686,6 @@ Polymer({
 
     this.destination.eulaUrl = e.detail;
     this.notifyPath('destination.eulaUrl');
-  },
-
-  /** @param {boolean} isDriveMounted */
-  setIsDriveMounted(isDriveMounted) {
-    this.$.destinationSelect.isDriveMounted = isDriveMounted;
   },
   // </if>
 });

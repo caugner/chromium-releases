@@ -262,11 +262,17 @@ bool FeatureList::IsFeatureOverridden(const std::string& feature_name) const {
 }
 
 bool FeatureList::IsFeatureOverriddenFromCommandLine(
+    const std::string& feature_name) const {
+  auto it = overrides_.find(feature_name);
+  return it != overrides_.end() && !it->second.overridden_by_field_trial;
+}
+
+bool FeatureList::IsFeatureOverriddenFromCommandLine(
     const std::string& feature_name,
     OverrideState state) const {
   auto it = overrides_.find(feature_name);
-  return it != overrides_.end() && it->second.overridden_state == state &&
-         !it->second.overridden_by_field_trial;
+  return it != overrides_.end() && !it->second.overridden_by_field_trial &&
+         it->second.overridden_state == state;
 }
 
 void FeatureList::AssociateReportingFieldTrial(
@@ -431,7 +437,7 @@ void FeatureList::SetInstance(std::unique_ptr<FeatureList> instance) {
   g_feature_list_instance = instance.release();
 
 #if defined(DCHECK_IS_CONFIGURABLE)
-  // Update the behaviour of LOG_DCHECK to match the Feature configuration.
+  // Update the behaviour of LOGGING_DCHECK to match the Feature configuration.
   // DCHECK is also forced to be FATAL if we are running a death-test.
   // TODO(crbug.com/1057995#c11): --gtest_internal_run_death_test doesn't
   // currently run through this codepath, mitigated in
@@ -441,9 +447,9 @@ void FeatureList::SetInstance(std::unique_ptr<FeatureList> instance) {
   if (FeatureList::IsEnabled(kDCheckIsFatalFeature) ||
       CommandLine::ForCurrentProcess()->HasSwitch(
           "gtest_internal_run_death_test")) {
-    logging::LOG_DCHECK = logging::LOG_FATAL;
+    logging::LOGGING_DCHECK = logging::LOG_FATAL;
   } else {
-    logging::LOG_DCHECK = logging::LOG_INFO;
+    logging::LOGGING_DCHECK = logging::LOG_INFO;
   }
 #endif  // defined(DCHECK_IS_CONFIGURABLE)
 }

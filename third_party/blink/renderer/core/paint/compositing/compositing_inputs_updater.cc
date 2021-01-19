@@ -38,6 +38,15 @@ CompositingInputsUpdater::~CompositingInputsUpdater() = default;
 
 bool CompositingInputsUpdater::LayerOrDescendantShouldBeComposited(
     PaintLayer* layer) {
+  if (auto* layout_view = DynamicTo<LayoutView>(layer->GetLayoutObject())) {
+    if (layout_view->AdditionalCompositingReasons())
+      return true;
+    // The containing frame may call this function for the root layer of a
+    // throttled frame. Return the current compositing status.
+    if (layout_view->GetFrameView()->ShouldThrottleRendering())
+      return layout_view->UsesCompositing();
+  }
+  DCHECK(!layer->GetLayoutObject().GetFrameView()->ShouldThrottleRendering());
   PaintLayerCompositor* compositor =
       layer->GetLayoutObject().View()->Compositor();
   return layer->DescendantHasDirectOrScrollingCompositingReason() ||
@@ -199,13 +208,11 @@ void CompositingInputsUpdater::UpdateSelfAndDescendantsRecursively(
   }
   if (!descendant_has_direct_compositing_reason &&
       layer->GetLayoutObject().IsLayoutEmbeddedContent()) {
-    if (LayoutView* root_of_child =
-            ToLayoutEmbeddedContent(layer->GetLayoutObject())
+    if (LayoutView* embedded_layout_view =
+            To<LayoutEmbeddedContent>(layer->GetLayoutObject())
                 .ChildLayoutView()) {
-      if (CompositingInputsUpdater(root_of_child->Layer(),
-                                   root_of_child->Layer())
-              .LayerOrDescendantShouldBeComposited(root_of_child->Layer()))
-        descendant_has_direct_compositing_reason = true;
+      descendant_has_direct_compositing_reason |=
+          LayerOrDescendantShouldBeComposited(embedded_layout_view->Layer());
     }
   }
   layer->SetDescendantHasDirectOrScrollingCompositingReason(
@@ -453,16 +460,20 @@ void CompositingInputsUpdater::UpdateAncestorDependentCompositingInputs(
   if (!RuntimeEnabledFeatures::CompositingOptimizationsEnabled()) {
     // The final value for |unclipped_absolute_bounding_box| needs to be
     // in absolute, unscrolled space, without any scroll applied.
+
     properties.unclipped_absolute_bounding_box =
         EnclosingIntRect(geometry_map_->AbsoluteRect(
             layer->BoundingBoxForCompositingOverlapTest()));
 
-    // At this point, |unclipped_absolute_bounding_box| is in viewport space.
-    // To convert to absolute space, add scroll offset. Note that even fixed
-    // layers are in viewport space due to expanding their bounding box to
-    // include the extent they could cover from scrolling to min/max offsets.
-    properties.unclipped_absolute_bounding_box.Move(
-        RoundedIntSize(root_layer_->GetScrollableArea()->GetScrollOffset()));
+    bool affected_by_scroll = root_layer_->GetScrollableArea() &&
+                              layer->IsAffectedByScrollOf(root_layer_);
+
+    // At ths point, |unclipped_absolute_bounding_box| is in viewport space.
+    // To convert to absolute space, add scroll offset for non-fixed layers.
+    if (affected_by_scroll) {
+      properties.unclipped_absolute_bounding_box.Move(
+          RoundedIntSize(root_layer_->GetScrollableArea()->GetScrollOffset()));
+    }
 
     // For sticky-positioned elements, the scroll offset is sometimes included
     // and sometimes not, depending on whether the sticky element is affixed or
@@ -481,8 +492,15 @@ void CompositingInputsUpdater::UpdateAncestorDependentCompositingInputs(
                              cache_slot, kIgnoreOverlayScrollbarSize,
                              kIgnoreOverflowClipAndScroll),
             clip_rect);
-    // |snapped_clip_rect| is in absolute space
     IntRect snapped_clip_rect = PixelSnappedIntRect(clip_rect.Rect());
+    // |snapped_clip_rect| is in absolute space space, but with scroll applied.
+    // To convert to absolute, unscrolled space, subtract scroll offsets for
+    // fixed layers.
+    if (root_layer_->GetScrollableArea() && !affected_by_scroll) {
+      snapped_clip_rect.Move(
+          RoundedIntSize(-root_layer_->GetScrollableArea()->GetScrollOffset()));
+    }
+
     properties.clipped_absolute_bounding_box =
         properties.unclipped_absolute_bounding_box;
     properties.clipped_absolute_bounding_box.Intersect(snapped_clip_rect);

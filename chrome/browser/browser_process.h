@@ -29,7 +29,6 @@ class DownloadRequestLimiter;
 class DownloadStatusUpdater;
 class GpuModeManager;
 class IconManager;
-class IntranetRedirectDetector;
 class MediaFileSystemRegistry;
 class NotificationPlatformBridge;
 class NotificationUIManager;
@@ -40,6 +39,10 @@ class SystemNetworkContextManager;
 class WatchDogThread;
 class WebRtcLogUploader;
 class StartupData;
+
+#if !defined(OS_ANDROID)
+class IntranetRedirectDetector;
+#endif
 
 namespace network {
 class NetworkQualityTracker;
@@ -55,7 +58,6 @@ class RulesetService;
 }
 
 namespace federated_learning {
-class FlocBlocklistService;
 class FlocSortingLshClustersService;
 }
 
@@ -190,7 +192,9 @@ class BrowserProcess {
   virtual printing::BackgroundPrintingManager*
       background_printing_manager() = 0;
 
+#if !defined(OS_ANDROID)
   virtual IntranetRedirectDetector* intranet_redirect_detector() = 0;
+#endif
 
   // Returns the locale used by the application. It is the IETF language tag,
   // defined in BCP 47. The region subtag is not included when it adds no
@@ -219,10 +223,6 @@ class BrowserProcess {
   // Browsing subresource filter.
   virtual subresource_filter::RulesetService*
   subresource_filter_ruleset_service() = 0;
-
-  // Returns the service providing versioned storage for a blocklist of flocs.
-  virtual federated_learning::FlocBlocklistService*
-  floc_blocklist_service() = 0;
 
   // Returns the service providing versioned storage for a list of limit values
   // for calculating the floc based on SortingLSH.

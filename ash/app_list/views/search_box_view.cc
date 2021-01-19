@@ -25,6 +25,7 @@
 #include "ash/public/cpp/app_list/app_list_config.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/public/cpp/app_list/vector_icons/vector_icons.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/wallpaper_types.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/search_box/search_box_constants.h"
@@ -100,8 +101,7 @@ SearchBoxView::~SearchBoxView() {
 
 void SearchBoxView::Init(bool is_tablet_mode) {
   is_tablet_mode_ = is_tablet_mode;
-  if (app_list_features::IsZeroStateSuggestionsEnabled())
-    set_show_close_button_when_active(true);
+  set_show_close_button_when_active(true);
   SearchBoxViewBase::Init();
   UpdatePlaceholderTextAndAccessibleName();
   current_query_ = search_box()->GetText();
@@ -132,12 +132,6 @@ void SearchBoxView::ClearSearch() {
   current_query_.clear();
   app_list_view_->SetStateFromSearchBoxView(
       true, false /*triggered_by_contents_change*/);
-}
-
-views::View* SearchBoxView::GetSelectedViewInContentsView() {
-  if (!contents_view_)
-    return nullptr;
-  return contents_view_->GetSelectedView();
 }
 
 void SearchBoxView::HandleSearchBoxEvent(ui::LocatedEvent* located_event) {
@@ -196,9 +190,10 @@ void SearchBoxView::UpdateSearchIcon() {
   const gfx::VectorIcon& icon = search_model_->search_engine_is_google()
                                     ? google_icon
                                     : kSearchEngineNotGoogleIcon;
-  SetSearchIconImage(gfx::CreateVectorIcon(
-      icon, kSearchBoxIconSize,
-      AppListColorProvider::Get()->GetSearchBoxIconColor()));
+  SetSearchIconImage(
+      gfx::CreateVectorIcon(icon, kSearchBoxIconSize,
+                            AppListColorProvider::Get()->GetSearchBoxIconColor(
+                                SkColorSetARGB(0xDE, 0x00, 0x00, 0x00))));
 }
 
 void SearchBoxView::UpdateSearchBoxBorder() {
@@ -232,10 +227,18 @@ int SearchBoxView::GetFocusRingSpacing() {
 
 void SearchBoxView::SetupCloseButton() {
   views::ImageButton* close = close_button();
-  close->SetImage(views::ImageButton::STATE_NORMAL,
-                  gfx::CreateVectorIcon(
-                      views::kIcCloseIcon, kSearchBoxIconSize,
-                      AppListColorProvider::Get()->GetSearchBoxIconColor()));
+  close->SetCallback(base::BindRepeating(
+      [](SearchBoxView* view) {
+        view->view_delegate_->LogSearchAbandonHistogram();
+        view->SetSearchBoxActive(false, ui::ET_UNKNOWN);
+        view->ClearSearch();
+      },
+      this));
+  close->SetImage(
+      views::ImageButton::STATE_NORMAL,
+      gfx::CreateVectorIcon(views::kIcCloseIcon, kSearchBoxIconSize,
+                            AppListColorProvider::Get()->GetSearchBoxIconColor(
+                                gfx::kGoogleGrey700)));
   close->SetVisible(false);
   base::string16 close_button_label(
       l10n_util::GetStringUTF16(IDS_APP_LIST_CLEAR_SEARCHBOX));
@@ -281,6 +284,17 @@ void SearchBoxView::RecordSearchBoxActivationHistogram(
   } else {
     UMA_HISTOGRAM_ENUMERATION("Apps.AppListSearchBoxActivated.ClamshellMode",
                               activation_type);
+  }
+}
+
+void SearchBoxView::OnSearchBoxActiveChanged(bool active) {
+  if (active) {
+    search_box()->SetAccessibleName(base::string16());
+  } else {
+    search_box()->SetAccessibleName(l10n_util::GetStringUTF16(
+        is_tablet_mode_
+            ? IDS_APP_LIST_SEARCH_BOX_ACCESSIBILITY_NAME_TABLET
+            : IDS_APP_LIST_SEARCH_BOX_ACCESSIBILITY_NAME_CLAMSHELL));
   }
 }
 
@@ -336,8 +350,8 @@ void SearchBoxView::UpdateBackground(double progress,
       progress, GetBackgroundColorForState(current_state),
       GetBackgroundColorForState(target_state));
   UpdateBackgroundColor(color);
-  search_box()->SetTextColor(
-      AppListColorProvider::Get()->GetSearchBoxTextColor());
+  search_box()->SetTextColor(AppListColorProvider::Get()->GetSearchBoxTextColor(
+      kDeprecatedSearchBoxTextDefaultColor));
 }
 
 void SearchBoxView::UpdateLayout(double progress,
@@ -390,8 +404,12 @@ void SearchBoxView::OnWallpaperColorsChanged() {
   AppListColorProvider* app_list_color_provider = AppListColorProvider::Get();
   search_box()->set_placeholder_text_color(
       app_list_color_provider->GetSearchBoxPlaceholderTextColor());
-  search_box()->SetTextColor(app_list_color_provider->GetSearchBoxTextColor());
-  UpdateBackgroundColor(app_list_color_provider->GetSearchBoxBackgroundColor());
+  search_box()->SetTextColor(app_list_color_provider->GetSearchBoxTextColor(
+      kDeprecatedSearchBoxTextDefaultColor));
+  if (features::IsDarkLightModeEnabled()) {
+    UpdateBackgroundColor(
+        app_list_color_provider->GetSearchBoxBackgroundColor());
+  }
   SchedulePaint();
 }
 
@@ -492,6 +510,13 @@ void SearchBoxView::ClearAutocompleteText() {
   ResetHighlightRange();
 }
 
+void SearchBoxView::OnBeforeUserAction(views::Textfield* sender) {
+  if (a11y_selection_on_search_result_) {
+    a11y_selection_on_search_result_ = false;
+    search_box()->NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
+  }
+}
+
 void SearchBoxView::ContentsChanged(views::Textfield* sender,
                                     const base::string16& new_contents) {
   if (IsTrimmedQueryEmpty(current_query_) && !IsSearchBoxTrimmedQueryEmpty()) {
@@ -565,6 +590,7 @@ void SearchBoxView::ClearSearchAndDeactivateSearchBox() {
   contents_view_->search_results_page_view()
       ->result_selection_controller()
       ->ClearSelection();
+  a11y_selection_on_search_result_ = false;
   ClearSearch();
   SetSearchBoxActive(false, ui::ET_UNKNOWN);
 }
@@ -691,6 +717,9 @@ bool SearchBoxView::HandleKeyEvent(views::Textfield* sender,
 
       DCHECK(close_button()->GetVisible());
       close_button()->RequestFocus();
+      close_button()->NotifyAccessibilityEvent(ax::mojom::Event::kSelection,
+                                               true);
+      a11y_selection_on_search_result_ = false;
       break;
     case ResultSelectionController::MoveResult::kResultChanged:
       UpdateSearchBoxTextForSelectedResult(
@@ -724,15 +753,6 @@ bool SearchBoxView::HandleGestureEvent(views::Textfield* sender,
   if (gesture_event.type() == ui::ET_GESTURE_TAP && HasAutocompleteText())
     AcceptAutocompleteText();
   return SearchBoxViewBase::HandleGestureEvent(sender, gesture_event);
-}
-
-void SearchBoxView::ButtonPressed(views::Button* sender,
-                                  const ui::Event& event) {
-  if (close_button() && sender == close_button()) {
-    view_delegate_->LogSearchAbandonHistogram();
-    SetSearchBoxActive(false, ui::ET_UNKNOWN);
-  }
-  SearchBoxViewBase::ButtonPressed(sender, event);
 }
 
 void SearchBoxView::UpdateSearchBoxTextForSelectedResult(
@@ -792,9 +812,9 @@ void SearchBoxView::SetupAssistantButton() {
   views::ImageButton* assistant = assistant_button();
   assistant->SetImage(
       views::ImageButton::STATE_NORMAL,
-      gfx::CreateVectorIcon(
-          chromeos::kAssistantIcon, kSearchBoxIconSize,
-          AppListColorProvider::Get()->GetSearchBoxIconColor()));
+      gfx::CreateVectorIcon(chromeos::kAssistantIcon, kSearchBoxIconSize,
+                            AppListColorProvider::Get()->GetSearchBoxIconColor(
+                                gfx::kGoogleGrey700)));
   base::string16 assistant_button_label(
       l10n_util::GetStringUTF16(IDS_APP_LIST_START_ASSISTANT));
   assistant->SetAccessibleName(assistant_button_label);

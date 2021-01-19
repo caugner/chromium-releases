@@ -33,19 +33,21 @@ import org.mockito.Mock;
 import org.chromium.base.Callback;
 import org.chromium.base.test.params.ParameterAnnotations;
 import org.chromium.base.test.params.ParameterizedRunner;
+import org.chromium.base.test.util.ApplicationTestUtils;
 import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.incognito.IncognitoUtils;
 import org.chromium.chrome.browser.incognito.interstitial.IncognitoInterstitialDelegate;
 import org.chromium.chrome.browser.night_mode.ChromeNightModeTestUtils;
 import org.chromium.chrome.browser.signin.account_picker.AccountPickerBottomSheetCoordinator;
 import org.chromium.chrome.browser.signin.account_picker.AccountPickerDelegate;
 import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
-import org.chromium.chrome.test.util.ApplicationTestUtils;
 import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.chrome.test.util.browser.signin.AccountManagerTestRule;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
@@ -54,7 +56,6 @@ import org.chromium.components.signin.base.CoreAccountInfo;
 import org.chromium.components.signin.base.GoogleServiceAuthError;
 import org.chromium.components.signin.base.GoogleServiceAuthError.State;
 import org.chromium.components.signin.test.util.FakeProfileDataSource;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.ui.test.util.NightModeTestUtils;
 import org.chromium.ui.test.util.RenderTestRule;
@@ -80,7 +81,8 @@ public class AccountPickerBottomSheetRenderTest {
                     /* fullName= */ null, /* givenName= */ null);
 
     @Rule
-    public final RenderTestRule mRenderTestRule = RenderTestRule.Builder.withPublicCorpus().build();
+    public final RenderTestRule mRenderTestRule =
+            RenderTestRule.Builder.withPublicCorpus().setRevision(1).build();
 
     @Rule
     public final AccountManagerTestRule mAccountManagerTestRule =
@@ -114,12 +116,14 @@ public class AccountPickerBottomSheetRenderTest {
     @Before
     public void setUp() {
         initMocks(this);
+        IncognitoUtils.setEnabledForTesting(true);
         mActivityTestRule.startMainActivityOnBlankPage();
     }
 
     @After
     public void tearDown() throws Exception {
         ApplicationTestUtils.finishActivity(mActivityTestRule.getActivity());
+        IncognitoUtils.setEnabledForTesting(null);
     }
 
     @AfterClass
@@ -299,8 +303,8 @@ public class AccountPickerBottomSheetRenderTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             accountListView.findViewHolderForAdapterPosition(3).itemView.performClick();
         });
-        CriteriaHelper.pollUiThread(bottomSheetView.findViewById(
-                R.id.incognito_interstitial_bottom_sheet_view)::isShown);
+        CriteriaHelper.pollUiThread(
+                bottomSheetView.findViewById(R.id.incognito_interstitial_learn_more)::isShown);
     }
 
     private void clickContinueButtonAndWaitForErrorView() {
@@ -309,9 +313,7 @@ public class AccountPickerBottomSheetRenderTest {
             bottomSheetView.findViewById(R.id.account_picker_continue_as_button).performClick();
         });
         CriteriaHelper.pollUiThread(() -> {
-            return !bottomSheetView.findViewById(R.id.account_picker_selected_account).isShown()
-                    && bottomSheetView.findViewById(R.id.account_picker_bottom_sheet_subtitle)
-                               .isShown();
+            return !bottomSheetView.findViewById(R.id.account_picker_selected_account).isShown();
         });
     }
 
@@ -349,7 +351,7 @@ public class AccountPickerBottomSheetRenderTest {
                     mIncognitoInterstitialDelegateMock);
         });
         CriteriaHelper.pollUiThread(mCoordinator.getBottomSheetViewForTesting().findViewById(
-                R.id.account_picker_continue_as_button)::isShown);
+                R.id.account_picker_selected_account)::isShown);
     }
 
     private BottomSheetController getBottomSheetController() {

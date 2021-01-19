@@ -23,6 +23,7 @@ using CompositingReasons = uint64_t;
   V(Canvas)                                                                   \
   V(Plugin)                                                                   \
   V(IFrame)                                                                   \
+  /* This is used for pre-CompositAfterPaint + CompositeSVG only. */          \
   V(SVGRoot)                                                                  \
   V(BackfaceVisibilityHidden)                                                 \
   V(ActiveTransformAnimation)                                                 \
@@ -44,6 +45,7 @@ using CompositingReasons = uint64_t;
      are set. */                                                              \
   V(WillChangeOther)                                                          \
   V(BackdropFilter)                                                           \
+  V(BackdropFilterMask)                                                       \
   V(RootScroller)                                                             \
   V(XrOverlay)                                                                \
   V(Viewport)                                                                 \
@@ -170,6 +172,9 @@ class PLATFORM_EXPORT CompositingReason {
         kWillChangeBackdropFilter | kActiveBackdropFilterAnimation,
     kDirectReasonsForFilterProperty =
         kActiveFilterAnimation | kWillChangeFilter,
+    kDirectReasonsForBackdropFilter = kBackdropFilter |
+                                      kActiveBackdropFilterAnimation |
+                                      kWillChangeBackdropFilter,
   };
 };
 

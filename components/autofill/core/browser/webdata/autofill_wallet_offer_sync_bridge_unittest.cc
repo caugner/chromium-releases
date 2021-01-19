@@ -12,7 +12,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
 #include "base/time/time.h"
@@ -26,12 +26,12 @@
 #include "components/autofill/core/common/autofill_constants.h"
 #include "components/sync/base/hash_util.h"
 #include "components/sync/model/entity_data.h"
-#include "components/sync/model/mock_model_type_change_processor.h"
 #include "components/sync/model/sync_data.h"
 #include "components/sync/model_impl/client_tag_based_model_type_processor.h"
 #include "components/sync/model_impl/in_memory_metadata_change_list.h"
 #include "components/sync/protocol/autofill_specifics.pb.h"
 #include "components/sync/protocol/sync.pb.h"
+#include "components/sync/test/model/mock_model_type_change_processor.h"
 #include "components/webdata/common/web_database.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -244,6 +244,7 @@ TEST_F(AutofillWalletOfferSyncBridgeTest, MergeSyncData_NewData) {
                                          &offer_specifics);
 
   EXPECT_CALL(*backend(), CommitChanges());
+  EXPECT_CALL(*backend(), NotifyOfMultipleAutofillChanges());
   StartSyncing({offer_specifics});
 
   // Only the server offer should be present on the client.
@@ -259,6 +260,7 @@ TEST_F(AutofillWalletOfferSyncBridgeTest, MergeSyncData_NoData) {
   table()->SetCreditCardOffers({client_data});
 
   EXPECT_CALL(*backend(), CommitChanges());
+  EXPECT_CALL(*backend(), NotifyOfMultipleAutofillChanges());
   StartSyncing({});
 
   EXPECT_TRUE(GetAllLocalData().empty());
@@ -275,6 +277,7 @@ TEST_F(AutofillWalletOfferSyncBridgeTest, MergeSyncData_LogDataValidity) {
   offer_specifics2.clear_id();
 
   EXPECT_CALL(*backend(), CommitChanges());
+  EXPECT_CALL(*backend(), NotifyOfMultipleAutofillChanges());
   base::HistogramTester histogram_tester;
   StartSyncing({offer_specifics1, offer_specifics2});
 
@@ -292,6 +295,7 @@ TEST_F(AutofillWalletOfferSyncBridgeTest, ApplyStopSyncChanges_ClearAllData) {
   table()->SetCreditCardOffers({client_data});
 
   EXPECT_CALL(*backend(), CommitChanges());
+  EXPECT_CALL(*backend(), NotifyOfMultipleAutofillChanges());
 
   // Passing in a non-null metadata change list indicates to the bridge that
   // sync is stopping but the data type is not disabled.
@@ -311,6 +315,7 @@ TEST_F(AutofillWalletOfferSyncBridgeTest, ApplyStopSyncChanges_KeepAllData) {
 
   // We do not write to DB at all, so we should not commit any changes.
   EXPECT_CALL(*backend(), CommitChanges()).Times(0);
+  EXPECT_CALL(*backend(), NotifyOfMultipleAutofillChanges()).Times(0);
 
   // Passing in a null metadata change list indicates to the bridge that
   // sync is stopping and the data type is disabled.

@@ -13,13 +13,13 @@
 #include "chrome/browser/after_startup_task_utils.h"
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
-#include "chrome/browser/search/ntp_features.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/search/ntp_user_data_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/ntp_tiles/metrics.h"
 #include "components/prefs/pref_service.h"
+#include "components/search/ntp_features.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
@@ -552,6 +552,9 @@ void NTPUserDataLogger::LogEvent(NTPLoggingEventType event,
     case NTP_MODULES_SHOWN:
       UMA_HISTOGRAM_LOAD_TIME("NewTabPage.Modules.ShownTime", time);
       break;
+    case NTP_APP_RENDERED:
+      UMA_HISTOGRAM_LOAD_TIME("NewTabPage.MainUi.ShownTime", time);
+      break;
   }
 }
 
@@ -612,6 +615,10 @@ void NTPUserDataLogger::LogModuleLoaded(const std::string& id,
 void NTPUserDataLogger::LogModuleUsage(const std::string& id) {
   UMA_HISTOGRAM_EXACT_LINEAR("NewTabPage.Modules.Usage", 1, 1);
   base::UmaHistogramExactLinear("NewTabPage.Modules.Usage." + id, 1, 1);
+}
+
+void NTPUserDataLogger::SetModulesVisible(bool visible) {
+  modules_visible_ = visible;
 }
 
 NTPUserDataLogger::NTPUserDataLogger(content::WebContents* contents)
@@ -737,6 +744,11 @@ void NTPUserDataLogger::EmitNtpStatistics(base::TimeDelta load_time) {
           "NewTabPage.Customized",
           LoggingEventToCustomizedFeature(NTP_BACKGROUND_CUSTOMIZED));
     }
+  }
+
+  if (base::FeatureList::IsEnabled(ntp_features::kModules)) {
+    base::UmaHistogramBoolean("NewTabPage.Modules.VisibleOnNTPLoad",
+                              modules_visible_);
   }
 
   has_emitted_ = true;

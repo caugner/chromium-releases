@@ -9,9 +9,11 @@
 
 #include "ash/public/cpp/login_accelerators.h"
 #include "base/macros.h"
+#include "base/optional.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_types.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
+#include "components/user_manager/user_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace chromeos {
@@ -72,7 +74,10 @@ class MockLoginDisplayHost : public LoginDisplayHost {
               (override));
   MOCK_METHOD(void, LoadWallpaper, (const AccountId&), (override));
   MOCK_METHOD(void, LoadSigninWallpaper, (), (override));
-  MOCK_METHOD(bool, IsUserAllowlisted, (const AccountId&), (override));
+  MOCK_METHOD(bool,
+              IsUserAllowlisted,
+              (const AccountId&, const base::Optional<user_manager::UserType>&),
+              (override));
   MOCK_METHOD(void, CancelPasswordChangedFlow, (), (override));
   MOCK_METHOD(void, MigrateUserData, (const std::string&), (override));
   MOCK_METHOD(void, ResyncUserData, (), (override));
@@ -83,6 +88,9 @@ class MockLoginDisplayHost : public LoginDisplayHost {
   MOCK_METHOD(void, HandleDisplayCaptivePortal, (), (override));
   MOCK_METHOD(void, UpdateAddUserButtonStatus, (), (override));
   MOCK_METHOD(void, RequestSystemInfoUpdate, (), (override));
+  MOCK_METHOD(bool, HasUserPods, (), (override));
+  MOCK_METHOD(void, AddObserver, (LoginDisplayHost::Observer*), (override));
+  MOCK_METHOD(void, RemoveObserver, (LoginDisplayHost::Observer*), (override));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockLoginDisplayHost);

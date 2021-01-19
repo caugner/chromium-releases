@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "windows.h"
-
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
@@ -11,12 +9,13 @@
 #include "base/process/memory.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/win/process_startup_helper.h"
+#include "base/win/windows_types.h"
 #include "chrome/credential_provider/eventlog/gcp_eventlog_messages.h"
 #include "chrome/credential_provider/extension/os_service_manager.h"
 #include "chrome/credential_provider/extension/service.h"
 #include "chrome/credential_provider/extension/task_manager.h"
+#include "chrome/credential_provider/gaiacp/gem_device_details_manager.h"
 #include "chrome/credential_provider/gaiacp/logging.h"
-#include "chrome/credential_provider/gaiacp/mdm_utils.h"
 #include "chrome/credential_provider/gaiacp/reg_utils.h"
 #include "chrome/credential_provider/gaiacp/user_policies_manager.h"
 
@@ -26,9 +25,19 @@ using credential_provider::kRegEnableVerboseLogging;
 // Register all tasks for ESA with the TaskManager.
 void RegisterAllTasks() {
   // Task to fetch Cloud policies for all GCPW users.
-  credential_provider::extension::TaskManager::Get()->RegisterTask(
-      "FetchCloudPolicies",
-      credential_provider::UserPoliciesManager::GetFetchPoliciesTaskCreator());
+  if (credential_provider::UserPoliciesManager::Get()->CloudPoliciesEnabled()) {
+    credential_provider::extension::TaskManager::Get()->RegisterTask(
+        "FetchCloudPolicies", credential_provider::UserPoliciesManager::
+                                  GetFetchPoliciesTaskCreator());
+  }
+
+  // Task to Upload device details.
+  if (credential_provider::GemDeviceDetailsManager::Get()
+          ->UploadDeviceDetailsFromEsaFeatureEnabled()) {
+    credential_provider::extension::TaskManager::Get()->RegisterTask(
+        "UploadDeviceDetails", credential_provider::GemDeviceDetailsManager::
+                                   UploadDeviceDetailsTaskCreator());
+  }
 }
 
 int APIENTRY wWinMain(HINSTANCE hInstance,

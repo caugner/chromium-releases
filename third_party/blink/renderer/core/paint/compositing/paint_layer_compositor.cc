@@ -43,7 +43,6 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/core/page/scrolling/scrolling_coordinator.h"
 #include "third_party/blink/renderer/core/paint/compositing/composited_layer_mapping.h"
 #include "third_party/blink/renderer/core/paint/compositing/compositing_inputs_updater.h"
 #include "third_party/blink/renderer/core/paint/compositing/compositing_layer_assigner.h"
@@ -162,14 +161,6 @@ void PaintLayerCompositor::UpdateInputsIfNeededRecursiveInternal(
   Lifecycle().AdvanceTo(DocumentLifecycle::kCompositingInputsClean);
 
 #if DCHECK_IS_ON()
-  if (!layout_view_->GetDocument()
-           .GetSettings()
-           ->GetAcceleratedCompositingEnabled()) {
-    DCHECK(!layout_view_->GetDocument()
-                .GetSettings()
-                ->GetAcceleratedCompositingEnabled());
-  }
-
   CompositingInputsUpdater::AssertNeedsCompositingInputsUpdateBitsCleared(
       RootLayer());
 #endif
@@ -213,9 +204,6 @@ void PaintLayerCompositor::UpdateAssignmentsIfNeededRecursiveInternal(
 
   Lifecycle().AdvanceTo(DocumentLifecycle::kInCompositingAssignmentsUpdate);
 
-  LocalFrameView* view = layout_view_->GetFrameView();
-  view->ResetNeedsForcedCompositingUpdate();
-
   for (Frame* child =
            layout_view_->GetFrameView()->GetFrame().Tree().FirstChild();
        child; child = child->Tree().NextSibling()) {
@@ -228,10 +216,11 @@ void PaintLayerCompositor::UpdateAssignmentsIfNeededRecursiveInternal(
     // TODO(bbudge) Remove this check when trusted Pepper plugins are gone.
     if (local_frame->GetDocument()->IsActive() &&
         local_frame->ContentLayoutObject()) {
-      local_frame->ContentLayoutObject()
-          ->Compositor()
-          ->UpdateAssignmentsIfNeededRecursiveInternal(
-              target_state, compositing_reasons_stats);
+      auto* child_compositor = local_frame->ContentLayoutObject()->Compositor();
+      child_compositor->UpdateAssignmentsIfNeededRecursiveInternal(
+          target_state, compositing_reasons_stats);
+      if (child_compositor->root_layer_attachment_dirty_)
+        SetNeedsCompositingUpdate(kCompositingUpdateRebuildTree);
     }
   }
 
@@ -267,6 +256,8 @@ void PaintLayerCompositor::UpdateAssignmentsIfNeededRecursiveInternal(
         ->AssertNoUnresolvedDirtyBits();
   }
 #endif
+
+  layout_view_->GetFrameView()->ResetNeedsForcedCompositingUpdate();
 }
 
 #if DCHECK_IS_ON()
@@ -304,12 +295,8 @@ void PaintLayerCompositor::UpdateAssignmentsIfNeeded(
   CompositingUpdateType update_type = pending_update_type_;
   pending_update_type_ = kCompositingUpdateNone;
 
-  if (!layout_view_->GetDocument()
-           .GetSettings()
-           ->GetAcceleratedCompositingEnabled() ||
-      update_type == kCompositingUpdateNone) {
+  if (update_type == kCompositingUpdateNone)
     return;
-  }
 
   PaintLayer* update_root = RootLayer();
 
@@ -322,14 +309,8 @@ void PaintLayerCompositor::UpdateAssignmentsIfNeeded(
     CompositingLayerAssigner layer_assigner(this);
     layer_assigner.Assign(update_root, layers_needing_paint_invalidation);
 
-    if (layer_assigner.LayersChanged()) {
+    if (layer_assigner.LayersChanged())
       update_type = std::max(update_type, kCompositingUpdateRebuildTree);
-      if (ScrollingCoordinator* scrolling_coordinator =
-              GetScrollingCoordinator()) {
-        LocalFrameView* frame_view = layout_view_->GetFrameView();
-        scrolling_coordinator->NotifyGeometryChanged(frame_view);
-      }
-    }
   }
 
   GraphicsLayer* current_parent = nullptr;
@@ -417,16 +398,6 @@ bool PaintLayerCompositor::AllocateOrClearCompositedLayerMapping(
       composited_layer_mapping_changed = true;
 
       RestartAnimationOnCompositor(layer->GetLayoutObject());
-
-      // At this time, the ScrollingCoordinator only supports the top-level
-      // frame.
-      if (layer->IsRootLayer() && layout_view_->GetFrame()->IsLocalRoot()) {
-        if (ScrollingCoordinator* scrolling_coordinator =
-                GetScrollingCoordinator()) {
-          scrolling_coordinator->FrameViewRootLayerDidChange(
-              layout_view_->GetFrameView());
-        }
-      }
       break;
     case kRemoveOwnCompositedLayerMapping:
     // PutInSquashingLayer means you might have to remove the composited layer
@@ -488,24 +459,6 @@ PaintLayerCompositor* PaintLayerCompositor::FrameContentsCompositor(
   return nullptr;
 }
 
-static void FullyInvalidatePaintRecursive(PaintLayer* layer) {
-  if (layer->GetCompositingState() == kPaintsIntoOwnBacking)
-    layer->GetCompositedLayerMapping()->SetAllLayersNeedDisplay();
-
-  for (PaintLayer* child = layer->FirstChild(); child;
-       child = child->NextSibling())
-    FullyInvalidatePaintRecursive(child);
-}
-
-void PaintLayerCompositor::FullyInvalidatePaint() {
-  DCHECK(!RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
-
-  // We're walking all compositing layers and invalidating them, so there's
-  // no need to have up-to-date compositing state.
-  DisableCompositingQueryAsserts disabler;
-  FullyInvalidatePaintRecursive(RootLayer());
-}
-
 PaintLayer* PaintLayerCompositor::RootLayer() const {
   return layout_view_->Layer();
 }
@@ -551,18 +504,16 @@ bool PaintLayerCompositor::CanBeComposited(const PaintLayer* layer) const {
   if (frame_view && !frame_view->IsVisible())
     return false;
 
+  DCHECK(!frame_view->ShouldThrottleRendering());
+
   const bool has_compositor_animation =
       CompositingReasonFinder::CompositingReasonsForAnimation(
           layer->GetLayoutObject()) != CompositingReason::kNone;
 
-  // Throttled frames have stale visibility state.
-  bool frame_is_visible =
-      !frame_view->ShouldThrottleRendering() && !layer->SubtreeIsInvisible();
-
   return layout_view_->GetDocument()
              .GetSettings()
              ->GetAcceleratedCompositingEnabled() &&
-         (has_compositor_animation || frame_is_visible) &&
+         (has_compositor_animation || !layer->SubtreeIsInvisible()) &&
          layer->IsSelfPaintingLayer() &&
          !layer->GetLayoutObject().IsLayoutFlowThread() &&
          // Don't composite <foreignObject> for the moment, to reduce instances
@@ -614,13 +565,6 @@ void PaintLayerCompositor::SetOwnerNeedsCompositingInputsUpdate() {
       return;
     layout_object->Layer()->SetNeedsCompositingInputsUpdate();
   }
-}
-
-ScrollingCoordinator* PaintLayerCompositor::GetScrollingCoordinator() const {
-  if (Page* page = GetPage())
-    return page->GetScrollingCoordinator();
-
-  return nullptr;
 }
 
 Page* PaintLayerCompositor::GetPage() const {

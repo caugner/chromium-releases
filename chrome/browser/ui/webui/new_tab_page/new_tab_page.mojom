@@ -25,6 +25,7 @@ struct MostVisitedTile {
   string title;
   mojo_base.mojom.TextDirection title_direction;
   url.mojom.Url url;
+  bool is_query_tile;
 
   // ======= METRICS =======
   // Identifier of most visited entry source (e.g. top sites).
@@ -341,6 +342,10 @@ interface PageHandler {
   OnDismissModule(string module_id);
   // Called when a module the given id is restored.
   OnRestoreModule(string module_id);
+  // If |visible| the modules will be shown.
+  SetModulesVisible(bool visible);
+  // Triggers a call to |SetModulesVisible| with the current visibility setting.
+  UpdateModulesVisible();
 
   // ======= METRICS =======
   // Logs that |tiles| were displayed / updated at |time|. The first instance of
@@ -354,7 +359,15 @@ interface PageHandler {
   OnPromoRendered(double time, url.mojom.Url? log_url);
   // Logs that |tile| at position |index| was triggered to navigate to that
   // most visited entry.
-  OnMostVisitedTileNavigation(MostVisitedTile tile, uint32 index);
+  // |mouse_button| indicates which mouse button was pressed on the entry. See
+  // https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/button
+  OnMostVisitedTileNavigation(MostVisitedTile tile,
+                        uint32 index,
+                        uint8 mouse_button,
+                        bool alt_key,
+                        bool ctrl_key,
+                        bool meta_key,
+                        bool shift_key);
   // Logs an action performed in the customize dialog.
   OnCustomizeDialogAction(CustomizeDialogAction action);
   // Logs that the |type| image of an image doodle has been clicked. If set, the
@@ -390,6 +403,8 @@ interface PageHandler {
   OnModuleUsage(string module_id);
   // Logs that the modules have been shown at |time|.
   OnModulesRendered(double time);
+  // Logs that the <ntp-app> element's |ready| callback method was called.
+  OnAppRendered(double time);
 
   // ======= REALBOX =======
   // Queries autocomplete matches from the browser.
@@ -437,6 +452,8 @@ interface Page {
   SetFakeboxFocused(bool focused);
   // If |visible| shows the fakebox.
   SetFakeboxVisible(bool visible);
+  // Updates the module visibility.
+  SetModulesVisible(bool visible);
 
   // ======= REALBOX =======
   // Updates the NTP realbox with the autocomplete results.

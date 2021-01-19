@@ -5,7 +5,6 @@
 #include "content/browser/loader/prefetch_url_loader_service.h"
 
 #include "base/bind.h"
-#include "base/debug/dump_without_crashing.h"
 #include "base/feature_list.h"
 #include "base/time/default_tick_clock.h"
 #include "content/browser/loader/prefetch_url_loader.h"
@@ -20,21 +19,14 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "net/base/load_flags.h"
+#include "net/base/network_isolation_key.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/loader/url_loader_throttle.h"
+#include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info.mojom-shared.h"
-#include "third_party/blink/public/mojom/renderer_preferences.mojom.h"
-
-namespace {
-void DumpWithoutCrashing(const network::ResourceRequest& request) {
-  DEBUG_ALIAS_FOR_GURL(prefetch_buf, request.url);
-  DEBUG_ALIAS_FOR_GURL(initiator_buf, request.request_initiator->GetURL());
-  base::debug::DumpWithoutCrashing();
-}
-}  // namespace
 
 namespace content {
 
@@ -163,25 +155,16 @@ void PrefetchURLLoaderService::CreateLoaderAndStart(
     url::Origin destination_origin = url::Origin::Create(resource_request.url);
     resource_request.trusted_params = network::ResourceRequest::TrustedParams();
     resource_request.trusted_params->isolation_info =
-        net::IsolationInfo::Create(
-            net::IsolationInfo::RedirectMode::kUpdateNothing,
-            destination_origin, destination_origin, net::SiteForCookies());
+        net::IsolationInfo::Create(net::IsolationInfo::RequestType::kOther,
+                                   destination_origin, destination_origin,
+                                   net::SiteForCookies());
   }
 
   // Recursive prefetch from a cross-origin main resource prefetch.
   if (resource_request.recursive_prefetch_token) {
-    // A request's |recursive_prefetch_token| is only provided if the request is
-    // a recursive prefetch. This means it is expected that the current
-    // context's |cross_origin_factory| was already created.
+    // TODO(crbug.com/1123715): Figure out why we're seeing this condition hold
+    // true in the field.
     if (!current_context.cross_origin_factory) {
-      // This could happen due to a compromised renderer passing in a recursive
-      // prefetch token for a request that's not a recursive prefetch. Cancel
-      // the request.
-      DVLOG(1) << "Recursive prefetch token unexpectedly set.";
-      DumpWithoutCrashing(resource_request);
-      mojo::Remote<network::mojom::URLLoaderClient>(std::move(client))
-          ->OnComplete(
-              network::URLLoaderCompletionStatus(net::ERR_INVALID_ARGUMENT));
       return;
     }
 
@@ -195,8 +178,6 @@ void PrefetchURLLoaderService::CreateLoaderAndStart(
     // a request in a special way. We'll cancel the request.
     if (isolation_info_iterator ==
         current_context.prefetch_isolation_infos.end()) {
-      DVLOG(1) << "Recursive prefetch request is missing prefetch isolation";
-      DumpWithoutCrashing(resource_request);
       mojo::Remote<network::mojom::URLLoaderClient>(std::move(client))
           ->OnComplete(
               network::URLLoaderCompletionStatus(net::ERR_INVALID_ARGUMENT));
@@ -229,7 +210,12 @@ void PrefetchURLLoaderService::CreateLoaderAndStart(
   mojo::MakeSelfOwnedReceiver(
       std::make_unique<PrefetchURLLoader>(
           routing_id, request_id, options, current_context.frame_tree_node_id,
-          resource_request, std::move(client), traffic_annotation,
+          resource_request,
+          resource_request.trusted_params
+              ? resource_request.trusted_params->isolation_info
+                    .network_isolation_key()
+              : current_context.render_frame_host->GetNetworkIsolationKey(),
+          std::move(client), traffic_annotation,
           std::move(network_loader_factory_to_use),
           base::BindRepeating(
               &PrefetchURLLoaderService::CreateURLLoaderThrottles, this,
@@ -272,8 +258,9 @@ bool PrefetchURLLoaderService::IsValidCrossOriginPrefetch(
   // Presence of |render_frame_host| is guaranteed by the caller - the caller
   // calls earlier EnsureCrossOriginFactory which has the same DCHECK.
   DCHECK(current_context.render_frame_host);
-  if (resource_request.request_initiator.value() !=
-      current_context.render_frame_host->GetLastCommittedOrigin()) {
+  if (!resource_request.request_initiator->opaque() &&
+      resource_request.request_initiator.value() !=
+          current_context.render_frame_host->GetLastCommittedOrigin()) {
     mojo::ReportBadMessage(
         "Prefetch/IsValidCrossOrigin: frame origin mismatch");
     return false;
@@ -330,8 +317,8 @@ void PrefetchURLLoaderService::Clone(
 }
 
 void PrefetchURLLoaderService::NotifyUpdate(
-    blink::mojom::RendererPreferencesPtr new_prefs) {
-  SetAcceptLanguages(new_prefs->accept_languages);
+    const blink::RendererPreferences& new_prefs) {
+  SetAcceptLanguages(new_prefs.accept_languages);
 }
 
 base::UnguessableToken PrefetchURLLoaderService::GenerateRecursivePrefetchToken(
@@ -348,7 +335,7 @@ base::UnguessableToken PrefetchURLLoaderService::GenerateRecursivePrefetchToken(
   // Create IsolationInfo.
   url::Origin destination_origin = url::Origin::Create(request.url);
   net::IsolationInfo preload_isolation_info = net::IsolationInfo::Create(
-      net::IsolationInfo::RedirectMode::kUpdateNothing, destination_origin,
+      net::IsolationInfo::RequestType::kOther, destination_origin,
       destination_origin, net::SiteForCookies());
 
   // Generate token.

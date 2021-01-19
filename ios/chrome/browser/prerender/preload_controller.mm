@@ -140,6 +140,14 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
  private:
   __weak id<PreloadCancelling> cancel_handler_ = nil;
 };
+
+// Maximum time to let a cancelled webState attempt to finish restore.
+static const size_t kMaximumCancelledWebStateDelay = 2;
+
+// Used to enable the workaround for a WebKit crash, see crbug.com/1032928.
+const base::Feature kPreloadDelayWebStateReset{
+    "PreloadDelayWebStateReset", base::FEATURE_ENABLED_BY_DEFAULT};
+
 }  // namespace
 
 @interface PreloadController () <CRConnectionTypeObserverBridge,
@@ -151,6 +159,7 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
                                  PreloadCancelling> {
   std::unique_ptr<web::WebStateDelegateBridge> _webStateDelegate;
   std::unique_ptr<web::WebStateObserverBridge> _webStateObserver;
+  std::unique_ptr<web::WebStateObserverBridge> _webStateToReplaceObserver;
   std::unique_ptr<PrefObserverBridge> _observerBridge;
   std::unique_ptr<ConnectionTypeObserverBridge> _connectionTypeObserver;
   std::unique_ptr<web::WebStatePolicyDeciderBridge> _policyDeciderBridge;
@@ -166,6 +175,11 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
 
   // The dialog presenter.
   std::unique_ptr<web::JavaScriptDialogPresenter> _dialogPresenter;
+
+  // A weak pointer to the webState that will be replaced with the prerendered
+  // one. This is needed by |startPrerender| to build the new webstate with the
+  // same sessions.
+  web::WebState* _webStateToReplace;
 }
 
 // The ChromeBrowserState passed on initialization.
@@ -237,6 +251,8 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
         net::NetworkChangeNotifier::GetConnectionType());
     _webStateDelegate = std::make_unique<web::WebStateDelegateBridge>(self);
     _webStateObserver = std::make_unique<web::WebStateObserverBridge>(self);
+    _webStateToReplaceObserver =
+        std::make_unique<web::WebStateObserverBridge>(self);
     _observerBridge = std::make_unique<PrefObserverBridge>(self);
     _prefChangeRegistrar.Init(_browserState->GetPrefs());
     _observerBridge->ObserveChangesForPreference(
@@ -247,7 +263,7 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
       _connectionTypeObserver =
           std::make_unique<ConnectionTypeObserverBridge>(self);
     }
-
+    _webStateToReplace = nullptr;
     [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(didReceiveMemoryWarning)
@@ -317,6 +333,7 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
 - (void)prerenderURL:(const GURL&)url
             referrer:(const web::Referrer&)referrer
           transition:(ui::PageTransition)transition
+     currentWebState:(web::WebState*)currentWebState
          immediately:(BOOL)immediately {
   // TODO(crbug.com/754050): If CanPrerenderURL() returns false, should we
   // cancel any scheduled prerender requests?
@@ -332,6 +349,12 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
   }
 
   [self removeScheduledPrerenderRequests];
+  _webStateToReplace = currentWebState;
+  // Observing the |_webStateToReplace| to make sure that if it's destructed
+  // the pre-rendering will be canceled.
+  if (_webStateToReplace) {
+    _webStateToReplace->AddObserver(_webStateToReplaceObserver.get());
+  }
   _scheduledRequest =
       std::make_unique<PrerenderRequest>(url, transition, referrer);
 
@@ -444,6 +467,9 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
 
 - (void)webState:(web::WebState*)webState
     didFinishNavigation:(web::NavigationContext*)navigation {
+  // the |_webStateToReplace| is observed for destruction event only.
+  if (_webStateToReplace == webState)
+    return;
   DCHECK_EQ(webState, _webState.get());
   if ([self shouldCancelPreloadForMimeType:webState->GetContentsMimeType()])
     [self schedulePrerenderCancel];
@@ -451,6 +477,10 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
 
 - (void)webState:(web::WebState*)webState
     didLoadPageWithSuccess:(BOOL)loadSuccess {
+  // the |_webStateToReplace| is observed for destruction event only.
+  if (_webStateToReplace == webState)
+    return;
+
   DCHECK_EQ(webState, _webState.get());
   // The load should have been cancelled when the navigation finishes, but this
   // makes sure that we didn't miss one.
@@ -461,6 +491,14 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
   }
 }
 
+- (void)webStateDestroyed:(web::WebState*)webState {
+  if (_webState.get() == webState)
+    return;
+  DCHECK_EQ(webState, _webStateToReplace);
+  // There is no way to create a pre-rendered webState without existing webState
+  // web state to replace, So cancel the prerender.
+  [self schedulePrerenderCancel];
+}
 #pragma mark - CRWWebStatePolicyDecider
 
 - (WebStatePolicyDecider::PolicyDecision)
@@ -478,6 +516,10 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
 }
 
 #pragma mark - ManageAccountsDelegate
+
+- (void)onRestoreGaiaCookies {
+  [self schedulePrerenderCancel];
+}
 
 - (void)onManageAccounts {
   [self schedulePrerenderCancel];
@@ -560,6 +602,10 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
 - (void)removeScheduledPrerenderRequests {
   [NSObject cancelPreviousPerformRequestsWithTarget:self];
   _scheduledRequest = nullptr;
+  if (_webStateToReplace) {
+    _webStateToReplace->RemoveObserver(_webStateToReplaceObserver.get());
+  }
+  _webStateToReplace = nullptr;
 }
 
 #pragma mark - Prerender Helpers
@@ -569,17 +615,27 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
   [self destroyPreviewContents];
   self.prerenderedURL = self.scheduledURL;
   std::unique_ptr<PrerenderRequest> request = std::move(_scheduledRequest);
+  // No need to observer the destruction of the |_webStateToReplace| anymore
+  // as it will be used here.
+  if (_webStateToReplace) {
+    _webStateToReplace->RemoveObserver(_webStateToReplaceObserver.get());
+  }
 
-  web::WebState* webStateToReplace = [self.delegate webStateToReplace];
-  if (!self.prerenderedURL.is_valid() || !webStateToReplace) {
+  // TODO(crbug.com/1140583): The correct way is to always get the
+  // webStateToReplace from the delegate. however this is not possible because
+  // there is only one delegate per browser state.
+  if (!_webStateToReplace)
+    _webStateToReplace = [self.delegate webStateToReplace];
+
+  if (!self.prerenderedURL.is_valid() || !_webStateToReplace) {
     [self destroyPreviewContents];
     return;
   }
 
   web::WebState::CreateParams createParams(self.browserState);
   _webState = web::WebState::CreateWithStorageSession(
-      createParams, webStateToReplace->BuildSessionStorage());
-
+      createParams, _webStateToReplace->BuildSessionStorage());
+  _webStateToReplace = nullptr;
   // Add the preload controller as a policyDecider before other tab helpers, so
   // that it can block the navigation if needed before other policy deciders
   // execute thier side effects (eg. AppLauncherTabHelper launching app).
@@ -631,8 +687,49 @@ class PreloadJavaScriptDialogPresenter : public web::JavaScriptDialogPresenter {
   _webState->RemoveObserver(_webStateObserver.get());
   breakpad::StopMonitoringURLsForPreloadWebState(_webState.get());
   _webState->SetDelegate(nullptr);
-  _webState.reset();
 
+  // Preload appears to trigger an edge-case crash in WebKit when a restore is
+  // triggered and cancelled before it can complete.  This isn't specific to
+  // preload, but is very easy to trigger in preload.  As a speculative fix, if
+  // a preload is in restore, don't destroy it until after restore is complete.
+  // This logic should really belong in WebState itself, so any attempt to
+  // destroy a WebState during restore will trigger this logic.  Even better,
+  // this edge case crash should be fixed in WebKit:
+  //     https://bugs.webkit.org/show_bug.cgi?id=217440.
+  // The crash in WebKit appears to be related to IPC throttling.  Session
+  // restore can create a large number of IPC calls, which can then be
+  // throttled.  It seems if the WKWebView is destroyed with this backlog of
+  // IPC calls, sometimes WebKit crashes.
+  // See crbug.com/1032928 for an explanation for how to trigger this crash.
+  // Note the timer should only be called if for some reason session restoration
+  // fails to complete -- thus preventing a WebState leak.
+  static bool delayPreloadDestroyWebState =
+      base::FeatureList::IsEnabled(kPreloadDelayWebStateReset);
+  if (delayPreloadDestroyWebState &&
+      _webState->GetNavigationManager()->IsRestoreSessionInProgress()) {
+    __block std::unique_ptr<web::WebState> webState = std::move(_webState);
+    __block std::unique_ptr<base::OneShotTimer> resetTimer(
+        new base::OneShotTimer());
+    auto reset_block = ^{
+      if (webState) {
+        webState.reset();
+      }
+
+      if (resetTimer) {
+        resetTimer->Stop();
+        resetTimer.reset();
+      }
+    };
+    resetTimer->Start(
+        FROM_HERE, base::TimeDelta::FromSeconds(kMaximumCancelledWebStateDelay),
+        base::BindOnce(reset_block));
+    webState->GetNavigationManager()->AddRestoreCompletionCallback(
+        base::BindOnce(^{
+          dispatch_async(dispatch_get_main_queue(), reset_block);
+        }));
+  } else {
+    _webState.reset();
+  }
   self.prerenderedURL = GURL();
   self.startTime = base::TimeTicks();
   self.loadCompleted = NO;

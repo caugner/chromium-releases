@@ -6,6 +6,7 @@
 #define CC_TREES_PROXY_IMPL_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/memory/weak_ptr.h"
 #include "cc/base/completion_event.h"
@@ -65,7 +66,7 @@ class CC_EXPORT ProxyImpl : public LayerTreeHostImplClient,
                                  bool hold_commit_for_activation);
   void SetSourceURL(ukm::SourceId source_id, const GURL& url);
   void SetUkmSmoothnessDestination(
-      UkmSmoothnessDataShared* ukm_smoothness_data);
+      base::WritableSharedMemoryMapping ukm_smoothness_data);
   void ClearHistory();
   void SetRenderFrameObserver(
       std::unique_ptr<RenderFrameMetadataObserver> observer);
@@ -148,6 +149,7 @@ class CC_EXPORT ProxyImpl : public LayerTreeHostImplClient,
       base::TimeTicks time) override;
   void FrameIntervalUpdated(base::TimeDelta interval) override {}
   bool HasCustomPropertyAnimations() const override;
+  bool IsInSynchronousComposite() const override;
 
   DrawResult DrawInternal(bool forced_draw);
 
@@ -175,6 +177,8 @@ class CC_EXPORT ProxyImpl : public LayerTreeHostImplClient,
   bool inside_draw_;
 
   bool send_compositor_frame_ack_;
+
+  TreePriority last_raster_priority_;
 
   TaskRunnerProvider* task_runner_provider_;
 

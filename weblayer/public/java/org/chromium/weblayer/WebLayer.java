@@ -14,6 +14,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.StrictMode;
+import android.os.SystemClock;
 import android.util.AndroidRuntimeException;
 import android.util.Log;
 import android.webkit.ValueCallback;
@@ -70,6 +71,11 @@ public class WebLayer {
 
     @NonNull
     private final IWebLayer mImpl;
+
+    // Times used for logging UMA histograms.
+    private static long sClassLoaderCreationTime;
+    private static long sContextCreationTime;
+    private static long sWebLayerLoaderCreationTime;
 
     /** The result of calling {@link #initializeWebViewCompatibilityMode}. */
     public enum WebViewCompatibilityResult {
@@ -274,13 +280,16 @@ public class WebLayer {
                 mContext = mContext.createAttributionContext(context.getAttributionTag());
             }
             try {
-                Class factoryClass = getOrCreateRemoteClassLoader(mContext).loadClass(
-                        "org.chromium.weblayer_private.WebLayerFactoryImpl");
+                ClassLoader classLoader = getOrCreateRemoteClassLoader(mContext);
+                long start = SystemClock.elapsedRealtime();
+                Class factoryClass =
+                        classLoader.loadClass("org.chromium.weblayer_private.WebLayerFactoryImpl");
                 mFactory = IWebLayerFactory.Stub.asInterface(
                         (IBinder) factoryClass
                                 .getMethod("create", String.class, int.class, int.class)
                                 .invoke(null, WebLayerClientVersionConstants.PRODUCT_VERSION,
                                         WebLayerClientVersionConstants.PRODUCT_MAJOR_VERSION, -1));
+                sWebLayerLoaderCreationTime = SystemClock.elapsedRealtime() - start;
                 available = mFactory.isClientSupported();
                 majorVersion = mFactory.getImplementationMajorVersion();
                 version = mFactory.getImplementationVersion();
@@ -417,8 +426,30 @@ public class WebLayer {
     }
 
     /**
-     * Return a list of Profile names currently on disk. This will not include the incognito
-     * profile. This will not include profiles that are being deleted from disk.
+     * Get or create the incognito profile with the name {@link profileName}.
+     *
+     * @param profileName The name of the profile. Null is mapped to an empty string.
+     *
+     * @since 87
+     */
+    @NonNull
+    public Profile getIncognitoProfile(@Nullable String profileName) {
+        ThreadCheck.ensureOnUiThread();
+        if (WebLayer.getSupportedMajorVersionInternal() < 87) {
+            throw new UnsupportedOperationException();
+        }
+        IProfile iprofile;
+        try {
+            iprofile = mImpl.getIncognitoProfile(sanitizeProfileName(profileName));
+        } catch (RemoteException e) {
+            throw new APICallException(e);
+        }
+        return Profile.of(iprofile);
+    }
+
+    /**
+     * Return a list of Profile names currently on disk. This does not include incognito
+     * profiles. This will not include profiles that are being deleted from disk.
      * WebLayer must be initialized before calling this.
      * @since 82
      */
@@ -500,13 +531,41 @@ public class WebLayer {
     @NonNull
     public static Fragment createBrowserFragment(
             @Nullable String profileName, @Nullable String persistenceId) {
+        String sanitizedName = sanitizeProfileName(profileName);
+        boolean isIncognito = "".equals(sanitizedName);
+        return createBrowserFragmentImpl(sanitizedName, persistenceId, isIncognito);
+    }
+
+    /**
+     * Creates a new WebLayer Fragment using the incognito profile with the specified name.
+     *
+     * @param profileName The name of the incongito profile, null is mapped to an empty string.
+     * @param persistenceId If non-null and not empty uniquely identifies the Browser for saving
+     * state.
+     *
+     * @throws UnsupportedOperationException If {@link params} is incognito and name is not empty
+     *         and <= 87. In order for this function not to trigger loading of WebLayer the
+     *         exception is thrown later on.
+     *
+     * @since 87
+     */
+    @NonNull
+    public static Fragment createBrowserFragmentWithIncognitoProfile(
+            @Nullable String profileName, @Nullable String persistenceId) {
+        return createBrowserFragmentImpl(sanitizeProfileName(profileName), persistenceId, true);
+    }
+
+    private static Fragment createBrowserFragmentImpl(
+            @NonNull String profileName, @Nullable String persistenceId, boolean isIncognito) {
         ThreadCheck.ensureOnUiThread();
-        // TODO: use a profile id instead of the path to the actual file.
+        // Support for named incognito profiles was added in 87. Checking is done in
+        // BrowserFragment, as this code should not trigger loading WebLayer.
         Bundle args = new Bundle();
-        args.putString(BrowserFragmentArgs.PROFILE_NAME, sanitizeProfileName(profileName));
+        args.putString(BrowserFragmentArgs.PROFILE_NAME, profileName);
         if (persistenceId != null) {
             args.putString(BrowserFragmentArgs.PERSISTENCE_ID, persistenceId);
         }
+        args.putBoolean(BrowserFragmentArgs.IS_INCOGNITO, isIncognito);
         BrowserFragment fragment = new BrowserFragment();
         fragment.setArguments(args);
         return fragment;
@@ -598,6 +657,7 @@ public class WebLayer {
             return sRemoteClassLoader;
         }
 
+        long start = SystemClock.elapsedRealtime();
         // Child processes do not need WebView compatibility since there is no chance
         // WebView will run in the same process.
         if (sDisableWebViewCompatibilityMode) {
@@ -617,6 +677,7 @@ public class WebLayer {
         } else {
             sRemoteClassLoader = WebViewCompatibilityHelper.initialize(appContext);
         }
+        sClassLoaderCreationTime = SystemClock.elapsedRealtime() - start;
         return sRemoteClassLoader;
     }
 
@@ -628,6 +689,7 @@ public class WebLayer {
         if (sRemoteContext != null) {
             return sRemoteContext;
         }
+        long start = SystemClock.elapsedRealtime();
         Class<?> webViewFactoryClass = Class.forName("android.webkit.WebViewFactory");
         String implPackageName = getImplPackageName(appContext);
         sAppContext = appContext;
@@ -643,6 +705,7 @@ public class WebLayer {
                     (String) webViewFactoryClass.getMethod("getWebViewPackageName").invoke(null);
             sRemoteContext = createRemoteContextFromPackageName(appContext, implPackageName);
         }
+        sContextCreationTime = SystemClock.elapsedRealtime() - start;
         return sRemoteContext;
     }
 
@@ -720,6 +783,41 @@ public class WebLayer {
             StrictModeWorkaround.apply();
             // The id is part of the public library to avoid conflicts.
             return R.id.weblayer_media_session_notification;
+        }
+
+        @Override
+        public long getClassLoaderCreationTime() {
+            return sClassLoaderCreationTime;
+        }
+
+        @Override
+        public long getContextCreationTime() {
+            return sContextCreationTime;
+        }
+
+        @Override
+        public long getWebLayerLoaderCreationTime() {
+            return sWebLayerLoaderCreationTime;
+        }
+
+        @Override
+        public Intent createRemoteMediaServiceIntent() {
+            StrictModeWorkaround.apply();
+            return new Intent(WebLayer.getAppContext(), RemoteMediaService.class);
+        }
+
+        @Override
+        public int getPresentationApiNotificationId() {
+            StrictModeWorkaround.apply();
+            // The id is part of the public library to avoid conflicts.
+            return R.id.weblayer_presentation_api_notification;
+        }
+
+        @Override
+        public int getRemotePlaybackApiNotificationId() {
+            StrictModeWorkaround.apply();
+            // The id is part of the public library to avoid conflicts.
+            return R.id.weblayer_remote_playback_api_notification;
         }
     }
 

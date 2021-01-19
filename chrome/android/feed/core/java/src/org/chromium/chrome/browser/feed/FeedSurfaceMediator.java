@@ -14,7 +14,6 @@ import android.widget.ScrollView;
 
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
-import androidx.recyclerview.widget.RecyclerView;
 
 import org.chromium.base.MemoryPressureListener;
 import org.chromium.base.memory.MemoryPressureCallback;
@@ -30,6 +29,7 @@ import org.chromium.chrome.browser.ntp.SnapScrollHelper;
 import org.chromium.chrome.browser.ntp.cards.SignInPromo;
 import org.chromium.chrome.browser.ntp.cards.promo.HomepagePromoController.HomepagePromoStateListener;
 import org.chromium.chrome.browser.ntp.cards.promo.HomepagePromoVariationManager;
+import org.chromium.chrome.browser.ntp.cards.promo.enhanced_protection.EnhancedProtectionPromoController.EnhancedProtectionPromoStateListener;
 import org.chromium.chrome.browser.ntp.snippets.SectionHeader;
 import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.PrefChangeRegistrar;
@@ -38,6 +38,7 @@ import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.signin.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.PersonalizedSigninPromoView;
 import org.chromium.chrome.browser.signin.SigninManager;
+import org.chromium.chrome.browser.signin.SigninPromoController;
 import org.chromium.chrome.browser.signin.SigninPromoUtil;
 import org.chromium.chrome.browser.suggestions.SuggestionsMetrics;
 import org.chromium.chrome.features.start_surface.StartSurfaceConfiguration;
@@ -48,11 +49,14 @@ import org.chromium.components.prefs.PrefService;
 import org.chromium.components.search_engines.TemplateUrlService.TemplateUrlServiceObserver;
 import org.chromium.components.signin.base.CoreAccountInfo;
 import org.chromium.components.signin.identitymanager.IdentityManager;
+import org.chromium.components.signin.metrics.SigninAccessPoint;
 import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.mojom.WindowOpenDisposition;
+
+import java.util.Locale;
 
 /**
  * A mediator for the {@link FeedSurfaceCoordinator} responsible for interacting with the
@@ -62,7 +66,7 @@ import org.chromium.ui.mojom.WindowOpenDisposition;
 public class FeedSurfaceMediator
         implements NewTabPageLayout.ScrollDelegate, ContextMenuManager.TouchEnabledDelegate,
                    TemplateUrlServiceObserver, ListMenu.Delegate, HomepagePromoStateListener,
-                   IdentityManager.Observer {
+                   EnhancedProtectionPromoStateListener, IdentityManager.Observer {
     @VisibleForTesting
     public static final String FEED_CONTENT_FIRST_LOADED_TIME_MS_UMA = "FeedContentFirstLoadedTime";
 
@@ -206,13 +210,25 @@ public class FeedSurfaceMediator
             public void onContentChanged() {
                 mStreamContentChanged = true;
                 if (mSnapScrollHelper != null) mSnapScrollHelper.resetSearchBoxOnScroll(true);
+
+                // Feed v2's background is set to be transparent in {@link
+                // FeedSurfaceCoordinator#createStream} to show the Feed placeholder. When first
+                // batch of articles are about to show, set recyclerView back to non-transparent.
+                // Feed v2 doesn't call onAddFinished(), so we hide placeholder here.
+                if (FeedFeatures.isV2Enabled() && mCoordinator.isPlaceholderShown()) {
+                    stream.hidePlaceholder();
+                }
             }
 
             @Override
             public void onAddFinished() {
-                // After first batch of articles are loaded, set recyclerView back to
+                // Feed v1's background is set to be transparent in {@link
+                // FeedSurfaceCoordinator#createStream} to show the Feed placeholder. After first
+                // batch of articles finish fade-in animation, set recyclerView back to
                 // non-transparent.
-                stream.getView().getBackground().setAlpha(255);
+                if (!FeedFeatures.isV2Enabled() && mCoordinator.isPlaceholderShown()) {
+                    stream.hidePlaceholder();
+                }
                 if (mContentFirstAvailableTimeMs == 0) {
                     mContentFirstAvailableTimeMs = SystemClock.elapsedRealtime();
                     if (mHasPendingUmaRecording) {
@@ -225,19 +241,11 @@ public class FeedSurfaceMediator
 
             @Override
             public void onAddStarting() {
-                if (!mCoordinator.isPlaceholderShown()) {
-                    return;
-                }
-                // If the placeholder is shown, set sign-in box visible back.
-                RecyclerView recyclerView = (RecyclerView) stream.getView();
-                if (recyclerView != null) {
-                    View signInView = recyclerView.findViewById(R.id.signin_promo_view_container);
-                    if (signInView != null) {
-                        signInView.setAlpha(0f);
-                        signInView.setVisibility(View.VISIBLE);
-                        signInView.animate().alpha(1f).setDuration(
-                                recyclerView.getItemAnimator().getAddDuration());
-                    }
+                // Feed v1's sign-in view is set to be invisible in {@link
+                // FeedSurfaceCoordinator#getSigninPromoView} if the Feed placeholder is shown. Set
+                // sign-in box visible back when Feed articles are about to show.
+                if (!FeedFeatures.isV2Enabled() && mCoordinator.isPlaceholderShown()) {
+                    mCoordinator.fadeInSigninView();
                 }
             }
         };
@@ -325,8 +333,13 @@ public class FeedSurfaceMediator
             mSignInPromo = null;
         }
 
+        View enhancedProtectionPromoView = null;
+        if (homepagePromoView == null && !signInPromoVisible) {
+            enhancedProtectionPromoView = createEnhancedProtectionPromoIfNeeded();
+        }
         // We are not going to show two promos at the same time.
-        mCoordinator.updateHeaderViews(signInPromoVisible, homepagePromoView);
+        mCoordinator.updateHeaderViews(
+                signInPromoVisible, homepagePromoView, enhancedProtectionPromoView);
     }
 
     /**
@@ -334,7 +347,11 @@ public class FeedSurfaceMediator
      * @return Whether the SignPromo is visible.
      */
     private boolean createSignInPromoIfNeeded() {
-        if (!SignInPromo.shouldCreatePromo()) return false;
+        if (!SignInPromo.shouldCreatePromo()
+                || !SigninPromoController.hasNotReachedImpressionLimit(
+                        SigninAccessPoint.NTP_CONTENT_SUGGESTIONS)) {
+            return false;
+        }
         if (mSignInPromo == null) {
             boolean suggestionsVisible = getPrefService().getBoolean(Pref.ARTICLES_LIST_VISIBLE);
 
@@ -352,6 +369,18 @@ public class FeedSurfaceMediator
             mCoordinator.getHomepagePromoController().setHomepagePromoStateListener(this);
         }
         return homepagePromoView;
+    }
+
+    private View createEnhancedProtectionPromoIfNeeded() {
+        if (mCoordinator.getEnhancedProtectionPromoController() == null) return null;
+
+        View enhancedProtectionPromoView =
+                mCoordinator.getEnhancedProtectionPromoController().getPromoView();
+        if (enhancedProtectionPromoView != null) {
+            mCoordinator.getEnhancedProtectionPromoController()
+                    .setEnhancedProtectionPromoStateListener(this);
+        }
+        return enhancedProtectionPromoView;
     }
 
     /** Clear any dependencies related to the {@link Stream}. */
@@ -591,8 +620,8 @@ public class FeedSurfaceMediator
             FeedUma.recordFeedControlsAction(FeedUma.CONTROLS_ACTION_TOGGLED_FEED);
             SuggestionsMetrics.recordArticlesListVisible();
         } else {
-            assert false
-                : String.format("Cannot handle action for item in the menu with id %d", itemId);
+            assert false : String.format(Locale.ENGLISH,
+                                   "Cannot handle action for item in the menu with id %d", itemId);
         }
     }
 
@@ -601,7 +630,13 @@ public class FeedSurfaceMediator
         // If the homepage has status update, we'll not show the HomepagePromo again.
         // There are cases where the user has their homepage reset to default. This is an edge case
         // and we don't have to reflect that change immediately.
-        mCoordinator.updateHeaderViews(false, null);
+        mCoordinator.updateHeaderViews(false, null, null);
+    }
+
+    @Override
+    public void onEnhancedProtectionPromoStateChange() {
+        // If the enhanced protection promo has been dismissed, delete it.
+        mCoordinator.updateHeaderViews(false, null, null);
     }
 
     // IdentityManager.Delegate interface.
@@ -631,7 +666,7 @@ public class FeedSurfaceMediator
             if (isVisible() == visible) return;
 
             super.setVisibilityInternal(visible);
-            mCoordinator.updateHeaderViews(visible, null);
+            mCoordinator.updateHeaderViews(visible, null, null);
             maybeUpdateSignInPromo();
         }
 

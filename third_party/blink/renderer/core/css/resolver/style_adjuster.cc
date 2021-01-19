@@ -36,6 +36,7 @@
 #include "third_party/blink/renderer/core/dom/container_node.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
@@ -43,6 +44,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
+#include "third_party/blink/renderer/core/html/forms/html_field_set_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_text_area_element.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
@@ -105,7 +107,7 @@ TouchAction AdjustTouchActionForElement(TouchAction touch_action,
       element && element == element->GetDocument().documentElement() &&
       element->GetDocument().LocalOwner();
   if ((!is_body_and_viewport && style.ScrollsOverflow()) || is_child_document)
-    return touch_action | TouchAction::kPan;
+    return touch_action | TouchAction::kPan | TouchAction::kInternalPanXScrolls;
   return touch_action;
 }
 
@@ -494,6 +496,8 @@ static void AdjustStyleForDisplay(ComputedStyle& style,
 
   // writing-mode does not apply to table row groups, table column groups, table
   // rows, and table columns.
+  // TODO(crbug.com/736072): Borders specified with logical css properties will
+  // not change to reflect new writing mode. ex: border-block-start.
   if (style.Display() == EDisplay::kTableColumn ||
       style.Display() == EDisplay::kTableColumnGroup ||
       style.Display() == EDisplay::kTableFooterGroup ||
@@ -560,6 +564,12 @@ static void AdjustEffectiveTouchAction(ComputedStyle& style,
   if (!is_non_replaced_inline_elements && !is_table_row_or_column &&
       is_layout_object_needed) {
     element_touch_action = style.GetTouchAction();
+    // kInternalPanXScrolls is only for internal usage, GetTouchAction()
+    // doesn't contain this bit. We set this bit when kPanX is set so it can be
+    // cleared for eligible editable areas later on.
+    if ((element_touch_action & TouchAction::kPanX) != TouchAction::kNone) {
+      element_touch_action |= TouchAction::kInternalPanXScrolls;
+    }
   }
 
   if (!element) {
@@ -572,7 +582,7 @@ static void AdjustEffectiveTouchAction(ComputedStyle& style,
   // Apply touch action inherited from parent frame.
   if (is_child_document && element->GetDocument().GetFrame()) {
     inherited_action &=
-        TouchAction::kPan |
+        TouchAction::kPan | TouchAction::kInternalPanXScrolls |
         element->GetDocument().GetFrame()->InheritedEffectiveTouchAction();
   }
 
@@ -589,12 +599,9 @@ static void AdjustEffectiveTouchAction(ComputedStyle& style,
   TouchAction enforced_by_policy = TouchAction::kNone;
   if (element->GetDocument().IsVerticalScrollEnforced())
     enforced_by_policy = TouchAction::kPanY;
-  if (base::FeatureList::IsEnabled(::features::kSwipeToMoveCursor) &&
+  if (::features::IsSwipeToMoveCursorEnabled() &&
       IsEditableElement(element, style)) {
-    EventHandlerRegistry& registry =
-        element->GetDocument().GetFrame()->GetEventHandlerRegistry();
-    registry.DidAddEventHandler(
-        *element, EventHandlerRegistry::kTouchStartOrMoveEventBlocking);
+    element_touch_action &= ~TouchAction::kInternalPanXScrolls;
   }
 
   // Apply the adjusted parent effective touch actions.
@@ -681,6 +688,20 @@ void StyleAdjuster::AdjustComputedStyle(StyleResolverState& state,
     AdjustStyleForDisplay(style, layout_parent_style, element,
                           element ? &element->GetDocument() : nullptr);
 
+    // TOOD(crbug.com/1146925): Sticky content in a scrollable FIELDSET triggers
+    // a DHCECK failure in |StickyPositionScrollingConstraints::
+    // AncestorContainingBlockOffset()|. We disable it until the root cause is
+    // fixed.
+    if (style.GetPosition() == EPosition::kSticky && element) {
+      for (const Node& ancestor : FlatTreeTraversal::AncestorsOf(*element)) {
+        if (const auto* fieldset = DynamicTo<HTMLFieldSetElement>(ancestor)) {
+          if (!fieldset->ComputedStyleRef().IsOverflowVisibleAlongBothAxes())
+            style.SetPosition(EPosition::kStatic);
+          break;
+        }
+      }
+    }
+
     // If this is a child of a LayoutNGCustom, we need the name of the parent
     // layout function for invalidation purposes.
     if (layout_parent_style.IsDisplayLayoutCustomBox()) {
@@ -714,6 +735,13 @@ void StyleAdjuster::AdjustComputedStyle(StyleResolverState& state,
   if (style.OverflowX() != EOverflow::kVisible ||
       style.OverflowY() != EOverflow::kVisible)
     AdjustOverflow(style);
+
+  // overflow-clip-margin only applies if 'overflow: clip' is set along both
+  // axis.
+  if (style.OverflowX() != EOverflow::kClip ||
+      style.OverflowY() != EOverflow::kClip) {
+    style.SetOverflowClipMargin(LayoutUnit());
+  }
 
   if (StopPropagateTextDecorations(style, element))
     style.ClearAppliedTextDecorations();

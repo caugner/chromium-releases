@@ -44,6 +44,9 @@ extern const base::Feature kDownloadRequestWithToken;
 // Enable Chrome Safe Browsing enhanced protection.
 extern const base::Feature kEnhancedProtection;
 
+// Include enhanced protection message in interstitials.
+extern const base::Feature kEnhancedProtectionMessageInInterstitials;
+
 // Controls whether the limited list size experiment is enabled. This experiment
 // limits the number of entries stored in each Safe Browsing list.
 extern const base::Feature kLimitedListSizeForIOS;
@@ -62,17 +65,13 @@ extern const base::Feature kPasswordProtectionForSignedInUsers;
 // Controls whether Chrome prompts Advanced Protection users for deep scanning.
 extern const base::Feature kPromptAppForDeepScanning;
 
-// Controls whether native (instead of WKWebView-provided) Safe Browsing
-// is available on iOS. When this flag is enabled, Safe Browsing is still
-// subject to an opt-out controlled by prefs::kSafeBrowsingEnabled.
-extern const base::Feature kSafeBrowsingAvailableOnIOS;
-
 // Controls whether Safe Browsing uses separate NetworkContexts for each
 // profile.
 extern const base::Feature kSafeBrowsingSeparateNetworkContexts;
 
-// Controls whether the security section is shown on the settings UI on Android.
-extern const base::Feature kSafeBrowsingSecuritySectionUIAndroid;
+// Controls whether the Safe Browsing section is shown on the settings UI on
+// Android.
+extern const base::Feature kSafeBrowsingSectionUIAndroid;
 
 // Controls whether cookies are removed from certain communications with Safe
 // Browsing.

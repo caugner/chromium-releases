@@ -42,8 +42,8 @@ class ChromePermissionsClient : public permissions::PermissionsClient {
                       GetUkmSourceIdCallback callback) override;
   permissions::PermissionRequest::IconId GetOverrideIconId(
       ContentSettingsType type) override;
-  std::unique_ptr<permissions::NotificationPermissionUiSelector>
-  CreateNotificationPermissionUiSelector(
+  std::vector<std::unique_ptr<permissions::NotificationPermissionUiSelector>>
+  CreateNotificationPermissionUiSelectors(
       content::BrowserContext* browser_context) override;
   void OnPromptResolved(content::BrowserContext* browser_context,
                         permissions::PermissionRequestType request_type,
@@ -52,6 +52,10 @@ class ChromePermissionsClient : public permissions::PermissionsClient {
                         base::Optional<QuietUiReason> quiet_ui_reason) override;
   base::Optional<bool> HadThreeConsecutiveNotificationPermissionDenies(
       content::BrowserContext* browser_context) override;
+  base::Optional<bool> HasPreviouslyAutoRevokedPermission(
+      content::BrowserContext* browser_context,
+      const GURL& origin,
+      ContentSettingsType permission) override;
   base::Optional<url::Origin> GetAutoApprovalOrigin() override;
   bool CanBypassEmbeddingOriginCheck(const GURL& requesting_origin,
                                      const GURL& embedding_origin) override;

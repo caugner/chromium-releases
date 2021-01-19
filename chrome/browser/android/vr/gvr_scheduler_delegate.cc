@@ -14,11 +14,11 @@
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/traced_value.h"
 #include "chrome/browser/android/vr/gl_browser_interface.h"
-#include "chrome/browser/android/vr/mailbox_to_surface_bridge.h"
 #include "chrome/browser/android/vr/metrics_util_android.h"
 #include "chrome/browser/android/vr/scoped_gpu_trace.h"
 #include "chrome/browser/vr/scheduler_browser_renderer_interface.h"
 #include "chrome/browser/vr/scheduler_ui_interface.h"
+#include "components/webxr/mailbox_to_surface_bridge_impl.h"
 #include "content/public/common/content_features.h"
 #include "device/vr/android/gvr/gvr_delegate.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
@@ -212,13 +212,40 @@ void GvrSchedulerDelegate::ConnectPresentingService(
   session->submit_frame_sink = std::move(submit_frame_sink);
   session->display_info = std::move(display_info);
 
+  // Currently, the initial filtering of supported devices happens on the
+  // browser side (BrowserXRRuntimeImpl::SupportsFeature()), so if we have
+  // reached this point, it is safe to assume that all requested features are
+  // enabled.
+  // TODO(https://crbug.com/995377): revisit the approach when the bug is fixed.
+  session->enabled_features.insert(session->enabled_features.end(),
+                                   options->required_features.begin(),
+                                   options->required_features.end());
+  session->enabled_features.insert(session->enabled_features.end(),
+                                   options->optional_features.begin(),
+                                   options->optional_features.end());
+
+  DVLOG(3) << __func__ << ": options->required_features.size()="
+           << options->required_features.size()
+           << ", options->optional_features.size()="
+           << options->optional_features.size()
+           << ", session->enabled_features.size()="
+           << session->enabled_features.size();
+
+  session->device_config = device::mojom::XRSessionDeviceConfig::New();
+  auto* config = session->device_config.get();
+
+  config->supports_viewport_scaling = true;
+  session->enviroment_blend_mode =
+      device::mojom::XREnvironmentBlendMode::kOpaque;
+  session->interaction_mode = device::mojom::XRInteractionMode::kScreenSpace;
+
   // This scalar will be applied in the renderer to the recommended render
   // target sizes. For WebVR it will always be applied, for WebXR it can be
   // overridden.
   if (base::AndroidHardwareBufferCompat::IsSupportAvailable()) {
-    session->default_framebuffer_scale = kRecommendedResolutionScale;
+    config->default_framebuffer_scale = kRecommendedResolutionScale;
   } else {
-    session->default_framebuffer_scale = kNoSharedBufferResolutionScale;
+    config->default_framebuffer_scale = kNoSharedBufferResolutionScale;
   }
 
   if (CanSendWebXrVSync())
@@ -303,7 +330,7 @@ void GvrSchedulerDelegate::CreateSurfaceBridge(
     gl::SurfaceTexture* surface_texture) {
   DCHECK(!mailbox_bridge_);
   DCHECK(!webxr_.mailbox_bridge_ready());
-  mailbox_bridge_ = std::make_unique<MailboxToSurfaceBridge>();
+  mailbox_bridge_ = std::make_unique<webxr::MailboxToSurfaceBridgeImpl>();
   if (surface_texture)
     mailbox_bridge_->CreateSurface(surface_texture);
   mailbox_bridge_->CreateAndBindContextProvider(

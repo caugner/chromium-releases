@@ -90,7 +90,7 @@
         Google Credential Provider for Windows
       </message>
       <message name="IDS_INVALID_UI_RESPONSE" desc="">
-        Can’t sign in to your work account. Make sure your device is connected to the internet and try again.
+        Can’t sign in to your work account. Please contact your administrator.
       </message>
       <message name="IDS_CANT_CREATE_USER" desc="">
         A user could not be created.
@@ -150,6 +150,9 @@
         Sign in with your work account
       </message>
       <message name="IDS_REAUTH_ONLINE_LOGIN_ENFORCED_DESCRIPTION" desc="">
+        Sign in with your work account
+      </message>
+      <message name="IDS_REAUTH_MISSING_POLICIES_DESCRIPTION" desc="">
         Sign in with your work account
       </message>
       <message name="IDS_AUTH_FID_PROVIDER_LABEL" desc="">

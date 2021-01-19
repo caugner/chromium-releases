@@ -4,8 +4,6 @@
 
 #include "chrome/credential_provider/gaiacp/reg_utils.h"
 
-#include <Windows.h>
-
 #include <atlbase.h>
 
 #include "base/base64.h"
@@ -47,6 +45,25 @@ const wchar_t kMicrosoftCryptographyMachineGuidRegKey[] = L"MachineGuid";
 
 constexpr wchar_t kRegUserDeviceResourceId[] = L"device_resource_id";
 constexpr wchar_t kRegGlsPath[] = L"gls_path";
+constexpr wchar_t kRegEnableVerboseLogging[] = L"enable_verbose_logging";
+constexpr wchar_t kRegInitializeCrashReporting[] = L"enable_crash_reporting";
+constexpr wchar_t kRegMdmUrl[] = L"mdm";
+constexpr wchar_t kRegEnableDmEnrollment[] = L"enable_dm_enrollment";
+constexpr wchar_t kRegDisablePasswordSync[] = L"disable_password_sync";
+constexpr wchar_t kRegMdmSupportsMultiUser[] = L"enable_multi_user_login";
+constexpr wchar_t kRegMdmAllowConsumerAccounts[] = L"enable_consumer_accounts ";
+constexpr wchar_t kRegMdmEnableForcePasswordReset[] =
+    L"enable_force_reset_password_option";
+constexpr wchar_t kRegDeviceDetailsUploadStatus[] =
+    L"device_details_upload_status";
+constexpr wchar_t kRegDeviceDetailsUploadFailures[] =
+    L"device_details_upload_failures";
+constexpr wchar_t kRegDeveloperMode[] = L"developer_mode";
+constexpr wchar_t kRegUpdateCredentialsOnChange[] =
+    L"update_credentials_on_change";
+constexpr wchar_t kRegUseShorterAccountName[] = L"use_shorter_account_name";
+constexpr wchar_t kEmailDomainsKey[] = L"ed";  // deprecated.
+constexpr wchar_t kEmailDomainsKeyNew[] = L"domains_allowed_to_login";
 
 namespace {
 
@@ -294,6 +311,41 @@ HRESULT SetGlobalFlagForTesting(const base::string16& name,
 
 HRESULT SetGlobalFlagForTesting(const base::string16& name, DWORD value) {
   return SetMachineRegDWORD(kGcpRootKeyName, name, value);
+}
+
+HRESULT SetUpdaterClientsAppPathFlag(const base::string16& name, DWORD value) {
+  base::win::RegKey key;
+  LONG sts = key.Create(HKEY_LOCAL_MACHINE, kRegUpdaterClientsAppPath,
+                        KEY_WRITE | KEY_WOW64_32KEY);
+  if (sts != ERROR_SUCCESS)
+    return HRESULT_FROM_WIN32(sts);
+
+  sts = key.WriteValue(name.c_str(), value);
+  if (sts != ERROR_SUCCESS)
+    return HRESULT_FROM_WIN32(sts);
+
+  return S_OK;
+}
+
+HRESULT GetUpdaterClientsAppPathFlag(const base::string16& name, DWORD* value) {
+  base::win::RegKey key;
+  LONG sts = key.Open(HKEY_LOCAL_MACHINE, kRegUpdaterClientsAppPath,
+                      KEY_READ | KEY_WOW64_32KEY);
+  if (sts != ERROR_SUCCESS)
+    return HRESULT_FROM_WIN32(sts);
+
+  sts = key.ReadValueDW(name.c_str(), value);
+  if (sts != ERROR_SUCCESS)
+    return HRESULT_FROM_WIN32(sts);
+
+  return S_OK;
+}
+
+DWORD GetUpdaterClientsAppPathFlagOrDefault(const base::string16& reg_key,
+                                            const DWORD& default_value) {
+  DWORD value;
+  HRESULT hr = GetUpdaterClientsAppPathFlag(reg_key, &value);
+  return SUCCEEDED(hr) ? value : default_value;
 }
 
 HRESULT GetUserProperty(const base::string16& sid,

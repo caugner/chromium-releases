@@ -238,6 +238,9 @@ void CompositingRequirementsUpdater::Update(
 
 #if DCHECK_IS_ON()
 static void CheckSubtreeHasNoCompositing(PaintLayer* layer) {
+  if (layer->GetLayoutObject().ChildPrePaintBlockedByDisplayLock())
+    return;
+
   PaintLayerPaintOrderIterator iterator(*layer, kAllChildren);
   while (PaintLayer* cur_layer = iterator.Next()) {
     DCHECK(cur_layer->GetCompositingState() == kNotComposited);
@@ -353,6 +356,20 @@ void CompositingRequirementsUpdater::UpdateRecursive(
                            ? layer->ClippedAbsoluteBoundingBox()
                            : layer->UnclippedAbsoluteBoundingBox();
 
+  if (!RuntimeEnabledFeatures::CompositingOptimizationsEnabled()) {
+    PaintLayer* root_layer = layout_view_.Layer();
+    // |abs_bounds| does not include root scroller offset. For the purposes
+    // of overlap, this only matters for fixed-position objects, and their
+    // relative position to other elements. Therefore, it's still correct to,
+    // instead of adding scroll to all non-fixed elements, add a reverse scroll
+    // to ones that are fixed.
+    if (root_layer->GetScrollableArea() &&
+        !layer->IsAffectedByScrollOf(root_layer)) {
+      abs_bounds.Move(
+          RoundedIntSize(root_layer->GetScrollableArea()->GetScrollOffset()));
+    }
+  }
+
   absolute_descendant_bounding_box = abs_bounds;
   if (layer_can_be_composited && current_recursion_data.testing_overlap_ &&
       !RequiresCompositingOrSquashing(direct_reasons)) {
@@ -375,7 +392,7 @@ void CompositingRequirementsUpdater::UpdateRecursive(
   // if it is composited.
   bool contains_composited_layer =
       (layer->GetLayoutObject().IsLayoutEmbeddedContent() &&
-       ToLayoutEmbeddedContent(layer->GetLayoutObject())
+       To<LayoutEmbeddedContent>(layer->GetLayoutObject())
            .ContentDocumentIsCompositing());
 
   bool will_be_composited_or_squashed =
@@ -422,14 +439,15 @@ void CompositingRequirementsUpdater::UpdateRecursive(
   //    e.g. change of stacking order)
   bool recursion_blocked_by_display_lock =
       layer->GetLayoutObject().ChildPrePaintBlockedByDisplayLock();
-  bool skip_children =
-      recursion_blocked_by_display_lock ||
+  bool skip_children_ignoring_display_lock =
       (!layer->DescendantHasDirectOrScrollingCompositingReason() &&
        !needs_recursion_for_composited_scrolling_plus_fixed_or_sticky &&
        !needs_recursion_for_out_of_flow_descendant &&
        layer->GetLayoutObject().ShouldClipOverflowAlongEitherAxis() &&
        !layer->HasCompositingDescendant() &&
        !layer->DescendantMayNeedCompositingRequirementsUpdate());
+  bool skip_children =
+      recursion_blocked_by_display_lock || skip_children_ignoring_display_lock;
 
   if (!skip_children) {
     PaintLayerPaintOrderIterator iterator(*layer, kNegativeZOrderChildren);
@@ -496,7 +514,7 @@ void CompositingRequirementsUpdater::UpdateRecursive(
   }
 
 #if DCHECK_IS_ON()
-  if (skip_children && !recursion_blocked_by_display_lock)
+  if (skip_children)
     CheckSubtreeHasNoCompositing(layer);
 #endif
 
@@ -615,11 +633,11 @@ void CompositingRequirementsUpdater::UpdateRecursive(
   // At this point we have finished collecting all reasons to composite this
   // layer.
   layer->SetCompositingReasons(reasons_to_composite);
-  // If we've skipped recursing down to children but children needed an
-  // update, remember this on the display lock context, so that we can restore
-  // the dirty bit when the lock is unlocked.
-  if (layer->DescendantMayNeedCompositingRequirementsUpdate() &&
-      skip_children) {
+  // If we've skipped recursing down to children, but we would have recursed if
+  // it were not for the display lock, remember this on the display lock
+  // context, so that we can restore the dirty bit and cause recursion when the
+  // lock is unlocked.
+  if (skip_children && !skip_children_ignoring_display_lock) {
     auto* context = layer->GetLayoutObject().GetDisplayLockContext();
     DCHECK(recursion_blocked_by_display_lock);
     DCHECK(context);

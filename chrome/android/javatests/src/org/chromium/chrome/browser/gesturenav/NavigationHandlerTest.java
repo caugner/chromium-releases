@@ -22,10 +22,13 @@ import org.junit.runner.RunWith;
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Restriction;
-import org.chromium.chrome.browser.compositor.animation.CompositorAnimationHandler;
 import org.chromium.chrome.browser.compositor.layouts.OverviewModeController;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.layouts.animation.CompositorAnimationHandler;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tabbed_mode.TabbedRootUiCoordinator;
@@ -35,8 +38,6 @@ import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.LoadUrlParams;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.net.test.EmbeddedTestServer;
@@ -47,8 +48,11 @@ import org.chromium.ui.test.util.UiRestriction;
  * Tests {@link NavigationHandler} navigating back/forward using overscroll history navigation.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.
-Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE, "enable-features=OverscrollHistoryNavigation"})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
+        "enable-features=OverscrollHistoryNavigation<GestureNavigation",
+        "force-fieldtrials=GestureNavigation/Enabled",
+        "force-fieldtrial-params=GestureNavigation.Enabled:"
+                + "gesture_navigation_triggering_area_width/36"})
 public class NavigationHandlerTest {
     private static final String RENDERED_PAGE = "/chrome/test/data/android/navigate/simple.html";
     private static final boolean LEFT_EDGE = true;
@@ -70,7 +74,7 @@ public class NavigationHandlerTest {
         DisplayMetrics displayMetrics = new DisplayMetrics();
         mActivityTestRule.getActivity().getWindowManager().getDefaultDisplay().getMetrics(
                 displayMetrics);
-        mEdgeWidthPx = displayMetrics.density * NavigationHandler.EDGE_WIDTH_DP;
+        mEdgeWidthPx = displayMetrics.density * NavigationHandler.DEFAULT_EDGE_WIDTH_DP;
         HistoryNavigationCoordinator coordinator = getNavigationCoordinator();
         mNavigationLayout = coordinator.getLayoutForTesting();
         mNavigationHandler = coordinator.getNavigationHandlerForTesting();
@@ -241,6 +245,7 @@ public class NavigationHandlerTest {
 
     @Test
     @SmallTest
+    @DisabledTest(message = "https://crbug.com/1147553")
     public void testSwipeAfterDestroy() {
         mTestServer = EmbeddedTestServer.createAndStartServer(
                 InstrumentationRegistry.getInstrumentation().getContext());
@@ -250,7 +255,7 @@ public class NavigationHandlerTest {
         // |triggerUi| can be invoked by SwipeRefreshHandler on the rendered
         // page. Make sure this won't crash after the coordinator (and also
         // handler action delegate) is destroyed.
-        assert !mNavigationHandler.triggerUi(LEFT_EDGE, 0, 0);
+        Assert.assertFalse(mNavigationHandler.triggerUi(LEFT_EDGE, 0, 0));
 
         // Just check we're still on the same URL.
         Assert.assertEquals(mTestServer.getURL(RENDERED_PAGE),

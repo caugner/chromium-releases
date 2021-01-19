@@ -172,8 +172,10 @@ class AutocompleteResult {
 
   // Returns a URL to offer the user as an alternative navigation when they
   // open |match| after typing in |input|.
-  static GURL ComputeAlternateNavUrl(const AutocompleteInput& input,
-                                     const AutocompleteMatch& match);
+  static GURL ComputeAlternateNavUrl(
+      const AutocompleteInput& input,
+      const AutocompleteMatch& match,
+      AutocompleteProviderClient* provider_client);
 
   // Prepend missing tail suggestion prefixes in results, if present.
   void InlineTailPrefixes();
@@ -205,6 +207,12 @@ class AutocompleteResult {
   static void LogAsynchronousUpdateMetrics(
       const std::vector<MatchDedupComparator>& old_result,
       const AutocompleteResult& new_result);
+
+  // Group suggestions in specified range by search vs url.
+  // The range used is [first_index, last_index), which contains all the
+  // elements between first_index and last_index, including the element pointed
+  // by first_index, but not the element pointed by last_index.
+  void GroupSuggestionsBySearchVsURL(int first_index, int last_index) const;
 
   // This value should be comfortably larger than any max-autocomplete-matches
   // under consideration.

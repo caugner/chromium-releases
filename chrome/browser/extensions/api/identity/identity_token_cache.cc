@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/ranges/algorithm.h"
 #include "base/stl_util.h"
 #include "chrome/browser/extensions/api/identity/identity_constants.h"
 
@@ -192,6 +193,20 @@ void IdentityTokenCache::EraseAccessToken(const std::string& extension_id,
   }
 }
 
+void IdentityTokenCache::EraseAllTokensForExtension(
+    const std::string& extension_id) {
+  base::EraseIf(access_tokens_cache_,
+                [&extension_id](const auto& key_value_pair) {
+                  const AccessTokensKey& key = key_value_pair.first;
+                  return key.extension_id == extension_id;
+                });
+  base::EraseIf(intermediate_value_cache_,
+                [&extension_id](const auto& key_value_pair) {
+                  const ExtensionTokenKey& key = key_value_pair.first;
+                  return key.extension_id == extension_id;
+                });
+}
+
 void IdentityTokenCache::EraseAllTokens() {
   intermediate_value_cache_.clear();
   access_tokens_cache_.clear();
@@ -208,7 +223,8 @@ const IdentityTokenCacheValue& IdentityTokenCache::GetToken(
         cached_tokens.begin(), cached_tokens.end(),
         [&key](const auto& cached_token) {
           return key.scopes.size() <= cached_token.granted_scopes().size() &&
-                 base::STLIncludes(cached_token.granted_scopes(), key.scopes);
+                 base::ranges::includes(cached_token.granted_scopes(),
+                                        key.scopes);
         });
 
     if (matched_token_it != cached_tokens.end()) {

@@ -11,8 +11,8 @@
 #include "ash/ash_export.h"
 #include "ash/login/ui/login_palette.h"
 #include "ash/login/ui/non_accessible_view.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "ui/views/view.h"
 
@@ -79,6 +79,8 @@ class ASH_EXPORT LoginPinView : public NonAccessibleView {
     // whenever a new backspace event should run after the initial delay.
     void SetBackspaceTimers(std::unique_ptr<base::OneShotTimer> delay_timer,
                             std::unique_ptr<base::RepeatingTimer> repeat_timer);
+
+    void ClickOnDigit(int number) const;
 
    private:
     LoginPinView* const view_;

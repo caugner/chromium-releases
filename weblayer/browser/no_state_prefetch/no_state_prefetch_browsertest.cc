@@ -5,11 +5,12 @@
 #include <memory>
 
 #include "base/run_loop.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/threading/platform_thread.h"
 #include "build/build_config.h"
-#include "components/prerender/browser/prerender_histograms.h"
-#include "components/prerender/browser/prerender_manager.h"
+#include "components/no_state_prefetch/browser/prerender_histograms.h"
+#include "components/no_state_prefetch/browser/prerender_manager.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/url_loader_monitor.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -20,6 +21,7 @@
 #include "weblayer/browser/no_state_prefetch/prerender_manager_factory.h"
 #include "weblayer/browser/profile_impl.h"
 #include "weblayer/browser/tab_impl.h"
+#include "weblayer/public/prerender_controller.h"
 #include "weblayer/shell/browser/shell.h"
 #include "weblayer/test/weblayer_browser_test.h"
 #include "weblayer/test/weblayer_browser_test_utils.h"
@@ -36,7 +38,7 @@ class NoStatePrefetchBrowserTest : public WebLayerBrowserTest {
  public:
 #if defined(OS_ANDROID)
   void SetUp() override {
-    InstallTestGmsBridge(/* user_consent= */ true);
+    InstallTestGmsBridge(ConsentType::kConsent);
 
     WebLayerBrowserTest::SetUp();
   }
@@ -68,15 +70,14 @@ class NoStatePrefetchBrowserTest : public WebLayerBrowserTest {
   std::unique_ptr<net::test_server::HttpResponse> HandleRequest(
       const net::test_server::HttpRequest& request) {
     if (request.GetURL().path().find("prerendered_page") != std::string::npos) {
-      if (prerendered_page_fetched_)
-        prerendered_page_fetched_->Quit();
+      prerendered_page_fetched_->Quit();
+      prerendered_page_was_fetched_ = true;
     }
     if (request.GetURL().path().find("prefetch.js") != std::string::npos) {
       script_fetched_ = true;
       auto iter = request.headers.find("Purpose");
       purpose_header_value_ = iter->second;
-      if (script_resource_fetched_)
-        script_resource_fetched_->Quit();
+      script_resource_fetched_->Quit();
     }
     if (request.GetURL().path().find("prefetch_meta.js") != std::string::npos) {
       script_executed_ = true;
@@ -103,6 +104,7 @@ class NoStatePrefetchBrowserTest : public WebLayerBrowserTest {
 
   std::unique_ptr<base::RunLoop> prerendered_page_fetched_;
   std::unique_ptr<base::RunLoop> script_resource_fetched_;
+  bool prerendered_page_was_fetched_ = false;
   bool script_fetched_ = false;
   bool script_executed_ = false;
   std::string purpose_header_value_;
@@ -195,14 +197,45 @@ IN_PROC_BROWSER_TEST_F(NoStatePrefetchBrowserTest,
   prerendered_page_fetched_->Run();
 }
 
-// link-rel="next" happens even when NoStatePrefetch has been disabled.
+// link-rel="next" URLs should not be prefetched.
 IN_PROC_BROWSER_TEST_F(NoStatePrefetchBrowserTest, LinkRelNextWithNSPDisabled) {
-  GetProfile()->SetBooleanSetting(SettingType::NETWORK_PREDICTION_ENABLED,
-                                  false);
   NavigateAndWaitForCompletion(
       GURL(https_server_->GetURL("/link_rel_next_parent.html")), shell());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(prerendered_page_was_fetched_);
+}
 
-  prerendered_page_fetched_->Run();
+// Non-web initiated prerender succeeds and subsequent navigations reuse
+// previously downloaded resources.
+// TODO(https://crbug.com/1144282): Fix failures on Asan.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_ExternalPrerender DISABLED_ExternalPrerender
+#else
+#define MAYBE_ExternalPrerender ExternalPrerender
+#endif
+IN_PROC_BROWSER_TEST_F(NoStatePrefetchBrowserTest, MAYBE_ExternalPrerender) {
+  GetProfile()->GetPrerenderController()->Prerender(
+      GURL(https_server_->GetURL("/prerendered_page.html")));
+
+  script_resource_fetched_->Run();
+
+  // Navigate to the prerendered page and wait for its title to change.
+  script_fetched_ = false;
+  NavigateToPageAndWaitForTitleChange(
+      GURL(https_server_->GetURL("/prerendered_page.html")),
+      base::ASCIIToUTF16("Prefetch Page"));
+  EXPECT_FALSE(script_fetched_);
+}
+
+// Non-web initiated prerender fails when the user has opted out.
+IN_PROC_BROWSER_TEST_F(NoStatePrefetchBrowserTest,
+                       ExternalPrerenderWhenOptedOut) {
+  GetProfile()->SetBooleanSetting(SettingType::NETWORK_PREDICTION_ENABLED,
+                                  false);
+  GetProfile()->GetPrerenderController()->Prerender(
+      GURL(https_server_->GetURL("/prerendered_page.html")));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(prerendered_page_was_fetched_);
 }
 
 }  // namespace weblayer

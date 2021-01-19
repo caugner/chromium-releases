@@ -8,7 +8,8 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    android:paddingBottom="16dp">
 
     <ImageView
         android:layout_width="wrap_content"
@@ -19,35 +20,7 @@
         android:importantForAccessibility="no"
         app:srcCompat="@drawable/drag_handlebar" />
 
-    <ImageView
-        android:id="@+id/account_picker_bottom_sheet_logo"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center_horizontal"
-        android:importantForAccessibility="no"
-        app:srcCompat="@drawable/chrome_sync_logo" />
-
-    <TextView
-        android:id="@+id/account_picker_bottom_sheet_title"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:layout_marginBottom="8dp"
-        android:gravity="center_horizontal"
-        android:textAppearance="@style/TextAppearance.TextLarge.Primary"
-        android:text="@string/signin_account_picker_dialog_title" />
-
-    <org.chromium.ui.widget.TextViewWithLeading
-        android:id="@+id/account_picker_bottom_sheet_subtitle"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="24dp"
-        android:layout_marginEnd="24dp"
-        android:layout_marginBottom="16dp"
-        android:gravity="center_horizontal"
-        android:textAppearance="@style/TextAppearance.TextMedium.Secondary"
-        android:text="@string/signin_account_picker_bottom_sheet_subtitle"
-        app:leading="@dimen/text_size_medium_leading" />
+    <include layout="@layout/account_picker_bottom_sheet_header" />
 
     <View
         android:id="@+id/account_picker_horizontal_divider"
@@ -60,7 +33,6 @@
         android:layout_marginStart="16dp"
         android:layout_marginEnd="16dp"
         android:layout_marginTop="8dp"
-        android:layout_marginBottom="8dp"
         android:visibility="gone"
         tools:listitem="@layout/account_chooser_dialog_item" />
 
@@ -78,7 +50,8 @@
         android:layout_width="32dp"
         android:layout_height="32dp"
         android:layout_gravity="center"
-        android:layout_marginBottom="54dp"
+        android:layout_marginTop="64dp"
+        android:layout_marginBottom="128dp"
         android:visibility="gone" />
 
     <org.chromium.ui.widget.ButtonCompat
@@ -89,10 +62,18 @@
         android:layout_marginStart="24dp"
         android:layout_marginEnd="24dp"
         android:layout_marginTop="8dp"
-        android:layout_marginBottom="20dp"
         android:ellipsize="end"
         android:singleLine="true"
         android:text="@string/signin_promo_continue_as" />
+
+    <org.chromium.ui.widget.ButtonCompat
+        android:id="@+id/account_picker_dismiss_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:text="@string/no_thanks"
+        style="@style/TextButton" />
 
     <include
         android:id="@+id/incognito_interstitial_bottom_sheet_view"

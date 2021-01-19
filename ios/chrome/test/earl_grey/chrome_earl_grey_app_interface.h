@@ -27,7 +27,11 @@
 
 // Returns the number of entries in the history database. Returns -1 if there
 // was an error.
-+ (NSInteger)getBrowsingHistoryEntryCount;
++ (NSInteger)browsingHistoryEntryCountWithError:
+    (NSError* __autoreleasing*)error;
+
+// Gets the number of items in the back list. Returns -1 in case of error.
++ (NSInteger)navigationBackListItemsCount;
 
 // Clears browsing cache. Returns nil on success, or else an NSError indicating
 // the operation failed.
@@ -161,6 +165,18 @@
 
 // Returns the index of active tab in normal mode.
 + (NSUInteger)indexOfActiveNormalTab;
+
+#pragma mark - Window utilities (EG2)
+
+// Returns the number of windows, including background and disconnected or
+// archived windows.
++ (NSUInteger)windowCount WARN_UNUSED_RESULT;
+
+// Returns the number of foreground (visible on screen) windows.
++ (NSUInteger)foregroundWindowCount WARN_UNUSED_RESULT;
+
+// Closes all but one window, including all non-foreground windows.
++ (void)closeAllExtraWindows;
 
 #pragma mark - WebState Utilities (EG2)
 
@@ -432,6 +448,13 @@
 
 // Returns whether the native context menus feature is enabled or not.
 + (BOOL)isNativeContextMenusEnabled;
+
+// Returns whether the app is configured to, and running in an environment which
+// can, open multiple windows.
++ (BOOL)areMultipleWindowsSupported;
+
+// Returns whether the Close All Tabs Confirmation feature is enabled.
++ (BOOL)isCloseAllTabsConfirmationEnabled;
 
 #pragma mark - Popup Blocking
 

@@ -6,7 +6,9 @@
 #define CHROME_BROWSER_UI_VIEWS_PERMISSION_BUBBLE_PERMISSION_PROMPT_IMPL_H_
 
 #include "base/macros.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "chrome/browser/ui/views/permission_bubble/permission_prompt_style.h"
 #include "components/permissions/permission_prompt.h"
 
 class Browser;
@@ -30,6 +32,8 @@ class PermissionPromptImpl : public permissions::PermissionPrompt,
   // permissions::PermissionPrompt:
   void UpdateAnchorPosition() override;
   TabSwitchingBehavior GetTabSwitchingBehavior() override;
+  permissions::PermissionPromptDisposition GetPromptDisposition()
+      const override;
 
   PermissionPromptBubbleView* prompt_bubble_for_testing() {
     return prompt_bubble_;
@@ -39,9 +43,9 @@ class PermissionPromptImpl : public permissions::PermissionPrompt,
   void OnWidgetClosing(views::Widget* widget) override;
 
  private:
-  enum class PromptStyle;
-
   LocationBarView* GetLocationBarView();
+
+  void ShowBubble();
 
   // The popup bubble. Not owned by this class; it will delete itself when a
   // decision is made.
@@ -50,9 +54,13 @@ class PermissionPromptImpl : public permissions::PermissionPrompt,
   // The web contents whose location bar should show the quiet prompt.
   content::WebContents* web_contents_;
 
-  PromptStyle prompt_style_;
+  PermissionPromptStyle prompt_style_;
 
   PermissionChip* permission_chip_ = nullptr;
+
+  permissions::PermissionPrompt::Delegate* const delegate_;
+
+  Browser* const browser_;
 
   DISALLOW_COPY_AND_ASSIGN(PermissionPromptImpl);
 };

@@ -121,11 +121,14 @@ class PermissionsClient {
   // used.
   virtual PermissionRequest::IconId GetOverrideIconId(ContentSettingsType type);
 
-  // Allows the embedder to provide a selector for chossing the UI to use for
-  // notification permission requests. If the embedder returns null here, the
-  // normal UI will be used.
-  virtual std::unique_ptr<NotificationPermissionUiSelector>
-  CreateNotificationPermissionUiSelector(
+  // Allows the embedder to provide a list of selectors for choosing the UI to
+  // use for notification permission requests. If the embedder returns an empty
+  // list, the normal UI will be used always. Then for each request, if none of
+  // the returned selectors prescribe the quiet UI, the normal UI will be used.
+  // Otherwise the quiet UI will be used. Selectors at lower indices have higher
+  // priority when determining the quiet UI flavor.
+  virtual std::vector<std::unique_ptr<NotificationPermissionUiSelector>>
+  CreateNotificationPermissionUiSelectors(
       content::BrowserContext* browser_context);
 
   using QuietUiReason = NotificationPermissionUiSelector::QuietUiReason;
@@ -142,6 +145,14 @@ class PermissionsClient {
   // ui dry run experiment group.
   virtual base::Optional<bool> HadThreeConsecutiveNotificationPermissionDenies(
       content::BrowserContext* browser_context);
+
+  // Returns whether the |permission| has already been auto-revoked due to abuse
+  // at least once for the given |origin|. Returns `nullopt` if permission
+  // auto-revocation is not supported for a given permission type.
+  virtual base::Optional<bool> HasPreviouslyAutoRevokedPermission(
+      content::BrowserContext* browser_context,
+      const GURL& origin,
+      ContentSettingsType permission);
 
   // If the embedder returns an origin here, any requests matching that origin
   // will be approved. Requests that do not match the returned origin will

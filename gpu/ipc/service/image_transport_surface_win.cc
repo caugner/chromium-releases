@@ -17,6 +17,7 @@
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_egl.h"
 #include "ui/gl/gl_switches.h"
+#include "ui/gl/gl_utils.h"
 #include "ui/gl/init/gl_factory.h"
 #include "ui/gl/vsync_provider_win.h"
 
@@ -28,12 +29,13 @@ CreateDirectCompositionSurfaceSettings(
   gl::DirectCompositionSurfaceWin::Settings settings;
   settings.disable_nv12_dynamic_textures =
       workarounds.disable_nv12_dynamic_textures;
-  settings.disable_larger_than_screen_overlays =
-      workarounds.disable_larger_than_screen_overlays;
   settings.disable_vp_scaling = workarounds.disable_vp_scaling;
   settings.use_angle_texture_offset = features::IsUsingSkiaRenderer();
   settings.reset_vp_when_colorspace_changes =
       workarounds.reset_vp_when_colorspace_changes;
+  settings.force_root_surface_full_damage =
+      features::IsUsingSkiaRenderer() &&
+      gl::ShouldForceDirectCompositionRootSurfaceFullDamage();
   return settings;
 }
 }  // namespace

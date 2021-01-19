@@ -15,7 +15,6 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -72,6 +71,9 @@ class TestingBrowserProcess : public BrowserProcess {
   // Convenience method to get g_browser_process as a TestingBrowserProcess*.
   static TestingBrowserProcess* GetGlobal();
 
+  TestingBrowserProcess(const TestingBrowserProcess&) = delete;
+  TestingBrowserProcess& operator=(const TestingBrowserProcess&) = delete;
+
   // BrowserProcess overrides:
   void EndSession() override;
   void FlushLocalStateAndReply(base::OnceClosure reply) override;
@@ -98,7 +100,6 @@ class TestingBrowserProcess : public BrowserProcess {
   safe_browsing::SafeBrowsingService* safe_browsing_service() override;
   subresource_filter::RulesetService* subresource_filter_ruleset_service()
       override;
-  federated_learning::FlocBlocklistService* floc_blocklist_service() override;
   federated_learning::FlocSortingLshClustersService*
   floc_sorting_lsh_clusters_service() override;
   optimization_guide::OptimizationGuideService* optimization_guide_service()
@@ -108,7 +109,9 @@ class TestingBrowserProcess : public BrowserProcess {
   extensions::EventRouterForwarder* extension_event_router_forwarder() override;
   NotificationUIManager* notification_ui_manager() override;
   NotificationPlatformBridge* notification_platform_bridge() override;
+#if !defined(OS_ANDROID)
   IntranetRedirectDetector* intranet_redirect_detector() override;
+#endif
   void CreateDevToolsProtocolHandler() override;
   void CreateDevToolsAutoOpener() override;
   bool IsShuttingDown() override;
@@ -152,8 +155,6 @@ class TestingBrowserProcess : public BrowserProcess {
   void SetSafeBrowsingService(safe_browsing::SafeBrowsingService* sb_service);
   void SetRulesetService(
       std::unique_ptr<subresource_filter::RulesetService> ruleset_service);
-  void SetFlocBlocklistService(
-      std::unique_ptr<federated_learning::FlocBlocklistService> service);
   void SetFlocSortingLshClustersService(
       std::unique_ptr<federated_learning::FlocSortingLshClustersService>
           service);
@@ -209,8 +210,6 @@ class TestingBrowserProcess : public BrowserProcess {
   scoped_refptr<safe_browsing::SafeBrowsingService> sb_service_;
   std::unique_ptr<subresource_filter::RulesetService>
       subresource_filter_ruleset_service_;
-  std::unique_ptr<federated_learning::FlocBlocklistService>
-      floc_blocklist_service_;
   std::unique_ptr<federated_learning::FlocSortingLshClustersService>
       floc_sorting_lsh_clusters_service_;
   std::unique_ptr<optimization_guide::OptimizationGuideService>
@@ -240,8 +239,6 @@ class TestingBrowserProcess : public BrowserProcess {
 #if !defined(OS_ANDROID)
   BuildState build_state_;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(TestingBrowserProcess);
 };
 
 // RAII (resource acquisition is initialization) for TestingBrowserProcess.
@@ -261,10 +258,11 @@ class TestingBrowserProcess : public BrowserProcess {
 class TestingBrowserProcessInitializer {
  public:
   TestingBrowserProcessInitializer();
+  TestingBrowserProcessInitializer(const TestingBrowserProcessInitializer&) =
+      delete;
+  TestingBrowserProcessInitializer& operator=(
+      const TestingBrowserProcessInitializer&) = delete;
   ~TestingBrowserProcessInitializer();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestingBrowserProcessInitializer);
 };
 
 #endif  // CHROME_TEST_BASE_TESTING_BROWSER_PROCESS_H_

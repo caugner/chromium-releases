@@ -118,7 +118,7 @@ const char kCookiesSettingsHelpCenterURL[] =
     "https://support.google.com/chrome?p=cpn_cookies";
 
 const char kCpuX86Sse2ObsoleteURL[] =
-    "https://support.google.com/chrome/?p=unsupported_cpu";
+    "https://support.google.com/chrome/?p=chrome_update_sse3";
 
 const char kCrashReasonURL[] =
 #if defined(OS_CHROMEOS)
@@ -208,6 +208,9 @@ const char kPasswordCheckLearnMoreURL[] =
     "https://support.google.com/chrome/"
     "?p=settings_password#leak_detection_privacy";
 #endif
+
+const char kPasswordGenerationLearnMoreURL[] =
+    "https://support.google.com/chrome/answer/7570435";
 
 const char kPasswordManagerLearnMoreURL[] =
 #if defined(OS_CHROMEOS)
@@ -345,6 +348,9 @@ const char kCupsPrintPPDLearnMoreURL[] =
 
 const char kEasyUnlockLearnMoreUrl[] =
     "https://support.google.com/chromebook/?p=smart_lock";
+
+const char kEchoLearnMoreURL[] =
+    "chrome://help-app/help/sub/3399709/id/2703646";
 
 const char kArcTermsPathFormat[] = "arc_tos/%s/terms.html";
 

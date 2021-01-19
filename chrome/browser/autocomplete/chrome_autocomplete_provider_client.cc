@@ -9,7 +9,7 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -25,6 +25,9 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/top_sites_factory.h"
+#include "chrome/browser/prefetch/search_prefetch/search_prefetch_service.h"
+#include "chrome/browser/prefetch/search_prefetch/search_prefetch_service_factory.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/query_tiles/tile_service_factory.h"
@@ -58,6 +61,7 @@
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/android/tab_android.h"
+#include "chrome/browser/android/tab_android_user_data.h"
 #include "chrome/browser/ui/android/tab_model/tab_model.h"
 #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 #else
@@ -69,7 +73,49 @@
 
 namespace {
 
-#if !defined(OS_ANDROID)
+#if defined(OS_ANDROID)
+class AutocompleteClientTabAndroidUserData
+    : public TabAndroidUserData<AutocompleteClientTabAndroidUserData>,
+      public TabAndroid::Observer {
+ public:
+  ~AutocompleteClientTabAndroidUserData() override {
+    tab_->RemoveObserver(this);
+  }
+
+  const GURL& GetStrippedURL() { return stripped_url_; }
+
+  bool IsInitialized() { return initialized_; }
+
+  void UpdateStrippedURL(const GURL& url,
+                         TemplateURLService* template_url_service) {
+    initialized_ = true;
+    if (url.is_valid()) {
+      stripped_url_ = AutocompleteMatch::GURLToStrippedGURL(
+          url, AutocompleteInput(), template_url_service, base::string16());
+    }
+  }
+
+  // TabAndroid::Observer implementation
+  void OnInitWebContents(TabAndroid* tab) override {
+    tab->RemoveUserData(UserDataKey());
+  }
+
+ private:
+  explicit AutocompleteClientTabAndroidUserData(TabAndroid* tab) : tab_(tab) {
+    DCHECK(tab);
+    tab->AddObserver(this);
+  }
+  friend class TabAndroidUserData<AutocompleteClientTabAndroidUserData>;
+
+  TabAndroid* tab_;
+  bool initialized_ = false;
+  GURL stripped_url_;
+
+  TAB_ANDROID_USER_DATA_KEY_DECL();
+};
+TAB_ANDROID_USER_DATA_KEY_IMPL(AutocompleteClientTabAndroidUserData)
+
+#else  // defined(OS_ANDROID)
 // This list should be kept in sync with chrome/common/webui_url_constants.h.
 // Only include useful sub-pages, confirmation alerts are not useful.
 const char* const kChromeSettingsSubPages[] = {
@@ -83,7 +129,47 @@ const char* const kChromeSettingsSubPages[] = {
     chrome::kManageProfileSubPage,    chrome::kPeopleSubPage,
 #endif
 };
-#endif  // !defined(OS_ANDROID)
+#endif  // defined(OS_ANDROID)
+
+class AutocompleteClientWebContentsUserData
+    : public content::WebContentsUserData<
+          AutocompleteClientWebContentsUserData> {
+ public:
+  ~AutocompleteClientWebContentsUserData() override = default;
+
+  int GetLastCommittedEntryIndex() { return last_committed_entry_index_; }
+  const GURL& GetLastCommittedStrippedURL() {
+    return last_committed_stripped_url_;
+  }
+  void UpdateLastCommittedStrippedURL(
+      int last_committed_index,
+      const GURL& last_committed_url,
+      TemplateURLService* template_url_service) {
+    if (last_committed_url.is_valid()) {
+      last_committed_entry_index_ = last_committed_index;
+      // Use blank input since we will re-use this stripped URL with other
+      // inputs.
+      last_committed_stripped_url_ = AutocompleteMatch::GURLToStrippedGURL(
+          last_committed_url, AutocompleteInput(), template_url_service,
+          base::string16());
+    }
+  }
+
+ private:
+  explicit AutocompleteClientWebContentsUserData(
+      content::WebContents* contents);
+  friend class content::WebContentsUserData<
+      AutocompleteClientWebContentsUserData>;
+
+  int last_committed_entry_index_ = -1;
+  GURL last_committed_stripped_url_;
+  WEB_CONTENTS_USER_DATA_KEY_DECL();
+};
+
+AutocompleteClientWebContentsUserData::AutocompleteClientWebContentsUserData(
+    content::WebContents*) {}
+
+WEB_CONTENTS_USER_DATA_KEY_IMPL(AutocompleteClientWebContentsUserData)
 
 }  // namespace
 
@@ -95,7 +181,9 @@ ChromeAutocompleteProviderClient::ChromeAutocompleteProviderClient(
           unified_consent::UrlKeyedDataCollectionConsentHelper::
               NewPersonalizedDataCollectionConsentHelper(
                   ProfileSyncServiceFactory::GetForProfile(profile_))),
-      storage_partition_(nullptr) {
+      storage_partition_(nullptr),
+      omnibox_triggered_feature_service_(
+          std::make_unique<OmniboxTriggeredFeatureService>()) {
   if (OmniboxFieldTrial::IsPedalSuggestionsEnabled())
     pedal_provider_ = std::make_unique<OmniboxPedalProvider>(*this);
 }
@@ -111,6 +199,10 @@ ChromeAutocompleteProviderClient::GetURLLoaderFactory() {
 
 PrefService* ChromeAutocompleteProviderClient::GetPrefs() {
   return profile_->GetPrefs();
+}
+
+PrefService* ChromeAutocompleteProviderClient::GetLocalState() {
+  return g_browser_process->local_state();
 }
 
 const AutocompleteSchemeClassifier&
@@ -163,12 +255,6 @@ ChromeAutocompleteProviderClient::GetRemoteSuggestionsService(
     bool create_if_necessary) const {
   return RemoteSuggestionsServiceFactory::GetForProfile(profile_,
                                                         create_if_necessary);
-}
-
-query_tiles::TileService*
-ChromeAutocompleteProviderClient::GetQueryTileService() const {
-  ProfileKey* profile_key = profile_->GetProfileKey();
-  return query_tiles::TileServiceFactory::GetForKey(profile_key);
 }
 
 DocumentSuggestionsService*
@@ -257,6 +343,17 @@ ChromeAutocompleteProviderClient::GetBuiltinsToProvideAsUserTypes() {
 component_updater::ComponentUpdateService*
 ChromeAutocompleteProviderClient::GetComponentUpdateService() {
   return g_browser_process->component_updater();
+}
+
+query_tiles::TileService*
+ChromeAutocompleteProviderClient::GetQueryTileService() const {
+  ProfileKey* profile_key = profile_->GetProfileKey();
+  return query_tiles::TileServiceFactory::GetForKey(profile_key);
+}
+
+OmniboxTriggeredFeatureService*
+ChromeAutocompleteProviderClient::GetOmniboxTriggeredFeatureService() const {
+  return omnibox_triggered_feature_service_.get();
 }
 
 bool ChromeAutocompleteProviderClient::IsOffTheRecord() const {
@@ -370,12 +467,22 @@ bool ChromeAutocompleteProviderClient::IsTabOpenWithURL(
 #endif  // defined(OS_ANDROID)
 }
 
-bool ChromeAutocompleteProviderClient::IsBrowserUpdateAvailable() const {
-#if defined(OS_ANDROID)
-  return false;
-#else
-  return UpgradeDetector::GetInstance()->is_upgrade_available();
-#endif
+bool ChromeAutocompleteProviderClient::IsIncognitoModeAvailable() const {
+  if (profile_->IsGuestSession() || profile_->IsEphemeralGuestProfile()) {
+    return false;
+  }
+  return IncognitoModePrefs::GetAvailability(profile_->GetPrefs()) !=
+         IncognitoModePrefs::DISABLED;
+}
+
+void ChromeAutocompleteProviderClient::OnAutocompleteControllerResultReady(
+    AutocompleteController* controller) {
+  auto* search_prefetch_service =
+      SearchPrefetchServiceFactory::GetForProfile(profile_);
+
+  // Prefetches result pages that the search provider marked as prefetchable.
+  if (search_prefetch_service)
+    search_prefetch_service->OnResultChanged(controller);
 }
 
 bool ChromeAutocompleteProviderClient::StrippedURLsAreEqual(
@@ -391,47 +498,6 @@ bool ChromeAutocompleteProviderClient::StrippedURLsAreEqual(
          AutocompleteMatch::GURLToStrippedGURL(
              url2, *input, template_url_service, base::string16());
 }
-
-class AutocompleteClientWebContentsUserData
-    : public content::WebContentsUserData<
-          AutocompleteClientWebContentsUserData> {
- public:
-  ~AutocompleteClientWebContentsUserData() override = default;
-
-  int GetLastCommittedEntryIndex() { return last_committed_entry_index_; }
-  const GURL& GetLastCommittedStrippedURL() {
-    return last_committed_stripped_url_;
-  }
-  void UpdateLastCommittedStrippedURL(
-      int last_committed_index,
-      const GURL& last_committed_url,
-      TemplateURLService* template_url_service) {
-    if (last_committed_url.is_valid()) {
-      last_committed_entry_index_ = last_committed_index;
-      // Use blank input since we will re-use this stripped URL with other
-      // inputs.
-      last_committed_stripped_url_ = AutocompleteMatch::GURLToStrippedGURL(
-          last_committed_url, AutocompleteInput(), template_url_service,
-          base::string16());
-    }
-  }
-
- private:
-  explicit AutocompleteClientWebContentsUserData(
-      content::WebContents* contents);
-  friend class content::WebContentsUserData<
-      AutocompleteClientWebContentsUserData>;
-
-  int last_committed_entry_index_ = -1;
-  GURL last_committed_stripped_url_;
-  WEB_CONTENTS_USER_DATA_KEY_DECL();
-};
-
-AutocompleteClientWebContentsUserData::AutocompleteClientWebContentsUserData(
-    content::WebContents*)
-    : content::WebContentsUserData<AutocompleteClientWebContentsUserData>() {}
-
-WEB_CONTENTS_USER_DATA_KEY_IMPL(AutocompleteClientWebContentsUserData)
 
 bool ChromeAutocompleteProviderClient::IsStrippedURLEqualToWebContentsURL(
     const GURL& stripped_url,
@@ -475,11 +541,14 @@ TabAndroid* ChromeAutocompleteProviderClient::GetTabOpenWithURL(
       } else {
         // Browser did not load the tab yet after Chrome started. To avoid
         // reloading WebContents, we just compare URLs.
-        // TODO(1094056) : Let's TabAndroid to support base::SupportsUserData,
-        // so we can avoid create new url over and over again.
-        const GURL tab_stripped_url = AutocompleteMatch::GURLToStrippedGURL(
-            tab->GetURL(), AutocompleteInput(), GetTemplateURLService(),
-            base::string16());
+        AutocompleteClientTabAndroidUserData::CreateForTabAndroid(tab);
+        AutocompleteClientTabAndroidUserData* user_data =
+            AutocompleteClientTabAndroidUserData::FromTabAndroid(tab);
+        DCHECK(user_data);
+        if (!user_data->IsInitialized())
+          user_data->UpdateStrippedURL(tab->GetURL(), GetTemplateURLService());
+
+        const GURL tab_stripped_url = user_data->GetStrippedURL();
         if (tab_stripped_url == stripped_url)
           return tab;
       }

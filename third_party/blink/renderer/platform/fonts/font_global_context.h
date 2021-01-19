@@ -21,8 +21,6 @@ class FontCache;
 class FontUniqueNameLookup;
 class HarfBuzzFontCache;
 
-enum CreateIfNeeded { kDoNotCreate, kCreate };
-
 // FontGlobalContext contains non-thread-safe, thread-specific data used for
 // font formatting.
 class PLATFORM_EXPORT FontGlobalContext {
@@ -31,7 +29,10 @@ class PLATFORM_EXPORT FontGlobalContext {
  public:
   static FontGlobalContext* Get(CreateIfNeeded = kCreate);
 
-  static inline FontCache& GetFontCache() { return Get()->font_cache_; }
+  static inline FontCache* GetFontCache(CreateIfNeeded create = kCreate) {
+    FontGlobalContext* context = Get(create);
+    return context ? &context->font_cache_ : nullptr;
+  }
 
   static HarfBuzzFontCache* GetHarfBuzzFontCache();
 
@@ -59,6 +60,8 @@ class PLATFORM_EXPORT FontGlobalContext {
   static FontUniqueNameLookup* GetFontUniqueNameLookup();
 
   IdentifiableToken GetOrComputeTypefaceDigest(const FontPlatformData& source);
+  IdentifiableToken GetOrComputePostScriptNameDigest(
+      const FontPlatformData& source);
 
   // Called by MemoryPressureListenerRegistry to clear memory.
   static void ClearMemory();
@@ -75,6 +78,7 @@ class PLATFORM_EXPORT FontGlobalContext {
   hb_font_funcs_t* harfbuzz_font_funcs_harfbuzz_advances_;
   std::unique_ptr<FontUniqueNameLookup> font_unique_name_lookup_;
   WTF::LruCache<SkFontID, IdentifiableToken> typeface_digest_cache_;
+  WTF::LruCache<SkFontID, IdentifiableToken> postscript_name_digest_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(FontGlobalContext);
 };

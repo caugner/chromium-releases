@@ -3,6 +3,7 @@
 <translationbundle lang="da">
 <translation id="1276998909102132017">Galleribilleder</translation>
 <translation id="1430915738399379752">Udskriv</translation>
+<translation id="1473110567575736769">Timer på 3 sekunder</translation>
 <translation id="1620510694547887537">Kamera</translation>
 <translation id="1627744224761163218">4x4</translation>
 <translation id="1664224225747386870">Der er ingen optagelser</translation>
@@ -29,7 +30,9 @@
 <translation id="3259149966178251584">Kameraets opløsning</translation>
 <translation id="3517926952904427380">Det var ikke muligt at tage et billede i stående format</translation>
 <translation id="3569311554794739032">Er du sikker på, at du vil fjerne <ph name="FILE" />?</translation>
+<translation id="3750315947605636967">Dit kamera anvendes af en anden app</translation>
 <translation id="3810838688059735925">Video</translation>
+<translation id="4000398125663085899">Nye billeder og videoer gemmes nu i en mappe i appen Filer: Mine filer &gt; Kamera</translation>
 <translation id="4118525110028899586">Sæt optagelsen på pause</translation>
 <translation id="4279490309300973883">Spejling</translation>
 <translation id="4329152592498422850">Skift for at tage et kvadratisk billede</translation>
@@ -59,11 +62,11 @@
 Hvis din feedback omhandler billed- eller videokvalitet, bedes du vedhæfte et billede eller en video af problemet og beskrive, hvad der er galt (f.eks. billedet er for mørkt, eller motivet er ikke i fokus).</translation>
 <translation id="6420689864531458495">(<ph name="ASPECT_RATIO_WIDTH" />:<ph name="ASPECT_RATIO_HEIGHT" /> – <ph name="WIDTH" />x<ph name="HEIGHT" />) <ph name="MEGAPIXEL" /> megapixels</translation>
 <translation id="6681668084120808868">Tag billede</translation>
-<translation id="6739700533200816396">Billeder og videoer gemmes nu i en ny mappe i appen Filer: Mine filer &gt; Kamera. Eksisterende billeder og videoer flyttes ikke til den nye mappe.</translation>
 <translation id="6778482348691154169">Der kan ikke tages et billede</translation>
 <translation id="6965382102122355670">OK</translation>
 <translation id="698156982839284926">3 sekunder</translation>
 <translation id="712848772518857951">Er du sikker på, at du vil fjerne <ph name="COUNT" /> elementer?</translation>
+<translation id="7134221860976209830">Timer på 10 sekunder</translation>
 <translation id="7243947652761655814">Videoopløsning</translation>
 <translation id="7337660886763914220">Der er fejl i filsystemet.</translation>
 <translation id="7557677699350329807">Skift til næste kamera</translation>
@@ -71,7 +74,6 @@ Hvis din feedback omhandler billed- eller videokvalitet, bedes du vedhæfte et b
 <translation id="7649070708921625228">Hjælp</translation>
 <translation id="7658239707568436148">Annuller</translation>
 <translation id="7670511624014457267">60 FPS</translation>
-<translation id="8049189770492311300">Timer</translation>
 <translation id="8067883171444229417">Afspil video</translation>
 <translation id="8131740175452115882">Bekræft</translation>
 <translation id="8145038249676204903">Skift for at tage et billede</translation>

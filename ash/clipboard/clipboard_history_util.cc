@@ -8,7 +8,10 @@
 
 #include "ash/clipboard/clipboard_history_item.h"
 #include "ash/metrics/histogram_macros.h"
+#include "ash/session/session_controller_impl.h"
+#include "ash/shell.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "ui/base/clipboard/clipboard_data.h"
 #include "ui/base/clipboard/custom_data_helper.h"
 
@@ -31,8 +34,16 @@ constexpr ui::ClipboardInternalFormat kPrioritizedFormats[] = {
 base::Optional<ui::ClipboardInternalFormat> CalculateMainFormat(
     const ui::ClipboardData& data) {
   for (const auto& format : kPrioritizedFormats) {
-    if (ContainsFormat(data, format))
+    if (ContainsFormat(data, format)) {
+      if (chromeos::features::IsClipboardHistorySimpleRenderEnabled()) {
+        if (format == ui::ClipboardInternalFormat::kHtml &&
+            (data.markup_data().find("<img") == std::string::npos) &&
+            (data.markup_data().find("<table") == std::string::npos)) {
+          continue;
+        }
+      }
       return format;
+    }
   }
   return base::nullopt;
 }
@@ -101,6 +112,20 @@ bool IsSupported(const ui::ClipboardData& data) {
     return ContainsFileSystemData(data);
 
   return true;
+}
+
+bool IsEnabledInCurrentMode() {
+  switch (Shell::Get()->session_controller()->login_status()) {
+    case LoginStatus::NOT_LOGGED_IN:
+    case LoginStatus::LOCKED:
+    case LoginStatus::KIOSK_APP:
+    case LoginStatus::PUBLIC:
+      return false;
+    case LoginStatus::USER:
+    case LoginStatus::GUEST:
+    case LoginStatus::SUPERVISED:
+      return true;
+  }
 }
 
 }  // namespace ClipboardHistoryUtil

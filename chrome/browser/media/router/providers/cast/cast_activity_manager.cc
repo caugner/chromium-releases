@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/optional.h"
@@ -19,6 +19,7 @@
 #include "chrome/browser/media/router/providers/cast/cast_media_route_provider_metrics.h"
 #include "chrome/browser/media/router/providers/cast/cast_session_client.h"
 #include "chrome/browser/media/router/providers/cast/mirroring_activity.h"
+#include "components/cast_channel/cast_message_util.h"
 #include "components/cast_channel/enum_table.h"
 #include "components/media_router/browser/logger_impl.h"
 #include "components/media_router/common/media_source.h"
@@ -72,7 +73,7 @@ CastActivityManager::~CastActivityManager() {
   // browser shuts down.  This works when the browser is closed through its UI,
   // or when it is given an opportunity to shut down gracefully, e.g. with
   // SIGINT on Linux, but not SIGTERM.
-  TerminateAllMirroringActivities();
+  TerminateAllLocalMirroringActivities();
 
   message_handler_->RemoveObserver(this);
   session_tracker_->RemoveObserver(this);
@@ -370,7 +371,8 @@ void CastActivityManager::JoinSession(
       client_id,
       CreateNewSessionMessage(*session, client_id, *sink, hash_token_));
   message_handler_->EnsureConnection(sink->cast_data().cast_channel_id,
-                                     client_id, session->transport_id());
+                                     client_id, session->transport_id(),
+                                     cast_source.connection_type());
 
   // Route is now local; update route queries.
   NotifyAllOnRoutesUpdated();
@@ -817,17 +819,46 @@ void CastActivityManager::HandleLaunchSessionResponse(
   RecordLaunchSessionResponseAppType(session->value().FindKey("appType"));
 
   const std::string& client_id = cast_source.client_id();
+  const auto channel_id = sink.cast_data().cast_channel_id;
+  const auto destination_id = session->transport_id();
+
+  // Cast SDK sessions have a |client_id|, and we ensure a virtual connection
+  // for them. For mirroring sessions, we ensure a strong virtual connection for
+  // |message_handler_|. Mirroring initiated via the Cast SDK will have
+  // EnsureConnection() called for both.
   if (!client_id.empty()) {
     activity_it->second->SendMessageToClient(
         client_id,
         CreateNewSessionMessage(*session, client_id, sink, hash_token_));
-
-    // TODO(jrw): Query media status.
-    message_handler_->EnsureConnection(sink.cast_data().cast_channel_id,
-                                       client_id, session->transport_id());
+    message_handler_->EnsureConnection(channel_id, client_id, destination_id,
+                                       cast_source.connection_type());
+  }
+  if (cast_source.ContainsStreamingApp()) {
+    message_handler_->EnsureConnection(
+        channel_id, message_handler_->sender_id(), destination_id,
+        cast_channel::VirtualConnectionType::kStrong);
+  } else if (client_id.empty()) {
+    logger_->LogError(
+        mojom::LogCategory::kRoute, kLoggerComponent,
+        "The client ID was unexpectedly empty for a non-mirroring app.",
+        sink.id(), cast_source.source_id(),
+        MediaRoute::GetPresentationIdFromMediaRouteId(route_id));
   }
 
   activity_it->second->SetOrUpdateSession(*session, sink, hash_token_);
+
+  if (!client_id.empty() && base::Contains(session->message_namespaces(),
+                                           cast_channel::kMediaNamespace)) {
+    // Request media status from the receiver.
+    base::Value request(base::Value::Type::DICTIONARY);
+    request.SetStringKey("type",
+                         cast_util::EnumToString<
+                             cast_channel::V2MessageType,
+                             cast_channel::V2MessageType::kMediaGetStatus>());
+    message_handler_->SendMediaRequest(channel_id, request, client_id,
+                                       destination_id);
+  }
+
   NotifyAllOnRoutesUpdated();
   logger_->LogInfo(mojom::LogCategory::kRoute, kLoggerComponent,
                    "Successfully Launched the session.", sink.id(),
@@ -905,14 +936,16 @@ std::string CastActivityManager::ChooseAppId(
   return source.app_infos()[0].app_id;
 }
 
-void CastActivityManager::TerminateAllMirroringActivities() {
+void CastActivityManager::TerminateAllLocalMirroringActivities() {
   // Save all route IDs so we aren't iterating over |activities_| when it's
   // modified.
   std::vector<MediaRoute::Id> route_ids;
   for (const auto& pair : activities_) {
-    // Anything that isn't an app activity is a mirroring activity.
-    if (app_activities_.find(pair.first) == app_activities_.end())
+    if (pair.second->route().is_local() &&
+        // Anything that isn't an app activity is a mirroring activity.
+        app_activities_.find(pair.first) == app_activities_.end()) {
       route_ids.push_back(pair.first);
+    }
   }
 
   // Terminate the activities.

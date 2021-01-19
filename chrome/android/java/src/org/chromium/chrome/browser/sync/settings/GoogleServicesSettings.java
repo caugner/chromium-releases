@@ -10,6 +10,7 @@ import android.view.MenuInflater;
 import android.view.MenuItem;
 
 import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 import androidx.fragment.app.DialogFragment;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
@@ -40,6 +41,8 @@ import org.chromium.components.browser_ui.settings.SettingsUtils;
 import org.chromium.components.prefs.PrefService;
 import org.chromium.components.signin.GAIAServiceType;
 import org.chromium.components.signin.identitymanager.ConsentLevel;
+import org.chromium.components.signin.identitymanager.IdentityManager;
+import org.chromium.components.signin.metrics.SignoutReason;
 import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 
@@ -52,17 +55,25 @@ public class GoogleServicesSettings
     private static final String SIGN_OUT_DIALOG_TAG = "sign_out_dialog_tag";
     private static final String CLEAR_DATA_PROGRESS_DIALOG_TAG = "clear_data_progress";
 
-    private static final String PREF_ALLOW_SIGNIN = "allow_signin";
+    @VisibleForTesting
+    public static final String PREF_ALLOW_SIGNIN = "allow_signin";
     private static final String PREF_SEARCH_SUGGESTIONS = "search_suggestions";
     private static final String PREF_NAVIGATION_ERROR = "navigation_error";
-    private static final String PREF_SAFE_BROWSING = "safe_browsing";
-    private static final String PREF_PASSWORD_LEAK_DETECTION = "password_leak_detection";
-    private static final String PREF_SAFE_BROWSING_SCOUT_REPORTING =
-            "safe_browsing_scout_reporting";
+    @VisibleForTesting
+    public static final String PREF_SAFE_BROWSING = "safe_browsing";
+    @VisibleForTesting
+    public static final String PREF_PASSWORD_LEAK_DETECTION = "password_leak_detection";
+    @VisibleForTesting
+    public static final String PREF_SAFE_BROWSING_SCOUT_REPORTING = "safe_browsing_scout_reporting";
     private static final String PREF_USAGE_AND_CRASH_REPORTING = "usage_and_crash_reports";
     private static final String PREF_URL_KEYED_ANONYMIZED_DATA = "url_keyed_anonymized_data";
     private static final String PREF_CONTEXTUAL_SEARCH = "contextual_search";
-    private static final String PREF_AUTOFILL_ASSISTANT = "autofill_assistant";
+    @VisibleForTesting
+    public static final String PREF_AUTOFILL_ASSISTANT = "autofill_assistant";
+    @VisibleForTesting
+    public static final String PREF_AUTOFILL_ASSISTANT_SUBSECTION = "autofill_assistant_subsection";
+    @VisibleForTesting
+    public static final String PREF_METRICS_SETTINGS = "metrics_settings";
 
     private final PrefService mPrefService = UserPrefs.get(Profile.getLastUsedRegularProfile());
     private final PrivacyPreferencesManager mPrivacyPrefManager =
@@ -109,7 +120,7 @@ public class GoogleServicesSettings
         // If security section UI is enabled, Safe Browsing related preferences will be moved to a
         // dedicated "Security" preference page.
         mIsSecurityPreferenceRemoved =
-                ChromeFeatureList.isEnabled(ChromeFeatureList.SAFE_BROWSING_SECURITY_SECTION_UI);
+                ChromeFeatureList.isEnabled(ChromeFeatureList.SAFE_BROWSING_SECTION_UI);
         if (mIsSecurityPreferenceRemoved) {
             removePreference(getPreferenceScreen(), findPreference(PREF_SAFE_BROWSING));
             removePreference(getPreferenceScreen(), findPreference(PREF_PASSWORD_LEAK_DETECTION));
@@ -134,6 +145,11 @@ public class GoogleServicesSettings
             mSafeBrowsingReporting.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
         }
 
+        // If the metrics-settings-android flag is not enabled, remove the corresponding element.
+        if (!ChromeFeatureList.isEnabled(ChromeFeatureList.METRICS_SETTINGS_ANDROID)) {
+            removePreference(getPreferenceScreen(), findPreference(PREF_METRICS_SETTINGS));
+        }
+
         mUsageAndCrashReporting =
                 (ChromeSwitchPreference) findPreference(PREF_USAGE_AND_CRASH_REPORTING);
         mUsageAndCrashReporting.setOnPreferenceChangeListener(this);
@@ -145,7 +161,15 @@ public class GoogleServicesSettings
         mUrlKeyedAnonymizedData.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
 
         mAutofillAssistant = (ChromeSwitchPreference) findPreference(PREF_AUTOFILL_ASSISTANT);
-        if (shouldShowAutofillAssistantPreference()) {
+        Preference autofillAssistantSubsection = findPreference(PREF_AUTOFILL_ASSISTANT_SUBSECTION);
+        // Assistant autofill/voicesearch both live in the sub-section. If either one of them is
+        // enabled, then the subsection should show.
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_ASSISTANT_PROACTIVE_HELP)
+                || ChromeFeatureList.isEnabled(ChromeFeatureList.OMNIBOX_ASSISTANT_VOICE_SEARCH)) {
+            removePreference(getPreferenceScreen(), mAutofillAssistant);
+            mAutofillAssistant = null;
+            autofillAssistantSubsection.setVisible(true);
+        } else if (shouldShowAutofillAssistantPreference()) {
             mAutofillAssistant.setOnPreferenceChangeListener(this);
             mAutofillAssistant.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
         } else {
@@ -190,23 +214,34 @@ public class GoogleServicesSettings
     public boolean onPreferenceChange(Preference preference, Object newValue) {
         String key = preference.getKey();
         if (PREF_ALLOW_SIGNIN.equals(key)) {
+            IdentityManager identityManager = IdentityServicesProvider.get().getIdentityManager(
+                    Profile.getLastUsedRegularProfile());
             boolean shouldSignUserOut =
-                    IdentityServicesProvider.get()
-                                    .getIdentityManager(Profile.getLastUsedRegularProfile())
-                                    .getPrimaryAccountInfo(ConsentLevel.NOT_REQUIRED)
-                            != null
+                    identityManager.getPrimaryAccountInfo(ConsentLevel.NOT_REQUIRED) != null
                     && !((boolean) newValue);
-            if (shouldSignUserOut) {
-                SignOutDialogFragment signOutFragment =
-                        SignOutDialogFragment.create(GAIAServiceType.GAIA_SERVICE_TYPE_NONE);
-                signOutFragment.setTargetFragment(this, 0);
-                signOutFragment.show(getFragmentManager(), SIGN_OUT_DIALOG_TAG);
-                // Don't change the preference state yet, it will be updated by onSignOutClicked if
-                // the user actually confirms the sign-out.
-                return false;
-            } else {
+            if (!shouldSignUserOut) {
                 mPrefService.setBoolean(Pref.SIGNIN_ALLOWED, (boolean) newValue);
+                return true;
             }
+
+            boolean shouldShowSignOutDialog =
+                    identityManager.getPrimaryAccountInfo(ConsentLevel.SYNC) != null;
+            if (!shouldShowSignOutDialog) {
+                // Don't show signout dialog if there's no sync consent, as it never wipes the data.
+                IdentityServicesProvider.get()
+                        .getSigninManager(Profile.getLastUsedRegularProfile())
+                        .signOut(SignoutReason.USER_CLICKED_SIGNOUT_SETTINGS, null, false);
+                mPrefService.setBoolean(Pref.SIGNIN_ALLOWED, false);
+                return true;
+            }
+
+            SignOutDialogFragment signOutFragment =
+                    SignOutDialogFragment.create(GAIAServiceType.GAIA_SERVICE_TYPE_NONE);
+            signOutFragment.setTargetFragment(this, 0);
+            signOutFragment.show(getFragmentManager(), SIGN_OUT_DIALOG_TAG);
+            // Don't change the preference state yet, it will be updated by onSignOutClicked
+            // if the user actually confirms the sign-out.
+            return false;
         } else if (PREF_SEARCH_SUGGESTIONS.equals(key)) {
             mPrefService.setBoolean(Pref.SEARCH_SUGGEST_ENABLED, (boolean) newValue);
         } else if (PREF_SAFE_BROWSING.equals(key)) {
@@ -359,8 +394,7 @@ public class GoogleServicesSettings
         final DialogFragment clearDataProgressDialog = new ClearDataProgressDialog();
         IdentityServicesProvider.get()
                 .getSigninManager(Profile.getLastUsedRegularProfile())
-                .signOut(org.chromium.components.signin.metrics.SignoutReason
-                                 .USER_CLICKED_SIGNOUT_SETTINGS,
+                .signOut(SignoutReason.USER_CLICKED_SIGNOUT_SETTINGS,
                         new SigninManager.SignOutCallback() {
                             @Override
                             public void preWipeData() {

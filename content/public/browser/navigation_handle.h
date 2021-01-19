@@ -38,6 +38,7 @@ class ProxyServer;
 namespace content {
 struct GlobalFrameRoutingId;
 struct GlobalRequestID;
+class NavigationEntry;
 class NavigationThrottle;
 class NavigationUIData;
 class RenderFrameHost;
@@ -381,6 +382,9 @@ class CONTENT_EXPORT NavigationHandle {
   // document or not. Set only when the navigation commits.
   virtual bool IsSameProcess() = 0;
 
+  // Returns the NavigationEntry associated with this, which may be null.
+  virtual NavigationEntry* GetNavigationEntry() = 0;
+
   // Returns the offset between the indices of the previous last committed and
   // the newly committed navigation entries.
   // (e.g. -1 for back navigations, 0 for reloads, 1 for forward navigations).
@@ -412,6 +416,15 @@ class CONTENT_EXPORT NavigationHandle {
   // Suppress any errors during a navigation and behave as if the user cancelled
   // the navigation: no error page will commit.
   virtual void SetSilentlyIgnoreErrors() = 0;
+
+  // The sandbox flags of the new document created by this navigation. This
+  // function can only be called for cross-document navigations after receiving
+  // the final response.
+  // See also: content/browser/renderer_host/sandbox_flags.md
+  //
+  // TODO(arthursonzogni): After RenderDocument, this can be computed and stored
+  // directly into the RenderDocumentHost.
+  virtual network::mojom::WebSandboxFlags SandboxFlagsToCommit() = 0;
 
   // Testing methods ----------------------------------------------------------
   //

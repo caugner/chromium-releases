@@ -5,16 +5,20 @@
 #import "ios/chrome/browser/ui/settings/safety_check/safety_check_mediator.h"
 
 #include "base/mac/foundation_util.h"
+#import "base/metrics/histogram_functions.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/version.h"
 #include "components/password_manager/core/browser/leak_detection_dialog_utils.h"
+#include "components/password_manager/core/browser/ui/password_check_referrer.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
-#include "components/safe_browsing/core/features.h"
+#include "components/safety_check/safety_check.h"
 #include "components/version_info/version_info.h"
 #include "ios/chrome/browser/application_context.h"
 #import "ios/chrome/browser/omaha/omaha_service.h"
@@ -60,15 +64,20 @@
 #endif
 
 using l10n_util::GetNSString;
-using safe_browsing::kSafeBrowsingAvailableOnIOS;
-
-constexpr char kSafeBrowsingStringURL[] = "chrome://settings/syncSetup";
 
 namespace {
 
+constexpr char kSafetyCheckMetricsUpdates[] =
+    "Settings.SafetyCheck.UpdatesResult";
+constexpr char kSafetyCheckMetricsPasswords[] =
+    "Settings.SafetyCheck.PasswordsResult";
+constexpr char kSafetyCheckMetricsSafeBrowsing[] =
+    "Settings.SafetyCheck.SafeBrowsingResult";
+constexpr char kSafetyCheckInteractions[] = "Settings.SafetyCheck.Interactions";
+
 typedef NSArray<TableViewItem*>* ItemArray;
 
-typedef NS_ENUM(NSInteger, ItemType) {
+typedef NS_ENUM(NSInteger, SafteyCheckItemType) {
   // CheckTypes section.
   UpdateItemType = kItemTypeEnumZero,
   PasswordItemType,
@@ -79,63 +88,13 @@ typedef NS_ENUM(NSInteger, ItemType) {
   TimestampFooterItem,
 };
 
-// Enum with all possible states of the update check.
-typedef NS_ENUM(NSInteger, UpdateCheckRowStates) {
-  // When the user is up to date.
-  UpdateCheckRowStateUpToDate,
-  // When the check has not been run yet.
-  UpdateCheckRowStateDefault,
-  // When the user is out of date.
-  UpdateCheckRowStateOutOfDate,
-  // When the user is managed.
-  UpdateCheckRowStateManaged,
-  // When the check is running.
-  UpdateCheckRowStateRunning,
-  // When Omaha encountered an error.
-  UpdateCheckRowStateOmahaError,
-  // When there is a connectivity issue.
-  UpdateCheckRowStateNetError,
-  // When the device is on a non-supported channel.
-  UpdateCheckRowStateChannel,
-};
-
-// Enum with all possible states of the password check.
-typedef NS_ENUM(NSInteger, PasswordCheckRowStates) {
-  // When no compromised passwords were detected.
-  PasswordCheckRowStateSafe,
-  // When user has compromised passwords.
-  PasswordCheckRowStateUnSafe,
-  // When check has not been run yet.
-  PasswordCheckRowStateDefault,
-  // When password check is running.
-  PasswordCheckRowStateRunning,
-  // When user has no passwords and check can't be performed.
-  PasswordCheckRowStateDisabled,
-  // When password check failed due to network issues, quota limit or others.
-  PasswordCheckRowStateError,
-};
-
-// Enum with all possible states of the Safe Browsing check.
-typedef NS_ENUM(NSInteger, SafeBrowsingCheckRowStates) {
-  // When check was not run yet.
-  SafeBrowsingCheckRowStateDefault,
-  // When Safe Browsing is managed by admin.
-  SafeBrowsingCheckRowStateManaged,
-  // When the Safe Browsing check is running.
-  SafeBrowsingCheckRowStateRunning,
-  // When Safe Browsing is enabled.
-  SafeBrowsingCheckRowStateSafe,
-  // When Safe Browsing is disabled.
-  SafeBrowsingCheckRowStateUnsafe,
-};
-
-// Enum with all possible states of the button to start the check.
-typedef NS_ENUM(NSInteger, CheckStartStates) {
-  // When the check is not running.
-  CheckStartStateDefault,
-  // When the check is running.
-  CheckStartStateCancel,
-};
+// The minimum time each of the three checks should show a running state. This
+// is to prevent any check that finshes quicky from causing the UI to appear
+// jittery. The numbers are all different so that no 2 tests finish at the same
+// time if they all end up using their min delays.
+constexpr double kUpdateRowMinDelay = 2.0;
+constexpr double kPasswordRowMinDelay = 1.5;
+constexpr double kSafeBrowsingRowMinDelay = 1.75;
 
 }  // namespace
 
@@ -209,6 +168,9 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
 
 // Whether or not a safety check just ran.
 @property(nonatomic, assign) BOOL checkDidRun;
+
+// When the check was started.
+@property(nonatomic, assign) base::Time checkStartTime;
 
 @end
 
@@ -315,6 +277,7 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
         [[TableViewTextItem alloc] initWithType:CheckStartItemType];
     _checkStartItem.text = GetNSString(IDS_IOS_CHECK_PASSWORDS_NOW_BUTTON);
     _checkStartItem.textColor = [UIColor colorNamed:kBlueColor];
+    _checkStartItem.accessibilityTraits |= UIAccessibilityTraitButton;
   }
   return self;
 }
@@ -366,7 +329,7 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
 #pragma mark - SafetyCheckServiceDelegate
 
 - (void)didSelectItem:(TableViewItem*)item {
-  ItemType type = static_cast<ItemType>(item.type);
+  SafteyCheckItemType type = static_cast<SafteyCheckItemType>(item.type);
   switch (type) {
     // Few selections are handled here explicitly, but all states are laid out
     // to have one location that shows all actions that are taken from the
@@ -385,6 +348,11 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
         case UpdateCheckRowStateOutOfDate: {  // i tap: Go to app store.
           NSString* updateLocation = [[NSUserDefaults standardUserDefaults]
               stringForKey:kIOSChromeUpgradeURLKey];
+          base::RecordAction(base::UserMetricsAction(
+              "Settings.SafetyCheck.RelaunchAfterUpdates"));
+          base::UmaHistogramEnumeration(
+              kSafetyCheckInteractions,
+              SafetyCheckInteractions::kUpdatesRelaunch);
           [self.handler showUpdateAtLocation:updateLocation];
           break;
         }
@@ -400,6 +368,13 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
         case PasswordCheckRowStateError:     // i tap: Show error popover.
           break;
         case PasswordCheckRowStateUnSafe:  // Go to password issues page.
+          base::RecordAction(
+              base::UserMetricsAction("Settings.SafetyCheck.ManagePasswords"));
+          base::UmaHistogramEnumeration(
+              kSafetyCheckInteractions,
+              SafetyCheckInteractions::kPasswordsManage);
+          password_manager::LogPasswordCheckReferrer(
+              password_manager::PasswordCheckReferrer::kSafetyCheck);
           [self.handler showPasswordIssuesPage];
           break;
       }
@@ -428,8 +403,24 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
   }
 }
 
+- (BOOL)isItemClickable:(TableViewItem*)item {
+  SafteyCheckItemType type = static_cast<SafteyCheckItemType>(item.type);
+  switch (type) {
+    case UpdateItemType:
+      return self.updateCheckRowState == UpdateCheckRowStateOutOfDate;
+    case PasswordItemType:
+      return self.passwordCheckRowState == PasswordCheckRowStateUnSafe;
+    case CheckStartItemType:
+      return YES;
+    case SafeBrowsingItemType:
+    case HeaderItem:
+    case TimestampFooterItem:
+      return NO;
+  }
+}
+
 - (BOOL)isItemWithErrorInfo:(TableViewItem*)item {
-  ItemType type = static_cast<ItemType>(item.type);
+  SafteyCheckItemType type = static_cast<SafteyCheckItemType>(item.type);
   return (type != CheckStartItemType);
 }
 
@@ -448,7 +439,7 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
   }
 
   // If not managed compute error info to show in popover, if available.
-  NSAttributedString* info = [self getPopoverInfoForType:itemType];
+  NSAttributedString* info = [self popoverInfoForType:itemType];
 
   // If |info| is empty there is no popover to display.
   if (!info)
@@ -469,15 +460,16 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
 #pragma mark - Private methods
 
 // Computes the text needed for a popover on |itemType| if available.
-- (NSAttributedString*)getPopoverInfoForType:(NSInteger)itemType {
-  ItemType type = static_cast<ItemType>(itemType);
+- (NSAttributedString*)popoverInfoForType:(NSInteger)itemType {
+  SafteyCheckItemType type = static_cast<SafteyCheckItemType>(itemType);
   switch (type) {
     case PasswordItemType:
       return [self passwordCheckErrorInfo];
     case SafeBrowsingItemType: {
       NSString* message = l10n_util::GetNSString(
           IDS_IOS_SETTINGS_SAFETY_CHECK_SAFE_BROWSING_DISABLED_INFO);
-      GURL safeBrowsingURL(kSafeBrowsingStringURL);
+      GURL safeBrowsingURL(
+          base::SysNSStringToUTF8(kSafeBrowsingSafetyCheckStringURL));
       return [self attributedStringWithText:message link:safeBrowsingURL];
     }
     case UpdateItemType:
@@ -497,27 +489,56 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
       self.currentPasswordCheckState == PasswordCheckState::kRunning;
   self.currentPasswordCheckState = newState;
 
+  BOOL noCompromisedPasswords =
+      self.passwordCheckManager->GetCompromisedCredentials().empty();
+
   switch (self.currentPasswordCheckState) {
     case PasswordCheckState::kRunning:
       return PasswordCheckRowStateRunning;
     case PasswordCheckState::kNoPasswords:
       return PasswordCheckRowStateDefault;
     case PasswordCheckState::kSignedOut:
+      base::UmaHistogramEnumeration(
+          kSafetyCheckMetricsPasswords,
+          safety_check::SafetyCheck::PasswordsStatus::kSignedOut);
+      return noCompromisedPasswords ? PasswordCheckRowStateError
+                                    : PasswordCheckRowStateUnSafe;
     case PasswordCheckState::kOffline:
+      base::UmaHistogramEnumeration(
+          kSafetyCheckMetricsPasswords,
+          safety_check::SafetyCheck::PasswordsStatus::kOffline);
+      return noCompromisedPasswords ? PasswordCheckRowStateError
+                                    : PasswordCheckRowStateUnSafe;
     case PasswordCheckState::kQuotaLimit:
+      base::UmaHistogramEnumeration(
+          kSafetyCheckMetricsPasswords,
+          safety_check::SafetyCheck::PasswordsStatus::kQuotaLimit);
+      return noCompromisedPasswords ? PasswordCheckRowStateError
+                                    : PasswordCheckRowStateUnSafe;
     case PasswordCheckState::kOther:
-      return self.passwordCheckManager->GetCompromisedCredentials().empty()
-                 ? PasswordCheckRowStateError
-                 : PasswordCheckRowStateUnSafe;
+      base::UmaHistogramEnumeration(
+          kSafetyCheckMetricsPasswords,
+          safety_check::SafetyCheck::PasswordsStatus::kError);
+      return noCompromisedPasswords ? PasswordCheckRowStateError
+                                    : PasswordCheckRowStateUnSafe;
     case PasswordCheckState::kCanceled:
     case PasswordCheckState::kIdle: {
-      if (!self.passwordCheckManager->GetCompromisedCredentials().empty()) {
+      if (!noCompromisedPasswords) {
+        base::UmaHistogramEnumeration(
+            kSafetyCheckMetricsPasswords,
+            safety_check::SafetyCheck::PasswordsStatus::kCompromisedExist);
         return PasswordCheckRowStateUnSafe;
       } else if (self.currentPasswordCheckState == PasswordCheckState::kIdle) {
         // Safe state is only possible after the state transitioned from
         // kRunning to kIdle.
-        return (wasRunning) ? PasswordCheckRowStateSafe
-                            : PasswordCheckRowStateDefault;
+        if (wasRunning) {
+          base::UmaHistogramEnumeration(
+              kSafetyCheckMetricsPasswords,
+              safety_check::SafetyCheck::PasswordsStatus::kSafe);
+          return PasswordCheckRowStateSafe;
+        } else {
+          return PasswordCheckRowStateDefault;
+        }
       }
       return PasswordCheckRowStateDefault;
     }
@@ -655,6 +676,7 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
   }
 
   // Otherwise start a check.
+  self.checkStartTime = base::Time::Now();
 
   // Record the current state of the checks.
   self.previousUpdateCheckRowState = self.updateCheckRowState;
@@ -665,6 +687,20 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
   self.updateCheckRowState = UpdateCheckRowStateRunning;
   self.passwordCheckRowState = PasswordCheckRowStateRunning;
   self.safeBrowsingCheckRowState = SafeBrowsingCheckRowStateRunning;
+
+  // Record all running.
+  base::RecordAction(base::UserMetricsAction("Settings.SafetyCheck.Start"));
+  base::UmaHistogramEnumeration(kSafetyCheckInteractions,
+                                SafetyCheckInteractions::kStarted);
+  base::UmaHistogramEnumeration(
+      kSafetyCheckMetricsUpdates,
+      safety_check::SafetyCheck::UpdateStatus::kChecking);
+  base::UmaHistogramEnumeration(
+      kSafetyCheckMetricsPasswords,
+      safety_check::SafetyCheck::PasswordsStatus::kChecking);
+  base::UmaHistogramEnumeration(
+      kSafetyCheckMetricsSafeBrowsing,
+      safety_check::SafetyCheck::SafeBrowsingStatus::kChecking);
 
   // Change checkStartItem to cancel state.
   self.checkStartState = CheckStartStateCancel;
@@ -693,44 +729,46 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
       }
       case version_info::Channel::CANARY:
       case version_info::Channel::UNKNOWN: {
-        // Want to show the loading wheel momentarily.
-        dispatch_after(
-            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.75 * NSEC_PER_SEC)),
-            dispatch_get_main_queue(), ^{
-              // Check if the check was cancelled while waiting.
-              if (self.checksRemaining) {
-                self.updateCheckRowState = UpdateCheckRowStateChannel;
-                [self reconfigureUpdateCheckItem];
-              }
-            });
+        [self possiblyDelayReconfigureUpdateCheckItemWithState:
+                  UpdateCheckRowStateChannel];
         break;
       }
     }
+    __weak __typeof__(self) weakSelf = self;
     // This handles a discrepancy between password check and safety check.  In
     // password check a user cannot start a check if they have no passwords, but
     // in safety check they can, but the |passwordCheckManager| won't even start
     // a check. This if block below allows safety check to push the disabled
     // state after check now is pressed.
     if (self.currentPasswordCheckState == PasswordCheckState::kNoPasswords) {
-      self.passwordCheckRowState = PasswordCheckRowStateDisabled;
       // Want to show the loading wheel momentarily.
       dispatch_after(
-          dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+          dispatch_time(DISPATCH_TIME_NOW,
+                        (int64_t)(kPasswordRowMinDelay * NSEC_PER_SEC)),
           dispatch_get_main_queue(), ^{
-            // Check if the check was cancelled while waiting.
-            if (self.checksRemaining)
-              [self reconfigurePasswordCheckItem];
+            // Check if the check was cancelled while waiting, we do not want to
+            // push a completed state to the UI if the check was cancelled.
+            if (weakSelf.checksRemaining) {
+              weakSelf.passwordCheckRowState = PasswordCheckRowStateDisabled;
+              [weakSelf reconfigurePasswordCheckItem];
+
+              base::UmaHistogramEnumeration(
+                  kSafetyCheckMetricsPasswords,
+                  safety_check::SafetyCheck::PasswordsStatus::kNoPasswords);
+            }
           });
     } else {
       self.passwordCheckManager->StartPasswordCheck();
     }
     // Want to show the loading wheel momentarily.
     dispatch_after(
-        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.75 * NSEC_PER_SEC)),
+        dispatch_time(DISPATCH_TIME_NOW,
+                      (int64_t)(kSafeBrowsingRowMinDelay * NSEC_PER_SEC)),
         dispatch_get_main_queue(), ^{
-          // Check if the check was cancelled while waiting.
-          if (self.checksRemaining)
-            [self checkAndReconfigureSafeBrowsingState];
+          // Check if the check was cancelled while waiting, we do not want to
+          // push a completed state to the UI if the check was cancelled.
+          if (weakSelf.checksRemaining)
+            [weakSelf checkAndReconfigureSafeBrowsingState];
         });
   }
   return;
@@ -749,6 +787,12 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
       (self.passwordCheckRowState == PasswordCheckRowStateUnSafe);
   if (self.checkDidRun && issuesFound) {
     [self updateTimestampOfLastCheck];
+    self.checkDidRun = NO;
+  } else if (self.checkDidRun && !issuesFound) {
+    // Clear the timestamp if the last check found no issues.
+    [[NSUserDefaults standardUserDefaults]
+        setDouble:base::Time().ToDoubleT()
+           forKey:kTimestampOfLastIssueFoundKey];
     self.checkDidRun = NO;
   }
   // If no checks are still running, reset |checkStartItem|.
@@ -776,8 +820,11 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
 - (void)handleUpdateCheckOffline {
   if (self.updateCheckRowState == UpdateCheckRowStateRunning) {
     self.updateCheckRowState = UpdateCheckRowStateNetError;
-
     [self reconfigureUpdateCheckItem];
+
+    base::UmaHistogramEnumeration(
+        kSafetyCheckMetricsUpdates,
+        safety_check::SafetyCheck::UpdateStatus::kFailedOffline);
   }
 }
 
@@ -788,10 +835,42 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
   if (self.updateCheckRowState == UpdateCheckRowStateRunning) {
     self.updateCheckRowState = UpdateCheckRowStateOmahaError;
     [self reconfigureUpdateCheckItem];
+
+    base::UmaHistogramEnumeration(
+        kSafetyCheckMetricsUpdates,
+        safety_check::SafetyCheck::UpdateStatus::kFailed);
   }
   return;
 }
 
+// If the update check would have completed too quickly, making the UI appear
+// jittery, delay the reconfigure call, using |newRowState|.
+- (void)possiblyDelayReconfigureUpdateCheckItemWithState:
+    (UpdateCheckRowStates)newRowState {
+  double secondsSinceStart =
+      base::Time::Now().ToDoubleT() - self.checkStartTime.ToDoubleT();
+  double minDelay = kUpdateRowMinDelay;
+  if (secondsSinceStart < minDelay) {
+    // Want to show the loading wheel for minimum time.
+    __weak __typeof__(self) weakSelf = self;
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW,
+                      (int64_t)((minDelay - secondsSinceStart) * NSEC_PER_SEC)),
+        dispatch_get_main_queue(), ^{
+          // Check if the check was cancelled while waiting, we do not want to
+          // push a completed state to the UI if the check was cancelled.
+          if (weakSelf.checksRemaining) {
+            weakSelf.updateCheckRowState = newRowState;
+            [weakSelf reconfigureUpdateCheckItem];
+          }
+        });
+  } else {
+    self.updateCheckRowState = newRowState;
+    [self reconfigureUpdateCheckItem];
+  }
+}
+
+// Processes the response from the Omaha service.
 - (void)handleOmahaResponse:(const UpgradeRecommendedDetails&)details {
   // If before the response the check was canceled, or Omaha assumed faulty,
   // do nothing.
@@ -799,39 +878,55 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
     return;
   }
 
+  NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+
   if (details.is_up_to_date) {
-    self.updateCheckRowState = UpdateCheckRowStateUpToDate;
+    [self possiblyDelayReconfigureUpdateCheckItemWithState:
+              UpdateCheckRowStateUpToDate];
+    base::UmaHistogramEnumeration(
+        kSafetyCheckMetricsUpdates,
+        safety_check::SafetyCheck::UpdateStatus::kUpdated);
   } else {
     // upgradeURL and next_version are only set if not up to date.
     const GURL& upgradeUrl = details.upgrade_url;
 
     if (!upgradeUrl.is_valid()) {
-      self.updateCheckRowState = UpdateCheckRowStateOmahaError;
-      [self reconfigureUpdateCheckItem];
+      [self possiblyDelayReconfigureUpdateCheckItemWithState:
+                UpdateCheckRowStateOmahaError];
+
+      base::UmaHistogramEnumeration(
+          kSafetyCheckMetricsUpdates,
+          safety_check::SafetyCheck::UpdateStatus::kFailed);
       return;
     }
 
     if (!details.next_version.size() ||
         !base::Version(details.next_version).IsValid()) {
-      self.updateCheckRowState = UpdateCheckRowStateOmahaError;
-      [self reconfigureUpdateCheckItem];
+      [self possiblyDelayReconfigureUpdateCheckItemWithState:
+                UpdateCheckRowStateOmahaError];
+
+      base::UmaHistogramEnumeration(
+          kSafetyCheckMetricsUpdates,
+          safety_check::SafetyCheck::UpdateStatus::kFailed);
       return;
     }
+    [self possiblyDelayReconfigureUpdateCheckItemWithState:
+              UpdateCheckRowStateOutOfDate];
 
-    self.updateCheckRowState = UpdateCheckRowStateOutOfDate;
-    // Valid results, update NSUserDefaults.
-    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    base::UmaHistogramEnumeration(
+        kSafetyCheckMetricsUpdates,
+        safety_check::SafetyCheck::UpdateStatus::kOutdated);
 
+    // Valid results, update all NSUserDefaults.
     [defaults setValue:base::SysUTF8ToNSString(upgradeUrl.spec())
                 forKey:kIOSChromeUpgradeURLKey];
     [defaults setValue:base::SysUTF8ToNSString(details.next_version)
                 forKey:kIOSChromeNextVersionKey];
-    [defaults setBool:details.is_up_to_date forKey:kIOSChromeUpToDateKey];
+
     // Treat the safety check finding the device out of date as if the update
     // infobar was just shown to not overshow the infobar to the user.
     [defaults setObject:[NSDate date] forKey:kLastInfobarDisplayTimeKey];
   }
-  [self reconfigureUpdateCheckItem];
   return;
 }
 
@@ -854,13 +949,24 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
 // Performs the Safe Browsing check and triggers the display update/
 - (void)checkAndReconfigureSafeBrowsingState {
   if (!self.safeBrowsingPreferenceManaged) {
-    self.safeBrowsingCheckRowState = self.safeBrowsingPreference.value
-                                         ? SafeBrowsingCheckRowStateSafe
-                                         : SafeBrowsingCheckRowStateUnsafe;
+    if (self.safeBrowsingPreference.value) {
+      self.safeBrowsingCheckRowState = SafeBrowsingCheckRowStateSafe;
+      base::UmaHistogramEnumeration(
+          kSafetyCheckMetricsSafeBrowsing,
+          safety_check::SafetyCheck::SafeBrowsingStatus::kEnabled);
+    } else {
+      self.safeBrowsingCheckRowState = SafeBrowsingCheckRowStateUnsafe;
+      base::UmaHistogramEnumeration(
+          kSafetyCheckMetricsSafeBrowsing,
+          safety_check::SafetyCheck::SafeBrowsingStatus::kDisabled);
+    }
   }
   if (self.safeBrowsingCheckRowState == SafeBrowsingCheckRowStateUnsafe &&
       self.safeBrowsingPreferenceManaged) {
     self.safeBrowsingCheckRowState = SafeBrowsingCheckRowStateManaged;
+    base::UmaHistogramEnumeration(
+        kSafetyCheckMetricsSafeBrowsing,
+        safety_check::SafetyCheck::SafeBrowsingStatus::kDisabledByAdmin);
   }
 
   [self reconfigureSafeBrowsingCheckItem];
@@ -873,7 +979,6 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
   self.updateCheckItem.enabled = YES;
   self.updateCheckItem.indicatorHidden = YES;
   self.updateCheckItem.infoButtonHidden = YES;
-  self.updateCheckItem.detailText = nil;
   self.updateCheckItem.trailingImage = nil;
   self.updateCheckItem.trailingImageTintColor = nil;
   self.updateCheckItem.accessoryType = UITableViewCellAccessoryNone;
@@ -882,8 +987,11 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
   [self resetsCheckStartItemIfNeeded];
 
   switch (self.updateCheckRowState) {
-    case UpdateCheckRowStateDefault:
+    case UpdateCheckRowStateDefault: {
+      self.updateCheckItem.detailText =
+          GetNSString(IDS_IOS_SETTINGS_SAFETY_CHECK_UPDATES_DESCRIPTION);
       break;
+    }
     case UpdateCheckRowStateRunning: {
       self.updateCheckItem.indicatorHidden = NO;
       break;
@@ -958,7 +1066,6 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
   self.passwordCheckItem.enabled = YES;
   self.passwordCheckItem.indicatorHidden = YES;
   self.passwordCheckItem.infoButtonHidden = YES;
-  self.passwordCheckItem.detailText = nil;
   self.passwordCheckItem.trailingImage = nil;
   self.passwordCheckItem.trailingImageTintColor = nil;
   self.passwordCheckItem.accessoryType = UITableViewCellAccessoryNone;
@@ -967,8 +1074,11 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
   [self resetsCheckStartItemIfNeeded];
 
   switch (self.passwordCheckRowState) {
-    case PasswordCheckRowStateDefault:
+    case PasswordCheckRowStateDefault: {
+      self.passwordCheckItem.detailText =
+          GetNSString(IDS_IOS_SETTINGS_SAFETY_CHECK_PASSWORDS_DESCRIPTION);
       break;
+    }
     case PasswordCheckRowStateRunning: {
       self.passwordCheckItem.indicatorHidden = NO;
       break;
@@ -1018,7 +1128,6 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
   self.safeBrowsingCheckItem.enabled = YES;
   self.safeBrowsingCheckItem.indicatorHidden = YES;
   self.safeBrowsingCheckItem.infoButtonHidden = YES;
-  self.safeBrowsingCheckItem.detailText = nil;
   self.safeBrowsingCheckItem.trailingImage = nil;
   self.safeBrowsingCheckItem.trailingImageTintColor = nil;
   self.safeBrowsingCheckItem.accessoryType = UITableViewCellAccessoryNone;
@@ -1027,8 +1136,11 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
   [self resetsCheckStartItemIfNeeded];
 
   switch (self.safeBrowsingCheckRowState) {
-    case SafeBrowsingCheckRowStateDefault:
+    case SafeBrowsingCheckRowStateDefault: {
+      self.safeBrowsingCheckItem.detailText =
+          GetNSString(IDS_IOS_SETTINGS_SAFETY_CHECK_SAFE_BROWSING_DESCRIPTION);
       break;
+    }
     case SafeBrowsingCheckRowStateRunning: {
       self.safeBrowsingCheckItem.indicatorHidden = NO;
       break;
@@ -1078,7 +1190,7 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
                forKey:kTimestampOfLastIssueFoundKey];
 }
 
-// Shows the timestamp if a safety check has previously found issues.
+// Shows the timestamp if the last safety check found issues.
 - (void)showTimestampIfNeeded {
   if (PreviousSafetyCheckIssueFound()) {
     TableViewLinkHeaderFooterItem* footerItem =
@@ -1087,7 +1199,7 @@ typedef NS_ENUM(NSInteger, CheckStartStates) {
     footerItem.text = [self formatElapsedTimeSinceLastCheck];
     [self.consumer setTimestampFooterItem:footerItem];
   } else {
-    // Hide the timestamp if safety check has never found issues.
+    // Hide the timestamp if the last safety check didn't find issues.
     [self.consumer setTimestampFooterItem:nil];
   }
 }

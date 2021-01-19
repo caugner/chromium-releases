@@ -32,7 +32,7 @@ export let LayoutOptions;
 export let PartialPoint;
 
 /** @typedef {{width: number, height: number}} */
-let Size;
+export let Size;
 
 /** @typedef {{x: number, y: number, width: number, height: number}} */
 let ViewportRect;
@@ -499,6 +499,11 @@ export class Viewport {
   /** @return {number} The current zoom. */
   getZoom() {
     return this.zoomManager_.applyBrowserZoom(this.internalZoom_);
+  }
+
+  /** @return {!Array<number>} The preset zoom factors. */
+  get presetZoomFactors() {
+    return this.presetZoomFactors_;
   }
 
   /** @param {!ZoomManager} manager */

@@ -63,6 +63,16 @@ VisibilityMetricsLogger::GetPerWebViewOpenWebVisibilityHistogram() {
   return *histogram;
 }
 
+base::HistogramBase*
+VisibilityMetricsLogger::GetOpenWebVisibileScreenPortionHistogram() {
+  static NoDestructor<base::HistogramBase*> histogram(
+      CreateHistogramForDurationTracking(
+          "Android.WebView.WebViewOpenWebVisible.ScreenPortion",
+          static_cast<int>(VisibilityMetricsLogger::
+                               WebViewOpenWebScreenPortion::kMaxValue)));
+  return *histogram;
+}
+
 VisibilityMetricsLogger::VisibilityMetricsLogger() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   last_update_time_ = base::TimeTicks::Now();
@@ -99,6 +109,22 @@ void VisibilityMetricsLogger::ClientVisibilityChanged(Client* client) {
   ProcessClientUpdate(client, client->GetVisibilityInfo());
 }
 
+void VisibilityMetricsLogger::UpdateOpenWebScreenArea(int pixels,
+                                                      int percentage) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  UpdateDurations(base::TimeTicks::Now());
+
+  open_web_screen_area_pixels_ = pixels;
+  open_web_screen_area_percentage_ = percentage;
+
+  DCHECK(percentage >= 0);
+  DCHECK(percentage <= 100);
+  current_open_web_screen_portion_ =
+      static_cast<VisibilityMetricsLogger::WebViewOpenWebScreenPortion>(
+          percentage / 10);
+}
+
 void VisibilityMetricsLogger::UpdateDurations(base::TimeTicks update_time) {
   base::TimeDelta delta = update_time - last_update_time_;
   if (visible_client_count_ > 0) {
@@ -123,28 +149,36 @@ void VisibilityMetricsLogger::UpdateDurations(base::TimeTicks update_time) {
   webcontent_visible_tracker_.per_webview_untracked_duration_ +=
       delta * (client_visibility_.size() - visible_webcontent_client_count_);
 
+  open_web_screen_portion_tracked_duration_[static_cast<int>(
+      current_open_web_screen_portion_)] += delta;
+
   last_update_time_ = update_time;
 }
 
-bool VisibilityMetricsLogger::IsVisible(const VisibilityInfo& info) {
-  return info.view_attached && info.view_visible && info.window_visible;
+bool VisibilityMetricsLogger::VisibilityInfo::IsVisible() const {
+  return view_attached && view_visible && window_visible;
 }
 
-bool VisibilityMetricsLogger::IsDisplayingOpenWebContent(
-    const VisibilityInfo& info) {
-  return info.scheme_http_or_https;
+bool VisibilityMetricsLogger::VisibilityInfo::ContainsOpenWebContent() const {
+  return scheme_http_or_https;
+}
+
+bool VisibilityMetricsLogger::VisibilityInfo::IsDisplayingOpenWebContent()
+    const {
+  return IsVisible() && ContainsOpenWebContent();
 }
 
 void VisibilityMetricsLogger::ProcessClientUpdate(Client* client,
                                                   const VisibilityInfo& info) {
   VisibilityInfo curr_info = client_visibility_[client];
-  bool was_visible = IsVisible(curr_info);
-  bool is_visible = IsVisible(info);
-  bool was_visible_web =
-      IsVisible(curr_info) && IsDisplayingOpenWebContent(curr_info);
-  bool is_visible_web = IsVisible(info) && IsDisplayingOpenWebContent(info);
+  bool was_visible = curr_info.IsVisible();
+  bool is_visible = info.IsVisible();
+  bool was_visible_web = curr_info.IsDisplayingOpenWebContent();
+  bool is_visible_web = info.IsDisplayingOpenWebContent();
   client_visibility_[client] = info;
   DCHECK(!was_visible || visible_client_count_ > 0);
+
+  bool any_client_was_visible = visible_client_count_ > 0;
 
   if (!was_visible && is_visible) {
     ++visible_client_count_;
@@ -157,6 +191,18 @@ void VisibilityMetricsLogger::ProcessClientUpdate(Client* client,
   } else if (was_visible_web && !is_visible_web) {
     --visible_webcontent_client_count_;
   }
+
+  bool any_client_is_visible = visible_client_count_ > 0;
+  if (on_visibility_changed_callback_ &&
+      any_client_was_visible != any_client_is_visible) {
+    on_visibility_changed_callback_.Run(any_client_is_visible);
+  }
+}
+
+void VisibilityMetricsLogger::SetOnVisibilityChangedCallback(
+    OnVisibilityChangedCallback callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  on_visibility_changed_callback_ = std::move(callback);
 }
 
 void VisibilityMetricsLogger::RecordMetrics() {
@@ -164,6 +210,7 @@ void VisibilityMetricsLogger::RecordMetrics() {
   UpdateDurations(base::TimeTicks::Now());
   RecordVisibilityMetrics();
   RecordOpenWebDisplayMetrics();
+  RecordScreenPortionMetrics();
 }
 
 void VisibilityMetricsLogger::RecordVisibilityMetrics() {
@@ -254,6 +301,20 @@ void VisibilityMetricsLogger::RecordOpenWebDisplayMetrics() {
     GetPerWebViewOpenWebVisibilityHistogram()->AddCount(
         static_cast<int>(WebViewOpenWebVisibility::kNotDisplayOpenWebContent),
         total_not_webcontent_or_not_visible_seconds);
+  }
+}
+
+void VisibilityMetricsLogger::RecordScreenPortionMetrics() {
+  for (int i = 0; i < static_cast<int>(WebViewOpenWebScreenPortion::kMaxValue);
+       i++) {
+    int32_t elapsed_seconds =
+        open_web_screen_portion_tracked_duration_[i].InSeconds();
+    if (elapsed_seconds == 0)
+      continue;
+
+    open_web_screen_portion_tracked_duration_[i] -=
+        base::TimeDelta::FromSeconds(elapsed_seconds);
+    GetOpenWebVisibileScreenPortionHistogram()->AddCount(i, elapsed_seconds);
   }
 }
 

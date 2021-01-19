@@ -45,8 +45,8 @@ apps::PickerEntryType GetPickerEntryType(apps::mojom::AppType app_type) {
     case apps::mojom::AppType::kWeb:
       picker_entry_type = apps::PickerEntryType::kWeb;
       break;
-    case apps::mojom::AppType::kMacNative:
-      picker_entry_type = apps::PickerEntryType::kMacNative;
+    case apps::mojom::AppType::kMacOs:
+      picker_entry_type = apps::PickerEntryType::kMacOs;
       break;
   }
   return picker_entry_type;
@@ -63,6 +63,12 @@ CommonAppsNavigationThrottle::MaybeCreate(content::NavigationHandle* handle) {
     return nullptr;
 
   content::WebContents* web_contents = handle->GetWebContents();
+
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+
+  if (!AppServiceProxyFactory::IsAppServiceAvailableForProfile(profile))
+    return nullptr;
 
   if (!apps::AppsNavigationThrottle::CanCreate(web_contents))
     return nullptr;
@@ -272,6 +278,11 @@ bool CommonAppsNavigationThrottle::ShouldCancelNavigation(
                           /*prefer_container=*/true),
             url, launch_source, display::kDefaultDisplayId);
         CloseOrGoBack(web_contents);
+        apps::IntentHandlingMetrics::RecordIntentPickerUserInteractionMetrics(
+            /*selected_app_package=*/preferred_app_id.value(),
+            GetPickerEntryType(app_type),
+            apps::IntentPickerCloseReason::PREFERRED_APP_FOUND,
+            apps::Source::kHttpOrHttps, /*should_persist=*/false);
         return true;
       }
     }
@@ -288,6 +299,10 @@ void CommonAppsNavigationThrottle::ShowIntentPickerForApps(
   if (apps.empty()) {
     IntentPickerTabHelper::SetShouldShowIcon(web_contents, false);
     ui_displayed_ = false;
+    apps::IntentHandlingMetrics::RecordIntentPickerUserInteractionMetrics(
+        /*selected_app_package=*/std::string(), apps::PickerEntryType::kUnknown,
+        apps::IntentPickerCloseReason::ERROR_BEFORE_PICKER,
+        apps::Source::kHttpOrHttps, /*should_persist=*/false);
     return;
   }
 
@@ -309,9 +324,6 @@ bool CommonAppsNavigationThrottle::ShouldAutoDisplayUi(
     const std::vector<apps::IntentPickerAppInfo>& apps_for_picker,
     content::WebContents* web_contents,
     const GURL& url) {
-  if (apps_for_picker.empty())
-    return false;
-
   // On devices with tablet form factor we should not pop out the intent
   // picker if Chrome has been chosen by the user as the platform for this URL.
   if (chromeos::switches::IsTabletFormFactor()) {
@@ -342,12 +354,17 @@ bool CommonAppsNavigationThrottle::ShouldAutoDisplayUi(
     auto preferred_app_id = proxy->PreferredApps().FindPreferredAppForUrl(url);
     if (preferred_app_id.has_value() &&
         preferred_app_id.value() == kUseBrowserForLink) {
+      apps::IntentHandlingMetrics::RecordIntentPickerUserInteractionMetrics(
+          /*selected_app_package=*/preferred_app_id.value(),
+          apps::PickerEntryType::kUnknown,
+          apps::IntentPickerCloseReason::PREFERRED_APP_FOUND,
+          apps::Source::kHttpOrHttps, /*should_persist=*/false);
       return false;
     }
   }
 
-  DCHECK(ui_auto_display_service_);
-  return ui_auto_display_service_->ShouldAutoDisplayUi(url);
+  return AppsNavigationThrottle::ShouldAutoDisplayUi(apps_for_picker,
+                                                     web_contents, url);
 }
 
 }  // namespace apps

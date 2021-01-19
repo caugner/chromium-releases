@@ -196,10 +196,11 @@ void NGFragmentItemsBuilder::AddListMarker(
 
 NGFragmentItemsBuilder::AddPreviousItemsResult
 NGFragmentItemsBuilder::AddPreviousItems(
+    const NGPhysicalBoxFragment& container,
     const NGFragmentItems& items,
-    const PhysicalSize& container_size,
     NGBoxFragmentBuilder* container_builder,
-    const NGFragmentItem* end_item) {
+    const NGFragmentItem* end_item,
+    wtf_size_t max_lines) {
   if (end_item) {
     DCHECK(node_);
     DCHECK(container_builder);
@@ -227,7 +228,7 @@ NGFragmentItemsBuilder::AddPreviousItems(
   // This is needed because the container size may be different, in that case,
   // the physical offsets are different when `writing-mode: vertial-rl`.
   DCHECK(!is_converted_to_physical_);
-  const WritingModeConverter converter(GetWritingDirection(), container_size);
+  const WritingModeConverter converter(GetWritingDirection(), container.Size());
   const WritingMode writing_mode = GetWritingMode();
   WritingModeConverter line_converter(
       {ToLineWritingMode(writing_mode), TextDirection::kLtr});
@@ -235,8 +236,9 @@ NGFragmentItemsBuilder::AddPreviousItems(
   const NGInlineBreakToken* last_break_token = nullptr;
   const NGInlineItemsData* items_data = nullptr;
   LayoutUnit used_block_size;
+  wtf_size_t line_count = 0;
 
-  for (NGInlineCursor cursor(items); cursor;) {
+  for (NGInlineCursor cursor(container, items); cursor;) {
     DCHECK(cursor.Current().Item());
     const NGFragmentItem& item = *cursor.Current().Item();
     if (&item == end_item)
@@ -286,6 +288,8 @@ NGFragmentItemsBuilder::AddPreviousItems(
                 line_child.Size()),
             line_child);
       }
+      if (++line_count == max_lines)
+        break;
       cursor.MoveToNextSkippingChildren();
       continue;
     }
@@ -299,7 +303,10 @@ NGFragmentItemsBuilder::AddPreviousItems(
 
   if (end_item && last_break_token) {
     DCHECK(!last_break_token->IsFinished());
-    return AddPreviousItemsResult{last_break_token, used_block_size, true};
+    DCHECK_GT(line_count, 0u);
+    DCHECK(!max_lines || line_count <= max_lines);
+    return AddPreviousItemsResult{last_break_token, used_block_size, line_count,
+                                  true};
   }
   return AddPreviousItemsResult();
 }
@@ -358,6 +365,19 @@ base::Optional<LogicalOffset> NGFragmentItemsBuilder::LogicalOffsetFor(
       return item.offset;
   }
   return base::nullopt;
+}
+
+void NGFragmentItemsBuilder::MoveChildrenInBlockDirection(LayoutUnit delta) {
+  DCHECK(!is_converted_to_physical_);
+  for (ItemWithOffset* iter = items_.begin(); iter != items_.end(); ++iter) {
+    if (iter->item->Type() == NGFragmentItem::kLine) {
+      iter->offset.block_offset += delta;
+      std::advance(iter, iter->item->DescendantsCount() - 1);
+      DCHECK_LE(iter, items_.end());
+      continue;
+    }
+    iter->offset.block_offset += delta;
+  }
 }
 
 void NGFragmentItemsBuilder::ToFragmentItems(const PhysicalSize& outer_size,

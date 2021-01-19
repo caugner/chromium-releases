@@ -30,11 +30,11 @@ import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.share.share_sheet.ShareSheetPropertyModelBuilder.ContentType;
-import org.chromium.chrome.browser.ui.favicon.IconType;
-import org.chromium.chrome.browser.ui.favicon.LargeIconBridge;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetContent;
 import org.chromium.components.browser_ui.share.ShareParams;
 import org.chromium.components.browser_ui.widget.RoundedCornerImageView;
+import org.chromium.components.favicon.IconType;
+import org.chromium.components.favicon.LargeIconBridge;
 import org.chromium.components.url_formatter.UrlFormatter;
 import org.chromium.ui.modelutil.LayoutViewBuilder;
 import org.chromium.ui.modelutil.MVCListAdapter.ListItem;
@@ -172,7 +172,8 @@ class ShareSheetBottomSheetContent implements BottomSheetContent, OnItemClickLis
         } else if (contentTypes.size() == 1
                 && (contentTypes.contains(ContentType.HIGHLIGHTED_TEXT)
                         || contentTypes.contains(ContentType.TEXT))) {
-            setDefaultIconForPreview(AppCompatResources.getDrawable(mContext, R.drawable.text));
+            setDefaultIconForPreview(
+                    AppCompatResources.getDrawable(mContext, R.drawable.text_icon));
             title = "";
             subtitle = mParams.getText();
             setSubtitleMaxLines(2);
@@ -263,6 +264,7 @@ class ShareSheetBottomSheetContent implements BottomSheetContent, OnItemClickLis
         if (icon == null) {
             setDefaultIconForPreview(
                     AppCompatResources.getDrawable(mContext, R.drawable.generic_favicon));
+            RecordUserAction.record("SharingHubAndroid.GenericFaviconShown");
         } else {
             int size = mContext.getResources().getDimensionPixelSize(
                     R.dimen.sharing_hub_preview_inner_icon_size);
@@ -270,6 +272,7 @@ class ShareSheetBottomSheetContent implements BottomSheetContent, OnItemClickLis
             ImageView imageView = this.getContentView().findViewById(R.id.image_preview);
             imageView.setImageBitmap(scaledIcon);
             centerIcon(imageView);
+            RecordUserAction.record("SharingHubAndroid.LinkFaviconShown");
         }
     }
 

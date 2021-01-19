@@ -23,6 +23,7 @@
 <translation id="1450753235335490080">Delingen af <ph name="CONTENT_TYPE" /> mislykkedes</translation>
 <translation id="1487931858675166540"><ph name="FIRST_ITEM_TITLE" /> blev udskiftet med <ph name="SECOND_ITEM_TITLE" /></translation>
 <translation id="1498028757988366001">Du har tidligere søgt efter dette. Hvis du sletter "<ph name="QUERY" />" fra din historik, fjernes den permanent på fra din konto på alle dine enheder.</translation>
+<translation id="1510238584712386396">Appliste</translation>
 <translation id="1591184457164800433">{MINUTES,plural, =1{1 minut og }one{# minutter og }other{# minutter og }}</translation>
 <translation id="1643823602425662293">Notifikation</translation>
 <translation id="169515659049020177">Shift</translation>
@@ -99,6 +100,7 @@
 <translation id="3600969208114796418"><ph name="SAVEAS_EXTENSION_TYPE" />-fil</translation>
 <translation id="3608915363409716668"><ph name="MAXIMUM_VALUE" />+</translation>
 <translation id="3618849550573277856">Slå "<ph name="LOOKUP_STRING" />" op</translation>
+<translation id="3622035490309591977">Historik for udklipsholder</translation>
 <translation id="364720409959344976">Vælg den mappe, der skal uploades</translation>
 <translation id="3660179305079774227">Pil opad</translation>
 <translation id="3670030362669914947">Nummer</translation>
@@ -134,6 +136,7 @@
 <translation id="520299402983819650"><ph name="QUANTITY" /> PB</translation>
 <translation id="5266161281976477809">Trekant til at vise eller skjule indhold</translation>
 <translation id="5278860589123563674">Afsendelsen mislykkedes</translation>
+<translation id="5283099933536931082"><ph name="APP_ITEM_TITLE" /> kræver din opmærksomhed.</translation>
 <translation id="528468243742722775">Afslut</translation>
 <translation id="5329858601952122676">&amp;Slet</translation>
 <translation id="5395308026110844773"><ph name="DRAGGED_APP_NAME" /> oven på <ph name="IN_PLACE_APP" />, slip for at oprette mappe.</translation>
@@ -144,11 +147,13 @@
 <translation id="5574202486608032840"><ph name="IDS_SHORT_PRODUCT_OS_NAME" />-system</translation>
 <translation id="5583640892426849032">Returtast</translation>
 <translation id="5613020302032141669">Venstrepil</translation>
+<translation id="5652575806481723716"><ph name="FOCUSED_APP_NAME" /> kræver din opmærksomhed.</translation>
 <translation id="5675363643668471212">Hyldeelement</translation>
 <translation id="5754277640426581776">{MINUTES,plural, =1{1 min.}one{# min.}other{# min.}}</translation>
 <translation id="5763338081255973061">{DAYS,plural, =0{Aktiv i dag}=1{Aktiv for 1 dag siden}one{Aktiv for # dag siden}other{Aktiv for # dage siden}}</translation>
 <translation id="5768079895599174203">{DAYS,plural, =1{1 dag og }one{# dage og }other{# dage og }}</translation>
 <translation id="5789643057113097023">.</translation>
+<translation id="5843690142429128814">Billede.</translation>
 <translation id="5866104238061687188">{YEARS,plural, =1{om 1 år}one{om # år}other{om # år}}</translation>
 <translation id="588258955323874662">Fuld skærm</translation>
 <translation id="5906667377645263094">{SECONDS,plural, =1{1 sekund tilbage}one{# sekunder tilbage}other{# sekunder tilbage}}</translation>
@@ -175,7 +180,7 @@
 <translation id="6430678249303439055">Bloker alle notifikationer fra denne app</translation>
 <translation id="6483402905448010557">{SECONDS,plural, =1{For 1 sekund siden}one{For # sekund siden}other{For # sekunder siden}}</translation>
 <translation id="6503257047630241175">RTF-indhold</translation>
-<translation id="6539092367496845964">Der opstod en fejl. Prøv igen senere.</translation>
+<translation id="6539092367496845964">Noget gik galt. Prøv igen senere.</translation>
 <translation id="654149438358937226">Bloker alle notifikationer</translation>
 <translation id="6567071839949112727">klik på overordnet element</translation>
 <translation id="6578407462441924264">Uden navn</translation>
@@ -189,6 +194,7 @@
 <translation id="6845533974506654842">tryk</translation>
 <translation id="6863590663815976734">{HOURS,plural, =1{1 time tilbage}one{# timer tilbage}other{# timer tilbage}}</translation>
 <translation id="688711909580084195">Unavngivet webside</translation>
+<translation id="6902419395050653510">HTML-indhold.</translation>
 <translation id="6907759265145635167"><ph name="QUANTITY" /> PB/sek.</translation>
 <translation id="6917971086528278418">{YEARS,plural, =1{Der er 1 år tilbage}one{Der er # år tilbage}other{Der er # år tilbage}}</translation>
 <translation id="6945221475159498467">Vælg</translation>

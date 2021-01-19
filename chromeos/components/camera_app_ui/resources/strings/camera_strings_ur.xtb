@@ -3,6 +3,7 @@
 <translationbundle lang="ur">
 <translation id="1276998909102132017">گیلری کی تصاویر</translation>
 <translation id="1430915738399379752">پرنٹ کریں</translation>
+<translation id="1473110567575736769">3 سیکنڈ کا ٹائمر</translation>
 <translation id="1620510694547887537">کیمرا</translation>
 <translation id="1627744224761163218">‎4 x 4</translation>
 <translation id="1664224225747386870">کچھ بھی ریکارڈ نہیں ہوا</translation>
@@ -29,7 +30,9 @@
 <translation id="3259149966178251584">کیمرہ ریزولیوشن</translation>
 <translation id="3517926952904427380">پورٹریٹ تصویر لینے سے قاصر</translation>
 <translation id="3569311554794739032">کیا آپ واقعی <ph name="FILE" /> کو ہٹانا چاہتے ہیں؟</translation>
+<translation id="3750315947605636967">کوئی دوسری ایپ آپ کا کیمرا استعمال کر رہی ہے</translation>
 <translation id="3810838688059735925">ویڈیو</translation>
+<translation id="4000398125663085899">نئی تصاویر اور ویڈیوز کو فائلز ایپ میں ایک فولڈر میں محفوظ کیا جائے گا: میری فائلیں &gt; کیمرا۔</translation>
 <translation id="4118525110028899586">ریکارڈنگ موقوف کریں</translation>
 <translation id="4279490309300973883">مررنگ</translation>
 <translation id="4329152592498422850">مربع تصویر لینے کی وضع پر سوئچ کریں</translation>
@@ -58,11 +61,11 @@
 اگر آپ کے تاثرات تصویر یا ویڈیو کے معیار کے بارے میں ہیں تو براہ کرم نمونہ کی تصویر یا ویڈیو منسلک کریں اور وضاحت کریں کہ کیا غلط ہے۔ (مثال کے طور پر، تصویر بہت گہری ہے یا مضمون فوکس میں نہیں ہے۔)</translation>
 <translation id="6420689864531458495">‏‎(<ph name="ASPECT_RATIO_WIDTH" />:<ph name="ASPECT_RATIO_HEIGHT" /> - <ph name="WIDTH" />x<ph name="HEIGHT" />)‎ <ph name="MEGAPIXEL" /> میگا پکسل</translation>
 <translation id="6681668084120808868">تصویر لیں</translation>
-<translation id="6739700533200816396">اب تصاویر اور ویڈیوز کو فائلز ایپ میں ایک نئے فولڈر میں محفوظ کیا جائے گا: میری فائلیں &gt; کیمرا۔ پچھلی تصاویر اور ویڈیوز نئے فولڈر میں منتقل نہیں ہوں گی۔</translation>
 <translation id="6778482348691154169">تصویر لینے سے قاصر</translation>
 <translation id="6965382102122355670">ٹھیک ہے</translation>
 <translation id="698156982839284926">3 سیکنڈ</translation>
 <translation id="712848772518857951">کیا آپ واقعی <ph name="COUNT" /> آئٹمز ہٹانا چاہتے ہیں؟</translation>
+<translation id="7134221860976209830">10 سیکنڈ کا ٹائمر</translation>
 <translation id="7243947652761655814">ویڈیو ریزولیوشن</translation>
 <translation id="7337660886763914220">فائل سسٹم کی خرابیاں۔</translation>
 <translation id="7557677699350329807">اگلے کیمرے پر سوئچ کريں</translation>
@@ -70,7 +73,6 @@
 <translation id="7649070708921625228">مدد</translation>
 <translation id="7658239707568436148">منسوخ کریں</translation>
 <translation id="7670511624014457267">60 FPS</translation>
-<translation id="8049189770492311300">ٹائمر</translation>
 <translation id="8067883171444229417">ویڈیو چلائیں</translation>
 <translation id="8131740175452115882">تصدیق کریں</translation>
 <translation id="8145038249676204903">تصویر لینے کی وضع پر سوئچ کریں</translation>

@@ -20,6 +20,7 @@
 #include "chrome/browser/chromeos/printing/enterprise_printers_provider.h"
 #include "chrome/browser/chromeos/printing/ppd_provider_factory.h"
 #include "chrome/browser/chromeos/printing/ppd_resolution_tracker.h"
+#include "chrome/browser/chromeos/printing/print_servers_policy_provider.h"
 #include "chrome/browser/chromeos/printing/print_servers_provider.h"
 #include "chrome/browser/chromeos/printing/printer_configurer.h"
 #include "chrome/browser/chromeos/printing/printer_event_tracker.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/chromeos/printing/printer_info.h"
 #include "chrome/browser/chromeos/printing/printers_map.h"
 #include "chrome/browser/chromeos/printing/server_printers_provider.h"
-#include "chrome/browser/chromeos/printing/server_printers_provider_factory.h"
 #include "chrome/browser/chromeos/printing/synced_printers_manager.h"
 #include "chrome/browser/chromeos/printing/synced_printers_manager_factory.h"
 #include "chrome/browser/chromeos/printing/usb_printer_detector.h"
@@ -77,7 +77,8 @@ class CupsPrintersManagerImpl
       std::unique_ptr<PrinterConfigurer> printer_configurer,
       std::unique_ptr<UsbPrinterNotificationController>
           usb_notification_controller,
-      ServerPrintersProvider* server_printers_provider,
+      std::unique_ptr<PrintServersPolicyProvider> print_servers_provider,
+      std::unique_ptr<ServerPrintersProvider> server_printers_provider,
       std::unique_ptr<EnterprisePrintersProvider> enterprise_printers_provider,
       PrinterEventTracker* event_tracker,
       PrefService* pref_service)
@@ -90,7 +91,8 @@ class CupsPrintersManagerImpl
         auto_usb_printer_configurer_(std::move(printer_configurer),
                                      this,
                                      usb_notification_controller_.get()),
-        server_printers_provider_(server_printers_provider),
+        print_servers_provider_(std::move(print_servers_provider)),
+        server_printers_provider_(std::move(server_printers_provider)),
         enterprise_printers_provider_(std::move(enterprise_printers_provider)),
         enterprise_printers_provider_observer_(this),
         event_tracker_(event_tracker) {
@@ -125,6 +127,9 @@ class CupsPrintersManagerImpl
                             weak_ptr_factory_.GetWeakPtr(), kZeroconfDetector));
     OnPrintersFound(kZeroconfDetector, zeroconf_detector_->GetPrinters());
 
+    print_servers_provider_->SetListener(
+        base::BindRepeating(&CupsPrintersManagerImpl::OnPrintServersUpdated,
+                            weak_ptr_factory_.GetWeakPtr()));
     server_printers_provider_->RegisterPrintersFoundCallback(
         base::BindRepeating(&CupsPrintersManagerImpl::OnPrintersUpdated,
                             weak_ptr_factory_.GetWeakPtr()));
@@ -174,6 +179,7 @@ class CupsPrintersManagerImpl
   // Public API function.
   void RemoveSavedPrinter(const std::string& printer_id) override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_);
+    installed_printer_fingerprints_.erase(printer_id);
     auto existing = synced_printers_manager_->GetPrinter(printer_id);
     if (existing) {
       event_tracker_->RecordPrinterRemoved(*existing);
@@ -263,11 +269,23 @@ class CupsPrintersManagerImpl
   void OnActiveNetworksChanged(
       std::vector<chromeos::network_config::mojom::NetworkStatePropertiesPtr>
           networks) override {
+    if (!HasNetworkDisconnected(networks)) {
+      // We only update the discovered list if we disconnected from our previous
+      // default network.
+      return;
+    }
+
+    PRINTER_LOG(DEBUG) << "Network change.  Refresh printers list.";
+
     // Clear the network detected printers when the active network changes.
     // This ensures that connecting to a new network will give us only newly
     // detected printers.
     ClearNetworkDetectedPrinters();
+
+    // Notify observers that the printer list has changed.
+    RebuildDetectedLists();
   }
+
   void OnNetworkStateChanged(
       chromeos::network_config::mojom::NetworkStatePropertiesPtr /* network */)
       override {}
@@ -450,6 +468,68 @@ class CupsPrintersManagerImpl
     }
   }
 
+  void OnPrintServersUpdated(bool is_complete,
+                             std::map<GURL, PrintServer> print_servers,
+                             ServerPrintersFetchingMode fetching_mode) {
+    fetching_mode_ = fetching_mode;
+    if (!is_complete) {
+      return;
+    }
+
+    print_servers_ = std::map<std::string, PrintServer>();
+    for (const auto& server_pair : print_servers) {
+      const PrintServer& server = server_pair.second;
+      print_servers_.value().emplace(server.GetId(), server);
+    }
+
+    if (fetching_mode_ == ServerPrintersFetchingMode::kSingleServerOnly) {
+      // If the previously selected print server is unavailable, set to the
+      // first print server in the list, or set to none if there are no print
+      // servers.
+      auto& servers = print_servers_.value();
+      if (!selected_print_server_id_.has_value() ||
+          !ChoosePrintServer(selected_print_server_id_)) {
+        auto first_id =
+            servers.empty()
+                ? base::nullopt
+                : base::make_optional(servers.begin()->second.GetId());
+        ChoosePrintServer(first_id);
+      }
+    } else {
+      selected_print_server_id_ = base::nullopt;
+      server_printers_provider_->OnServersChanged(true, print_servers);
+    }
+  }
+
+  // Public API function.
+  bool ChoosePrintServer(
+      const base::Optional<std::string>& selected_print_server_id) override {
+    if (fetching_mode_ != ServerPrintersFetchingMode::kSingleServerOnly ||
+        !print_servers_.has_value()) {
+      return false;
+    }
+
+    std::map<GURL, PrintServer> selected_print_servers;
+    if (selected_print_server_id.has_value()) {
+      auto iter = print_servers_.value().find(selected_print_server_id.value());
+      if (iter != print_servers_.value().end()) {
+        const PrintServer& server = iter->second;
+        selected_print_servers.emplace(server.GetUrl(), server);
+      } else {
+        // A selected value was given that is not available
+        return false;
+      }
+    }
+    selected_print_server_id_ = selected_print_server_id;
+    server_printers_provider_->OnServersChanged(true, selected_print_servers);
+    return true;
+  }
+
+  // Public API function.
+  ServerPrintersFetchingMode GetServerPrintersFetchingMode() const override {
+    return fetching_mode_;
+  }
+
  private:
   base::Optional<Printer> GetEnterprisePrinter(const std::string& id) const {
     return printers_.Get(PrinterClass::kEnterprise, id);
@@ -464,9 +544,13 @@ class CupsPrintersManagerImpl
 
   // Notify observers on the given classes the the relevant lists have changed.
   void NotifyObservers(const std::vector<PrinterClass>& printer_classes) {
-    for (auto& observer : observer_list_) {
-      for (auto printer_class : printer_classes) {
-        observer.OnPrintersChanged(printer_class, printers_.Get(printer_class));
+    for (auto printer_class : printer_classes) {
+      auto printers = printers_.Get(printer_class);
+      PRINTER_LOG(DEBUG) << "Sending notification for " << printers.size()
+                         << " printers in class (" << ToString(printer_class)
+                         << ")";
+      for (auto& observer : observer_list_) {
+        observer.OnPrintersChanged(printer_class, printers);
       }
     }
   }
@@ -596,6 +680,33 @@ class CupsPrintersManagerImpl
     }
   }
 
+  // Returns true if we've disconnected from our current network. Updates
+  // the current active network. This method is not reentrant.
+  bool HasNetworkDisconnected(
+      const std::vector<
+          chromeos::network_config::mojom::NetworkStatePropertiesPtr>&
+          networks) {
+    // An empty current_network indicates that we're not connected to a valid
+    // network right now.
+    std::string current_network;
+    if (!networks.empty()) {
+      // The first network is the default network which receives mDNS
+      // multicasts.
+      current_network = networks.front()->guid;
+    }
+
+    // If we attach to a network after being disconnected, we do not want to
+    // forcibly clear our detected list.  It is either already empty or contains
+    // valid entries because we missed the original connection event.
+    bool network_disconnected =
+        !active_network_.empty() && current_network != active_network_;
+
+    // Ensure that we don't register network state updates as network changes.
+    active_network_ = std::move(current_network);
+
+    return network_disconnected;
+  }
+
   // Record in UMA the appropriate event with a setup attempt for a printer is
   // abandoned.
   void RecordSetupAbandoned(const Printer& printer) override {
@@ -652,6 +763,7 @@ class CupsPrintersManagerImpl
 
   // Resets all network detected printer lists.
   void ClearNetworkDetectedPrinters() {
+    PRINTER_LOG(DEBUG) << "Clear network printers";
     zeroconf_detections_.clear();
 
     ResetNearbyPrintersLists();
@@ -684,8 +796,16 @@ class CupsPrintersManagerImpl
 
   AutomaticUsbPrinterConfigurer auto_usb_printer_configurer_;
 
-  // Not owned.
-  ServerPrintersProvider* server_printers_provider_;
+  std::unique_ptr<PrintServersPolicyProvider> print_servers_provider_;
+
+  // The print server ID that is the current selection, if any.
+  base::Optional<std::string> selected_print_server_id_;
+
+  ServerPrintersFetchingMode fetching_mode_;
+
+  base::Optional<std::map<std::string, PrintServer>> print_servers_;
+
+  std::unique_ptr<ServerPrintersProvider> server_printers_provider_;
 
   std::unique_ptr<EnterprisePrintersProvider> enterprise_printers_provider_;
   ScopedObserver<EnterprisePrintersProvider,
@@ -701,6 +821,9 @@ class CupsPrintersManagerImpl
   // Equals true if the list of enterprise printers and related policies
   // is initialized and configured correctly.
   bool enterprise_printers_are_ready_ = false;
+
+  // GUID of the current default network.
+  std::string active_network_;
 
   // Tracks PpdReference resolution. Also stores USB manufacturer string if
   // available.
@@ -733,8 +856,8 @@ std::unique_ptr<CupsPrintersManager> CupsPrintersManager::Create(
       UsbPrinterDetector::Create(), ZeroconfPrinterDetector::Create(),
       CreatePpdProvider(profile), PrinterConfigurer::Create(profile),
       UsbPrinterNotificationController::Create(profile),
-      ServerPrintersProviderFactory::GetInstance()->GetForBrowserContext(
-          profile),
+      PrintServersPolicyProvider::Create(profile),
+      ServerPrintersProvider::Create(),
       EnterprisePrintersProvider::Create(CrosSettings::Get(), profile),
       PrinterEventTrackerFactory::GetInstance()->GetForBrowserContext(profile),
       profile->GetPrefs());
@@ -749,7 +872,8 @@ std::unique_ptr<CupsPrintersManager> CupsPrintersManager::CreateForTesting(
     std::unique_ptr<PrinterConfigurer> printer_configurer,
     std::unique_ptr<UsbPrinterNotificationController>
         usb_notification_controller,
-    ServerPrintersProvider* server_printers_provider,
+    std::unique_ptr<ServerPrintersProvider> server_printers_provider,
+    std::unique_ptr<PrintServersPolicyProvider> print_servers_provider,
     std::unique_ptr<EnterprisePrintersProvider> enterprise_printers_provider,
     PrinterEventTracker* event_tracker,
     PrefService* pref_service) {
@@ -757,8 +881,8 @@ std::unique_ptr<CupsPrintersManager> CupsPrintersManager::CreateForTesting(
       synced_printers_manager, std::move(usb_detector),
       std::move(zeroconf_detector), std::move(ppd_provider),
       std::move(printer_configurer), std::move(usb_notification_controller),
-      server_printers_provider, std::move(enterprise_printers_provider),
-      event_tracker, pref_service);
+      std::move(print_servers_provider), std::move(server_printers_provider),
+      std::move(enterprise_printers_provider), event_tracker, pref_service);
 }
 
 // static
@@ -773,7 +897,8 @@ void CupsPrintersManager::RegisterProfilePrefs(
 }
 
 // static
-void CupsPrintersManager::RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
+void CupsPrintersManager::RegisterLocalStatePrefs(
+    PrefRegistrySimple* registry) {
   PrintServersProvider::RegisterLocalStatePrefs(registry);
 }
 

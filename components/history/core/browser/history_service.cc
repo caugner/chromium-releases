@@ -17,8 +17,8 @@
 
 #include "components/history/core/browser/history_service.h"
 
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/feature_list.h"
@@ -109,9 +109,15 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
   }
 
   void NotifyURLsModified(const URLRows& changed_urls) override {
+    // As the two argument version is overridden, this should not be called.
+    NOTREACHED();
+  }
+
+  void NotifyURLsModified(const URLRows& changed_urls,
+                          UrlsModifiedReason reason) override {
     service_task_runner_->PostTask(
         FROM_HERE, base::BindOnce(&HistoryService::NotifyURLsModified,
-                                  history_service_, changed_urls));
+                                  history_service_, changed_urls, reason));
   }
 
   void NotifyURLsDeleted(DeletionInfo deletion_info) override {
@@ -1179,10 +1185,11 @@ void HistoryService::NotifyURLVisited(ui::PageTransition transition,
     observer.OnURLVisited(this, transition, row, redirects, visit_time);
 }
 
-void HistoryService::NotifyURLsModified(const URLRows& changed_urls) {
+void HistoryService::NotifyURLsModified(const URLRows& changed_urls,
+                                        UrlsModifiedReason reason) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   for (HistoryServiceObserver& observer : observers_)
-    observer.OnURLsModified(this, changed_urls);
+    observer.OnURLsModified(this, changed_urls, reason);
 }
 
 void HistoryService::NotifyURLsDeleted(const DeletionInfo& deletion_info) {

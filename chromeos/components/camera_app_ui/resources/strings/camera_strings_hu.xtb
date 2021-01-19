@@ -3,6 +3,7 @@
 <translationbundle lang="hu">
 <translation id="1276998909102132017">Galériaképek</translation>
 <translation id="1430915738399379752">Nyomtatás</translation>
+<translation id="1473110567575736769">Három másodperces időzítő</translation>
 <translation id="1620510694547887537">Kamera</translation>
 <translation id="1627744224761163218">4 × 4</translation>
 <translation id="1664224225747386870">A kamera semmit sem rögzített</translation>
@@ -29,7 +30,9 @@
 <translation id="3259149966178251584">Kamera felbontása</translation>
 <translation id="3517926952904427380">Nem sikerült álló fényképet készíteni</translation>
 <translation id="3569311554794739032">Biztosan eltávolítja a következő fájlt: <ph name="FILE" />?</translation>
+<translation id="3750315947605636967">A kamerát egy másik alkalmazás használja</translation>
 <translation id="3810838688059735925">Videó</translation>
+<translation id="4000398125663085899">Az új fotók és videók mostantól a Fájlok alkalmazás egyik mappájába lesznek mentve: Saját fájlok &gt; Kamera</translation>
 <translation id="4118525110028899586">Felvétel szüneteltetése</translation>
 <translation id="4279490309300973883">Tükrözés</translation>
 <translation id="4329152592498422850">Váltás négyzet alakú fotó készítésére</translation>
@@ -58,11 +61,11 @@
 Ha visszajelzése a kép vagy a videó minőségével kapcsolatos, kérjük, mellékeljen valamilyen mintafotót vagy -videót, és ismertesse a problémát. (Például túl sötét a fotó, vagy a kép tárgya nincs fókuszban.)</translation>
 <translation id="6420689864531458495">(<ph name="ASPECT_RATIO_WIDTH" />:<ph name="ASPECT_RATIO_HEIGHT" /> – <ph name="WIDTH" /> × <ph name="HEIGHT" />) <ph name="MEGAPIXEL" /> megapixel</translation>
 <translation id="6681668084120808868">Fényképkészítés</translation>
-<translation id="6739700533200816396">A fotók és videók mostantól a Fájlok alkalmazás egy új mappájába lesznek elmentve: Saját fájlok &gt; Kamera. A régebbi fotók és videók nem kerülnek át az új mappába.</translation>
 <translation id="6778482348691154169">Nem sikerült elkészíteni a fotót</translation>
 <translation id="6965382102122355670">OK</translation>
 <translation id="698156982839284926">3 másodperc</translation>
 <translation id="712848772518857951">Biztosan eltávolít <ph name="COUNT" /> elemet?</translation>
+<translation id="7134221860976209830">Tíz másodperces időzítő</translation>
 <translation id="7243947652761655814">Videó felbontása</translation>
 <translation id="7337660886763914220">Fájlrendszerbeli hibák.</translation>
 <translation id="7557677699350329807">Váltás a következő kamerára</translation>
@@ -70,7 +73,6 @@ Ha visszajelzése a kép vagy a videó minőségével kapcsolatos, kérjük, mel
 <translation id="7649070708921625228">Súgó</translation>
 <translation id="7658239707568436148">Mégse</translation>
 <translation id="7670511624014457267">60 FPS</translation>
-<translation id="8049189770492311300">Időzítő</translation>
 <translation id="8067883171444229417">Videó lejátszása</translation>
 <translation id="8131740175452115882">Megerősítés</translation>
 <translation id="8145038249676204903">Váltás fotókészítésre</translation>

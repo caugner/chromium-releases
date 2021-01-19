@@ -16,6 +16,7 @@
 #include "components/feature_engagement/public/event_constants.h"
 #include "components/feature_engagement/public/tracker.h"
 #include "components/metrics/metrics_service.h"
+#import "components/previous_session_info/previous_session_info.h"
 #import "ios/chrome/app/application_delegate/browser_launcher.h"
 #import "ios/chrome/app/application_delegate/memory_warning_helper.h"
 #import "ios/chrome/app/application_delegate/metrics_mediator.h"
@@ -27,19 +28,18 @@
 #import "ios/chrome/app/main_application_delegate.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/browsing_data/browsing_data_remover.h"
-#include "ios/chrome/browser/browsing_data/browsing_data_remover_factory.h"
+#import "ios/chrome/browser/browsing_data/sessions_storage_util.h"
 #include "ios/chrome/browser/chrome_constants.h"
 #include "ios/chrome/browser/crash_report/breakpad_helper.h"
 #include "ios/chrome/browser/crash_report/crash_keys_helper.h"
 #include "ios/chrome/browser/crash_report/crash_loop_detection_util.h"
+#include "ios/chrome/browser/crash_report/features.h"
 #import "ios/chrome/browser/device_sharing/device_sharing_manager.h"
 #include "ios/chrome/browser/feature_engagement/tracker_factory.h"
 #import "ios/chrome/browser/geolocation/omnibox_geolocation_config.h"
 #import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/metrics/ios_profile_session_durations_service.h"
 #import "ios/chrome/browser/metrics/ios_profile_session_durations_service_factory.h"
-#import "ios/chrome/browser/metrics/previous_session_info.h"
 #import "ios/chrome/browser/signin/authentication_service.h"
 #import "ios/chrome/browser/signin/authentication_service_factory.h"
 #import "ios/chrome/browser/ui/authentication/signed_in_accounts_view_controller.h"
@@ -54,6 +54,7 @@
 #import "ios/chrome/browser/ui/scoped_ui_blocker/scoped_ui_blocker.h"
 #import "ios/chrome/browser/ui/util/multi_window_support.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
+#include "ios/chrome/browser/web_state_list/session_metrics.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_metrics_browser_agent.h"
 #include "ios/net/cookies/cookie_store_ios.h"
 #include "ios/net/cookies/system_cookie_util.h"
@@ -74,6 +75,10 @@ void PostTaskOnUIThread(base::OnceClosure closure) {
   base::PostTask(FROM_HERE, {web::WebThread::UI}, std::move(closure));
 }
 NSString* const kStartupAttemptReset = @"StartupAttempReset";
+
+// Time interval used for startRecordingMemoryFootprintWithInterval:
+const NSTimeInterval kMemoryFootprintRecordingTimeInterval = 5;
+
 }  // namespace
 
 #pragma mark - AppStateObserverList
@@ -138,6 +143,9 @@ NSString* const kStartupAttemptReset = @"StartupAttempReset";
 // never reset.
 @property(nonatomic, assign) BOOL firstSceneHasActivated;
 
+// This flag is set when the first scene has initialized its UI and never reset.
+@property(nonatomic, assign) BOOL firstSceneHasInitializedUI;
+
 // The current blocker target if any.
 @property(nonatomic, weak, readwrite) id<UIBlockerTarget> uiBlockerTarget;
 
@@ -192,7 +200,6 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
 
 - (void)setMainSceneState:(SceneState*)mainSceneState {
   DCHECK(!_mainSceneState);
-
   _mainSceneState = mainSceneState;
   [self.observers appState:self sceneConnected:mainSceneState];
 }
@@ -293,6 +300,7 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
   [MetricsMediator logDateInUserDefaults];
   // Clear the memory warning flag since the app is now safely in background.
   [[PreviousSessionInfo sharedInstance] resetMemoryWarningFlag];
+  [[PreviousSessionInfo sharedInstance] stopRecordingMemoryFootprint];
 
   // Turn off uploading of crash reports and metrics, in case the method of
   // communication changes while in the background.
@@ -362,6 +370,13 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
   }
 
   base::RecordAction(base::UserMetricsAction("MobileWillEnterForeground"));
+
+  if (EnableSyntheticCrashReportsForUte()) {
+    [[PreviousSessionInfo sharedInstance]
+        startRecordingMemoryFootprintWithInterval:
+            base::TimeDelta::FromSeconds(
+                kMemoryFootprintRecordingTimeInterval)];
+  }
 }
 
 - (void)resumeSessionWithTabOpener:(id<TabOpening>)tabOpener
@@ -456,14 +471,7 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
   for (UISceneSession* session in sceneSessions) {
     [sessionIDs addObject:session.persistentIdentifier];
   }
-  ChromeBrowserState* browserState =
-      _browserLauncher.interfaceProvider.mainInterface.browserState;
-  BrowsingDataRemoverFactory::GetForBrowserState(browserState)
-      ->RemoveSessionsData(sessionIDs);
-  ChromeBrowserState* incognitoBrowserState =
-      _browserLauncher.interfaceProvider.incognitoInterface.browserState;
-  BrowsingDataRemoverFactory::GetForBrowserState(incognitoBrowserState)
-      ->RemoveSessionsData(sessionIDs);
+  sessions_storage_util::MarkSessionsForRemoval(sessionIDs);
 }
 
 - (void)willResignActiveTabModel {
@@ -486,10 +494,26 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
                              base::TimeDelta::FromMilliseconds(1),
                              base::TimeDelta::FromHours(24), 50);
 
-  WebStateListMetricsBrowserAgent* webStateListMetrics =
-      WebStateListMetricsBrowserAgent::FromBrowser(currentInterface.browser);
-  if (webStateListMetrics)
-    webStateListMetrics->RecordSessionMetrics();
+  // Record session metrics (currentInterface.browserState may be null during
+  // tests).
+  if (currentInterface.browserState) {
+    ChromeBrowserState* mainChromeBrowserState =
+        currentInterface.browserState->GetOriginalChromeBrowserState();
+
+    SessionMetrics::FromBrowserState(mainChromeBrowserState)
+        ->RecordAndClearSessionMetrics(
+            MetricsToRecordFlags::kOpenedTabCount |
+            MetricsToRecordFlags::kClosedTabCount |
+            MetricsToRecordFlags::kActivatedTabCount);
+
+    if (mainChromeBrowserState->HasOffTheRecordChromeBrowserState()) {
+      ChromeBrowserState* otrChromeBrowserState =
+          mainChromeBrowserState->GetOffTheRecordChromeBrowserState();
+
+      SessionMetrics::FromBrowserState(otrChromeBrowserState)
+          ->RecordAndClearSessionMetrics(MetricsToRecordFlags::kNoMetrics);
+    }
+  }
 
   if (currentInterface.browserState) {
     IOSProfileSessionDurationsService* psdService =
@@ -552,7 +576,8 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
       for (UIWindowScene* scene in connectedScenes) {
         if (![scene.delegate isKindOfClass:[SceneDelegate class]]) {
           // This might happen in tests.
-          // TODO(crbug.com/1113097): This shouldn't be needed.
+          // TODO(crbug.com/1113097): This shouldn't be needed. (It might also
+          // be the cause of crbug.com/1142782).
           [sceneStates addObject:[[SceneState alloc] initWithAppState:self]];
           continue;
         }
@@ -640,6 +665,15 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
   // -startUpBrowserForegroundInitialization.
   DCHECK([self.startupInformation isColdStart]);
   [_browserLauncher startUpBrowserToStage:INITIALIZATION_STAGE_FOREGROUND];
+
+  if (EnableSyntheticCrashReportsForUte()) {
+    // Must be called after sequenced context creation, which happens in
+    // startUpBrowserToStage: method called above.
+    [[PreviousSessionInfo sharedInstance]
+        startRecordingMemoryFootprintWithInterval:
+            base::TimeDelta::FromSeconds(
+                kMemoryFootprintRecordingTimeInterval)];
+  }
 }
 
 - (void)saveLaunchDetailsToDefaults {
@@ -681,14 +715,21 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
   return self.uiBlockerTarget;
 }
 
+#pragma mark - SceneStateObserver
+
+- (void)sceneStateHasInitializedUI:(SceneState*)sceneState {
+  if (self.firstSceneHasInitializedUI) {
+    return;
+  }
+  self.firstSceneHasInitializedUI = YES;
+  [self.observers appState:self firstSceneHasInitializedUI:sceneState];
+}
+
 - (void)sceneState:(SceneState*)sceneState
     transitionedToActivationLevel:(SceneActivationLevel)level {
   if (level >= SceneActivationLevelForegroundActive) {
     if (!self.firstSceneHasActivated) {
       self.firstSceneHasActivated = YES;
-
-      [self.observers appState:self firstSceneActivated:sceneState];
-
       if (self.isInSafeMode) {
         // Safe mode can only be started when there's a window, so the actual
         // safe mode has been postponed until now.

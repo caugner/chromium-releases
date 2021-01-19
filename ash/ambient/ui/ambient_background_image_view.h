@@ -22,6 +22,7 @@ class Label;
 namespace ash {
 
 class GlanceableInfoView;
+class MediaStringView;
 
 // AmbientBackgroundImageView--------------------------------------------------
 // A custom ImageView to display photo image and details information on ambient.
@@ -38,8 +39,6 @@ class ASH_EXPORT AmbientBackgroundImageView : public views::View,
   ~AmbientBackgroundImageView() override;
 
   // views::View:
-  bool OnMousePressed(const ui::MouseEvent& event) override;
-  void OnGestureEvent(ui::GestureEvent* event) override;
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
 
   // views::ViewObserver:
@@ -70,7 +69,7 @@ class ASH_EXPORT AmbientBackgroundImageView : public views::View,
   // Whether the device is in landscape orientation.
   bool IsLandscapeOrientation() const;
 
-  bool HasPairedPortraitImages() const;
+  bool HasPairedImages() const;
 
   // Owned by |AmbientController| and should always outlive |this|.
   AmbientViewDelegate* delegate_ = nullptr;
@@ -89,6 +88,8 @@ class ASH_EXPORT AmbientBackgroundImageView : public views::View,
   // Label to show details text, i.e. attribution, to be displayed for the
   // current image. Owned by the view hierarchy.
   views::Label* details_label_ = nullptr;
+
+  MediaStringView* media_string_view_ = nullptr;
 
   ScopedObserver<views::View, views::ViewObserver> observed_views_{this};
 };

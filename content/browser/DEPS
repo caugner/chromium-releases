@@ -50,7 +50,8 @@ include_rules = [
   "+device/fido/hid",
   "+device/gamepad", # For gamepad API
   "+device/nfc",
-  "+device/vr",  # For WebVR API
+  "+device/vr/public", # For WebXR API
+  "+device/vr/buildflags/buildflags.h",  # For WebXR API
   # This can only be used on POSIX, in particular it mustn't be used on Windows
   # in the browser DLL.
   "+gin/v8_initializer.h",
@@ -65,8 +66,6 @@ include_rules = [
   # dependency.
   "+services",
   "-services/content",
-  "+services/content/public",
-  "+services/content/navigable_contents_delegate.h",
   "+services/content/service.h",
   "+services/content/service_delegate.h",
   "-services/network",
@@ -103,7 +102,6 @@ include_rules = [
   "+third_party/blink/public/common",
   "+third_party/blink/public/mojom",
   "+third_party/blink/public/platform/resource_request_blocked_reason.h",
-  "+third_party/blink/public/platform/viewport_intersection_state.h",
   "+third_party/blink/public/platform/web_client_hints_type.h",
   "+third_party/blink/public/platform/web_content_security_policy.h",
   "+third_party/blink/public/common/page/drag_operation.h",
@@ -113,7 +111,7 @@ include_rules = [
   "+third_party/blink/public/platform/web_text_input_type.h",
   "+third_party/blink/public/platform/mac/web_scrollbar_theme.h",
   "+third_party/blink/public/platform/modules/service_worker/web_service_worker_error.h",
-  "+third_party/blink/public/platform/modules/sms/sms_receiver.mojom.h",
+  "+third_party/blink/public/platform/modules/sms/webotp_service.mojom.h",
   "+third_party/blink/public/public_buildflags.h",
   "+third_party/blink/public/strings/grit/blink_strings.h",
   "+third_party/blink/public/web/web_ax_enums.h",

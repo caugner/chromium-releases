@@ -54,6 +54,7 @@ public class PageInfoCookiesController
         rowParams.visible = delegate.isSiteSettingsAvailable();
         rowParams.title = mTitle;
         rowParams.iconResId = R.drawable.permission_cookie;
+        rowParams.decreaseIconSize = true;
         rowParams.clickCallback = this::launchSubpage;
         mRowView.setParams(rowParams);
     }
@@ -72,6 +73,7 @@ public class PageInfoCookiesController
     public View createViewForSubpage(ViewGroup parent) {
         assert mSubPage == null;
         mSubPage = new PageInfoCookiesPreference();
+        mSubPage.setSiteSettingsClient(mDelegate.getSiteSettingsClient());
         AppCompatActivity host = (AppCompatActivity) mRowView.getContext();
         host.getSupportFragmentManager().beginTransaction().add(mSubPage, null).commitNow();
 
@@ -101,7 +103,9 @@ public class PageInfoCookiesController
 
         mWebsite = SingleWebsiteSettings.mergePermissionAndStorageInfoForTopLevelOrigin(
                 address, result);
-        mSubPage.setStorageUsage(mWebsite.getTotalUsage());
+        if (mSubPage != null) {
+            mSubPage.setStorageUsage(mWebsite.getTotalUsage());
+        }
     }
 
     private void onCheckedChangedCallback(boolean state) {
@@ -121,8 +125,11 @@ public class PageInfoCookiesController
     public void onSubpageRemoved() {
         assert mSubPage != null;
         AppCompatActivity host = (AppCompatActivity) mRowView.getContext();
-        host.getSupportFragmentManager().beginTransaction().remove(mSubPage).commitNow();
+        PageInfoCookiesPreference subPage = mSubPage;
         mSubPage = null;
+        // If the activity is getting destroyed or saved, it is not allowed to modify fragments.
+        if (host.isFinishing() || host.getSupportFragmentManager().isStateSaved()) return;
+        host.getSupportFragmentManager().beginTransaction().remove(subPage).commitNow();
     }
 
     @Override

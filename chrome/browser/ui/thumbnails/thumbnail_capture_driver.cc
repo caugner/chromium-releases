@@ -54,9 +54,21 @@ void ThumbnailCaptureDriver::SetCapturePermittedByScheduler(bool scheduled) {
 }
 
 void ThumbnailCaptureDriver::UpdateCaptureState() {
-  if (!scheduled_) {
+  // If there was a final thumbnail but the page has changed, get set up
+  // for a new capture.
+  if (page_readiness_ < PageReadiness::kReadyForFinalCapture &&
+      capture_state_ == CaptureState::kHaveFinalCapture) {
     client_->StopCapture();
     capture_state_ = CaptureState::kNoCapture;
+  }
+
+  // If de-scheduled, stop any ongoing capture.
+  if (!scheduled_) {
+    client_->StopCapture();
+
+    if (capture_state_ < CaptureState::kHaveFinalCapture)
+      capture_state_ = CaptureState::kNoCapture;
+
     return;
   }
 
@@ -111,23 +123,15 @@ void ThumbnailCaptureDriver::UpdateSchedulingPriority() {
     return;
   }
 
-  // Capturing is not allowed when a page is visible. Otherwise it
-  // prevents the tab from properly entering fullscreen. See
-  // https://crbug.com/1112607
-  if (page_visible_) {
-    scheduler_->SetTabCapturePriority(
-        this, ThumbnailScheduler::TabCapturePriority::kNone);
-    return;
-  }
-
-  // For now don't force-load background pages. This is not ideal. We would
-  // like to grab frames from background pages to make hover cards and the
-  // "Mohnstrudel" touch/tablet tabstrip more responsive by pre-loading
-  // thumbnails from those pages. However, this currently results in a number
-  // of test failures and a possible violation of an assumption made by the
-  // renderer. TODO(crbug.com/1073141): Figure out how to force-render
-  // background tabs. This bug has detailed descriptions of steps we might
-  // take to make capture more flexible in this area.
+  // For now don't force-load background pages, or the current page if the
+  // thumbnail isn't being requested. This is not ideal. We would like to grab
+  // frames from background pages to make hover cards and the "Mohnstrudel"
+  // touch/tablet tabstrip more responsive by pre-loading thumbnails from those
+  // pages. However, this currently results in a number of test failures and a
+  // possible violation of an assumption made by the renderer.
+  // TODO(crbug.com/1073141): Figure out how to force-render background tabs.
+  // This bug has detailed descriptions of steps we might take to make capture
+  // more flexible in this area.
   if (!thumbnail_visible_) {
     scheduler_->SetTabCapturePriority(
         this, ThumbnailScheduler::TabCapturePriority::kNone);

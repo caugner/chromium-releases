@@ -50,6 +50,16 @@ extern const char kBackoffMaxDelayInMsKey[];
 // Finch parameter key for lambda in tile score decay calculation.
 extern const char kTileScoreDecayLambdaKey[];
 
+// Finch parameter key representing the minimum scores for new tiles that are in
+// front of others.
+extern const char kMinimumScoreForNewFrontTilesKey[];
+
+// Finch parameter key for number of trending tiles to display.
+extern const char kNumTrendingTilesKey[];
+
+// Finch parameter key for max number of trending tile impressions.
+extern const char kMaxTrendingTileImpressionsKey[];
+
 class TileConfig {
  public:
   // Gets the URL for the Query Tiles server.
@@ -90,6 +100,15 @@ class TileConfig {
 
   // Get the lambda value used for calculating the tile score decay over time.
   static double GetTileScoreDecayLambda();
+
+  // Get the minimum scrore for newly showing tiles that are in front of others.
+  static double GetMinimumScoreForNewFrontTiles();
+
+  // Get the number of trending tiles to be displayed at the same time.
+  static int GetNumTrendingTilesToDisplay();
+
+  // Get the maximum number of impressions for a trending tile to be displayed.
+  static int GetMaxTrendingTileImpressions();
 };
 
 }  // namespace query_tiles

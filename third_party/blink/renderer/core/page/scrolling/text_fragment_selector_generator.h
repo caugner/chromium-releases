@@ -5,6 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_SCROLLING_TEXT_FRAGMENT_SELECTOR_GENERATOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_SCROLLING_TEXT_FRAGMENT_SELECTOR_GENERATOR_H_
 
+#include "base/optional.h"
+#include "components/shared_highlighting/core/common/shared_highlighting_metrics.h"
 #include "third_party/blink/public/mojom/link_to_text/link_to_text.mojom-blink.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/page/scrolling/text_fragment_finder.h"
@@ -41,8 +43,10 @@ class CORE_EXPORT TextFragmentSelectorGenerator final
   void UpdateSelection(LocalFrame* selection_frame,
                        const EphemeralRangeInFlatTree& selection_range);
 
-  // Extend the selection from start and end to contain full words.
-  void CompleteSelection();
+  // Adjust the selection start/end to a valid position. That includes skipping
+  // non text start/end nodes and extending selection from start and end to
+  // contain full words.
+  void AdjustSelection();
 
   // blink::mojom::blink::TextFragmentSelectorProducer interface
   // Generates selector for current selection.
@@ -64,6 +68,10 @@ class CORE_EXPORT TextFragmentSelectorGenerator final
   }
   String GetNextTextBlockForTesting(const Position& position) {
     return GetNextTextBlock(position);
+  }
+  bool IsInSameUninterruptedBlockForTesting(const Position& start,
+                                            const Position& end) {
+    return IsInSameUninterruptedBlock(start, end);
   }
 
   // Releases members if necessary.
@@ -105,6 +113,10 @@ class CORE_EXPORT TextFragmentSelectorGenerator final
   // boundaries.
   String GetNextTextBlock(const Position& position);
 
+  // Returns true if start and end positions are in the same block and there are
+  // no other blocks between them. Otherwise, returns false.
+  bool IsInSameUninterruptedBlock(const Position& start, const Position& end);
+
   void GenerateExactSelector();
   void ExtendRangeSelector();
   void ExtendContext();
@@ -123,6 +135,8 @@ class CORE_EXPORT TextFragmentSelectorGenerator final
   GenerationStep step_ = kExact;
   SelectorState state_ = kNeedsNewCandidate;
 
+  base::Optional<shared_highlighting::LinkGenerationError> error_;
+
   // Fields used for keeping track of context.
 
   // Strings available for gradually forming prefix and suffix.
@@ -139,6 +153,9 @@ class CORE_EXPORT TextFragmentSelectorGenerator final
 
   int num_range_start_words_ = 0;
   int num_range_end_words_ = 0;
+
+  int iteration_ = 0;
+  base::TimeTicks generation_start_time_;
 
   DISALLOW_COPY_AND_ASSIGN(TextFragmentSelectorGenerator);
 };

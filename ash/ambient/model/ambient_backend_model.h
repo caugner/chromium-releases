@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "ash/ambient/ambient_constants.h"
 #include "ash/ash_export.h"
 #include "ash/public/cpp/ambient/ambient_backend_controller.h"
 #include "base/macros.h"
@@ -36,6 +37,8 @@ struct ASH_EXPORT PhotoWithDetails {
   gfx::ImageSkia photo;
   gfx::ImageSkia related_photo;
   std::string details;
+  // Hash of this image data. Used for de-duping images.
+  std::string hash;
 };
 
 // Stores necessary information fetched from the backdrop server to render
@@ -54,21 +57,28 @@ class ASH_EXPORT AmbientBackendModel {
   void AppendTopics(const std::vector<AmbientModeTopic>& topics);
   const std::vector<AmbientModeTopic>& topics() const { return topics_; }
 
-  // Prefetch one more image for ShowNextImage animations.
-  bool ShouldFetchImmediately() const;
+  // If enough images are loaded to start ambient mode.
+  bool ImagesReady() const;
 
   // Add image to local storage.
   void AddNextImage(const PhotoWithDetails& photo);
 
-  // Get/Set the photo refresh interval.
-  base::TimeDelta GetPhotoRefreshInterval();
-  void SetPhotoRefreshInterval(base::TimeDelta interval);
+  // If the hash matches the hash of the next image to be displayed.
+  bool HashMatchesNextImage(const std::string& hash) const;
+
+  // Record that fetching an image has failed.
+  void AddImageFailure();
+
+  void ResetImageFailures();
+
+  bool ImageLoadingFailed();
 
   // Clear local storage.
   void Clear();
 
   // Get images from local storage. Could be null image.
   const PhotoWithDetails& GetNextImage() const;
+  const PhotoWithDetails& GetCurrentImage() const { return current_image_; }
 
   // Updates the weather information and notifies observers if the icon image is
   // not null.
@@ -88,13 +98,17 @@ class ASH_EXPORT AmbientBackendModel {
   // Calculate the temperature in celsius.
   float GetTemperatureInCelsius() const;
 
+  base::TimeDelta GetPhotoRefreshInterval() const;
+
   bool show_celsius() const { return show_celsius_; }
 
  private:
   friend class AmbientBackendModelTest;
+  friend class AmbientAshTestBase;
 
   void NotifyTopicsChanged();
   void NotifyImagesChanged();
+  void NotifyImagesReady();
   void NotifyWeatherInfoUpdated();
 
   std::vector<AmbientModeTopic> topics_;
@@ -103,16 +117,13 @@ class ASH_EXPORT AmbientBackendModel {
   PhotoWithDetails current_image_;
   PhotoWithDetails next_image_;
 
-  // The index of currently shown image.
-  int current_image_index_ = 0;
-
   // Current weather information.
   gfx::ImageSkia weather_condition_icon_;
   float temperature_fahrenheit_ = 0.0f;
   bool show_celsius_ = false;
 
-  // The interval to refresh photos.
-  base::TimeDelta photo_refresh_interval_;
+  // The number of consecutive failures to load the next image.
+  int failures_ = 0;
 
   base::ObserverList<AmbientBackendModelObserver> observers_;
 

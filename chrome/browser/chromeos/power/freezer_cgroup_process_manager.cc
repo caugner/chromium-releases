@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
@@ -21,8 +21,7 @@
 namespace chromeos {
 
 namespace {
-const char kFreezerPath[] =
-    "/sys/fs/cgroup/freezer/early_freezer/chrome_renderers";
+const char kFreezerPath[] = "/sys/fs/cgroup/freezer/chrome_renderers";
 const char kToBeFrozen[] = "to_be_frozen";
 const char kFreezerState[] = "freezer.state";
 const char kCgroupProcs[] = "cgroup.procs";

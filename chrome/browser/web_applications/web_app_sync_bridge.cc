@@ -8,10 +8,11 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/containers/flat_set.h"
 #include "base/logging.h"
+#include "base/metrics/user_metrics.h"
 #include "base/optional.h"
 #include "base/util/type_safety/pass_key.h"
 #include "chrome/browser/web_applications/components/os_integration_manager.h"
@@ -25,7 +26,6 @@
 #include "chrome/browser/web_applications/web_app_registry_update.h"
 #include "chrome/browser/web_applications/web_app_sync_install_delegate.h"
 #include "chrome/common/channel_info.h"
-#include "chrome/common/chrome_features.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/report_unrecoverable_error.h"
 #include "components/sync/model/metadata_batch.h"
@@ -178,7 +178,22 @@ void WebAppSyncBridge::Init(base::OnceClosure callback) {
 }
 
 void WebAppSyncBridge::SetAppUserDisplayMode(const AppId& app_id,
-                                             DisplayMode user_display_mode) {
+                                             DisplayMode user_display_mode,
+                                             bool is_user_action) {
+  if (is_user_action) {
+    switch (user_display_mode) {
+      case DisplayMode::kStandalone:
+        base::RecordAction(
+            base::UserMetricsAction("WebApp.SetWindowMode.Window"));
+        break;
+      case DisplayMode::kBrowser:
+        base::RecordAction(base::UserMetricsAction("WebApp.SetWindowMode.Tab"));
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+
   ScopedRegistryUpdate update(this);
   WebApp* web_app = update->UpdateApp(app_id);
   if (web_app)
@@ -422,7 +437,7 @@ void WebAppSyncBridge::MergeLocalAppsToSync(
   // Sort only once.
   base::flat_set<AppId> sync_server_apps(std::move(storage_keys));
 
-  for (const WebApp& app : registrar_->AllApps()) {
+  for (const WebApp& app : registrar_->GetAppsIncludingStubs()) {
     if (!app.IsSynced())
       continue;
 
@@ -519,9 +534,7 @@ void WebAppSyncBridge::ApplySyncChangesToRegistrar(
   // still registered at this stage.
   for (const AppId& app_id : update_local_data->apps_to_delete) {
     registrar_->NotifyWebAppUninstalled(app_id);
-    WebAppProviderBase::GetProviderBase(profile())
-        ->os_integration_manager()
-        .UninstallAllOsHooks(app_id, base::DoNothing());
+    os_integration_manager().UninstallAllOsHooks(app_id, base::DoNothing());
   }
 
   std::vector<WebApp*> apps_to_install;
@@ -606,7 +619,7 @@ void WebAppSyncBridge::GetData(StorageKeyList storage_keys,
 void WebAppSyncBridge::GetAllDataForDebugging(DataCallback callback) {
   auto data_batch = std::make_unique<syncer::MutableDataBatch>();
 
-  for (const WebApp& app : registrar_->AllApps()) {
+  for (const WebApp& app : registrar_->GetAppsIncludingStubs()) {
     if (app.IsSynced())
       data_batch->Put(app.app_id(), CreateSyncEntityData(app));
   }
@@ -633,7 +646,7 @@ std::string WebAppSyncBridge::GetStorageKey(
 void WebAppSyncBridge::MaybeInstallAppsInSyncInstall() {
   std::vector<WebApp*> apps_in_sync_install;
 
-  for (WebApp& app : registrar_->AllAppsMutable()) {
+  for (WebApp& app : registrar_->GetAppsIncludingStubsMutable()) {
     if (app.is_in_sync_install())
       apps_in_sync_install.push_back(&app);
   }

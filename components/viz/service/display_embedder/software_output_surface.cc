@@ -26,10 +26,6 @@ SoftwareOutputSurface::SoftwareOutputSurface(
     std::unique_ptr<SoftwareOutputDevice> software_device)
     : OutputSurface(std::move(software_device)) {
   capabilities_.max_frames_pending = software_device_->MaxFramesPending();
-  // Arbitrary max texture size to help avoid OOM crashes. A 8192*8192 RGBA
-  // texture will require ~268mb of memory so we probably don't want to allow
-  // much bigger.
-  capabilities_.max_render_target_size = 8192;
 }
 
 SoftwareOutputSurface::~SoftwareOutputSurface() = default;
@@ -151,13 +147,4 @@ void SoftwareOutputSurface::SetNeedsSwapSizeNotifications(
   needs_swap_size_notifications_ = needs_swap_size_notifications;
 }
 #endif
-
-scoped_refptr<gpu::GpuTaskSchedulerHelper>
-SoftwareOutputSurface::GetGpuTaskSchedulerHelper() {
-  return nullptr;
-}
-
-gpu::MemoryTracker* SoftwareOutputSurface::GetMemoryTracker() {
-  return nullptr;
-}
 }  // namespace viz

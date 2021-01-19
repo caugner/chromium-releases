@@ -12,6 +12,7 @@
 #include "base/single_thread_task_runner.h"
 #include "gpu/command_buffer/client/shared_image_interface.h"
 #include "gpu/config/gpu_feature_info.h"
+#include "skia/ext/legacy_display_globals.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
@@ -173,11 +174,12 @@ SkImageInfo GetSkImageInfo(const scoped_refptr<Image>& input) {
 
 // This function results in a readback due to using SkImage::readPixels().
 // Returns transparent black pixels if the input SkImageInfo.bounds() does
-// not intersect with the input image boundaries.
+// not intersect with the input image boundaries. When apply_orientation
+// is true this method will orient the data according to the source's EXIF
+// information.
 Vector<uint8_t> CopyImageData(const scoped_refptr<StaticBitmapImage>& input,
                               const SkImageInfo& info,
-                              const unsigned x = 0,
-                              const unsigned y = 0) {
+                              bool apply_orientation = true) {
   if (info.isEmpty())
     return {};
   PaintImage paint_image = input->PaintImageForCurrentFrame();
@@ -189,16 +191,29 @@ Vector<uint8_t> CopyImageData(const scoped_refptr<StaticBitmapImage>& input,
   Vector<uint8_t> dst_buffer(byte_length);
 
   bool read_pixels_successful =
-      paint_image.readPixels(info, dst_buffer.data(), info.minRowBytes(), x, y);
+      paint_image.readPixels(info, dst_buffer.data(), info.minRowBytes(), 0, 0);
   DCHECK(read_pixels_successful);
   if (!read_pixels_successful)
     return {};
+
+  // Orient the data, and re-read the pixels.
+  if (apply_orientation && !input->HasDefaultOrientation()) {
+    paint_image = Image::ResizeAndOrientImage(
+        paint_image, input->CurrentFrameOrientation(), FloatSize(1, 1), 1,
+        kInterpolationNone);
+    read_pixels_successful = paint_image.readPixels(info, dst_buffer.data(),
+                                                    info.minRowBytes(), 0, 0);
+    DCHECK(read_pixels_successful);
+    if (!read_pixels_successful)
+      return {};
+  }
+
   return dst_buffer;
 }
 
 Vector<uint8_t> CopyImageData(const scoped_refptr<StaticBitmapImage>& input) {
   SkImageInfo info = GetSkImageInfo(input);
-  return CopyImageData(std::move(input), info);
+  return CopyImageData(std::move(input), info, false);
 }
 
 static inline bool ShouldAvoidPremul(
@@ -446,7 +461,7 @@ scoped_refptr<StaticBitmapImage> MakeBlankImage(
   SkImageInfo info = SkImageInfo::Make(
       parsed_options.crop_rect.Width(), parsed_options.crop_rect.Height(),
       parsed_options.color_params.GetSkColorType(), kPremul_SkAlphaType,
-      parsed_options.color_params.GetSkColorSpaceForSkSurfaces());
+      parsed_options.color_params.GetSkColorSpace());
   if (parsed_options.should_scale_input) {
     info =
         info.makeWH(parsed_options.resize_width, parsed_options.resize_height);
@@ -606,8 +621,7 @@ ImageBitmap::ImageBitmap(ImageElementBase* image,
                                          : ImageDecoder::kAlphaNotPremultiplied,
         ImageDecoder::kDefaultBitDepth,
         parsed_options.has_color_space_conversion ? ColorBehavior::Tag()
-                                                  : ColorBehavior::Ignore(),
-        ImageDecoder::OverrideAllowDecodeToYuv::kDeny));
+                                                  : ColorBehavior::Ignore()));
     auto skia_image = ImageBitmap::GetSkImageFromDecoder(std::move(decoder));
     if (!skia_image)
       return;
@@ -735,7 +749,7 @@ ImageBitmap::ImageBitmap(const void* pixel_data,
       SkImageInfo::Make(width, height, color_params.GetSkColorType(),
                         is_image_bitmap_premultiplied ? kPremul_SkAlphaType
                                                       : kUnpremul_SkAlphaType,
-                        color_params.GetSkColorSpaceForSkSurfaces());
+                        color_params.GetSkColorSpace());
   SkPixmap pixmap(info, pixel_data, info.bytesPerPixel() * width);
   sk_sp<SkImage> raster_copy = SkImage::MakeRasterCopy(pixmap);
   if (!raster_copy)
@@ -795,7 +809,7 @@ ImageBitmap::ImageBitmap(ImageData* data,
       parsed_options.color_params.GetSkColorType(),
       parsed_options.premultiply_alpha ? kPremul_SkAlphaType
                                        : kUnpremul_SkAlphaType,
-      parsed_options.color_params.GetSkColorSpaceForSkSurfaces());
+      parsed_options.color_params.GetSkColorSpace());
   image_ = StaticBitmapImage::Create(std::move(image_pixels), info);
   if (!image_)
     return;
@@ -879,6 +893,7 @@ scoped_refptr<StaticBitmapImage> ImageBitmap::Transfer() {
   DCHECK(!IsNeutered());
   is_neutered_ = true;
   image_->Transfer();
+  UpdateImageBitmapMemoryUsage();
   return std::move(image_);
 }
 
@@ -889,7 +904,7 @@ void ImageBitmap::UpdateImageBitmapMemoryUsage() {
 
   int32_t new_memory_usage = 0;
 
-  if (image_) {
+  if (!is_neutered_ && image_) {
     base::CheckedNumeric<int32_t> memory_usage_checked = bytes_per_pixel;
     memory_usage_checked *= image_->width();
     memory_usage_checked *= image_->height();
@@ -953,7 +968,8 @@ void ImageBitmap::RasterizeImageOnBackgroundThread(
   DCHECK(!IsMainThread());
   SkImageInfo info =
       SkImageInfo::MakeN32Premul(dst_rect.Width(), dst_rect.Height());
-  sk_sp<SkSurface> surface = SkSurface::MakeRaster(info);
+  SkSurfaceProps props = skia::LegacyDisplayGlobals::GetSkSurfaceProps();
+  sk_sp<SkSurface> surface = SkSurface::MakeRaster(info, &props);
   sk_sp<SkImage> skia_image;
   if (surface) {
     paint_record->Playback(surface->getCanvas());
@@ -962,7 +978,7 @@ void ImageBitmap::RasterizeImageOnBackgroundThread(
   PostCrossThreadTask(
       *task_runner, FROM_HERE,
       CrossThreadBindOnce(std::move(callback), std::move(skia_image),
-                          kDefaultImageOrientation));
+                          ImageOrientationEnum::kDefault));
 }
 
 ScriptPromise ImageBitmap::CreateAsync(ImageElementBase* image,
@@ -1039,6 +1055,7 @@ void ImageBitmap::close() {
     return;
   image_ = nullptr;
   is_neutered_ = true;
+  UpdateImageBitmapMemoryUsage();
 }
 
 // static
@@ -1058,12 +1075,13 @@ Vector<uint8_t> ImageBitmap::CopyBitmapData(AlphaDisposition alpha_op,
   auto color_type = info.colorType();
   if (color_type == kN32_SkColorType && u8_color_type == kRGBAColorType)
     color_type = kRGBA_8888_SkColorType;
+  // Note that width() and height() here apply EXIF orientation
   info =
       SkImageInfo::Make(width(), height(), color_type,
                         (alpha_op == kPremultiplyAlpha) ? kPremul_SkAlphaType
                                                         : kUnpremul_SkAlphaType,
                         info.refColorSpace());
-  return CopyImageData(image_, info);
+  return CopyImageData(image_, info, true);
 }
 
 Vector<uint8_t> ImageBitmap::CopyBitmapData() {
@@ -1073,7 +1091,7 @@ Vector<uint8_t> ImageBitmap::CopyBitmapData() {
 unsigned ImageBitmap::width() const {
   if (!image_)
     return 0;
-  IntSize size = image_->SizeRespectingOrientation();
+  IntSize size = image_->PreferredDisplaySize();
   DCHECK_GT(size.Width(), 0);
   return size.Width();
 }
@@ -1081,7 +1099,7 @@ unsigned ImageBitmap::width() const {
 unsigned ImageBitmap::height() const {
   if (!image_)
     return 0;
-  IntSize size = image_->SizeRespectingOrientation();
+  IntSize size = image_->PreferredDisplaySize();
   DCHECK_GT(size.Height(), 0);
   return size.Height();
 }
@@ -1095,7 +1113,7 @@ IntSize ImageBitmap::Size() const {
     return IntSize();
   DCHECK_GT(image_->width(), 0);
   DCHECK_GT(image_->height(), 0);
-  return IntSize(image_->width(), image_->height());
+  return image_->PreferredDisplaySize();
 }
 
 ScriptPromise ImageBitmap::CreateImageBitmap(ScriptState* script_state,

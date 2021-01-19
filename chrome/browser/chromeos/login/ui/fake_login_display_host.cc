@@ -106,7 +106,9 @@ void FakeLoginDisplayHost::LoadWallpaper(const AccountId& account_id) {}
 
 void FakeLoginDisplayHost::LoadSigninWallpaper() {}
 
-bool FakeLoginDisplayHost::IsUserAllowlisted(const AccountId& account_id) {
+bool FakeLoginDisplayHost::IsUserAllowlisted(
+    const AccountId& account_id,
+    const base::Optional<user_manager::UserType>& user_type) {
   return false;
 }
 
@@ -132,5 +134,14 @@ void FakeLoginDisplayHost::HandleDisplayCaptivePortal() {}
 void FakeLoginDisplayHost::UpdateAddUserButtonStatus() {}
 
 void FakeLoginDisplayHost::RequestSystemInfoUpdate() {}
+
+bool FakeLoginDisplayHost::HasUserPods() {
+  return false;
+}
+
+void FakeLoginDisplayHost::AddObserver(LoginDisplayHost::Observer* observer) {}
+
+void FakeLoginDisplayHost::RemoveObserver(
+    LoginDisplayHost::Observer* observer) {}
 
 }  // namespace chromeos

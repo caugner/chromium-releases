@@ -60,8 +60,8 @@ void LoginDisplayWebUI::Init(const user_manager::UserList& users,
   OobeUI* oobe_ui = LoginDisplayHost::default_host()->GetOobeUI();
   const std::string display_type = oobe_ui->display_type();
   if (display_type == OobeUI::kUserAddingDisplay && !user_selection_screen_) {
-    user_selection_screen_ =
-        std::make_unique<ChromeUserSelectionScreen>(display_type);
+    user_selection_screen_ = std::make_unique<ChromeUserSelectionScreen>(
+        DisplayedScreen::USER_ADDING_SCREEN);
     user_board_view_ = oobe_ui->GetView<UserBoardScreenHandler>()->GetWeakPtr();
     user_selection_screen_->SetView(user_board_view_.get());
     // TODO(jdufault): Bind and Unbind should be controlled by either the
@@ -144,6 +144,7 @@ void LoginDisplayWebUI::ShowError(int error_msg_id,
   // related.
   if (error_msg_id != IDS_LOGIN_ERROR_ALLOWLIST &&
       error_msg_id != IDS_ENTERPRISE_LOGIN_ERROR_ALLOWLIST &&
+      error_msg_id != IDS_ENTERPRISE_AND_FAMILY_LINK_LOGIN_ERROR_ALLOWLIST &&
       error_msg_id != IDS_LOGIN_ERROR_OWNER_KEY_LOST &&
       error_msg_id != IDS_LOGIN_ERROR_OWNER_REQUIRED &&
       error_msg_id != IDS_LOGIN_ERROR_GOOGLE_ACCOUNT_NOT_ALLOWED &&

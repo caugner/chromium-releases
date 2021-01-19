@@ -14,8 +14,8 @@
 #include "chrome/browser/web_applications/components/app_registry_controller.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
 #include "chrome/browser/web_applications/components/web_app_provider_base.h"
+#include "chrome/browser/web_applications/components/web_application_info.h"
 #include "chrome/common/chrome_features.h"
-#include "chrome/common/web_application_info.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/test_navigation_observer.h"
 
@@ -41,8 +41,8 @@ class WebAppLinkCapturingBrowserTest : public WebAppNavigationBrowserTest {
     web_app_info->start_url = start_url_;
     web_app_info->open_as_window = true;
     app_id_ = web_app::InstallWebApp(profile(), std::move(web_app_info));
-    provider().registry_controller().SetExperimentalTabbedWindowMode(app_id_,
-                                                                     true);
+    provider().registry_controller().SetExperimentalTabbedWindowMode(
+        app_id_, true, /*is_user_action=*/false);
   }
 
   WebAppProviderBase& provider() {

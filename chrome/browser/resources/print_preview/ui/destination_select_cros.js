@@ -46,11 +46,6 @@ Polymer({
 
     driveDestinationKey: String,
 
-    isDriveMounted: {
-      type: Boolean,
-      value: true,
-    },
-
     loaded: Boolean,
 
     noDestinations: Boolean,
@@ -114,13 +109,6 @@ Polymer({
         return loadTimeData.getBoolean('printSaveToDrive');
       },
       readOnly: true,
-    },
-
-    /** @private */
-    driveDestinationKeyCros_: {
-      type: String,
-      computed: 'computeDriveDestinationKeyCros_(' +
-          'driveDestinationKey, saveToDriveFlagEnabled_, isDriveMounted)',
     },
   },
 
@@ -299,15 +287,10 @@ Polymer({
       }
     }
 
-    if (this.destination.origin !== DestinationOrigin.CROS) {
-      return this.destination.shouldShowDeprecatedPrinterWarning ?
-          this.i18nAdvanced('printerNotSupportedWarning') :
-          '';
-    }
-
     // Only when the flag is enabled do we need to fetch a local printer status
     // error string.
-    if (!this.printerStatusFlagEnabled_) {
+    if (this.destination.origin !== DestinationOrigin.CROS ||
+        !this.printerStatusFlagEnabled_) {
       return '';
     }
 
@@ -355,17 +338,5 @@ Polymer({
         this.$$('#dropdown')
             .shadowRoot.querySelectorAll('.list-item:not([hidden])') :
         this.shadowRoot.querySelectorAll('option:not([hidden])');
-  },
-
-  /**
-   * @return {string}
-   * @private
-   */
-  computeDriveDestinationKeyCros_: function() {
-    if (!this.saveToDriveFlagEnabled_) {
-      return this.driveDestinationKey;
-    }
-
-    return this.isDriveMounted ? SAVE_TO_DRIVE_CROS_DESTINATION_KEY : '';
   },
 });

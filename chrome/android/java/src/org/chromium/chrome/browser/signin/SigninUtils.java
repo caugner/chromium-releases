@@ -12,13 +12,14 @@ import android.os.Build;
 import android.provider.Settings;
 
 import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.IntentUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.browser.app.ChromeActivity;
-import org.chromium.chrome.browser.help.HelpAndFeedback;
+import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherImpl;
 import org.chromium.chrome.browser.incognito.interstitial.IncognitoInterstitialDelegate;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.signin.account_picker.AccountConsistencyPromoAction;
@@ -27,6 +28,7 @@ import org.chromium.chrome.browser.signin.account_picker.AccountPickerDelegate;
 import org.chromium.chrome.browser.sync.settings.AccountManagementFragment;
 import org.chromium.chrome.browser.tabmodel.TabCreator;
 import org.chromium.chrome.browser.tabmodel.TabModel;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetControllerProvider;
 import org.chromium.components.browser_ui.settings.ManagedPreferencesUtils;
 import org.chromium.components.signin.AccountManagerFacadeProvider;
@@ -79,12 +81,14 @@ public class SigninUtils {
     }
 
     @CalledByNative
-    private static void openAccountPickerBottomSheet(
-            WindowAndroid windowAndroid, String continueUrl) {
+    @VisibleForTesting
+    static void openAccountPickerBottomSheet(WindowAndroid windowAndroid, String continueUrl) {
         ThreadUtils.assertOnUiThread();
         SigninManager signinManager = IdentityServicesProvider.get().getSigninManager(
                 Profile.getLastUsedRegularProfile());
         if (!signinManager.isSignInAllowed()) {
+            AccountPickerDelegate.recordAccountConsistencyPromoAction(
+                    AccountConsistencyPromoAction.SUPPRESSED_SIGNIN_NOT_ALLOWED);
             return;
         }
         if (AccountManagerFacadeProvider.getInstance().tryGetGoogleAccounts().isEmpty()) {
@@ -94,8 +98,16 @@ public class SigninUtils {
                     AccountConsistencyPromoAction.SUPPRESSED_NO_ACCOUNTS);
             return;
         }
-        ChromeActivity activity = (ChromeActivity) windowAndroid.getActivity().get();
+        BottomSheetController bottomSheetController =
+                BottomSheetControllerProvider.from(windowAndroid);
+        if (bottomSheetController == null) {
+            // The bottomSheetController can be null when google.com is just opened inside a
+            // bottom sheet for example. In this case, it's better to disable the account picker
+            // bottom sheet.
+            return;
+        }
 
+        ChromeActivity activity = (ChromeActivity) windowAndroid.getActivity().get();
         // To close the current regular tab after the user clicks on "Continue" in the incognito
         // interstitial.
         TabModel regularTabModel = activity.getTabModelSelector().getModel(/*incognito=*/false);
@@ -104,13 +116,13 @@ public class SigninUtils {
         TabCreator incognitoTabCreator = activity.getTabCreator(/*incognito=*/true);
         IncognitoInterstitialDelegate incognitoInterstitialDelegate =
                 new IncognitoInterstitialDelegate(activity, regularTabModel, incognitoTabCreator,
-                        HelpAndFeedback.getInstance());
+                        HelpAndFeedbackLauncherImpl.getInstance());
 
-        AccountPickerBottomSheetCoordinator coordinator = new AccountPickerBottomSheetCoordinator(
-                windowAndroid.getContext().get(), BottomSheetControllerProvider.from(windowAndroid),
-                new AccountPickerDelegate(windowAndroid, activity.getActivityTab(),
-                        new WebSigninBridge.Factory(), continueUrl),
-                incognitoInterstitialDelegate);
+        AccountPickerBottomSheetCoordinator coordinator =
+                new AccountPickerBottomSheetCoordinator(activity, bottomSheetController,
+                        new AccountPickerDelegate(windowAndroid, activity.getActivityTab(),
+                                new WebSigninBridge.Factory(), continueUrl),
+                        incognitoInterstitialDelegate);
     }
 
     /**

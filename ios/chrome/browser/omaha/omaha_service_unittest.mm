@@ -18,6 +18,7 @@
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state_manager.h"
 #include "ios/chrome/browser/install_time_util.h"
+#import "ios/chrome/browser/upgrade/upgrade_constants.h"
 #include "ios/chrome/browser/upgrade/upgrade_recommended_details.h"
 #include "ios/chrome/common/channel_info.h"
 #include "ios/chrome/test/ios_chrome_scoped_testing_chrome_browser_state_manager.h"
@@ -131,9 +132,9 @@ class OmahaServiceTest : public PlatformTest {
 
 TEST_F(OmahaServiceTest, PingMessageTest) {
   const char* expectedResult =
-      "<request protocol=\"3.0\" version=\"iOS-1.0.0.0\" ismachine=\"1\" "
-      "requestid=\"requestId\" sessionid=\"sessionId\""
-      " hardware_class=\"[^\"]*\">"
+      "<request protocol=\"3.0\" updater=\"iOS\" updaterversion=\"[^\"]*\""
+      " updaterchannel=\"[^\"]*\" ismachine=\"1\" requestid=\"requestId\""
+      " sessionid=\"sessionId\" hardware_class=\"[^\"]*\">"
       "<os platform=\"ios\" version=\"[0-9][0-9]*\\(\\.[0-9][0-9]*\\)*\""
       " arch=\"[^\"]*\"/>"
       "<app version=\"[^\"]*\" nextversion=\"\" lang=\"[^\"]*\""
@@ -145,8 +146,8 @@ TEST_F(OmahaServiceTest, PingMessageTest) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   std::string content = service.GetPingContent(
       "requestId", "sessionId", version_info::GetVersionNumber(),
       GetChannelString(), base::Time::Now(), OmahaService::USAGE_PING);
@@ -154,15 +155,15 @@ TEST_F(OmahaServiceTest, PingMessageTest) {
   regcomp(&regex, expectedResult, REG_NOSUB);
   int result = regexec(&regex, content.c_str(), 0, NULL, 0);
   regfree(&regex);
-  EXPECT_EQ(0, result);
+  EXPECT_EQ(0, result) << "Actual contents: " << content;
   EXPECT_FALSE(NeedUpdate());
 }
 
 TEST_F(OmahaServiceTest, PingMessageTestWithUnknownInstallDate) {
   const char* expectedResult =
-      "<request protocol=\"3.0\" version=\"iOS-1.0.0.0\" ismachine=\"1\" "
-      "requestid=\"requestId\" sessionid=\"sessionId\""
-      " hardware_class=\"[^\"]*\">"
+      "<request protocol=\"3.0\" updater=\"iOS\" updaterversion=\"[^\"]*\""
+      " updaterchannel=\"[^\"]*\" ismachine=\"1\" requestid=\"requestId\""
+      " sessionid=\"sessionId\" hardware_class=\"[^\"]*\">"
       "<os platform=\"ios\" version=\"[0-9][0-9]*\\(\\.[0-9][0-9]*\\)*\""
       " arch=\"[^\"]*\"/>"
       "<app version=\"[^\"]*\" nextversion=\"\" lang=\"[^\"]*\""
@@ -173,8 +174,8 @@ TEST_F(OmahaServiceTest, PingMessageTestWithUnknownInstallDate) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   std::string content = service.GetPingContent(
       "requestId", "sessionId", version_info::GetVersionNumber(),
       GetChannelString(),
@@ -184,15 +185,15 @@ TEST_F(OmahaServiceTest, PingMessageTestWithUnknownInstallDate) {
   regcomp(&regex, expectedResult, REG_NOSUB);
   int result = regexec(&regex, content.c_str(), 0, NULL, 0);
   regfree(&regex);
-  EXPECT_EQ(0, result);
+  EXPECT_EQ(0, result) << "Actual contents: " << content;
   EXPECT_FALSE(NeedUpdate());
 }
 
 TEST_F(OmahaServiceTest, InstallEventMessageTest) {
   const char* kExpectedResultFormat =
-      "<request protocol=\"3.0\" version=\"iOS-1.0.0.0\" ismachine=\"1\" "
-      "requestid=\"requestId\" sessionid=\"sessionId\""
-      " hardware_class=\"[^\"]*\">"
+      "<request protocol=\"3.0\" updater=\"iOS\" updaterversion=\"[^\"]*\""
+      " updaterchannel=\"[^\"]*\" ismachine=\"1\" requestid=\"requestId\""
+      " sessionid=\"sessionId\" hardware_class=\"[^\"]*\">"
       "<os platform=\"ios\" version=\"[0-9][0-9]*(\\.[0-9][0-9]*)*\""
       " arch=\"[^\"]*\"/>"
       "<app version=\"%s\" nextversion=\"[^\"]*\" lang=\"[^\"]*\""
@@ -205,8 +206,8 @@ TEST_F(OmahaServiceTest, InstallEventMessageTest) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   CleanService(&service, "");
   std::string content = service.GetPingContent(
       "requestId", "sessionId", version_info::GetVersionNumber(),
@@ -243,8 +244,8 @@ TEST_F(OmahaServiceTest, SendPingSuccess) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
   CleanService(&service, version_info::GetVersionNumber());
 
@@ -268,13 +269,74 @@ TEST_F(OmahaServiceTest, SendPingSuccess) {
   EXPECT_FALSE(ScheduledCallbackUsed());
 }
 
+TEST_F(OmahaServiceTest, PingUpToDateUpdatesUserDefaults) {
+  OmahaService service(false);
+  service.StartInternal();
+
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
+  CleanService(&service, version_info::GetVersionNumber());
+
+  service.SendPing();
+
+  auto* pending_request = test_url_loader_factory_.GetPendingRequest(0);
+  test_url_loader_factory_.SimulateResponseForPendingRequest(
+      pending_request->request.url.spec(), GetResponseSuccess());
+
+  EXPECT_TRUE(
+      [[NSUserDefaults standardUserDefaults] boolForKey:kIOSChromeUpToDateKey]);
+  EXPECT_FALSE(NeedUpdate());
+  EXPECT_FALSE(ScheduledCallbackUsed());
+}
+
+TEST_F(OmahaServiceTest, PingOutOfDateUpdatesUserDefaults) {
+  OmahaService service(false);
+  service.StartInternal();
+
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
+  CleanService(&service, version_info::GetVersionNumber());
+
+  service.SendPing();
+
+  std::string response =
+      std::string(
+          "<?xml version=\"1.0\"?><response protocol=\"3.0\" server=\"prod\">"
+          "<daystart elapsed_seconds=\"56754\"/><app appid=\"") +
+      test_application_id() +
+      "\" status=\"ok\">"
+      "<updatecheck status=\"ok\"><urls>"
+      "<url codebase=\"http://www.goo.fr/foo/\"/></urls>"
+      "<manifest version=\"0.0.1075.1441\">"
+      "<packages>"
+      "<package hash=\"0\" name=\"Chrome\" required=\"true\" size=\"0\"/>"
+      "</packages>"
+      "<actions>"
+      "<action event=\"update\" run=\"Chrome\"/>"
+      "<action event=\"postinstall\" osminversion=\"6.0\"/>"
+      "</actions>"
+      "</manifest>"
+      "</updatecheck><ping status=\"ok\"/>"
+      "</app></response>";
+  auto* pending_request = test_url_loader_factory_.GetPendingRequest(0);
+  test_url_loader_factory_.SimulateResponseForPendingRequest(
+      pending_request->request.url.spec(), response);
+
+  EXPECT_FALSE(
+      [[NSUserDefaults standardUserDefaults] boolForKey:kIOSChromeUpToDateKey]);
+  EXPECT_TRUE(NeedUpdate());
+  EXPECT_TRUE(ScheduledCallbackUsed());
+}
+
 TEST_F(OmahaServiceTest, CallbackForScheduledNotUsedOnErrorResponse) {
   base::Time now = base::Time::Now();
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
   CleanService(&service, version_info::GetVersionNumber());
 
@@ -306,8 +368,8 @@ TEST_F(OmahaServiceTest, OneOffSuccess) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
 
   service.one_off_check_callback_ =
@@ -341,8 +403,8 @@ TEST_F(OmahaServiceTest, OngoingPingOneOffCallbackUsed) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
   CleanService(&service, version_info::GetVersionNumber());
 
@@ -378,8 +440,8 @@ TEST_F(OmahaServiceTest, OneOffCallbackUsedOnlyOnce) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
 
   service.one_off_check_callback_ =
@@ -422,8 +484,8 @@ TEST_F(OmahaServiceTest, ScheduledPingDuringOneOffDropped) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
 
   service.one_off_check_callback_ =
@@ -464,8 +526,8 @@ TEST_F(OmahaServiceTest, ParseAndEchoLastServerDate) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
   CleanService(&service, version_info::GetVersionNumber());
 
@@ -478,9 +540,9 @@ TEST_F(OmahaServiceTest, ParseAndEchoLastServerDate) {
   EXPECT_EQ(4088, service.last_server_date_);
 
   const char* expectedResult =
-      "<request protocol=\"3.0\" version=\"iOS-1.0.0.0\" ismachine=\"1\" "
-      "requestid=\"requestId\" sessionid=\"sessionId\""
-      " hardware_class=\"[^\"]*\">"
+      "<request protocol=\"3.0\" updater=\"iOS\" updaterversion=\"[^\"]*\""
+      " updaterchannel=\"[^\"]*\" ismachine=\"1\" requestid=\"requestId\""
+      " sessionid=\"sessionId\" hardware_class=\"[^\"]*\">"
       "<os platform=\"ios\" version=\"[0-9][0-9]*\\(\\.[0-9][0-9]*\\)*\""
       " arch=\"[^\"]*\"/>"
       "<app version=\"[^\"]*\" nextversion=\"\" lang=\"[^\"]*\""
@@ -497,7 +559,7 @@ TEST_F(OmahaServiceTest, ParseAndEchoLastServerDate) {
   regcomp(&regex, expectedResult, REG_NOSUB);
   int result = regexec(&regex, content.c_str(), 0, nullptr, 0);
   regfree(&regex);
-  EXPECT_EQ(0, result);
+  EXPECT_EQ(0, result) << "Actual contents: " << content;
 }
 
 TEST_F(OmahaServiceTest, SendInstallEventSuccess) {
@@ -505,8 +567,8 @@ TEST_F(OmahaServiceTest, SendInstallEventSuccess) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
   CleanService(&service, "");
 
@@ -539,8 +601,8 @@ TEST_F(OmahaServiceTest, SendPingReceiveUpdate) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
   CleanService(&service, version_info::GetVersionNumber());
 
@@ -586,8 +648,8 @@ TEST_F(OmahaServiceTest, SendPingFailure) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
   CleanService(&service, version_info::GetVersionNumber());
 
@@ -639,8 +701,8 @@ TEST_F(OmahaServiceTest, PersistStatesTest) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.number_of_tries_ = 5;
   service.last_sent_time_ = now - base::TimeDelta::FromSeconds(1);
   service.next_tries_time_ = now + base::TimeDelta::FromSeconds(2);
@@ -676,8 +738,8 @@ TEST_F(OmahaServiceTest, ActivePingAfterInstallEventTest) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
   CleanService(&service, "");
 
@@ -712,8 +774,8 @@ TEST_F(OmahaServiceTest, NonSpammingTest) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
   CleanService(&service, version_info::GetVersionNumber());
 
@@ -747,8 +809,8 @@ TEST_F(OmahaServiceTest, InstallRetryTest) {
   OmahaService service(false);
   service.StartInternal();
 
-  service.set_upgrade_recommended_callback(
-      base::Bind(&OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
+  service.set_upgrade_recommended_callback(base::BindRepeating(
+      &OmahaServiceTest::OnNeedUpdate, base::Unretained(this)));
   service.InitializeURLLoaderFactory(test_shared_url_loader_factory_);
   CleanService(&service, "");
 

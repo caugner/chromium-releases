@@ -44,16 +44,46 @@ void AmbientUiModel::SetUiVisibility(AmbientUiVisibility visibility) {
   NotifyAmbientUiVisibilityChanged();
 }
 
-void AmbientUiModel::SetUiMode(AmbientUiMode ui_mode) {
-  if (ui_mode_ == ui_mode)
+void AmbientUiModel::SetLockScreenInactivityTimeout(base::TimeDelta timeout) {
+  if (timeout == lock_screen_inactivity_timeout_)
     return;
 
-  ui_mode_ = ui_mode;
+  lock_screen_inactivity_timeout_ = timeout;
+  NotifyLockScreenInactivityTimeoutChanged();
+}
+
+void AmbientUiModel::SetBackgroundLockScreenTimeout(base::TimeDelta timeout) {
+  if (timeout == background_lock_screen_timeout_)
+    return;
+
+  background_lock_screen_timeout_ = timeout;
+  NotifyBackgroundLockScreenTimeoutChanged();
+}
+
+void AmbientUiModel::SetPhotoRefreshInterval(base::TimeDelta interval) {
+  if (interval == photo_refresh_interval_)
+    return;
+
+  photo_refresh_interval_ = interval;
 }
 
 void AmbientUiModel::NotifyAmbientUiVisibilityChanged() {
   for (auto& observer : observers_)
     observer.OnAmbientUiVisibilityChanged(ui_visibility_);
+}
+
+void AmbientUiModel::NotifyLockScreenInactivityTimeoutChanged() {
+  for (auto& observer : observers_) {
+    observer.OnLockScreenInactivityTimeoutChanged(
+        lock_screen_inactivity_timeout_);
+  }
+}
+
+void AmbientUiModel::NotifyBackgroundLockScreenTimeoutChanged() {
+  for (auto& observer : observers_) {
+    observer.OnBackgroundLockScreenTimeoutChanged(
+        background_lock_screen_timeout_);
+  }
 }
 
 std::ostream& operator<<(std::ostream& out, AmbientUiMode mode) {
@@ -63,6 +93,21 @@ std::ostream& operator<<(std::ostream& out, AmbientUiMode mode) {
       break;
     case AmbientUiMode::kInSessionUi:
       out << "kInSessionUi";
+      break;
+  }
+  return out;
+}
+
+std::ostream& operator<<(std::ostream& out, AmbientUiVisibility visibility) {
+  switch (visibility) {
+    case AmbientUiVisibility::kShown:
+      out << "kShown";
+      break;
+    case AmbientUiVisibility::kHidden:
+      out << "kHidden";
+      break;
+    case AmbientUiVisibility::kClosed:
+      out << "kClosed";
       break;
   }
   return out;

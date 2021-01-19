@@ -37,27 +37,46 @@ const utils = goog.require(
    * Does the actual work for handleTextFragments.
    */
   const doHandleTextFragments = function(fragments, scroll) {
-    let marks = [];
+    const marks = [];
+    let successCount = 0;
 
     for (const fragment of fragments) {
       // Process the fragments, then filter out any that evaluate to false.
-      let newMarks = utils.processTextFragmentDirective(fragment)
+      const foundRanges = utils.processTextFragmentDirective(fragment)
           .filter((mark) => { return !!mark });
 
-      if (Array.isArray(newMarks))
-        marks.push(...newMarks);
+      if (Array.isArray(foundRanges)) {
+        // If length < 1, then nothing was found. If length > 1, then the
+        // fragment in the URL is ambiguous (i.e., it could identify multiple
+        // different places on the page) so we discard it as well.
+        if (foundRanges.length === 1) {
+          ++successCount;
+          let newMarks = utils.markRange(foundRanges[0]);
+          if (Array.isArray(newMarks)) {
+            marks.push(...newMarks);
+          }
+        }
+      }
     }
 
     if (scroll && marks.length > 0)
       utils.scrollElementIntoView(marks[0]);
 
-    // TODO(crbug.com/1099268): Count successes/failures above and log metrics
+    // Clean-up marks whenever the user taps somewhere on the page. Use capture
+    // to make sure the event listener is executed immediately and cannot be
+    // prevented by the event target (during bubble phase).
+    document.addEventListener("click", function removeMarksFunction() {
+      utils.removeMarks(marks);
+      document.removeEventListener("click", removeMarksFunction,
+                                   /*useCapture=*/true);
+    }, /*useCapture=*/true);
 
-    for (const mark of marks) {
-      mark.addEventListener("click", () => {
-        utils.removeMarks(marks);
-      });
-    }
+    __gCrWeb.message.invokeOnHost({
+      command: 'textFragments.response',
+      result: {
+        successCount: successCount,
+        fragmentsCount: fragments.length
+      }
+    });
   }
-
 })();

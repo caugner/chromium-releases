@@ -7,8 +7,8 @@
 #include "ash/login/ui/access_code_input.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_forward.h"
+#include "base/callback_helpers.h"
 #include "base/optional.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chromeos/constants/chromeos_features.h"
@@ -28,7 +28,6 @@ constexpr const int kFieldSpace = 8;
 // Total height of the view.
 constexpr const int kPinInputTotalHeightDp = 37;
 // Default length
-constexpr const int kDefaultLength = 6;
 constexpr const int kPinAutosubmitMinLength = 6;
 constexpr const int kPinAutosubmitMaxLength = 12;
 }  // namespace
@@ -38,6 +37,7 @@ constexpr const int kPinAutosubmitMaxLength = 12;
 class LoginPinInput : public FixedLengthCodeInput {
  public:
   LoginPinInput(int length,
+                const LoginPalette& palette,
                 LoginPinInputView::OnPinSubmit on_submit,
                 LoginPinInputView::OnPinChanged on_changed);
 
@@ -48,6 +48,8 @@ class LoginPinInput : public FixedLengthCodeInput {
                         const ui::MouseEvent& mouse_event) override;
   bool HandleGestureEvent(views::Textfield* sender,
                           const ui::GestureEvent& gesture_event) override;
+  bool HandleKeyEvent(views::Textfield* sender,
+                      const ui::KeyEvent& key_event) override;
   // views::view
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
@@ -60,6 +62,7 @@ class LoginPinInput : public FixedLengthCodeInput {
 };
 
 LoginPinInput::LoginPinInput(int length,
+                             const LoginPalette& palette,
                              LoginPinInputView::OnPinSubmit on_submit,
                              LoginPinInputView::OnPinChanged on_changed)
     : FixedLengthCodeInput(length,
@@ -68,7 +71,8 @@ LoginPinInput::LoginPinInput(int length,
                                                base::Unretained(this)),
                            /*on_enter*/ base::DoNothing(),
                            /*on_escape*/ base::DoNothing(),
-                           /*obscure_pin*/ true),
+                           /*obscure_pin*/ true,
+                           /*text_color*/ palette.pin_input_text_color),
       length_(length),
       on_submit_(on_submit),
       on_changed_(on_changed) {
@@ -87,6 +91,7 @@ void LoginPinInput::OnModified(bool last_field_active, bool complete) {
   if (last_field_active && complete) {
     base::Optional<std::string> user_input = GetCode();
     DCHECK(on_submit_);
+    SetReadOnly(true);
     on_submit_.Run(base::UTF8ToUTF16(user_input.value_or(std::string())));
   }
 }
@@ -112,6 +117,18 @@ bool LoginPinInput::HandleGestureEvent(views::Textfield* sender,
   return true;
 }
 
+bool LoginPinInput::HandleKeyEvent(views::Textfield* sender,
+                                   const ui::KeyEvent& key_event) {
+  // Let the parent view handle the 'Return' key. Triggers SmartLock login.
+  if (key_event.type() == ui::ET_KEY_PRESSED &&
+      key_event.key_code() == ui::VKEY_RETURN) {
+    return false;
+  }
+
+  // Delegate all other key events to the base class.
+  return FixedLengthCodeInput::HandleKeyEvent(sender, key_event);
+}
+
 void LoginPinInput::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   FixedLengthCodeInput::GetAccessibleNodeData(node_data);
   const int inserted_digits = active_input_index();
@@ -121,6 +138,8 @@ void LoginPinInput::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->SetName(l10n_util::GetStringUTF8(
           IDS_ASH_LOGIN_POD_PASSWORD_PIN_INPUT_ACCESSIBLE_NAME));
 }
+
+const int LoginPinInputView::kDefaultLength = 6;
 
 LoginPinInputView::TestApi::TestApi(LoginPinInputView* view) : view_(view) {
   DCHECK(view_);
@@ -132,11 +151,16 @@ views::View* LoginPinInputView::TestApi::code_input() {
   return view_->code_input_;
 }
 
-LoginPinInputView::LoginPinInputView() : length_(kDefaultLength) {
+base::Optional<std::string> LoginPinInputView::TestApi::GetCode() {
+  return view_->code_input_->GetCode();
+}
+
+LoginPinInputView::LoginPinInputView(const LoginPalette& palette)
+    : length_(kDefaultLength), palette_(palette) {
   SetLayoutManager(std::make_unique<views::FillLayout>());
 
   code_input_ = AddChildView(std::make_unique<LoginPinInput>(
-      length_,
+      length_, palette_,
       base::BindRepeating(&LoginPinInputView::SubmitPin,
                           base::Unretained(this)),
       base::BindRepeating(&LoginPinInputView::OnChanged,
@@ -177,13 +201,18 @@ void LoginPinInputView::UpdateLength(const size_t pin_length) {
   RemoveChildView(code_input_);
   delete code_input_;
   code_input_ = AddChildView(std::make_unique<LoginPinInput>(
-      pin_length,
+      pin_length, palette_,
       base::BindRepeating(&LoginPinInputView::SubmitPin,
                           base::Unretained(this)),
       base::BindRepeating(&LoginPinInputView::OnChanged,
                           base::Unretained(this))));
+  is_read_only_ = false;
   Layout();
   SetVisible(true);
+}
+
+void LoginPinInputView::SetAuthenticateWithEmptyPinOnReturnKey(bool enabled) {
+  authenticate_with_empty_pin_on_return_key_ = enabled;
 }
 
 void LoginPinInputView::Reset() {
@@ -198,10 +227,12 @@ void LoginPinInputView::Backspace() {
 
 void LoginPinInputView::InsertDigit(int digit) {
   DCHECK(code_input_);
-  code_input_->InsertDigit(digit);
+  if (!is_read_only_)
+    code_input_->InsertDigit(digit);
 }
 
 void LoginPinInputView::SetReadOnly(bool read_only) {
+  is_read_only_ = read_only;
   code_input_->SetReadOnly(read_only);
 }
 
@@ -215,6 +246,20 @@ gfx::Size LoginPinInputView::CalculatePreferredSize() const {
 void LoginPinInputView::RequestFocus() {
   DCHECK(code_input_);
   code_input_->RequestFocus();
+}
+
+bool LoginPinInputView::OnKeyPressed(const ui::KeyEvent& event) {
+  // The 'Return' key has no relationship to the digits inserted in this view.
+  // It just performs an unlock attempt with an empty PIN, which triggers a
+  // SmartLock attempt in LoginAuthUserView. The user's PIN is only submitted
+  // when the last digit is inserted.
+  if (event.key_code() == ui::KeyboardCode::VKEY_RETURN && !is_read_only_ &&
+      authenticate_with_empty_pin_on_return_key_) {
+    SubmitPin(base::UTF8ToUTF16(""));
+    return true;
+  }
+
+  return false;
 }
 
 void LoginPinInputView::OnChanged(bool is_empty) {

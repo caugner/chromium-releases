@@ -650,7 +650,47 @@ suite('DragManager', () => {
     assertFalse(isDraggedOut);
   });
 
-  test('DropTabWithoutMovingShowsContextMenu', async () => {
+  test('DragEndWithoutMovingShowsContextMenu', async () => {
+    const draggedTab = delegate.children[0];
+    const dragDetails = {
+      bubbles: true,
+      composed: true,
+      clientX: 100,
+      clientY: 150,
+      dataTransfer: new MockDataTransfer(),
+    };
+    draggedTab.dispatchEvent(new DragEvent('dragstart', dragDetails));
+    draggedTab.dispatchEvent(new DragEvent('dragend', dragDetails));
+
+    assertEquals(
+        1, testTabStripEmbedderProxy.getCallCount('showTabContextMenu'));
+    const [tabId, clientX, clientY] =
+        await testTabStripEmbedderProxy.whenCalled('showTabContextMenu');
+    assertEquals(draggedTab.tab.id, tabId);
+    assertEquals(dragDetails.clientX, clientX);
+    assertEquals(dragDetails.clientY, clientY);
+  });
+
+  test('DragendAfterMovingDoesNotShowContextMenu', async () => {
+    const draggedTab = delegate.children[0];
+    const dragOverTab = delegate.children[1];
+    const dragDetails = {
+      bubbles: true,
+      composed: true,
+      clientX: 100,
+      clientY: 150,
+      dataTransfer: new MockDataTransfer(),
+    };
+    draggedTab.dispatchEvent(new DragEvent('dragstart', dragDetails));
+    dragOverTab.dispatchEvent(new DragEvent(
+        'dragover', Object.assign({}, dragDetails, {clientX: 200})));
+    draggedTab.dispatchEvent(new DragEvent('dragend', dragDetails));
+
+    assertEquals(
+        0, testTabStripEmbedderProxy.getCallCount('showTabContextMenu'));
+  });
+
+  test('DropWithoutMovingShowsContextMenu', async () => {
     const draggedTab = delegate.children[0];
     const dragDetails = {
       bubbles: true,
@@ -671,22 +711,39 @@ suite('DragManager', () => {
     assertEquals(dragDetails.clientY, clientY);
   });
 
-  test('DropTabAfterMovingDoesNotShowContextMenu', async () => {
+  test('DragEndWithDropEffectMoveDoesNotRemoveDraggedOutAttribute', () => {
     const draggedTab = delegate.children[0];
-    const dragOverTab = delegate.children[1];
-    const dragDetails = {
+    const dataTransfer = new MockDataTransfer();
+    draggedTab.dispatchEvent(new DragEvent('dragstart', {
       bubbles: true,
       composed: true,
       clientX: 100,
       clientY: 150,
-      dataTransfer: new MockDataTransfer(),
-    };
-    draggedTab.dispatchEvent(new DragEvent('dragstart', dragDetails));
-    dragOverTab.dispatchEvent(new DragEvent(
-        'dragover', Object.assign({}, dragDetails, {clientX: 200})));
-    draggedTab.dispatchEvent(new DragEvent('drop', dragDetails));
+      dataTransfer,
+    }));
+    delegate.dispatchEvent(new DragEvent('dragleave', {dataTransfer}));
+    assertTrue(draggedTab.isDraggedOut());
 
-    assertEquals(
-        0, testTabStripEmbedderProxy.getCallCount('showTabContextMenu'));
+    dataTransfer.dropEffect = 'move';
+    delegate.dispatchEvent(new DragEvent('dragend', {dataTransfer}));
+    assertTrue(draggedTab.isDraggedOut());
+  });
+
+  test('DragEndWithDropEffectNoneRemovesDraggedOutAttribute', () => {
+    const draggedTab = delegate.children[0];
+    const dataTransfer = new MockDataTransfer();
+    draggedTab.dispatchEvent(new DragEvent('dragstart', {
+      bubbles: true,
+      composed: true,
+      clientX: 100,
+      clientY: 150,
+      dataTransfer,
+    }));
+    delegate.dispatchEvent(new DragEvent('dragleave', {dataTransfer}));
+    assertTrue(draggedTab.isDraggedOut());
+
+    dataTransfer.dropEffect = 'none';
+    delegate.dispatchEvent(new DragEvent('dragend', {dataTransfer}));
+    assertFalse(draggedTab.isDraggedOut());
   });
 });

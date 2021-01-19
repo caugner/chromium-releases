@@ -10,7 +10,7 @@ import {assertInstanceof} from './chrome_util.js';
 /**
  * Gets an element matching css selector under the target element and checks its
  * type.
- * @param {(!HTMLElement|!HTMLDocument)} target
+ * @param {!Node} target
  * @param {string} selector
  * @param {function(new: T, ...)} type A user-defined constructor.
  * @return {T}
@@ -23,7 +23,7 @@ export function getFrom(target, selector, type) {
 /**
  * Gets all elements matching css selector under the target element and asserts
  * their type to be specific type.
- * @param {(!HTMLElement|!HTMLDocument)} target
+ * @param {!Node} target
  * @param {string} selector
  * @param {function(new: T, ...)} type A user-defined constructor.
  * @return {!NodeList<T>}

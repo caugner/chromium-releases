@@ -8,6 +8,9 @@
 #include <utility>
 
 #include "base/metrics/histogram_functions.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_metrics.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/css/css_font_selector.h"
 #include "third_party/blink/renderer/core/css/offscreen_font_selector.h"
@@ -44,8 +47,7 @@ namespace blink {
 
 OffscreenCanvas::OffscreenCanvas(ExecutionContext* context, const IntSize& size)
     : CanvasRenderingContextHost(
-          CanvasRenderingContextHost::HostType::kOffscreenCanvasHost,
-          base::make_optional<UkmParameters>()),
+          CanvasRenderingContextHost::HostType::kOffscreenCanvasHost),
       execution_context_(context),
       size_(size) {
   // Other code in Blink watches for destruction of the context; be
@@ -103,6 +105,7 @@ void OffscreenCanvas::Commit(scoped_refptr<CanvasResource> canvas_resource,
 void OffscreenCanvas::Dispose() {
   // We need to drop frame dispatcher, to prevent mojo calls from completing.
   frame_dispatcher_ = nullptr;
+  DiscardResourceProvider();
 
   if (context_) {
     context_->DetachHost();
@@ -176,6 +179,13 @@ void OffscreenCanvas::SetSize(const IntSize& size) {
   }
 }
 
+ScriptPromise OffscreenCanvas::convertToBlob(ScriptState* script_state,
+                                             const ImageEncodeOptions* options,
+                                             ExceptionState& exception_state) {
+  return CanvasRenderingContextHost::convertToBlob(script_state, options,
+                                                   exception_state, context_);
+}
+
 void OffscreenCanvas::RecordTransfer() {
   UMA_HISTOGRAM_BOOLEAN("Blink.OffscreenCanvas.Transferred", true);
 }
@@ -211,7 +221,24 @@ ImageBitmap* OffscreenCanvas::transferToImageBitmap(
                                       "ImageBitmap construction failed");
   }
 
+  RecordIdentifiabilityMetric(
+      blink::IdentifiableSurface::FromTypeAndToken(
+          blink::IdentifiableSurface::Type::kCanvasReadback,
+          context_ ? context_->GetContextType()
+                   : CanvasRenderingContext::kContextTypeUnknown),
+      0);
+
   return image;
+}
+
+void OffscreenCanvas::RecordIdentifiabilityMetric(
+    const blink::IdentifiableSurface& surface,
+    const IdentifiableToken& token) const {
+  if (!IdentifiabilityStudySettings::Get()->ShouldSample(surface))
+    return;
+  blink::IdentifiabilityMetricBuilder(GetExecutionContext()->UkmSourceID())
+      .Set(surface, token)
+      .Record(GetExecutionContext()->UkmRecorder());
 }
 
 scoped_refptr<Image> OffscreenCanvas::GetSourceImageForCanvas(
@@ -493,6 +520,11 @@ bool OffscreenCanvas::ShouldAccelerate2dContext() const {
       SharedGpuContext::ContextProviderWrapper();
   return context_provider_wrapper &&
          context_provider_wrapper->Utils()->Accelerated2DCanvasFeatureEnabled();
+}
+
+UkmParameters OffscreenCanvas::GetUkmParameters() {
+  auto* context = GetExecutionContext();
+  return {context->UkmRecorder(), context->UkmSourceID()};
 }
 
 FontSelector* OffscreenCanvas::GetFontSelector() {

@@ -11,6 +11,7 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_executor.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
@@ -27,7 +28,9 @@ class PaymentResponseHelperTest : public testing::Test,
                                   public PaymentResponseHelper::Delegate {
  protected:
   PaymentResponseHelperTest()
-      : test_payment_request_delegate_(&test_personal_data_manager_),
+      : test_payment_request_delegate_(
+            std::make_unique<base::SingleThreadTaskExecutor>(),
+            &test_personal_data_manager_),
         address_(autofill::test::GetFullProfile()),
         billing_addresses_({&address_}) {
     test_personal_data_manager_.AddProfile(address_);
@@ -91,7 +94,7 @@ class PaymentResponseHelperTest : public testing::Test,
   const mojom::PaymentResponsePtr& response() { return payment_response_; }
   autofill::AutofillProfile* test_address() { return &address_; }
   const autofill::CreditCard& test_credit_card() { return visa_card_; }
-  PaymentApp* test_app() { return autofill_app_.get(); }
+  base::WeakPtr<PaymentApp> test_app() { return autofill_app_->AsWeakPtr(); }
   PaymentRequestDelegate* test_payment_request_delegate() {
     return &test_payment_request_delegate_;
   }

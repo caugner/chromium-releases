@@ -21,6 +21,7 @@
 #include "components/payments/content/service_worker_payment_app_factory.h"
 #include "components/payments/core/journey_logger.h"
 #include "components/payments/core/payments_profile_comparator.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/payment_app_provider.h"
 #include "content/public/browser/web_contents.h"
 #include "third_party/blink/public/mojom/payments/payment_request.mojom.h"
@@ -97,8 +98,7 @@ class PaymentRequestState : public PaymentAppFactory::Delegate,
                               const std::string& error_message)>;
 
   // The `spec` parameter should not be null.
-  PaymentRequestState(content::WebContents* web_contents,
-                      content::RenderFrameHost* initiator_render_frame_host,
+  PaymentRequestState(content::RenderFrameHost* initiator_render_frame_host,
                       const GURL& top_level_origin,
                       const GURL& frame_origin,
                       const url::Origin& frame_security_origin,
@@ -203,7 +203,7 @@ class PaymentRequestState : public PaymentAppFactory::Delegate,
   }
   // Returns the currently selected app for this PaymentRequest flow. It's not
   // guaranteed to be complete. Returns nullptr if there is no selected app.
-  PaymentApp* selected_app() const { return selected_app_; }
+  PaymentApp* selected_app() const { return selected_app_.get(); }
 
   // Returns the appropriate Autofill Profiles for this user. The profiles
   // returned are owned by the PaymentRequestState.
@@ -239,7 +239,7 @@ class PaymentRequestState : public PaymentAppFactory::Delegate,
   void SetSelectedShippingOption(const std::string& shipping_option_id);
   void SetSelectedShippingProfile(autofill::AutofillProfile* profile);
   void SetSelectedContactProfile(autofill::AutofillProfile* profile);
-  void SetSelectedApp(PaymentApp* app);
+  void SetSelectedApp(base::WeakPtr<PaymentApp> app);
 
   bool is_ready_to_pay() { return is_ready_to_pay_; }
 
@@ -332,8 +332,7 @@ class PaymentRequestState : public PaymentAppFactory::Delegate,
   bool GetCanMakePaymentValue() const;
   bool GetHasEnrolledInstrumentValue() const;
 
-  content::WebContents* web_contents_;
-  content::RenderFrameHost* initiator_render_frame_host_;
+  content::GlobalFrameRoutingId frame_routing_id_;
   const GURL top_origin_;
   const GURL frame_origin_;
   const url::Origin frame_security_origin_;
@@ -386,7 +385,7 @@ class PaymentRequestState : public PaymentAppFactory::Delegate,
   autofill::AutofillProfile* selected_contact_profile_ = nullptr;
   autofill::AutofillProfile* invalid_shipping_profile_ = nullptr;
   autofill::AutofillProfile* invalid_contact_profile_ = nullptr;
-  PaymentApp* selected_app_ = nullptr;
+  base::WeakPtr<PaymentApp> selected_app_;
 
   // Profiles may change due to (e.g.) sync events, so profiles are cached after
   // loading and owned here. They are populated once only, and ordered by

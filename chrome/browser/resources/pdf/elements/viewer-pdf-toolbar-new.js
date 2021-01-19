@@ -17,6 +17,7 @@ import './shared-css.js';
 import './shared-vars.js';
 
 import {AnchorAlignment} from 'chrome://resources/cr_elements/cr_action_menu/cr_action_menu.m.js';
+import {assert} from 'chrome://resources/js/assert.m.js';
 import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {FittingType} from '../constants.js';
@@ -70,12 +71,12 @@ export class ViewerPdfToolbarNewElement extends PolymerElement {
       pageNo: Number,
       pdfAnnotationsEnabled: Boolean,
       pdfFormSaveEnabled: Boolean,
+      presentationModeEnabled: Boolean,
       printingEnabled: Boolean,
       rotated: Boolean,
-      viewportZoom: {
-        type: Number,
-        observer: 'viewportZoomChanged_',
-      },
+      viewportZoom: Number,
+      /** @type {!{min: number, max: number}} */
+      zoomBounds: Object,
 
       sidenavCollapsed: Boolean,
       twoUpViewEnabled: Boolean,
@@ -91,6 +92,13 @@ export class ViewerPdfToolbarNewElement extends PolymerElement {
       fitToButtonIcon_: {
         type: String,
         computed: 'computeFitToButtonIcon_(fittingType_)',
+      },
+
+      /** @private */
+      viewportZoomPercent_: {
+        type: Number,
+        computed: 'computeViewportZoomPercent_(viewportZoom)',
+        observer: 'viewportZoomPercentChanged_',
       },
 
       // <if expr="chromeos">
@@ -127,9 +135,6 @@ export class ViewerPdfToolbarNewElement extends PolymerElement {
 
     /** @private {boolean} */
     this.moreMenuOpen_ = false;
-
-    /** @private {?number} */
-    this.zoomTimeout_ = null;
   }
 
   /**
@@ -157,6 +162,14 @@ export class ViewerPdfToolbarNewElement extends PolymerElement {
   }
 
   /**
+   * @return {number}
+   * @private
+   */
+  computeViewportZoomPercent_() {
+    return Math.round(100 * this.viewportZoom);
+  }
+
+  /**
    * @param {string} fitToPageTooltip
    * @param {string} fitToWidthTooltip
    * @return {string} The appropriate tooltip for the current state
@@ -173,9 +186,8 @@ export class ViewerPdfToolbarNewElement extends PolymerElement {
   }
 
   /** @private */
-  viewportZoomChanged_() {
-    const zoom = Math.round(this.viewportZoom * 100);
-    this.getZoomInput_().value = `${zoom}%`;
+  viewportZoomPercentChanged_() {
+    this.getZoomInput_().value = `${this.viewportZoomPercent_}%`;
   }
 
   // <if expr="chromeos">
@@ -211,6 +223,13 @@ export class ViewerPdfToolbarNewElement extends PolymerElement {
       this.toggleAnnotation();
     }
     // </if>
+  }
+
+  /** @private */
+  onFullscreenClick_() {
+    assert(this.presentationModeEnabled);
+    this.getMenu_().close();
+    this.dispatchEvent(new CustomEvent('fullscreen-click'));
   }
 
   /**
@@ -293,20 +312,24 @@ export class ViewerPdfToolbarNewElement extends PolymerElement {
   }
 
   /** @private */
-  onZoomInput_() {
-    if (this.zoomTimeout_) {
-      clearTimeout(this.zoomTimeout_);
+  onZoomChange_() {
+    const input = this.getZoomInput_();
+    let value = Number.parseInt(input.value, 10);
+    value = Math.max(Math.min(value, this.zoomBounds.max), this.zoomBounds.min);
+    if (this.sendZoomChanged_(value)) {
+      return;
     }
-    this.zoomTimeout_ = setTimeout(() => this.sendZoomChanged_(), 250);
+
+    const zoomString = `${this.viewportZoomPercent_}%`;
+    input.value = zoomString;
   }
 
   /**
+   * @param {number} value The new zoom value
    * @return {boolean} Whether the zoom-changed event was sent.
    * @private
    */
-  sendZoomChanged_() {
-    this.zoomTimeout_ = null;
-    const value = Number.parseInt(this.getZoomInput_().value, 10);
+  sendZoomChanged_(value) {
     if (Number.isNaN(value)) {
       return false;
     }
@@ -318,21 +341,6 @@ export class ViewerPdfToolbarNewElement extends PolymerElement {
 
     this.dispatchEvent(new CustomEvent('zoom-changed', {detail: value}));
     return true;
-  }
-
-  /** @private */
-  onZoomInputBlur_() {
-    if (this.zoomTimeout_) {
-      clearTimeout(this.zoomTimeout_);
-    }
-
-    if (this.sendZoomChanged_()) {
-      return;
-    }
-
-    const zoom = Math.round(this.viewportZoom * 100);
-    const zoomString = `${zoom}%`;
-    this.getZoomInput_().value = zoomString;
   }
 
   /**
@@ -360,6 +368,24 @@ export class ViewerPdfToolbarNewElement extends PolymerElement {
    */
   onMoreOpenChanged_(e) {
     this.moreMenuOpen_ = e.detail.value;
+  }
+
+  /**
+   * @return {boolean}
+   * @private
+   */
+  isAtMinimumZoom_() {
+    return this.zoomBounds !== undefined &&
+        this.viewportZoomPercent_ === this.zoomBounds.min;
+  }
+
+  /**
+   * @return {boolean}
+   * @private
+   */
+  isAtMaximumZoom_() {
+    return this.zoomBounds !== undefined &&
+        this.viewportZoomPercent_ === this.zoomBounds.max;
   }
 
   // <if expr="chromeos">

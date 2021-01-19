@@ -7,11 +7,11 @@
 #include "base/base_paths_win.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_writer.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_path_override.h"
 #include "chrome/credential_provider/extension/user_device_context.h"
 #include "chrome/credential_provider/gaiacp/gcpw_strings.h"
-#include "chrome/credential_provider/gaiacp/mdm_utils.h"
 #include "chrome/credential_provider/gaiacp/reg_utils.h"
 #include "chrome/credential_provider/gaiacp/user_policies_manager.h"
 #include "chrome/credential_provider/test/gls_runner_test_base.h"
@@ -21,7 +21,30 @@ namespace credential_provider {
 
 namespace testing {
 
-class GcpUserPoliciesBaseTest : public GlsRunnerTestBase {};
+class GcpUserPoliciesBaseTest : public GlsRunnerTestBase {
+ protected:
+  void SetUp() override;
+  base::string16 CreateUser();
+};
+
+void GcpUserPoliciesBaseTest::SetUp() {
+  GlsRunnerTestBase::SetUp();
+
+  FakesForTesting fakes;
+  fakes.fake_win_http_url_fetcher_creator =
+      fake_http_url_fetcher_factory()->GetCreatorCallback();
+  UserPoliciesManager::Get()->SetFakesForTesting(&fakes);  // IN-TEST
+}
+
+base::string16 GcpUserPoliciesBaseTest::CreateUser() {
+  // Create a fake user associated to a gaia id.
+  CComBSTR sid_str;
+  EXPECT_EQ(S_OK, fake_os_user_manager()->CreateTestOSUser(
+                      kDefaultUsername, L"password", L"Full Name", L"comment",
+                      base::UTF8ToUTF16(kDefaultGaiaId), L"user@company.com",
+                      &sid_str));
+  return OLE2W(sid_str);
+}
 
 TEST_F(GcpUserPoliciesBaseTest, NonExistentUser) {
   ASSERT_TRUE(FAILED(UserPoliciesManager::Get()->FetchAndStoreCloudUserPolicies(
@@ -32,18 +55,41 @@ TEST_F(GcpUserPoliciesBaseTest, NonExistentUser) {
 }
 
 TEST_F(GcpUserPoliciesBaseTest, NoAccessToken) {
-  // Create a fake user associated to a gaia id.
-  CComBSTR sid_str;
-  ASSERT_EQ(S_OK, fake_os_user_manager()->CreateTestOSUser(
-                      kDefaultUsername, L"password", L"Full Name", L"comment",
-                      base::UTF8ToUTF16(kDefaultGaiaId), L"user@company.com",
-                      &sid_str));
-  base::string16 sid = OLE2W(sid_str);
+  base::string16 sid = CreateUser();
 
   ASSERT_TRUE(FAILED(
       UserPoliciesManager::Get()->FetchAndStoreCloudUserPolicies(sid, "")));
   UserPolicies policies;
   ASSERT_FALSE(UserPoliciesManager::Get()->GetUserPolicies(sid, &policies));
+}
+
+TEST_F(GcpUserPoliciesBaseTest, DetectMissingAndStalePolicies) {
+  base::string16 sid = CreateUser();
+  ASSERT_TRUE(UserPoliciesManager::Get()->IsUserPolicyStaleOrMissing(sid));
+
+  UserPolicies policies;
+  base::Value expected_response_value(base::Value::Type::DICTIONARY);
+  expected_response_value.SetKey("policies", policies.ToValue());
+  std::string expected_response;
+  base::JSONWriter::Write(expected_response_value, &expected_response);
+
+  fake_http_url_fetcher_factory()->SetFakeResponse(
+      UserPoliciesManager::Get()->GetGcpwServiceUserPoliciesUrl(sid),
+      FakeWinHttpUrlFetcher::Headers(), expected_response);
+
+  ASSERT_TRUE(
+      SUCCEEDED(UserPoliciesManager::Get()->FetchAndStoreCloudUserPolicies(
+          sid, "access_token")));
+
+  ASSERT_FALSE(UserPoliciesManager::Get()->IsUserPolicyStaleOrMissing(sid));
+
+  base::string16 fetch_time_millis = base::NumberToString16(
+      base::Time::Now().ToDeltaSinceWindowsEpoch().InMilliseconds() -
+      kMaxTimeDeltaSinceLastUserPolicyRefresh.InMilliseconds() - 1);
+
+  ASSERT_EQ(S_OK, SetUserProperty(sid, L"last_policy_refresh_time",
+                                  fetch_time_millis));
+  ASSERT_TRUE(UserPoliciesManager::Get()->IsUserPolicyStaleOrMissing(sid));
 }
 
 // Tests effective user policy under various scenarios of cloud policy values.
@@ -76,13 +122,15 @@ void GcpUserPoliciesFetchAndReadTest::SetUp() {
   policies_.enable_multi_user_login = std::get<3>(GetParam());
   policies_.validity_period_days = std::get<4>(GetParam());
 
-  // Create a fake user associated to a gaia id.
-  CComBSTR sid;
-  ASSERT_EQ(S_OK,
-            fake_os_user_manager()->CreateTestOSUser(
-                kDefaultUsername, L"password", L"Full Name", L"comment",
-                base::UTF8ToUTF16(kDefaultGaiaId), L"user@company.com", &sid));
-  sid_ = OLE2W(sid);
+  sid_ = CreateUser();
+
+  // Remove the mdm_url value which exists by default as it's added in
+  // InitializeRegistryOverrideForTesting and set to an empty value disabling
+  // MDM enrollment.
+  base::win::RegKey key;
+  EXPECT_EQ(ERROR_SUCCESS,
+            key.Open(HKEY_LOCAL_MACHINE, kGcpRootKeyName, KEY_WRITE));
+  EXPECT_EQ(ERROR_SUCCESS, key.DeleteValue(kRegMdmUrl));
 }
 
 void GcpUserPoliciesFetchAndReadTest::SetRegistryValues(bool dm_enrollment,
@@ -133,6 +181,7 @@ TEST_P(GcpUserPoliciesFetchAndReadTest, CloudPoliciesWin) {
   UserPolicies policies_fetched;
   ASSERT_TRUE(
       UserPoliciesManager::Get()->GetUserPolicies(sid_, &policies_fetched));
+  ASSERT_FALSE(UserPoliciesManager::Get()->IsUserPolicyStaleOrMissing(sid_));
 
   ASSERT_EQ(policies_, policies_fetched);
 }
@@ -280,6 +329,47 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Combine(::testing::Values(L"", L"valid-device-resource-id"),
                        ::testing::Bool(),
                        ::testing::Values(L"", L"valid-dm-token")));
+
+// Test to verify automatic enabling of cloud policies when DM token is present.
+// Parameters:
+// string : Value of DM Token on the device.
+// int : 0 - Cloud policies disabled through registry.
+//       1 - Cloud policies enabled through registry.
+//       2 - Cloud policies registry flag not set.
+class GcpUserPoliciesEnableOnDmTokenTest
+    : public GcpUserPoliciesBaseTest,
+      public ::testing::WithParamInterface<std::tuple<const char*, int>> {};
+
+TEST_P(GcpUserPoliciesEnableOnDmTokenTest, EnableIfFound) {
+  std::string dm_token(std::get<0>(GetParam()));
+  int reg_enable_cloud_policies = std::get<1>(GetParam());
+
+  if (!dm_token.empty()) {
+    ASSERT_EQ(S_OK, SetDmTokenForTesting(dm_token));
+  }
+  if (reg_enable_cloud_policies < 2) {
+    SetGlobalFlagForTesting(L"cloud_policies_enabled",
+                            reg_enable_cloud_policies);
+  }
+
+  // This is needed because we want to call the default constructor of the
+  // UserDeviceManager in each test.
+  FakeUserPoliciesManager fake_user_policies_manager;
+
+  // Feature is enabled if it's explicitly enabled or if the flag is not set and
+  // a valid DM token exists.
+  if (reg_enable_cloud_policies == 1 ||
+      (reg_enable_cloud_policies == 2 && !dm_token.empty())) {
+    ASSERT_TRUE(UserPoliciesManager::Get()->CloudPoliciesEnabled());
+  } else {
+    ASSERT_FALSE(UserPoliciesManager::Get()->CloudPoliciesEnabled());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         GcpUserPoliciesEnableOnDmTokenTest,
+                         ::testing::Combine(::testing::Values("", "dm-token"),
+                                            ::testing::Values(0, 1, 2)));
 
 }  // namespace testing
 }  // namespace credential_provider

@@ -3,6 +3,7 @@
 <translationbundle lang="lo">
 <translation id="1276998909102132017">ຮູບພາບໃນຄັງ</translation>
 <translation id="1430915738399379752">ພິມ</translation>
+<translation id="1473110567575736769">ໂມງນັບຖອຍຫຼັງ 3 ວິນາທີ</translation>
 <translation id="1620510694547887537">ກ້ອງ​ຖ່າຍ​ຮູບ</translation>
 <translation id="1627744224761163218">4 x 4</translation>
 <translation id="1664224225747386870">ບໍ່ໄດ້ບັນທຶກຫຍັງໄວ້</translation>
@@ -29,7 +30,9 @@
 <translation id="3259149966178251584">ຄວາມລະອຽດກ້ອງຖ່າຍຮູບ</translation>
 <translation id="3517926952904427380">ບໍ່ສາມາດຖ່າຍຮູບບຸກຄົນໄດ້</translation>
 <translation id="3569311554794739032">ທ່ານຕ້ອງການລຶບ <ph name="FILE" /> ອອກແທ້ບໍ?</translation>
+<translation id="3750315947605636967">ກ້ອງຂອງທ່ານກຳລັງຖືກໃຊ້ໂດຍແອັບອື່ນ</translation>
 <translation id="3810838688059735925">ວິ​ດີ​ໂອ</translation>
+<translation id="4000398125663085899">ດຽວນີ້ຮູບພາບ ແລະ ວິດີໂອໃໝ່ຈະຖືກບັນທຶກໄວ້ໃນໂຟນເດີໃນແອັບ Files: ໄຟລ໌ຂອງຂ້ອຍ &gt; ກ້ອງ</translation>
 <translation id="4118525110028899586">ຢຸດການບັນທຶກໄວ້ຊົ່ວຄາວ</translation>
 <translation id="4279490309300973883">ການສ່ອງ</translation>
 <translation id="4329152592498422850">ສະຫຼັບເພື່ອຖ່າຍຮູບແບບເປັນສີ່ຫຼ່ຽມສາກ</translation>
@@ -58,11 +61,11 @@
 ຖ້າຄຳຕິຊົມຂອງທ່ານກ່ຽວກັບຄຸນນະພາບຮູບ ຫຼື ວິດີໂອ, ກະລຸນາແນບຮູບ ຫຼື ວິດີໂອຕົວຢ່າງມານຳ ແລະ ໃຫ້ລາຍລະອຽດວ່າມີຫຍັງຜິດພາດ. (ຕົວຢ່າງ: ຮູບມືດເກີນໄປ ຫຼື ຮູບເປົ້າໝາຍບໍ່ຢູ່ໃນໂຟກັສ.)</translation>
 <translation id="6420689864531458495">(<ph name="ASPECT_RATIO_WIDTH" />:<ph name="ASPECT_RATIO_HEIGHT" /> - <ph name="WIDTH" />x<ph name="HEIGHT" />) <ph name="MEGAPIXEL" /> ເມກະພິກເຊວ</translation>
 <translation id="6681668084120808868">ຖ່າຍຮູບ</translation>
-<translation id="6739700533200816396">ດຽວນີ້ຮູບພາບ ແລະ ວິດີໂອຈະຖືກບັນທຶກໄວ້ໃນໂຟນເດີໃໝ່ຢູ່ໃນແອັບ Files: ໄຟລ໌ຂອງຂ້ອຍ &gt; ກ້ອງ. ຮູບພາບ ແລະ ວິດີໂອກ່ອນໜ້າຈະບໍ່ຍ້າຍໄປຍັງໂຟນເດີໃໝ່.</translation>
 <translation id="6778482348691154169">ບໍ່ສາມາດຖ່າຍຮູບໄດ້</translation>
 <translation id="6965382102122355670">ຕົກລົງ</translation>
 <translation id="698156982839284926">3 ວິນາທີ</translation>
 <translation id="712848772518857951">ທ່ານຕ້ອງການລຶບ <ph name="COUNT" /> ລາຍການອອກແທ້ໆບໍ?</translation>
+<translation id="7134221860976209830">ໂມງນັບຖອຍຫຼັງ 10 ວິນາທີ</translation>
 <translation id="7243947652761655814">ຄວາມລະອຽດຂອງວິດີໂອ</translation>
 <translation id="7337660886763914220">ຂໍ້ຜິດພາດຂອງໄຟລ໌ລະບົບ.</translation>
 <translation id="7557677699350329807">ປ່ຽນເປັນກ້ອງຖັດໄປ</translation>
@@ -70,7 +73,6 @@
 <translation id="7649070708921625228">ຊ່ວຍ​ເຫຼືອ</translation>
 <translation id="7658239707568436148">ຍົກ​ເລີກ​</translation>
 <translation id="7670511624014457267">60 FPS</translation>
-<translation id="8049189770492311300">ເຄື່ອງຈັບເວລາ</translation>
 <translation id="8067883171444229417">ຫຼິ້ນວິດີໂອ</translation>
 <translation id="8131740175452115882">ຢືນ​ຢັນ</translation>
 <translation id="8145038249676204903">ປ່ຽນເປັນຖ່າຍຮູບ</translation>

@@ -33,6 +33,7 @@
 #include <sddl.h>
 #include <shellapi.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 #include <initializer_list>
@@ -41,13 +42,12 @@
 #include "chrome/installer/mini_installer/appid.h"
 #include "chrome/installer/mini_installer/configuration.h"
 #include "chrome/installer/mini_installer/decompress.h"
+#include "chrome/installer/mini_installer/delete_with_retry.h"
 #include "chrome/installer/mini_installer/mini_installer_constants.h"
 #include "chrome/installer/mini_installer/pe_resource.h"
 #include "chrome/installer/mini_installer/regkey.h"
 
 namespace mini_installer {
-
-typedef StackString<MAX_PATH> PathString;
 
 // This structure passes data back and forth for the processing
 // of resource callbacks.
@@ -61,6 +61,15 @@ struct Context {
   // A Windows error code corresponding to an extraction error.
   DWORD error_code;
 };
+
+// Deletes |path|, updating |max_delete_attempts| if more attempts were taken
+// than indicated in |max_delete_attempts|.
+void DeleteWithRetryAndMetrics(const wchar_t* path, int& max_delete_attempts) {
+  int attempts = 0;
+  DeleteWithRetry(path, attempts);
+  if (attempts > max_delete_attempts)
+    max_delete_attempts = attempts;
+}
 
 // TODO(grt): Frame this in terms of whether or not the brand supports
 // integration with Omaha, where Google Update is the Google-specific fork of
@@ -101,6 +110,36 @@ void WriteInstallResults(const Configuration& configuration,
       key.WriteDWValue(kInstallerExtraCode1RegistryValue, result.windows_error);
     }
   }
+}
+
+// Success metric reporting ----------------------------------------------------
+
+// A single DWORD value may be written to the ExtraCode1 registry value on
+// success. This is used to report a sample for a metric of a specific category.
+
+// Categories of metrics written into ExtraCode1 on success. Values should not
+// be reordered or reused unless the population reporting such categories
+// becomes insiginficant or is filtered out based on release version.
+enum MetricCategory : uint16_t {
+  // The sample 0 indicates that %TMP% was used to hold the work dir. Active
+  // from release 86.0.4237.0 through 88.0.4313.0.
+  // kTemporaryDirectoryWithFallback = 1,
+
+  // The sample 0 indicates that CWD was used to hold the work dir. Active from
+  // release 86.0.4237.0 through 88.0.4313.0.
+  // kTemporaryDirectoryWithoutFallback = 2,
+
+  // Values indicate the maximum number of retries needed to delete a file or
+  // directory via DeleteWithRetry. Active from release 88.0.4314.0.
+  kMaxDeleteRetryCount = 3,
+};
+
+using MetricSample = uint16_t;
+
+// Returns an ExtraCode1 value encoding a sample for a particular category.
+constexpr DWORD MetricToExtraCode1(MetricCategory category,
+                                   MetricSample sample) {
+  return category << 16 | sample;
 }
 
 // Writes the value |extra_code_1| into ExtraCode1 for reporting by Omaha.
@@ -351,6 +390,26 @@ BOOL CALLBACK WriteResourceToDirectory(HMODULE module,
   return (resource.IsValid() && full_path.assign(base_path) &&
           full_path.append(name) && resource.WriteToDisk(full_path.get()));
 }
+
+// An EnumResNameProc callback that deletes the file corresponding to the
+// resource |name| from the directory |base_path_ptr| (which must end with a
+// path separator).
+BOOL CALLBACK DeleteResourceInDirectory(HMODULE module,
+                                        const wchar_t* type,
+                                        wchar_t* name,
+                                        LONG_PTR base_path_ptr) {
+  PathString full_path;
+
+  if (full_path.assign(reinterpret_cast<const wchar_t*>(base_path_ptr)) &&
+      full_path.append(name)) {
+    // Do not record metrics for these deletes, as they are not done for release
+    // builds.
+    int attempts;
+    DeleteWithRetry(full_path.get(), attempts);
+  }
+
+  return TRUE;  // Continue enumeration.
+}
 #endif
 
 // Finds and writes to disk resources of various types. Returns false
@@ -365,11 +424,15 @@ BOOL CALLBACK WriteResourceToDirectory(HMODULE module,
 // For component builds (where setup.ex_ is always used), all files stored as
 // uncompressed 'BN' resources are also extracted. This is generally the set of
 // DLLs/resources needed by setup.exe to run.
+// |max_delete_attempts| is set to the highest number of attempts needed by
+// DeleteWithRetry to delete files that are unpacked and processed
+// (setup_patch.packed.7z or setup.ex_).
 ProcessExitResult UnpackBinaryResources(const Configuration& configuration,
                                         HMODULE module,
                                         const wchar_t* base_path,
                                         PathString* archive_path,
-                                        PathString* setup_path) {
+                                        PathString* setup_path,
+                                        int& max_delete_attempts) {
   // Generate the setup.exe path where we patch/uncompress setup resource.
   PathString setup_dest_path;
   if (!setup_dest_path.assign(base_path) || !setup_dest_path.append(kSetupExe))
@@ -429,11 +492,11 @@ ProcessExitResult UnpackBinaryResources(const Configuration& configuration,
           SETUP_PATCH_FAILED_PATH_NOT_FOUND,
           SETUP_PATCH_FAILED_COULD_NOT_CREATE_PROCESS);
     }
-
-    if (!exit_code.IsSuccess())
-      DeleteFile(setup_path->get());
-    else
+    DeleteWithRetryAndMetrics(setup_path->get(), max_delete_attempts);
+    if (exit_code.IsSuccess())
       setup_path->assign(setup_dest_path);
+    else
+      setup_path->clear();
 
     return exit_code;
   }
@@ -455,7 +518,8 @@ ProcessExitResult UnpackBinaryResources(const Configuration& configuration,
   // as opposed to old DOS way of 'SZDD'. Hence we don't use LZCopy.
   bool success =
       mini_installer::Expand(setup_path->get(), setup_dest_path.get());
-  ::DeleteFile(setup_path->get());
+  DeleteWithRetryAndMetrics(setup_path->get(), max_delete_attempts);
+
   if (success)
     setup_path->assign(setup_dest_path);
   else
@@ -533,14 +597,26 @@ ProcessExitResult RunSetup(const Configuration& configuration,
                            RUN_SETUP_FAILED_COULD_NOT_CREATE_PROCESS);
 }
 
-// Deletes given files and working dir.
-void DeleteExtractedFiles(const wchar_t* base_path,
-                          const wchar_t* archive_path,
-                          const wchar_t* setup_path) {
-  ::DeleteFile(archive_path);
-  ::DeleteFile(setup_path);
+// Deletes the files extracted by UnpackBinaryResources and the work directory
+// created by GetWorkDir.
+void DeleteExtractedFiles(HMODULE module,
+                          const PathString& archive_path,
+                          const PathString& setup_path,
+                          const PathString& base_path,
+                          int& max_delete_attempts) {
+  if (!archive_path.empty())
+    DeleteWithRetryAndMetrics(archive_path.get(), max_delete_attempts);
+  if (!setup_path.empty())
+    DeleteWithRetryAndMetrics(setup_path.get(), max_delete_attempts);
+
+#if defined(COMPONENT_BUILD)
+  // Delete the modules in a component build extracted for use by setup.exe.
+  ::EnumResourceNames(module, kBinResourceType, DeleteResourceInDirectory,
+                      reinterpret_cast<LONG_PTR>(base_path.get()));
+#endif
+
   // Delete the temp dir (if it is empty, otherwise fail).
-  ::RemoveDirectory(base_path);
+  DeleteWithRetryAndMetrics(base_path.get(), max_delete_attempts);
 }
 
 // Returns true if the supplied path supports ACLs.
@@ -717,11 +793,10 @@ bool CreateWorkDir(const wchar_t* base_path,
 
 // Creates and returns a temporary directory in |work_dir| that can be used to
 // extract mini_installer payload. |work_dir| ends with a path separator.
-// |used_fallback| is set to true if the %TMP% directory was used rather than
-// the directory containing |module|.
+// Returns true if |work_dir| is available for use, or false in case of error
+// (indicated by |exit_code|).
 bool GetWorkDir(HMODULE module,
                 PathString* work_dir,
-                bool* used_fallback,
                 ProcessExitResult* exit_code) {
   PathString base_path;
 
@@ -736,140 +811,7 @@ bool GetWorkDir(HMODULE module,
          CreateWorkDir(base_path.get(), work_dir, exit_code);
 }
 
-// Returns true for ".." and "." directories.
-bool IsCurrentOrParentDirectory(const wchar_t* dir) {
-  return dir && dir[0] == L'.' &&
-         (dir[1] == L'\0' || (dir[1] == L'.' && dir[2] == L'\0'));
-}
-
-// Best effort directory tree deletion including the directory specified
-// by |path|, which must not end in a separator.
-// The |path| argument is writable so that each recursion can use the same
-// buffer as was originally allocated for the path.  The path will be unchanged
-// upon return.
-void RecursivelyDeleteDirectory(PathString* path) {
-  // |path| will never have a trailing backslash.
-  size_t end = path->length();
-  if (!path->append(L"\\*.*"))
-    return;
-
-  WIN32_FIND_DATA find_data = {0};
-  HANDLE find = ::FindFirstFile(path->get(), &find_data);
-  if (find != INVALID_HANDLE_VALUE) {
-    do {
-      // Chrome never creates files/directories with reparse points (i.e.,
-      // mounted folders, links, etc), so never try to delete them.
-      if (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
-        continue;
-
-      // Use the short name if available to make the most of our buffer.
-      const wchar_t* name = find_data.cAlternateFileName[0]
-                                ? find_data.cAlternateFileName
-                                : find_data.cFileName;
-      if (IsCurrentOrParentDirectory(name))
-        continue;
-
-      path->truncate_at(end + 1);  // Keep the trailing backslash.
-      if (!path->append(name))
-        continue;  // Continue in spite of too long names.
-
-      if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-        RecursivelyDeleteDirectory(path);
-      else
-        ::DeleteFile(path->get());
-    } while (::FindNextFile(find, &find_data));
-    ::FindClose(find);
-  }
-
-  // Restore the path and delete the directory before we return.
-  path->truncate_at(end);
-  ::RemoveDirectory(path->get());
-}
-
-// Enumerates subdirectories of |parent_dir| and deletes all subdirectories
-// that match with a given |prefix|.  |parent_dir| must have a trailing
-// backslash.
-// The process is done on a best effort basis, so conceivably there might
-// still be matches left when the function returns.
-void DeleteDirectoriesWithPrefix(const wchar_t* parent_dir,
-                                 const wchar_t* prefix) {
-  // |parent_dir| is guaranteed to always have a trailing backslash.
-  PathString spec;
-  if (!spec.assign(parent_dir) || !spec.append(prefix) || !spec.append(L"*.*"))
-    return;
-
-  WIN32_FIND_DATA find_data = {0};
-  HANDLE find = ::FindFirstFileEx(spec.get(), FindExInfoStandard, &find_data,
-                                  FindExSearchLimitToDirectories, nullptr, 0);
-  if (find == INVALID_HANDLE_VALUE)
-    return;
-
-  PathString path;
-  do {
-    // Chrome never creates files/directories with reparse points (i.e., mounted
-    // folders, links, etc), so never try to delete them.
-    if (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
-      continue;
-
-    if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-      // Use the short name if available to make the most of our buffer.
-      const wchar_t* name = find_data.cAlternateFileName[0]
-                                ? find_data.cAlternateFileName
-                                : find_data.cFileName;
-      if (IsCurrentOrParentDirectory(name))
-        continue;
-      if (path.assign(parent_dir) && path.append(name))
-        RecursivelyDeleteDirectory(&path);
-    }
-  } while (::FindNextFile(find, &find_data));
-  ::FindClose(find);
-}
-
-// Attempts to free up space by deleting temp directories that previous
-// installer runs have failed to clean up.
-void DeleteOldChromeTempDirectories() {
-  static const wchar_t* const kDirectoryPrefixes[] = {
-      kTempPrefix,
-      L"chrome_"  // Previous installers created directories with this prefix
-                  // and there are still some lying around.
-  };
-
-  ProcessExitResult ignore(SUCCESS_EXIT_CODE);
-  PathString temp;
-  // GetTempDir always returns a path with a trailing backslash.
-  if (!GetTempDir(&temp, &ignore))
-    return;
-
-  for (size_t i = 0; i < _countof(kDirectoryPrefixes); ++i) {
-    DeleteDirectoriesWithPrefix(temp.get(), kDirectoryPrefixes[i]);
-  }
-}
-
-// Checks the command line for specific mini installer flags.
-// If the function returns true, the command line has been processed and all
-// required actions taken.  The installer must exit and return the returned
-// |exit_code|.
-bool ProcessNonInstallOperations(const Configuration& configuration,
-                                 ProcessExitResult* exit_code) {
-  switch (configuration.operation()) {
-    case Configuration::CLEANUP:
-      // Cleanup has already taken place in DeleteOldChromeTempDirectories at
-      // this point, so just tell our caller to exit early.
-      *exit_code = ProcessExitResult(SUCCESS_EXIT_CODE);
-      return true;
-
-    default:
-      return false;
-  }
-}
-
 ProcessExitResult WMain(HMODULE module) {
-  // Always start with deleting potential leftovers from previous installations.
-  // This can make the difference between success and failure.  We've seen
-  // many installations out in the field fail due to out of disk space problems
-  // so this could buy us some space.
-  DeleteOldChromeTempDirectories();
-
   ProcessExitResult exit_code = ProcessExitResult(SUCCESS_EXIT_CODE);
 
   // Parse configuration from the command line and resources.
@@ -882,15 +824,9 @@ ProcessExitResult WMain(HMODULE module) {
   if (configuration.has_invalid_switch())
     return ProcessExitResult(INVALID_OPTION);
 
-  // If the --cleanup switch was specified on the command line, then that means
-  // we should only do the cleanup and then exit.
-  if (ProcessNonInstallOperations(configuration, &exit_code))
-    return exit_code;
-
   // First get a path where we can extract payload
-  bool work_dir_in_fallback = false;
   PathString base_path;
-  if (!GetWorkDir(module, &base_path, &work_dir_in_fallback, &exit_code))
+  if (!GetWorkDir(module, &base_path, &exit_code))
     return exit_code;
 
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
@@ -902,10 +838,12 @@ ProcessExitResult WMain(HMODULE module) {
   SetInstallerFlags(configuration);
 #endif
 
+  int max_delete_attempts = 0;
   PathString archive_path;
   PathString setup_path;
-  exit_code = UnpackBinaryResources(configuration, module, base_path.get(),
-                                    &archive_path, &setup_path);
+  exit_code =
+      UnpackBinaryResources(configuration, module, base_path.get(),
+                            &archive_path, &setup_path, max_delete_attempts);
 
   // While unpacking the binaries, we paged in a whole bunch of memory that
   // we don't need anymore.  Let's give it back to the pool before running
@@ -915,24 +853,20 @@ ProcessExitResult WMain(HMODULE module) {
   if (exit_code.IsSuccess())
     exit_code = RunSetup(configuration, archive_path.get(), setup_path.get());
 
-  if (configuration.should_delete_extracted_files())
-    DeleteExtractedFiles(base_path.get(), archive_path.get(), setup_path.get());
+  if (configuration.should_delete_extracted_files()) {
+    DeleteExtractedFiles(module, archive_path, setup_path, base_path,
+                         max_delete_attempts);
+  }
 
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   if (exit_code.IsSuccess()) {
-    // Send up a signal in ExtraCode1 upon successful install where the fallback
-    // work dir location was used. This means that GetWorkDir failed to create a
-    // temporary directory next to the executable (in a directory owned by
-    // Omaha) then succeeded to create one in %TMP% and ultimately resulted in
-    // a successful install/update. If we ~never see this signal, then we know
-    // that it's safe to remove the fallback code and associated cleanup. See
-    // https://crbug.com/516207 for more info.
-    // Pick two arbitrary values that should stand out obviously in queries.
-    constexpr DWORD kSucceededWithFallback = 0x1U << 16;
-    constexpr DWORD kSucceededWithoutFallback = 0x2U << 16;
-    WriteExtraCode1(configuration, work_dir_in_fallback
-                                       ? kSucceededWithFallback
-                                       : kSucceededWithoutFallback);
+    // Send up a signal in ExtraCode1 upon successful install indicating the
+    // maximum number of retries needed to delete a file or directory by
+    // DeleteWithRetry; see https://crbug.com/1138157.
+    MetricSample max_retries =
+        (max_delete_attempts > 1 ? max_delete_attempts - 1 : 0);
+    WriteExtraCode1(configuration,
+                    MetricToExtraCode1(kMaxDeleteRetryCount, max_retries));
   } else {
     WriteInstallResults(configuration, exit_code);
   }

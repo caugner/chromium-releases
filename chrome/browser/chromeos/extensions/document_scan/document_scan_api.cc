@@ -9,6 +9,7 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "chrome/browser/chromeos/scanning/lorgnette_scanner_manager.h"
 #include "chrome/browser/chromeos/scanning/lorgnette_scanner_manager_factory.h"
 #include "chromeos/dbus/lorgnette/lorgnette_service.pb.h"
@@ -80,12 +81,13 @@ void DocumentScanScanFunction::OnNamesReceived(
   chromeos::LorgnetteScannerManagerFactory::GetForBrowserContext(
       browser_context())
       ->Scan(
-          scanner_name, settings,
+          scanner_name, settings, base::NullCallback(),
           base::BindRepeating(&DocumentScanScanFunction::OnPageReceived, this),
           base::BindOnce(&DocumentScanScanFunction::OnScanCompleted, this));
 }
 
-void DocumentScanScanFunction::OnPageReceived(std::string scanned_image) {
+void DocumentScanScanFunction::OnPageReceived(std::string scanned_image,
+                                              uint32_t /*page_number*/) {
   // Take only the first page of the scan.
   if (!scan_data_.has_value()) {
     scan_data_ = std::move(scanned_image);

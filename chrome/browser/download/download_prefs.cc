@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/check.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
@@ -408,6 +408,17 @@ bool DownloadPrefs::PromptDownloadLater() const {
   if (base::FeatureList::IsEnabled(download::features::kDownloadLater)) {
     return *prompt_for_download_later_ !=
            static_cast<int>(DownloadLaterPromptStatus::kDontShow);
+  }
+#endif
+
+  return false;
+}
+
+bool DownloadPrefs::HasDownloadLaterPromptShown() const {
+#ifdef OS_ANDROID
+  if (base::FeatureList::IsEnabled(download::features::kDownloadLater)) {
+    return *prompt_for_download_later_ !=
+           static_cast<int>(DownloadLaterPromptStatus::kShowInitial);
   }
 #endif
 

@@ -382,18 +382,52 @@ suite('NewTabPageAppTest', () => {
     const theme = createTheme();
     theme.shortcutUseWhiteAddIcon = true;
     testProxy.callbackRouterRemote.setTheme(theme);
-    assertFalse(app.$.mostVisited.hasAttribute('use-white-add-icon'));
+    const mostVisited = $$(app, '#mostVisited');
+    assertFalse(mostVisited.hasAttribute('use-white-add-icon'));
     await testProxy.callbackRouterRemote.$.flushForTesting();
-    assertTrue(app.$.mostVisited.hasAttribute('use-white-add-icon'));
+    assertTrue(mostVisited.hasAttribute('use-white-add-icon'));
   });
 
   test('theme updates use title pill', async () => {
     const theme = createTheme();
     theme.shortcutUseTitlePill = true;
     testProxy.callbackRouterRemote.setTheme(theme);
-    assertFalse(app.$.mostVisited.hasAttribute('use-title-pill'));
+    const mostVisited = $$(app, '#mostVisited');
+    assertFalse(mostVisited.hasAttribute('use-title-pill'));
     await testProxy.callbackRouterRemote.$.flushForTesting();
-    assertTrue(app.$.mostVisited.hasAttribute('use-title-pill'));
+    assertTrue(mostVisited.hasAttribute('use-title-pill'));
+  });
+
+  test('can show promo with browser command', async () => {
+    const testProxy = PromoBrowserCommandProxy.getInstance();
+    testProxy.handler = TestBrowserProxy.fromClass(
+        promoBrowserCommand.mojom.CommandHandlerRemote);
+    testProxy.handler.setResultFor(
+        'canShowPromoWithCommand', Promise.resolve({canShow: true}));
+
+    const commandId = 123;  // Unsupported command.
+    window.dispatchEvent(new MessageEvent('message', {
+      data: {
+        frameType: 'one-google-bar',
+        messageType: 'can-show-promo-with-browser-command',
+        commandId,
+      },
+      source: window,
+      origin: window.origin,
+    }));
+
+    // Make sure the command is sent to the browser.
+    const expectedCommandId =
+        await testProxy.handler.whenCalled('canShowPromoWithCommand');
+    // Unsupported commands get resolved to the default command before being
+    // sent to the browser.
+    assertEquals(
+        promoBrowserCommand.mojom.Command.kUnknownCommand, expectedCommandId);
+
+    // Make sure the promo frame gets notified whether the promo can be shown.
+    const {data} = await eventToPromise('message', window);
+    assertEquals('can-show-promo-with-browser-command', data.messageType);
+    assertTrue(data[commandId]);
   });
 
   test('executes promo browser command', async () => {
@@ -439,26 +473,36 @@ suite('NewTabPageAppTest', () => {
       });
     });
 
-    test('modules appended to page', async () => {
-      // Act.
-      moduleResolver.resolve([
-        {
-          id: 'foo',
-          element: document.createElement('div'),
-          title: 'Foo Title',
-        },
-        {
-          id: 'bar',
-          element: document.createElement('div'),
-          title: 'Bar Title',
-        }
-      ]);
-      await flushTasks();  // Wait for module descriptor resolution.
+    [true, false].forEach(visible => {
+      test(`modules appended to page if visibility ${visible}`, async () => {
+        // Act.
+        moduleResolver.resolve([
+          {
+            id: 'foo',
+            element: document.createElement('div'),
+            title: 'Foo Title',
+          },
+          {
+            id: 'bar',
+            element: document.createElement('div'),
+            title: 'Bar Title',
+          }
+        ]);
+        $$(app, 'ntp-middle-slot-promo')
+            .dispatchEvent(new Event(
+                'ntp-middle-slot-promo-loaded',
+                {bubbles: true, composed: true}));
+        testProxy.callbackRouterRemote.setModulesVisible(visible);
+        await flushTasks();  // Wait for module descriptor resolution.
 
-      // Assert.
-      const modules = app.shadowRoot.querySelectorAll('ntp-module-wrapper');
-      assertEquals(2, modules.length);
-      assertEquals(1, testProxy.handler.getCallCount('onModulesRendered'));
+        // Assert.
+        const modules = app.shadowRoot.querySelectorAll('ntp-module-wrapper');
+        assertEquals(2, modules.length);
+        assertEquals(
+            visible ? 1 : 0,
+            testProxy.handler.getCallCount('onModulesRendered'));
+        assertEquals(1, testProxy.handler.getCallCount('updateModulesVisible'));
+      });
     });
 
     test('modules can be dismissed and restored', async () => {

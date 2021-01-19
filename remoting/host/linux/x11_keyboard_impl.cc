@@ -7,8 +7,6 @@
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "remoting/host/linux/unicode_to_keysym.h"
-#include "ui/gfx/x/x11.h"
-#include "ui/gfx/x/x11_types.h"
 #include "ui/gfx/x/xkb.h"
 #include "ui/gfx/x/xproto.h"
 #include "ui/gfx/x/xtest.h"
@@ -16,11 +14,10 @@
 namespace {
 
 bool FindKeycodeForKeySym(x11::Connection* connection,
-                          x11::KeySym key_sym,
+                          uint32_t key_sym,
                           uint32_t* keycode,
                           uint32_t* modifiers) {
-  auto found_keycode =
-      static_cast<uint32_t>(connection->KeysymToKeycode(key_sym));
+  auto found_keycode = connection->KeysymToKeycode(key_sym);
 
   const x11::KeyButMask kModifiersToTry[] = {
       {},
@@ -38,11 +35,21 @@ bool FindKeycodeForKeySym(x11::Connection* connection,
     auto mods = static_cast<uint32_t>(i);
     if (connection->KeycodeToKeysym(found_keycode, mods) == key_sym) {
       *modifiers = mods;
-      *keycode = found_keycode;
+      *keycode = static_cast<uint8_t>(found_keycode);
       return true;
     }
   }
   return false;
+}
+
+// This is ported from XStringToKeysym
+// https://gitlab.freedesktop.org/xorg/lib/libx11/-/blob/2b7598221d87049d03e9a95fcb541c37c8728184/src/StrKeysym.c#L147-154
+uint32_t UnicodeToKeysym(uint32_t u) {
+  if (u > 0x10ffff || u < 0x20 || (u > 0x7e && u < 0xa0))
+    return 0;
+  if (u < 0x100)
+    return u;
+  return u | 0x01000000;
 }
 
 }  // namespace
@@ -50,7 +57,7 @@ bool FindKeycodeForKeySym(x11::Connection* connection,
 namespace remoting {
 
 X11KeyboardImpl::X11KeyboardImpl(x11::Connection* connection)
-    : connection_(connection), display_(connection->display()) {}
+    : connection_(connection) {}
 
 X11KeyboardImpl::~X11KeyboardImpl() = default;
 
@@ -97,35 +104,30 @@ bool X11KeyboardImpl::FindKeycode(uint32_t code_point,
                                   uint32_t* keycode,
                                   uint32_t* modifiers) {
   for (uint32_t keysym : GetKeySymsForUnicode(code_point)) {
-    if (FindKeycodeForKeySym(connection_, static_cast<x11::KeySym>(keysym),
-                             keycode, modifiers)) {
+    if (FindKeycodeForKeySym(connection_, keysym, keycode, modifiers))
       return true;
-    }
   }
   return false;
 }
 
 bool X11KeyboardImpl::ChangeKeyMapping(uint32_t keycode, uint32_t code_point) {
-  bool res = false;
-  if (code_point > 0) {
-    for (auto keysym : GetKeySymsForUnicode(code_point)) {
-      if (keysym > 0xffff)
-        continue;
-      connection_->ChangeKeyboardMapping({
-          .keycode_count = 1,
-          .first_keycode = static_cast<x11::KeyCode>(keycode),
-          .keysyms_per_keycode = 2,
-          .keysyms = {static_cast<x11::KeySym>(keysym) /* lower-case */,
-                      static_cast<x11::KeySym>(keysym) /* upper-case */},
-      });
-      res = true;
-    }
-  }
-  return res;
+  if (!code_point)
+    return false;
+  auto keysym = UnicodeToKeysym(code_point);
+  if (!keysym)
+    return false;
+  connection_->ChangeKeyboardMapping({
+      .keycode_count = 1,
+      .first_keycode = static_cast<x11::KeyCode>(keycode),
+      .keysyms_per_keycode = 2,
+      .keysyms = {static_cast<x11::KeySym>(keysym) /* lower-case */,
+                  static_cast<x11::KeySym>(keysym) /* upper-case */},
+  });
+  return true;
 }
 
 void X11KeyboardImpl::Flush() {
-  XFlush(display_);
+  connection_->Flush();
 }
 
 void X11KeyboardImpl::Sync() {

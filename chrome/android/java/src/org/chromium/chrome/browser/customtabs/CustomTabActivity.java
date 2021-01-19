@@ -24,6 +24,7 @@ import androidx.annotation.Nullable;
 import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.browser.customtabs.CustomTabsSessionToken;
 
+import org.chromium.base.Callback;
 import org.chromium.base.IntentUtils;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
@@ -32,6 +33,7 @@ import org.chromium.chrome.browser.LaunchIntentDispatcher;
 import org.chromium.chrome.browser.autofill_assistant.AutofillAssistantFacade;
 import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider.CustomTabsUiType;
+import org.chromium.chrome.browser.customtabs.content.CustomTabActivityNavigationController;
 import org.chromium.chrome.browser.customtabs.content.CustomTabActivityTabProvider;
 import org.chromium.chrome.browser.customtabs.features.CustomTabNavigationBarController;
 import org.chromium.chrome.browser.firstrun.FirstRunSignInProcessor;
@@ -91,6 +93,16 @@ public class CustomTabActivity extends BaseCustomTabActivity {
         resetPostMessageHandlersForCurrentSession();
 
         mSession = mIntentDataProvider.getSession();
+
+        // shouldHideOmniboxSuggestionsForCctVisits() can not be called immediately as it depends
+        // upon FeatureList, which has not been initialized yet.
+        getStartupTabPreloader().setTabCreatedCallback(new Callback<Tab>() {
+            @Override
+            public void onResult(Tab tab) {
+                CustomTabActivityNavigationController.applyExperimentsToNewTab(
+                        tab, mIntentDataProvider);
+            }
+        });
 
         CustomTabNavigationBarController.update(getWindow(), mIntentDataProvider, getResources());
     }
@@ -177,6 +189,11 @@ public class CustomTabActivity extends BaseCustomTabActivity {
             if (mNavigationController.openCurrentUrlInBrowser(false)) {
                 RecordUserAction.record("CustomTabsMenuOpenInChrome");
                 WebContents webContents = tab == null ? null : tab.getWebContents();
+                if (tab != null) {
+                    tab.setAddApi2TransitionToFutureNavigations(false);
+                    tab.setHideFutureNavigations(false);
+                    tab.setShouldBlockNewNotificationRequests(false);
+                }
                 mConnection.notifyOpenInBrowser(mSession, webContents);
             }
             return true;

@@ -24,21 +24,22 @@ grit("extension_resources") {
     "grit/extension_resources.rc",
   ]
   resource_ids = ""
-  grit_flags = [
-    "-E",
-    "root_gen_dir=" + rebase_path(root_gen_dir, root_build_dir),
-  ]
 }
 
 source_set("common") {
   sources = [
     "extension_strings.cc",
     "extension_strings.h",
+    "extension_utils.cc",
+    "extension_utils.h",
     "os_service_manager.cc",
     "os_service_manager.h",
     "scoped_handle.h",
   ]
-  deps = [ "//base:base" ]
+  deps = [
+    "../gaiacp:util",
+    "//base:base",
+  ]
   configs += [ "//build/config/win:windowed" ]
 }
 
@@ -71,6 +72,7 @@ executable("gcpw_extension") {
     ":version",
     "../eventlog:gcp_eventlog_messages",
     "../gaiacp:common",
+    "../gaiacp:policies",
     "../gaiacp:util",
     "//base",
     "//components/crash/core/app:crash_export_thunks",

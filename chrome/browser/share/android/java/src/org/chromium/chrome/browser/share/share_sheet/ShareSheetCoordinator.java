@@ -6,12 +6,12 @@ package org.chromium.chrome.browser.share.share_sheet;
 
 import android.app.Activity;
 import android.content.res.Configuration;
-import android.graphics.Bitmap;
 import android.view.View;
 
 import androidx.annotation.VisibleForTesting;
 import androidx.appcompat.content.res.AppCompatResources;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
@@ -19,17 +19,17 @@ import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.lifecycle.ConfigurationChangedObserver;
-import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.settings.SettingsLauncher;
 import org.chromium.chrome.browser.share.ChromeShareExtras;
 import org.chromium.chrome.browser.share.ShareHelper;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.ui.favicon.LargeIconBridge;
+import org.chromium.chrome.modules.image_editor.ImageEditorModuleProvider;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetContent;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetObserver;
 import org.chromium.components.browser_ui.bottomsheet.EmptyBottomSheetObserver;
 import org.chromium.components.browser_ui.share.ShareParams;
+import org.chromium.components.favicon.LargeIconBridge;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.base.WindowAndroid.ActivityStateObserver;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -51,6 +51,7 @@ public class ShareSheetCoordinator implements ActivityStateObserver, ChromeOptio
     private final Callback<Tab> mPrintTabCallback;
     private final SettingsLauncher mSettingsLauncher;
     private final boolean mIsSyncEnabled;
+    private final ImageEditorModuleProvider mImageEditorModuleProvider;
     private long mShareStartTime;
     private boolean mExcludeFirstParty;
     private boolean mIsMultiWindow;
@@ -58,12 +59,11 @@ public class ShareSheetCoordinator implements ActivityStateObserver, ChromeOptio
     private Activity mActivity;
     private ActivityLifecycleDispatcher mLifecycleDispatcher;
     private ChromeProvidedSharingOptionsProvider mChromeProvidedSharingOptionsProvider;
+    private ShareParams mShareParams;
     private ShareSheetBottomSheetContent mBottomSheet;
     private WindowAndroid mWindowAndroid;
     private final BottomSheetObserver mBottomSheetObserver;
     private final LargeIconBridge mIconBridge;
-    private String mUrl;
-    private Bitmap mIconForPreview;
 
     /**
      * Constructs a new ShareSheetCoordinator.
@@ -73,12 +73,14 @@ public class ShareSheetCoordinator implements ActivityStateObserver, ChromeOptio
      * changes.
      * @param tabProvider Supplier for the current activity tab.
      * @param modelBuilder The {@link ShareSheetPropertyModelBuilder} for the share sheet.
+     * @param imageEditorModuleProvider Image Editor module entry point if present in the APK.
      */
     // TODO(crbug/1022172): Should be package-protected once modularization is complete.
     public ShareSheetCoordinator(BottomSheetController controller,
             ActivityLifecycleDispatcher lifecycleDispatcher, Supplier<Tab> tabProvider,
             ShareSheetPropertyModelBuilder modelBuilder, Callback<Tab> printTab,
-            LargeIconBridge iconBridge, SettingsLauncher settingsLauncher, boolean isSyncEnabled) {
+            LargeIconBridge iconBridge, SettingsLauncher settingsLauncher, boolean isSyncEnabled,
+            ImageEditorModuleProvider imageEditorModuleProvider) {
         mBottomSheetController = controller;
         mLifecycleDispatcher = lifecycleDispatcher;
         mLifecycleDispatcher.register(this);
@@ -87,6 +89,7 @@ public class ShareSheetCoordinator implements ActivityStateObserver, ChromeOptio
         mPrintTabCallback = printTab;
         mSettingsLauncher = settingsLauncher;
         mIsSyncEnabled = isSyncEnabled;
+        mImageEditorModuleProvider = imageEditorModuleProvider;
         mBottomSheetObserver = new EmptyBottomSheetObserver() {
             @Override
             public void onSheetContentChanged(BottomSheetContent bottomSheet) {
@@ -105,6 +108,12 @@ public class ShareSheetCoordinator implements ActivityStateObserver, ChromeOptio
     }
 
     protected void destroy() {
+        if (mShareParams != null) {
+            ShareParams.TargetChosenCallback callback = mShareParams.getCallback();
+            if (callback != null) {
+                callback.onCancel();
+            }
+        }
         if (mWindowAndroid != null) {
             mWindowAndroid.removeActivityStateObserver(this);
             mWindowAndroid = null;
@@ -118,6 +127,7 @@ public class ShareSheetCoordinator implements ActivityStateObserver, ChromeOptio
     // TODO(crbug/1022172): Should be package-protected once modularization is complete.
     public void showShareSheet(
             ShareParams params, ChromeShareExtras chromeShareExtras, long shareStartTime) {
+        mShareParams = params;
         mActivity = params.getWindow().getActivity().get();
         if (mActivity == null) return;
 
@@ -163,8 +173,9 @@ public class ShareSheetCoordinator implements ActivityStateObserver, ChromeOptio
         }
         mChromeProvidedSharingOptionsProvider = new ChromeProvidedSharingOptionsProvider(activity,
                 mTabProvider, mBottomSheetController, mBottomSheet, shareParams, chromeShareExtras,
-                mPrintTabCallback, mSettingsLauncher, mIsSyncEnabled, mShareStartTime, this);
-        mIsMultiWindow = MultiWindowUtils.getInstance().isInMultiWindowMode(activity);
+                mPrintTabCallback, mSettingsLauncher, mIsSyncEnabled, mShareStartTime, this,
+                mImageEditorModuleProvider);
+        mIsMultiWindow = ApiCompatibilityUtils.isInMultiWindowMode(activity);
 
         return mChromeProvidedSharingOptionsProvider.getPropertyModels(
                 contentTypes, mIsMultiWindow);
@@ -212,7 +223,7 @@ public class ShareSheetCoordinator implements ActivityStateObserver, ChromeOptio
         if (mActivity == null) {
             return;
         }
-        boolean isMultiWindow = MultiWindowUtils.getInstance().isInMultiWindowMode(mActivity);
+        boolean isMultiWindow = ApiCompatibilityUtils.isInMultiWindowMode(mActivity);
         // mContentTypes is null if Chrome features should not be shown.
         if (mIsMultiWindow == isMultiWindow || mContentTypes == null) {
             return;

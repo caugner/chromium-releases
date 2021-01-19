@@ -669,10 +669,11 @@ TEST_F(AXTreeSourceArcTest, OnViewSelectedEvent) {
   SetProperty(item, AXBooleanProperty::IMPORTANCE, true);
   SetProperty(item, AXBooleanProperty::VISIBLE_TO_USER, true);
 
-  // A selected event from Slider is kValueChanged.
+  // A selected event from Slider is kAriaAttributeChanged.
   event->source_id = slider->id;
   CallNotifyAccessibilityEvent(event.get());
-  EXPECT_EQ(1, GetDispatchedEventCount(ax::mojom::Event::kValueChanged));
+  EXPECT_EQ(1,
+            GetDispatchedEventCount(ax::mojom::Event::kAriaAttributeChanged));
 
   // A selected event from a collection. In Android, these event properties are
   // populated by AdapterView.
@@ -712,11 +713,14 @@ TEST_F(AXTreeSourceArcTest, OnViewSelectedEvent) {
 }
 
 TEST_F(AXTreeSourceArcTest, OnWindowStateChangedEvent) {
+  set_full_focus_mode(true);
+
   auto event = AXEventData::New();
   event->task_id = 1;
 
   event->window_data = std::vector<mojom::AccessibilityWindowInfoDataPtr>();
   event->window_data->push_back(AXWindowInfoData::New());
+  event->window_id = 1;
   AXWindowInfoData* root_window = event->window_data->back().get();
   root_window->window_id = 100;
   root_window->root_node_id = 10;
@@ -777,9 +781,11 @@ TEST_F(AXTreeSourceArcTest, OnWindowStateChangedEvent) {
   EXPECT_EQ(node3->id, data.focus_id);
 
   // Simulate opening another window in this task.
+  // |root_window->window_id| can be the same as the previous one, but
+  // |event->window_id| of the event are always different for different window.
   // This is the same as new WINDOW_STATE_CHANGED event, so focus is at the
   // first accessible node (node2).
-  root_window->window_id = 200;
+  event->window_id = 2;
   event->event_type = AXEventType::WINDOW_STATE_CHANGED;
   event->source_id = node1->id;
   CallNotifyAccessibilityEvent(event.get());
@@ -789,7 +795,7 @@ TEST_F(AXTreeSourceArcTest, OnWindowStateChangedEvent) {
 
   // Simulate closing the second window and coming back to the first window.
   // The focus back to the last focus node, which is node3.
-  root_window->window_id = 100;
+  event->window_id = 1;
   event->event_type = AXEventType::WINDOW_STATE_CHANGED;
   event->source_id = root->id;
   CallNotifyAccessibilityEvent(event.get());
@@ -801,6 +807,8 @@ TEST_F(AXTreeSourceArcTest, OnWindowStateChangedEvent) {
 }
 
 TEST_F(AXTreeSourceArcTest, OnFocusEvent) {
+  set_full_focus_mode(true);
+
   auto event = AXEventData::New();
   event->task_id = 1;
   event->event_type = AXEventType::VIEW_FOCUSED;
@@ -854,7 +862,6 @@ TEST_F(AXTreeSourceArcTest, OnFocusEvent) {
 
   // VIEW_ACCESSIBILITY_FOCUSED event also updates the focus in screen reader
   // mode.
-  set_full_focus_mode(true);
   SetProperty(node1, AXBooleanProperty::ACCESSIBILITY_FOCUSED, false);
   SetProperty(node2, AXBooleanProperty::ACCESSIBILITY_FOCUSED, true);
   event->event_type = AXEventType::VIEW_ACCESSIBILITY_FOCUSED;
@@ -1228,11 +1235,13 @@ TEST_F(AXTreeSourceArcTest, StateDescriptionChangedEvent) {
   SetProperty(event.get(), AXEventIntListProperty::CONTENT_CHANGE_TYPES,
               content_change_types);
   CallNotifyAccessibilityEvent(event.get());
-  EXPECT_EQ(ax::mojom::Event::kValueChanged, last_dispatched_event_type());
+  EXPECT_EQ(ax::mojom::Event::kAriaAttributeChanged,
+            last_dispatched_event_type());
 
   event->event_type = AXEventType::WINDOW_CONTENT_CHANGED;
   CallNotifyAccessibilityEvent(event.get());
-  EXPECT_EQ(ax::mojom::Event::kValueChanged, last_dispatched_event_type());
+  EXPECT_EQ(ax::mojom::Event::kAriaAttributeChanged,
+            last_dispatched_event_type());
 
   // State description changed event from non range widget.
   event->node_data.push_back(AXNodeInfoData::New());

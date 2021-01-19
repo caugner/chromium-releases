@@ -2417,90 +2417,6 @@ TEST_F(ViewTest, ViewInHiddenWidgetWithAccelerator) {
 }
 #endif  // OS_APPLE
 
-// TODO(crbug.com/667757): these tests were initially commented out when getting
-// aura to run. Figure out if still valuable and either nuke or fix.
-#if 0
-////////////////////////////////////////////////////////////////////////////////
-// Mouse-wheel message rerouting
-////////////////////////////////////////////////////////////////////////////////
-class ScrollableTestView : public View {
- public:
-  ScrollableTestView() { }
-
-  virtual gfx::Size GetPreferredSize() {
-    return gfx::Size(100, 10000);
-  }
-
-  virtual void Layout() {
-    SizeToPreferredSize();
-  }
-};
-
-class TestViewWithControls : public View {
- public:
-  TestViewWithControls() {
-    text_field_ = new Textfield();
-    AddChildView(text_field_);
-  }
-
-  Textfield* text_field_;
-};
-
-class SimpleWidgetDelegate : public WidgetDelegate {
- public:
-  explicit SimpleWidgetDelegate(View* contents) : contents_(contents) {  }
-
-  virtual void DeleteDelegate() { delete this; }
-
-  virtual View* GetContentsView() { return contents_; }
-
-  virtual Widget* GetWidget() { return contents_->GetWidget(); }
-  virtual const Widget* GetWidget() const { return contents_->GetWidget(); }
-
- private:
-  View* contents_;
-};
-
-// Tests that the mouse-wheel messages are correctly rerouted to the window
-// under the mouse.
-// TODO(jcampan): http://crbug.com/10572 Disabled as it fails on the Vista build
-//                bot.
-// Note that this fails for a variety of reasons:
-// - focused view is apparently reset across window activations and never
-//   properly restored
-// - this test depends on you not having any other window visible open under the
-//   area that it opens the test windows. --beng
-TEST_F(ViewTest, DISABLED_RerouteMouseWheelTest) {
-  TestViewWithControls* view_with_controls = new TestViewWithControls();
-  Widget* window1 = Widget::CreateWindowWithBounds(
-      new SimpleWidgetDelegate(view_with_controls),
-      gfx::Rect(0, 0, 100, 100));
-  window1->Show();
-  ScrollView* scroll_view = new ScrollView();
-  scroll_view->SetContents(new ScrollableTestView());
-  Widget* window2 = Widget::CreateWindowWithBounds(
-      new SimpleWidgetDelegate(scroll_view),
-      gfx::Rect(200, 200, 100, 100));
-  window2->Show();
-  EXPECT_EQ(0, scroll_view->GetVisibleRect().y());
-
-  // Make the window1 active, as this is what it would be in real-world.
-  window1->Activate();
-
-  // Let's send a mouse-wheel message to the different controls and check that
-  // it is rerouted to the window under the mouse (effectively scrolling the
-  // scroll-view).
-
-  // First to the Window's HWND.
-  ::SendMessage(view_with_controls->GetWidget()->GetNativeView(),
-                WM_MOUSEWHEEL, MAKEWPARAM(0, -20), MAKELPARAM(250, 250));
-  EXPECT_EQ(20, scroll_view->GetVisibleRect().y());
-
-  window1->CloseNow();
-  window2->CloseNow();
-}
-#endif  // 0
-
 ////////////////////////////////////////////////////////////////////////////////
 // Native view hierachy
 ////////////////////////////////////////////////////////////////////////////////
@@ -2530,8 +2446,10 @@ class ToplevelWidgetObserverView : public View {
   DISALLOW_COPY_AND_ASSIGN(ToplevelWidgetObserverView);
 };
 
-// Test that a view can track the current top level widget by overriding
-// View::ViewHierarchyChanged() and View::NativeViewHierarchyChanged().
+// Test that
+// a) a view can track the current top level widget by overriding
+//    View::ViewHierarchyChanged() and View::NativeViewHierarchyChanged().
+// b) a widget has the correct parent after reparenting.
 TEST_F(ViewTest, NativeViewHierarchyChanged) {
   std::unique_ptr<Widget> toplevel1(new Widget);
   Widget::InitParams toplevel1_params =
@@ -2549,6 +2467,7 @@ TEST_F(ViewTest, NativeViewHierarchyChanged) {
   Widget::InitParams child_params(Widget::InitParams::TYPE_CONTROL);
   child_params.parent = toplevel1->GetNativeView();
   child->Init(std::move(child_params));
+  EXPECT_EQ(toplevel1.get(), child->parent());
 
   auto owning_observer_view = std::make_unique<ToplevelWidgetObserverView>();
   EXPECT_EQ(nullptr, owning_observer_view->toplevel());
@@ -2560,6 +2479,7 @@ TEST_F(ViewTest, NativeViewHierarchyChanged) {
   Widget::ReparentNativeView(child->GetNativeView(),
                              toplevel2->GetNativeView());
   EXPECT_EQ(toplevel2.get(), observer_view->toplevel());
+  EXPECT_EQ(toplevel2.get(), child->parent());
 
   owning_observer_view =
       observer_view->parent()->RemoveChildViewT(observer_view);

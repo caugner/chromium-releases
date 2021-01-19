@@ -83,6 +83,7 @@ struct CORE_EXPORT PaintLayerScrollableAreaRareData {
   base::Optional<cc::SnapContainerData> snap_container_data_;
   bool snap_container_data_needs_update_ = true;
   bool needs_resnap_ = false;
+  Vector<IntRect> tickmarks_override_;
 };
 
 // PaintLayerScrollableArea represents the scrollable area of a LayoutBox.
@@ -349,7 +350,7 @@ class CORE_EXPORT PaintLayerScrollableArea final
   bool ShouldPlaceVerticalScrollbarOnLeft() const override;
   int PageStep(ScrollbarOrientation) const override;
   mojom::blink::ScrollBehavior ScrollBehaviorStyle() const override;
-  ColorScheme UsedColorScheme() const override;
+  mojom::blink::ColorScheme UsedColorScheme() const override;
   cc::AnimationHost* GetCompositorAnimationHost() const override;
   CompositorAnimationTimeline* GetCompositorAnimationTimeline() const override;
   bool HasTickmarks() const override;
@@ -403,6 +404,8 @@ class CORE_EXPORT PaintLayerScrollableArea final
 
   bool HasOverlayOverflowControls() const;
   bool NeedsScrollCorner() const;
+
+  bool ShouldOverflowControlsPaintAsOverlay() const;
 
   bool HasOverflow() const {
     return HasHorizontalOverflow() || HasVerticalOverflow();
@@ -607,6 +610,8 @@ class CORE_EXPORT PaintLayerScrollableArea final
   bool HasPendingHistoryRestoreScrollOffset() override {
     return !!pending_view_state_;
   }
+
+  void SetTickmarksOverride(Vector<IntRect> tickmarks);
 
  private:
   bool NeedsScrollbarReconstruction() const;

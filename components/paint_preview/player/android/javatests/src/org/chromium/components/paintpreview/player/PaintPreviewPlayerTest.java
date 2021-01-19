@@ -26,11 +26,11 @@ import org.junit.runner.RunWith;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.ScalableTimeout;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.ui.test.util.DummyUiActivityTestCase;
 import org.chromium.url.GURL;
 
@@ -198,13 +198,36 @@ public class PaintPreviewPlayerTest extends DummyUiActivityTestCase {
                     new PaintPreviewTestService(mTempFolder.getRoot().getPath());
             // Use the wrong URL to simulate a failure.
             mPlayerManager = new PlayerManager(new GURL("about:blank"), getActivity(), service,
-                    TEST_DIRECTORY_KEY, mLinkClickHandler,
-                    () -> { Assert.fail("Unexpected overscroll refresh attempted."); },
-                    () -> {
-                        Assert.fail("View Ready callback occurred, but expected a failure.");
-                    },
-                    null, null, 0xffffffff,
-                    (status) -> { compositorErrorCallback.notifyCalled(); }, false);
+                    TEST_DIRECTORY_KEY, new PlayerManager.Listener() {
+                        @Override
+                        public void onCompositorError(int status) {
+                            compositorErrorCallback.notifyCalled();
+                        }
+
+                        @Override
+                        public void onViewReady() {
+                            Assert.fail("View Ready callback occurred, but expected a failure.");
+                        }
+
+                        @Override
+                        public void onFirstPaint() {}
+
+                        @Override
+                        public void onUserInteraction() {}
+
+                        @Override
+                        public void onUserFrustration() {}
+
+                        @Override
+                        public void onPullToRefresh() {
+                            Assert.fail("Unexpected overscroll refresh attempted.");
+                        }
+
+                        @Override
+                        public void onLinkClick(GURL url) {
+                            mLinkClickHandler.onLinkClicked(url);
+                        }
+                    }, 0xffffffff, false);
             mPlayerManager.setCompressOnClose(false);
         });
         compositorErrorCallback.waitForFirst();
@@ -342,6 +365,7 @@ public class PaintPreviewPlayerTest extends DummyUiActivityTestCase {
         mLinkClickHandler = new TestLinkClickHandler();
         mRefreshedCallback = new CallbackHelper();
         CallbackHelper viewReady = new CallbackHelper();
+        CallbackHelper firstPaint = new CallbackHelper();
         mInitializationFailed = false;
 
         PostTask.postTask(UiThreadTaskTraits.DEFAULT, () -> {
@@ -354,9 +378,38 @@ public class PaintPreviewPlayerTest extends DummyUiActivityTestCase {
             }
 
             mPlayerManager = new PlayerManager(new GURL(TEST_URL), getActivity(), service,
-                    TEST_DIRECTORY_KEY, mLinkClickHandler, mRefreshedCallback::notifyCalled,
-                    viewReady::notifyCalled, null, null, 0xffffffff,
-                    (status) -> { mInitializationFailed = true; }, false);
+                    TEST_DIRECTORY_KEY, new PlayerManager.Listener() {
+                        @Override
+                        public void onCompositorError(int status) {
+                            mInitializationFailed = true;
+                        }
+
+                        @Override
+                        public void onViewReady() {
+                            viewReady.notifyCalled();
+                        }
+
+                        @Override
+                        public void onFirstPaint() {
+                            firstPaint.notifyCalled();
+                        }
+
+                        @Override
+                        public void onUserInteraction() {}
+
+                        @Override
+                        public void onUserFrustration() {}
+
+                        @Override
+                        public void onPullToRefresh() {
+                            mRefreshedCallback.notifyCalled();
+                        }
+
+                        @Override
+                        public void onLinkClick(GURL url) {
+                            mLinkClickHandler.onLinkClicked(url);
+                        }
+                    }, 0xffffffff, false);
             mPlayerManager.setCompressOnClose(false);
             getActivity().setContentView(mPlayerManager.getView());
         });
@@ -390,6 +443,12 @@ public class PaintPreviewPlayerTest extends DummyUiActivityTestCase {
         }, TIMEOUT_MS, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
         if (mInitializationFailed) {
             Assert.fail("Compositor may have crashed.");
+        }
+
+        try {
+            firstPaint.waitForFirst();
+        } catch (Exception e) {
+            Assert.fail("First paint not issued.");
         }
     }
 

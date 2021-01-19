@@ -3,10 +3,6 @@
 // found in the LICENSE file.
 
 import './strings.m.js';
-import './middle_slot_promo.js';
-import './most_visited.js';
-import './customize_dialog.js';
-import './voice_search_overlay.js';
 import './iframe.js';
 import './fakebox.js';
 import './realbox.js';
@@ -26,7 +22,7 @@ import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/poly
 
 import {BackgroundManager} from './background_manager.js';
 import {BrowserProxy} from './browser_proxy.js';
-import {BackgroundSelection, BackgroundSelectionType} from './customize_dialog.js';
+import {BackgroundSelection, BackgroundSelectionType} from './customize_dialog_types.js';
 import {ModuleDescriptor} from './modules/module_descriptor.js';
 import {ModuleRegistry} from './modules/module_registry.js';
 import {oneGoogleBarApi} from './one_google_bar_api.js';
@@ -40,6 +36,14 @@ import {$$} from './utils.js';
  * }}
  */
 let CommandData;
+
+// Adds a <script> tag that holds the lazy loaded code.
+function ensureLazyLoaded() {
+  const script = document.createElement('script');
+  script.type = 'module';
+  script.src = './lazy_load.js';
+  document.body.appendChild(script);
+}
 
 class AppElement extends PolymerElement {
   static get is() {
@@ -200,6 +204,12 @@ class AppElement extends PolymerElement {
       },
 
       /** @private */
+      modulesVisible_: {
+        type: Boolean,
+        reflectToAttribute: true,
+      },
+
+      /** @private */
       middleSlotPromoLoaded_: Boolean,
 
       /** @private */
@@ -216,6 +226,14 @@ class AppElement extends PolymerElement {
         computed: `computePromoAndModulesLoaded_(middleSlotPromoLoaded_,
             modulesLoaded_)`,
         reflectToAttribute: true,
+      },
+
+      /** @private */
+      modulesLoadedAndVisible_: {
+        type: Boolean,
+        computed: `computeModulesLoadedAndVisible_(promoAndModulesLoaded_,
+            modulesVisible_)`,
+        observer: 'onModulesLoadedAndVisibleChange_',
       },
 
       /**
@@ -258,6 +276,8 @@ class AppElement extends PolymerElement {
     this.backgroundManager_ = BackgroundManager.getInstance();
     /** @private {?number} */
     this.setThemeListenerId_ = null;
+    /** @private {?number} */
+    this.setModulesVisibleListenerId_ = null;
     /** @private {!EventTracker} */
     this.eventTracker_ = new EventTracker();
     this.loadOneGoogleBar_();
@@ -282,6 +302,11 @@ class AppElement extends PolymerElement {
           performance.measure('theme-set');
           this.theme_ = theme;
         });
+    this.setModulesVisibleListenerId_ =
+        this.callbackRouter_.setModulesVisible.addListener(visible => {
+          this.modulesVisible_ = visible;
+        });
+    this.pageHandler_.updateModulesVisible();
     this.eventTracker_.add(window, 'message', (event) => {
       /** @type {!Object} */
       const data = event.data;
@@ -326,8 +351,10 @@ class AppElement extends PolymerElement {
   /** @override */
   ready() {
     super.ready();
+    this.pageHandler_.onAppRendered(BrowserProxy.getInstance().now());
     // Let the browser breath and then render remaining elements.
     BrowserProxy.getInstance().waitForLazyRender().then(() => {
+      ensureLazyLoaded();
       this.lazyRender_ = true;
     });
     this.printPerformance_();
@@ -500,6 +527,14 @@ class AppElement extends PolymerElement {
         (!loadTimeData.getBoolean('modulesEnabled') || this.modulesLoaded_);
   }
 
+  /**
+   * @return {boolean}
+   * @private
+   */
+  computeModulesLoadedAndVisible_() {
+    return this.promoAndModulesLoaded_ && this.modulesVisible_;
+  }
+
   /** @private */
   async onLazyRendered_() {
     if (!loadTimeData.getBoolean('modulesEnabled')) {
@@ -507,7 +542,6 @@ class AppElement extends PolymerElement {
     }
     this.moduleDescriptors_ =
         await ModuleRegistry.getInstance().initializeModules();
-    this.modulesLoaded_ = true;
   }
 
   /** @private */
@@ -590,6 +624,13 @@ class AppElement extends PolymerElement {
       this.backgroundManager_.setBackgroundColor(this.theme_.backgroundColor);
     }
     this.updateBackgroundImagePath_();
+  }
+
+  /** @private */
+  onModulesLoadedAndVisibleChange_() {
+    if (this.modulesLoadedAndVisible_) {
+      this.pageHandler_.onModulesRendered(BrowserProxy.getInstance().now());
+    }
   }
 
   /**
@@ -704,6 +745,34 @@ class AppElement extends PolymerElement {
   }
 
   /**
+   * Sends the command received from the given source and origin to the browser.
+   * Relays the browser response to whether or not a promo containing the given
+   * command can be shown back to the source promo frame. |commandSource| and
+   * |commandOrigin| are used only to send the response back to the source promo
+   * frame and should not be used for anything else.
+   * @param {Object} messageData Data received from the source promo frame.
+   * @param {Window} commandSource Source promo frame.
+   * @param {string} commandOrigin Origin of the source promo frame.
+   * @private
+   */
+  canShowPromoWithBrowserCommand_(messageData, commandSource, commandOrigin) {
+    // Make sure we don't send unsupported commands to the browser.
+    /** @type {!promoBrowserCommand.mojom.Command} */
+    const commandId = Object.values(promoBrowserCommand.mojom.Command)
+                          .includes(messageData.commandId) ?
+        messageData.commandId :
+        promoBrowserCommand.mojom.Command.kUnknownCommand;
+
+    PromoBrowserCommandProxy.getInstance()
+        .handler.canShowPromoWithCommand(commandId)
+        .then(({canShow}) => {
+          const response = {messageType: messageData.messageType};
+          response[messageData.commandId] = canShow;
+          commandSource.postMessage(response, commandOrigin);
+        });
+  }
+
+  /**
    * Sends the command and the accompanying mouse click info received from the
    * promo of the given source and origin to the browser. Relays the execution
    * status response back to the source promo frame. |commandSource| and
@@ -775,6 +844,8 @@ class AppElement extends PolymerElement {
     } else if (data.messageType === 'deactivate') {
       this.$.oneGoogleBarOverlayBackdrop.toggleAttribute('show', false);
       $$(this, '#oneGoogleBar').style.zIndex = '0';
+    } else if (data.messageType === 'can-show-promo-with-browser-command') {
+      this.canShowPromoWithBrowserCommand_(data, event.source, event.origin);
     } else if (data.messageType === 'execute-browser-command') {
       this.executePromoBrowserCommand_(
           /** @type {!CommandData} */ (data.data), event.source, event.origin);
@@ -799,17 +870,17 @@ class AppElement extends PolymerElement {
     }
     const onResize = () => {
       const promoElement = $$(this, 'ntp-middle-slot-promo');
-      const hidePromo = this.$.mostVisited.getBoundingClientRect().bottom >=
+      promoElement.hidden =
+          $$(this, '#mostVisited').getBoundingClientRect().bottom >=
           promoElement.offsetTop;
-      promoElement.style.visibility = hidePromo ? 'hidden' : 'visible';
     };
     this.eventTracker_.add(window, 'resize', onResize);
     onResize();
   }
 
   /** @private */
-  onModulesRendered_() {
-    this.pageHandler_.onModulesRendered(BrowserProxy.getInstance().now());
+  onModulesLoaded_() {
+    this.modulesLoaded_ = true;
   }
 
   /**

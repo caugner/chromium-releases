@@ -18,8 +18,6 @@
 #include "ui/views/view.h"
 
 namespace views {
-class Button;
-class ButtonListener;
 class ImageView;
 class Separator;
 class Textfield;
@@ -32,7 +30,9 @@ enum class EasyUnlockIconId;
 
 // Contains a textfield and a submit button. When the display password button
 // feature is enabled, the textfield contains a button in the form of an eye
-// icon that the user can click on to reveal the password.
+// icon that the user can click on to reveal the password. Submitting a password
+// will make it read only and prevent further submissions until the controller
+// sets ReadOnly to false again.
 //
 // This view is always rendered via layers.
 //
@@ -54,7 +54,6 @@ enum class EasyUnlockIconId;
 //  1 2 3 4 5 6    (o)  (=>)
 //  ------------------
 class ASH_EXPORT LoginPasswordView : public views::View,
-                                     public views::ButtonListener,
                                      public views::TextfieldController,
                                      public ImeControllerImpl::Observer {
  public:
@@ -83,7 +82,6 @@ class ASH_EXPORT LoginPasswordView : public views::View,
       base::RepeatingCallback<void(const base::string16& password)>;
   using OnPasswordTextChanged = base::RepeatingCallback<void(bool is_empty)>;
   using OnEasyUnlockIconHovered = base::RepeatingClosure;
-  using OnEasyUnlockIconTapped = base::RepeatingClosure;
 
   // Must call |Init| after construction.
   explicit LoginPasswordView(const LoginPalette& palette);
@@ -96,7 +94,7 @@ class ASH_EXPORT LoginPasswordView : public views::View,
   void Init(const OnPasswordSubmit& on_submit,
             const OnPasswordTextChanged& on_password_text_changed,
             const OnEasyUnlockIconHovered& on_easy_unlock_icon_hovered,
-            const OnEasyUnlockIconTapped& on_easy_unlock_icon_tapped);
+            views::Button::PressedCallback on_easy_unlock_icon_tapped);
 
   // Is the password field enabled when there is no text?
   void SetEnabledOnEmptyPassword(bool enabled);
@@ -145,12 +143,6 @@ class ASH_EXPORT LoginPasswordView : public views::View,
 
   // Invert the textfield type and toggle the display password button.
   void InvertPasswordDisplayingState();
-
-  // views::ButtonListener:
-  // Handles click on the display password button. Therefore, it inverts the
-  // display password button icon's (show/hide) and shows/hides the content of
-  // the password field.
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Hides the password. When |chromevox_exception| is true, the password is not
   // hidden if ChromeVox is enabled.

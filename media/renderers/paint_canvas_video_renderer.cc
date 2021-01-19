@@ -33,6 +33,7 @@
 #include "gpu/command_buffer/common/shared_image_usage.h"
 #include "media/base/data_buffer.h"
 #include "media/base/video_frame.h"
+#include "media/base/wait_and_replace_sync_token_client.h"
 #include "third_party/libyuv/include/libyuv.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkImageGenerator.h"
@@ -53,7 +54,7 @@
 #define LIBYUV_I422_TO_ARGB libyuv::I422ToARGB
 #define LIBYUV_I444_TO_ARGB libyuv::I444ToARGB
 
-#define LIBYUV_I420ALPHA_TO_ARGB libyuv::I420AlphaToARGB
+#define LIBYUV_I420ALPHA_TO_ARGB_MATRIX libyuv::I420AlphaToARGBMatrix
 
 #define LIBYUV_J400_TO_ARGB libyuv::J400ToARGB
 #define LIBYUV_J420_TO_ARGB libyuv::J420ToARGB
@@ -92,7 +93,7 @@
 #define LIBYUV_I422_TO_ARGB libyuv::I422ToABGR
 #define LIBYUV_I444_TO_ARGB libyuv::I444ToABGR
 
-#define LIBYUV_I420ALPHA_TO_ARGB libyuv::I420AlphaToABGR
+#define LIBYUV_I420ALPHA_TO_ARGB_MATRIX libyuv::I420AlphaToABGRMatrix
 
 #define LIBYUV_J400_TO_ARGB libyuv::J400ToARGB
 #define LIBYUV_J420_TO_ARGB libyuv::J420ToABGR
@@ -135,23 +136,6 @@ namespace {
 // This class keeps the last image drawn.
 // We delete the temporary resource if it is not used for 3 seconds.
 const int kTemporaryResourceDeletionDelay = 3;  // Seconds;
-
-class SyncTokenClientImpl : public VideoFrame::SyncTokenClient {
- public:
-  explicit SyncTokenClientImpl(gpu::InterfaceBase* ib) : ib_(ib) {}
-  ~SyncTokenClientImpl() override = default;
-  void GenerateSyncToken(gpu::SyncToken* sync_token) override {
-    ib_->GenSyncTokenCHROMIUM(sync_token->GetData());
-  }
-  void WaitSyncToken(const gpu::SyncToken& sync_token) override {
-    ib_->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
-  }
-
- private:
-  gpu::InterfaceBase* ib_;
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(SyncTokenClientImpl);
-};
 
 // Helper class that begins/ends access to a mailbox within a scope. The mailbox
 // must have been imported into |texture|.
@@ -327,7 +311,7 @@ void SynchronizeVideoFrameRead(scoped_refptr<VideoFrame> video_frame,
                                gpu::raster::RasterInterface* ri,
                                gpu::ContextSupport* context_support) {
   DCHECK(ri);
-  SyncTokenClientImpl client(ri);
+  WaitAndReplaceSyncTokenClient client(ri);
   video_frame->UpdateReleaseSyncToken(&client);
 
   if (video_frame->metadata()->read_lock_fences_enabled) {
@@ -486,15 +470,58 @@ void ConvertVideoFrameToRGBPixelsTask(const VideoFrame* video_frame,
       break;
 
     case PIXEL_FORMAT_I420A:
-      LIBYUV_I420ALPHA_TO_ARGB(plane_meta[VideoFrame::kYPlane].data,
-                               plane_meta[VideoFrame::kYPlane].stride,
-                               plane_meta[VideoFrame::kUPlane].data,
-                               plane_meta[VideoFrame::kUPlane].stride,
-                               plane_meta[VideoFrame::kVPlane].data,
-                               plane_meta[VideoFrame::kVPlane].stride,
-                               plane_meta[VideoFrame::kAPlane].data,
-                               plane_meta[VideoFrame::kAPlane].stride, pixels,
-                               row_bytes, width, rows, premultiply_alpha);
+      switch (color_space) {
+        case kJPEG_SkYUVColorSpace:
+          LIBYUV_I420ALPHA_TO_ARGB_MATRIX(
+              plane_meta[VideoFrame::kYPlane].data,
+              plane_meta[VideoFrame::kYPlane].stride,
+              plane_meta[VideoFrame::kUPlane].data,
+              plane_meta[VideoFrame::kUPlane].stride,
+              plane_meta[VideoFrame::kVPlane].data,
+              plane_meta[VideoFrame::kVPlane].stride,
+              plane_meta[VideoFrame::kAPlane].data,
+              plane_meta[VideoFrame::kAPlane].stride, pixels, row_bytes,
+              &libyuv::kYuvJPEGConstants, width, rows, premultiply_alpha);
+          break;
+        case kRec709_SkYUVColorSpace:
+          LIBYUV_I420ALPHA_TO_ARGB_MATRIX(
+              plane_meta[VideoFrame::kYPlane].data,
+              plane_meta[VideoFrame::kYPlane].stride,
+              plane_meta[VideoFrame::kUPlane].data,
+              plane_meta[VideoFrame::kUPlane].stride,
+              plane_meta[VideoFrame::kVPlane].data,
+              plane_meta[VideoFrame::kVPlane].stride,
+              plane_meta[VideoFrame::kAPlane].data,
+              plane_meta[VideoFrame::kAPlane].stride, pixels, row_bytes,
+              &libyuv::kYuvH709Constants, width, rows, premultiply_alpha);
+          break;
+        case kRec601_SkYUVColorSpace:
+          LIBYUV_I420ALPHA_TO_ARGB_MATRIX(
+              plane_meta[VideoFrame::kYPlane].data,
+              plane_meta[VideoFrame::kYPlane].stride,
+              plane_meta[VideoFrame::kUPlane].data,
+              plane_meta[VideoFrame::kUPlane].stride,
+              plane_meta[VideoFrame::kVPlane].data,
+              plane_meta[VideoFrame::kVPlane].stride,
+              plane_meta[VideoFrame::kAPlane].data,
+              plane_meta[VideoFrame::kAPlane].stride, pixels, row_bytes,
+              &libyuv::kYuvI601Constants, width, rows, premultiply_alpha);
+          break;
+        case kBT2020_SkYUVColorSpace:
+          LIBYUV_I420ALPHA_TO_ARGB_MATRIX(
+              plane_meta[VideoFrame::kYPlane].data,
+              plane_meta[VideoFrame::kYPlane].stride,
+              plane_meta[VideoFrame::kUPlane].data,
+              plane_meta[VideoFrame::kUPlane].stride,
+              plane_meta[VideoFrame::kVPlane].data,
+              plane_meta[VideoFrame::kVPlane].stride,
+              plane_meta[VideoFrame::kAPlane].data,
+              plane_meta[VideoFrame::kAPlane].stride, pixels, row_bytes,
+              &libyuv::kYuv2020Constants, width, rows, premultiply_alpha);
+          break;
+        default:
+          NOTREACHED();
+      }
       break;
 
     case PIXEL_FORMAT_I444:
@@ -1272,7 +1299,7 @@ bool PaintCanvasVideoRenderer::CopyVideoFrameTexturesToGLTexture(
       video_frame->metadata()->read_lock_fences_enabled) {
     if (!raster_context_provider)
       return false;
-    GrContext* gr_context = raster_context_provider->GrContext();
+    GrDirectContext* gr_context = raster_context_provider->GrContext();
     if (!gr_context)
       return false;
 // TODO(crbug.com/1108154): Expand this uploading path to macOS, linux
@@ -1337,7 +1364,7 @@ bool PaintCanvasVideoRenderer::CopyVideoFrameTexturesToGLTexture(
     CopyVideoFrameSingleTextureToGLTexture(
         destination_gl, video_frame.get(), target, texture, internal_format,
         format, type, level, premultiply_alpha, flip_y);
-    SyncTokenClientImpl client(destination_gl);
+    WaitAndReplaceSyncTokenClient client(destination_gl);
     video_frame->UpdateReleaseSyncToken(&client);
   }
   DCHECK(!cache_ || !cache_->wraps_video_frame_texture);
@@ -1408,7 +1435,7 @@ bool PaintCanvasVideoRenderer::UploadVideoFrameToGLTexture(
   destination_gl->WaitSyncTokenCHROMIUM(
       mailbox_holder.sync_token.GetConstData());
 
-  SyncTokenClientImpl client(source_ri);
+  WaitAndReplaceSyncTokenClient client(source_ri);
   video_frame->UpdateReleaseSyncToken(&client);
 
   return true;
@@ -1468,7 +1495,7 @@ bool PaintCanvasVideoRenderer::PrepareVideoFrameForWebGL(
   destination_gl->WaitSyncTokenCHROMIUM(
       mailbox_holder.sync_token.GetConstData());
 
-  SyncTokenClientImpl client(source_ri);
+  WaitAndReplaceSyncTokenClient client(source_ri);
   video_frame->UpdateReleaseSyncToken(&client);
 
   DCHECK(!cache_ || !cache_->wraps_video_frame_texture);

@@ -7,6 +7,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/layout/layout_box_model_object.h"
+#include "third_party/blink/renderer/core/layout/svg/layout_svg_root.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/paint/compositing/composited_layer_mapping.h"
 #include "third_party/blink/renderer/core/paint/compositing/compositing_reason_finder.h"
@@ -29,7 +30,7 @@ void CompositingLayerPropertyUpdater::Update(const LayoutObject& object) {
 
   if (!object.HasLayer())
     return;
-  const auto* paint_layer = ToLayoutBoxModelObject(object).Layer();
+  const auto* paint_layer = To<LayoutBoxModelObject>(object).Layer();
   const auto* mapping = paint_layer->GetCompositedLayerMapping();
   if (!mapping)
     return;
@@ -137,7 +138,7 @@ void CompositingLayerPropertyUpdater::Update(const LayoutObject& object) {
     // See comments for ScrollTranslation in object_paint_properties.h for the
     // reason of adding ScrollOrigin().
     auto contents_paint_offset =
-        snapped_paint_offset + ToLayoutBox(object).ScrollOrigin();
+        snapped_paint_offset + To<LayoutBox>(object).ScrollOrigin();
     auto SetScrollingContentsLayerState = [&fragment_data,
                                            &contents_paint_offset](
                                               GraphicsLayer* graphics_layer) {
@@ -195,6 +196,14 @@ void CompositingLayerPropertyUpdater::Update(const LayoutObject& object) {
 
     mask_layer->SetLayerState(
         state, snapped_paint_offset + mask_layer->OffsetFromLayoutObject());
+  }
+
+  if (RuntimeEnabledFeatures::CompositeSVGEnabled()) {
+    if (object.IsSVGRoot()) {
+      main_graphics_layer->SetShouldCreateLayersAfterPaint(
+          To<LayoutSVGRoot>(object).HasDescendantCompositingReasons() &&
+          main_graphics_layer->PaintsContentOrHitTest());
+    }
   }
 }
 

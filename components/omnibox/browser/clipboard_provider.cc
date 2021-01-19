@@ -41,9 +41,9 @@ namespace {
 
 const size_t kMaxClipboardSuggestionShownNumTimesSimpleSize = 20;
 
-// Clipboard suggestions should be placed above search and url suggestions, but
-// below query tiles.
-const int kClipboardMatchRelevanceScore = 1500;
+// Clipboard suggestions should be placed above search and url suggestions
+// (including MostVisited tiles), but below query tiles.
+const int kClipboardMatchRelevanceScore = 1501;
 
 bool IsMatchDeletionEnabled() {
   return base::FeatureList::IsEnabled(
@@ -294,9 +294,7 @@ void ClipboardProvider::CheckClipboardContent(const AutocompleteInput& input) {
     desired_types.insert(ClipboardContentType::Text);
   }
 
-  if (base::FeatureList::IsEnabled(
-          omnibox::kEnableClipboardProviderImageSuggestions) &&
-      TemplateURLSupportsImageSearch()) {
+  if (TemplateURLSupportsImageSearch()) {
     desired_types.insert(ClipboardContentType::Image);
   }
 
@@ -324,15 +322,8 @@ void ClipboardProvider::OnReceiveClipboardContent(
     AutocompleteMatch match = NewBlankImageMatch();
     field_trial_triggered_ = true;
     field_trial_triggered_in_session_ = true;
-    // Some users may be in a counterfactual study arm in which we perform all
-    // necessary work but do not forward the autocomplete matches.
-    bool in_counterfactual_group = base::GetFieldTrialParamByFeatureAsBool(
-        omnibox::kEnableClipboardProviderImageSuggestions,
-        "ClipboardProviderImageSuggestionsCounterfactualArm", false);
-    if (!in_counterfactual_group) {
-      AddCreatedMatchWithTracking(input, match, clipboard_contents_age);
-      listener_->OnProviderUpdate(true);
-    }
+    AddCreatedMatchWithTracking(input, match, clipboard_contents_age);
+    listener_->OnProviderUpdate(true);
   } else if (matched_types.find(ClipboardContentType::URL) !=
              matched_types.end()) {
     AutocompleteMatch match = NewBlankURLMatch();
@@ -393,12 +384,6 @@ base::Optional<AutocompleteMatch> ClipboardProvider::CreateTextMatch(
 }
 
 bool ClipboardProvider::CreateImageMatch(const AutocompleteInput& input) {
-  // Only try image match if feature is enabled
-  if (!base::FeatureList::IsEnabled(
-          omnibox::kEnableClipboardProviderImageSuggestions)) {
-    return false;
-  }
-
   if (!clipboard_content_->HasRecentImageFromClipboard()) {
     return false;
   }
@@ -552,7 +537,10 @@ void ClipboardProvider::NewClipboardImageMatch(
 void ClipboardProvider::OnReceiveImage(
     ClipboardImageMatchCallback callback,
     base::Optional<gfx::Image> optional_image) {
-  if (!optional_image) {
+  // ImageSkia::ToImageSkia should only be called if the gfx::Image is
+  // non-empty. It is unclear when the clipboard returns a non-optional but
+  // empty image. See crbug.com/1136759 for more details.
+  if (!optional_image || optional_image.value().IsEmpty()) {
     std::move(callback).Run(base::nullopt);
     return;
   }
@@ -591,9 +579,7 @@ void ClipboardProvider::ConstructImageMatchCallback(
       *match.search_terms_args.get(), url_service->search_terms_data(),
       &post_content));
 
-  if (!base::GetFieldTrialParamByFeatureAsBool(
-          omnibox::kEnableClipboardProviderImageSuggestions,
-          OmniboxFieldTrial::kImageSearchSuggestionThumbnail, false)) {
+  if (!base::FeatureList::IsEnabled(omnibox::kImageSearchSuggestionThumbnail)) {
     // If Omnibox image suggestion do not need thumbnail, release memory.
     match.search_terms_args.reset();
   }

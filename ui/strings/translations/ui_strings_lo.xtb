@@ -23,6 +23,7 @@
 <translation id="1450753235335490080">ບໍ່ສາມາດແບ່ງປັນ <ph name="CONTENT_TYPE" /> ໄດ້</translation>
 <translation id="1487931858675166540">ສະຫຼັບ <ph name="FIRST_ITEM_TITLE" /> ກັບ <ph name="SECOND_ITEM_TITLE" /> ແລ້ວ</translation>
 <translation id="1498028757988366001">ທ່ານໄດ້ຊອກຫາສິ່ງນີ້ມາກ່ອນແລ້ວ. ການລຶບ "<ph name="QUERY" />" ອອກຈາກປະຫວັດຂອທ່ານຈະລຶບມັນອອກຈາກບັນຊີຂອງທ່ານຢ່າງຖາວອນໃນທົ່ວທຸກອຸປະກອນຂອງທ່ານ.</translation>
+<translation id="1510238584712386396">ຕົວ​ເປີດ​ໃຊ້</translation>
 <translation id="1591184457164800433">{MINUTES,plural, =1{1 ນາ​ທີ​ ແລະ }other{# ນາ​ທີ ​ແລະ }}</translation>
 <translation id="1643823602425662293">ການແຈ້ງເຕືອນ</translation>
 <translation id="169515659049020177">Shift</translation>
@@ -99,6 +100,7 @@
 <translation id="3600969208114796418">ໄຟລ໌ <ph name="SAVEAS_EXTENSION_TYPE" /></translation>
 <translation id="3608915363409716668"><ph name="MAXIMUM_VALUE" />+</translation>
 <translation id="3618849550573277856">ຊອກ "<ph name="LOOKUP_STRING" />"</translation>
+<translation id="3622035490309591977">ປະຫວັດຄລິບບອດ</translation>
 <translation id="364720409959344976">ເລືອກໂຟລເດີທີ່ຈະອັບໂຫຼດ</translation>
 <translation id="3660179305079774227">ລູກສອນຂຶ້ນ</translation>
 <translation id="3670030362669914947">ໝາຍເລກ</translation>
@@ -134,6 +136,7 @@
 <translation id="520299402983819650"><ph name="QUANTITY" /> PB</translation>
 <translation id="5266161281976477809">ສາມຫຼ່ຽມການເປີດເຜີຍ</translation>
 <translation id="5278860589123563674">ສົ່ງບໍ່ສຳເລັດ</translation>
+<translation id="5283099933536931082"><ph name="APP_ITEM_TITLE" /> ຂໍໃຫ້ທ່ານດຳເນີນການ.</translation>
 <translation id="528468243742722775">ສິ້ນສຸດ</translation>
 <translation id="5329858601952122676">ລຶບ</translation>
 <translation id="5395308026110844773"><ph name="DRAGGED_APP_NAME" /> ຢູ່ເທິງ <ph name="IN_PLACE_APP" />, ປ່ອຍເພື່ອສ້າງໂຟນເດີ.</translation>
@@ -144,11 +147,13 @@
 <translation id="5574202486608032840">ລະບົບ <ph name="IDS_SHORT_PRODUCT_OS_NAME" /></translation>
 <translation id="5583640892426849032">ລຶບຄືນຫຼັງ</translation>
 <translation id="5613020302032141669">ລູກສອນຊ້າຍ</translation>
+<translation id="5652575806481723716"><ph name="FOCUSED_APP_NAME" /> ຂໍໃຫ້ທ່ານດຳເນີນການ.</translation>
 <translation id="5675363643668471212">ລາຍການຖ້ານວາງ</translation>
 <translation id="5754277640426581776">{MINUTES,plural, =1{1 ນາ​ທີ}other{# ນາ​ທີ}}</translation>
 <translation id="5763338081255973061">{DAYS,plural, =0{ເປີດນຳໃຊ້ມື້ນີ້}=1{ເປີດນຳໃຊ້ເມື່ອ 1 ມື້ກ່ອນ}other{ເປີດນຳໃຊ້ເມື່ອ # ມື້ກ່ອນ}}</translation>
 <translation id="5768079895599174203">{DAYS,plural, =1{1 ວັນ​ ແລະ }other{# ວັນ ແລະ }}</translation>
 <translation id="5789643057113097023">.</translation>
+<translation id="5843690142429128814">ຮູບ.</translation>
 <translation id="5866104238061687188">{YEARS,plural, =1{ໃນ 1 ປີ}other{ໃນ # ປີ}}</translation>
 <translation id="588258955323874662">ເຕັມໜ້າຈໍ</translation>
 <translation id="5906667377645263094">{SECONDS,plural, =1{ຍັງ​ເຫຼືອ 1 ວິ​ນາ​ທີ}other{ຍັງ​ເຫຼືອ # ວິ​ນາ​ທີ}}</translation>
@@ -189,6 +194,7 @@
 <translation id="6845533974506654842">ກົດ</translation>
 <translation id="6863590663815976734">{HOURS,plural, =1{ຍັງ​ເຫຼືອ 1 ຊົ່ວ​ໂມງ}other{ຍັງ​ເຫຼືອ # ຊົ່ວ​ໂມງ}}</translation>
 <translation id="688711909580084195">ໜ້າເວັບບໍ່ມີຊື່</translation>
+<translation id="6902419395050653510">ເນື້ອຫາ HTML.</translation>
 <translation id="6907759265145635167"><ph name="QUANTITY" /> PB/ວິນາທີ</translation>
 <translation id="6917971086528278418">{YEARS,plural, =1{ຍັງເຫຼືອ 1 ປີ}other{ຍັງເຫຼືອ # ປີ}}</translation>
 <translation id="6945221475159498467">ເລືອກ</translation>

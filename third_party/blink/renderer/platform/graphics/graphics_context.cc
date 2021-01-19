@@ -32,6 +32,7 @@
 #include "build/build_config.h"
 #include "components/paint_preview/common/paint_preview_tracker.h"
 #include "skia/ext/platform_canvas.h"
+#include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink.h"
 #include "third_party/blink/renderer/platform/fonts/text_run_paint_info.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/geometry/float_rounded_rect.h"
@@ -130,6 +131,7 @@ GraphicsContext::GraphicsContext(PaintController& paint_controller,
       disable_destruction_checks_(false),
 #endif
       device_scale_factor_(1.0f),
+      dark_mode_filter_(nullptr),
       printing_(false),
       is_painting_preview_(false),
       in_drawing_recorder_(false),
@@ -138,9 +140,6 @@ GraphicsContext::GraphicsContext(PaintController& paint_controller,
   // allocate several here.
   paint_state_stack_.push_back(std::make_unique<GraphicsContextState>());
   paint_state_ = paint_state_stack_.back().get();
-
-  dark_mode_filter_ = std::make_unique<DarkModeFilter>();
-  dark_mode_filter_->UpdateSettings(GetCurrentDarkModeSettings());
 }
 
 GraphicsContext::~GraphicsContext() {
@@ -154,9 +153,18 @@ GraphicsContext::~GraphicsContext() {
 #endif
 }
 
+DarkModeFilter* GraphicsContext::GetDarkModeFilter() {
+  if (!dark_mode_filter_) {
+    dark_mode_filter_ =
+        std::make_unique<DarkModeFilter>(GetCurrentDarkModeSettings());
+  }
+
+  return dark_mode_filter_.get();
+}
+
 void GraphicsContext::UpdateDarkModeSettingsForTest(
     const DarkModeSettings& settings) {
-  GetDarkModeFilter()->UpdateSettings(settings);
+  dark_mode_filter_ = std::make_unique<DarkModeFilter>(settings);
 }
 
 void GraphicsContext::Save() {
@@ -452,14 +460,14 @@ void GraphicsContext::DrawFocusRing(const Vector<IntRect>& rects,
                                     float border_radius,
                                     float min_border_width,
                                     const Color& color,
-                                    ColorScheme color_scheme) {
+                                    mojom::blink::ColorScheme color_scheme) {
 #if defined(OS_MAC)
-  const Color& inner_color = color_scheme == ColorScheme::kDark
+  const Color& inner_color = color_scheme == mojom::blink::ColorScheme::kDark
                                  ? SkColorSetRGB(0x99, 0xC8, 0xFF)
                                  : color;
 #else
   const Color& inner_color =
-      color_scheme == ColorScheme::kDark ? SK_ColorWHITE : color;
+      color_scheme == mojom::blink::ColorScheme::kDark ? SK_ColorWHITE : color;
 #endif
   if (::features::IsFormControlsRefreshEnabled()) {
     // The focus ring is made of two borders which have a 2:1 ratio.
@@ -471,7 +479,7 @@ void GraphicsContext::DrawFocusRing(const Vector<IntRect>& rects,
     if (min_border_width >= inside_border_width) {
       offset -= inside_border_width;
     }
-    const Color& outer_color = color_scheme == ColorScheme::kDark
+    const Color& outer_color = color_scheme == mojom::blink::ColorScheme::kDark
                                    ? SkColorSetRGB(0x10, 0x10, 0x10)
                                    : SK_ColorWHITE;
     // The outer ring is drawn first, and we overdraw to ensure no gaps or AA

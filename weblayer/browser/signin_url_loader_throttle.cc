@@ -60,7 +60,7 @@ SigninURLLoaderThrottle::~SigninURLLoaderThrottle() = default;
 std::unique_ptr<SigninURLLoaderThrottle> SigninURLLoaderThrottle::Create(
     content::BrowserContext* browser_context,
     content::WebContents::Getter web_contents_getter) {
-  if (browser_context->IsOffTheRecord() || !GetDelegate(web_contents_getter))
+  if (!GetDelegate(web_contents_getter))
     return nullptr;
 
   // Use base::WrapUnique + new because of the constructor is private.
@@ -141,8 +141,12 @@ void SigninURLLoaderThrottle::ProcessRequest(
   // Disable incognito and adding accounts for now. This shouldn't matter in
   // practice though since we are skipping the /SignOutOptions page completely
   // with the manage=true param.
+  //
+  // TODO(crbug.com/1134042): Check whether the child account status should also
+  // be sent in the Mirror request header from WebLayer.
   signin::AppendOrRemoveMirrorRequestHeader(
       &request_adapter, new_url, delegate->GetGaiaId(),
+      base::nullopt /* is_child_account */,
       signin::AccountConsistencyMethod::kMirror,
       CookieSettingsFactory::GetForBrowserContext(browser_context_).get(),
       signin::PROFILE_MODE_INCOGNITO_DISABLED |

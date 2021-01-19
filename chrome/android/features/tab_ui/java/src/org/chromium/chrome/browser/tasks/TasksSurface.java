@@ -10,6 +10,8 @@ import android.view.ViewGroup;
 
 import androidx.annotation.Nullable;
 
+import com.google.android.material.appbar.AppBarLayout;
+
 import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.browser.compositor.layouts.Layout;
 import org.chromium.chrome.browser.ntp.FakeboxDelegate;
@@ -66,8 +68,36 @@ public interface TasksSurface {
     View getView();
 
     /**
+     * Get the view {@link View} of the top transparent placeholder on start surface.
+     */
+    View getTopToolbarPlaceholderView();
+
+    /**
      * Called when the native initialization is completed. Anything to construct a TasksSurface but
      * require native initialization should be constructed here.
      */
     void onFinishNativeInitialization(Context context, FakeboxDelegate fakeboxDelegate);
+
+    /**
+     * @param onOffsetChangedListener Registers listener for the offset changes of the header view.
+     */
+    void addHeaderOffsetChangeListener(
+            AppBarLayout.OnOffsetChangedListener onOffsetChangedListener);
+
+    /**
+     * @param onOffsetChangedListener Unregisters listener for the offset changes of the header
+     *         view.
+     */
+    void removeHeaderOffsetChangeListener(
+            AppBarLayout.OnOffsetChangedListener onOffsetChangedListener);
+
+    /**
+     * Add the fake search box shrink animation.
+     */
+    void addFakeSearchBoxShrinkAnimation();
+
+    /**
+     * Remove the omnibox shrink animation.
+     */
+    void removeFakeSearchBoxShrinkAnimation();
 }

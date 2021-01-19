@@ -27,6 +27,7 @@ import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bun
 
 import {GlobalScrollTargetBehavior, GlobalScrollTargetBehaviorImpl} from '../global_scroll_target_behavior.m.js';
 import {loadTimeData} from '../i18n_setup.js';
+import {MetricsBrowserProxyImpl, PrivacyElementInteractions} from '../metrics_browser_proxy.js';
 import {routes} from '../route.js';
 import {Route, RouteObserverBehavior, Router} from '../router.m.js';
 
@@ -123,11 +124,18 @@ Polymer({
    *
    * RouteObserverBehavior
    * @param {!Route} currentRoute
+   * @param {!Route} previousRoute
    * @protected
    */
-  currentRouteChanged(currentRoute) {
+  currentRouteChanged(currentRoute, previousRoute) {
     GlobalScrollTargetBehaviorImpl.currentRouteChanged.call(this, currentRoute);
-    if (currentRoute === routes.SITE_SETTINGS_SITE_DATA) {
+    // Reload cookies on navigation to the site data page from a different
+    // route, except when a search query is present, as that will be handled by
+    // onFilterChanged_.
+    // TODO (crbug.com/1141796): Remove this layering violation.
+    const searchQueryParam =
+        Router.getInstance().getQueryParameters().get('searchSubpage');
+    if (currentRoute === routes.SITE_SETTINGS_SITE_DATA && !searchQueryParam) {
       this.isLoading_ = true;
       // Needed to fix iron-list rendering issue. The list will not render
       // correctly until a scroll occurs.
@@ -197,7 +205,12 @@ Polymer({
    * @private
    */
   onFilterChanged_(current, previous) {
-    if (previous === undefined) {
+    // Ignore the first undefined -> defined transition, unless |current| has a
+    // value. This can occur if the first navigation to the page contains a
+    // search query parameter.
+    // TODO (crbug.com/1141796): Remove requirement to perform this check as
+    // it is subtle and a flow on from a layering violation.
+    if (previous === undefined && !current) {
       return;
     }
     this.updateSiteList_();
@@ -276,10 +289,14 @@ Polymer({
   onConfirmDelete_() {
     this.$.confirmDeleteDialog.close();
     if (this.filter.length === 0) {
+      MetricsBrowserProxyImpl.getInstance().recordSettingsPageHistogram(
+          PrivacyElementInteractions.SITE_DATA_REMOVE_ALL);
       this.browserProxy_.removeAll().then(() => {
         this.sites = [];
       });
     } else {
+      MetricsBrowserProxyImpl.getInstance().recordSettingsPageHistogram(
+          PrivacyElementInteractions.SITE_DATA_REMOVE_FILTERED);
       this.browserProxy_.removeShownItems();
       // We just deleted all items found by the filter, let's reset the filter.
       this.fire('clear-subpage-search');

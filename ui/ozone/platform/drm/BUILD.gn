@@ -4,8 +4,8 @@
 
 import("//build/config/chromecast_build.gni")
 import("//build/config/linux/pkg_config.gni")
+import("//build/config/ozone.gni")
 import("//gpu/vulkan/features.gni")
-import("//ui/ozone/ozone.gni")
 
 visibility = [ "//ui/ozone/*" ]
 
@@ -25,6 +25,8 @@ source_set("gbm") {
     "common/drm_util.h",
     "common/scoped_drm_types.cc",
     "common/scoped_drm_types.h",
+    "gpu/crtc_commit_request.cc",
+    "gpu/crtc_commit_request.h",
     "gpu/crtc_controller.cc",
     "gpu/crtc_controller.h",
     "gpu/drm_device.cc",

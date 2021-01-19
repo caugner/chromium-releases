@@ -25,13 +25,13 @@
 #include "gpu/config/device_perf_info.h"
 #include "gpu/config/gpu_control_list.h"
 #include "gpu/config/gpu_domain_guilt.h"
-#include "gpu/config/gpu_extra_info.h"
 #include "gpu/config/gpu_feature_info.h"
 #include "gpu/config/gpu_info.h"
 #include "gpu/config/gpu_mode.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "third_party/blink/public/mojom/gpu/gpu.mojom.h"
 #include "ui/display/display_observer.h"
+#include "ui/gfx/gpu_extra_info.h"
 
 class GURL;
 
@@ -103,14 +103,14 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager,
   void UpdateGpuFeatureInfo(const gpu::GpuFeatureInfo& gpu_feature_info,
                             const base::Optional<gpu::GpuFeatureInfo>&
                                 gpu_feature_info_for_hardware_gpu);
-  void UpdateGpuExtraInfo(const gpu::GpuExtraInfo& gpu_extra_info);
+  void UpdateGpuExtraInfo(const gfx::GpuExtraInfo& gpu_extra_info);
 
   gpu::GpuFeatureInfo GetGpuFeatureInfo() const;
 
   gpu::GPUInfo GetGPUInfoForHardwareGpu() const;
   gpu::GpuFeatureInfo GetGpuFeatureInfoForHardwareGpu() const;
 
-  gpu::GpuExtraInfo GetGpuExtraInfo() const;
+  gfx::GpuExtraInfo GetGpuExtraInfo() const;
 
   bool IsGpuCompositingDisabled() const;
 
@@ -164,6 +164,9 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager,
   // on Android and Chrome OS.
   void FallBackToNextGpuMode();
 
+  // Check if there is at least one fallback option available.
+  bool CanFallback() const;
+
   // Returns false if the latest GPUInfo gl_renderer is from SwiftShader or
   // Disabled (in the viz case).
   bool IsGpuProcessUsingHardwareGpu() const;
@@ -175,6 +178,8 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager,
   // DisplayObserver overrides.
   void OnDisplayAdded(const display::Display& new_display) override;
   void OnDisplayRemoved(const display::Display& old_display) override;
+  void OnDisplayMetricsChanged(const display::Display& display,
+                               uint32_t changed_metrics) override;
 
   // Binds a new Mojo receiver to handle requests from a renderer.
   static void BindReceiver(

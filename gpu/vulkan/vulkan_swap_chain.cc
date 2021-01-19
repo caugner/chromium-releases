@@ -95,8 +95,13 @@ void VulkanSwapChain::Destroy() {
       // other fences and semaphores safely.
       base::ScopedBlockingCall scoped_blocking_call(
           FROM_HERE, base::BlockingType::MAY_BLOCK);
-      vkWaitForFences(device, 1, &fence_and_semaphores_queue_.back().fence,
-                      VK_TRUE, UINT64_MAX);
+      // Use 1 second timeout for vkWaitForFences(), it should be long enough.
+      constexpr auto kTimeout = base::TimeTicks::kNanosecondsPerSecond;
+      auto result =
+          vkWaitForFences(device, 1, &fence_and_semaphores_queue_.back().fence,
+                          VK_TRUE, kTimeout);
+      if (result != VK_SUCCESS)
+        LOG(ERROR) << "vkWaitForFences() failed: " << result;
     }
     for (auto& fence_and_semaphores : fence_and_semaphores_queue_) {
       vkDestroyFence(device, fence_and_semaphores.fence,
@@ -234,6 +239,8 @@ bool VulkanSwapChain::InitializeSwapChain(
          base::TaskShutdownBehavior::BLOCK_SHUTDOWN, base::MayBlock()});
   }
 
+  image_usage_ = image_usage_flags;
+
   return true;
 }
 
@@ -290,6 +297,7 @@ void VulkanSwapChain::DestroySwapImages() {
 bool VulkanSwapChain::BeginWriteCurrentImage(VkImage* image,
                                              uint32_t* image_index,
                                              VkImageLayout* image_layout,
+                                             VkImageUsageFlags* image_usage,
                                              VkSemaphore* begin_semaphore,
                                              VkSemaphore* end_semaphore) {
   base::AutoLock auto_lock(lock_);
@@ -297,6 +305,7 @@ bool VulkanSwapChain::BeginWriteCurrentImage(VkImage* image,
   DCHECK(image);
   DCHECK(image_index);
   DCHECK(image_layout);
+  DCHECK(image_usage);
   DCHECK(begin_semaphore);
   DCHECK(end_semaphore);
   DCHECK(!is_writing_);
@@ -327,6 +336,7 @@ bool VulkanSwapChain::BeginWriteCurrentImage(VkImage* image,
   *image = current_image_data.image;
   *image_index = *acquired_image_;
   *image_layout = current_image_data.image_layout;
+  *image_usage = image_usage_;
   *begin_semaphore = current_image_data.acquire_semaphore;
   *end_semaphore = current_image_data.present_semaphore;
   is_writing_ = true;
@@ -568,7 +578,7 @@ void VulkanSwapChain::ReturnFenceAndSemaphores(
 VulkanSwapChain::ScopedWrite::ScopedWrite(VulkanSwapChain* swap_chain)
     : swap_chain_(swap_chain) {
   success_ = swap_chain_->BeginWriteCurrentImage(
-      &image_, &image_index_, &image_layout_, &begin_semaphore_,
+      &image_, &image_index_, &image_layout_, &image_usage_, &begin_semaphore_,
       &end_semaphore_);
   if (LIKELY(success_)) {
     DCHECK(begin_semaphore_ != VK_NULL_HANDLE);

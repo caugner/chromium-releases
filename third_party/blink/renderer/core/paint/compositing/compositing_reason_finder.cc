@@ -14,9 +14,11 @@
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
 #include "third_party/blink/renderer/core/layout/layout_video.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/layout/svg/layout_svg_transformable_container.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
+#include "third_party/blink/renderer/core/svg/svg_element.h"
 
 namespace blink {
 
@@ -132,7 +134,7 @@ CompositingReasons CompositingReasonFinder::DirectReasonsForPaintProperties(
 
   reasons |= CompositingReasonsFor3DTransform(object);
 
-  auto* layer = ToLayoutBoxModelObject(object).Layer();
+  auto* layer = To<LayoutBoxModelObject>(object).Layer();
   if (layer->Has3DTransformedDescendant()) {
     // Perspective (specified either by perspective or transform properties)
     // with 3d descendants need a render surface for flattening purposes.
@@ -186,15 +188,20 @@ CompositingReasons
 CompositingReasonFinder::DirectReasonsForSVGChildPaintProperties(
     const LayoutObject& object) {
   DCHECK(object.IsSVGChild());
-  if (RuntimeEnabledFeatures::CompositeSVGEnabled() && !object.IsText()) {
-    const ComputedStyle& style = object.StyleRef();
-    auto reasons = CompositingReasonsForAnimation(object) |
-                   CompositingReasonsForWillChange(style);
-    if (style.HasBackdropFilter())
-      reasons |= CompositingReason::kBackdropFilter;
-    return reasons;
-  }
-  return CompositingReason::kNone;
+  if (!RuntimeEnabledFeatures::CompositeSVGEnabled())
+    return CompositingReason::kNone;
+  if (object.IsText())
+    return CompositingReason::kNone;
+
+  const ComputedStyle& style = object.StyleRef();
+  auto reasons = CompositingReasonsForAnimation(object);
+  reasons |= CompositingReasonsForWillChange(style);
+  // Exclude will-change for other properties some of which don't apply to SVG
+  // children, e.g. 'top'.
+  reasons &= ~CompositingReason::kWillChangeOther;
+  if (style.HasBackdropFilter())
+    reasons |= CompositingReason::kBackdropFilter;
+  return reasons;
 }
 
 CompositingReasons CompositingReasonFinder::CompositingReasonsFor3DTransform(
@@ -283,6 +290,14 @@ CompositingReasons CompositingReasonFinder::NonStyleDeterminedDirectReasons(
   return direct_reasons;
 }
 
+static bool ObjectTypeSupportsCompositedTransformAnimation(
+    const LayoutObject& object) {
+  if (object.IsSVGChild())
+    return RuntimeEnabledFeatures::CompositeSVGEnabled();
+  // Transforms don't apply on non-replaced inline elements.
+  return object.IsBox();
+}
+
 CompositingReasons CompositingReasonFinder::CompositingReasonsForAnimation(
     const LayoutObject& object) {
   CompositingReasons reasons = CompositingReason::kNone;
@@ -290,11 +305,8 @@ CompositingReasons CompositingReasonFinder::CompositingReasonsForAnimation(
   if (style.SubtreeWillChangeContents())
     return reasons;
 
-  // Transforms don't apply on non-replaced inline elements.
-  bool supports_composited_animations =
-      object.IsBox() ||
-      (RuntimeEnabledFeatures::CompositeSVGEnabled() && object.IsSVGChild());
-  if (supports_composited_animations && style.HasCurrentTransformAnimation())
+  if (style.HasCurrentTransformAnimation() &&
+      ObjectTypeSupportsCompositedTransformAnimation(object))
     reasons |= CompositingReason::kActiveTransformAnimation;
   if (style.HasCurrentOpacityAnimation())
     reasons |= CompositingReason::kActiveOpacityAnimation;

@@ -4,14 +4,13 @@
 
 #include "chrome/renderer/chrome_content_settings_agent_delegate.h"
 
-#include "chrome/common/chrome_features.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/common/ssl_insecure_content.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "base/metrics/histogram_functions.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/api_permission.h"
@@ -57,7 +56,12 @@ bool ChromeContentSettingsAgentDelegate::IsPluginTemporarilyAllowed(
          base::Contains(temporarily_allowed_plugins_, std::string());
 }
 
-bool ChromeContentSettingsAgentDelegate::IsSchemeWhitelisted(
+void ChromeContentSettingsAgentDelegate::AllowPluginTemporarily(
+    const std::string& identifier) {
+  temporarily_allowed_plugins_.insert(identifier);
+}
+
+bool ChromeContentSettingsAgentDelegate::IsSchemeAllowlisted(
     const std::string& scheme) {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   return scheme == extensions::kExtensionScheme;
@@ -73,6 +77,16 @@ ChromeContentSettingsAgentDelegate::AllowReadFromClipboard() {
       extension_dispatcher_->script_context_set().GetCurrent();
   if (current_context && current_context->HasAPIPermission(
                              extensions::APIPermission::kClipboardRead)) {
+    if (current_context->context_type() ==
+        extensions::Feature::CONTENT_SCRIPT_CONTEXT) {
+      bool has_user_activation =
+          render_frame_->GetWebFrame()->HasTransientUserActivation();
+      // TODO(https://crbug.com/1051198): Evaluate and deprecate content script
+      // read without user activation after enough data is gathered.
+      base::UmaHistogramBoolean(
+          "Clipboard.ExtensionContentScriptReadHasUserActivation",
+          has_user_activation);
+    }
     return true;
   }
 #endif
@@ -115,16 +129,6 @@ void ChromeContentSettingsAgentDelegate::PassiveInsecureContentFound(
   FilteredReportInsecureContentDisplayed(GURL(resource_url));
 }
 
-bool ChromeContentSettingsAgentDelegate::OnMessageReceived(
-    const IPC::Message& message) {
-  // Don't swallow LoadBlockedPlugins messages, as they're sent to every
-  // blocked plugin.
-  IPC_BEGIN_MESSAGE_MAP(ChromeContentSettingsAgentDelegate, message)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_LoadBlockedPlugins, OnLoadBlockedPlugins)
-  IPC_END_MESSAGE_MAP()
-  return false;
-}
-
 void ChromeContentSettingsAgentDelegate::DidCommitProvisionalLoad(
     ui::PageTransition transition) {
   if (render_frame()->GetWebFrame()->Parent())
@@ -134,11 +138,6 @@ void ChromeContentSettingsAgentDelegate::DidCommitProvisionalLoad(
 }
 
 void ChromeContentSettingsAgentDelegate::OnDestruct() {}
-
-void ChromeContentSettingsAgentDelegate::OnLoadBlockedPlugins(
-    const std::string& identifier) {
-  temporarily_allowed_plugins_.insert(identifier);
-}
 
 bool ChromeContentSettingsAgentDelegate::IsPlatformApp() {
 #if BUILDFLAG(ENABLE_EXTENSIONS)

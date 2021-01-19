@@ -56,7 +56,7 @@ class OmahaService {
 
   // Returns debug information about the omaha service.
   static void GetDebugInformation(
-      const base::Callback<void(base::DictionaryValue*)> callback);
+      base::OnceCallback<void(base::DictionaryValue*)> callback);
 
  private:
   // For tests:
@@ -82,6 +82,8 @@ class OmahaService {
   FRIEND_TEST_ALL_PREFIXES(OmahaServiceTest, NonSpammingTest);
   FRIEND_TEST_ALL_PREFIXES(OmahaServiceTest, ActivePingAfterInstallEventTest);
   FRIEND_TEST_ALL_PREFIXES(OmahaServiceTest, InstallRetryTest);
+  FRIEND_TEST_ALL_PREFIXES(OmahaServiceTest, PingUpToDateUpdatesUserDefaults);
+  FRIEND_TEST_ALL_PREFIXES(OmahaServiceTest, PingOutOfDateUpdatesUserDefaults);
   FRIEND_TEST_ALL_PREFIXES(OmahaServiceInternalTest,
                            PingMessageTestWithProfileData);
 
@@ -150,7 +152,7 @@ class OmahaService {
 
   // Computes debugging information and fill |result|.
   void GetDebugInformationOnIOThread(
-      const base::Callback<void(base::DictionaryValue*)> callback);
+      base::OnceCallback<void(base::DictionaryValue*)> callback);
 
   // Returns whether the next ping to send must a an install/update ping. If
   // |true|, the next ping must use |GetInstallRetryRequestId| as identifier

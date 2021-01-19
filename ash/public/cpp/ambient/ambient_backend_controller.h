@@ -5,6 +5,7 @@
 #ifndef ASH_PUBLIC_CPP_AMBIENT_AMBIENT_BACKEND_CONTROLLER_H_
 #define ASH_PUBLIC_CPP_AMBIENT_AMBIENT_BACKEND_CONTROLLER_H_
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -12,10 +13,6 @@
 #include "ash/public/cpp/ash_public_export.h"
 #include "base/callback_forward.h"
 #include "base/optional.h"
-
-namespace base {
-class TimeDelta;
-}  // namespace base
 
 namespace ash {
 
@@ -151,11 +148,12 @@ class ASH_PUBLIC_EXPORT AmbientBackendController {
                                       int num_albums,
                                       OnSettingsAndAlbumsFetchedCallback) = 0;
 
-  // Set the photo refresh interval in ambient mode.
-  virtual void SetPhotoRefreshInterval(base::TimeDelta interval) = 0;
-
   // Fetch the weather information.
   virtual void FetchWeather(FetchWeatherCallback) = 0;
+
+  // Get stock photo urls to cache in advance in case Ambient mode is started
+  // without internet access.
+  virtual const std::array<const char*, 2>& GetBackupPhotoUrls() const = 0;
 };
 
 }  // namespace ash

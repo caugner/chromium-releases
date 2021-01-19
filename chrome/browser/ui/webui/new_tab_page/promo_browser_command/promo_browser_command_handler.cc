@@ -9,12 +9,16 @@
 #include "base/metrics/user_metrics.h"
 #include "chrome/browser/browser_features.h"
 #include "chrome/browser/command_updater_impl.h"
+#include "chrome/browser/enterprise/util/managed_browser_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/promos/promo_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/common/webui_url_constants.h"
+#include "components/safe_browsing/content/web_ui/safe_browsing_ui.h"
+#include "components/safe_browsing/core/common/safe_browsing_policy_handler.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 
@@ -38,6 +42,31 @@ PromoBrowserCommandHandler::PromoBrowserCommandHandler(
 }
 
 PromoBrowserCommandHandler::~PromoBrowserCommandHandler() = default;
+
+void PromoBrowserCommandHandler::CanShowPromoWithCommand(
+    promo_browser_command::mojom::Command command_id,
+    CanShowPromoWithCommandCallback callback) {
+  bool can_show = false;
+  switch (static_cast<Command>(command_id)) {
+    case Command::kUnknownCommand:
+      // Nothing to do.
+      break;
+    case Command::kOpenSafetyCheck:
+      can_show = chrome::enterprise_util::HasBrowserPoliciesApplied(profile_);
+      break;
+    case Command::kOpenSafeBrowsingEnhancedProtectionSettings: {
+      bool managed = safe_browsing::SafeBrowsingPolicyHandler::
+          IsSafeBrowsingProtectionLevelSetByPolicy(profile_->GetPrefs());
+      bool already_enabled =
+          safe_browsing::IsEnhancedProtectionEnabled(*(profile_->GetPrefs()));
+      can_show = !managed && !already_enabled;
+    } break;
+    default:
+      NOTREACHED() << "Unspecified behavior for command " << command_id;
+      break;
+  }
+  std::move(callback).Run(can_show);
+}
 
 void PromoBrowserCommandHandler::ExecuteCommand(
     Command command_id,
@@ -68,8 +97,9 @@ void PromoBrowserCommandHandler::ExecuteCommandWithDisposition(
       base::RecordAction(
           base::UserMetricsAction("NewTabPage_Promos_SafetyCheck"));
       break;
-    case Command::kOpenSafeBrowsingSettings:
-      NavigateToURL(GURL(chrome::GetSettingsUrl(chrome::kSafeBrowsingSubPage)),
+    case Command::kOpenSafeBrowsingEnhancedProtectionSettings:
+      NavigateToURL(GURL(chrome::GetSettingsUrl(
+                        chrome::kSafeBrowsingEnhancedProtectionSubPage)),
                     disposition);
       base::RecordAction(
           base::UserMetricsAction("NewTabPage_Promos_EnhancedProtection"));
@@ -87,7 +117,8 @@ void PromoBrowserCommandHandler::EnableCommands() {
   GetCommandUpdater()->UpdateCommandEnabled(
       static_cast<int>(Command::kOpenSafetyCheck), true);
   GetCommandUpdater()->UpdateCommandEnabled(
-      static_cast<int>(Command::kOpenSafeBrowsingSettings), true);
+      static_cast<int>(Command::kOpenSafeBrowsingEnhancedProtectionSettings),
+      true);
 }
 
 CommandUpdater* PromoBrowserCommandHandler::GetCommandUpdater() {

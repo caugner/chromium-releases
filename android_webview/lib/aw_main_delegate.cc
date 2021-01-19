@@ -8,6 +8,7 @@
 
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/aw_media_url_interceptor.h"
+#include "android_webview/browser/gfx/aw_draw_fn_impl.h"
 #include "android_webview/browser/gfx/browser_view_renderer.h"
 #include "android_webview/browser/gfx/gpu_service_web_view.h"
 #include "android_webview/browser/gfx/viz_compositor_thread_runner_webview.h"
@@ -51,6 +52,7 @@
 #include "content/public/common/content_descriptor_keys.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/cpu_affinity.h"
 #include "gin/public/isolate_holder.h"
 #include "gin/v8_initializer.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
@@ -166,6 +168,9 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
     base::android::RegisterApkAssetWithFileDescriptorStore(
         content::kV8Snapshot64DataDescriptor,
         gin::V8Initializer::GetSnapshotFilePath(false, file_type));
+
+    if (AwDrawFnImpl::IsUsingVulkan())
+      cl->AppendSwitch(switches::kWebViewDrawFunctorUsesVulkan);
   }
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
 
@@ -192,6 +197,16 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
     if (cl->HasSwitch(switches::kWebViewLogJsConsoleMessages)) {
       features.EnableIfNotSet(::features::kLogJsConsoleMessages);
     }
+
+    if (cl->HasSwitch(switches::kWebViewDrawFunctorUsesVulkan)) {
+      // When draw functor uses vulkan, assume that it is safe to enable viz
+      // which depends on shared images.
+      features.EnableIfNotSet(::features::kEnableSharedImageForWebview);
+    }
+
+    // WebView uses kWebViewVulkan to control vulkan. Pre-emptively disable
+    // kVulkan in case it becomes enabled by default.
+    features.DisableIfNotSet(::features::kVulkan);
 
     features.DisableIfNotSet(::features::kWebPayments);
 
@@ -224,9 +239,9 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
     // SurfaceControl is not supported on webview.
     features.DisableIfNotSet(::features::kAndroidSurfaceControl);
 
-    // TODO(https://crbug.com/963653): SmsReceiver is not yet supported on
+    // TODO(https://crbug.com/963653): WebOTP is not yet supported on
     // WebView.
-    features.DisableIfNotSet(::features::kSmsReceiver);
+    features.DisableIfNotSet(::features::kWebOTP);
 
     // TODO(https://crbug.com/1012899): WebXR is not yet supported on WebView.
     features.DisableIfNotSet(::features::kWebXr);
@@ -240,10 +255,9 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
     // De-jelly is never supported on WebView.
     features.EnableIfNotSet(::features::kDisableDeJelly);
 
-    // COOP/COEP is not supported on WebView. See:
+    // COOP is not supported on WebView yet. See:
     // https://groups.google.com/a/chromium.org/forum/#!topic/blink-dev/XBKAGb2_7uAi.
     features.DisableIfNotSet(network::features::kCrossOriginOpenerPolicy);
-    features.DisableIfNotSet(network::features::kCrossOriginEmbedderPolicy);
 
     features.DisableIfNotSet(::features::kInstalledApp);
 
@@ -299,10 +313,6 @@ void AwMainDelegate::PreSandboxStartup() {
 
   if (process_type == switches::kRendererProcess) {
     InitResourceBundleRendererSide();
-    if (command_line.HasSwitch(switches::kWebViewForceLittleCores)) {
-      base::SetProcessCpuAffinityMode(base::GetCurrentProcessHandle(),
-                                      base::CpuAffinityMode::kLittleCoresOnly);
-    }
   }
 
   EnableCrashReporter(process_type);
@@ -372,6 +382,15 @@ void AwMainDelegate::PostFieldTrialInitialization() {
 
   ALLOW_UNUSED_LOCAL(is_canary_dev);
   ALLOW_UNUSED_LOCAL(is_browser_process);
+
+  // Enable LITTLE-cores only mode if the feature is enabled, but only for child
+  // processes, as the browser process is shared with the hosting app.
+  if (!is_browser_process &&
+      base::FeatureList::IsEnabled(
+          android_webview::features::
+              kWebViewCpuAffinityRestrictToLittleCores)) {
+    content::EnforceProcessCpuAffinity(base::CpuAffinityMode::kLittleCoresOnly);
+  }
 
 #if BUILDFLAG(ENABLE_GWP_ASAN_MALLOC)
   gwp_asan::EnableForMalloc(is_canary_dev || is_browser_process,

@@ -140,6 +140,8 @@ IN_PROC_BROWSER_TEST_F(DeveloperPrivateApiTest, InspectEmbeddedOptionsPage) {
 IN_PROC_BROWSER_TEST_F(DeveloperPrivateApiTest,
                        InspectInactiveServiceWorkerBackground) {
   ResultCatcher result_catcher;
+  service_worker_test_utils::TestRegistrationObserver registration_observer(
+      browser()->profile());
   // Load an extension that is service worker based.
   const Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII("service_worker")
@@ -147,9 +149,6 @@ IN_PROC_BROWSER_TEST_F(DeveloperPrivateApiTest,
                         .AppendASCII("inspect"));
   ASSERT_TRUE(extension);
   ASSERT_TRUE(result_catcher.GetNextResult());
-
-  service_worker_test_utils::TestRegistrationObserver registration_observer(
-      browser()->profile());
   registration_observer.WaitForRegistrationStored();
 
   // Stop the service worker.

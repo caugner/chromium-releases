@@ -13,7 +13,7 @@
 
 #include "base/atomic_ref_count.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/debug/leak_annotations.h"
 #include "base/files/file_path.h"
@@ -46,7 +46,6 @@
 #include "chrome/browser/download/download_status_updater.h"
 #include "chrome/browser/gpu/gpu_mode_manager.h"
 #include "chrome/browser/icon_manager.h"
-#include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/lifetime/switch_utils.h"
@@ -90,7 +89,6 @@
 #include "components/component_updater/component_updater_service.h"
 #include "components/component_updater/timer_update_scheduler.h"
 #include "components/crash/core/common/crash_key.h"
-#include "components/federated_learning/floc_blocklist_service.h"
 #include "components/federated_learning/floc_constants.h"
 #include "components/federated_learning/floc_sorting_lsh_clusters_service.h"
 #include "components/gcm_driver/gcm_driver.h"
@@ -160,6 +158,7 @@
 #else
 #include "chrome/browser/devtools/devtools_auto_opener.h"
 #include "chrome/browser/gcm/gcm_product_util.h"
+#include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/resource_coordinator/tab_manager.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -195,6 +194,10 @@
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/ui/user_manager.h"
 #include "components/enterprise/browser/controller/chrome_browser_cloud_management_controller.h"
+#endif
+
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#include "chrome/browser/error_reporting/chrome_js_error_report_processor.h"  // nogncheck
 #endif
 
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
@@ -369,6 +372,8 @@ void BrowserProcessImpl::StartTearDown() {
   // |tearing_down_| necessary in IsShuttingDown().
   tearing_down_ = true;
   DCHECK(IsShuttingDown());
+
+  platform_part()->BeginStartTearDown();
 
   metrics_services_manager_.reset();
   intranet_redirect_detector_.reset();
@@ -824,12 +829,15 @@ printing::BackgroundPrintingManager*
 #endif
 }
 
+#if !defined(OS_ANDROID)
 IntranetRedirectDetector* BrowserProcessImpl::intranet_redirect_detector() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!intranet_redirect_detector_)
-    CreateIntranetRedirectDetector();
+    intranet_redirect_detector_ = std::make_unique<IntranetRedirectDetector>();
+
   return intranet_redirect_detector_.get();
 }
+#endif
 
 const std::string& BrowserProcessImpl::GetApplicationLocale() {
 #if !defined(OS_CHROMEOS)
@@ -993,14 +1001,6 @@ BrowserProcessImpl::subresource_filter_ruleset_service() {
   return subresource_filter_ruleset_service_.get();
 }
 
-federated_learning::FlocBlocklistService*
-BrowserProcessImpl::floc_blocklist_service() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (!floc_blocklist_service_)
-    CreateFlocBlocklistService();
-  return floc_blocklist_service_.get();
-}
-
 federated_learning::FlocSortingLshClustersService*
 BrowserProcessImpl::floc_sorting_lsh_clusters_service() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -1154,6 +1154,10 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
   ApplyMetricsReportingPolicy();
 #endif
 
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+  ChromeJsErrorReportProcessor::Create();
+#endif
+
 #if BUILDFLAG(ENABLE_PLUGINS)
   auto* plugin_service = content::PluginService::GetInstance();
   plugin_service->SetFilter(ChromePluginServiceFilter::GetInstance());
@@ -1193,11 +1197,6 @@ void BrowserProcessImpl::CreateIconManager() {
   DCHECK(!created_icon_manager_ && !icon_manager_);
   created_icon_manager_ = true;
   icon_manager_ = std::make_unique<IconManager>();
-}
-
-void BrowserProcessImpl::CreateIntranetRedirectDetector() {
-  DCHECK(!intranet_redirect_detector_);
-  intranet_redirect_detector_ = std::make_unique<IntranetRedirectDetector>();
 }
 
 void BrowserProcessImpl::CreateNotificationPlatformBridge() {
@@ -1280,12 +1279,6 @@ void BrowserProcessImpl::CreateSubresourceFilterRulesetService() {
   base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   subresource_filter_ruleset_service_ =
       subresource_filter::RulesetService::Create(local_state(), user_data_dir);
-}
-
-void BrowserProcessImpl::CreateFlocBlocklistService() {
-  DCHECK(!floc_blocklist_service_);
-  floc_blocklist_service_ =
-      std::make_unique<federated_learning::FlocBlocklistService>();
 }
 
 void BrowserProcessImpl::CreateFlocSortingLshClustersService() {

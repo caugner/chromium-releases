@@ -110,10 +110,10 @@ FrameSequenceMetrics::FrameSequenceMetrics(FrameSequenceTrackerType type,
   // Only construct |jank_reporter_| if it has a valid tracker and thread type.
   // For scrolling tracker types, |jank_reporter_| may be constructed later in
   // SetScrollingThread().
-  if ((thread_type == ThreadType::kCompositor ||
-       thread_type == ThreadType::kMain) &&
-      type != FrameSequenceTrackerType::kCustom)
+  if (thread_type == ThreadType::kCompositor ||
+      thread_type == ThreadType::kMain) {
     jank_reporter_ = std::make_unique<JankMetrics>(type, thread_type);
+  }
 }
 
 FrameSequenceMetrics::~FrameSequenceMetrics() = default;
@@ -150,7 +150,7 @@ FrameSequenceMetrics::ThreadType FrameSequenceMetrics::GetEffectiveThread()
 
     case FrameSequenceTrackerType::kMainThreadAnimation:
     case FrameSequenceTrackerType::kRAF:
-    case FrameSequenceTrackerType::kCanvas:
+    case FrameSequenceTrackerType::kCanvasAnimation:
     case FrameSequenceTrackerType::kJSAnimation:
       return ThreadType::kMain;
 
@@ -219,7 +219,12 @@ void FrameSequenceMetrics::ReportMetrics() {
 
   if (type_ == FrameSequenceTrackerType::kCustom) {
     DCHECK(!custom_reporter_.is_null());
-    std::move(custom_reporter_).Run(std::move(main_throughput_));
+    std::move(custom_reporter_)
+        .Run({
+            main_throughput_.frames_expected,
+            main_throughput_.frames_produced,
+            jank_reporter_->jank_count(),
+        });
 
     main_throughput_ = {};
     impl_throughput_ = {};
@@ -252,7 +257,8 @@ void FrameSequenceMetrics::ReportMetrics() {
                               type_),
             impl_throughput_);
   }
-  if (main_report) {
+  if (main_report || type_ == FrameSequenceTrackerType::kCanvasAnimation ||
+      type_ == FrameSequenceTrackerType::kJSAnimation) {
     main_throughput_percent_dropped =
         ThroughputData::ReportDroppedFramePercentHistogram(
             this, ThreadType::kMain,
@@ -354,13 +360,37 @@ void FrameSequenceMetrics::ReportMetrics() {
 
 void FrameSequenceMetrics::ComputeJank(
     FrameSequenceMetrics::ThreadType thread_type,
+    uint32_t frame_token,
     base::TimeTicks presentation_time,
     base::TimeDelta frame_interval) {
   if (!jank_reporter_)
     return;
 
   if (thread_type == jank_reporter_->thread_type())
-    jank_reporter_->AddPresentedFrame(presentation_time, frame_interval);
+    jank_reporter_->AddPresentedFrame(frame_token, presentation_time,
+                                      frame_interval);
+}
+
+void FrameSequenceMetrics::NotifySubmitForJankReporter(
+    FrameSequenceMetrics::ThreadType thread_type,
+    uint32_t frame_token,
+    uint32_t sequence_number) {
+  if (!jank_reporter_)
+    return;
+
+  if (thread_type == jank_reporter_->thread_type())
+    jank_reporter_->AddSubmitFrame(frame_token, sequence_number);
+}
+
+void FrameSequenceMetrics::NotifyNoUpdateForJankReporter(
+    FrameSequenceMetrics::ThreadType thread_type,
+    uint32_t sequence_number,
+    base::TimeDelta frame_interval) {
+  if (!jank_reporter_)
+    return;
+
+  if (thread_type == jank_reporter_->thread_type())
+    jank_reporter_->AddFrameWithNoUpdate(sequence_number, frame_interval);
 }
 
 bool FrameSequenceMetrics::ThroughputData::CanReportHistogram(
@@ -392,7 +422,9 @@ int FrameSequenceMetrics::ThroughputData::ReportDroppedFramePercentHistogram(
     const ThroughputData& data) {
   const auto sequence_type = metrics->type();
   DCHECK_LT(sequence_type, FrameSequenceTrackerType::kMaxType);
-  DCHECK(CanReportHistogram(metrics, thread_type, data));
+  DCHECK(CanReportHistogram(metrics, thread_type, data) ||
+         sequence_type == FrameSequenceTrackerType::kCanvasAnimation ||
+         sequence_type == FrameSequenceTrackerType::kJSAnimation);
 
   if (metrics->GetEffectiveThread() == thread_type) {
     STATIC_HISTOGRAM_POINTER_GROUP(

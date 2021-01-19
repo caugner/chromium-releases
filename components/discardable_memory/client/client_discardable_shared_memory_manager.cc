@@ -190,11 +190,11 @@ ClientDiscardableSharedMemoryManager::ClientDiscardableSharedMemoryManager(
     mojo::PendingRemote<mojom::DiscardableSharedMemoryManager> manager,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> periodic_purge_task_runner)
-    : heap_(std::make_unique<DiscardableSharedMemoryHeap>()),
-      periodic_purge_task_runner_(std::move(periodic_purge_task_runner)),
-      io_task_runner_(std::move(io_task_runner)),
-      manager_mojo_(std::make_unique<
-                    mojo::Remote<mojom::DiscardableSharedMemoryManager>>()) {
+    : ClientDiscardableSharedMemoryManager(
+          std::move(io_task_runner),
+          std::move(periodic_purge_task_runner)) {
+  manager_mojo_ =
+      std::make_unique<mojo::Remote<mojom::DiscardableSharedMemoryManager>>();
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
       this, "ClientDiscardableSharedMemoryManager",
       base::ThreadTaskRunnerHandle::Get());
@@ -206,7 +206,9 @@ ClientDiscardableSharedMemoryManager::ClientDiscardableSharedMemoryManager(
 ClientDiscardableSharedMemoryManager::ClientDiscardableSharedMemoryManager(
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> periodic_purge_task_runner)
-    : heap_(std::make_unique<DiscardableSharedMemoryHeap>()),
+    : RefCountedDeleteOnSequence<ClientDiscardableSharedMemoryManager>(
+          base::ThreadTaskRunnerHandle::Get()),
+      heap_(std::make_unique<DiscardableSharedMemoryHeap>()),
       periodic_purge_task_runner_(std::move(periodic_purge_task_runner)),
       io_task_runner_(std::move(io_task_runner)) {}
 
@@ -222,6 +224,11 @@ ClientDiscardableSharedMemoryManager::~ClientDiscardableSharedMemoryManager() {
   // It is because releasing |heap_| will invoke DeletedDiscardableSharedMemory
   // which needs |manager_mojo_|.
   heap_.reset();
+
+  if (base::FeatureList::IsEnabled(kSchedulePeriodicPurge) &&
+      periodic_purge_task_runner_) {
+    DCHECK(periodic_purge_task_runner_->RunsTasksInCurrentSequence());
+  }
 
   // Delete the |manager_mojo_| on IO thread, so any pending tasks on IO thread
   // will be executed before the |manager_mojo_| is deleted.
@@ -243,8 +250,19 @@ ClientDiscardableSharedMemoryManager::AllocateLockedDiscardableMemory(
     size_t size) {
   base::AutoLock lock(lock_);
 
-  if (timer_ == nullptr && periodic_purge_task_runner_)
-    StartScheduledPurging(periodic_purge_task_runner_);
+  if (base::FeatureList::IsEnabled(kSchedulePeriodicPurge)) {
+    if (timer_ == nullptr && periodic_purge_task_runner_) {
+      // A Timer can only be started from its sequence, but this does not
+      // necessarily execute on the right thread. Post a task to make sure
+      // we're starting the timer correctly.
+      timer_ = std::make_unique<base::RepeatingTimer>();
+      periodic_purge_task_runner_->PostTask(
+          FROM_HERE,
+          base::BindOnce(
+              &ClientDiscardableSharedMemoryManager::StartScheduledPurging,
+              weak_factory_.GetWeakPtr()));
+    }
+  }
 
   DCHECK_NE(size, 0u);
 
@@ -297,6 +315,11 @@ ClientDiscardableSharedMemoryManager::AllocateLockedDiscardableMemory(
     }
 
     free_span->set_is_locked(true);
+
+    if (pages >= allocation_pages) {
+      UMA_HISTOGRAM_BOOLEAN("Memory.Discardable.LargeAllocationFromFreelist",
+                            true);
+    }
 
     // Memory usage is guaranteed to have changed after having removed
     // at least one span from the free lists.
@@ -357,6 +380,11 @@ ClientDiscardableSharedMemoryManager::AllocateLockedDiscardableMemory(
     heap_->MergeIntoFreeLists(std::move(leftover));
   }
 
+  if (pages >= allocation_pages) {
+    UMA_HISTOGRAM_BOOLEAN("Memory.Discardable.LargeAllocationFromFreelist",
+                          false);
+  }
+
   MemoryUsageChanged(heap_->GetSize(), heap_->GetSizeOfFreeLists());
 
   auto discardable_memory =
@@ -365,24 +393,23 @@ ClientDiscardableSharedMemoryManager::AllocateLockedDiscardableMemory(
   return std::move(discardable_memory);
 }
 
-void ClientDiscardableSharedMemoryManager::StartScheduledPurging(
-    scoped_refptr<base::SequencedTaskRunner> task_runner) {
-  DCHECK(task_runner);
-  if (base::FeatureList::IsEnabled(kSchedulePeriodicPurge)) {
-    // The expected cost of purging should be very small (< 1ms), so it can be
-    // scheduled frequently. However, we don't purge memory that has been
-    // touched recently (see: |BackgroundPurge| and |kMinAgeForScheduledPurge|),
-    // so there is no benefit to running this more than once per minute.
-    constexpr base::TimeDelta kInterval = base::TimeDelta::FromMinutes(1);
+void ClientDiscardableSharedMemoryManager::StartScheduledPurging() {
+  // The expected cost of purging should be very small (< 1ms), so it can be
+  // scheduled frequently. However, we don't purge memory that has been
+  // touched recently (see: |BackgroundPurge| and |kMinAgeForScheduledPurge|),
+  // so there is no benefit to running this more than once per minute.
+  constexpr base::TimeDelta kInterval = base::TimeDelta::FromMinutes(1);
 
-    timer_ = std::make_unique<base::RepeatingTimer>();
-    timer_->SetTaskRunner(task_runner);
+  base::AutoLock lock(lock_);
+  timer_->Start(
+      FROM_HERE, kInterval,
+      base::BindRepeating(&ClientDiscardableSharedMemoryManager::ScheduledPurge,
+                          weak_factory_.GetWeakPtr()));
+}
 
-    timer_->Start(FROM_HERE, kInterval,
-                  base::BindRepeating(
-                      &ClientDiscardableSharedMemoryManager::ScheduledPurge,
-                      base::Unretained(this)));
-  }
+void ClientDiscardableSharedMemoryManager::StopScheduledPurging() {
+  base::AutoLock lock(lock_);
+  timer_ = nullptr;
 }
 
 bool ClientDiscardableSharedMemoryManager::OnMemoryDump(
@@ -460,8 +487,15 @@ void ClientDiscardableSharedMemoryManager::ReleaseFreeMemory() {
     ReleaseFreeMemoryImpl();
   }
 
-  if (GetBytesAllocated() == 0)
-    timer_ = nullptr;
+  if (base::FeatureList::IsEnabled(kSchedulePeriodicPurge)) {
+    if (GetBytesAllocated() == 0 && periodic_purge_task_runner_) {
+      periodic_purge_task_runner_->PostTask(
+          FROM_HERE,
+          base::BindOnce(
+              &ClientDiscardableSharedMemoryManager::StopScheduledPurging,
+              weak_factory_.GetWeakPtr()));
+    }
+  }
 }
 
 void ClientDiscardableSharedMemoryManager::ReleaseFreeMemoryImpl() {

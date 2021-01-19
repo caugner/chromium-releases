@@ -48,8 +48,6 @@ class TestClientDiscardableSharedMemoryManager
             base::MakeRefCounted<TestSingleThreadTaskRunner>(),
             periodic_purge_task_runner) {}
 
-  ~TestClientDiscardableSharedMemoryManager() override = default;
-
   std::unique_ptr<base::DiscardableSharedMemory>
   AllocateLockedDiscardableSharedMemory(size_t size, int32_t id) override {
     auto shared_memory = std::make_unique<base::DiscardableSharedMemory>();
@@ -69,30 +67,27 @@ class TestClientDiscardableSharedMemoryManager
     return heap_->GetSizeOfFreeLists();
   }
 
-  base::RepeatingTimer* timer() const { return timer_.get(); }
+  bool TimerIsNull() const {
+    base::AutoLock lock(lock_);
+    return timer_ == nullptr;
+  }
+
+ private:
+  ~TestClientDiscardableSharedMemoryManager() override = default;
 };
 
 class ClientDiscardableSharedMemoryManagerTest : public testing::Test {
  public:
-  void SetUp() override {
-    client_ =
-        std::make_unique<TestClientDiscardableSharedMemoryManager>(nullptr);
-  }
-  std::unique_ptr<TestClientDiscardableSharedMemoryManager> client_;
-  const size_t page_size_ = base::GetPageSize();
-};
-
-class ClientDiscardableSharedMemoryManagerPeriodicPurgingTest
-    : public ClientDiscardableSharedMemoryManagerTest {
- public:
-  ClientDiscardableSharedMemoryManagerPeriodicPurgingTest()
+  ClientDiscardableSharedMemoryManagerTest()
       : task_env_(base::test::TaskEnvironment::MainThreadType::UI,
                   base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
   void SetUp() override {
-    client_ = std::make_unique<TestClientDiscardableSharedMemoryManager>(
+    client_ = base::MakeRefCounted<TestClientDiscardableSharedMemoryManager>(
         task_env_.GetMainThreadTaskRunner());
   }
   base::test::TaskEnvironment task_env_;
+  scoped_refptr<TestClientDiscardableSharedMemoryManager> client_;
+  const size_t page_size_ = base::GetPageSize();
 };
 
 // This test allocates a single piece of memory, then verifies that calling
@@ -282,8 +277,7 @@ TEST_F(ClientDiscardableSharedMemoryManagerTest, ReleaseUnlocked) {
 // This tests that memory is actually removed by the periodic purging. We mock a
 // task runner for this test and fast forward to make sure that the memory is
 // purged at the right time.
-TEST_F(ClientDiscardableSharedMemoryManagerPeriodicPurgingTest,
-       ScheduledReleaseUnlocked) {
+TEST_F(ClientDiscardableSharedMemoryManagerTest, ScheduledReleaseUnlocked) {
   base::test::ScopedFeatureList fl;
   fl.InitAndEnableFeature(discardable_memory::kSchedulePeriodicPurge);
   ASSERT_EQ(client_->GetBytesAllocated(), 0u);
@@ -306,7 +300,7 @@ TEST_F(ClientDiscardableSharedMemoryManagerPeriodicPurgingTest,
 
 // Same as the above test, but tests that multiple pieces of memory will be
 // handled properly.
-TEST_F(ClientDiscardableSharedMemoryManagerPeriodicPurgingTest,
+TEST_F(ClientDiscardableSharedMemoryManagerTest,
        ScheduledReleaseUnlockedMultiple) {
   base::test::ScopedFeatureList fl;
   fl.InitAndEnableFeature(discardable_memory::kSchedulePeriodicPurge);
@@ -391,67 +385,76 @@ TEST_F(ClientDiscardableSharedMemoryManagerTest, LockingSuccessUma) {
 
 // Test that a repeating timer for background purging is created when we
 // allocate memory and discarded when we run out of allocated memory.
-TEST_F(ClientDiscardableSharedMemoryManagerPeriodicPurgingTest,
-       SchedulingProactivePurging) {
+TEST_F(ClientDiscardableSharedMemoryManagerTest, SchedulingProactivePurging) {
   base::test::ScopedFeatureList fl;
   fl.InitAndEnableFeature(discardable_memory::kSchedulePeriodicPurge);
-  ASSERT_EQ(client_->timer(), nullptr);
+  ASSERT_TRUE(client_->TimerIsNull());
 
   // the amount of memory allocated here is arbitrary, we're only trying to get
   // the timer started.
   auto mem = client_->AllocateLockedDiscardableMemory(200);
 
-  EXPECT_NE(client_->timer(), nullptr);
+  task_env_.FastForwardBy(TimeDelta::FromSeconds(0));
+  EXPECT_FALSE(client_->TimerIsNull());
 
   // This does not destroy the timer because there is still memory allocated.
   client_->ReleaseFreeMemory();
 
-  EXPECT_NE(client_->timer(), nullptr);
+  task_env_.FastForwardBy(TimeDelta::FromSeconds(0));
+  EXPECT_FALSE(client_->TimerIsNull());
 
   mem = nullptr;
 
-  EXPECT_NE(client_->timer(), nullptr);
+  task_env_.FastForwardBy(TimeDelta::FromSeconds(0));
+  EXPECT_FALSE(client_->TimerIsNull());
 
   // Now that all memory is freed, destroy the timer.
   client_->ReleaseFreeMemory();
 
-  EXPECT_EQ(client_->timer(), nullptr);
+  task_env_.FastForwardBy(TimeDelta::FromSeconds(0));
+  EXPECT_TRUE(client_->TimerIsNull());
 }
 
 // This test is similar to the one above, but tests that creating and deleting
 // the timer still works with multiple pieces of allocated memory.
-TEST_F(ClientDiscardableSharedMemoryManagerPeriodicPurgingTest,
+TEST_F(ClientDiscardableSharedMemoryManagerTest,
        SchedulingProactivePurgingMultipleAllocations) {
   base::test::ScopedFeatureList fl;
   fl.InitAndEnableFeature(discardable_memory::kSchedulePeriodicPurge);
-  ASSERT_EQ(client_->timer(), nullptr);
+  ASSERT_TRUE(client_->TimerIsNull());
 
   // the amount of memory allocated here is arbitrary, we're only trying to get
   // the timer started.
   auto mem = client_->AllocateLockedDiscardableMemory(200);
   auto mem2 = client_->AllocateLockedDiscardableMemory(100);
 
-  EXPECT_NE(client_->timer(), nullptr);
+  task_env_.FastForwardBy(TimeDelta::FromSeconds(0));
+  EXPECT_FALSE(client_->TimerIsNull());
 
   client_->ReleaseFreeMemory();
 
-  EXPECT_NE(client_->timer(), nullptr);
+  task_env_.FastForwardBy(TimeDelta::FromSeconds(0));
+  EXPECT_FALSE(client_->TimerIsNull());
 
   mem = nullptr;
 
-  EXPECT_NE(client_->timer(), nullptr);
+  task_env_.FastForwardBy(TimeDelta::FromSeconds(0));
+  EXPECT_FALSE(client_->TimerIsNull());
 
   client_->ReleaseFreeMemory();
 
-  EXPECT_NE(client_->timer(), nullptr);
+  task_env_.FastForwardBy(TimeDelta::FromSeconds(0));
+  EXPECT_FALSE(client_->TimerIsNull());
 
   mem2 = nullptr;
 
-  EXPECT_NE(client_->timer(), nullptr);
+  task_env_.FastForwardBy(TimeDelta::FromSeconds(0));
+  EXPECT_FALSE(client_->TimerIsNull());
 
   client_->ReleaseFreeMemory();
 
-  EXPECT_EQ(client_->timer(), nullptr);
+  task_env_.FastForwardBy(TimeDelta::FromSeconds(0));
+  EXPECT_TRUE(client_->TimerIsNull());
 }
 
 }  // namespace

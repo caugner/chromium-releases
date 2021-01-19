@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {eventToPromise} from 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/_test_resources/webui/test_util.m.js';
+import {eventToPromise, flushTasks} from 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/_test_resources/webui/test_util.m.js';
 import {FittingType} from 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/constants.js';
 import {ViewerPdfToolbarNewElement} from 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/elements/viewer-pdf-toolbar-new.js';
 
@@ -105,6 +105,8 @@ const tests = [
 
   function testZoomButtons() {
     const toolbar = createToolbar();
+    toolbar.zoomBounds = {min: 25, max: 500};
+    toolbar.viewportZoom = 1;
 
     let zoomInCount = 0;
     let zoomOutCount = 0;
@@ -112,6 +114,8 @@ const tests = [
     toolbar.addEventListener('zoom-out', () => zoomOutCount++);
 
     const zoomButtons = getCrIconButtons(toolbar, 'zoom-controls');
+    chrome.test.assertFalse(zoomButtons[0].disabled);
+    chrome.test.assertFalse(zoomButtons[1].disabled);
 
     // Zoom out
     chrome.test.assertEq('pdf:remove', zoomButtons[0].ironIcon);
@@ -119,11 +123,22 @@ const tests = [
     chrome.test.assertEq(0, zoomInCount);
     chrome.test.assertEq(1, zoomOutCount);
 
+    // Set zoom to min. Zoom out is disabled.
+    toolbar.viewportZoom = .25;
+    chrome.test.assertTrue(zoomButtons[0].disabled);
+    chrome.test.assertFalse(zoomButtons[1].disabled);
+
     // Zoom in
     chrome.test.assertEq('pdf:add', zoomButtons[1].ironIcon);
     zoomButtons[1].click();
     chrome.test.assertEq(1, zoomInCount);
     chrome.test.assertEq(1, zoomOutCount);
+
+    // Set zoom to max. Zoom in is disabled.
+    toolbar.zoomBounds = {min: 25, max: 500};
+    toolbar.viewportZoom = 5;
+    chrome.test.assertFalse(zoomButtons[0].disabled);
+    chrome.test.assertTrue(zoomButtons[1].disabled);
 
     chrome.test.succeed();
   },
@@ -141,6 +156,7 @@ const tests = [
   function testZoomField() {
     const toolbar = createToolbar();
     toolbar.viewportZoom = .8;
+    toolbar.zoomBounds = {min: 25, max: 500};
     const zoomField = toolbar.shadowRoot.querySelector('#zoom-controls input');
     chrome.test.assertEq('80%', zoomField.value);
 
@@ -148,15 +164,50 @@ const tests = [
     toolbar.viewportZoom = .533;
     chrome.test.assertEq('53%', zoomField.value);
 
-    // Setting a new value sends the value in a zoom-changed event.
-    let sentValue = -1;
-    toolbar.addEventListener('zoom-changed', e => {
-      sentValue = e.detail;
-      chrome.test.assertEq(110, sentValue);
-      chrome.test.succeed();
-    });
-    zoomField.value = '110%';
-    zoomField.dispatchEvent(new CustomEvent('input'));
+    // Setting a non-number value resets to viewport zoom.
+    zoomField.value = 'abc';
+    zoomField.dispatchEvent(new CustomEvent('change'));
+    chrome.test.assertEq('53%', zoomField.value);
+
+    // Setting a value that is over the max zoom clips to the max value.
+    const whenSent = eventToPromise('zoom-changed', toolbar);
+    zoomField.value = '90000%';
+    zoomField.dispatchEvent(new CustomEvent('change'));
+    whenSent
+        .then(e => {
+          chrome.test.assertEq(500, e.detail);
+
+          // This happens in the parent.
+          toolbar.viewportZoom = 5;
+          chrome.test.assertEq('500%', zoomField.value);
+
+          // Setting a value that is over the maximum again restores the max
+          // value, even though no event is sent.
+          zoomField.value = '80000%';
+          zoomField.dispatchEvent(new CustomEvent('change'));
+          chrome.test.assertEq('500%', zoomField.value);
+
+          // Setting a new value sends the value in a zoom-changed event.
+          const whenSentNew = eventToPromise('zoom-changed', toolbar);
+          zoomField.value = '110%';
+          zoomField.dispatchEvent(new CustomEvent('change'));
+          return whenSentNew;
+        })
+        .then(e => {
+          chrome.test.assertEq(110, e.detail);
+
+          // Setting a new value and blurring sends the value in a zoom-changed
+          // event. If the value is below the minimum, this sends the minimum
+          // zoom.
+          const whenSentFromBlur = eventToPromise('zoom-changed', toolbar);
+          zoomField.value = '18%';
+          zoomField.dispatchEvent(new CustomEvent('blur'));
+          return whenSentFromBlur;
+        })
+        .then(e => {
+          chrome.test.assertEq(25, e.detail);
+          chrome.test.succeed();
+        });
   },
 
   // Test that the overflow menu closes when an action is triggered.
@@ -245,6 +296,22 @@ const tests = [
     toolbar.addEventListener(
         'sidenav-toggle-click', () => chrome.test.succeed());
     toggleButton.click();
+  },
+
+  async function testEnterFullscreenButton() {
+    const toolbar = createToolbar();
+    let button = toolbar.shadowRoot.querySelector('#fullscreen-button');
+    chrome.test.assertEq(null, button);
+
+    toolbar.presentationModeEnabled = true;
+    await flushTasks();
+    button = toolbar.shadowRoot.querySelector('#fullscreen-button');
+    chrome.test.assertTrue(button !== null);
+
+    const whenFired = eventToPromise('fullscreen-click', toolbar);
+    button.click();
+    await whenFired;
+    chrome.test.succeed();
   },
 ];
 
