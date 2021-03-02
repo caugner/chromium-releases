@@ -33,6 +33,7 @@ from .protocol import (ActionSequenceProtocolPart,
                        StorageProtocolPart,
                        SelectorProtocolPart,
                        ClickProtocolPart,
+                       CookiesProtocolPart,
                        SendKeysProtocolPart,
                        TestDriverProtocolPart,
                        CoverageProtocolPart,
@@ -40,7 +41,6 @@ from .protocol import (ActionSequenceProtocolPart,
                        VirtualAuthenticatorProtocolPart,
                        SetPermissionProtocolPart,
                        PrintProtocolPart)
-from ..testrunner import Stop
 from ..webdriver_server import GeckoDriverServer
 
 
@@ -436,6 +436,15 @@ class MarionetteClickProtocolPart(ClickProtocolPart):
         return element.click()
 
 
+class MarionetteCookiesProtocolPart(CookiesProtocolPart):
+    def setup(self):
+        self.marionette = self.parent.marionette
+
+    def delete_all_cookies(self):
+        self.logger.info("Deleting all cookies")
+        return self.marionette.delete_all_cookies()
+
+
 class MarionetteSendKeysProtocolPart(SendKeysProtocolPart):
     def setup(self):
         self.marionette = self.parent.marionette
@@ -623,6 +632,7 @@ class MarionetteProtocol(Protocol):
                   MarionetteStorageProtocolPart,
                   MarionetteSelectorProtocolPart,
                   MarionetteClickProtocolPart,
+                  MarionetteCookiesProtocolPart,
                   MarionetteSendKeysProtocolPart,
                   MarionetteActionSequenceProtocolPart,
                   MarionetteTestDriverProtocolPart,
@@ -716,8 +726,9 @@ class ExecuteAsyncScriptRun(TimedRunner):
                 # timeout is set too high. This works at least.
                 self.protocol.base.set_timeout(2**28 - 1)
         except IOError:
-            self.logger.error("Lost marionette connection before starting test")
-            return Stop
+            msg = "Lost marionette connection before starting test"
+            self.logger.error(msg)
+            return ("INTERNAL-ERROR", msg)
 
     def before_run(self):
         index = self.url.rfind("/storage/")
@@ -954,7 +965,8 @@ class MarionetteRefTestExecutor(RefTestExecutor):
             assertion_count = self.protocol.asserts.get()
             if "extra" not in result:
                 result["extra"] = {}
-            result["extra"]["assertion_count"] = assertion_count
+            if assertion_count is not None:
+                result["extra"]["assertion_count"] = assertion_count
 
         return self.convert_result(test, result)
 

@@ -36,12 +36,14 @@
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
+#include "chrome/browser/chromeos/crosapi/browser_util.h"
 #include "chrome/browser/chromeos/extensions/active_tab_permission_granter_delegate_chromeos.h"
 #include "chrome/browser/chromeos/extensions/extension_tab_util_delegate_chromeos.h"
 #include "chrome/browser/chromeos/extensions/permissions_updater_delegate_chromeos.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_service.h"
 #include "chrome/browser/chromeos/login/enterprise_user_session_metrics.h"
+#include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/signin/auth_error_observer.h"
 #include "chrome/browser/chromeos/login/signin/auth_error_observer_factory.h"
@@ -406,7 +408,7 @@ void ChromeUserManagerImpl::Shutdown() {
     GetMinimumVersionPolicyHandler()->RemoveObserver(this);
   }
 
-  local_accounts_subscription_.reset();
+  local_accounts_subscription_ = {};
 
   if (session_length_limiter_ && IsEnterpriseManaged()) {
     // Store session length before tearing down `session_length_limiter_` for
@@ -470,6 +472,10 @@ user_manager::UserList ChromeUserManagerImpl::GetUsersAllowedForMultiProfile()
   if (connector->IsActiveDirectoryManaged())
     return user_manager::UserList();
 
+  // Multiprofile mode is not allowed when Lacros is enabled.
+  if (crosapi::browser_util::IsLacrosEnabled())
+    return user_manager::UserList();
+
   user_manager::UserList result;
   const user_manager::UserList& users = GetUsers();
   for (user_manager::UserList::const_iterator it = users.begin();
@@ -491,7 +497,8 @@ user_manager::UserList ChromeUserManagerImpl::GetUsersAllowedForMultiProfile()
     }
   }
 
-  return result;
+  // Extract out users that are allowed on login screen.
+  return ExistingUserController::ExtractLoginUsers(result);
 }
 
 user_manager::UserList ChromeUserManagerImpl::GetUnlockUsers() const {
@@ -1184,7 +1191,7 @@ bool ChromeUserManagerImpl::IsUserAllowed(
     const user_manager::User& user) const {
   DCHECK(user.GetType() == user_manager::USER_TYPE_REGULAR ||
          user.GetType() == user_manager::USER_TYPE_GUEST ||
-         user.GetType() == user_manager::USER_TYPE_SUPERVISED ||
+         user.GetType() == user_manager::USER_TYPE_SUPERVISED_DEPRECATED ||
          user.GetType() == user_manager::USER_TYPE_CHILD);
 
   return chrome_user_manager_util::IsUserAllowed(
@@ -1367,7 +1374,7 @@ bool ChromeUserManagerImpl::IsStubAccountId(const AccountId& account_id) const {
          account_id == user_manager::StubAdAccountId();
 }
 
-bool ChromeUserManagerImpl::IsSupervisedAccountId(
+bool ChromeUserManagerImpl::IsDeprecatedSupervisedAccountId(
     const AccountId& account_id) const {
   const policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
