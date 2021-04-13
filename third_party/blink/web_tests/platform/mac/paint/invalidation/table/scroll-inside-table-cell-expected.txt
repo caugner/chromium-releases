@@ -4,10 +4,10 @@
       "name": "Scrolling Contents Layer",
       "bounds": [800, 600],
       "contentsOpaque": true,
-      "backgroundColor": "#FF0000"
+      "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "LayoutNGTableCell (relative positioned) TD id='cellToScroll' class='relative'",
+      "name": "LayoutNGTableCellNew (relative positioned) TD id='cellToScroll' class='relative'",
       "bounds": [454, 469],
       "transform": 1
     },

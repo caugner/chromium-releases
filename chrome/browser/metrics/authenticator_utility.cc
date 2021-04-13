@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/rand_util.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
@@ -37,8 +38,12 @@ void ReportAvailability(bool available) {
 #if defined(OS_MAC)
 void ReportUVPlatformAuthenticatorAvailabilityWithConfig(
     base::Optional<device::fido::mac::AuthenticatorConfig> config) {
-  ReportAvailability(config &&
-                     content::IsUVPlatformAuthenticatorAvailable(*config));
+  if (!config) {
+    ReportAvailability(false);
+    return;
+  }
+  content::IsUVPlatformAuthenticatorAvailable(
+      *config, base::BindOnce(&ReportAvailability));
 }
 
 void ReportUVPlatformAuthenticatorAvailabilityMainThreadMac() {
@@ -76,23 +81,14 @@ void ReportUVPlatformAuthenticatorAvailability() {
   // platform version is an exact proxy for whether a platform authenticator
   // can be used.
 #if defined(OS_MAC)
-  DCHECK(!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  // Getting the profile has to be done on the main thread to avoid race
-  // conditions.
-  content::GetUIThreadTaskRunner({base::TaskPriority::BEST_EFFORT})
-      ->PostTask(FROM_HERE,
-                 base::BindOnce(
-                     &ReportUVPlatformAuthenticatorAvailabilityMainThreadMac));
+  // The Mac startup metric is disabled due to a crash for a M90 merge. See
+  // crbug.com/1199266 for details.
 #elif defined(OS_WIN)
-  std::unique_ptr<content::AuthenticatorRequestClientDelegate> client_delegate =
-      std::make_unique<content::AuthenticatorRequestClientDelegate>();
-  device::WinWebAuthnApi* win_webauthn_api =
-      device::WinWebAuthnApi::GetDefault();
-  ReportAvailability(
-      win_webauthn_api &&
-      content::IsUVPlatformAuthenticatorAvailable(win_webauthn_api));
+  content::IsUVPlatformAuthenticatorAvailable(
+      device::WinWebAuthnApi::GetDefault(),
+      base::BindOnce(&ReportAvailability));
 #elif BUILDFLAG(IS_CHROMEOS_ASH)
-  ReportAvailability(content::IsUVPlatformAuthenticatorAvailable());
+  // TODO(crbug.com/1181426): Reenable the IsUVPAA() startup metric on CrOS.
 #endif
 }
 
