@@ -23,10 +23,6 @@
 
 class Profile;
 
-namespace content {
-class PageNavigator;
-}
-
 // Modal dialog that shows when the user attempts to install an extension. Also
 // shown if the extension is already installed but needs additional permissions.
 // Not a normal "bubble" despite being a subclass of BubbleDialogDelegateView.
@@ -40,8 +36,7 @@ class ExtensionInstallDialogView
   static const int kRatingsViewId = 1;
 
   ExtensionInstallDialogView(
-      Profile* profile,
-      content::PageNavigator* navigator,
+      std::unique_ptr<ExtensionInstallPromptShowParams> show_params,
       ExtensionInstallPrompt::DoneCallback done_callback,
       std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt);
   ExtensionInstallDialogView(const ExtensionInstallDialogView&) = delete;
@@ -62,7 +57,10 @@ class ExtensionInstallDialogView
   void VisibilityChanged(views::View* starting_from, bool is_visible) override;
   void AddedToWidget() override;
   bool IsDialogButtonEnabled(ui::DialogButton button) const override;
-  base::string16 GetAccessibleWindowTitle() const override;
+  std::u16string GetAccessibleWindowTitle() const override;
+
+  ExtensionInstallPromptShowParams* GetShowParamsForTesting();
+  void ClickLinkForTesting();
 
  private:
   void CloseDialog();
@@ -88,10 +86,10 @@ class ExtensionInstallDialogView
   void UpdateInstallResultHistogram(bool accepted) const;
 
   Profile* profile_;
-  content::PageNavigator* navigator_;
+  std::unique_ptr<ExtensionInstallPromptShowParams> show_params_;
   ExtensionInstallPrompt::DoneCallback done_callback_;
   std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt_;
-  base::string16 title_;
+  std::u16string title_;
   base::ScopedObservation<extensions::ExtensionRegistry,
                           extensions::ExtensionRegistryObserver>
       extension_registry_observation_{this};

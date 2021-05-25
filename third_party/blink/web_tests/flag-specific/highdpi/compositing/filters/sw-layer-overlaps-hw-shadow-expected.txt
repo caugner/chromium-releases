@@ -17,6 +17,7 @@
       "name": "Squashing Layer (first squashed layer: LayoutNGBlockFlow (positioned) DIV id='software')",
       "position": [-158, -158],
       "bounds": [150, 150],
+      "backgroundColor": "#008000",
       "transform": 1
     }
   ],

@@ -27,7 +27,6 @@
 #include "components/constrained_window/constrained_window_views.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/page_navigator.h"
-#include "content/public/browser/web_contents.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_urls.h"
@@ -75,7 +74,7 @@ class RatingsView : public views::View {
 
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
     node_data->role = ax::mojom::Role::kStaticText;
-    base::string16 accessible_text;
+    std::u16string accessible_text;
     if (rating_count_ == 0) {
       accessible_text = l10n_util::GetStringUTF16(
           IDS_EXTENSION_PROMPT_NO_RATINGS_ACCESSIBLE_TEXT);
@@ -120,7 +119,7 @@ END_METADATA
 class RatingLabel : public views::Label {
  public:
   METADATA_HEADER(RatingLabel);
-  RatingLabel(const base::string16& text, int text_context)
+  RatingLabel(const std::u16string& text, int text_context)
       : views::Label(text, text_context, views::style::STYLE_PRIMARY) {}
   RatingLabel(const RatingLabel&) = delete;
   RatingLabel& operator=(const RatingLabel&) = delete;
@@ -141,15 +140,14 @@ void AddResourceIcon(const gfx::ImageSkia* skia_image, void* data) {
 }
 
 void ShowExtensionInstallDialogImpl(
-    ExtensionInstallPromptShowParams* show_params,
+    std::unique_ptr<ExtensionInstallPromptShowParams> show_params,
     ExtensionInstallPrompt::DoneCallback done_callback,
     std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  gfx::NativeWindow parent_window = show_params->GetParentWindow();
   ExtensionInstallDialogView* dialog = new ExtensionInstallDialogView(
-      show_params->profile(), show_params->GetParentWebContents(),
-      std::move(done_callback), std::move(prompt));
-  constrained_window::CreateBrowserModalDialogViews(
-      dialog, show_params->GetParentWindow())
+      std::move(show_params), std::move(done_callback), std::move(prompt));
+  constrained_window::CreateBrowserModalDialogViews(dialog, parent_window)
       ->Show();
 }
 
@@ -181,7 +179,7 @@ END_METADATA
 // Represents one section in the scrollable info area, which could be a block of
 // permissions, a list of retained files, or a list of retained devices.
 struct ExtensionInfoSection {
-  base::string16 header;
+  std::u16string header;
   std::unique_ptr<views::View> contents_view;
 };
 
@@ -206,12 +204,11 @@ void AddPermissions(ExtensionInstallPrompt::Prompt* prompt,
 }  // namespace
 
 ExtensionInstallDialogView::ExtensionInstallDialogView(
-    Profile* profile,
-    content::PageNavigator* navigator,
+    std::unique_ptr<ExtensionInstallPromptShowParams> show_params,
     ExtensionInstallPrompt::DoneCallback done_callback,
     std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt)
-    : profile_(profile),
-      navigator_(navigator),
+    : profile_(show_params->profile()),
+      show_params_(std::move(show_params)),
       done_callback_(std::move(done_callback)),
       prompt_(std::move(prompt)),
       title_(prompt_->GetDialogTitle()),
@@ -273,6 +270,15 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
 ExtensionInstallDialogView::~ExtensionInstallDialogView() {
   if (done_callback_)
     OnDialogCanceled();
+}
+
+ExtensionInstallPromptShowParams*
+ExtensionInstallDialogView::GetShowParamsForTesting() {
+  return show_params_.get();
+}
+
+void ExtensionInstallDialogView::ClickLinkForTesting() {
+  LinkClicked();
 }
 
 void ExtensionInstallDialogView::SetInstallButtonDelayForTesting(
@@ -410,7 +416,7 @@ bool ExtensionInstallDialogView::IsDialogButtonEnabled(
   return true;
 }
 
-base::string16 ExtensionInstallDialogView::GetAccessibleWindowTitle() const {
+std::u16string ExtensionInstallDialogView::GetAccessibleWindowTitle() const {
   return title_;
 }
 
@@ -445,8 +451,9 @@ void ExtensionInstallDialogView::LinkClicked() {
                        WindowOpenDisposition::NEW_FOREGROUND_TAB,
                        ui::PAGE_TRANSITION_LINK, false);
 
-  if (navigator_) {
-    navigator_->OpenURL(params);
+  DCHECK(show_params_);
+  if (show_params_->GetParentWebContents()) {
+    show_params_->GetParentWebContents()->OpenURL(params);
   } else {
     chrome::ScopedTabbedBrowserDisplayer displayer(profile_);
     displayer.browser()->OpenURL(params);
@@ -482,7 +489,7 @@ void ExtensionInstallDialogView::CreateContents() {
   }
 
   if (prompt_->GetRetainedFileCount()) {
-    std::vector<base::string16> details;
+    std::vector<std::u16string> details;
     for (size_t i = 0; i < prompt_->GetRetainedFileCount(); ++i) {
       details.push_back(prompt_->GetRetainedFile(i));
     }
@@ -492,7 +499,7 @@ void ExtensionInstallDialogView::CreateContents() {
   }
 
   if (prompt_->GetRetainedDeviceCount()) {
-    std::vector<base::string16> details;
+    std::vector<std::u16string> details;
     for (size_t i = 0; i < prompt_->GetRetainedDeviceCount(); ++i) {
       details.push_back(prompt_->GetRetainedDeviceMessageString(i));
     }

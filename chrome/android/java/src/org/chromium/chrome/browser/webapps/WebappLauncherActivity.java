@@ -25,7 +25,6 @@ import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.BuildInfo;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.IntentUtils;
 import org.chromium.base.Log;
@@ -33,7 +32,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.WarmupManager;
-import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
+import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.customtabs.BaseCustomTabActivity;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.firstrun.FirstRunFlowSequencer;
@@ -138,13 +137,6 @@ public class WebappLauncherActivity extends Activity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Close the notification tray.
-        if (!BuildInfo.isAtLeastS()) {
-            // https://crbug.com/1166691
-            ContextUtils.getApplicationContext().sendBroadcast(
-                    new Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS));
-        }
-
         long createTimestamp = SystemClock.elapsedRealtime();
         Intent intent = getIntent();
 
@@ -171,7 +163,11 @@ public class WebappLauncherActivity extends Activity {
 
         if (FirstRunFlowSequencer.launch(this, intent, false /* requiresBroadcast */,
                     shouldPreferLightweightFre(launchData))) {
-            ApiCompatibilityUtils.finishAndRemoveTask(this);
+            // Do not remove the current task. The full FRE reuses the task due to
+            // android:launchMode arguments, while the LWFRE does not. So removing the task would
+            // break the full FRE. The LWFRE will still clean up the task since this is the only
+            // activity in the current task. See https://crbug.com/1201353 for more details.
+            finish();
             return;
         }
 
