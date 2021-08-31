@@ -9,7 +9,7 @@ PASS: event.clientX should be 175 and is
 PASS: event.clientY should be 105 and is
 PASS: event.layerX should be 7 and is
 PASS: event.layerY should be 5 and is
-FAIL: event.offsetX should be 7 but instead is 7.000000208616257
-FAIL: event.offsetY should be 5 but instead is 5.000000149011612
+PASS: event.offsetX should be 7 and is
+PASS: event.offsetY should be 5 and is
 PASS: event.x should be 175 and is
 PASS: event.y should be 105 and is

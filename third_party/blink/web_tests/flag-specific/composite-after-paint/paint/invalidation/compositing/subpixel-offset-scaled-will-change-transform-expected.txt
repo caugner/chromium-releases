@@ -22,8 +22,8 @@
     },
     {
       "name": "LayoutNGBlockFlow (relative positioned) DIV id='child3' class='child'",
-      "bounds": [2, 1],
-      "contentsOpaqueForText": true,
+      "bounds": [1, 1],
+      "contentsOpaque": true,
       "backgroundColor": "#0000FF",
       "transform": 6
     },

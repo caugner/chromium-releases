@@ -13,7 +13,6 @@ import android.view.ViewGroup;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.filters.SmallTest;
 
-import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TestRule;
@@ -55,13 +54,10 @@ public class AdaptiveButtonActionMenuCoordinatorTest {
     @Mock
     private Callback<Integer> mCallback;
 
-    @Before
-    public void setUp() {}
-
     @Test
     @SmallTest
     @DisableFeatures({ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR})
-    @EnableFeatures({ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION})
+    @EnableFeatures({ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2})
     public void testMenu() {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             AdaptiveButtonActionMenuCoordinator coordinator =

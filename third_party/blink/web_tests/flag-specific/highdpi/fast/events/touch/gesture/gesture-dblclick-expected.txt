@@ -35,7 +35,7 @@ PASS event.clientX is 11
 PASS event.clientY is 12
 PASS event.detail is 2
 PASS event.type is "click"
-FAIL event.clientX should be 11. Was 11.333333969116211.
+PASS event.clientX is 11
 PASS event.clientY is 12
 PASS event.detail is 2
 PASS event.type is "dblclick"

@@ -53,12 +53,12 @@ PASS event.clientY is >= targetRect.top
 
 
 Received click in child frame with currentOffset=15 expectedOffset=10
-FAIL event.screenX should be 25. Was 37.5.
-FAIL event.screenY should be 25. Was 37.5.
-FAIL event.clientX should be 15. Was 15.333333969116211.
-FAIL event.clientY should be 15. Was 15.333333969116211.
-FAIL event.pageX should be 15. Was 15.333333969116211.
-FAIL event.pageY should be 15. Was 15.333333969116211.
+FAIL event.screenX should be 25. Was 37.
+FAIL event.screenY should be 25. Was 37.
+PASS event.clientX is 15
+PASS event.clientY is 15
+PASS event.pageX is 15
+PASS event.pageY is 15
 PASS event.target.nodeName is "BODY"
 Target element is at (0,0,500,500)
 PASS targetRect.right is >= event.clientX

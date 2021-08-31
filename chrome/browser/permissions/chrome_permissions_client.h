@@ -12,6 +12,9 @@
 
 class ChromePermissionsClient : public permissions::PermissionsClient {
  public:
+  ChromePermissionsClient(const ChromePermissionsClient&) = delete;
+  ChromePermissionsClient& operator=(const ChromePermissionsClient&) = delete;
+
   static ChromePermissionsClient* GetInstance();
 
   // PermissionsClient:
@@ -63,10 +66,14 @@ class ChromePermissionsClient : public permissions::PermissionsClient {
   absl::optional<GURL> OverrideCanonicalOrigin(
       const GURL& requesting_origin,
       const GURL& embedding_origin) override;
+  bool DoOriginsMatchNewTabPage(const GURL& requesting_origin,
+                                const GURL& embedding_origin) override;
 #if defined(OS_ANDROID)
   bool IsPermissionControlledByDse(content::BrowserContext* browser_context,
                                    ContentSettingsType type,
                                    const url::Origin& origin) override;
+  bool IsDseOrigin(content::BrowserContext* browser_context,
+                   const url::Origin& origin) override;
   bool ResetPermissionIfControlledByDse(
       content::BrowserContext* browser_context,
       ContentSettingsType type,
@@ -92,9 +99,6 @@ class ChromePermissionsClient : public permissions::PermissionsClient {
   friend base::NoDestructor<ChromePermissionsClient>;
 
   ChromePermissionsClient() = default;
-
-  ChromePermissionsClient(const ChromePermissionsClient&) = delete;
-  ChromePermissionsClient& operator=(const ChromePermissionsClient&) = delete;
 };
 
 #endif  // CHROME_BROWSER_PERMISSIONS_CHROME_PERMISSIONS_CLIENT_H_

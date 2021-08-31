@@ -6,8 +6,8 @@ PASS successfullyParsed is true
 
 TEST COMPLETE
 
-FAIL event.clientX should be 401. Was 267.3333435058594.
-FAIL event.clientY should be 301. Was 200.6666717529297.
+FAIL event.clientX should be 401. Was 267.
+FAIL event.clientY should be 301. Was 200.
 PASS event.screenX is expectedScreenX
 PASS event.screenY is expectedScreenY
 PASS event.clientX is expectedX
@@ -15,7 +15,7 @@ PASS event.clientY is expectedY
 FAIL event.screenX should be 360. Was 627.
 FAIL event.screenY should be 260. Was 460.
 PASS event.clientX is expectedX
-FAIL event.clientY should be 388. Was 388.66668701171875.
+PASS event.clientY is expectedY
 FAIL event.screenX should be 260. Was 527.
 FAIL event.screenY should be 176. Was 378.
 Target
