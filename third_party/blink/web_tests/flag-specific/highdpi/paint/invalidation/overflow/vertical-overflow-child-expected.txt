@@ -34,7 +34,7 @@
       "position": [2, 2],
       "bounds": [3150, 278],
       "invalidations": [
-        [2999, 0, 151, 150]
+        [3000, 0, 150, 150]
       ],
       "transform": 2
     }

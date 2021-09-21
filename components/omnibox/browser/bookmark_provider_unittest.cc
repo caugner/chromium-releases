@@ -315,12 +315,12 @@ TEST_F(BookmarkProviderTest, Positions) {
     // Validate number of results is as expected.
     EXPECT_LE(matches.size(), query_data[i].match_count)
         << "One or more of the following matches were unexpected:\n"
-        << MatchesAsString16(matches)
-        << "For query '" << query_data[i].query << "'.";
+        << MatchesAsString16(matches) << "For query '" << query_data[i].query
+        << "'.";
     EXPECT_GE(matches.size(), query_data[i].match_count)
         << "One or more expected matches are missing. Matches found:\n"
-        << MatchesAsString16(matches)
-        << "for query '" << query_data[i].query << "'.";
+        << MatchesAsString16(matches) << "for query '" << query_data[i].query
+        << "'.";
     // Validate positions within each match is as expected.
     for (size_t j = 0; j < matches.size(); ++j) {
       // Collect the expected positions as a vector, collect the match's
@@ -330,8 +330,7 @@ TEST_F(BookmarkProviderTest, Positions) {
       TestBookmarkPositions actual_positions(
           PositionsFromAutocompleteMatch(matches[j]));
       EXPECT_TRUE(std::equal(expected_positions.begin(),
-                             expected_positions.end(),
-                             actual_positions.begin(),
+                             expected_positions.end(), actual_positions.begin(),
                              TestBookmarkPositionsEqual))
           << "EXPECTED: " << TestBookmarkPositionsAsString(expected_positions)
           << "ACTUAL:   " << TestBookmarkPositionsAsString(actual_positions)
@@ -394,14 +393,15 @@ TEST_F(BookmarkProviderTest, Rankings) {
     // Validate number and content of results is as expected.
     for (size_t j = 0; j < std::max(query_data[i].match_count, matches.size());
          ++j) {
-      EXPECT_LT(j, query_data[i].match_count) << "    Unexpected match '"
+      EXPECT_LT(j, query_data[i].match_count)
+          << "    Unexpected match '"
           << base::UTF16ToUTF8(matches[j].description) << "' for query: '"
-          <<  query_data[i].query << "'.";
+          << query_data[i].query << "'.";
       if (j >= query_data[i].match_count)
         continue;
-      EXPECT_LT(j, matches.size()) << "    Missing match '"
-          << query_data[i].matches[j] << "' for query: '"
-          << query_data[i].query << "'.";
+      EXPECT_LT(j, matches.size())
+          << "    Missing match '" << query_data[i].matches[j]
+          << "' for query: '" << query_data[i].query << "'.";
       if (j >= matches.size())
         continue;
       EXPECT_EQ(query_data[i].matches[j],
@@ -420,27 +420,27 @@ TEST_F(BookmarkProviderTest, InlineAutocompletion) {
     const bool allowed_to_be_default_match;
     const std::string inline_autocompletion;
   } query_data[] = {
-    { "bla", "http://blah.com/", true, "h.com" },
-    { "blah ", "http://blah.com/", false, ".com" },
-    { "http://bl", "http://blah.com/", true, "ah.com" },
-    { "fiddle.c", "http://fiddle.com/", true, "om" },
-    { "www", "http://www.www.com/", true, ".com" },
-    { "chro", "chrome://version", true, "me://version" },
-    { "chrome://ve", "chrome://version", true, "rsion" },
-    { "chrome ver", "chrome://version", false, "" },
-    { "versi", "chrome://version", false, "" },
-    { "abou", "chrome://omnibox", false, "" },
-    { "about:om", "chrome://omnibox", true, "nibox" }
-    // Note: when adding a new URL to this test, be sure to add it to the list
-    // of bookmarks at the top of the file as well.  All items in this list
-    // need to be in the bookmarks list because BookmarkProvider's
-    // TitleMatchToACMatch() has an assertion that verifies the URL is
-    // actually bookmarked.
+      {"bla", "http://blah.com/", true, "h.com"},
+      {"blah ", "http://blah.com/", false, ".com"},
+      {"http://bl", "http://blah.com/", true, "ah.com"},
+      {"fiddle.c", "http://fiddle.com/", true, "om"},
+      {"www", "http://www.www.com/", true, ".com"},
+      {"chro", "chrome://version", true, "me://version"},
+      {"chrome://ve", "chrome://version", true, "rsion"},
+      {"chrome ver", "chrome://version", false, ""},
+      {"versi", "chrome://version", false, ""},
+      {"abou", "chrome://omnibox", false, ""},
+      {"about:om", "chrome://omnibox", true, "nibox"}
+      // Note: when adding a new URL to this test, be sure to add it to the list
+      // of bookmarks at the top of the file as well.  All items in this list
+      // need to be in the bookmarks list because BookmarkProvider's
+      // TitleMatchToACMatch() has an assertion that verifies the URL is
+      // actually bookmarked.
   };
 
   for (size_t i = 0; i < base::size(query_data); ++i) {
-    const std::string description = "for query=" + query_data[i].query +
-        " and url=" + query_data[i].url;
+    const std::string description =
+        "for query=" + query_data[i].query + " and url=" + query_data[i].url;
     AutocompleteInput input(base::ASCIIToUTF16(query_data[i].query),
                             metrics::OmniboxEventProto::OTHER,
                             TestSchemeClassifier());
@@ -456,9 +456,11 @@ TEST_F(BookmarkProviderTest, InlineAutocompletion) {
         bookmark_match, AutocompleteMatchType::BOOKMARK_TITLE, relevance,
         provider_.get(), classifier_, input, fixed_up_input);
     EXPECT_EQ(query_data[i].allowed_to_be_default_match,
-              ac_match.allowed_to_be_default_match) << description;
+              ac_match.allowed_to_be_default_match)
+        << description;
     EXPECT_EQ(base::ASCIIToUTF16(query_data[i].inline_autocompletion),
-              ac_match.inline_autocompletion) << description;
+              ac_match.inline_autocompletion)
+        << description;
   }
 }
 

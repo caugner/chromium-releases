@@ -19,7 +19,7 @@
       "bounds": [376, 376],
       "backgroundColor": "#FF0000",
       "invalidations": [
-        [75, 75, 301, 301]
+        [76, 76, 300, 300]
       ],
       "transform": 1
     }

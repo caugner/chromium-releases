@@ -1408,7 +1408,9 @@ public class ContextualSearchManager
         assert (suggestionIndex - defaultSearchAdjustment)
                 < mRelatedSearches.getQueries(isInBarSuggestion).size();
 
-        if (isInBarSuggestion) mSearchPanel.expandPanel(StateChangeReason.CLICK);
+        if (isInBarSuggestion && mSearchPanel.isPeeking()) {
+            mSearchPanel.expandPanel(StateChangeReason.CLICK);
+        }
         if (showDefaultSearch && suggestionIndex == 0) {
             // Click on the default query
             mSearchRequest = new ContextualSearchRequest(mResolvedSearchTerm.searchTerm(),
@@ -1680,6 +1682,11 @@ public class ContextualSearchManager
         if (isSearchPanelShowing()) {
             if (selectionValid) {
                 mSearchPanel.setSearchTerm(selection);
+                // If we have a literal search request we should update that too.
+                if (mSearchRequest != null) {
+                    mSearchRequest = new ContextualSearchRequest(
+                            selection, mPolicy.shouldPrefetchSearchResult());
+                }
                 mIsRelatedSearchesSerp = false;
                 ensureCaption();
             } else {

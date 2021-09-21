@@ -135,9 +135,6 @@ class WallpaperPrivateSetCustomWallpaperFunction
 
   // User account id of the active user when this api is been called.
   AccountId account_id_ = EmptyAccountId();
-
-  // User id hash of the logged in user.
-  std::string wallpaper_files_id_;
 };
 
 class WallpaperPrivateSetCustomWallpaperLayoutFunction
@@ -436,6 +433,18 @@ class WallpaperPrivateGetSurpriseMeImageFunction : public ExtensionFunction {
       surprise_me_image_fetcher_;
 
   DISALLOW_COPY_AND_ASSIGN(WallpaperPrivateGetSurpriseMeImageFunction);
+};
+
+class WallpaperPrivateIsSwaEnabledFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("wallpaperPrivate.isSwaEnabled",
+                             WALLPAPERPRIVATE_ISSWAENABLED)
+
+ protected:
+  ~WallpaperPrivateIsSwaEnabledFunction() override = default;
+
+  // ExtensionFunction:
+  ResponseAction Run() override;
 };
 
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_WALLPAPER_PRIVATE_API_H_
