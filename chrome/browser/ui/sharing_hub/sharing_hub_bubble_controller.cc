@@ -89,9 +89,8 @@ SharingHubBubbleController::~SharingHubBubbleController() {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   if (base::FeatureList::IsEnabled(features::kSharesheet) &&
       base::FeatureList::IsEnabled(features::kChromeOSSharingHub) &&
-      sharesheet_service_ && native_window_) {
-    sharesheet_service_->CloseBubble(native_window_,
-                                     sharesheet::SharesheetResult::kCancel);
+      sharesheet_controller_) {
+    sharesheet_controller_->CloseBubble(sharesheet::SharesheetResult::kCancel);
   }
 #endif
 }
@@ -220,19 +219,17 @@ void SharingHubBubbleController::ShowSharesheet(
   DCHECK(highlighted_button);
   highlighted_button_tracker_.SetView(highlighted_button);
 
-  if (!sharesheet_service_) {
-    Profile* const profile =
-        Profile::FromBrowserContext(web_contents_->GetBrowserContext());
-    DCHECK(profile);
+  Profile* const profile =
+      Profile::FromBrowserContext(web_contents_->GetBrowserContext());
+  DCHECK(profile);
 
-    sharesheet_service_ =
-        sharesheet::SharesheetServiceFactory::GetForProfile(profile);
-  }
+  sharesheet::SharesheetService* const sharesheet_service =
+      sharesheet::SharesheetServiceFactory::GetForProfile(profile);
 
   apps::mojom::IntentPtr intent = apps_util::CreateShareIntentFromText(
       web_contents_->GetURL().spec(),
       base::UTF16ToUTF8(web_contents_->GetTitle()));
-  sharesheet_service_->ShowBubble(
+  sharesheet_service->ShowBubble(
       web_contents_, std::move(intent),
       sharesheet::SharesheetMetrics::LaunchSource::kOmniboxShare,
       base::BindOnce(&SharingHubBubbleController::OnShareDelivered,
@@ -240,8 +237,9 @@ void SharingHubBubbleController::ShowSharesheet(
       base::BindOnce(&SharingHubBubbleController::OnSharesheetClosed,
                      base::Unretained(this)));
 
-  // Save the window in order to close the sharesheet if the tab is closed.
-  native_window_ = web_contents_->GetTopLevelNativeWindow();
+  // Save the controller in order to close the sharesheet if the tab is closed.
+  sharesheet_controller_ = sharesheet_service->GetSharesheetController(
+      web_contents_->GetTopLevelNativeWindow());
 }
 
 void SharingHubBubbleController::OnShareDelivered(
@@ -257,7 +255,7 @@ void SharingHubBubbleController::OnSharesheetClosed(
   if (button)
     button->SetHighlighted(false);
 
-  native_window_ = nullptr;
+  sharesheet_controller_ = nullptr;
 }
 #endif
 

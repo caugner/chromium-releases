@@ -72,7 +72,7 @@ public class ShoppingPersistedTabDataNativeTest {
                 if (expectedExists) {
                     Assert.assertNotNull(res);
                 } else {
-                    Assert.assertNull(res.getPriceDrop());
+                    Assert.assertNull(res);
                 }
                 semaphore.release();
             });

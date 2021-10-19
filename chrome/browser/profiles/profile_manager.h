@@ -136,7 +136,7 @@ class ProfileManager : public Profile::Delegate {
   // already exist on disk
   // Returns true if the profile exists, but the final loaded profile will come
   // as part of the callback.
-  bool LoadProfile(const std::string& profile_base_name,
+  bool LoadProfile(const base::FilePath& profile_base_name,
                    bool incognito,
                    ProfileLoadedCallback callback);
   bool LoadProfileByPath(const base::FilePath& profile_path,
@@ -160,6 +160,10 @@ class ProfileManager : public Profile::Delegate {
   // Get the path of the last used profile, or if that's undefined, the default
   // profile.
   base::FilePath GetLastUsedProfileDir();
+
+  // Returns the path of a profile with the requested account, or the empty
+  // path if none exists.
+  base::FilePath GetProfileDirForEmail(const std::string& email);
 
   // Returns created and fully initialized profiles. Note, profiles order is NOT
   // guaranteed to be related with the creation order.

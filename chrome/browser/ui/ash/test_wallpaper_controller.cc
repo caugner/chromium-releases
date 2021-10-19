@@ -235,7 +235,7 @@ void TestWallpaperController::UpdateDailyRefreshWallpaper(
   NOTIMPLEMENTED();
 }
 
-void TestWallpaperController::SyncLocalAndRemotePrefs(
+void TestWallpaperController::OnGoogleDriveMounted(
     const AccountId& account_id) {
   NOTIMPLEMENTED();
 }

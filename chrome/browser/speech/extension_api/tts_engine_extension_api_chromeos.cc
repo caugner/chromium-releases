@@ -65,10 +65,6 @@ void TtsExtensionEngineChromeOS::Speak(content::TtsUtterance* utterance,
     return;
   }
 
-  // Reset any previously bound connections since we want to initialize with new
-  // audio params.
-  playback_tts_stream_.reset();
-
   TtsEngineExtensionObserverChromeOS::GetInstance(profile)
       ->BindPlaybackTtsStream(
           playback_tts_stream_.BindNewPipeAndPassReceiver(),

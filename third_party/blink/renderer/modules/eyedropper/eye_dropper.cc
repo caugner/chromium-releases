@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "ui/base/ui_base_features.h"
 
 namespace blink {
 
@@ -43,13 +44,19 @@ ScriptPromise EyeDropper::open(ScriptState* script_state,
     return ScriptPromise();
   }
 
+  if (!features::IsEyeDropperEnabled()) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kOperationError,
+                                      "EyeDropper is not available.");
+    return ScriptPromise();
+  }
+
   if (eye_dropper_chooser_.is_bound()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "EyeDropper is already open.");
     return ScriptPromise();
   }
 
-  auto* resolver_ = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  resolver_ = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver_->Promise();
 
   auto* frame = window->GetFrame();
@@ -60,7 +67,7 @@ ScriptPromise EyeDropper::open(ScriptState* script_state,
       WTF::Bind(&EyeDropper::EndChooser, WrapWeakPersistent(this)));
   eye_dropper_chooser_->Choose(WTF::Bind(&EyeDropper::EyeDropperResponseHandler,
                                          WrapPersistent(this),
-                                         WrapPersistent(resolver_)));
+                                         WrapPersistent(resolver_.Get())));
 
   return promise;
 }

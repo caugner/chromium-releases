@@ -21,7 +21,6 @@ import org.chromium.base.Callback;
 import org.chromium.base.MathUtils;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
-import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
@@ -327,10 +326,7 @@ public class MultiThumbnailCardProvider implements TabListMediator.ThumbnailProv
     }
 
     public void initWithNative() {
-        // TODO (https://crbug.com/1048632): Use the current profile (i.e., regular profile or
-        // incognito profile) instead of always using regular profile. It works correctly now, but
-        // it is not safe.
-        mTabListFaviconProvider.initWithNative(Profile.getLastUsedRegularProfile());
+        mTabListFaviconProvider.initWithNative(mTabModelSelector.getCurrentModel().getProfile());
     }
 
     /**
@@ -347,7 +343,8 @@ public class MultiThumbnailCardProvider implements TabListMediator.ThumbnailProv
     private void initializedThumbnailRects(Context context, float expectedThumbnailAspectRatio) {
         boolean themeRefactorEnabled = TabUiThemeProvider.themeRefactorEnabled();
 
-        float thumbnailHorizontalPadding = TabUiThemeProvider.getTabCardPaddingDimension(context);
+        float thumbnailHorizontalPadding =
+                TabUiThemeProvider.getTabMiniThumbnailPaddingDimension(context);
         float thumbnailVerticalPadding = themeRefactorEnabled
                 ? thumbnailHorizontalPadding
                 : thumbnailHorizontalPadding / expectedThumbnailAspectRatio;

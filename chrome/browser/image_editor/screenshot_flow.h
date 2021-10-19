@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/callback.h"
+#include "ui/base/cursor/cursor.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_delegate.h"
 #include "ui/events/event.h"
@@ -69,7 +70,16 @@ class ScreenshotFlow : public ui::LayerDelegate, public ui::EventHandler {
   // copying to the clipboard or saving.
   void Start(ScreenshotCaptureCallback flow_callback);
 
+  // Runs the screen capture flow, capturing the entire viewport rather than
+  // a region selected by the user.
+  void StartFullscreenCapture(ScreenshotCaptureCallback flow_callback);
+
+  // Exits capture mode without running any callbacks.
+  void CancelCapture();
+
  private:
+  class UnderlyingWebContentsObserver;
+
   // ui:EventHandler:
   void OnKeyEvent(ui::KeyEvent* event) override;
   void OnMouseEvent(ui::MouseEvent* event) override;
@@ -97,12 +107,19 @@ class ScreenshotFlow : public ui::LayerDelegate, public ui::EventHandler {
   // to Start().
   void CompleteCapture(const gfx::Rect& region);
 
+  // Completes the capture process for a whole viewport capture. Primarily
+  // used when the user has a screenreader enabled.
+  void CompleteFullscreenCapture(gfx::Image img);
+
   // Paints the screenshot selection layer. The user's selection is left
   // unpainted to be hollowed out. |invalidation_region| specifies an optional
   // region to clip to for performance; if empty, paints the entire window.
   void PaintSelectionLayer(gfx::Canvas* canvas,
                            const gfx::Rect& selection,
                            const gfx::Rect& invalidation_region);
+
+  // Requests to set the cursor type.
+  void SetCursor(ui::mojom::CursorType cursor_type);
 
   base::WeakPtr<ScreenshotFlow> weak_this_;
 
@@ -112,6 +129,9 @@ class ScreenshotFlow : public ui::LayerDelegate, public ui::EventHandler {
 
   // Web Contents that we are capturing.
   base::WeakPtr<content::WebContents> web_contents_;
+
+  // Observer for |web_contents_|.
+  std::unique_ptr<UnderlyingWebContentsObserver> web_contents_observer_;
 
   // Callback provided to Start().
   ScreenshotCaptureCallback flow_callback_;

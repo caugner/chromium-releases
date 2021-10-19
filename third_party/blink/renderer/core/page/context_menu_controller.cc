@@ -32,7 +32,6 @@
 
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_functions.h"
-#include "components/shared_highlighting/core/common/shared_highlighting_features.h"
 #include "services/metrics/public/cpp/ukm_entry_builder.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "third_party/blink/public/common/context_menu_data/context_menu_data.h"
@@ -643,9 +642,6 @@ bool ContextMenuController::ShowContextMenu(LocalFrame* frame,
         << "]\nVisibleSelection: "
         << selected_frame->Selection()
                .ComputeVisibleSelectionInDOMTreeDeprecated();
-    if (!result.IsContentEditable()) {
-      UpdateTextFragmentHandler(selected_frame);
-    }
   }
 
   // If there is a text fragment at the same location as the click indicate that
@@ -780,20 +776,6 @@ bool ContextMenuController::ShowContextMenu(LocalFrame* frame,
       data, host_context_menu_location);
 
   return true;
-}
-
-void ContextMenuController::UpdateTextFragmentHandler(
-    LocalFrame* selected_frame) {
-  if (!selected_frame->GetTextFragmentHandler()) {
-    if (!base::FeatureList::IsEnabled(
-            shared_highlighting::kSharedHighlightingAmp)) {
-      return;
-    }
-
-    selected_frame->CreateTextFragmentHandler();
-  }
-
-  selected_frame->GetTextFragmentHandler()->StartPreemptiveGenerationIfNeeded();
 }
 
 }  // namespace blink

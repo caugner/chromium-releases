@@ -13,6 +13,8 @@ import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.view.LayoutInflater;
 
+import dalvik.system.BaseDexClassLoader;
+
 import org.chromium.base.ContextUtils;
 import org.chromium.base.WrappedClassLoader;
 
@@ -78,7 +80,11 @@ public class ClassLoaderContextWrapperFactory {
             final ClassLoader appCl = getBaseContext().getClassLoader();
             final ClassLoader chromiumCl = ClassLoaderContextWrapper.class.getClassLoader();
 
-            return new WrappedClassLoader(chromiumCl, appCl);
+            assert appCl instanceof BaseDexClassLoader;
+            assert chromiumCl instanceof BaseDexClassLoader;
+
+            return new WrappedClassLoader(
+                    (BaseDexClassLoader) chromiumCl, (BaseDexClassLoader) appCl);
         }
 
         @Override

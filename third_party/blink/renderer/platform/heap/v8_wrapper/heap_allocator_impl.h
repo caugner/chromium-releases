@@ -137,11 +137,11 @@ class PLATFORM_EXPORT HeapAllocator {
   }
 
   template <typename T>
-  static void TraceBackingStoreIfMarked(T* object) {
+  static void TraceBackingStoreIfMarked(T** slot) {
     HeapConsistency::WriteBarrierParams params;
-    if (HeapConsistency::GetWriteBarrierType(object, params) ==
+    if (HeapConsistency::GetWriteBarrierType(slot, *slot, params) ==
         HeapConsistency::WriteBarrierType::kMarking) {
-      HeapConsistency::SteeleWriteBarrier(params, object);
+      HeapConsistency::SteeleWriteBarrier(params, *slot);
     }
   }
 

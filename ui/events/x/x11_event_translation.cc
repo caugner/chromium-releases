@@ -9,6 +9,7 @@
 #include "base/check.h"
 #include "base/notreached.h"
 #include "base/time/time.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
@@ -104,18 +105,13 @@ std::unique_ptr<KeyEvent> CreateKeyEvent(EventType event_type,
   // in KeyEvent::ApplyLayout() which makes it possible for CrOS/Linux, for
   // example, to support host system keyboard layouts.
   std::unique_ptr<KeyEvent> event;
-#if defined(USE_OZONE)
-  if (features::IsUsingOzonePlatform()) {
-    event = std::make_unique<KeyEvent>(event_type, key_code, event_flags,
-                                       EventTimeFromXEvent(x11_event));
-  }
-#endif
-#if defined(USE_X11)
-  if (!event) {
-    event = std::make_unique<KeyEvent>(
-        event_type, key_code, CodeFromXEvent(x11_event), event_flags,
-        GetDomKeyFromXEvent(x11_event), EventTimeFromXEvent(x11_event));
-  }
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  event = std::make_unique<KeyEvent>(event_type, key_code, event_flags,
+                                     EventTimeFromXEvent(x11_event));
+#else
+  event = std::make_unique<KeyEvent>(
+      event_type, key_code, CodeFromXEvent(x11_event), event_flags,
+      GetDomKeyFromXEvent(x11_event), EventTimeFromXEvent(x11_event));
 #endif
 
   DCHECK(event);
@@ -139,7 +135,7 @@ std::unique_ptr<MouseEvent> CreateMouseEvent(EventType type,
   if (crossing && crossing->detail == x11::NotifyDetail::Inferior)
     return nullptr;
 
-  PointerDetails details{EventPointerType::kMouse};
+  PointerDetails details = GetStylusPointerDetailsFromXEvent(x11_event);
   auto event = std::make_unique<MouseEvent>(
       type, EventLocationFromXEvent(x11_event),
       EventSystemLocationFromXEvent(x11_event), EventTimeFromXEvent(x11_event),

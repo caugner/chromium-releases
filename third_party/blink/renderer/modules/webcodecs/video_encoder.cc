@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
+#include "base/containers/contains.h"
 #include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
@@ -24,6 +25,7 @@
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/mime_util.h"
 #include "media/base/offloading_video_encoder.h"
+#include "media/base/svc_scalability_mode.h"
 #include "media/base/video_codecs.h"
 #include "media/base/video_color_space.h"
 #include "media/base/video_encoder.h"
@@ -107,10 +109,6 @@ bool IsAcceleratedConfigurationSupported(
   if (!gpu_factories || !gpu_factories->IsGpuVideoAcceleratorEnabled())
     return false;
 
-  // No support for temporal SVC in accelerated encoders yet.
-  if (options.temporal_layers > 1)
-    return false;
-
   auto supported_profiles =
       gpu_factories->GetVideoEncodeAcceleratorSupportedProfiles().value_or(
           media::VideoEncodeAccelerator::SupportedProfiles());
@@ -137,6 +135,12 @@ bool IsAcceleratedConfigurationSupported(
         supported_profile.max_framerate_denominator;
     if (options.framerate.has_value() &&
         options.framerate.value() > max_supported_framerate) {
+      continue;
+    }
+
+    if (options.scalability_mode &&
+        !base::Contains(supported_profile.scalability_modes,
+                        options.scalability_mode)) {
       continue;
     }
 
@@ -210,14 +214,17 @@ VideoEncoderTraits::ParsedConfig* ParseConfigStatic(
       return nullptr;
     }
     result->options.framerate = config->framerate();
+  } else {
+    result->options.framerate =
+        media::VideoEncodeAccelerator::kDefaultFramerate;
   }
 
   // https://w3c.github.io/webrtc-svc/
   if (config->hasScalabilityMode()) {
     if (config->scalabilityMode() == "L1T2") {
-      result->options.temporal_layers = 2;
+      result->options.scalability_mode = media::SVCScalabilityMode::kL1T2;
     } else if (config->scalabilityMode() == "L1T3") {
-      result->options.temporal_layers = 3;
+      result->options.scalability_mode = media::SVCScalabilityMode::kL1T3;
     } else {
       exception_state.ThrowTypeError("Unsupported scalabilityMode.");
       return nullptr;
@@ -231,7 +238,7 @@ VideoEncoderTraits::ParsedConfig* ParseConfigStatic(
       IDLEnumAsString(config->hardwareAcceleration()));
 
   bool is_codec_ambiguous = true;
-  result->codec = media::kUnknownVideoCodec;
+  result->codec = media::VideoCodec::kUnknown;
   result->profile = media::VIDEO_CODEC_PROFILE_UNKNOWN;
   result->level = 0;
   result->codec_string = config->codec();
@@ -255,7 +262,7 @@ VideoEncoderTraits::ParsedConfig* ParseConfigStatic(
     return result;
 
   // We should only get here with H264 codecs.
-  if (result->codec != media::VideoCodec::kCodecH264) {
+  if (result->codec != media::VideoCodec::kH264) {
     exception_state.ThrowTypeError(
         "'avc' field can only be used with AVC codecs");
     return nullptr;
@@ -276,10 +283,10 @@ VideoEncoderTraits::ParsedConfig* ParseConfigStatic(
 bool VerifyCodecSupportStatic(VideoEncoderTraits::ParsedConfig* config,
                               ExceptionState* exception_state) {
   switch (config->codec) {
-    case media::kCodecVP8:
+    case media::VideoCodec::kVP8:
       break;
 
-    case media::kCodecVP9:
+    case media::VideoCodec::kVP9:
       if (config->profile == media::VideoCodecProfile::VP9PROFILE_PROFILE1 ||
           config->profile == media::VideoCodecProfile::VP9PROFILE_PROFILE3) {
         if (exception_state) {
@@ -290,7 +297,7 @@ bool VerifyCodecSupportStatic(VideoEncoderTraits::ParsedConfig* config,
       }
       break;
 
-    case media::kCodecH264:
+    case media::VideoCodec::kH264:
       break;
 
     default:
@@ -349,7 +356,7 @@ VideoEncoderConfig* CopyConfig(const VideoEncoderConfig& config) {
 #if defined(OS_MAC)
 const base::Feature kWebCodecsEncoderGpuMemoryBufferReadback{
     "WebCodecsEncoderGpuMemoryBufferReadback",
-    base::FEATURE_DISABLED_BY_DEFAULT};
+    base::FEATURE_ENABLED_BY_DEFAULT};
 #endif
 
 bool CanUseGpuMemoryBufferReadback(media::VideoPixelFormat format) {
@@ -454,12 +461,12 @@ std::unique_ptr<media::VideoEncoder> VideoEncoder::CreateSoftwareVideoEncoder(
     return nullptr;
   std::unique_ptr<media::VideoEncoder> result;
   switch (codec) {
-    case media::kCodecVP8:
-    case media::kCodecVP9:
+    case media::VideoCodec::kVP8:
+    case media::VideoCodec::kVP9:
       result = CreateVpxVideoEncoder();
       self->UpdateEncoderLog("VpxVideoEncoder", false);
       break;
-    case media::kCodecH264:
+    case media::VideoCodec::kH264:
       result = CreateOpenH264VideoEncoder();
       self->UpdateEncoderLog("OpenH264VideoEncoder", false);
       break;
@@ -540,7 +547,7 @@ void VideoEncoder::ContinueConfigureWithGpuFactories(
           "Encoder initialization error.", status));
     } else {
       UMA_HISTOGRAM_ENUMERATION("Blink.WebCodecs.VideoEncoder.Codec", codec,
-                                media::kVideoCodecMax + 1);
+                                media::VideoCodec::kMaxValue);
     }
     req->EndTracing();
 
@@ -817,7 +824,7 @@ void VideoEncoder::CallOutputCallback(
   auto* chunk = MakeGarbageCollected<EncodedVideoChunk>(std::move(buffer));
 
   auto* metadata = EncodedVideoChunkMetadata::Create();
-  if (active_config->options.temporal_layers > 0)
+  if (active_config->options.scalability_mode.has_value())
     metadata->setTemporalLayerId(output.temporal_id);
 
   if (first_output_after_configure_ || codec_desc.has_value()) {
@@ -867,11 +874,11 @@ static void isConfigSupportedWithSoftwareOnly(
     VideoEncoderTraits::ParsedConfig* config) {
   std::unique_ptr<media::VideoEncoder> software_encoder;
   switch (config->codec) {
-    case media::kCodecVP8:
-    case media::kCodecVP9:
+    case media::VideoCodec::kVP8:
+    case media::VideoCodec::kVP9:
       software_encoder = CreateVpxVideoEncoder();
       break;
-    case media::kCodecH264:
+    case media::VideoCodec::kH264:
       software_encoder = CreateOpenH264VideoEncoder();
       break;
     default:

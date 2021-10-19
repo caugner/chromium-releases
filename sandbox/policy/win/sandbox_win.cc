@@ -1222,16 +1222,12 @@ std::string SandboxWin::GetSandboxTypeInEnglish(SandboxType sandbox_type) {
       return "Audio";
     case SandboxType::kSpeechRecognition:
       return "Speech Recognition";
-    case SandboxType::kProxyResolver:
-      return "Proxy Resolver";
     case SandboxType::kPdfConversion:
       return "PDF Conversion";
     case SandboxType::kMediaFoundationCdm:
       return "Media Foundation CDM";
     case SandboxType::kService:
       return "Service";
-    case SandboxType::kVideoCapture:
-      return "Video Capture";
     case SandboxType::kIconReader:
       return "Icon Reader";
   }

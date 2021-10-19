@@ -98,6 +98,7 @@ import org.chromium.chrome.browser.homepage.HomepageManager;
 import org.chromium.chrome.browser.incognito.IncognitoNotificationManager;
 import org.chromium.chrome.browser.incognito.IncognitoNotificationPresenceController;
 import org.chromium.chrome.browser.incognito.IncognitoProfileDestroyer;
+import org.chromium.chrome.browser.incognito.IncognitoStartup;
 import org.chromium.chrome.browser.incognito.IncognitoTabLauncher;
 import org.chromium.chrome.browser.incognito.IncognitoTabSnapshotController;
 import org.chromium.chrome.browser.incognito.IncognitoUtils;
@@ -651,7 +652,7 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
 
         try (TraceEvent e = TraceEvent.scoped(
                      "ChromeTabbedActivity.setupCompositorContentPreNativeForPhone")) {
-            CompositorViewHolder compositorViewHolder = getCompositorViewHolder();
+            CompositorViewHolder compositorViewHolder = getCompositorViewHolderSupplier().get();
 
             // TODO(1169205): Remove all GTS enabled checks after M5 is default.
             if (TabUiFeatureUtilities.isGridTabSwitcherEnabled(this)) {
@@ -679,8 +680,8 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
             mLayoutManager = new LayoutManagerChromePhone(compositorViewHolder, mContentContainer,
                     mStartSurfaceSupplier.get(), getTabContentManagerSupplier(),
                     () -> {
-                        if (getCompositorViewHolder() == null) return null;
-                        return getCompositorViewHolder().getLayerTitleCache();
+                        if (!getCompositorViewHolderSupplier().hasValue()) return null;
+                        return getCompositorViewHolderSupplier().get().getLayerTitleCache();
                     },
                     mOverviewModeBehaviorSupplier,
                     mRootUiCoordinator::getTopUiThemeColorProvider, mJankTracker);
@@ -696,11 +697,11 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
         try (TraceEvent e = TraceEvent.scoped(
                      "ChromeTabbedActivity.setupCompositorContentPreNativeForTablet")) {
             // clang-format off
-            mLayoutManager = new LayoutManagerChromeTablet(getCompositorViewHolder(),
+            mLayoutManager = new LayoutManagerChromeTablet(getCompositorViewHolderSupplier().get(),
                     mContentContainer, getTabContentManagerSupplier(),
                     () -> {
-                        if (getCompositorViewHolder() == null) return null;
-                        return getCompositorViewHolder().getLayerTitleCache();
+                        if (!getCompositorViewHolderSupplier().hasValue()) return null;
+                        return getCompositorViewHolderSupplier().get().getLayerTitleCache();
                     },
                     mOverviewModeBehaviorSupplier,
                     mRootUiCoordinator::getTopUiThemeColorProvider, mJankTracker);
@@ -901,7 +902,7 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
         super.finishNativeInitialization();
 
         // TODO(jinsukkim): Let these classes handle the registration by themselves.
-        mCompositorViewHolder = getCompositorViewHolder();
+        mCompositorViewHolder = getCompositorViewHolderSupplier().get();
         mOverviewListLayout = (OverviewListLayout) mLayoutManager.getOverviewListLayout();
         getTabObscuringHandler().addObserver(mCompositorViewHolder);
         getTabObscuringHandler().addObserver(mOverviewListLayout);
@@ -914,15 +915,8 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
     public void onResumeWithNative() {
         super.onResumeWithNative();
 
-        if (IncognitoUtils.shouldDestroyIncognitoProfileOnStartup(
-                    getTabModelSelector().getCurrentModel().isIncognito(),
-                    TABBED_MODE_COMPONENT_NAMES)) {
-            Profile.getLastUsedRegularProfile()
-                    .getPrimaryOTRProfile(/*createIfNeeded=*/true)
-                    .destroyWhenAppropriate();
-        } else {
-            CookiesFetcher.restoreCookies();
-        }
+        IncognitoStartup.onResumeWithNative(
+                getTabModelSelectorSupplier(), TABBED_MODE_COMPONENT_NAMES);
 
         mLocaleManager.setSnackbarManager(getSnackbarManager());
         mLocaleManager.startObservingPhoneChanges();
@@ -1731,7 +1725,7 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
         try (TraceEvent e =
                         TraceEvent.scoped("ChromeTabbedActivity.prepareToShowStartPagePreNative")) {
             setupCompositorContentPreNativeForPhone();
-            getCompositorViewHolder().setLayoutManager(mLayoutManager);
+            getCompositorViewHolderSupplier().get().setLayoutManager(mLayoutManager);
 
             if (shouldShowOverviewPageOnStart()) {
                 mLayoutManager.setTabModelSelector(mTabModelSelector);
@@ -1835,7 +1829,7 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
                     /* ChromeActivityNativeDelegate */ this, /* isCustomTab= */ false,
                     getBrowserControlsManager(), getFullscreenManager(),
                     /* TabCreatorManager */ this, getTabModelSelectorSupplier(),
-                    this::getCompositorViewHolder, getModalDialogManagerSupplier(),
+                    getCompositorViewHolderSupplier(), getModalDialogManagerSupplier(),
                     this::getSnackbarManager, getBrowserControlsManager(), getActivityTabProvider(),
                     getLifecycleDispatcher(), getWindowAndroid(), this::getLastUserInteractionTime,
                     this::hadWarmStart, mJankTracker, getToolbarManager()::getToolbar);
@@ -1976,7 +1970,7 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
         } else if (id == R.id.all_bookmarks_menu_id) {
             // Note that 'currentTab' could be null in overview mode when start surface is
             // enabled.
-            getCompositorViewHolder().hideKeyboard(() -> {
+            getCompositorViewHolderSupplier().get().hideKeyboard(() -> {
                 BookmarkUtils.showBookmarkManager(
                         ChromeTabbedActivity.this, getCurrentTabModel().isIncognito());
             });
@@ -2322,7 +2316,7 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
 
         if (mOverviewModeController.overviewVisible()) {
             if (didFinishNativeInitialization()) {
-                getCompositorViewHolder().hideKeyboard(() -> {});
+                getCompositorViewHolderSupplier().get().hideKeyboard(() -> {});
             }
             return;
         }
@@ -2332,7 +2326,7 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
         if (currentTab == null) {
             mOverviewModeController.showOverview(false);
         } else {
-            getCompositorViewHolder().hideKeyboard(
+            getCompositorViewHolderSupplier().get().hideKeyboard(
                     () -> mOverviewModeController.showOverview(true));
             updateAccessibilityState(false);
             TasksUma.recordTabLaunchType(getCurrentTabModel());
@@ -2534,12 +2528,12 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
 
     @VisibleForTesting
     public View getTabsView() {
-        return getCompositorViewHolder();
+        return getCompositorViewHolderSupplier().get();
     }
 
     @VisibleForTesting
     public LayoutManagerChrome getLayoutManager() {
-        return (LayoutManagerChrome) getCompositorViewHolder().getLayoutManager();
+        return (LayoutManagerChrome) getCompositorViewHolderSupplier().get().getLayoutManager();
     }
 
     @VisibleForTesting

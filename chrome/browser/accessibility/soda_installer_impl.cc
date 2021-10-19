@@ -116,12 +116,6 @@ void SodaInstallerImpl::UninstallSoda(PrefService* global_prefs) {
   base::DeletePathRecursively(speech::GetSodaDirectory());
   base::DeletePathRecursively(speech::GetSodaLanguagePacksDirectory());
   global_prefs->SetTime(prefs::kSodaScheduledDeletionTime, base::Time());
-
-  soda_binary_installed_ = false;
-  is_soda_downloading_ = false;
-  soda_installer_initialized_ = false;
-  installed_languages_.clear();
-  language_pack_progress_.clear();
 }
 
 void SodaInstallerImpl::OnEvent(Events event, const std::string& id) {

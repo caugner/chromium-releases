@@ -7,9 +7,9 @@ package org.chromium.chrome.browser.webapps;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
+import android.text.TextUtils;
 
 import org.chromium.base.Callback;
-import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.ui.LayoutInflaterUtils;
 import org.chromium.ui.modaldialog.DialogDismissalCause;
@@ -45,6 +45,7 @@ public class WebApkIconNameUpdateDialog implements ModalDialogProperties.Control
 
     /**
      * Shows the dialog.
+     * @param context The context used to inflate views.
      * @param manager The {@ModalDialogManager} to use.
      * @param packageName The package name for this app.
      * @param iconChanging Whether an icon change has been detected.
@@ -54,22 +55,33 @@ public class WebApkIconNameUpdateDialog implements ModalDialogProperties.Control
      * @param newAppShortName The proposed short name for the updated app.
      * @param oldAppName The name of the currently installed app.
      * @param newAppName The proposed name for the updated app.
-     * @param oldIcon The icon of the currently installed app.
-     * @param newIcon The proposed new icon for the updated app.
+     * @param currentAppIcon The icon of the currently installed app.
+     * @param updatedAppIcon The proposed new icon for the updated app.
      * @param oldIconAdaptive Whether the current icon is adaptive.
      * @param newIconAdaptive Whether the updated icon is adaptive.
      * @param callback The callback to use to communicate the results.
      */
-    public void show(ModalDialogManager manager, String packageName, boolean iconChanging,
-            boolean shortNameChanging, boolean nameChanging, String oldAppShortName,
-            String newAppShortName, String oldAppName, String newAppName, Bitmap currentAppIcon,
-            Bitmap updatedAppIcon, boolean oldIconAdaptive, boolean newIconAdaptive,
-            Callback<Integer> callback) {
-        Context context = ContextUtils.getApplicationContext();
+    public void show(Context context, ModalDialogManager manager, String packageName,
+            boolean iconChanging, boolean shortNameChanging, boolean nameChanging,
+            String oldAppShortName, String newAppShortName, String oldAppName, String newAppName,
+            Bitmap currentAppIcon, Bitmap updatedAppIcon, boolean oldIconAdaptive,
+            boolean newIconAdaptive, Callback<Integer> callback) {
         Resources resources = context.getResources();
         mOldAppShortName = oldAppShortName;
         mPackageName = packageName;
         mDialogResultCallback = callback;
+
+        if (nameChanging && shortNameChanging && TextUtils.equals(oldAppShortName, oldAppName)
+                && TextUtils.equals(newAppShortName, newAppName)) {
+            // We can get notified of a change where:
+            //                Before -> After
+            // Name:            foo      bar
+            // Short name:      foo      bar
+            //
+            // It doesn't make sense to show duplicate labels, so we treat it as if the only thing
+            // changing is the short name.
+            nameChanging = false;
+        }
 
         int titleId = 0;
         if (iconChanging && (shortNameChanging || nameChanging)) {
@@ -101,8 +113,8 @@ public class WebApkIconNameUpdateDialog implements ModalDialogProperties.Control
                 new PropertyModel.Builder(ModalDialogProperties.ALL_KEYS)
                         .with(ModalDialogProperties.CONTROLLER, this)
                         .with(ModalDialogProperties.TITLE, resources, titleId)
-                        .with(ModalDialogProperties.MESSAGE, resources,
-                                R.string.webapp_update_explanation)
+                        .with(ModalDialogProperties.MESSAGE,
+                                resources.getString(R.string.webapp_update_explanation))
                         .with(ModalDialogProperties.CUSTOM_VIEW, dialogCustomView)
                         .with(ModalDialogProperties.PRIMARY_BUTTON_FILLED, true)
                         .with(ModalDialogProperties.POSITIVE_BUTTON_TEXT, resources, R.string.ok)

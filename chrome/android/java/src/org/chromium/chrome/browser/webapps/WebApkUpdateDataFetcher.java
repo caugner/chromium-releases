@@ -120,8 +120,7 @@ public class WebApkUpdateDataFetcher extends EmptyTabObserver {
             String[] iconUrls, @WebDisplayMode int displayMode, int orientation, long themeColor,
             long backgroundColor, String shareAction, String shareParamsTitle,
             String shareParamsText, boolean isShareMethodPost, boolean isShareEncTypeMultipart,
-            String[] shareParamsFileNames, String[][] shareParamsAccepts, String[][] shortcuts,
-            byte[][] shortcutIconData) {
+            String[] shareParamsFileNames, String[][] shareParamsAccepts, String[][] shortcuts) {
         Context appContext = ContextUtils.getApplicationContext();
 
         HashMap<String, String> iconUrlToMurmur2HashMap = new HashMap<String, String>();
@@ -136,12 +135,11 @@ public class WebApkUpdateDataFetcher extends EmptyTabObserver {
         }
 
         List<WebApkExtras.ShortcutItem> shortcutItems = new ArrayList<>();
-        for (int i = 0; i < shortcuts.length; i++) {
-            String[] shortcutData = shortcuts[i];
+        for (String[] shortcutData : shortcuts) {
             shortcutItems.add(new WebApkExtras.ShortcutItem(shortcutData[0] /* name */,
                     shortcutData[1] /* shortName */, shortcutData[2] /* launchUrl */,
                     shortcutData[3] /* iconUrl */, shortcutData[4] /* iconHash */,
-                    new WebappIcon(shortcutIconData[i])));
+                    new WebappIcon(shortcutData[5], false /* isTrusted */)));
         }
 
         // When share action is empty, we use a default empty share target

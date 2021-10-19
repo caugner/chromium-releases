@@ -145,8 +145,8 @@ class PLATFORM_EXPORT HeapAllocator {
   }
 
   template <typename T>
-  static void TraceBackingStoreIfMarked(T* object) {
-    MarkingVisitor::RetraceObject(object);
+  static void TraceBackingStoreIfMarked(T** slot) {
+    MarkingVisitor::RetraceObject(*slot);
   }
 
   template <typename T, typename Traits>
