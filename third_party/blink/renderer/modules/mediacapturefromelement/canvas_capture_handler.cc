@@ -42,8 +42,8 @@ namespace blink {
 
 namespace {
 
-const base::Feature kOneCopyCanvasCapture {
-  "OneCopyCanvasCapture",
+const base::Feature kTwoCopyCanvasCapture {
+  "TwoCopyCanvasCapture",
 #if defined(OS_MAC)
       base::FEATURE_ENABLED_BY_DEFAULT
 #else
@@ -132,6 +132,11 @@ class CanvasCaptureHandler::CanvasCaptureHandlerDelegate {
       : new_frame_callback_(new_frame_callback) {
     DETACH_FROM_THREAD(io_thread_checker_);
   }
+
+  CanvasCaptureHandlerDelegate(const CanvasCaptureHandlerDelegate&) = delete;
+  CanvasCaptureHandlerDelegate& operator=(const CanvasCaptureHandlerDelegate&) =
+      delete;
+
   ~CanvasCaptureHandlerDelegate() {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
   }
@@ -152,8 +157,6 @@ class CanvasCaptureHandler::CanvasCaptureHandlerDelegate {
   // Bound to IO thread.
   THREAD_CHECKER(io_thread_checker_);
   base::WeakPtrFactory<CanvasCaptureHandlerDelegate> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(CanvasCaptureHandlerDelegate);
 };
 
 CanvasCaptureHandler::CanvasCaptureHandler(
@@ -237,7 +240,7 @@ void CanvasCaptureHandler::SendNewFrame(
 
   // Try async reading if image is texture backed.
   if (image->CurrentFrameKnownToBeOpaque() || can_discard_alpha_) {
-    if (base::FeatureList::IsEnabled(kOneCopyCanvasCapture)) {
+    if (base::FeatureList::IsEnabled(kTwoCopyCanvasCapture)) {
       if (!accelerated_frame_pool_) {
         accelerated_frame_pool_ =
             std::make_unique<WebGraphicsContext3DVideoFramePool>(

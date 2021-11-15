@@ -1,3 +1,1 @@
-monorail: {
-  component: "UI>Shell>Kiosk"
-}
+mixins: "//chrome/browser/ash/app_mode/COMMON_METADATA"

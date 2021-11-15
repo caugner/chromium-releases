@@ -1,4 +1,1 @@
-monorail: {
-  component: "Services>Safebrowsing"
-}
-team_email: "safebrowsing@chromium.org"
+mixins: "//chrome/browser/safe_browsing/COMMON_METADATA"

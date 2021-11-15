@@ -1,3 +1,1 @@
-monorail {
-  component: "UI>Browser>Bubbles"
-}
+mixins: "//chrome/browser/ui/page_action/COMMON_METADATA"

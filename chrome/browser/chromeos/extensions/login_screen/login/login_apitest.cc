@@ -202,7 +202,7 @@ class LoginApitest : public LoginScreenApitestBase {
   void LockScreen() { ScreenLockerTester().Lock(); }
 
  private:
-  chromeos::LocalPolicyTestServerMixin local_policy_mixin_{&mixin_host_};
+  ash::LocalPolicyTestServerMixin local_policy_mixin_{&mixin_host_};
   base::DictionaryValue config_;
 };
 
@@ -255,6 +255,9 @@ IN_PROC_BROWSER_TEST_F(LoginApitest, FetchDataForNextLoginAttempt) {
   local_state->SetString(prefs::kLoginExtensionApiDataForNextLoginAttempt,
                          kData);
   SetUpLoginScreenExtensionAndRunTest(kFetchDataForNextLoginAttempt);
+
+  EXPECT_EQ("", local_state->GetString(
+                    prefs::kLoginExtensionApiDataForNextLoginAttempt));
 }
 
 IN_PROC_BROWSER_TEST_F(LoginApitest, LockManagedGuestSession) {

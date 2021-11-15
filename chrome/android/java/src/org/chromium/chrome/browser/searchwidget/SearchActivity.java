@@ -24,11 +24,11 @@ import org.chromium.base.Log;
 import org.chromium.base.jank_tracker.DummyJankTracker;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.blink.mojom.DisplayMode;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.WebContentsFactory;
 import org.chromium.chrome.browser.app.tabmodel.TabWindowManagerSingleton;
-import org.chromium.chrome.browser.browserservices.intents.WebDisplayMode;
 import org.chromium.chrome.browser.contextmenu.ContextMenuPopulatorFactory;
 import org.chromium.chrome.browser.customtabs.CustomTabsConnection;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
@@ -165,8 +165,10 @@ public class SearchActivity extends AsyncInitializationActivity
 
     @Override
     protected void triggerLayoutInflation() {
+        enableHardwareAcceleration();
         mSnackbarManager = new SnackbarManager(this, findViewById(android.R.id.content), null);
-        mSearchBoxDataProvider = new SearchBoxDataProvider(this, isFromQuickActionSearchWidget());
+        mSearchBoxDataProvider = new SearchBoxDataProvider(this);
+        mSearchBoxDataProvider.setIsFromQuickActionSearchWidget(isFromQuickActionSearchWidget());
 
         mContentView = createContentView();
         setContentView(mContentView);
@@ -189,13 +191,13 @@ public class SearchActivity extends AsyncInitializationActivity
                 /*shareDelegateSupplier=*/null, /*incognitoStateProvider=*/null,
                 getLifecycleDispatcher(), overrideUrlLoadingDelegate, /*backKeyBehavior=*/this,
                 SearchEngineLogoUtils.getInstance(), /*launchAssistanceSettingsAction=*/() -> {},
-                /*pageInfoAction=*/(tab, permission) -> {},
+                /*pageInfoAction=*/(tab, permission, fromStoreIcon) -> {},
                 IntentHandler::bringTabToFront,
                 /*saveOfflineButtonState=*/(tab) -> false, /*omniboxUma*/(url, transition) -> {},
                 TabWindowManagerSingleton::getInstance, /*bookmarkState=*/(url) -> false,
                 VoiceToolbarButtonController::isToolbarMicEnabled, new DummyJankTracker(),
                 /*ExploreIconState*/(pixelSize, callback) ->{},
-                /*userEducationHelper=*/null);
+                /*userEducationHelper=*/null, /*merchantTrustSignalsCoordinatorSupplier=*/null);
         // clang-format on
         mLocationBarCoordinator.setUrlBarFocusable(true);
         mLocationBarCoordinator.setShouldShowMicButtonWhenUnfocused(true);
@@ -221,7 +223,7 @@ public class SearchActivity extends AsyncInitializationActivity
                 return new TabWebContentsDelegateAndroid() {
                     @Override
                     public int getDisplayMode() {
-                        return WebDisplayMode.BROWSER;
+                        return DisplayMode.BROWSER;
                     }
 
                     @Override
@@ -339,7 +341,22 @@ public class SearchActivity extends AsyncInitializationActivity
     public void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        mSearchBoxDataProvider.setIsFromQuickActionSearchWidget(isFromQuickActionSearchWidget());
         beginQuery();
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        // Make sure that re-entering the SearchActivity from different widgets shows appropriate
+        // suggestion types.
+        mLocationBarCoordinator.clearOmniboxFocus();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        mSearchBox.focusTextBox();
     }
 
     @Override
@@ -349,7 +366,9 @@ public class SearchActivity extends AsyncInitializationActivity
 
     @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
     static @SearchType int getSearchType(String action) {
-        if (TextUtils.equals(action, SearchActivityConstants.ACTION_START_VOICE_SEARCH)) {
+        if (TextUtils.equals(action, SearchActivityConstants.ACTION_START_VOICE_SEARCH)
+                || TextUtils.equals(
+                        action, SearchActivityConstants.ACTION_START_EXTENDED_VOICE_SEARCH)) {
             return SearchType.VOICE;
         } else if (TextUtils.equals(action, SearchActivityConstants.ACTION_START_LENS_SEARCH)) {
             return SearchType.LENS;

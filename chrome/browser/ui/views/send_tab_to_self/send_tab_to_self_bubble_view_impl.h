@@ -41,6 +41,10 @@ class SendTabToSelfBubbleViewImpl : public SendTabToSelfBubbleView,
                               content::WebContents* web_contents,
                               SendTabToSelfBubbleController* controller);
 
+  SendTabToSelfBubbleViewImpl(const SendTabToSelfBubbleViewImpl&) = delete;
+  SendTabToSelfBubbleViewImpl& operator=(const SendTabToSelfBubbleViewImpl&) =
+      delete;
+
   ~SendTabToSelfBubbleViewImpl() override;
 
   // SendTabToSelfBubbleView:
@@ -51,6 +55,8 @@ class SendTabToSelfBubbleViewImpl : public SendTabToSelfBubbleView,
   std::u16string GetWindowTitle() const override;
   void WindowClosing() override;
 
+  void BackButtonPressed();
+
   void DeviceButtonPressed(SendTabToSelfBubbleDeviceButton* device_button);
 
   void OnManageDevicesClicked(const ui::Event& event);
@@ -60,6 +66,7 @@ class SendTabToSelfBubbleViewImpl : public SendTabToSelfBubbleView,
  private:
   // views::BubbleDialogDelegateView:
   void Init() override;
+  void AddedToWidget() override;
 
   // Creates the subtitle / hint text used in V2.
   void CreateHintTextLabel(views::GridLayout* layout);
@@ -76,8 +83,6 @@ class SendTabToSelfBubbleViewImpl : public SendTabToSelfBubbleView,
   // ScrollView containing the list of device buttons.
   // Only kept for GetButtonContainerForTesting().
   views::ScrollView* scroll_view_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(SendTabToSelfBubbleViewImpl);
 };
 
 }  // namespace send_tab_to_self

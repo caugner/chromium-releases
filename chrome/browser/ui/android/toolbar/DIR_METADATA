@@ -1,4 +1,1 @@
-monorail {
-  component: "UI>Browser>Toolbar"
-}
-os: ANDROID
+mixins: "//chrome/browser/ui/android/toolbar/COMMON_METADATA"

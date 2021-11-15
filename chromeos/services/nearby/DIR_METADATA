@@ -1,3 +1,1 @@
-monorail {
-  component: "OS>Systems>Multidevice>Nearby"
-}
+mixins: "//chromeos/services/nearby/COMMON_METADATA"

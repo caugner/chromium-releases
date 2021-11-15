@@ -1,3 +1,1 @@
-monorail {
-  component: "UI>Browser>Mobile>CustomTabs"
-}
+mixins: "//chrome/android/java/src/org/chromium/chrome/browser/browserservices/COMMON_METADATA"

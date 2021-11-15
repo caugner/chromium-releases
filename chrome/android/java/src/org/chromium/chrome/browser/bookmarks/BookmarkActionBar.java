@@ -21,6 +21,7 @@ import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
 import org.chromium.components.bookmarks.BookmarkId;
 import org.chromium.components.bookmarks.BookmarkType;
+import org.chromium.components.browser_ui.util.ToolbarUtils;
 import org.chromium.components.browser_ui.widget.dragreorder.DragReorderableListAdapter;
 import org.chromium.components.browser_ui.widget.selectable_list.SelectableListToolbar;
 import org.chromium.components.browser_ui.widget.selectable_list.SelectionDelegate;
@@ -35,6 +36,7 @@ import java.util.List;
 public class BookmarkActionBar extends SelectableListToolbar<BookmarkId>
         implements BookmarkUIObserver, OnMenuItemClickListener, OnClickListener,
                    DragReorderableListAdapter.DragListener {
+
     private BookmarkItem mCurrentFolder;
     private BookmarkDelegate mDelegate;
 
@@ -259,7 +261,11 @@ public class BookmarkActionBar extends SelectableListToolbar<BookmarkId>
      */
     @Override
     public void onDragStateChange(boolean drag) {
+        // Disable menu items while dragging.
         getMenu().setGroupEnabled(R.id.selection_mode_menu_group, !drag);
+        ToolbarUtils.setOverFlowMenuEnabled(this, !drag);
+
+        // Disable listeners while dragging.
         setNavigationOnClickListener(drag ? null : this);
         setOnMenuItemClickListener(drag ? null : this);
     }

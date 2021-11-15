@@ -1,3 +1,1 @@
-monorail: {
-  component: "Internals>Preload"
-}
+mixins: "//chrome/browser/predictors/COMMON_METADATA"

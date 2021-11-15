@@ -448,11 +448,12 @@ PaintResult PaintLayerPainter::PaintLayerContents(
   offset_from_root += subpixel_accumulation;
 
   if (RuntimeEnabledFeatures::CullRectUpdateEnabled()) {
-    if (object.FirstFragment().NextFragment()) {
+    if (object.FirstFragment().NextFragment() ||
+        IsUnclippedLayoutView(paint_layer_)) {
       result = kMayBeClippedByCullRect;
     } else {
       IntRect visual_rect = FirstFragmentVisualRect(object);
-      IntRect cull_rect = object.FirstFragment().GetCullRect().Rect();
+      IntRect cull_rect(object.FirstFragment().GetCullRect().Rect());
       bool cull_rect_intersects_self = cull_rect.Intersects(visual_rect);
       if (!cull_rect.Contains(visual_rect))
         result = kMayBeClippedByCullRect;

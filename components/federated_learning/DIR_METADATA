@@ -1,1 +1,1 @@
-team_email: "privacy-sandbox-dev@chromium.org"
+mixins: "//components/federated_learning/COMMON_METADATA"

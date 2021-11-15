@@ -143,7 +143,8 @@ class TestBrowserWindow : public BrowserWindow {
   qrcode_generator::QRCodeGeneratorBubbleView* ShowQRCodeGeneratorBubble(
       content::WebContents* contents,
       qrcode_generator::QRCodeGeneratorBubbleController* controller,
-      const GURL& url) override;
+      const GURL& url,
+      bool show_back_button) override;
 #if !defined(OS_ANDROID)
   sharing_hub::ScreenshotCapturedBubble* ShowScreenshotCapturedBubble(
       content::WebContents* contents,
@@ -219,8 +220,6 @@ class TestBrowserWindow : public BrowserWindow {
   std::unique_ptr<content::EyeDropper> OpenEyeDropper(
       content::RenderFrameHost* frame,
       content::EyeDropperListener* listener) override;
-
-  void ShowInProductHelpPromo(InProductHelpFeature iph_feature) override {}
 
   void SetNativeWindow(gfx::NativeWindow window);
 

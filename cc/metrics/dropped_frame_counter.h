@@ -91,6 +91,11 @@ class CC_EXPORT DroppedFrameCounter {
     total_counter_ = total_counter;
   }
 
+  void SetTimeFcpReceivedForTesting(base::TimeTicks time_fcp_received) {
+    DCHECK(fcp_received_);
+    time_fcp_received_ = time_fcp_received;
+  }
+
   double sliding_window_max_percent_dropped() const {
     return sliding_window_max_percent_dropped_;
   }
@@ -109,8 +114,7 @@ class CC_EXPORT DroppedFrameCounter {
 
   void UpdateMaxPercentDroppedFrame(double percent_dropped_frame);
 
-  const base::TimeDelta kSlidingWindowInterval =
-      base::TimeDelta::FromSeconds(1);
+  const base::TimeDelta kSlidingWindowInterval = base::Seconds(1);
   std::queue<std::pair<const viz::BeginFrameArgs, bool>> sliding_window_;
   uint32_t dropped_frame_count_in_window_ = 0;
   double total_frames_in_window_ = 60.0;

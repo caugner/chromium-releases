@@ -36,6 +36,8 @@
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/models/image_model.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/color/color_id.h"
+#include "ui/color/color_provider.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/paint_vector_icon.h"
@@ -102,8 +104,8 @@ class TipTextContainer : public views::View {
     constexpr int kTipImageSize = 16;
     auto* lightbulb_outline_image = AddChildView(
         std::make_unique<views::ImageView>(ui::ImageModel::FromVectorIcon(
-            vector_icons::kLightbulbOutlineIcon,
-            ui::NativeTheme::kColorId_AlertSeverityMedium, kTipImageSize)));
+            vector_icons::kLightbulbOutlineIcon, ui::kColorAlertMediumSeverity,
+            kTipImageSize)));
     lightbulb_outline_image->SetVerticalAlignment(
         views::ImageView::Alignment::kLeading);
 
@@ -125,7 +127,7 @@ class TipTextContainer : public views::View {
 
     // TODO(tluk): We should not be using hard coded color constants and
     // switching colors based on the dark mode flag. We should instead
-    // systematize these into color ids simply call GetSystemColor() for these
+    // systematize these into color ids and simply call GetColor() for these
     // ids.
     SetBackground(views::CreateSolidBackground(
         should_use_dark_colors ? gfx::kGoogleGrey800 : gfx::kGoogleGrey050));
@@ -142,8 +144,7 @@ class TipTextContainer : public views::View {
     tip_->SetEnabledColor(
         should_use_dark_colors
             ? gfx::kGoogleGrey200
-            : GetNativeTheme()->GetSystemColor(
-                  ui::NativeTheme::kColorId_LabelSecondaryColor));
+            : GetColorProvider()->GetColor(ui::kColorLabelForegroundSecondary));
   }
 
  private:
@@ -387,7 +388,7 @@ END_METADATA
 LocalCardMigrationDialogView::LocalCardMigrationDialogView(
     LocalCardMigrationDialogController* controller,
     content::WebContents* web_contents)
-    : controller_(controller), web_contents_(web_contents) {
+    : controller_(controller), web_contents_(web_contents->GetWeakPtr()) {
   SetButtons(controller_->AllCardsInvalid()
                  ? ui::DIALOG_BUTTON_OK
                  : ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL);
@@ -413,6 +414,13 @@ LocalCardMigrationDialogView::LocalCardMigrationDialogView(
 LocalCardMigrationDialogView::~LocalCardMigrationDialogView() {}
 
 void LocalCardMigrationDialogView::ShowDialog() {
+  if (!web_contents_) {
+    // If web_contents does not exist, delete this because at this step this
+    // View is not owned by any class.
+    delete this;
+    return;
+  }
+
   ConstructView();
   constrained_window::CreateBrowserModalDialogViews(
       this, web_contents_->GetTopLevelNativeWindow())

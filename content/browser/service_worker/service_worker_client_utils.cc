@@ -266,8 +266,10 @@ void GetNonWindowClients(
       }
     }
   } else {
-    for (const auto& controllee : controller->controllee_map())
-      AddNonWindowClient(controllee.second, options->client_type, &clients);
+    for (const auto& controllee : controller->controllee_map()) {
+      AddNonWindowClient(controllee.second.get(), options->client_type,
+                         &clients);
+    }
   }
   DidGetClients(std::move(callback), std::move(clients));
 }
@@ -310,8 +312,9 @@ void GetWindowClients(
       }
     }
   } else {
-    for (const auto& controllee : controller->controllee_map())
-      AddWindowClient(controllee.second, &clients_info);
+    for (const auto& controllee : controller->controllee_map()) {
+      AddWindowClient(controllee.second.get(), &clients_info);
+    }
   }
 
   if (clients_info.empty()) {
@@ -395,13 +398,12 @@ void FocusWindowClient(ServiceWorkerContainerHost* container_host,
     return;
   }
 
-  // Avoid focusing on prerendered pages.
+  // Avoid focusing on inactive pages.
   // TODO(https://crbug.com/1239553): Running the callback with nullptr
   // results in NotFoundError whereas TypeError should be invoked
   // according to the specification.
   // https://w3c.github.io/ServiceWorker/#client-focus
-  if (render_frame_host->GetLifecycleState() ==
-      RenderFrameHost::LifecycleState::kPrerendering) {
+  if (!render_frame_host->IsActive()) {
     std::move(callback).Run(nullptr);
     return;
   }
@@ -497,9 +499,7 @@ void NavigateClient(const GURL& url,
   // navigation. We can't proceed with the navigation and rely on the usual
   // mechanism to disallow (PrerenderNavigationThrottle), because
   // RequestOpenURL() crashes if called by a prerendering main frame.
-  if (rfhi->frame_tree_node()->IsMainFrame() &&
-      rfhi->frame_tree()->is_prerendering()) {
-    DCHECK(blink::features::IsPrerender2Enabled());
+  if (rfhi->is_main_frame() && rfhi->frame_tree()->is_prerendering()) {
     DidNavigate(context, script_url.GetOrigin(), key, std::move(callback),
                 GlobalRenderFrameHostId());
     return;

@@ -35,7 +35,7 @@
 #include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/events/x/events_x_utils.h"
 #include "ui/events/x/x11_event_translation.h"
-#include "ui/gfx/skia_util.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/x/x11_atom_cache.h"
 #include "ui/gfx/x/x11_path.h"
 #include "ui/gfx/x/x11_window_event_manager.h"
@@ -191,6 +191,7 @@ X11Window::X11Window(PlatformWindowDelegate* platform_window_delegate)
       x_root_window_(GetX11RootWindow()) {
   DCHECK(connection_);
   DCHECK_NE(x_root_window_, x11::Window::None);
+  DCHECK(platform_window_delegate_);
 
   // Set a class property key, which allows |this| to be used for interactive
   // events, e.g. move or resize.
@@ -463,6 +464,8 @@ bool X11Window::IsVisible() const {
 }
 
 void X11Window::PrepareForShutdown() {
+  if (HasCapture())
+    X11WindowManager::GetInstance()->UngrabEvents(this);
   connection_->RemoveEventObserver(this);
   DCHECK(X11EventSource::HasInstance());
   X11EventSource::GetInstance()->RemovePlatformEventDispatcher(this);
@@ -672,6 +675,13 @@ void X11Window::Maximize() {
   // Some WMs do not respect maximization hints on unmapped windows, so we
   // save this one for later too.
   should_maximize_after_map_ = !window_mapped_in_client_;
+
+  // Some WMs keep respecting the frame extents even if the window is maximised.
+  // Remove the insets when maximising.  The extents will be set again when the
+  // window is restored to normal state.
+  // See https://crbug.com/1260821
+  if (CanSetDecorationInsets())
+    SetDecorationInsets(nullptr);
 
   SetWMSpecState(true, x11::GetAtom("_NET_WM_STATE_MAXIMIZED_VERT"),
                  x11::GetAtom("_NET_WM_STATE_MAXIMIZED_HORZ"));
@@ -1007,40 +1017,72 @@ void X11Window::SetOpacity(float opacity) {
 }
 
 bool X11Window::CanSetDecorationInsets() const {
+  // Xfwm handles _GTK_FRAME_EXTENTS a bit unexpected way.  That is a known bug
+  // that will be eventually fixed, but for now we have to disable the function
+  // for Xfce.  The block below should be removed when Xfwm is updated with the
+  // fix and is known to work properly.
+  // See https://crbug.com/1260821.
+  {
+    static WindowManagerName wm_name = WM_OTHER;
+    static bool checked_for_wm = false;
+    if (!checked_for_wm) {
+      wm_name = GuessWindowManager();
+      checked_for_wm = true;
+    }
+    if (wm_name == WM_XFWM4)
+      return false;
+  }
   return ui::WmSupportsHint(x11::GetAtom("_GTK_FRAME_EXTENTS"));
 }
 
-void X11Window::SetDecorationInsets(gfx::Insets insets_px) {
-  std::vector<uint32_t> extents{static_cast<uint32_t>(insets_px.left()),
-                                static_cast<uint32_t>(insets_px.right()),
-                                static_cast<uint32_t>(insets_px.top()),
-                                static_cast<uint32_t>(insets_px.bottom())};
-  x11::SetArrayProperty(xwindow_, x11::GetAtom("_GTK_FRAME_EXTENTS"),
-                        x11::Atom::CARDINAL, extents);
+void X11Window::SetDecorationInsets(const gfx::Insets* insets_px) {
+  auto atom = x11::GetAtom("_GTK_FRAME_EXTENTS");
+  if (!insets_px) {
+    x11::DeleteProperty(xwindow_, atom);
+    return;
+  }
+  std::vector<uint32_t> extents{static_cast<uint32_t>(insets_px->left()),
+                                static_cast<uint32_t>(insets_px->right()),
+                                static_cast<uint32_t>(insets_px->top()),
+                                static_cast<uint32_t>(insets_px->bottom())};
+  x11::SetArrayProperty(xwindow_, atom, x11::Atom::CARDINAL, extents);
 }
 
-void X11Window::SetOpaqueRegion(std::vector<gfx::Rect> region_px) {
+void X11Window::SetOpaqueRegion(const std::vector<gfx::Rect>* region_px) {
+  auto atom = x11::GetAtom("_NET_WM_OPAQUE_REGION");
+  if (!region_px) {
+    x11::DeleteProperty(xwindow_, atom);
+    return;
+  }
   std::vector<uint32_t> value;
-  for (const auto& rect : region_px) {
+  for (const auto& rect : *region_px) {
     value.push_back(rect.x());
     value.push_back(rect.y());
     value.push_back(rect.width());
     value.push_back(rect.height());
   }
-  x11::SetArrayProperty(xwindow_, x11::GetAtom("_NET_WM_OPAQUE_REGION"),
-                        x11::Atom::CARDINAL, value);
+  x11::SetArrayProperty(xwindow_, atom, x11::Atom::CARDINAL, value);
 }
 
-void X11Window::SetInputRegion(gfx::Rect region_px) {
+void X11Window::SetInputRegion(const gfx::Rect* region_px) {
+  if (!region_px) {
+    // Reset the input region.
+    connection_->shape().Mask({
+        .operation = x11::Shape::So::Set,
+        .destination_kind = x11::Shape::Sk::Input,
+        .destination_window = xwindow_,
+    });
+    return;
+  }
   connection_->shape().Rectangles(x11::Shape::RectanglesRequest{
       .operation = x11::Shape::So::Set,
       .destination_kind = x11::Shape::Sk::Input,
       .ordering = x11::ClipOrdering::YXBanded,
       .destination_window = xwindow_,
-      .rectangles = {{static_cast<int16_t>(region_px.x()),
-                      static_cast<int16_t>(region_px.y()),
-                      static_cast<uint16_t>(region_px.width()),
-                      static_cast<uint16_t>(region_px.height())}},
+      .rectangles = {{static_cast<int16_t>(region_px->x()),
+                      static_cast<int16_t>(region_px->y()),
+                      static_cast<uint16_t>(region_px->width()),
+                      static_cast<uint16_t>(region_px->height())}},
   });
 }
 
@@ -1451,7 +1493,7 @@ int X11Window::UpdateDrag(const gfx::Point& screen_point) {
 
   auto data = std::make_unique<OSExchangeData>(
       std::make_unique<XOSExchangeDataProvider>(
-          drag_drop_client_->xwindow(),
+          drag_drop_client_->xwindow(), target_current_context->source_window(),
           target_current_context->fetched_targets()));
   int suggested_operations = target_current_context->GetDragOperation();
   // KDE-based file browsers such as Dolphin change the drag operation depending
@@ -1874,9 +1916,7 @@ void X11Window::AfterActivationStateChanged() {
   if (had_pointer_capture && !has_pointer_capture)
     OnXWindowLostCapture();
 
-  // A window can be both minimized and active from x11's perspective.
-  // But we treat a minimized window as inactive for platform consistency.
-  bool is_active = IsActive() && !IsMinimized();
+  bool is_active = IsActive();
   if (!was_active_ && is_active)
     SetFlashFrameHint(false);
 

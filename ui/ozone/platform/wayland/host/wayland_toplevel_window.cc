@@ -263,12 +263,16 @@ bool WaylandToplevelWindow::CanSetDecorationInsets() const {
              ->SupportsSetWindowGeometry();
 }
 
-void WaylandToplevelWindow::SetOpaqueRegion(std::vector<gfx::Rect> region_px) {
+void WaylandToplevelWindow::SetOpaqueRegion(
+    const std::vector<gfx::Rect>* region_px) {
   root_surface()->SetOpaqueRegion(region_px);
 }
 
-void WaylandToplevelWindow::SetInputRegion(gfx::Rect region_px) {
-  input_region_px_ = region_px;
+void WaylandToplevelWindow::SetInputRegion(const gfx::Rect* region_px) {
+  if (region_px)
+    input_region_px_ = *region_px;
+  else
+    input_region_px_ = absl::nullopt;
   root_surface()->SetInputRegion(region_px);
 }
 
@@ -371,6 +375,8 @@ void WaylandToplevelWindow::HandleToplevelConfigure(int32_t width_dip,
 
   if (did_active_change)
     delegate()->OnActivationChanged(is_active_);
+
+  state_change_in_transit_ = false;
 }
 
 void WaylandToplevelWindow::HandleSurfaceConfigure(uint32_t serial) {
@@ -437,6 +443,9 @@ void WaylandToplevelWindow::UpdateVisualSize(const gfx::Size& size_px) {
     shell_toplevel()->AckConfigure(result->serial);
     connection()->ScheduleFlush();
     pending_configures_.erase(pending_configures_.begin(), ++result);
+  } else if (set_geometry_on_next_frame_) {
+    SetWindowGeometry(gfx::Rect(size_dip));
+    set_geometry_on_next_frame_ = false;
   }
 
   // UpdateVisualSize() indicates a frame update, which means we can forward new
@@ -467,6 +476,7 @@ bool WaylandToplevelWindow::OnInitialize(
     workspace_ = kVisibleOnAllWorkspaces;
   }
 
+  SetPinnedModeExtension(this, static_cast<PinnedModeExtension*>(this));
   return true;
 }
 
@@ -489,6 +499,11 @@ void WaylandToplevelWindow::SetWindowGeometry(gfx::Rect bounds_dip) {
         gfx::ScaleToRoundedInsets(*frame_insets_px(), 1.f / window_scale()));
   }
   shell_toplevel_->SetWindowGeometry(bounds_dip);
+}
+
+void WaylandToplevelWindow::UpdateDecorations() {
+  if (!state_change_in_transit_)
+    set_geometry_on_next_frame_ = true;
 }
 
 void WaylandToplevelWindow::OcclusionChanged(void* data,
@@ -574,10 +589,10 @@ void WaylandToplevelWindow::ShowSnapPreview(
                            ZAURA_SURFACE_INTENT_TO_SNAP_SINCE_VERSION) {
     uint32_t zaura_shell_snap_direction = ZAURA_SURFACE_SNAP_DIRECTION_NONE;
     switch (snap_direction) {
-      case WaylandWindowSnapDirection::kLeft:
+      case WaylandWindowSnapDirection::kPrimary:
         zaura_shell_snap_direction = ZAURA_SURFACE_SNAP_DIRECTION_LEFT;
         break;
-      case WaylandWindowSnapDirection::kRight:
+      case WaylandWindowSnapDirection::kSecondary:
         zaura_shell_snap_direction = ZAURA_SURFACE_SNAP_DIRECTION_RIGHT;
         break;
       case WaylandWindowSnapDirection::kNone:
@@ -597,10 +612,10 @@ void WaylandToplevelWindow::CommitSnap(
   if (aura_surface_ && zaura_surface_get_version(aura_surface_.get()) >=
                            ZAURA_SURFACE_UNSET_SNAP_SINCE_VERSION) {
     switch (snap_direction) {
-      case WaylandWindowSnapDirection::kLeft:
+      case WaylandWindowSnapDirection::kPrimary:
         zaura_surface_set_snap_left(aura_surface_.get());
         return;
-      case WaylandWindowSnapDirection::kRight:
+      case WaylandWindowSnapDirection::kSecondary:
         zaura_surface_set_snap_right(aura_surface_.get());
         return;
       case WaylandWindowSnapDirection::kNone:
@@ -669,6 +684,20 @@ void WaylandToplevelWindow::SendToDeskAtIndex(int index) {
   }
 }
 
+void WaylandToplevelWindow::Pin(bool trusted) const {
+  if (aura_surface_ && zaura_surface_get_version(aura_surface_.get()) >=
+                           ZAURA_SURFACE_SET_PIN_SINCE_VERSION) {
+    zaura_surface_set_pin(aura_surface_.get(), trusted);
+  }
+}
+
+void WaylandToplevelWindow::Unpin() const {
+  if (aura_surface_ && zaura_surface_get_version(aura_surface_.get()) >=
+                           ZAURA_SURFACE_UNSET_PIN_SINCE_VERSION) {
+    zaura_surface_unset_pin(aura_surface_.get());
+  }
+}
+
 std::string WaylandToplevelWindow::GetWorkspace() const {
   return workspace_.has_value() ? base::NumberToString(workspace_.value())
                                 : std::string();
@@ -710,6 +739,8 @@ void WaylandToplevelWindow::TriggerStateChanges() {
   } else if (state_ == PlatformWindowState::kNormal) {
     shell_toplevel_->UnSetMaximized();
   }
+
+  state_change_in_transit_ = (previous_state_ != state_);
 
   delegate()->OnWindowStateChanged(previous_state_, state_);
 
@@ -845,8 +876,9 @@ void WaylandToplevelWindow::UpdateWindowMask() {
   // TODO(http://crbug.com/1158733): When supporting PlatformWindow::SetShape,
   // update window region with the given |shape|.
   WaylandWindow::UpdateWindowMask();
-  root_surface()->SetInputRegion(
-      input_region_px_ ? *input_region_px_ : gfx::Rect(visual_size_px()));
+  gfx::Rect region(visual_size_px());
+  root_surface()->SetInputRegion(input_region_px_ ? &*input_region_px_
+                                                  : &region);
 }
 
 void WaylandToplevelWindow::UpdateWindowShape() {

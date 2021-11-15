@@ -73,6 +73,10 @@ def ci_builder(
     if not branches.matches(branch_selector):
         return
 
+    try_only_kwargs = [k for k in ("mirrors", "try_settings") if k in kwargs]
+    if try_only_kwargs:
+        fail("CI builders cannot specify the following try-only arguments: {}".format(try_only_kwargs))
+
     # Branch builders should never close the tree, only builders from the main
     # "ci" bucket.
     bucket = defaults.get_value_from_kwargs("bucket", kwargs)
@@ -112,10 +116,10 @@ def ci_builder(
         branches.value({branches.STANDARD_BRANCHES: "chrome_browser_release"}),
     )
 
-    experiments = experiments or {}
+    experiments = dict(experiments or {})
 
     # TODO(crbug.com/1135718): Promote out of experiment for all builders.
-    experiments.setdefault("chromium.chromium_tests.use_rdb_results", 10)
+    experiments.setdefault("chromium.chromium_tests.use_rdb_results", 100)
 
     goma_enable_ats = defaults.get_value_from_kwargs("goma_enable_ats", kwargs)
     if goma_enable_ats == args.COMPUTE:
@@ -756,6 +760,17 @@ def mojo_builder(
         **kwargs
     )
 
+def rust_builder(
+        *,
+        name,
+        **kwargs):
+    return ci.builder(
+        name = name,
+        builder_group = "chromium.rust",
+        goma_backend = builders.goma.backend.RBE_PROD,
+        **kwargs
+    )
+
 def swangle_builder(*, name, builderless = True, pinned = True, **kwargs):
     builder_args = dict(kwargs)
     builder_args.update(
@@ -906,6 +921,7 @@ ci = struct(
     mac_thin_tester = mac_thin_tester,
     memory_builder = memory_builder,
     mojo_builder = mojo_builder,
+    rust_builder = rust_builder,
     swangle_linux_builder = swangle_linux_builder,
     swangle_mac_builder = swangle_mac_builder,
     swangle_windows_builder = swangle_windows_builder,

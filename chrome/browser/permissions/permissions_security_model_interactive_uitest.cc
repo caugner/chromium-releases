@@ -12,6 +12,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/permissions/permission_request_manager_test_api.h"
+#include "components/content_settings/browser/page_specific_content_settings.h"
 #include "components/embedder_support/switches.h"
 #include "components/permissions/features.h"
 #include "components/permissions/test/mock_permission_prompt_factory.h"
@@ -213,7 +214,9 @@ class PermissionsSecurityModelInteractiveUITest
     ASSERT_FALSE(
         content::EvalJs(test_rfh, check_permission_script).value.GetBool());
 
-    const bool is_embedder = test_rfh->IsDescendantOf(opener_rfh);
+    const bool contents_is_embedder =
+        content::WebContents::FromRenderFrameHost(test_rfh) ==
+        opener_or_embedder_contents;
 
     permissions::PermissionRequestManager* manager =
         permissions::PermissionRequestManager::FromWebContents(
@@ -244,21 +247,19 @@ class PermissionsSecurityModelInteractiveUITest
     EXPECT_TRUE(
         content::EvalJs(opener_rfh, check_permission_script).value.GetBool());
 
+    // If `test_rfh` is not a descendant of `opener_or_embedder_contents`,
+    // in other words if `test_rfh` was created via `Window.open()`,
+    // permissions are propagated from an opener WebContents only if
+    // `RevisedOriginHandlingEnabled` is enabled.
+    const bool expect_granted =
+        IsRevisedOriginHandlingEnabled() || contents_is_embedder;
+
     // Verify permissions on the test RFH.
     {
-      // If `test_rfh` is not a descendant of `opener_or_embedder_contents`,
-      // in other words if `test_rfh` was created via `Window.open()`,
-      // permissions are propagated from an opener WebContents only if
-      // `RevisedOriginHandlingEnabled` is enabled.
-      const bool expect_granted =
-          IsRevisedOriginHandlingEnabled() || is_embedder;
-
       EXPECT_EQ(
           expect_granted,
           content::EvalJs(test_rfh, check_permission_script).value.GetBool());
     }
-
-    const bool expect_granted = IsRevisedOriginHandlingEnabled() || is_embedder;
 
     // Request permission on the test RFH.
     test_rfh->GetView()->Focus();
@@ -770,4 +771,67 @@ IN_PROC_BROWSER_TEST_P(PermissionsSecurityModelInteractiveUITest,
                               content::EXECUTE_SCRIPT_DEFAULT_OPTIONS, 1)
                   .value.GetBool());
 }
+
+IN_PROC_BROWSER_TEST_P(PermissionsSecurityModelInteractiveUITest,
+                       MicActivityIndicatorOnNtpUseDseOrigin) {
+  content::WebContents* embedder_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(embedder_contents);
+
+  content::RenderFrameHost* main_rfh =
+      ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
+          browser(), GURL(chrome::kChromeUINewTabURL), 1);
+  content::WebContents::FromRenderFrameHost(main_rfh)->Focus();
+
+  ASSERT_TRUE(main_rfh);
+  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
+            embedder_contents->GetLastCommittedURL().GetOrigin());
+  EXPECT_EQ(GURL(chrome::kChromeUINewTabPageURL),
+            main_rfh->GetLastCommittedOrigin().GetURL());
+
+  constexpr char kCheckMic[] = R"((async () => {
+         const PermissionStatus =
+            await navigator.permissions.query({name: 'microphone'});
+         return PermissionStatus.state === 'granted';
+    })();)";
+
+  EXPECT_FALSE(content::EvalJs(main_rfh, kCheckMic,
+                               content::EXECUTE_SCRIPT_DEFAULT_OPTIONS, 1)
+                   .value.GetBool());
+
+  permissions::PermissionRequestManager* permission_request_manager =
+      permissions::PermissionRequestManager::FromWebContents(embedder_contents);
+
+  constexpr char kRequestMic[] =
+      "navigator.mediaDevices.getUserMedia({ audio: true });";
+
+  std::unique_ptr<permissions::MockPermissionPromptFactory> bubble_factory =
+      std::make_unique<permissions::MockPermissionPromptFactory>(
+          permission_request_manager);
+
+  bubble_factory->set_response_type(
+      permissions::PermissionRequestManager::AutoResponseType::ACCEPT_ALL);
+
+  content::EvalJsResult result = content::EvalJs(
+      main_rfh, kRequestMic, content::EXECUTE_SCRIPT_DEFAULT_OPTIONS, 1);
+  EXPECT_EQ("", result.error);
+
+  // Mic request from an NTP will be changed to DSE origin.
+  EXPECT_TRUE(
+      bubble_factory->RequestOriginSeen(GURL("https://www.google.com")));
+  bubble_factory->set_response_type(
+      permissions::PermissionRequestManager::AutoResponseType::NONE);
+
+  EXPECT_TRUE(content::EvalJs(main_rfh, kCheckMic,
+                              content::EXECUTE_SCRIPT_DEFAULT_OPTIONS, 1)
+                  .value.GetBool());
+
+  content_settings::PageSpecificContentSettings* page_content_settings =
+      content_settings::PageSpecificContentSettings::GetForFrame(main_rfh);
+
+  // Media stream origin on NTP should equal to DSE.
+  EXPECT_EQ(page_content_settings->media_stream_access_origin(),
+            GURL("https://www.google.com"));
+
+}  // namespace
 }  // anonymous namespace

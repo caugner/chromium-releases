@@ -1,3 +1,1 @@
-monorail {
-  component: "UI>Browser>Mobile>SearchWidget"
-}
+mixins: "//chrome/android/java/src/org/chromium/chrome/browser/searchwidget/COMMON_METADATA"

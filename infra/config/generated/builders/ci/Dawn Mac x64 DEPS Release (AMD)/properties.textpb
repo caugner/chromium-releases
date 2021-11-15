@@ -1,15 +1,12 @@
 {
   "$build/chromium_tests": {
     "project_trigger_overrides": {
-      "chromium": "chromium-m95"
+      "chromium": "chromium-m96"
     }
   },
   "$kitchen": {
     "devshell": true,
     "git_auth": true
-  },
-  "$recipe_engine/isolated": {
-    "server": "https://isolateserver.appspot.com"
   },
   "$recipe_engine/resultdb/test_presentation": {
     "column_keys": [],
@@ -18,5 +15,9 @@
       "v.test_suite"
     ]
   },
-  "recipe": "chromium"
+  "builder_group": "chromium.dawn",
+  "recipe": "chromium",
+  "sheriff_rotations": [
+    "chrome_browser_release"
+  ]
 }

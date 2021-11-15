@@ -1,3 +1,1 @@
-monorail {
-  component: "Internals>Media>UI"
-}
+mixins: "//chrome/browser/ui/global_media_controls/COMMON_METADATA"

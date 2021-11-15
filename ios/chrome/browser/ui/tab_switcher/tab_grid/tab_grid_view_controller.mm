@@ -251,10 +251,8 @@ NSUInteger GetPageIndexFromPage(TabGridPage page) {
 
   [self setupTopToolbar];
   [self setupBottomToolbar];
-  if (@available(iOS 14, *)) {
-    if (IsTabsBulkActionsEnabled())
-      [self setupEditButton];
-  }
+  if (IsTabsBulkActionsEnabled())
+    [self setupEditButton];
 
   // Hide the toolbars and the floating button, so they can fade in the first
   // time there's a transition into this view controller.
@@ -461,10 +459,7 @@ NSUInteger GetPageIndexFromPage(TabGridPage page) {
 
   [self.regularTabsViewController contentWillAppearAnimated:animated];
 
-  if (@available(iOS 13.0, *)) {
-    self.remoteTabsViewController.session =
-        self.view.window.windowScene.session;
-  }
+  self.remoteTabsViewController.session = self.view.window.windowScene.session;
 
   self.remoteTabsViewController.preventUpdates = NO;
 }
@@ -514,6 +509,11 @@ NSUInteger GetPageIndexFromPage(TabGridPage page) {
     (id<GridImageDataSource>)regularTabsImageDataSource {
   self.regularTabsViewController.imageDataSource = regularTabsImageDataSource;
   _regularTabsImageDataSource = regularTabsImageDataSource;
+}
+
+- (void)setPriceCardDataSource:(id<PriceCardDataSource>)priceCardDataSource {
+  self.regularTabsViewController.priceCardDataSource = priceCardDataSource;
+  _priceCardDataSource = priceCardDataSource;
 }
 
 - (id<GridConsumer>)incognitoTabsConsumer {
@@ -582,6 +582,16 @@ NSUInteger GetPageIndexFromPage(TabGridPage page) {
   _incognitoTabsContextMenuProvider = provider;
 
   self.incognitoTabsViewController.menuProvider = provider;
+}
+
+- (void)setReauthAgent:(IncognitoReauthSceneAgent*)reauthAgent {
+  if (_reauthAgent) {
+    [_reauthAgent removeObserver:self];
+  }
+
+  _reauthAgent = reauthAgent;
+
+  [_reauthAgent addObserver:self];
 }
 
 #pragma mark - TabGridPaging
@@ -1305,33 +1315,31 @@ NSUInteger GetPageIndexFromPage(TabGridPage page) {
   self.bottomToolbar.mode = self.tabGridMode;
   self.topToolbar.mode = self.tabGridMode;
 
-  if (@available(iOS 14, *)) {
-    GridViewController* gridViewController =
-        [self gridViewControllerForPage:self.currentPage];
-    NSArray<NSString*>* items =
-        gridViewController.selectedShareableItemIDsForEditing;
-    UIMenu* menu = nil;
-    switch (self.currentPage) {
-      case TabGridPageIncognitoTabs:
-        menu = [UIMenu
-            menuWithChildren:[self.incognitoTabsDelegate
-                                 addToButtonMenuElementsForItems:items]];
-        break;
-      case TabGridPageRegularTabs:
-        menu = [UIMenu
-            menuWithChildren:[self.regularTabsDelegate
-                                 addToButtonMenuElementsForItems:items]];
-        break;
-      case TabGridPageRemoteTabs:
-        // No-op, Add To button inaccessible in remote tabs page.
-        break;
-    }
-    [self.bottomToolbar setAddToButtonMenu:menu];
-    BOOL incognitoTabsNeedsAuth =
-        (self.currentPage == TabGridPageIncognitoTabs &&
-         self.incognitoTabsViewController.contentNeedsAuthentication);
-    [self.bottomToolbar setAddToButtonEnabled:!incognitoTabsNeedsAuth];
+  GridViewController* gridViewController =
+      [self gridViewControllerForPage:self.currentPage];
+  NSArray<NSString*>* items =
+      gridViewController.selectedShareableItemIDsForEditing;
+  UIMenu* menu = nil;
+  switch (self.currentPage) {
+    case TabGridPageIncognitoTabs:
+      menu =
+          [UIMenu menuWithChildren:[self.incognitoTabsDelegate
+                                       addToButtonMenuElementsForItems:items]];
+      break;
+    case TabGridPageRegularTabs:
+      menu =
+          [UIMenu menuWithChildren:[self.regularTabsDelegate
+                                       addToButtonMenuElementsForItems:items]];
+      break;
+    case TabGridPageRemoteTabs:
+      // No-op, Add To button inaccessible in remote tabs page.
+      break;
   }
+  [self.bottomToolbar setAddToButtonMenu:menu];
+  BOOL incognitoTabsNeedsAuth =
+      (self.currentPage == TabGridPageIncognitoTabs &&
+       self.incognitoTabsViewController.contentNeedsAuthentication);
+  [self.bottomToolbar setAddToButtonEnabled:!incognitoTabsNeedsAuth];
 
   // When current page is a remote tabs page.
   if (self.currentPage == TabGridPageRemoteTabs) {
@@ -2078,6 +2086,15 @@ NSUInteger GetPageIndexFromPage(TabGridPage page) {
 
 - (void)didTapLinkWithURL:(const GURL&)URL {
   [self.delegate openLinkWithURL:URL];
+}
+
+#pragma mark - IncognitoReauthObserver
+
+- (void)reauthAgent:(IncognitoReauthSceneAgent*)agent
+    didUpdateAuthenticationRequirement:(BOOL)isRequired {
+  if (isRequired) {
+    self.tabGridMode = TabGridModeNormal;
+  }
 }
 
 #pragma mark - UIResponder

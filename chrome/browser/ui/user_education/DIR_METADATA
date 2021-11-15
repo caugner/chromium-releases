@@ -1,3 +1,1 @@
-monorail: {
-  component: "UI>Browser>UserEducation"
-}
+mixins: "//chrome/browser/ui/user_education/COMMON_METADATA"

@@ -51,6 +51,8 @@ std::ostream& operator<<(std::ostream& os, Source::Type type) {
       return os << "System";
     case Source::Type::kPolicy:
       return os << "Policy";
+    case Source::Type::kSubApp:
+      return os << "SubApp";
     case Source::Type::kWebAppStore:
       return os << "WebAppStore";
     case Source::Type::kSync:
@@ -91,6 +93,8 @@ std::ostream& operator<<(std::ostream& os, InstallResultCode code) {
       return os << "kPreviouslyUninstalled";
     case InstallResultCode::kWebContentsDestroyed:
       return os << "kWebContentsDestroyed";
+    case InstallResultCode::kInstallTaskDestroyed:
+      return os << "kInstallTaskDestroyed";
     case InstallResultCode::kWriteDataFailed:
       return os << "kWriteDataFailed";
     case InstallResultCode::kUserInstallDeclined:
@@ -113,8 +117,6 @@ std::ostream& operator<<(std::ostream& os, InstallResultCode code) {
       return os << "kFailedPlaceholderUninstall";
     case InstallResultCode::kNotInstallable:
       return os << "kNotInstallable";
-    case InstallResultCode::kBookmarkExtensionInstallError:
-      return os << "kBookmarkExtensionInstallError";
     case InstallResultCode::kApkWebAppInstallFailed:
       return os << "kApkWebAppInstallFailed";
     case InstallResultCode::kCancelledOnWebAppProviderShuttingDown:

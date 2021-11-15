@@ -24,6 +24,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/synchronization/lock.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -67,7 +68,7 @@
 #include "media/base/media_switches.h"
 #include "media/filters/stream_parser_factory.h"
 #include "media/video/gpu_video_accelerator_factories.h"
-#include "media/webrtc/webrtc_switches.h"
+#include "media/webrtc/webrtc_features.h"
 #include "mojo/public/cpp/base/big_buffer.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "ppapi/buildflags/buildflags.h"
@@ -201,8 +202,11 @@ RendererBlinkPlatformImpl::RendererBlinkPlatformImpl(
   top_level_blame_context_.Initialize();
   main_thread_scheduler_->SetTopLevelBlameContext(&top_level_blame_context_);
 
-  GetBrowserInterfaceBroker()->GetInterface(
-      code_cache_host_remote_.InitWithNewPipeAndPassReceiver());
+  {
+    base::AutoLock lock(code_cache_host_lock_);
+    GetBrowserInterfaceBroker()->GetInterface(
+        code_cache_host_remote_.InitWithNewPipeAndPassReceiver());
+  }
 }
 
 RendererBlinkPlatformImpl::~RendererBlinkPlatformImpl() {
@@ -329,7 +333,7 @@ void RendererBlinkPlatformImpl::CacheMetadata(
   // Let the browser know we generated cacheable metadata for this resource.
   // The browser may cache it and return it on subsequent responses to speed
   // the processing of this resource.
-  GetCodeCacheHost().DidGenerateCacheableMetadata(
+  GetCodeCacheHost()->DidGenerateCacheableMetadata(
       cache_type, url, response_time,
       mojo_base::BigBuffer(base::make_span(data, size)));
 }
@@ -338,7 +342,7 @@ void RendererBlinkPlatformImpl::FetchCachedCode(
     blink::mojom::CodeCacheType cache_type,
     const blink::WebURL& url,
     FetchCachedCodeCallback callback) {
-  GetCodeCacheHost().FetchCachedCode(
+  GetCodeCacheHost()->FetchCachedCode(
       cache_type, url,
       base::BindOnce(
           [](FetchCachedCodeCallback callback, base::Time time,
@@ -351,7 +355,7 @@ void RendererBlinkPlatformImpl::FetchCachedCode(
 void RendererBlinkPlatformImpl::ClearCodeCacheEntry(
     blink::mojom::CodeCacheType cache_type,
     const GURL& url) {
-  GetCodeCacheHost().ClearCodeCacheEntry(cache_type, url);
+  GetCodeCacheHost()->ClearCodeCacheEntry(cache_type, url);
 }
 
 bool RendererBlinkPlatformImpl::IsRedirectSafe(const GURL& from_url,
@@ -401,7 +405,7 @@ void RendererBlinkPlatformImpl::CacheMetadataInCacheStorage(
   // Let the browser know we generated cacheable metadata for this resource in
   // CacheStorage. The browser may cache it and return it on subsequent
   // responses to speed the processing of this resource.
-  GetCodeCacheHost().DidGenerateCacheableMetadataInCacheStorage(
+  GetCodeCacheHost()->DidGenerateCacheableMetadataInCacheStorage(
       url, response_time, mojo_base::BigBuffer(base::make_span(data, size)),
       cacheStorageOrigin, cacheStorageCacheName.Utf8());
 }
@@ -685,18 +689,6 @@ void RendererBlinkPlatformImpl::GetWebRTCRendererPreferences(
     }
   }
   *allow_mdns_obfuscation = true;
-}
-
-absl::optional<int> RendererBlinkPlatformImpl::GetAgcStartupMinimumVolume() {
-  std::string min_volume_str =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kAgcStartupMinVolume);
-  int startup_min_volume;
-  if (min_volume_str.empty() ||
-      !base::StringToInt(min_volume_str, &startup_min_volume)) {
-    return absl::optional<int>();
-  }
-  return absl::optional<int>(startup_min_volume);
 }
 
 bool RendererBlinkPlatformImpl::IsWebRtcHWH264DecodingEnabled(
@@ -1101,13 +1093,18 @@ SkBitmap* RendererBlinkPlatformImpl::GetSadPageBitmap() {
 
 //------------------------------------------------------------------------------
 
-blink::mojom::CodeCacheHost& RendererBlinkPlatformImpl::GetCodeCacheHost() {
+mojo::SharedRemote<blink::mojom::CodeCacheHost>
+RendererBlinkPlatformImpl::GetCodeCacheHost() {
+  base::AutoLock lock(code_cache_host_lock_);
   if (!code_cache_host_) {
     code_cache_host_ = mojo::SharedRemote<blink::mojom::CodeCacheHost>(
         std::move(code_cache_host_remote_),
         base::ThreadPool::CreateSequencedTaskRunner({}));
   }
-  return *code_cache_host_;
+  // mojo::SharedRemote is not thread-safe itself, but it's safe to copy to
+  // other threads. So, return the code cache host by copy, rather than
+  // accessing the underlying interface directly.
+  return code_cache_host_;
 }
 
 std::unique_ptr<blink::WebV8ValueConverter>

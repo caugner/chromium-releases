@@ -43,6 +43,8 @@ import org.chromium.chrome.browser.omnibox.UrlBar.UrlBarDelegate;
 import org.chromium.chrome.browser.omnibox.UrlBarCoordinator.SelectionState;
 import org.chromium.chrome.browser.omnibox.geo.GeolocationHeader;
 import org.chromium.chrome.browser.omnibox.status.StatusCoordinator;
+import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
+import org.chromium.chrome.browser.omnibox.styles.OmniboxTheme;
 import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteCoordinator;
 import org.chromium.chrome.browser.omnibox.voice.AssistantVoiceSearchService;
 import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionHandler;
@@ -58,6 +60,7 @@ import org.chromium.components.browser_ui.styles.ChromeColors;
 import org.chromium.components.browser_ui.widget.animation.CancelAwareAnimatorListener;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.components.externalauth.ExternalAuthUtils;
+import org.chromium.components.metrics.OmniboxEventProtos.OmniboxEventProto.PageClassification;
 import org.chromium.components.search_engines.TemplateUrl;
 import org.chromium.components.search_engines.TemplateUrlService;
 import org.chromium.components.signin.AccountManagerFacadeProvider;
@@ -923,26 +926,27 @@ class LocationBarMediator
     }
 
     /**
-     * Update visuals to use a correct light or dark color scheme depending on the primary color.
+     * Update visuals to use a correct color scheme depending on the primary color.
      */
     @VisibleForTesting
-    /* package */ void updateUseDarkColors() {
+    /* package */ void updateOmniboxTheme() {
         // TODO(crbug.com/1114183): Unify light and dark color logic in chrome and make it clear
         // whether the foreground or background color is dark.
-        final boolean useDarkColors =
+        final boolean useDarkForegroundColors =
                 !ColorUtils.shouldUseLightForegroundOnBackground(getPrimaryBackgroundColor());
+        final @OmniboxTheme int omniboxTheme = OmniboxResourceProvider.getOmniboxTheme(
+                mContext, mLocationBarDataProvider.isIncognito(), getPrimaryBackgroundColor());
 
         mLocationBarLayout.setDeleteButtonTint(
-                ChromeColors.getPrimaryIconTint(mContext, !useDarkColors));
+                ChromeColors.getPrimaryIconTint(mContext, !useDarkForegroundColors));
         // If the URL changed colors and is not focused, update the URL to account for the new
         // color scheme.
-        if (mUrlCoordinator.setUseDarkTextColors(useDarkColors) && !isUrlBarFocused()) {
+        if (mUrlCoordinator.setOmniboxTheme(omniboxTheme) && !isUrlBarFocused()) {
             updateUrl();
         }
-        mStatusCoordinator.setUseDarkColors(useDarkColors);
+        mStatusCoordinator.setUseDarkForegroundColors(useDarkForegroundColors);
         if (mAutocompleteCoordinator != null) {
-            mAutocompleteCoordinator.updateVisualsForState(
-                    useDarkColors, mLocationBarDataProvider.isIncognito());
+            mAutocompleteCoordinator.updateVisualsForState(omniboxTheme);
         }
     }
 
@@ -1037,6 +1041,16 @@ class LocationBarMediator
         if (mIsTablet && mShouldShowButtonsWhenUnfocused) {
             return (mUrlHasFocus || mIsUrlFocusChangeInProgress) && isLensOnOmniboxEnabled();
         }
+
+        // Never show Lens in the old search widget page context.
+        // This widget must guarantee consistent feature set regardless of search engine choice or
+        // other aspects that may not be met by Lens.
+        LocationBarDataProvider dataProvider = getLocationBarDataProvider();
+        if (dataProvider.getPageClassification(dataProvider.isIncognito())
+                == PageClassification.ANDROID_SEARCH_WIDGET_VALUE) {
+            return false;
+        }
+
         return !shouldShowDeleteButton()
                 && (mUrlHasFocus || mIsUrlFocusChangeInProgress
                         || mIsLocationBarFocusedFromNtpScroll || mShouldShowLensButtonWhenUnfocused)
@@ -1160,7 +1174,7 @@ class LocationBarMediator
     public void onPrimaryColorChanged() {
         updateAssistantVoiceSearchDrawableAndColors();
         updateLensButtonColors();
-        updateUseDarkColors();
+        updateOmniboxTheme();
     }
 
     @Override

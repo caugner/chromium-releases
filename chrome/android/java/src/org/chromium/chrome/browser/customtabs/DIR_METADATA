@@ -1,4 +1,1 @@
-monorail {
-  component: "UI>Browser>Mobile>CustomTabs"
-}
-team_email: "mobile-web-install-team@google.com"
+mixins: "//chrome/android/java/src/org/chromium/chrome/browser/customtabs/COMMON_METADATA"

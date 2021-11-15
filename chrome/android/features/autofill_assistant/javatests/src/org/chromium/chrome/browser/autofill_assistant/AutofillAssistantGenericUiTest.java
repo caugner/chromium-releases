@@ -8,8 +8,9 @@ import static android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO;
 import static android.view.View.IMPORTANT_FOR_ACCESSIBILITY_YES;
 
 import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.action.ViewActions.clearText;
 import static androidx.test.espresso.action.ViewActions.click;
-import static androidx.test.espresso.action.ViewActions.replaceText;
+import static androidx.test.espresso.action.ViewActions.typeText;
 import static androidx.test.espresso.assertion.PositionAssertions.isLeftAlignedWith;
 import static androidx.test.espresso.assertion.ViewAssertions.doesNotExist;
 import static androidx.test.espresso.assertion.ViewAssertions.matches;
@@ -1696,14 +1697,19 @@ public class AutofillAssistantGenericUiTest {
 
         GenericUserInterfaceProto genericUserInterface =
                 GenericUserInterfaceProto.newBuilder()
-                        .setRootView(ViewProto.newBuilder()
-                                             .setIdentifier("text_view")
-                                             .setTextInputView(
-                                                     TextInputViewProto.newBuilder()
-                                                             .setHint("Type here")
-                                                             .setType(TextInputViewProto
-                                                                              .InputTypeHint.NONE)
-                                                             .setModelIdentifier("text_value")))
+                        .setRootView(
+                                ViewProto.newBuilder()
+                                        .setIdentifier("text_view")
+                                        .setLayoutParams(
+                                                ViewLayoutParamsProto.newBuilder().setLayoutWidth(
+                                                        ViewLayoutParamsProto.Size
+                                                                .MATCH_PARENT_VALUE))
+                                        .setTextInputView(
+                                                TextInputViewProto.newBuilder()
+                                                        .setHint("Type here")
+                                                        .setType(TextInputViewProto.InputTypeHint
+                                                                         .NONE)
+                                                        .setModelIdentifier("text_value")))
                         .setInteractions(
                                 InteractionsProto.newBuilder().addAllInteractions(interactions))
                         .setModel(ModelProto.newBuilder().addAllValues(modelValues))
@@ -1728,10 +1734,11 @@ public class AutofillAssistantGenericUiTest {
         startAutofillAssistant(mTestRule.getActivity(), testService);
 
         waitUntilViewMatchesCondition(withContentDescription("Type here"), isCompletelyDisplayed());
-        onView(withContentDescription("Type here")).perform(replaceText("test 1"));
-        onView(withText("test 1")).check(matches(isDisplayed()));
-        onView(withContentDescription("Type here")).perform(replaceText("test 2"));
-        onView(withText("test 2")).check(matches(isDisplayed()));
+        onView(withContentDescription("Type here")).perform(typeText("test 1"));
+        waitUntilViewMatchesCondition(withText("test 1"), isDisplayed());
+        onView(withContentDescription("Type here")).perform(clearText());
+        onView(withContentDescription("Type here")).perform(typeText("test 2"));
+        waitUntilViewMatchesCondition(withText("test 2"), isDisplayed());
 
         int numNextActionsCalled = testService.getNextActionsCounter();
         onView(withContentDescription("Done")).perform(click());

@@ -8,7 +8,7 @@
 <translation id="1169783199079129864">{MINUTES,plural, =1{1 ਮਿੰਟ}one{# ਮਿੰਟ}other{# ਮਿੰਟ}}</translation>
 <translation id="1181037720776840403">ਹਟਾਓ</translation>
 <translation id="1201402288615127009">ਅੱਗੇ</translation>
-<translation id="1218444235442067213"><ph name="APP_NAME" />, Play ਸਟੋਰ ਐਪ</translation>
+<translation id="1218444235442067213"><ph name="APP_NAME" />, Play Store ਐਪ</translation>
 <translation id="1243314992276662751">ਅਪਲੋਡ ਕਰੋ</translation>
 <translation id="1266864766717917324"><ph name="CONTENT_TYPE" /> ਨਾਲ ਸਾਂਝਾ ਨਹੀਂ ਕੀਤਾ ਜਾ ਸਕਿਆ</translation>
 <translation id="1269641567813814718">Win</translation>
@@ -30,6 +30,7 @@
 <translation id="1710340000377843106">ਹੁਣ</translation>
 <translation id="1752946267035950200">{MINUTES,plural, =1{1 ਮਿੰਟ}one{# ਮਿੰਟ}other{# ਮਿੰਟ}}</translation>
 <translation id="1761785978543082658"><ph name="QUANTITY" /> B</translation>
+<translation id="1770726142253415363">ਕਤਾਰ <ph name="ROW_NUMBER" />, ਕਾਲਮ <ph name="COLUMN_NUMBER" /> 'ਤੇ ਲਿਜਾਇਆ ਗਿਆ।</translation>
 <translation id="1801827354178857021">ਮਿਆਦ</translation>
 <translation id="1803208670097017349">{MONTHS,plural, =1{1 ਮਹੀਨਾ}one{# ਮਹੀਨਾ}other{# ਮਹੀਨੇ}}</translation>
 <translation id="1809410197924942083"><ph name="QUANTITY" /> MB/s</translation>

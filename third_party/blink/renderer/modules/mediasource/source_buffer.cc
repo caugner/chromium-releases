@@ -158,7 +158,7 @@ scoped_refptr<media::StreamParserBuffer> MakeAudioStreamParserBuffer(
   // TODO(crbug.com/1144908): Get EncodedAudioChunk to have an optional duration
   // attribute, and require it to be populated for use by MSE-for-WebCodecs,
   // here. For initial prototype, hard-coded 22ms is used as estimated duration.
-  stream_parser_buffer->set_duration(base::TimeDelta::FromMilliseconds(22));
+  stream_parser_buffer->set_duration(base::Milliseconds(22));
   stream_parser_buffer->set_is_duration_estimated(true);
   return stream_parser_buffer;
 }
@@ -631,6 +631,9 @@ ScriptPromise SourceBuffer::appendEncodedChunks(
     ExceptionState& exception_state) {
   DVLOG(2) << __func__ << " this=" << this;
 
+  UseCounter::Count(ExecutionContext::From(script_state),
+                    WebFeature::kMediaSourceExtensionsForWebCodecs);
+
   TRACE_EVENT_NESTABLE_ASYNC_BEGIN0(
       "media", "SourceBuffer::appendEncodedChunks", TRACE_ID_LOCAL(this));
 
@@ -990,9 +993,13 @@ void SourceBuffer::changeType(const String& type,
   }
 }
 
-void SourceBuffer::ChangeTypeUsingConfig(const SourceBufferConfig* config,
+void SourceBuffer::ChangeTypeUsingConfig(ExecutionContext* execution_context,
+                                         const SourceBufferConfig* config,
                                          ExceptionState& exception_state) {
   DVLOG(2) << __func__ << " this=" << this;
+
+  UseCounter::Count(execution_context,
+                    WebFeature::kMediaSourceExtensionsForWebCodecs);
 
   // If this object has been removed from the sourceBuffers attribute of the
   //    parent media source, then throw an InvalidStateError exception and abort

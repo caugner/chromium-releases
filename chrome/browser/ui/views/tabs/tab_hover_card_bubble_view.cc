@@ -36,6 +36,8 @@
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/theme_provider.h"
+#include "ui/color/color_id.h"
+#include "ui/color/color_provider.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/animation/linear_animation.h"
 #include "ui/gfx/animation/slide_animation.h"
@@ -48,7 +50,6 @@
 #include "ui/gfx/text_constants.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/gfx/text_utils.h"
-#include "ui/native_theme/native_theme.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/background.h"
@@ -667,7 +668,12 @@ class TabHoverCardBubbleView::ThumbnailView
   // `target_tab_image_`. Does a smart three-way crossfade if an image is
   // already fading out.
   void StartFadeOut() {
-    if (!GetVisible())
+    // If we aren't visible, don't have a widget, or our widget is being
+    // destructed and has no theme provider, skip trying to fade out since a
+    // ThemeProvider is needed for fading out placeholder images. (Note that
+    // GetThemeProvider() returns nullptr if there is no widget.)
+    // See: crbug.com/1246914
+    if (!GetVisible() || !GetThemeProvider())
       return;
 
     if (!GetPreviewImageCrossfadeStart().has_value())
@@ -916,14 +922,13 @@ void TabHoverCardBubbleView::UpdateCardContent(const Tab* tab) {
         // Simulate the same look as the footnote view.
         // TODO(dfried): should we add this as a variation of
         // FootnoteContainerView? Currently it's only used here.
-        alert_label->SetBackground(
-            views::CreateSolidBackground(GetNativeTheme()->GetSystemColor(
-                ui::NativeTheme::kColorId_BubbleFooterBackground)));
+        const auto* color_provider = GetColorProvider();
+        alert_label->SetBackground(views::CreateSolidBackground(
+            color_provider->GetColor(ui::kColorBubbleFooterBackground)));
         alert_label->SetBorder(views::CreatePaddedBorder(
             views::CreateSolidSidedBorder(
                 0, 0, 1, 0,
-                GetNativeTheme()->GetSystemColor(
-                    ui::NativeTheme::kColorId_FootnoteContainerBorder)),
+                color_provider->GetColor(ui::kColorBubbleFooterBorder)),
             kAlertMargins));
       }
       GetBubbleFrameView()->SetHeaderView(std::move(alert_label));

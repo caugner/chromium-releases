@@ -360,6 +360,9 @@ extern const char kAllowDeletingBrowserHistory[];
 extern const char kForceGoogleSafeSearch[];
 extern const char kForceYouTubeRestrict[];
 extern const char kAllowedDomainsForApps[];
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+extern const char kUseAshProxy[];
+#endif  //  BUILDFLAG(IS_CHROMEOS_LACROS)
 // TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
 // of lacros-chrome is complete.
 #if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
@@ -397,10 +400,10 @@ extern const char kUseCustomChromeFrame[];
 #if BUILDFLAG(ENABLE_PLUGINS)
 extern const char kContentSettingsPluginWhitelist[];
 #endif
-#if !defined(OS_ANDROID)
 extern const char kPartitionDefaultZoomLevel[];
 extern const char kPartitionPerHostZoomLevels[];
 
+#if !defined(OS_ANDROID)
 extern const char kPinnedTabs[];
 #endif  // !defined(OS_ANDROID)
 
@@ -449,6 +452,7 @@ extern const char kPrintPdfAsImageAvailability[];
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 extern const char kPrintRasterizePdfDpi[];
+extern const char kPrintPdfAsImageDefault[];
 #endif
 
 #if defined(OS_WIN) && BUILDFLAG(ENABLE_PRINTING)
@@ -530,7 +534,6 @@ extern const char kNaviOnboardGroup[];
 extern const char kQuietNotificationPermissionShouldShowPromo[];
 extern const char kQuietNotificationPermissionPromoWasShown[];
 extern const char kNotificationPermissionActions[];
-extern const char kPermissionActions[];
 extern const char kHadThreeConsecutiveNotificationPermissionDenies[];
 
 #if !defined(OS_ANDROID)
@@ -581,6 +584,7 @@ extern const char kOpenPdfDownloadInSystemReader[];
 extern const char kPromptForDownloadAndroid[];
 extern const char kDownloadLaterPromptStatus[];
 extern const char kShowMissingSdCardErrorAndroid[];
+extern const char kIncognitoReauthenticationForAndroid[];
 #endif
 
 extern const char kSaveFileDefaultDirectory[];
@@ -650,6 +654,9 @@ extern const char kDevToolsPortForwardingEnabled[];
 extern const char kDevToolsPortForwardingDefaultSet[];
 extern const char kDevToolsPortForwardingConfig[];
 extern const char kDevToolsPreferences[];
+extern const char kDevToolsSyncPreferences[];
+extern const char kDevToolsSyncedPreferencesSyncEnabled[];
+extern const char kDevToolsSyncedPreferencesSyncDisabled[];
 extern const char kDevToolsDiscoverTCPTargetsEnabled[];
 extern const char kDevToolsTCPDiscoveryConfig[];
 
@@ -696,6 +703,7 @@ extern const char kMediaDeviceIdSalt[];
 extern const char kMediaStorageIdSalt[];
 #if defined(OS_WIN)
 extern const char kMediaCdmOriginData[];
+extern const char kNetworkServiceSandboxEnabled[];
 #endif  // defined(OS_WIN)
 
 extern const char kPrintPreviewStickySettings[];
@@ -1066,6 +1074,7 @@ extern const char kAutoplayAllowed[];
 extern const char kAutoplayWhitelist[];
 extern const char kBlockAutoplayEnabled[];
 #endif
+extern const char kSandboxExternalProtocolBlocked[];
 
 #if defined(OS_LINUX)
 extern const char kAllowNativeNotifications[];
@@ -1120,6 +1129,7 @@ extern const char kRequiredClientCertificateForDevice[];
 extern const char kCertificateProvisioningStateForUser[];
 extern const char kCertificateProvisioningStateForDevice[];
 #endif
+extern const char kPromptOnMultipleMatchingCertificates[];
 
 extern const char kMediaFeedsBackgroundFetching[];
 extern const char kMediaFeedsSafeSearchEnabled[];
@@ -1155,6 +1165,7 @@ extern const char kCartModuleWelcomeSurfaceShownTimes[];
 extern const char kCartDiscountAcknowledged[];
 extern const char kCartDiscountEnabled[];
 extern const char kCartUsedDiscounts[];
+extern const char kCartDiscountLastFetchedTime[];
 #endif
 
 #if defined(OS_ANDROID)

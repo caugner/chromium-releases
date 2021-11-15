@@ -1,4 +1,1 @@
-monorail: {
-  component: "Internals>PerformanceManager"
-}
-team_email: "catan-team@chromium.org"
+mixins: "//services/resource_coordinator/COMMON_METADATA"

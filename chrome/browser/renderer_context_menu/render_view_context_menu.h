@@ -16,7 +16,7 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
-#include "chrome/browser/sharing/share_submenu_model.h"
+#include "chrome/browser/share/share_submenu_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_sub_menu_model.h"
 #include "components/renderer_context_menu/context_menu_content_type.h"
@@ -32,8 +32,7 @@
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/geometry/vector2d.h"
 
-#if (defined(OS_WIN) || defined(OS_CHROMEOS) || defined(OS_LINUX)) && \
-    BUILDFLAG(GOOGLE_CHROME_BRANDING)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #include "chrome/browser/lens/region_search/lens_region_search_controller.h"
 #endif
 
@@ -91,6 +90,9 @@ class RenderViewContextMenu : public RenderViewContextMenuBase,
  public:
   RenderViewContextMenu(content::RenderFrameHost* render_frame_host,
                         const content::ContextMenuParams& params);
+
+  RenderViewContextMenu(const RenderViewContextMenu&) = delete;
+  RenderViewContextMenu& operator=(const RenderViewContextMenu&) = delete;
 
   ~RenderViewContextMenu() override;
 
@@ -222,7 +224,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase,
   void AppendClickToCallItem();
 #endif
   void AppendSharedClipboardItem();
-  void AppendLensRegionSearchItem();
+  void AppendRegionSearchItem();
   void AppendQRCodeGeneratorItem(bool for_image, bool draw_icon);
 
   std::unique_ptr<ui::DataTransferEndpoint> CreateDataEndpoint(
@@ -244,7 +246,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase,
   bool IsRouteMediaEnabled() const;
   bool IsOpenLinkOTREnabled() const;
   bool IsSearchWebForEnabled() const;
-  bool IsLensRegionSearchEnabled() const;
+  bool IsRegionSearchEnabled() const;
 
   // Command execution functions.
   void ExecOpenWebApp();
@@ -258,7 +260,8 @@ class RenderViewContextMenu : public RenderViewContextMenuBase,
   void ExecCopyLinkText();
   void ExecCopyImageAt();
   void ExecSearchLensForImage();
-  void ExecLensRegionSearch();
+  void ExecRegionSearch(int event_flags,
+                        bool is_google_default_search_provider);
   void ExecSearchWebForImage();
   void ExecLoadImage();
   void ExecPlayPause();
@@ -351,7 +354,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase,
       send_tab_to_self_sub_menu_model_;
 
   // Sharing submenu, if present.
-  std::unique_ptr<sharing::ShareSubmenuModel> share_submenu_model_;
+  std::unique_ptr<share::ShareSubmenuModel> share_submenu_model_;
 
   // Click to call menu observer.
   std::unique_ptr<ClickToCallContextMenuObserver>
@@ -364,8 +367,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase,
   // The system app (if any) associated with the WebContents we're in.
   const web_app::SystemWebAppDelegate* system_app_ = nullptr;
 
-#if (defined(OS_WIN) || defined(OS_CHROMEOS) || defined(OS_LINUX)) && \
-    BUILDFLAG(GOOGLE_CHROME_BRANDING)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Controller for Lens Region Search feature. This controller will be
   // destroyed as soon as the RenderViewContextMenu object is destroyed. The
   // RenderViewContextMenu is reset every time it is shown, but persists between
@@ -375,8 +377,6 @@ class RenderViewContextMenu : public RenderViewContextMenuBase,
   std::unique_ptr<lens::LensRegionSearchController>
       lens_region_search_controller_;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(RenderViewContextMenu);
 };
 
 #endif  // CHROME_BROWSER_RENDERER_CONTEXT_MENU_RENDER_VIEW_CONTEXT_MENU_H_

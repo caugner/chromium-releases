@@ -31,6 +31,8 @@
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller_impl.h"
 #include "chrome/browser/ui/autofill/payments/autofill_snackbar_controller_impl.h"
+#include "chrome/browser/ui/autofill/payments/card_unmask_authentication_selection_dialog_controller_impl.h"
+#include "chrome/browser/ui/autofill/payments/card_unmask_otp_input_dialog_controller_impl.h"
 #include "chrome/browser/ui/autofill/payments/create_card_unmask_prompt_view.h"
 #include "chrome/browser/ui/autofill/payments/credit_card_scanner_controller.h"
 #include "chrome/browser/ui/autofill/save_update_address_profile_bubble_controller_impl.h"
@@ -44,7 +46,9 @@
 #include "components/autofill/content/browser/autofill_log_router_factory.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
+#include "components/autofill/core/browser/data_model/autofill_offer_data.h"
 #include "components/autofill/core/browser/form_data_importer.h"
+#include "components/autofill/core/browser/payments/card_unmask_challenge_option.h"
 #include "components/autofill/core/browser/payments/payments_client.h"
 #include "components/autofill/core/browser/ui/payments/card_unmask_prompt_view.h"
 #include "components/autofill/core/browser/ui/popup_item_ids.h"
@@ -289,6 +293,25 @@ void ChromeAutofillClient::ShowAutofillSettings(
 #endif  // #if defined(OS_ANDROID)
 }
 
+void ChromeAutofillClient::ShowCardUnmaskOtpInputDialog(
+    const size_t& otp_length,
+    base::WeakPtr<OtpUnmaskDelegate> delegate) {
+  CardUnmaskOtpInputDialogControllerImpl::CreateForWebContents(web_contents());
+  CardUnmaskOtpInputDialogControllerImpl* controller =
+      CardUnmaskOtpInputDialogControllerImpl::FromWebContents(web_contents());
+  DCHECK(controller);
+  controller->ShowDialog(otp_length, delegate);
+}
+
+void ChromeAutofillClient::OnUnmaskOtpVerificationResult(
+    OtpUnmaskResult unmask_result) {
+  CardUnmaskOtpInputDialogControllerImpl::CreateForWebContents(web_contents());
+  CardUnmaskOtpInputDialogControllerImpl* controller =
+      CardUnmaskOtpInputDialogControllerImpl::FromWebContents(web_contents());
+  DCHECK(controller);
+  controller->OnOtpVerificationResult(unmask_result);
+}
+
 void ChromeAutofillClient::ShowUnmaskPrompt(
     const CreditCard& card,
     UnmaskCardReason reason,
@@ -308,23 +331,43 @@ void ChromeAutofillClient::OnUnmaskVerificationResult(
   // For VCN related errors, on Android we show a new error dialog instead of
   // updating the CVC unmask prompt with the error message.
   switch (result) {
-    case AutofillClient::VCN_RETRIEVAL_PERMANENT_FAILURE:
+    case AutofillClient::PaymentsRpcResult::kVcnRetrievalPermanentFailure:
       ShowVirtualCardErrorDialog(/*is_permanent_error=*/true);
       break;
-    case AutofillClient::VCN_RETRIEVAL_TRY_AGAIN_FAILURE:
+    case AutofillClient::PaymentsRpcResult::kVcnRetrievalTryAgainFailure:
       ShowVirtualCardErrorDialog(/*is_permanent_error=*/false);
       break;
-    case AutofillClient::SUCCESS:
-    case AutofillClient::TRY_AGAIN_FAILURE:
-    case AutofillClient::PERMANENT_FAILURE:
-    case AutofillClient::NETWORK_ERROR:
+    case AutofillClient::PaymentsRpcResult::kSuccess:
+    case AutofillClient::PaymentsRpcResult::kTryAgainFailure:
+    case AutofillClient::PaymentsRpcResult::kPermanentFailure:
+    case AutofillClient::PaymentsRpcResult::kNetworkError:
       // Do nothing
       break;
-    case AutofillClient::NONE:
+    case AutofillClient::PaymentsRpcResult::kNone:
       NOTREACHED();
       return;
   }
 #endif  // OS_ANDROID
+}
+
+void ChromeAutofillClient::ShowUnmaskAuthenticatorSelectionDialog(
+    const std::vector<CardUnmaskChallengeOption>& challenge_options,
+    base::OnceCallback<void(const std::string&)>
+        confirm_unmask_challenge_option_callback,
+    base::OnceClosure cancel_unmasking_closure) {
+  CardUnmaskAuthenticationSelectionDialogControllerImpl::GetOrCreate(
+      web_contents())
+      ->ShowDialog(challenge_options,
+                   std::move(confirm_unmask_challenge_option_callback),
+                   std::move(cancel_unmasking_closure));
+}
+
+void ChromeAutofillClient::DismissUnmaskAuthenticatorSelectionDialog(
+    bool server_success) {
+  CardUnmaskAuthenticationSelectionDialogControllerImpl::GetOrCreate(
+      web_contents())
+      ->DismissDialogUponServerProcessedAuthenticationMethodRequest(
+          server_success);
 }
 
 #if !defined(OS_ANDROID)
@@ -607,6 +650,11 @@ void ChromeAutofillClient::ScanCreditCard(CreditCardScanCallback callback) {
 void ChromeAutofillClient::ShowAutofillPopup(
     const autofill::AutofillClient::PopupOpenArgs& open_args,
     base::WeakPtr<AutofillPopupDelegate> delegate) {
+  // Autofill popups should only be shown in focused windows because on Windows
+  // the popup may overlap the focused window (see crbug.com/1239760).
+  if (!has_focus_)
+    return;
+
   // Don't show any popups while Autofill Assistant's UI is shown.
   if (IsAutofillAssistantShowing()) {
     return;
@@ -712,9 +760,14 @@ void ChromeAutofillClient::ShowOfferNotificationIfApplicable(
   if (offer->IsCardLinkedOffer() && !card)
     return;
 
-  // TODO(crbug.com/1203811): Promo code offers should eventually show offer
-  //                          details in their own format as well.
-  if (!offer->IsCardLinkedOffer())
+  if (!base::FeatureList::IsEnabled(
+          features::kAutofillEnableOfferNotificationForPromoCodes) &&
+      offer->IsPromoCodeOffer()) {
+    return;
+  }
+
+  // Malformed offers should not be displayed.
+  if (offer->GetOfferType() == AutofillOfferData::OfferType::UNKNOWN)
     return;
 
 #if defined(OS_ANDROID)
@@ -730,6 +783,7 @@ void ChromeAutofillClient::ShowOfferNotificationIfApplicable(
 }
 
 void ChromeAutofillClient::OnVirtualCardDataAvailable(
+    const std::u16string& masked_card_identifier_string,
     const CreditCard* credit_card,
     const std::u16string& cvc,
     const gfx::Image& card_image) {
@@ -750,7 +804,8 @@ void ChromeAutofillClient::OnVirtualCardDataAvailable(
   VirtualCardManualFallbackBubbleControllerImpl* controller =
       VirtualCardManualFallbackBubbleControllerImpl::FromWebContents(
           web_contents());
-  controller->ShowBubble(credit_card, cvc, card_image);
+  controller->ShowBubble(masked_card_identifier_string, credit_card, cvc,
+                         card_image);
 #endif
 }
 
@@ -760,6 +815,19 @@ void ChromeAutofillClient::ShowVirtualCardErrorDialog(bool is_permanent_error) {
           ? AutofillErrorDialogType::VIRTUAL_CARD_PERMANENT_ERROR
           : AutofillErrorDialogType::VIRTUAL_CARD_TEMPORARY_ERROR;
   autofill_error_dialog_controller_.Show(error_dialog_type);
+}
+
+void ChromeAutofillClient::ShowAutofillProgressDialog(
+    base::OnceClosure cancel_callback) {
+  DCHECK(autofill_progress_dialog_controller_);
+  autofill_progress_dialog_controller_->ShowDialog(std::move(cancel_callback));
+}
+
+void ChromeAutofillClient::CloseAutofillProgressDialog(
+    bool show_confirmation_before_closing) {
+  DCHECK(autofill_progress_dialog_controller_);
+  autofill_progress_dialog_controller_->DismissDialog(
+      show_confirmation_before_closing);
 }
 
 bool ChromeAutofillClient::IsAutofillAssistantShowing() {
@@ -861,8 +929,15 @@ void ChromeAutofillClient::WebContentsDestroyed() {
   HideAutofillPopup(PopupHidingReason::kTabGone);
 }
 
+void ChromeAutofillClient::OnWebContentsLostFocus(
+    content::RenderWidgetHost* render_widget_host) {
+  has_focus_ = false;
+  HideAutofillPopup(PopupHidingReason::kFocusChanged);
+}
+
 void ChromeAutofillClient::OnWebContentsFocused(
     content::RenderWidgetHost* render_widget_host) {
+  has_focus_ = true;
 #if defined(OS_ANDROID)
   save_card_message_controller_android_.OnWebContentsFocused();
 #endif
@@ -891,7 +966,10 @@ ChromeAutofillClient::ChromeAutofillClient(content::WebContents* web_contents)
           GetPersonalDataManager()->app_locale())),
       unmask_controller_(
           user_prefs::UserPrefs::Get(web_contents->GetBrowserContext())),
-      autofill_error_dialog_controller_(web_contents) {
+      autofill_error_dialog_controller_(web_contents),
+      autofill_progress_dialog_controller_(
+          std::make_unique<AutofillProgressDialogControllerImpl>(
+              web_contents)) {
   // TODO(crbug.com/928595): Replace the closure with a callback to the
   // renderer that indicates if log messages should be sent from the
   // renderer.
@@ -942,6 +1020,6 @@ std::u16string ChromeAutofillClient::GetAccountHolderName() {
   return base::UTF8ToUTF16(primary_account_info.full_name);
 }
 
-WEB_CONTENTS_USER_DATA_KEY_IMPL(ChromeAutofillClient)
+WEB_CONTENTS_USER_DATA_KEY_IMPL(ChromeAutofillClient);
 
 }  // namespace autofill

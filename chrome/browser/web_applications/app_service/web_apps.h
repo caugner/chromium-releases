@@ -23,6 +23,7 @@
 #include "mojo/public/cpp/bindings/remote_set.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/native_widget_types.h"
+#include "url/gurl.h"
 
 class Profile;
 
@@ -130,13 +131,11 @@ class WebApps : public apps::PublisherBase,
                  bool report_abuse) override;
   void PauseApp(const std::string& app_id) override;
   void UnpauseApp(const std::string& app_id) override;
+  void StopApp(const std::string& app_id) override;
   void GetMenuModel(const std::string& app_id,
                     apps::mojom::MenuType menu_type,
                     int64_t display_id,
                     GetMenuModelCallback callback) override;
-  void GetMenuModelFromWebAppProvider(const std::string& app_id,
-                                      apps::mojom::MenuItemsPtr menu_items,
-                                      GetMenuModelCallback callback);
   // menu_type is stored as |shortcut_id|.
   void ExecuteContextMenuCommand(const std::string& app_id,
                                  int command_id,
@@ -145,12 +144,16 @@ class WebApps : public apps::PublisherBase,
   void SetWindowMode(const std::string& app_id,
                      apps::mojom::WindowMode window_mode) override;
 
+  void GetAppShortcutMenuModel(const std::string& app_id,
+                               apps::mojom::MenuItemsPtr menu_items,
+                               GetMenuModelCallback callback);
+
   void OnShortcutsMenuIconsRead(
       const std::string& app_id,
       apps::mojom::MenuItemsPtr menu_items,
       GetMenuModelCallback callback,
       ShortcutsMenuIconBitmaps shortcuts_menu_icon_bitmaps);
-#endif
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   mojo::RemoteSet<apps::mojom::Subscriber> subscribers_;
 

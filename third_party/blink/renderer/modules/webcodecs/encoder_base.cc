@@ -61,8 +61,11 @@ EncoderBase<Traits>::EncoderBase(ScriptState* script_state,
       state_(V8CodecState::Enum::kUnconfigured),
       script_state_(script_state),
       trace_counter_id_(g_sequence_num_for_counters.GetNext()) {
-  logger_ = std::make_unique<CodecLogger>(GetExecutionContext(),
-                                          Thread::Current()->GetTaskRunner());
+  auto* context = ExecutionContext::From(script_state);
+  callback_runner_ = context->GetTaskRunner(TaskType::kInternalMediaRealTime);
+
+  logger_ =
+      std::make_unique<CodecLogger>(GetExecutionContext(), callback_runner_);
 
   media::MediaLog* log = logger_->log();
 
@@ -168,7 +171,6 @@ void EncoderBase<Traits>::close(ExceptionState& exception_state) {
   state_ = V8CodecState(V8CodecState::Enum::kClosed);
 
   ResetInternal();
-  media_encoder_.reset();
   output_callback_.Clear();
   error_callback_.Clear();
 }
@@ -203,7 +205,6 @@ void EncoderBase<Traits>::reset(ExceptionState& exception_state) {
 
   state_ = V8CodecState(V8CodecState::Enum::kUnconfigured);
   ResetInternal();
-  media_encoder_.reset();
 
   // This codec isn't holding on to any resources, and doesn't need to be
   // reclaimed.
@@ -223,7 +224,14 @@ void EncoderBase<Traits>::ResetInternal() {
       pending_req->input.Release()->close();
   }
   requested_encodes_ = 0;
-  stall_request_processing_ = false;
+  blocking_request_in_progress_ = false;
+
+  // Schedule deletion of |media_encoder_| for later.
+  // ResetInternal() might be called by an error reporting callback called by
+  // |media_encoder_|. If we delete it now, this thread might come back up
+  // the call stack and continu executing code belonging to deleted
+  // |media_encoder_|.
+  callback_runner_->DeleteSoon(FROM_HERE, std::move(media_encoder_));
 }
 
 template <typename Traits>
@@ -243,7 +251,6 @@ void EncoderBase<Traits>::HandleError(DOMException* ex) {
 
   // Errors are permanent. Shut everything down.
   error_callback_.Clear();
-  media_encoder_.reset();
   output_callback_.Clear();
 
   // Prevent further logging.
@@ -264,7 +271,7 @@ void EncoderBase<Traits>::EnqueueRequest(Request* request) {
 
 template <typename Traits>
 void EncoderBase<Traits>::ProcessRequests() {
-  while (!requests_.empty() && !stall_request_processing_) {
+  while (!requests_.empty() && ReadyToProcessNextRequest()) {
     TraceQueueSizes();
 
     Request* request = requests_.TakeFirst();
@@ -288,6 +295,11 @@ void EncoderBase<Traits>::ProcessRequests() {
   }
 
   TraceQueueSizes();
+}
+
+template <typename Traits>
+bool EncoderBase<Traits>::ReadyToProcessNextRequest() {
+  return !blocking_request_in_progress_;
 }
 
 template <typename Traits>
@@ -323,13 +335,13 @@ void EncoderBase<Traits>::ProcessFlush(Request* request) {
     }
     req->EndTracing();
 
-    self->stall_request_processing_ = false;
+    self->blocking_request_in_progress_ = false;
     self->ProcessRequests();
   };
 
   request->StartTracing();
 
-  stall_request_processing_ = true;
+  blocking_request_in_progress_ = true;
   media_encoder_->Flush(ConvertToBaseOnceCallback(
       CrossThreadBindOnce(done_callback, WrapCrossThreadWeakPersistent(this),
                           WrapCrossThreadPersistent(request))));
@@ -345,13 +357,13 @@ void EncoderBase<Traits>::OnCodecReclaimed(DOMException* exception) {
 template <typename Traits>
 void EncoderBase<Traits>::ContextDestroyed() {
   state_ = V8CodecState(V8CodecState::Enum::kClosed);
+  ResetInternal();
   logger_->Neuter();
-  media_encoder_.reset();
 }
 
 template <typename Traits>
 bool EncoderBase<Traits>::HasPendingActivity() const {
-  return stall_request_processing_ || !requests_.empty();
+  return blocking_request_in_progress_ || !requests_.empty();
 }
 
 template <typename Traits>

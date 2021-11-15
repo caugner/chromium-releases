@@ -436,7 +436,7 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
         web::GURLOriginWithWKSecurityOrigin(action.targetFrame.securityOrigin));
     isCrossOriginTargetFrame = !sourceOrigin.IsSameOriginWith(targetOrigin);
   }
-  web::WebStatePolicyDecider::RequestInfo requestInfo(
+  const web::WebStatePolicyDecider::RequestInfo requestInfo(
       transition, isMainFrameNavigationAction, isCrossOriginTargetFrame,
       userInteractedWithRequestMainFrame);
 
@@ -481,9 +481,6 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
   [self updatePendingNavigationInfoFromNavigationResponse:WKResponse
                                               HTTPHeaders:headers];
 
-  web::WebStatePolicyDecider::PolicyDecision policyDecision =
-      web::WebStatePolicyDecider::PolicyDecision::Allow();
-
   __weak CRWPendingNavigationInfo* weakPendingNavigationInfo =
       self.pendingNavigationInfo;
   auto callback = base::BindOnce(
@@ -501,8 +498,10 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
       });
 
   if ([self shouldRenderResponse:WKResponse]) {
-    self.webStateImpl->ShouldAllowResponse(
-        WKResponse.response, WKResponse.forMainFrame, std::move(callback));
+    const web::WebStatePolicyDecider::ResponseInfo response_info(
+        WKResponse.forMainFrame);
+    self.webStateImpl->ShouldAllowResponse(WKResponse.response, response_info,
+                                           std::move(callback));
     return;
   }
 
@@ -1009,6 +1008,18 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
     didFailNavigation:(WKNavigation*)navigation
             withError:(NSError*)error {
   [self didReceiveWKNavigationDelegateCallback];
+
+  // |webView:didFailNavigation:withError:| may be called after the document has
+  // already loaded which should be ignored. This can happen when navigating
+  // back to a page which loads from the back forward cache. See
+  // crbug.com/1249735 for more details. This will also be called when the user
+  // cancels an active page load.
+  if (self.navigationState == web::WKNavigationState::FINISHED &&
+      error.code == NSURLErrorCancelled &&
+      [error.domain isEqualToString:NSURLErrorDomain]) {
+    _certVerificationErrors->Clear();
+    return;
+  }
 
   [self.navigationStates setState:web::WKNavigationState::FAILED
                     forNavigation:navigation];

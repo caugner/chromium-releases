@@ -131,6 +131,7 @@ EndpointFetcher::EndpointFetcher(
     int64_t timeout_ms,
     const std::string& post_data,
     const std::vector<std::string>& headers,
+    const std::vector<std::string>& cors_exempt_headers,
     const net::NetworkTrafficAnnotationTag& annotation_tag,
     const scoped_refptr<network::SharedURLLoaderFactory>& url_loader_factory,
     const bool is_oauth_fetch)
@@ -141,6 +142,7 @@ EndpointFetcher::EndpointFetcher(
       timeout_ms_(timeout_ms),
       post_data_(post_data),
       headers_(headers),
+      cors_exempt_headers_(cors_exempt_headers),
       annotation_tag_(annotation_tag),
       url_loader_factory_(url_loader_factory),
       identity_manager_(nullptr),
@@ -200,6 +202,11 @@ void EndpointFetcher::PerformRequest(
   for (size_t i = 0; i + 1 < headers_.size(); i += 2) {
     resource_request->headers.SetHeader(headers_[i], headers_[i + 1]);
   }
+  DCHECK(cors_exempt_headers_.size() % 2 == 0);
+  for (size_t i = 0; i + 1 < cors_exempt_headers_.size(); i += 2) {
+    resource_request->cors_exempt_headers.SetHeaderIfMissing(
+        cors_exempt_headers_[i], cors_exempt_headers_[i + 1]);
+  }
   switch (auth_type_) {
     case OAUTH:
       resource_request->headers.SetHeader(
@@ -230,8 +237,7 @@ void EndpointFetcher::PerformRequest(
   }
   simple_url_loader_->SetRetryOptions(kNumRetries,
                                       network::SimpleURLLoader::RETRY_ON_5XX);
-  simple_url_loader_->SetTimeoutDuration(
-      base::TimeDelta::FromMilliseconds(timeout_ms_));
+  simple_url_loader_->SetTimeoutDuration(base::Milliseconds(timeout_ms_));
   simple_url_loader_->SetAllowHttpErrorResults(true);
   network::SimpleURLLoader::BodyAsStringCallback body_as_string_callback =
       base::BindOnce(&EndpointFetcher::OnResponseFetched,

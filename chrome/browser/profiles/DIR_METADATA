@@ -1,4 +1,1 @@
-monorail: {
-  component: "UI>Browser>Profiles"
-}
-team_email: "chrome-signin@chromium.org"
+mixins: "//chrome/browser/profiles/COMMON_METADATA"

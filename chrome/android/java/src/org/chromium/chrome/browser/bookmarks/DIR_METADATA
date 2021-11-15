@@ -1,4 +1,1 @@
-monorail {
-  component: "UI>Browser>Bookmarks"
-}
-team_email: "clank-app-team@google.com"
+mixins: "//chrome/android/java/src/org/chromium/chrome/browser/bookmarks/COMMON_METADATA"

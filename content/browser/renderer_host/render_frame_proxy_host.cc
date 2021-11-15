@@ -33,6 +33,7 @@
 #include "content/browser/scoped_active_url.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/disallow_activation_reason.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/referrer_type_converters.h"
@@ -50,6 +51,7 @@
 namespace content {
 
 namespace {
+using perfetto::protos::pbzero::ChromeTrackEvent;
 
 RenderFrameProxyHost::TestObserver* g_observer_for_testing = nullptr;
 
@@ -461,9 +463,15 @@ void RenderFrameProxyHost::ChildProcessGone() {
 }
 
 void RenderFrameProxyHost::DidFocusFrame() {
+  TRACE_EVENT("navigation", "RenderFrameProxyHost::DidFocusFrame",
+              ChromeTrackEvent::kFrameTreeNodeInfo, *frame_tree_node_,
+              ChromeTrackEvent::kSiteInstance,
+              *static_cast<SiteInstanceImpl*>(GetSiteInstance()));
   RenderFrameHostImpl* render_frame_host =
       frame_tree_node_->current_frame_host();
-
+  // Do not focus inactive RenderFrameHost.
+  if (!render_frame_host->IsActive())
+    return;
   render_frame_host->delegate()->SetFocusedFrame(frame_tree_node_,
                                                  GetSiteInstance());
 }
@@ -473,8 +481,10 @@ void RenderFrameProxyHost::CapturePaintPreviewOfCrossProcessSubframe(
     const base::UnguessableToken& guid) {
   RenderFrameHostImpl* rfh = frame_tree_node_->current_frame_host();
   // Do not capture paint on behalf of inactive RenderFrameHost.
-  if (rfh->IsInactiveAndDisallowActivation())
+  if (rfh->IsInactiveAndDisallowActivation(
+          DisallowActivationReasonId::kCapturePaintPreviewProxy)) {
     return;
+  }
   rfh->delegate()->CapturePaintPreviewOfCrossProcessSubframe(clip_rect, guid,
                                                              rfh);
 }
@@ -544,8 +554,9 @@ void RenderFrameProxyHost::RouteMessageEvent(
   SiteInstance* target_site_instance = target_rfh->GetSiteInstance();
   if (!target_site_instance->IsRelatedSiteInstance(GetSiteInstance()) &&
       !target_rfh->delegate()->ShouldRouteMessageEvent(target_rfh,
-                                                       GetSiteInstance()))
+                                                       GetSiteInstance())) {
     return;
+  }
 
   // If there is a |source_frame_token|, translate it to the frame token of the
   // equivalent RenderFrameProxyHost in the target process.
@@ -668,9 +679,10 @@ void RenderFrameProxyHost::OpenURL(blink::mojom::OpenURLParamsPtr params) {
   // - If the document is prerendering, we don't expect to get here because
   // prerendering pages are expected to defer cross-origin iframes, so there
   // should not be any OOPIFs. Just cancel prerendering if we get here.
-  // TODO(falken): Log a specific cancellation reason if this occurs.
-  if (current_rfh->IsInactiveAndDisallowActivation())
+  if (current_rfh->IsInactiveAndDisallowActivation(
+          DisallowActivationReasonId::kOpenURL)) {
     return;
+  }
 
   // Verify that we are in the same BrowsingInstance as the current
   // RenderFrameHost.
@@ -685,7 +697,6 @@ void RenderFrameProxyHost::OpenURL(blink::mojom::OpenURLParamsPtr params) {
   // renderer side, e.g. status not available on remote frame, etc.
   blink::NavigationDownloadPolicy download_policy = params->download_policy;
   GetContentClient()->browser()->AugmentNavigationDownloadPolicy(
-      frame_tree_node_->navigator().controller().DeprecatedGetWebContents(),
       current_rfh, params->user_gesture, &download_policy);
 
   if ((frame_tree_node_->pending_frame_policy().sandbox_flags &
