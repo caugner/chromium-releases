@@ -314,7 +314,7 @@ void NavigationControllerImpl::DidFinishLoad(
   OnNavigationEntryChanged();
 }
 
-void NavigationControllerImpl::RenderProcessGone(
+void NavigationControllerImpl::PrimaryMainFrameRenderProcessGone(
     base::TerminationStatus status) {
   // If the current RenderProcess terminates then trigger a NavigationState
   // change to let the caller know that something is wrong.
@@ -373,6 +373,13 @@ void DiffNavigationEntries(const fuchsia::web::NavigationState& old_entry,
                            const fuchsia::web::NavigationState& new_entry,
                            fuchsia::web::NavigationState* difference) {
   DCHECK(difference);
+
+  // |new_entry| should not be empty when the difference is between states
+  // pre- and post-navigation. It is possible for non-navigation events (e.g.
+  // Renderer-process teardown) to trigger notifications, in which case both
+  // states may be empty (i.e. both come from the "initial" NavigationEntry).
+  if (new_entry.IsEmpty() && old_entry.IsEmpty())
+    return;
 
   DCHECK(new_entry.has_title());
   if (!old_entry.has_title() || (new_entry.title() != old_entry.title())) {

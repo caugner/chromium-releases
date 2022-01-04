@@ -50,7 +50,9 @@ void LayoutNGMixin<Base>::Paint(const PaintInfo& paint_info) const {
   // instead of |LayoutObject|, because this function cannot handle block
   // fragmented objects. We can come here only when |this| cannot traverse
   // fragments, or the parent is legacy.
-  DCHECK(!Base::CanTraversePhysicalFragments() ||
+  DCHECK(Base::GetNGPaginationBreakability() ==
+             LayoutNGBlockFlow::kForbidBreaks ||
+         !Base::CanTraversePhysicalFragments() ||
          !Base::Parent()->CanTraversePhysicalFragments());
   DCHECK_LE(Base::PhysicalFragmentCount(), 1u);
 
@@ -78,7 +80,9 @@ bool LayoutNGMixin<Base>::NodeAtPoint(HitTestResult& result,
                                       const PhysicalOffset& accumulated_offset,
                                       HitTestAction action) {
   // See |Paint()|.
-  DCHECK(!Base::CanTraversePhysicalFragments() ||
+  DCHECK(Base::GetNGPaginationBreakability() ==
+             LayoutNGBlockFlow::kForbidBreaks ||
+         !Base::CanTraversePhysicalFragments() ||
          !Base::Parent()->CanTraversePhysicalFragments());
   DCHECK_LE(Base::PhysicalFragmentCount(), 1u);
 
@@ -415,12 +419,11 @@ LayoutNGMixin<Base>::UpdateInFlowBlockLayout() {
   // If we are a layout root, use the previous space if available. This will
   // include any stretched sizes if applicable.
   NGConstraintSpace constraint_space =
-      is_layout_root && previous_result
+      is_layout_root && previous_result &&
+              previous_result->GetConstraintSpaceForCaching()
+                      .GetWritingMode() == Base::StyleRef().GetWritingMode()
           ? previous_result->GetConstraintSpaceForCaching()
           : NGConstraintSpace::CreateFromLayoutObject(*this);
-
-  DCHECK_EQ(constraint_space.GetWritingMode(),
-            Base::StyleRef().GetWritingMode());
 
   scoped_refptr<const NGLayoutResult> result =
       NGBlockNode(this).Layout(constraint_space);

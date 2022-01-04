@@ -61,6 +61,8 @@
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
+using views::BubbleBorder;
+
 namespace {
 
 // By spec, dropdowns should always have a width which is a multiple of 12.
@@ -86,6 +88,9 @@ constexpr int kAutofillPopupAdditionalPadding = 16;
 
 // Vertical spacing between labels in one row.
 constexpr int kAdjacentLabelsVerticalSpacing = 2;
+
+// The default icon size used in the suggestion drop down.
+constexpr int kIconSize = 16;
 
 // Popup footer items that use a leading icon instead of a trailing one.
 constexpr autofill::PopupItemId kItemTypesUsingLeadingIcons[] = {
@@ -134,8 +139,8 @@ std::unique_ptr<views::ImageView> ImageViewFromImageSkia(
 
 std::unique_ptr<views::ImageView> ImageViewFromVectorIcon(
     const gfx::VectorIcon& vector_icon) {
-  return std::make_unique<views::ImageView>(ui::ImageModel::FromVectorIcon(
-      vector_icon, ui::kColorIcon, gfx::kFaviconSize));
+  return std::make_unique<views::ImageView>(
+      ui::ImageModel::FromVectorIcon(vector_icon, ui::kColorIcon, kIconSize));
 }
 
 std::unique_ptr<views::ImageView> GetIconImageViewByName(
@@ -149,9 +154,8 @@ std::unique_ptr<views::ImageView> GetIconImageViewByName(
     return ImageViewFromVectorIcon(omnibox::kHttpIcon);
 
   if (icon_str == "httpsInvalid") {
-    return ImageViewFromImageSkia(
-        gfx::CreateVectorIcon(vector_icons::kNotSecureWarningIcon,
-                              gfx::kFaviconSize, gfx::kGoogleRed700));
+    return ImageViewFromImageSkia(gfx::CreateVectorIcon(
+        vector_icons::kNotSecureWarningIcon, kIconSize, gfx::kGoogleRed700));
   }
 
   if (icon_str == "keyIcon")
@@ -160,11 +164,15 @@ std::unique_ptr<views::ImageView> GetIconImageViewByName(
   if (icon_str == "globeIcon")
     return ImageViewFromVectorIcon(kGlobeIcon);
 
+  if (icon_str == "accountIcon") {
+    return ImageViewFromVectorIcon(kAccountCircleIcon);
+  }
+
   if (icon_str == "settingsIcon") {
     return ImageViewFromVectorIcon(
         base::FeatureList::IsEnabled(
             autofill::features::kAutofillUseConsistentPopupSettingsIcons)
-            ? kProductIcon
+            ? kMonoColorProductIcon
             : vector_icons::kSettingsIcon);
   }
 
@@ -177,7 +185,7 @@ std::unique_ptr<views::ImageView> GetIconImageViewByName(
   if (icon_str == "google") {
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
     return ImageViewFromImageSkia(gfx::CreateVectorIcon(
-        kGoogleGLogoIcon, gfx::kFaviconSize, gfx::kPlaceholderColor));
+        kGoogleGLogoIcon, kIconSize, gfx::kPlaceholderColor));
 #else
     return nullptr;
 #endif
@@ -292,6 +300,7 @@ class AutofillPopupItemView : public AutofillPopupRowView {
 
   // views::View:
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  void OnPaint(gfx::Canvas* canvas) override;
   void OnMouseEntered(const ui::MouseEvent& event) override;
   void OnMouseExited(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
@@ -345,6 +354,11 @@ class AutofillPopupItemView : public AutofillPopupRowView {
 
   // All the labels inside this view.
   std::vector<views::Label*> inner_labels_;
+
+  // The Autofill popup may be hovered by the mouse after its creation. In this
+  // case, we want to ignore clicks on the hovered menu item until the user made
+  // an explicit choice. See crbug.com/1240472, crbug.com/1241585.
+  bool mouse_observed_outside_of_item_ = false;
 };
 
 int AutofillPopupItemView::GetFrontendId() const {
@@ -573,19 +587,35 @@ void AutofillPopupItemView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->AddIntAttribute(ax::mojom::IntAttribute::kPosInSet, pos_in_set);
 }
 
+void AutofillPopupItemView::OnPaint(gfx::Canvas* canvas) {
+  AutofillPopupRowView::OnPaint(canvas);
+  mouse_observed_outside_of_item_ |= !IsMouseHovered();
+}
+
 void AutofillPopupItemView::OnMouseEntered(const ui::MouseEvent& event) {
+  // OnMouseEntered() also fires if the had been hovering over the item and
+  // moved only a little bit. In that case, clicks shall still be ignored and we
+  // don't want to show a preview.
+  if (!mouse_observed_outside_of_item_)
+    return;
   AutofillPopupController* controller = popup_view()->controller();
   if (controller)
     controller->SetSelectedLine(GetLineNumber());
 }
 
 void AutofillPopupItemView::OnMouseExited(const ui::MouseEvent& event) {
+  mouse_observed_outside_of_item_ = true;
   AutofillPopupController* controller = popup_view()->controller();
   if (controller)
     controller->SelectionCleared();
 }
 
 void AutofillPopupItemView::OnMouseReleased(const ui::MouseEvent& event) {
+  // Ignore mouse clicks in case the popup appeared directly under the mouse
+  // cursor and we have no indication that the user intentionally selected the
+  // current item.
+  if (!mouse_observed_outside_of_item_)
+    return;
   AutofillPopupController* controller = popup_view()->controller();
   if (controller && event.IsOnlyLeftMouseButton() &&
       HitTestPoint(event.location())) {
@@ -1002,7 +1032,10 @@ void AutofillPopupFooterView::CreateContent() {
 void AutofillPopupFooterView::RefreshStyle() {
   AutofillPopupItemView::RefreshStyle();
   SetBorder(views::CreateSolidSidedBorder(
-      /*top=*/views::MenuConfig::instance().separator_thickness,
+      // If the footer is the first item, do not draw a separator line.
+      /*top=*/GetLineNumber() == 0
+          ? 0
+          : views::MenuConfig::instance().separator_thickness,
       /*left=*/0,
       /*bottom=*/0,
       /*right=*/0,
@@ -1405,27 +1438,44 @@ bool AutofillPopupViewNativeViews::DoUpdateBoundsAndRedrawPopup() {
   gfx::Size preferred_size = CalculatePreferredSize();
   gfx::Rect popup_bounds;
 
-  // When a bubble border is shown, the contents area (inside the shadow) is
-  // supposed to be aligned with input element boundaries.
+  const gfx::Rect content_area_bounds = GetContentAreaBounds();
+  // TODO(crbug.com/1262371) Once popups can render outside the main window on
+  // Linux, use the screen bounds.
+  const gfx::Rect top_window_bounds = GetTopWindowBounds();
+  const gfx::Rect& max_bounds_for_popup =
+      PopupMayExceedContentAreaBounds(controller_->GetWebContents())
+          ? top_window_bounds
+          : content_area_bounds;
+
   gfx::Rect element_bounds =
       gfx::ToEnclosingRect(controller_->element_bounds());
+
+  // If the element exceeds the content area, ensure that the popup is still
+  // visually attached to the input element.
+  element_bounds.Intersect(content_area_bounds);
+  if (element_bounds.IsEmpty()) {
+    controller_->Hide(PopupHidingReason::kElementOutsideOfContentArea);
+    return false;
+  }
+
   // Consider the element is |kElementBorderPadding| pixels larger at the top
   // and at the bottom in order to reposition the dropdown, so that it doesn't
   // look too close to the element.
   element_bounds.Inset(/*horizontal=*/0, /*vertical=*/-kElementBorderPadding);
 
+  // At least one row of the popup should be shown in the bounds of the content
+  // area so that the user notices the presence of the popup.
   int item_height =
       body_container_ && body_container_->children().size() > 0
           ? body_container_->children()[0]->GetPreferredSize().height()
           : 0;
 
-  const gfx::Rect content_area_bounds = GetContentAreaBounds();
-  if (!CanShowDropdownHere(item_height, content_area_bounds, element_bounds)) {
+  if (!CanShowDropdownHere(item_height, max_bounds_for_popup, element_bounds)) {
     controller_->Hide(PopupHidingReason::kInsufficientSpace);
     return false;
   }
 
-  CalculatePopupYAndHeight(preferred_size.height(), content_area_bounds,
+  CalculatePopupYAndHeight(preferred_size.height(), max_bounds_for_popup,
                            element_bounds, &popup_bounds);
 
   // Adjust the width to compensate for a scroll bar, if necessary, and for
@@ -1442,19 +1492,26 @@ bool AutofillPopupViewNativeViews::DoUpdateBoundsAndRedrawPopup() {
   }
   preferred_size.set_width(AdjustWidth(preferred_size.width() + scroll_width));
 
-  if (base::FeatureList::IsEnabled(
+  if (!base::FeatureList::IsEnabled(
           autofill::features::kAutofillCenterAlignedSuggestions)) {
-    CalculatePopupXAndWidthHorizontallyCentered(
-        preferred_size.width(), content_area_bounds, element_bounds,
-        controller_->IsRTL(), &popup_bounds);
-  } else {
-    CalculatePopupXAndWidth(preferred_size.width(), content_area_bounds,
+    CalculatePopupXAndWidth(preferred_size.width(), max_bounds_for_popup,
                             element_bounds, controller_->IsRTL(),
                             &popup_bounds);
+  } else {
+    popup_bounds = GetOptionalPositionAndPlaceArrowOnBubble(
+        element_bounds, content_area_bounds, preferred_size);
   }
 
   if (BoundsOverlapWithAnyOpenPrompt(popup_bounds,
                                      controller_->GetWebContents())) {
+    controller_->Hide(PopupHidingReason::kOverlappingWithAnotherPrompt);
+    return false;
+  }
+  // On Windows, due to platform-specific implementation details, the previous
+  // check isn't reliable, and fails to detect open prompts. Since the most
+  // critical bubble is the permission bubble, we check for that specifically.
+  if (BoundsOverlapWithOpenPermissionsPrompt(popup_bounds,
+                                             controller_->GetWebContents())) {
     controller_->Hide(PopupHidingReason::kOverlappingWithAnotherPrompt);
     return false;
   }

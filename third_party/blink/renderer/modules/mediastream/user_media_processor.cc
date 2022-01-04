@@ -14,9 +14,9 @@
 #include "base/containers/contains.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "media/base/audio_parameters.h"
 #include "media/capture/video_capture_types.h"
@@ -726,6 +726,7 @@ void UserMediaProcessor::SelectAudioSettings(
 
 absl::optional<base::UnguessableToken>
 UserMediaProcessor::DetermineExistingAudioSessionId() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(current_request_info_->request()->Audio());
 
   auto settings = current_request_info_->audio_capture_settings();
@@ -734,7 +735,12 @@ UserMediaProcessor::DetermineExistingAudioSessionId() {
   // Create a copy of the MediaStreamSource objects that are
   // associated to the same audio device capture based on its device ID.
   HeapVector<Member<MediaStreamSource>> matching_sources;
-  for (const auto& source : local_sources_) {
+
+  // Take a defensive copy, as local_sources_ can be modified during
+  // destructions in GC runs triggered by the push_back allocation in this loop.
+  // crbug.com/1238209
+  HeapVector<Member<MediaStreamSource>> local_sources_copy = local_sources_;
+  for (const auto& source : local_sources_copy) {
     MediaStreamSource* source_copy = source;
     if (source_copy->GetType() == MediaStreamSource::kTypeAudio &&
         source_copy->Id().Utf8() == device_id) {

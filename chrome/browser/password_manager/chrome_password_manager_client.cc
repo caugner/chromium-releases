@@ -326,7 +326,7 @@ bool ChromePasswordManagerClient::PromptUserToSaveOrUpdatePassword(
 
   if (update_password) {
     if (messages::IsUpdatePasswordMessagesUiEnabled()) {
-      save_password_message_delegate_.DisplaySavePasswordPrompt(
+      save_update_password_message_delegate_.DisplaySaveUpdatePasswordPrompt(
           web_contents(), std::move(form_to_save), /*update_password=*/true);
     } else {
       UpdatePasswordInfoBarDelegate::Create(web_contents(),
@@ -334,7 +334,7 @@ bool ChromePasswordManagerClient::PromptUserToSaveOrUpdatePassword(
     }
   } else {
     if (messages::IsPasswordMessagesUiEnabled()) {
-      save_password_message_delegate_.DisplaySavePasswordPrompt(
+      save_update_password_message_delegate_.DisplaySaveUpdatePasswordPrompt(
           web_contents(), std::move(form_to_save), /*update_password=*/false);
     } else {
       SavePasswordInfoBarDelegate::Create(web_contents(),
@@ -456,8 +456,8 @@ void ChromePasswordManagerClient::ShowTouchToFill(
 #if defined(OS_ANDROID)
   GetOrCreateTouchToFillController()->Show(
       credential_cache_
-          .GetCredentialStore(
-              url::Origin::Create(driver->GetLastCommittedURL().GetOrigin()))
+          .GetCredentialStore(url::Origin::Create(
+              driver->GetLastCommittedURL().DeprecatedGetOriginAsURL()))
           .GetCredentials(),
       driver->AsWeakPtr());
 #endif
@@ -501,6 +501,8 @@ void ChromePasswordManagerClient::GeneratePassword(
 #else
   password_manager::ContentPasswordManagerDriver* content_driver =
       driver_factory_->GetDriverForFrame(web_contents()->GetFocusedFrame());
+  if (!content_driver)
+    return;
 #endif
   // Using unretained pointer is safe because |this| outlives
   // ContentPasswordManagerDriver that holds the connection.
@@ -607,7 +609,7 @@ void ChromePasswordManagerClient::NotifyUserCredentialsWereLeaked(
   }
 
   if (messages::IsPasswordMessagesUiEnabled()) {
-    save_password_message_delegate_.DismissSavePasswordPrompt();
+    save_update_password_message_delegate_.DismissSaveUpdatePasswordPrompt();
   } else {
     HideSavePasswordInfobar(web_contents());
   }
@@ -973,9 +975,10 @@ bool ChromePasswordManagerClient::IsIsolationForPasswordSitesEnabled() const {
 }
 
 bool ChromePasswordManagerClient::IsNewTabPage() const {
-  auto origin = GetLastCommittedURL().GetOrigin();
-  return origin == GURL(chrome::kChromeUINewTabPageURL).GetOrigin() ||
-         origin == GURL(chrome::kChromeUINewTabURL).GetOrigin();
+  auto origin = GetLastCommittedURL().DeprecatedGetOriginAsURL();
+  return origin ==
+             GURL(chrome::kChromeUINewTabPageURL).DeprecatedGetOriginAsURL() ||
+         origin == GURL(chrome::kChromeUINewTabURL).DeprecatedGetOriginAsURL();
 }
 
 FieldInfoManager* ChromePasswordManagerClient::GetFieldInfoManager() const {
@@ -999,6 +1002,9 @@ void ChromePasswordManagerClient::AutomaticGenerationAvailable(
   if (PasswordGenerationController::AllowedForWebContents(web_contents())) {
     PasswordManagerDriver* driver = driver_factory_->GetDriverForFrame(
         password_generation_driver_receivers_.GetCurrentTargetFrame());
+    // This method is called over Mojo via a RenderFrameHostReceiverSet; the
+    // current target frame must be live.
+    DCHECK(driver);
 
     PasswordGenerationController* generation_controller =
         PasswordGenerationController::GetIfExisting(web_contents());
@@ -1015,6 +1021,9 @@ void ChromePasswordManagerClient::AutomaticGenerationAvailable(
   password_manager::ContentPasswordManagerDriver* driver =
       driver_factory_->GetDriverForFrame(
           password_generation_driver_receivers_.GetCurrentTargetFrame());
+  // This method is called over Mojo via a RenderFrameHostReceiverSet; the
+  // current target frame must be live.
+  DCHECK(driver);
 
   // Attempt to show the autofill dropdown UI first.
   gfx::RectF element_bounds_in_top_frame_space =
@@ -1039,6 +1048,9 @@ void ChromePasswordManagerClient::ShowPasswordEditingPopup(
     const std::u16string& password_value) {
   auto* driver = driver_factory_->GetDriverForFrame(
       password_generation_driver_receivers_.GetCurrentTargetFrame());
+  // This method is called over Mojo via a RenderFrameHostReceiverSet; the
+  // current target frame must be live.
+  DCHECK(driver);
   gfx::RectF element_bounds_in_screen_space =
       GetBoundsInScreenSpace(TransformToRootCoordinates(
           password_generation_driver_receivers_.GetCurrentTargetFrame(),
@@ -1073,6 +1085,9 @@ void ChromePasswordManagerClient::PresaveGeneratedPassword(
 
   PasswordManagerDriver* driver = driver_factory_->GetDriverForFrame(
       password_generation_driver_receivers_.GetCurrentTargetFrame());
+  // This method is called over Mojo via a RenderFrameHostReceiverSet; the
+  // current target frame must be live.
+  DCHECK(driver);
   password_manager_.OnPresaveGeneratedPassword(
       driver,
       password_manager::GetFormWithFrameAndFormMetaData(
@@ -1085,6 +1100,9 @@ void ChromePasswordManagerClient::PasswordNoLongerGenerated(
     const autofill::FormData& form_data) {
   PasswordManagerDriver* driver = driver_factory_->GetDriverForFrame(
       password_generation_driver_receivers_.GetCurrentTargetFrame());
+  // This method is called over Mojo via a RenderFrameHostReceiverSet; the
+  // current target frame must be live.
+  DCHECK(driver);
   password_manager_.OnPasswordNoLongerGenerated(
       driver, password_manager::GetFormWithFrameAndFormMetaData(
                   password_generation_driver_receivers_.GetCurrentTargetFrame(),
@@ -1324,7 +1342,7 @@ void ChromePasswordManagerClient::WebContentsDestroyed() {
   }
 
 #if defined(OS_ANDROID)
-  save_password_message_delegate_.DismissSavePasswordPrompt();
+  save_update_password_message_delegate_.DismissSaveUpdatePasswordPrompt();
 #endif
 }
 
@@ -1436,7 +1454,7 @@ bool ChromePasswordManagerClient::IsPasswordManagementEnabledForCurrentPage(
   }
 
   // The password manager is disabled on Google Password Manager page.
-  if (url.GetOrigin() ==
+  if (url.DeprecatedGetOriginAsURL() ==
       GURL(password_manager::kPasswordManagerAccountDashboardURL)) {
     is_enabled = false;
   }

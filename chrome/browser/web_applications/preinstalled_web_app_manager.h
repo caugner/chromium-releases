@@ -54,6 +54,7 @@ class PreinstalledWebAppManager {
   static const char* kHistogramConfigErrorCount;
   static const char* kHistogramInstallResult;
   static const char* kHistogramUninstallAndReplaceCount;
+  static const char* kHistogramAppToReplaceStillInstalledCount;
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
@@ -61,7 +62,7 @@ class PreinstalledWebAppManager {
   static void BypassOfflineManifestRequirementForTesting();
   static void SetConfigDirForTesting(const base::FilePath* config_dir);
   static void SetConfigsForTesting(const std::vector<base::Value>* configs);
-  static void SetFileUtilsForTesting(const FileUtilsWrapper* file_utils);
+  static void SetFileUtilsForTesting(FileUtilsWrapper* file_utils);
 
   explicit PreinstalledWebAppManager(Profile* profile);
   PreinstalledWebAppManager(const PreinstalledWebAppManager&) = delete;

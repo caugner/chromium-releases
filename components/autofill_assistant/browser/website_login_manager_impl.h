@@ -37,12 +37,18 @@ class WebsiteLoginManagerImpl : public WebsiteLoginManager {
       base::OnceCallback<void(bool, std::string)> callback) override;
   void DeletePasswordForLogin(const Login& login,
                               base::OnceCallback<void(bool)> callback) override;
+
+  void GetGetLastTimePasswordUsed(
+      const Login& login,
+      base::OnceCallback<void(absl::optional<base::Time>)> callback) override;
+
   void EditPasswordForLogin(const Login& login,
                             const std::string& new_password,
                             base::OnceCallback<void(bool)> callback) override;
-  std::string GeneratePassword(autofill::FormSignature form_signature,
-                               autofill::FieldSignature field_signature,
-                               uint64_t max_length) override;
+  absl::optional<std::string> GeneratePassword(
+      autofill::FormSignature form_signature,
+      autofill::FieldSignature field_signature,
+      uint64_t max_length) override;
 
   void PresaveGeneratedPassword(const Login& login,
                                 const std::string& password,
@@ -66,6 +72,7 @@ class WebsiteLoginManagerImpl : public WebsiteLoginManager {
   class UpdatePasswordRequest;
   class PendingDeletePasswordRequest;
   class PendingEditPasswordRequest;
+  class PendingFetchLastTimePasswordUseRequest;
 
   void OnRequestFinished(const PendingRequest* request);
 

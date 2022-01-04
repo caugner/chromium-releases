@@ -21,6 +21,7 @@
 #include "cc/debug/debug_colors.h"
 #include "cc/paint/render_surface_filters.h"
 #include "components/viz/common/display/renderer_settings.h"
+#include "components/viz/common/features.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
 #include "components/viz/common/frame_sinks/copy_output_util.h"
 #include "components/viz/common/quads/aggregated_render_pass_draw_quad.h"
@@ -119,45 +120,6 @@ SkDrawRegion::SkDrawRegion(const gfx::QuadF& draw_region) {
 bool IsTextureResource(DisplayResourceProviderSkia* resource_provider,
                        ResourceId resource_id) {
   return !resource_provider->IsResourceSoftwareBacked(resource_id);
-}
-
-void ApplyExplicitScissor(const DrawQuad* quad,
-                          const gfx::Rect& scissor_rect,
-                          const gfx::Transform& device_transform,
-                          unsigned* aa_flags,
-                          gfx::RectF* vis_rect) {
-  // Inset rectangular edges and turn off the AA for clipped edges. Operates in
-  // the quad's space, so apply inverse of transform to get new scissor
-  gfx::RectF scissor(scissor_rect);
-  device_transform.TransformRectReverse(&scissor);
-
-  float left_inset = scissor.x() - vis_rect->x();
-  float top_inset = scissor.y() - vis_rect->y();
-  float right_inset = vis_rect->right() - scissor.right();
-  float bottom_inset = vis_rect->bottom() - scissor.bottom();
-
-  if (left_inset >= kAAEpsilon) {
-    *aa_flags &= ~SkCanvas::kLeft_QuadAAFlag;
-  } else {
-    left_inset = 0;
-  }
-  if (top_inset >= kAAEpsilon) {
-    *aa_flags &= ~SkCanvas::kTop_QuadAAFlag;
-  } else {
-    top_inset = 0;
-  }
-  if (right_inset >= kAAEpsilon) {
-    *aa_flags &= ~SkCanvas::kRight_QuadAAFlag;
-  } else {
-    right_inset = 0;
-  }
-  if (bottom_inset >= kAAEpsilon) {
-    *aa_flags &= ~SkCanvas::kBottom_QuadAAFlag;
-  } else {
-    bottom_inset = 0;
-  }
-
-  vis_rect->Inset(left_inset, top_inset, right_inset, bottom_inset);
 }
 
 unsigned GetCornerAAFlags(const DrawQuad* quad,
@@ -552,6 +514,19 @@ struct SkiaRenderer::DrawQuadParams {
     p.setAntiAlias(aa_flags != SkCanvas::kNone_QuadAAFlags);
     return p;
   }
+
+  SkPath draw_region_in_path() const {
+    if (draw_region) {
+      return SkPath::Polygon(draw_region->points,
+                             base::size(draw_region->points),
+                             /*isClosed=*/true);
+    }
+    return SkPath();
+  }
+
+  void ApplyScissor(const SkiaRenderer* renderer,
+                    const DrawQuad* quad,
+                    const gfx::Rect* scissor_to_apply);
 };
 
 SkiaRenderer::DrawQuadParams::DrawQuadParams(const gfx::Transform& cdt,
@@ -595,7 +570,8 @@ class SkiaRenderer::ScopedSkImageBuilder {
                        bool maybe_concurrent_reads,
                        SkAlphaType alpha_type = kPremul_SkAlphaType,
                        GrSurfaceOrigin origin = kTopLeft_GrSurfaceOrigin,
-                       bool use_target_color_space = false);
+                       const absl::optional<gfx::ColorSpace>&
+                           override_colorspace = absl::nullopt);
 
   ScopedSkImageBuilder(const ScopedSkImageBuilder&) = delete;
   ScopedSkImageBuilder& operator=(const ScopedSkImageBuilder&) = delete;
@@ -618,19 +594,16 @@ SkiaRenderer::ScopedSkImageBuilder::ScopedSkImageBuilder(
     bool maybe_concurrent_reads,
     SkAlphaType alpha_type,
     GrSurfaceOrigin origin,
-    bool use_target_color_space) {
+    const absl::optional<gfx::ColorSpace>& override_color_space) {
   if (!resource_id)
     return;
   auto* resource_provider = skia_renderer->resource_provider();
   DCHECK(IsTextureResource(resource_provider, resource_id));
 
-  gfx::ColorSpace color_space;
-  if (use_target_color_space)
-    color_space = skia_renderer->CurrentRenderPassColorSpace();
-
   auto* image_context = skia_renderer->lock_set_for_external_use_->LockResource(
       resource_id, maybe_concurrent_reads, /*is_video_plane=*/false,
-      color_space);
+      override_color_space);
+
   // |ImageContext::image| provides thread safety: (a) this ImageContext is
   // only accessed by GPU thread after |image| is set and (b) the fields of
   // ImageContext that are accessed by both compositor and GPU thread are no
@@ -763,6 +736,11 @@ SkiaRenderer::SkiaRenderer(const RendererSettings* settings,
   current_frame_resource_fence_ = base::MakeRefCounted<FrameResourceFence>();
   this->resource_provider()->SetReadLockFence(
       current_frame_resource_fence_.get());
+
+#if OS_ANDROID
+  use_real_color_space_for_stream_video_ =
+      features::UseRealVideoColorSpaceForDisplay();
+#endif
 }
 
 SkiaRenderer::~SkiaRenderer() = default;
@@ -1033,6 +1011,10 @@ void SkiaRenderer::DrawQuadInternal(const DrawQuad* quad,
     case DrawQuad::Material::kTiledContent:
       DrawTileDrawQuad(TileDrawQuad::MaterialCast(quad), rpdq_params, params);
       break;
+    case DrawQuad::Material::kSharedElement:
+      DrawUnsupportedQuad(quad, rpdq_params, params);
+      NOTREACHED();
+      break;
     case DrawQuad::Material::kYuvVideoContent:
       DrawYUVVideoQuad(YUVVideoDrawQuad::MaterialCast(quad), rpdq_params,
                        params);
@@ -1117,7 +1099,7 @@ void SkiaRenderer::PrepareCanvasForRPDQ(const DrawRPDQParams& rpdq_params,
 
   // Initially the backdrop filter fills the entire rect; if we draw less than
   // that we need to clear the excess.
-  bool post_backdrop_filter_clear_needed = params->draw_region.has_value();
+  bool post_backdrop_filter_clear_needed = !!params->draw_region;
 
   // Explicitly crop the input and the output to the backdrop bounds; this is
   // required for the backdrop-filter spec.
@@ -1178,13 +1160,12 @@ void SkiaRenderer::PrepareCanvasForRPDQ(const DrawRPDQParams& rpdq_params,
       current_canvas_->clipRRect(SkRRect(*rpdq_params.backdrop_filter_bounds),
                                  SkClipOp::kDifference, aa);
     }
-    if (params->draw_region.has_value()) {
-      SkPath clipPath;
-      clipPath.addPoly(params->draw_region->points, 4, true /* close */);
+    if (params->draw_region) {
+      SkPath clip_path = params->draw_region_in_path();
       if (rpdq_params.bypass_geometry) {
-        clipPath.transform(rpdq_params.bypass_geometry->transform);
+        clip_path.transform(rpdq_params.bypass_geometry->transform);
       }
-      current_canvas_->clipPath(clipPath, SkClipOp::kDifference, aa);
+      current_canvas_->clipPath(clip_path, SkClipOp::kDifference, aa);
     }
     current_canvas_->clear(SK_ColorTRANSPARENT);
     current_canvas_->restore();
@@ -1331,18 +1312,7 @@ SkiaRenderer::DrawQuadParams SkiaRenderer::CalculateDrawQuadParams(
     params.opacity = 1.f;
   }
 
-  // Applying the scissor explicitly means avoiding a clipRect() call and
-  // allows more quads to be batched together in a DrawEdgeAAImageSet call
-  if (scissor_rect) {
-    if (CanExplicitlyScissor(quad, draw_region, params.content_device_transform,
-                             *scissor_rect)) {
-      ApplyExplicitScissor(quad, *scissor_rect, params.content_device_transform,
-                           &params.aa_flags, &params.visible_rect);
-      params.vis_tex_coords = params.visible_rect;
-    } else {
-      params.scissor_rect = *scissor_rect;
-    }
-  }
+  params.ApplyScissor(this, quad, scissor_rect);
 
   // Determine final rounded rect clip geometry. We transform it from target
   // space to window space to make batching and canvas preparation easier
@@ -1372,28 +1342,40 @@ SkiaRenderer::DrawQuadParams SkiaRenderer::CalculateDrawQuadParams(
   return params;
 }
 
-bool SkiaRenderer::CanExplicitlyScissor(
+void SkiaRenderer::DrawQuadParams::ApplyScissor(
+    const SkiaRenderer* renderer,
     const DrawQuad* quad,
-    const gfx::QuadF* draw_region,
-    const gfx::Transform& contents_device_transform,
-    const gfx::Rect& scissor_rect) const {
+    const gfx::Rect* scissor_to_apply) {
+  // No scissor should have been set before calling ApplyScissor
+  DCHECK(!scissor_rect.has_value());
+
+  if (!scissor_to_apply) {
+    // No scissor at all, which matches the DCHECK'ed state above
+    return;
+  }
+
+  // Assume at start that the scissor will be applied through the canvas clip,
+  // so that this can simply return when it detects the scissor cannot be
+  // applied explicitly to |visible_rect|.
+  scissor_rect = *scissor_to_apply;
+
   // PICTURE_CONTENT is not like the others, since it is executing a list of
   // draw calls into the canvas.
   if (quad->material == DrawQuad::Material::kPictureContent)
-    return false;
+    return;
   // Intersection with scissor and a quadrilateral is not necessarily a quad,
   // so don't complicate things
-  if (draw_region)
-    return false;
+  if (draw_region.has_value())
+    return;
 
   // This is slightly different than
   // gfx::Transform::IsPositiveScaleAndTranslation in that it also allows zero
   // scales. This is because in the common orthographic case the z scale is 0.
-  if (!contents_device_transform.IsScaleOrTranslation() ||
-      contents_device_transform.matrix().get(0, 0) < 0.0f ||
-      contents_device_transform.matrix().get(1, 1) < 0.0f ||
-      contents_device_transform.matrix().get(2, 2) < 0.0f) {
-    return false;
+  if (!content_device_transform.IsScaleOrTranslation() ||
+      content_device_transform.matrix().get(0, 0) < 0.0f ||
+      content_device_transform.matrix().get(1, 1) < 0.0f ||
+      content_device_transform.matrix().get(2, 2) < 0.0f) {
+    return;
   }
 
   // State check: should not have a CompositorRenderPassDrawQuad if we got here.
@@ -1403,22 +1385,69 @@ bool SkiaRenderer::CanExplicitlyScissor(
     // geometry beyond the quad's visible_rect, so it's not safe to pre-clip.
     auto pass_id =
         AggregatedRenderPassDrawQuad::MaterialCast(quad)->render_pass_id;
-    if (FiltersForPass(pass_id) || BackdropFiltersForPass(pass_id))
-      return false;
+    if (renderer->FiltersForPass(pass_id) ||
+        renderer->BackdropFiltersForPass(pass_id))
+      return;
   }
 
   // If the intersection of the scissor and the quad's visible_rect results in
   // subpixel device-space geometry, do not drop the scissor. Otherwise Skia
   // sees an unclipped anti-aliased hairline and uses different AA methods that
   // would cause the rasterized result to extend beyond the scissor.
-  gfx::RectF device_bounds(quad->visible_rect);
-  contents_device_transform.TransformRect(&device_bounds);
-  device_bounds.Intersect(gfx::RectF(scissor_rect));
+  gfx::RectF device_bounds(visible_rect);
+  content_device_transform.TransformRect(&device_bounds);
+  device_bounds.Intersect(gfx::RectF(*scissor_rect));
   if (device_bounds.width() < 1.0f || device_bounds.height() < 1.0f) {
-    return false;
+    return;
   }
 
-  return true;
+  // The explicit scissor is applied in the quad's local space. If the transform
+  // does not leave sufficient precision to round-trip the scissor rect to-from
+  // device->local->device space, the explicitly "clipped" geometry does not
+  // necessarily respect the original scissor.
+  gfx::RectF local_scissor(*scissor_rect);
+  content_device_transform.TransformRectReverse(&local_scissor);
+  gfx::RectF remapped_scissor(local_scissor);
+  content_device_transform.TransformRect(&remapped_scissor);
+  if (gfx::ToRoundedRect(remapped_scissor) != *scissor_rect) {
+    return;
+  }
+
+  // At this point, we've determined that we can transform the scissor rect into
+  // the quad's local space and adjust |vis_rect|, such that when it's mapped to
+  // device space, it will be contained in in the original scissor.
+  // Applying the scissor explicitly means avoiding a clipRect() call and
+  // allows more quads to be batched together in a DrawEdgeAAImageSet call
+  float left_inset = local_scissor.x() - visible_rect.x();
+  float top_inset = local_scissor.y() - visible_rect.y();
+  float right_inset = visible_rect.right() - local_scissor.right();
+  float bottom_inset = visible_rect.bottom() - local_scissor.bottom();
+
+  // The scissor is a non-AA clip, so we unset the bit flag for clipped edges.
+  if (left_inset >= kAAEpsilon) {
+    aa_flags &= ~SkCanvas::kLeft_QuadAAFlag;
+  } else {
+    left_inset = 0;
+  }
+  if (top_inset >= kAAEpsilon) {
+    aa_flags &= ~SkCanvas::kTop_QuadAAFlag;
+  } else {
+    top_inset = 0;
+  }
+  if (right_inset >= kAAEpsilon) {
+    aa_flags &= ~SkCanvas::kRight_QuadAAFlag;
+  } else {
+    right_inset = 0;
+  }
+  if (bottom_inset >= kAAEpsilon) {
+    aa_flags &= ~SkCanvas::kBottom_QuadAAFlag;
+  } else {
+    bottom_inset = 0;
+  }
+
+  visible_rect.Inset(left_inset, top_inset, right_inset, bottom_inset);
+  vis_tex_coords = visible_rect;
+  scissor_rect.reset();
 }
 
 const DrawQuad* SkiaRenderer::CanPassBeDrawnDirectly(
@@ -1535,11 +1564,12 @@ SkiaRenderer::BypassMode SkiaRenderer::CalculateBypassParams(
   // Invertibility was a requirement for being bypassable.
   DCHECK(inverted);
 
-  if (params->draw_region.has_value()) {
+  if (params->draw_region) {
     // The draw region was determined by the RPDQ's geometry, so map the
     // quadrilateral to the bypass'ed quad's coordinate space so that BSP
     // splitting is still respected.
-    rpdq_to_bypass.mapPoints(params->draw_region->points, 4);
+    rpdq_to_bypass.mapPoints(params->draw_region->points,
+                             base::size(params->draw_region->points));
   }
 
   // Compute draw params for the bypass quad from scratch, but since the
@@ -1630,7 +1660,7 @@ SkCanvas::SrcRectConstraint SkiaRenderer::ResolveTextureConstraints(
   // and change the visible rect so that the mapping from |visible_rect| to
   // |valid_texel_bounds| causes |draw_region| to map to original
   // |vis_tex_coords|
-  if (!params->draw_region.has_value()) {
+  if (!params->draw_region) {
     params->draw_region.emplace(gfx::QuadF(params->visible_rect));
   }
 
@@ -1701,9 +1731,9 @@ void SkiaRenderer::AddQuadToBatch(const SkImage* image,
   DCHECK(batched_quad_state_.constraint == constraint);
 
   // Add entry, with optional clip quad and shared transform
-  if (params->draw_region.has_value()) {
-    for (int i = 0; i < 4; ++i) {
-      batched_draw_regions_.push_back(params->draw_region->points[i]);
+  if (params->draw_region) {
+    for (const auto& point : params->draw_region->points) {
+      batched_draw_regions_.push_back(point);
     }
   }
 
@@ -1770,7 +1800,7 @@ void SkiaRenderer::DrawColoredQuad(SkColor color,
   color = SkColorSetA(color, params->opacity * SkColorGetA(color));
 
   const SkPoint* draw_region =
-      params->draw_region.has_value() ? params->draw_region->points : nullptr;
+      params->draw_region ? params->draw_region->points : nullptr;
 
   current_canvas_->experimental_DrawEdgeAAQuad(
       gfx::RectFToSkRect(params->visible_rect), draw_region,
@@ -1820,7 +1850,7 @@ void SkiaRenderer::DrawSingleImage(const SkImage* image,
   // Use -1 for matrix index since the cdt is set on the canvas.
   SkCanvas::ImageSetEntry entry = MakeEntry(image, matrix_index, *params);
   const SkPoint* draw_region =
-      params->draw_region.has_value() ? params->draw_region->points : nullptr;
+      params->draw_region ? params->draw_region->points : nullptr;
   current_canvas_->experimental_DrawEdgeAAImageSet(
       &entry, 1, draw_region, bypass_transform, params->sampling, paint,
       constraint);
@@ -1838,16 +1868,13 @@ void SkiaRenderer::DrawPaintOpBuffer(const cc::PaintOpBuffer* buffer,
   PrepareCanvas(params->scissor_rect, params->rounded_corner_bounds,
                 &params->content_device_transform);
 
-  float scale_x = params->rect.width() / quad->tex_coord_rect.width();
-  float scale_y = params->rect.height() / quad->tex_coord_rect.height();
-
-  float offset_x =
-      params->visible_rect.x() - params->vis_tex_coords.x() * scale_x;
-  float offset_y =
-      params->visible_rect.y() - params->vis_tex_coords.y() * scale_y;
-
   auto visible_rect = gfx::RectFToSkRect(params->visible_rect);
   current_canvas_->clipRect(visible_rect);
+
+  if (params->draw_region) {
+    bool aa = params->aa_flags != SkCanvas::kNone_QuadAAFlags;
+    current_canvas_->clipPath(params->draw_region_in_path(), aa);
+  }
 
   absl::optional<int> restore_count;
   sk_sp<SkColorFilter> color_filter =
@@ -1861,6 +1888,14 @@ void SkiaRenderer::DrawPaintOpBuffer(const cc::PaintOpBuffer* buffer,
 
   if (clear_color)
     current_canvas_->drawColor(*clear_color);
+
+  float scale_x = params->rect.width() / quad->tex_coord_rect.width();
+  float scale_y = params->rect.height() / quad->tex_coord_rect.height();
+
+  float offset_x =
+      params->visible_rect.x() - params->vis_tex_coords.x() * scale_x;
+  float offset_y =
+      params->visible_rect.y() - params->vis_tex_coords.y() * scale_y;
 
   current_canvas_->translate(offset_x, offset_y);
   current_canvas_->scale(scale_x, scale_y);
@@ -1883,12 +1918,9 @@ void SkiaRenderer::DrawDebugBorderQuad(const DebugBorderDrawQuad* quad,
   SkMatrix cdt;
   gfx::TransformToFlattenedSkMatrix(params->content_device_transform, &cdt);
 
-  SkPath path;
-  if (params->draw_region.has_value()) {
-    path.addPoly(params->draw_region->points, 4, true /* close */);
-  } else {
-    path.addRect(gfx::RectFToSkRect(params->visible_rect));
-  }
+  SkPath path = params->draw_region
+                    ? params->draw_region_in_path()
+                    : SkPath::Rect(gfx::RectFToSkRect(params->visible_rect));
   path.transform(cdt);
 
   SkPaint paint = params->paint(nullptr /* color_filter */);
@@ -1924,10 +1956,9 @@ void SkiaRenderer::DrawPictureQuad(const PictureDrawQuad* quad,
   SkRect visible_rect = gfx::RectFToSkRect(params->visible_rect);
   SkPaint paint = params->paint(GetContentColorFilter());
 
-  if (params->draw_region.has_value()) {
-    SkPath clip;
-    clip.addPoly(params->draw_region->points, 4, true /* close */);
-    current_canvas_->clipPath(clip, paint.isAntiAlias());
+  if (params->draw_region) {
+    current_canvas_->clipPath(params->draw_region_in_path(),
+                              paint.isAntiAlias());
   } else {
     current_canvas_->clipRect(visible_rect, paint.isAntiAlias());
   }
@@ -1973,9 +2004,18 @@ void SkiaRenderer::DrawStreamVideoQuad(const StreamVideoDrawQuad* quad,
                                        DrawQuadParams* params) {
   DCHECK(!MustFlushBatchedQuads(quad, rpdq_params, *params));
 
+  absl::optional<gfx::ColorSpace> override_color_space;
+
+  // Force SRGB color space if we don't want real color space from media
+  // decoder.
+  if (!use_real_color_space_for_stream_video_) {
+    override_color_space = gfx::ColorSpace::CreateSRGB();
+  }
+
   ScopedSkImageBuilder builder(this, quad->resource_id(),
                                /*maybe_concurrent_reads=*/true,
-                               kUnpremul_SkAlphaType);
+                               kUnpremul_SkAlphaType, kTopLeft_GrSurfaceOrigin,
+                               override_color_space);
   const SkImage* image = builder.sk_image();
   if (!image)
     return;
@@ -2009,11 +2049,15 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
   const bool needs_color_conversion_filter =
       quad->is_video_frame && src_color_space.IsHDR();
 
+  absl::optional<gfx::ColorSpace> override_color_space;
+  if (needs_color_conversion_filter)
+    override_color_space = CurrentRenderPassColorSpace();
+
   ScopedSkImageBuilder builder(
       this, quad->resource_id(), /*maybe_concurrent_reads=*/true,
       quad->premultiplied_alpha ? kPremul_SkAlphaType : kUnpremul_SkAlphaType,
       quad->y_flipped ? kBottomLeft_GrSurfaceOrigin : kTopLeft_GrSurfaceOrigin,
-      /*use_target_color_space=*/needs_color_conversion_filter);
+      override_color_space);
   const SkImage* image = builder.sk_image();
   if (!image)
     return;

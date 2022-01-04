@@ -49,6 +49,8 @@ COMPONENT_EXPORT(AUTOFILL) extern const base::Feature kAutofillDisableFilling;
 COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillDisableAddressImport;
 COMPONENT_EXPORT(AUTOFILL)
+extern const base::Feature kAutofillDisplaceRemovedForms;
+COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillEnableAccountWalletStorage;
 COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillEnableAugmentedPhoneCountryCode;
@@ -105,7 +107,12 @@ COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillLabelAffixRemoval;
 COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillCenterAlignedSuggestions;
-COMPONENT_EXPORT(AUTOFILL) extern const base::Feature kAutofillPruneSuggestions;
+COMPONENT_EXPORT(AUTOFILL)
+extern const base::FeatureParam<int>
+    kAutofillMaximumPixelsToMoveSuggestionopupToCenter;
+COMPONENT_EXPORT(AUTOFILL)
+extern const base::FeatureParam<int>
+    kAutofillMaxiumWidthPercentageToMoveSuggestionPopupToCenter;
 COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillParsingPatternsFromRemote;
 COMPONENT_EXPORT(AUTOFILL)
@@ -115,8 +122,6 @@ extern const base::Feature kAutofillParsingPatternsNegativeMatching;
 COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillParsingPatternsLanguageDependent;
 COMPONENT_EXPORT(AUTOFILL)
-extern const base::Feature kAutofillPreventMixedFormsFilling;
-COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillProbableFormSubmissionInBrowser;
 COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillProfileClientValidation;
@@ -124,6 +129,8 @@ COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillProfileImportFromUnfocusableFields;
 COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillProfileServerValidation;
+COMPONENT_EXPORT(AUTOFILL)
+extern const base::Feature kAutofillRecordMetricsOfUnownedForms;
 COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillRetrieveOverallPredictionsFromCache;
 COMPONENT_EXPORT(AUTOFILL) extern const base::Feature kAutofillSaveAndFillVPA;
@@ -149,12 +156,7 @@ extern const base::Feature kAutofillUseImprovedLabelDisambiguation;
 COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillUseNewSectioningMethod;
 COMPONENT_EXPORT(AUTOFILL)
-extern const base::Feature kAutofillUseNewFormExtraction;
-COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillUseConsistentPopupSettingsIcons;
-COMPONENT_EXPORT(AUTOFILL)
-extern const base::Feature
-    kAutofillUseOnlyFormRendererIDForOldDuplicateFormRemoval;
 COMPONENT_EXPORT(AUTOFILL)
 extern const base::Feature kAutofillUseUnassociatedListedElements;
 

@@ -10,20 +10,30 @@
 
 namespace feature_engagement {
 
+// A feature for enabling automatic snooze mode for In-Product Help (IPH). When
+// this flag is enabled, we don't show snooze button/UI on the IPH, but on
+// dismiss we will implicitly snooze it until the snooze limit count is reached.
+extern const base::Feature kEnableAutomaticSnooze;
+
 // A feature for enabling a demonstration mode for In-Product Help (IPH).
 extern const base::Feature kIPHDemoMode;
 
 // A feature for enabling a snooze mode for In-Product Help (IPH).
 extern const base::Feature kIPHSnooze;
 
+// A feature for enabling In-Product Help (IPH) to use client side
+// configuration. When this flag is enabled, finch config will be ignored for
+// all IPHs.
+extern const base::Feature kUseClientConfigIPH;
+
 // A feature to ensure all arrays can contain at least one feature.
 extern const base::Feature kIPHDummyFeature;
 
 #if defined(OS_WIN) || defined(OS_APPLE) || defined(OS_LINUX) || \
     defined(OS_CHROMEOS) || defined(OS_FUCHSIA)
+extern const base::Feature kIPHDesktopSharedHighlightingFeature;
 extern const base::Feature kIPHDesktopTabGroupsNewGroupFeature;
-extern const base::Feature kIPHFocusModeFeature;
-extern const base::Feature kIPHGlobalMediaControlsFeature;
+extern const base::Feature kIPHFocusHelpBubbleScreenReaderPromoFeature;
 extern const base::Feature kIPHGMCCastStartStopFeature;
 extern const base::Feature kIPHLiveCaptionFeature;
 extern const base::Feature kIPHPasswordsAccountStorageFeature;

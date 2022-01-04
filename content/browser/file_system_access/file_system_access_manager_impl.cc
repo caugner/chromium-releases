@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/bind_post_task.h"
 #include "base/callback_helpers.h"
 #include "base/check_op.h"
 #include "base/command_line.h"
@@ -20,6 +19,7 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/bind_post_task.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "build/build_config.h"
@@ -48,6 +48,7 @@
 #include "storage/browser/file_system/file_system_operation_runner.h"
 #include "storage/browser/file_system/file_system_url.h"
 #include "storage/browser/file_system/file_system_util.h"
+#include "storage/browser/quota/quota_manager_proxy.h"
 #include "storage/common/file_system/file_system_types.h"
 #include "storage/common/file_system/file_system_util.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
@@ -86,7 +87,7 @@ void ShowFilePickerOnUIThread(const url::Origin& requesting_origin,
   }
 
   url::Origin embedding_origin =
-      url::Origin::Create(web_contents->GetLastCommittedURL());
+      web_contents->GetMainFrame()->GetLastCommittedOrigin();
   if (embedding_origin != requesting_origin) {
     // Third party iframes are not allowed to show a file picker.
     std::move(callback).Run(
@@ -509,11 +510,14 @@ void FileSystemAccessManagerImpl::SetDefaultPathAndShowPicker(
           ? options->get_save_file_picker_options()->suggested_name
           : std::string();
 
-  auto suggested_name_path =
-      !suggested_name.empty()
-          ? net::GenerateFileName(GURL(), std::string(), std::string(),
-                                  suggested_name, std::string(), std::string())
-          : base::FilePath();
+  base::FilePath suggested_name_path;
+  if (!suggested_name.empty()) {
+    // `net::GenerateFileName` does not strip "%" characters.
+    base::ReplaceChars(suggested_name, "%", "_", &suggested_name);
+    suggested_name_path =
+        net::GenerateFileName(GURL(), std::string(), std::string(),
+                              suggested_name, std::string(), std::string());
+  }
 
   FileSystemChooser::Options file_system_chooser_options(
       GetSelectFileDialogType(options), GetAndMoveAcceptsTypesInfo(options),

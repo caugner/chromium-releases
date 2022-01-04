@@ -28,17 +28,6 @@ namespace blink {
 
 namespace {
 
-scoped_refptr<viz::RasterContextProvider> GetRasterContextProvider() {
-  auto wrapper = SharedGpuContext::ContextProviderWrapper();
-  if (!wrapper)
-    return nullptr;
-
-  if (auto* provider = wrapper->ContextProvider())
-    return base::WrapRefCounted(provider->RasterContextProvider());
-
-  return nullptr;
-}
-
 bool CanUseZeroCopyImages(const media::VideoFrame& frame) {
   // SharedImage optimization: create AcceleratedStaticBitmapImage directly.
   // Disabled on Android because the hardware decode implementation may neuter
@@ -203,7 +192,7 @@ scoped_refptr<StaticBitmapImage> CreateImageFromVideoFrame(
     DLOG(ERROR) << "An external CanvasResourceProvider must be provided when "
                    "providing a custom destination rect.";
     return nullptr;
-  } else if (!gfx::Rect(gfx::Size(resource_provider->Size()))
+  } else if (!gfx::Rect(ToGfxSize(resource_provider->Size()))
                   .Contains(final_dest_rect)) {
     DLOG(ERROR)
         << "Provided CanvasResourceProvider is too small. Expected at least "
@@ -251,7 +240,7 @@ bool DrawVideoFrameIntoResourceProvider(
     bool ignore_video_transformation) {
   DCHECK(frame);
   DCHECK(resource_provider);
-  DCHECK(gfx::Rect(gfx::Size(resource_provider->Size())).Contains(dest_rect));
+  DCHECK(gfx::Rect(ToGfxSize(resource_provider->Size())).Contains(dest_rect));
 
   if (frame->HasTextures()) {
     if (!raster_context_provider) {
@@ -317,17 +306,30 @@ void DrawVideoFrameIntoCanvas(scoped_refptr<media::VideoFrame> frame,
                        raster_context_provider);
 }
 
+scoped_refptr<viz::RasterContextProvider> GetRasterContextProvider() {
+  auto wrapper = SharedGpuContext::ContextProviderWrapper();
+  if (!wrapper)
+    return nullptr;
+
+  if (auto* provider = wrapper->ContextProvider())
+    return base::WrapRefCounted(provider->RasterContextProvider());
+
+  return nullptr;
+}
+
 std::unique_ptr<CanvasResourceProvider> CreateResourceProviderForVideoFrame(
     IntSize size,
     viz::RasterContextProvider* raster_context_provider) {
   if (!ShouldCreateAcceleratedImages(raster_context_provider)) {
     return CanvasResourceProvider::CreateBitmapProvider(
-        size, cc::PaintFlags::FilterQuality::kLow, CanvasResourceParams(),
+        SkImageInfo::MakeN32Premul(size.width(), size.height()),
+        cc::PaintFlags::FilterQuality::kLow,
         CanvasResourceProvider::ShouldInitialize::kNo);
   }
 
   return CanvasResourceProvider::CreateSharedImageProvider(
-      size, cc::PaintFlags::FilterQuality::kLow, CanvasResourceParams(),
+      SkImageInfo::MakeN32Premul(size.width(), size.height()),
+      cc::PaintFlags::FilterQuality::kLow,
       CanvasResourceProvider::ShouldInitialize::kNo,
       SharedGpuContext::ContextProviderWrapper(), RasterMode::kGPU,
       false,  // Origin of GL texture is bottom left on screen

@@ -35,13 +35,14 @@ class URLLoaderFactoryGetter;
 // prefetches. The renderer uses it for prefetch requests including <link
 // rel="prefetch">.
 class CONTENT_EXPORT PrefetchURLLoaderService final
-    : public base::RefCountedThreadSafe<
-          PrefetchURLLoaderService,
-          content::BrowserThread::DeleteOnUIThread>,
-      public blink::mojom::RendererPreferenceWatcher,
+    : public blink::mojom::RendererPreferenceWatcher,
       public network::mojom::URLLoaderFactory {
  public:
   explicit PrefetchURLLoaderService(BrowserContext* browser_context);
+  ~PrefetchURLLoaderService() override;
+
+  PrefetchURLLoaderService(const PrefetchURLLoaderService&) = delete;
+  PrefetchURLLoaderService& operator=(const PrefetchURLLoaderService&) = delete;
 
   void GetFactory(
       mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
@@ -67,11 +68,7 @@ class CONTENT_EXPORT PrefetchURLLoaderService final
   }
 
  private:
-  friend class base::DeleteHelper<content::PrefetchURLLoaderService>;
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
   struct BindContext;
-
-  ~PrefetchURLLoaderService() override;
 
   // network::mojom::URLLoaderFactory:
   void CreateLoaderAndStart(
@@ -114,6 +111,9 @@ class CONTENT_EXPORT PrefetchURLLoaderService final
   mojo::ReceiverSet<network::mojom::URLLoaderFactory,
                     std::unique_ptr<BindContext>>
       loader_factory_receivers_;
+  mojo::ReceiverSet<network::mojom::URLLoader,
+                    std::unique_ptr<network::mojom::URLLoader>>
+      prefetch_receivers_;
   // Used in the IO thread.
   mojo::Receiver<blink::mojom::RendererPreferenceWatcher>
       preference_watcher_receiver_{this};
@@ -124,8 +124,6 @@ class CONTENT_EXPORT PrefetchURLLoaderService final
       signed_exchange_prefetch_metric_recorder_;
 
   std::string accept_langs_;
-
-  DISALLOW_COPY_AND_ASSIGN(PrefetchURLLoaderService);
 };
 
 }  // namespace content

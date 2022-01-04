@@ -7,7 +7,6 @@
 #include <string>
 
 #include "chrome/browser/commerce/commerce_feature_list.h"
-#include "chrome/browser/commerce/coupons/coupon_service.h"
 #include "chrome/browser/commerce/coupons/coupon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/autofill/autofill_bubble_base.h"
@@ -51,7 +50,10 @@ OfferNotificationBubbleControllerImpl::OfferNotificationBubbleControllerImpl(
     content::WebContents* web_contents)
     : AutofillBubbleControllerBase(web_contents),
       coupon_service_(CouponServiceFactory::GetForProfile(
-          Profile::FromBrowserContext(web_contents->GetBrowserContext()))) {}
+          Profile::FromBrowserContext(web_contents->GetBrowserContext()))) {
+  if (coupon_service_)
+    coupon_service_observation_.Observe(coupon_service_);
+}
 
 std::u16string OfferNotificationBubbleControllerImpl::GetWindowTitle() const {
   switch (offer_->GetOfferType()) {
@@ -190,31 +192,25 @@ void OfferNotificationBubbleControllerImpl::ReshowBubble() {
   Show();
 }
 
-void OfferNotificationBubbleControllerImpl::DidFinishNavigation(
-    content::NavigationHandle* navigation_handle) {
-  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
-  // frames. This caller was converted automatically to the primary main frame
-  // to preserve its semantics. Follow up to confirm correctness.
-  if (!navigation_handle->IsInPrimaryMainFrame() ||
-      !navigation_handle->HasCommitted())
+void OfferNotificationBubbleControllerImpl::OnCouponInvalidated(
+    const autofill::AutofillOfferData& offer_data) {
+  if (!offer_ || *offer_ != offer_data)
     return;
+  ClearCurrentOffer();
+}
 
-  // Don't react to same-document (fragment) navigations.
-  if (navigation_handle->IsSameDocument())
-    return;
-
+void OfferNotificationBubbleControllerImpl::PrimaryPageChanged(
+    content::Page& page) {
   // Don't do anything if user is still on an eligible origin for this offer.
   if (base::ranges::count(origins_to_display_bubble_,
-                          navigation_handle->GetURL().GetOrigin())) {
+                          page.GetMainDocument()
+                              .GetLastCommittedURL()
+                              .DeprecatedGetOriginAsURL())) {
     return;
   }
 
   // Reset variables.
-  origins_to_display_bubble_.clear();
-  UpdatePageActionIcon();
-
-  // Hide the bubble.
-  HideBubble();
+  ClearCurrentOffer();
 }
 
 PageActionIconType
@@ -249,6 +245,12 @@ bool OfferNotificationBubbleControllerImpl::IsWebContentsActive() {
 
   return active_browser->tab_strip_model()->GetActiveWebContents() ==
          web_contents();
+}
+
+void OfferNotificationBubbleControllerImpl::ClearCurrentOffer() {
+  origins_to_display_bubble_.clear();
+  UpdatePageActionIcon();
+  HideBubble();
 }
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(OfferNotificationBubbleControllerImpl);
