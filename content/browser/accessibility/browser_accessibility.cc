@@ -27,6 +27,7 @@
 #include "ui/base/buildflags.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/rect_f.h"
+#include "ui/strings/grit/ax_strings.h"
 
 namespace content {
 
@@ -424,36 +425,6 @@ gfx::RectF BrowserAccessibility::GetLocation() const {
   return GetData().relative_bounds.bounds;
 }
 
-gfx::Rect BrowserAccessibility::GetClippedScreenBoundsRect(
-    ui::AXOffscreenResult* offscreen_result) const {
-  return GetBoundsRect(ui::AXCoordinateSystem::kScreenDIPs,
-                       ui::AXClippingBehavior::kClipped, offscreen_result);
-}
-
-gfx::Rect BrowserAccessibility::GetUnclippedScreenBoundsRect(
-    ui::AXOffscreenResult* offscreen_result) const {
-  return GetBoundsRect(ui::AXCoordinateSystem::kScreenDIPs,
-                       ui::AXClippingBehavior::kUnclipped, offscreen_result);
-}
-
-gfx::Rect BrowserAccessibility::GetClippedRootFrameBoundsRect(
-    ui::AXOffscreenResult* offscreen_result) const {
-  return GetBoundsRect(ui::AXCoordinateSystem::kRootFrame,
-                       ui::AXClippingBehavior::kClipped, offscreen_result);
-}
-
-gfx::Rect BrowserAccessibility::GetUnclippedRootFrameBoundsRect(
-    ui::AXOffscreenResult* offscreen_result) const {
-  return GetBoundsRect(ui::AXCoordinateSystem::kRootFrame,
-                       ui::AXClippingBehavior::kUnclipped, offscreen_result);
-}
-
-gfx::Rect BrowserAccessibility::GetClippedFrameBoundsRect(
-    ui::AXOffscreenResult* offscreen_result) const {
-  return GetBoundsRect(ui::AXCoordinateSystem::kFrame,
-                       ui::AXClippingBehavior::kUnclipped, offscreen_result);
-}
-
 gfx::Rect BrowserAccessibility::GetUnclippedRootFrameHypertextRangeBoundsRect(
     const int start_offset,
     const int end_offset,
@@ -712,9 +683,8 @@ gfx::Rect BrowserAccessibility::GetInnerTextRangeBoundsRect(
     const ui::AXCoordinateSystem coordinate_system,
     const ui::AXClippingBehavior clipping_behavior,
     ui::AXOffscreenResult* offscreen_result) const {
-  const int inner_text_length = GetInnerText().length();
-  if (start_offset < 0 || end_offset > inner_text_length ||
-      start_offset > end_offset)
+  const int text_length = GetTextContentUTF16().length();
+  if (start_offset < 0 || end_offset > text_length || start_offset > end_offset)
     return gfx::Rect();
 
   return GetInnerTextRangeBoundsRectInSubtree(
@@ -730,7 +700,8 @@ gfx::Rect BrowserAccessibility::GetInnerTextRangeBoundsRectInSubtree(
     ui::AXOffscreenResult* offscreen_result) const {
   if (GetRole() == ax::mojom::Role::kInlineTextBox) {
     return RelativeToAbsoluteBounds(
-        GetInlineTextRect(start_offset, end_offset, GetInnerText().length()),
+        GetInlineTextRect(start_offset, end_offset,
+                          GetTextContentUTF16().length()),
         coordinate_system, clipping_behavior, offscreen_result);
   }
 
@@ -739,20 +710,20 @@ gfx::Rect BrowserAccessibility::GetInnerTextRangeBoundsRectInSubtree(
   for (InternalChildIterator it = InternalChildrenBegin();
        it != InternalChildrenEnd(); ++it) {
     const BrowserAccessibility* browser_accessibility_child = it.get();
-    const int child_inner_text_length =
-        browser_accessibility_child->GetInnerText().length();
+    const int child_text_length =
+        browser_accessibility_child->GetTextContentUTF16().length();
 
     // The text bounds queried are not in this subtree; skip it and continue.
     const int child_start_offset =
         std::max(start_offset - child_offset_in_parent, 0);
-    if (child_start_offset > child_inner_text_length) {
-      child_offset_in_parent += child_inner_text_length;
+    if (child_start_offset > child_text_length) {
+      child_offset_in_parent += child_text_length;
       continue;
     }
 
     // The text bounds queried have already been gathered; short circuit.
     const int child_end_offset =
-        std::min(end_offset - child_offset_in_parent, child_inner_text_length);
+        std::min(end_offset - child_offset_in_parent, child_text_length);
     if (child_end_offset < 0)
       return bounds;
 
@@ -766,7 +737,7 @@ gfx::Rect BrowserAccessibility::GetInnerTextRangeBoundsRectInSubtree(
     else
       bounds.Union(child_bounds);
 
-    child_offset_in_parent += child_inner_text_length;
+    child_offset_in_parent += child_text_length;
   }
 
   return bounds;
@@ -929,10 +900,6 @@ std::string BrowserAccessibility::GetLiveRegionText() const {
   return text;
 }
 
-std::vector<int> BrowserAccessibility::GetLineStartOffsets() const {
-  return node()->GetOrComputeLineStartOffsets();
-}
-
 BrowserAccessibility::AXPosition BrowserAccessibility::CreatePositionAt(
     int offset,
     ax::mojom::TextAffinity affinity) const {
@@ -970,8 +937,8 @@ BrowserAccessibility::GetHypertextOffsetToHyperlinkChildIndex() const {
   return node_->GetHypertextOffsetToHyperlinkChildIndex();
 }
 
-std::u16string BrowserAccessibility::GetInnerText() const {
-  return base::UTF8ToUTF16(node()->GetInnerText());
+std::u16string BrowserAccessibility::GetTextContentUTF16() const {
+  return node()->GetTextContentUTF16();
 }
 
 std::u16string BrowserAccessibility::GetValueForControl() const {
@@ -1477,7 +1444,7 @@ gfx::NativeViewAccessible BrowserAccessibility::GetNSWindow() {
   return nullptr;
 }
 
-gfx::NativeViewAccessible BrowserAccessibility::GetParent() {
+gfx::NativeViewAccessible BrowserAccessibility::GetParent() const {
   BrowserAccessibility* parent = PlatformGetParent();
   if (parent)
     return parent->GetNativeViewAccessible();

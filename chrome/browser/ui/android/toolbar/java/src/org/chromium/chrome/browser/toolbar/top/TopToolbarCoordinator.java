@@ -125,7 +125,6 @@ public class TopToolbarCoordinator implements Toolbar {
      *         enabled.
      * @param initializeWithIncognitoColors Whether the toolbar should be initialized with incognito
      *         colors.
-     * @param shouldHideToolbarLayoutOnStart Whether to hide toolbar layout on startup.
      */
     public TopToolbarCoordinator(ToolbarControlContainer controlContainer,
             ToolbarLayout toolbarLayout, ToolbarDataProvider toolbarDataProvider,
@@ -149,7 +148,7 @@ public class TopToolbarCoordinator implements Toolbar {
             boolean isTabToGtsAnimationEnabled, boolean isStartSurfaceEnabled,
             boolean isTabGroupsAndroidContinuationEnabled, HistoryDelegate historyDelegate,
             BooleanSupplier partnerHomepageEnabledSupplier, OfflineDownloader offlineDownloader,
-            boolean initializeWithIncognitoColors, boolean shouldHideToolbarLayoutOnStart) {
+            boolean initializeWithIncognitoColors) {
         mControlContainer = controlContainer;
         mToolbarLayout = toolbarLayout;
         mMenuButtonCoordinator = browsingModeMenuButtonCoordinator;
@@ -161,7 +160,6 @@ public class TopToolbarCoordinator implements Toolbar {
 
         if (mToolbarLayout instanceof ToolbarPhone) {
             if (isStartSurfaceEnabled) {
-                if (shouldHideToolbarLayoutOnStart) mToolbarLayout.setVisibility(View.GONE);
                 View.OnClickListener homeButtonOnClickListener = v -> {
                     if (tabController != null) {
                         tabController.openHomepage();
@@ -169,18 +167,17 @@ public class TopToolbarCoordinator implements Toolbar {
                 };
                 mStartSurfaceToolbarCoordinator = new StartSurfaceToolbarCoordinator(
                         controlContainer.getRootView().findViewById(R.id.tab_switcher_toolbar_stub),
-                        userEducationHelper, layoutStateProviderSupplier, identityDiscStateSupplier,
-                        overviewThemeColorProvider, overviewModeMenuButtonCoordinator,
-                        identityDiscButtonSupplier, isGridTabSwitcherEnabled,
-                        homepageEnabledSupplier, startSurfaceAsHomepageSupplier,
-                        homepageManagedByPolicySupplier, homeButtonOnClickListener,
-                        isTabGroupsAndroidContinuationEnabled, isIncognitoModeEnabledSupplier);
+                        userEducationHelper, identityDiscStateSupplier, overviewThemeColorProvider,
+                        overviewModeMenuButtonCoordinator, identityDiscButtonSupplier,
+                        isGridTabSwitcherEnabled, homepageEnabledSupplier,
+                        startSurfaceAsHomepageSupplier, homepageManagedByPolicySupplier,
+                        homeButtonOnClickListener, isTabGroupsAndroidContinuationEnabled,
+                        isIncognitoModeEnabledSupplier);
             } else {
                 mTabSwitcherModeCoordinatorPhone = new TabSwitcherModeTTCoordinatorPhone(
                         controlContainer.getRootView().findViewById(R.id.tab_switcher_toolbar_stub),
                         overviewModeMenuButtonCoordinator, isGridTabSwitcherEnabled,
-                        isTabToGtsAnimationEnabled, isStartSurfaceEnabled,
-                        isIncognitoModeEnabledSupplier);
+                        isTabToGtsAnimationEnabled, isIncognitoModeEnabledSupplier);
             }
         }
         mIsGridTabSwitcherEnabled = isGridTabSwitcherEnabled;
@@ -540,7 +537,7 @@ public class TopToolbarCoordinator implements Toolbar {
         if (mTabSwitcherModeCoordinatorPhone != null) {
             mTabSwitcherModeCoordinatorPhone.setTabSwitcherMode(inTabSwitcherMode);
         } else if (mStartSurfaceToolbarCoordinator != null) {
-            mStartSurfaceToolbarCoordinator.setStartSurfaceMode(inTabSwitcherMode);
+            // Do nothing. Already handled by onStartSurfaceStateChanged.
         }
     }
 

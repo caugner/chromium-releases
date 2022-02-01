@@ -13,7 +13,8 @@
 namespace ui {
 
 namespace {
-constexpr uint32_t kMaxSurfaceAugmenterVersion = 1;
+constexpr uint32_t kMinVersion = 1;
+constexpr uint32_t kMaxVersion = 2;
 }
 
 // static
@@ -27,13 +28,15 @@ void SurfaceAugmenter::Instantiate(WaylandConnection* connection,
                                    uint32_t version) {
   DCHECK_EQ(interface, kInterfaceName);
 
-  if (connection->surface_augmenter_)
+  if (connection->surface_augmenter_ ||
+      !wl::CanBind(interface, version, kMinVersion, kMaxVersion)) {
     return;
+  }
 
-  auto augmenter = wl::Bind<surface_augmenter>(
-      registry, name, std::min(version, kMaxSurfaceAugmenterVersion));
+  auto augmenter = wl::Bind<surface_augmenter>(registry, name,
+                                               std::min(version, kMaxVersion));
   if (!augmenter) {
-    LOG(ERROR) << "Failed to bind overlay_prioritizer";
+    LOG(ERROR) << "Failed to bind surface_augmenter";
     return;
   }
   connection->surface_augmenter_ =

@@ -33,6 +33,11 @@ const base::Feature kWebViewForceDarkModeMatchTheme{
 const base::Feature kWebViewDisplayCutout{"WebViewDisplayCutout",
                                           base::FEATURE_ENABLED_BY_DEFAULT};
 
+// Fake empty component to measure component updater performance impact on
+// WebView clients.
+const base::Feature kWebViewEmptyComponent{"WebViewEmptyComponentLoaderPolicy",
+                                           base::FEATURE_DISABLED_BY_DEFAULT};
+
 // When enabled, passive mixed content (Audio/Video/Image subresources loaded
 // over HTTP on HTTPS sites) will be autoupgraded to HTTPS, and the load will be
 // blocked if the resource fails to load over HTTPS. This only affects apps that
@@ -50,6 +55,10 @@ const base::Feature kWebViewExtraHeadersSameOriginOnly{
 // Enable the new Java/JS Bridge code path with mojo implementation.
 const base::Feature kWebViewJavaJsBridgeMojo{"WebViewJavaJsBridgeMojo",
                                              base::FEATURE_DISABLED_BY_DEFAULT};
+
+// When enabled, connections using legacy TLS 1.0/1.1 versions are allowed.
+const base::Feature kWebViewLegacyTlsSupport{"WebViewLegacyTlsSupport",
+                                             base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Enables logging whether it was a first party page when logging PageTimeSpent.
 const base::Feature kWebViewLogFirstPartyPageTimeSpent{

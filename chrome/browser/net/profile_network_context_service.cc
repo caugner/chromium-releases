@@ -704,10 +704,25 @@ void ProfileNetworkContextService::ConfigureNetworkContextParamsInternal(
         local_state->GetFilePath(prefs::kDiskCacheDir);
     if (!disk_cache_dir.empty())
       base_cache_path = disk_cache_dir.Append(base_cache_path.BaseName());
-    network_context_params->http_cache_path =
+    base::FilePath http_cache_path =
         base_cache_path.Append(chrome::kCacheDirname);
-    network_context_params->http_cache_max_size =
-        local_state->GetInteger(prefs::kDiskCacheSize);
+    if (base::FeatureList::IsEnabled(features::kDisableHttpDiskCache)) {
+      // Clear any existing on-disk cache first since if the user tries to
+      // remove the cache it would only affect the in-memory cache while in the
+      // experiment.
+      base::ThreadPool::PostTask(
+          FROM_HERE,
+          {base::TaskPriority::BEST_EFFORT, base::MayBlock(),
+           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+          base::BindOnce(base::GetDeletePathRecursivelyCallback(),
+                         http_cache_path));
+      network_context_params->http_cache_max_size =
+          features::kDisableHttpDiskCacheMemoryCacheSizeParam.Get();
+    } else {
+      network_context_params->http_cache_path = http_cache_path;
+      network_context_params->http_cache_max_size =
+          local_state->GetInteger(prefs::kDiskCacheSize);
+    }
 
     network_context_params->file_paths =
         ::network::mojom::NetworkContextFilePaths::New();
@@ -716,7 +731,7 @@ void ProfileNetworkContextService::ConfigureNetworkContextParamsInternal(
         path.Append(chrome::kNetworkDataDirname);
     network_context_params->file_paths->unsandboxed_data_path = path;
     network_context_params->file_paths->trigger_migration =
-        features::ShouldTriggerNetworkDataMigration();
+        base::FeatureList::IsEnabled(features::kTriggerNetworkDataMigration);
     // Currently this just contains HttpServerProperties, but that will likely
     // change.
     network_context_params->file_paths->http_server_properties_file_name =
@@ -880,12 +895,6 @@ void ProfileNetworkContextService::ConfigureNetworkContextParamsInternal(
         true;
   }
 #endif
-
-  // Should be initialized with existing per-profile CORS access lists.
-  network_context_params->cors_origin_access_list =
-      profile_->GetSharedCorsOriginAccessList()
-          ->GetOriginAccessList()
-          .CreateCorsOriginAccessPatternsList();
 
   network_context_params->reset_http_cache_backend =
       GetHttpCacheBackendResetParam(g_browser_process->local_state());

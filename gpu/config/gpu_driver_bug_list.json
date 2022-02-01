@@ -2823,8 +2823,8 @@
       "vendor_id": "0x8086",
       "driver_version": {
         "schema": "intel_driver",
-        "op": "<",
-        "value": "0.0.100.0"
+        "op": "<=",
+        "value": "0.0.99.9999"
       },
       "features": [
         "disable_nv12_dynamic_textures"
@@ -3816,6 +3816,22 @@
       "gl_vendor": "Intel.*",
       "features": [
         "check_egl_fence_before_wait"
+      ]
+    },
+    {
+      "id": 386,
+      "cr_bugs": [1253962],
+      "description": "Older Adreno 4xx drivers drop draws sometimes with oop-c",
+      "os": {
+        "type" : "android"
+      },
+      "driver_version": {
+        "op": "<",
+        "value": "145"
+      },
+      "gl_renderer": ".*Adreno \\(TM\\) 4.*",
+      "features": [
+        "disable_canvas_oop_rasterization"
       ]
     }
   ]

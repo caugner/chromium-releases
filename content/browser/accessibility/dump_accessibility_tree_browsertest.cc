@@ -901,9 +901,12 @@ IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeTest,
   RunAriaTest(FILE_PATH_LITERAL("aria-insertion-deletion.html"));
 }
 
+#if !defined(OS_CHROMEOS)
+// TODO(accessibility) Reennable. See crrev.com/c//3396516.
 IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeTest, AccessibilityAriaInvalid) {
   RunAriaTest(FILE_PATH_LITERAL("aria-invalid.html"));
 }
+#endif  // defined(OS_CHROMEOS)
 
 IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeTest,
                        AccessibilityAriaKeyShortcuts) {
@@ -2022,6 +2025,10 @@ IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeTest,
 // TODO(crbug.com/1265293): test is flaky on linux.
 #define MAYBE_AccessibilityIframeWithInvalidChildren \
   DISABLED_AccessibilityIframeWithInvalidChildren
+#elif defined(OS_CHROMEOS)
+// TODO(crbug.com/1269123): test is flaky on chromeos.
+#define MAYBE_AccessibilityIframeWithInvalidChildren \
+  DISABLED_AccessibilityIframeWithInvalidChildren
 #else
 #define MAYBE_AccessibilityIframeWithInvalidChildren \
   AccessibilityIframeWithInvalidChildren
@@ -2706,8 +2713,7 @@ IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeTest, AccessibilitySelectMenu) {
   RunHtmlTest(FILE_PATH_LITERAL("selectmenu.html"));
 }
 
-IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeTest,
-                       MAYBE(AccessibilitySelectMenuOpen)) {
+IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeTest, AccessibilitySelectMenuOpen) {
   RunHtmlTest(FILE_PATH_LITERAL("selectmenu-open.html"));
 }
 

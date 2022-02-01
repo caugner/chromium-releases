@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/overlay/overlay_window_views.h"
+#include "base/memory/raw_ptr.h"
 
 #include <memory>
 #include <string>
@@ -198,7 +199,7 @@ class OverlayWindowFrameView : public views::NonClientFrameView {
   }
 
  private:
-  views::Widget* widget_;
+  raw_ptr<views::Widget> widget_;
 };
 
 // OverlayWindow implementation of WidgetDelegate.
@@ -1023,6 +1024,15 @@ void OverlayWindowViews::OnNativeBlur() {
   views::Widget::OnNativeBlur();
 }
 
+void OverlayWindowViews::OnNativeWidgetDestroying() {
+  views::Widget::OnNativeWidgetDestroying();
+  if (has_registered_frame_sink_hierarchy_) {
+    DCHECK(GetCurrentFrameSinkId());
+    GetCompositor()->RemoveChildFrameSink(*GetCurrentFrameSinkId());
+    has_registered_frame_sink_hierarchy_ = false;
+  }
+}
+
 void OverlayWindowViews::OnNativeWidgetDestroyed() {
   views::Widget::OnNativeWidgetDestroyed();
   controller_->OnWindowDestroyed(
@@ -1069,6 +1079,26 @@ void OverlayWindowViews::OnNativeWidgetWorkspaceChanged() {
   // TODO(apacible): Update sizes and maybe resize the current
   // Picture-in-Picture window. Currently, switching between workspaces on linux
   // does not trigger this function. http://crbug.com/819673
+}
+
+// When the PiP window is moved to different displays on Chrome OS, we need to
+// re-parent the frame sink since the compositor will change. After
+// OnNativeWidgetRemovingFromCompositor() is called, the window layer containing
+// the compositor will be removed in Window::RemoveChildImpl(), and
+// OnNativeWidgetAddedToCompositor() is called once another compositor is added.
+void OverlayWindowViews::OnNativeWidgetAddedToCompositor() {
+  if (!has_registered_frame_sink_hierarchy_ && GetCurrentFrameSinkId()) {
+    GetCompositor()->AddChildFrameSink(*GetCurrentFrameSinkId());
+    has_registered_frame_sink_hierarchy_ = true;
+  }
+}
+
+void OverlayWindowViews::OnNativeWidgetRemovingFromCompositor() {
+  if (has_registered_frame_sink_hierarchy_) {
+    DCHECK(GetCurrentFrameSinkId());
+    GetCompositor()->RemoveChildFrameSink(*GetCurrentFrameSinkId());
+    has_registered_frame_sink_hierarchy_ = false;
+  }
 }
 
 void OverlayWindowViews::OnKeyEvent(ui::KeyEvent* event) {

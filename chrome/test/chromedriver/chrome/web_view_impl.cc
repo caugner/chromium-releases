@@ -856,8 +856,7 @@ Status WebViewImpl::AddCookie(const std::string& name,
       client_->SendCommandAndGetResult("Network.setCookie", params, &result);
   if (status.IsError())
     return Status(kUnableToSetCookie);
-  bool success;
-  if (!result->GetBoolean("success", &success) || !success)
+  if (!result->FindBoolKey("success").value_or(false))
     return Status(kUnableToSetCookie);
   return Status(kOk);
 }
@@ -1232,8 +1231,7 @@ Status WebViewImpl::CallAsyncFunctionInternal(
       return Status(static_cast<StatusCode>(status_code), message);
     }
 
-    base::Value* value = NULL;
-    if (result_info->Get("value", &value)) {
+    if (base::Value* value = result_info->FindKey("value")) {
       *result = base::Value::ToUniquePtrValue(value->Clone());
       return Status(kOk);
     }
@@ -1442,8 +1440,8 @@ Status EvaluateScriptAndGetValue(DevToolsClient* client,
   if (type == "undefined") {
     *result = std::make_unique<base::Value>();
   } else {
-    base::Value* value;
-    if (!temp_result->Get("value", &value))
+    base::Value* value = temp_result->FindKey("value");
+    if (value == nullptr)
       return Status(kUnknownError, "Runtime.evaluate missing 'value'");
     *result = base::Value::ToUniquePtrValue(value->Clone());
   }
@@ -1465,8 +1463,8 @@ Status ParseCallFunctionResult(const base::Value& temp_result,
     dict->GetString("value", &message);
     return Status(static_cast<StatusCode>(status_code), message);
   }
-  const base::Value* unscoped_value;
-  if (!dict->Get("value", &unscoped_value)) {
+  const base::Value* unscoped_value = dict->FindKey("value");
+  if (unscoped_value == nullptr) {
     // Missing 'value' indicates the JavaScript code didn't return a value.
     return Status(kOk);
   }

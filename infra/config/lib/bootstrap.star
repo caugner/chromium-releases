@@ -25,9 +25,11 @@ builder definition its and it must be using a bootstrappable recipe. See
 load("@stdlib//internal/graph.star", "graph")
 load("//project.star", "settings")
 
-# builder_config.star has a generator that modifies properties, so load it first
-# to ensure that the modified properties get written out to the property files
+# builder_config.star and orchestrator.star have generators that modify
+# properties, so load them first to ensure that the modified properties get
+# written out to the property files
 load("./builder_config.star", _ = "builder_config")  # @unused
+load("./orchestrator.star", _2 = "register_orchestrator")  # @unused
 
 PROPERTIES_OPTIONAL = "PROPERTIES_OPTIONAL"
 
@@ -145,7 +147,7 @@ def _bootstrap_properties(ctx):
                     if p in builder_properties:
                         non_bootstrapped_properties[p] = builder_properties[p]
 
-                properties_file = "builders/{}/{}/properties.textpb".format(bucket_name, builder_name)
+                properties_file = "builders/{}/{}/properties.json".format(bucket_name, builder_name)
                 non_bootstrapped_properties["$bootstrap/properties"] = {
                     "top_level_project": {
                         "repo": {
@@ -161,7 +163,7 @@ def _bootstrap_properties(ctx):
             if bootstrap_node.props.bootstrap:
                 non_bootstrapped_properties.update({
                     "$bootstrap/exe": {
-                        "exe": builder.exe,
+                        "exe": json.decode(proto.to_jsonpb(builder.exe, use_proto_names = True)),
                     },
                     "led_builder_is_bootstrapped": True,
                 })

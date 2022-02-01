@@ -41,9 +41,14 @@ bool SharingHubAppMenuEnabled(content::BrowserContext* context) {
 }
 
 bool SharingHubOmniboxEnabled(content::BrowserContext* context) {
+  Profile* profile = Profile::FromBrowserContext(context);
+  if (!profile)
+    return false;
+
   return (base::FeatureList::IsEnabled(kSharingHubDesktopOmnibox) ||
           share::AreUpcomingSharingFeaturesEnabled()) &&
-         IsEnterprisePolicyEnabled(context);
+         IsEnterprisePolicyEnabled(context) && !profile->IsIncognitoProfile() &&
+         !profile->IsGuestSession();
 }
 
 bool DesktopScreenshotsFeatureEnabled(content::BrowserContext* context) {
@@ -55,8 +60,8 @@ bool DesktopScreenshotsFeatureEnabled(content::BrowserContext* context) {
 const base::Feature kSharingHubDesktopAppMenu{
     "SharingHubDesktopAppMenu", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kSharingHubDesktopOmnibox{
-    "SharingHubDesktopOmnibox", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kSharingHubDesktopOmnibox{"SharingHubDesktopOmnibox",
+                                              base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kDesktopScreenshots{"DesktopScreenshots",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
