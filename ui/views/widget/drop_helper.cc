@@ -101,7 +101,10 @@ DragOperation DropHelper::OnDrop(const OSExchangeData& data,
   View::ConvertPointToTarget(root_view, drop_view, &view_location);
   ui::DropTargetEvent drop_event(data, gfx::PointF(view_location),
                                  gfx::PointF(view_location), drag_operation);
-  return drop_view->OnPerformDrop(drop_event);
+  auto output_drag_op = ui::mojom::DragOperation::kNone;
+  auto drop_cb = drop_view->GetDropCallback(drop_event);
+  std::move(drop_cb).Run(drop_event, output_drag_op);
+  return output_drag_op;
 }
 
 DropHelper::DropCallback DropHelper::GetDropCallback(
@@ -156,7 +159,7 @@ View* DropHelper::CalculateTargetViewImpl(const gfx::Point& root_view_location,
     // TODO(sky): for the time being these are separate. Once I port chrome menu
     // I can switch to the #else implementation and nuke the OS_WIN
     // implementation.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // View under mouse changed, which means a new view may want the drop.
   // Walk the tree, stopping at target_view_ as we know it'll accept the
   // drop.

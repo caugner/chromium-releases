@@ -743,6 +743,9 @@ TEST_F(
     });
 
 TEST_F('ChromeVoxBackgroundTest', 'SelectOptionSelected', function() {
+  // Undoes the ChromeVoxNextE2E call setting this to true. The doDefault action
+  // should always be read.
+  DesktopAutomationHandler.announceActions = false;
   const mockFeedback = this.createMockFeedback();
   const site = `
     <p>start</p>
@@ -2086,10 +2089,17 @@ TEST_F('ChromeVoxBackgroundTest', 'ReadPhoneticPronunciationTest', function() {
   this.runWithLoadedTree(site, function(root) {
     root.find({role: RoleType.BUTTON}).focus();
     mockFeedback.call(doCmd('readPhoneticPronunciation'))
-        .expectSpeech('T: tango, h: hotel, i: india, s: sierra')
+        .expectSpeech(
+            'T: tango, h: hotel, i: india, s: sierra,  : , i: india, ' +
+            's: sierra,  : , a: alpha,  : , b: bravo, u: uniform, t: tango, ' +
+            't: tango, o: oscar, n: november')
         .call(doCmd('nextWord'))
         .call(doCmd('readPhoneticPronunciation'))
         .expectSpeech('i: india, s: sierra')
+        .call(doCmd('previousWord'))
+        .call(doCmd('readPhoneticPronunciation'))
+        .expectSpeech('T: tango, h: hotel, i: india, s: sierra')
+        .call(doCmd('nextWord'))
         .call(doCmd('nextWord'))
         .call(doCmd('nextWord'))
         .call(doCmd('readPhoneticPronunciation'))
@@ -2136,12 +2146,12 @@ TEST_F('ChromeVoxBackgroundTest', 'InvalidItemNavigation', function() {
   const mockFeedback = this.createMockFeedback();
   const site = `
     <h3><a href="#a">inner</a></h3>
-    <p aria-invalid="spelling">some txet</p>
+    <p>some <span aria-invalid="spelling">txet</span></p>
     <button>button A</button>
     <p aria-invalid="true">some other reason</p>
     <p>no error text 1</P>
     <p aria-invalid=false>no error text 2</P>
-    <p aria-invalid="grammar">this are a text</p>
+    <p><span aria-invalid="grammar">this are</span> a test</span></p>
     <p aria-invalid="unknown">error is this</p>
     <a href="#b">outer1</a>
     <h3>outer2</h3>
@@ -2152,21 +2162,21 @@ TEST_F('ChromeVoxBackgroundTest', 'InvalidItemNavigation', function() {
         RoleType.LINK, ChromeVoxState.instance.currentRange.start.node.role);
     assertEquals('inner', ChromeVoxState.instance.currentRange.start.node.name);
     mockFeedback.call(doCmd('nextInvalidItem'))
-        .expectSpeech('some txet', 'misspelled')
+        .expectSpeech('txet', 'misspelled')
         .call(doCmd('nextInvalidItem'))
         .expectSpeech('some other reason')
         .call(doCmd('nextInvalidItem'))
-        .expectSpeech('this are a text', 'grammar error')
+        .expectSpeech('this are', 'grammar error')
         .call(doCmd('nextInvalidItem'))
         .expectSpeech('error is this')
         // Ensure wrap.
         .call(doCmd('nextInvalidItem'))
-        .expectSpeech('some txet')
+        .expectSpeech('txet')
         // Wrap backward.
         .call(doCmd('previousInvalidItem'))
         .expectSpeech('error is this')
         .call(doCmd('previousInvalidItem'))
-        .expectSpeech('this are a text', 'grammar error');
+        .expectSpeech('this are', 'grammar error');
 
     mockFeedback.replay();
   });

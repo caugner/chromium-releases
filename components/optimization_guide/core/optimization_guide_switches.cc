@@ -87,6 +87,11 @@ const char kModelOverride[] = "optimization-guide-model-override";
 // Triggers validation of the model. Used for manual testing.
 const char kModelValidate[] = "optimization-guide-model-validate";
 
+// Prevents any models from being executing when in annotating a batch
+// of visits. This is used for testing only.
+const char kStopHistoryVisitBatchAnnotateForTesting[] =
+    "stop-history-visit-batch-annotate";
+
 bool IsHintComponentProcessingDisabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(kHintsProtoOverride);
 }
@@ -191,7 +196,7 @@ bool ShouldValidateModel() {
 }
 
 absl::optional<std::string> GetModelOverride() {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // TODO(crbug/1227996): The parsing below is not supported on Windows because
   // ':' is used as a delimiter, but this must be used in the absolute file path
   // on Windows.
@@ -204,6 +209,13 @@ absl::optional<std::string> GetModelOverride() {
     return absl::nullopt;
   return command_line->GetSwitchValueASCII(kModelOverride);
 #endif
+}
+
+bool StopHistoryVisitBatchAnnotateForTesting() {
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(kStopHistoryVisitBatchAnnotateForTesting))
+    return true;
+  return false;
 }
 
 }  // namespace switches

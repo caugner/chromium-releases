@@ -73,8 +73,8 @@ namespace {
 
 const char kReceivingEndDoesntExistError[] =
     "Could not establish connection. Receiving end does not exist.";
-#if defined(OS_WIN) || defined(OS_MAC) || defined(OS_LINUX) || \
-    defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+    BUILDFLAG(IS_CHROMEOS)
 const char kMissingPermissionError[] =
     "Access to native messaging requires nativeMessaging permission.";
 const char kProhibitedByPoliciesError[] =
@@ -438,8 +438,8 @@ void MessageService::OpenChannelToNativeApp(
   if (!opener_port->IsValidPort())
     return;
 
-#if defined(OS_WIN) || defined(OS_MAC) || defined(OS_LINUX) || \
-    defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+    BUILDFLAG(IS_CHROMEOS)
   bool has_permission = extension->permissions_data()->HasAPIPermission(
       mojom::APIPermissionID::kNativeMessaging);
   if (!has_permission) {
@@ -492,13 +492,13 @@ void MessageService::OpenChannelToNativeApp(
   channel->opener->IncrementLazyKeepaliveCount();
 
   AddChannel(std::move(channel), receiver_port_id);
-#else   // !(defined(OS_WIN) || defined(OS_MAC) || defined(OS_LINUX) ||
-        // defined(OS_CHROMEOS))
+#else   // !(BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
+        // BUILDFLAG(IS_CHROMEOS))
   const char kNativeMessagingNotSupportedError[] =
       "Native Messaging is not supported on this platform.";
   opener_port->DispatchOnDisconnect(kNativeMessagingNotSupportedError);
-#endif  // !(defined(OS_WIN) || defined(OS_MAC) || defined(OS_LINUX) ||
-        // defined(OS_CHROMEOS))
+#endif  // !(BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
+        // BUILDFLAG(IS_CHROMEOS))
 }
 
 void MessageService::OpenChannelToTab(const ChannelEndpoint& source,
@@ -585,13 +585,31 @@ void MessageService::OpenChannelImpl(BrowserContext* browser_context,
 
   // Check whether the source got closed while in flight.
   const ChannelEndpoint& source = params->source;
-  if (!source.IsValid())
-    return;  // Closed while in flight.
-  if (!params->opener_port->IsValidPort())
-    return;
 
+  bool will_open_channel = true;
+
+  if (!source.IsValid()) {  // Closed while in flight.
+    will_open_channel = false;
+  }
+  if (!params->opener_port->IsValidPort()) {
+    will_open_channel = false;
+  }
   if (!params->receiver || !params->receiver->IsValidPort()) {
+    will_open_channel = false;
     params->opener_port->DispatchOnDisconnect(kReceivingEndDoesntExistError);
+  }
+
+  if (!will_open_channel) {
+    // The channel won't open. If this was a pending channel, remove it,
+    // because now it will never open. This prevents the pending message
+    // from being re-added indefinitely.  See https://crbug.com/1231683.
+    // TODO(crbug.com/1296492): This probably isn't the best solution.
+    // Ideally, we should close the channel before we get to this point
+    // if there's  no chance it will ever open, remove it from pending
+    // channels, and then only try to open the pending channel if it's
+    // still valid.
+    pending_lazy_context_channels_.erase(
+        params->receiver_port_id.GetChannelId());
     return;
   }
 

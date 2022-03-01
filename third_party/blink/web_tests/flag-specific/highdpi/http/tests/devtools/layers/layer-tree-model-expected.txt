@@ -3,7 +3,6 @@ Initial layer tree
 <invalid node id> 0x0 (0)
     #document (1)
     #document (1)
-    #document (1)
     div#subframe1 120x120 (1)
     div#a (1)
     div#b1 (1)
@@ -15,7 +14,6 @@ Updated layer tree
 <invalid node id> 0x0 (0)
     #document (1)
     #document (1)
-    #document (1)
     div#subframe1 120x120 (1)
     div#a (1)
     div#b2 (1)
@@ -25,7 +23,6 @@ Updated layer tree
     <invalid node id> (1)
 Updated layer geometry
 <invalid node id> 0x0 (0)
-    #document (1)
     #document (1)
     #document (1)
     div#subframe1 120x120 (1)

@@ -130,6 +130,16 @@ def ci_builder(
         branches.value({branches.STANDARD_BRANCHES: "chrome_browser_release"}),
     )
 
+    # All builders that are selected for extended stable should be part of the
+    # chrome_browser_release sheriff rotation (this is less straightforward than
+    # above because desktop extended stable can coexist with CrOS LTS and we
+    # don't want the CrOS LTS builders to appear in the chrome_browser_release
+    # tree)
+    if branches.matches(branch_selector, target = branches.DESKTOP_EXTENDED_STABLE_BRANCHES):
+        sheriff_rotations = args.listify(sheriff_rotations, branches.value({
+            branches.DESKTOP_EXTENDED_STABLE_BRANCHES: "chrome_browser_release",
+        }))
+
     goma_enable_ats = defaults.get_value_from_kwargs("goma_enable_ats", kwargs)
     if goma_enable_ats == args.COMPUTE:
         os = defaults.get_value_from_kwargs("os", kwargs)
@@ -211,8 +221,8 @@ def _gpu_mac_builder(*, name, **kwargs):
     This sets mac-specific defaults that are common to GPU-related builder
     groups.
     """
+    kwargs.setdefault("builderless", True)
     kwargs.setdefault("os", os.MAC_ANY)
-    kwargs.setdefault("pool", ci.DEFAULT_POOL)
     return ci.builder(name = name, **kwargs)
 
 def _gpu_windows_builder(*, name, **kwargs):

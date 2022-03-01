@@ -2,30 +2,28 @@
 {
   "layers": [
     {
-      "name": "Scrolling Contents Layer",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [1200, 900],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
       "name": "LayoutNGTextControlMultiLine TEXTAREA",
-      "bounds": [309, 189],
+      "position": [2, 2],
+      "bounds": [284, 186],
+      "drawsContent": false,
       "transform": 1
     },
     {
-      "name": "ContentsLayer for Vertical Scrollbar Layer",
-      "position": [286, 1],
-      "bounds": [22, 164],
+      "name": "Scroll corner of LayoutNGTextControlMultiLine TEXTAREA",
+      "position": [263, 143],
+      "bounds": [44, 44],
+      "contentsOpaqueForText": true,
+      "drawsContent": false,
       "transform": 1
     },
     {
-      "name": "Scroll Corner Layer",
-      "position": [285, 165],
-      "bounds": [22, 22],
-      "transform": 1
-    },
-    {
-      "name": "Scrolling Contents Layer",
+      "name": "LayoutNGTextControlMultiLine TEXTAREA",
       "position": [2, 2],
       "bounds": [284, 492],
       "contentsOpaque": true,
@@ -33,28 +31,64 @@
       "transform": 2
     },
     {
+      "name": "VerticalScrollbar",
+      "position": [286, 1],
+      "bounds": [22, 164],
+      "transform": 1
+    },
+    {
+      "name": "Scroll corner of LayoutNGTextControlMultiLine TEXTAREA",
+      "position": [285, 165],
+      "bounds": [22, 22],
+      "contentsOpaque": true,
+      "transform": 1
+    },
+    {
       "name": "LayoutNGTextControlMultiLine TEXTAREA",
-      "bounds": [309, 189],
+      "position": [4, 5],
+      "bounds": [282, 486],
+      "transform": 2
+    },
+    {
+      "name": "LayoutNGTextControlMultiLine TEXTAREA",
+      "position": [2, 2],
+      "bounds": [284, 186],
+      "drawsContent": false,
       "transform": 3
     },
     {
-      "name": "ContentsLayer for Vertical Scrollbar Layer",
+      "name": "Scroll corner of LayoutNGTextControlMultiLine TEXTAREA",
+      "position": [263, 143],
+      "bounds": [44, 44],
+      "contentsOpaqueForText": true,
+      "drawsContent": false,
+      "transform": 3
+    },
+    {
+      "name": "LayoutNGTextControlMultiLine TEXTAREA",
+      "position": [2, 2],
+      "bounds": [284, 492],
+      "contentsOpaque": true,
+      "backgroundColor": "#CCCCCC",
+      "transform": 4
+    },
+    {
+      "name": "VerticalScrollbar",
       "position": [286, 1],
       "bounds": [22, 164],
       "transform": 3
     },
     {
-      "name": "Scroll Corner Layer",
+      "name": "Scroll corner of LayoutNGTextControlMultiLine TEXTAREA",
       "position": [285, 165],
       "bounds": [22, 22],
+      "contentsOpaque": true,
       "transform": 3
     },
     {
-      "name": "Scrolling Contents Layer",
-      "position": [2, 2],
-      "bounds": [284, 492],
-      "contentsOpaque": true,
-      "backgroundColor": "#CCCCCC",
+      "name": "LayoutNGTextControlMultiLine TEXTAREA",
+      "position": [4, 5],
+      "bounds": [282, 486],
       "transform": 4
     }
   ],

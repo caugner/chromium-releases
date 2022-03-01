@@ -1,1 +1,1 @@
-mixins: "//chromeos/services/nearby/COMMON_METADATA"
+mixins: "//ash/services/nearby/COMMON_METADATA"

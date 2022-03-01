@@ -424,6 +424,10 @@ class BLINK_EXPORT WebLocalFrameClient {
   // The frame's document and all of its subresources succeeded to load.
   virtual void DidFinishLoad() {}
 
+  // The frame's document and all of its subresources succeeded to load for
+  // printing.
+  virtual void DidFinishLoadForPrinting() {}
+
   // The navigation resulted in no change to the documents within the page.
   // For example, the navigation may have just resulted in scrolling to a named
   // anchor or a PopState event may have been dispatched.
@@ -568,9 +572,7 @@ class BLINK_EXPORT WebLocalFrameClient {
   virtual void DidObserveLayoutNg(uint32_t all_block_count,
                                   uint32_t ng_block_count,
                                   uint32_t all_call_count,
-                                  uint32_t ng_call_count,
-                                  uint32_t flexbox_ng_block_count,
-                                  uint32_t grid_ng_block_count) {}
+                                  uint32_t ng_call_count) {}
 
   enum class LazyLoadBehavior {
     kDeferredImage,    // An image is being deferred by the lazy load feature.
@@ -651,10 +653,13 @@ class BLINK_EXPORT WebLocalFrameClient {
   // Notifies the embedder that a WebAXObject is dirty and its state needs
   // to be serialized again. If |subtree| is true, the entire subtree is
   // dirty.
-  virtual void MarkWebAXObjectDirty(
-      const WebAXObject&,
-      bool subtree,
-      ax::mojom::Action event_from_action = ax::mojom::Action::kNone) {}
+  // |event_from| and |event_from_action| annotate this node change with info
+  // about the event which caused the change. For example, an event from a user
+  // or an event from a focus action.
+  virtual void MarkWebAXObjectDirty(const WebAXObject&,
+                                    bool subtree,
+                                    ax::mojom::EventFrom event_from,
+                                    ax::mojom::Action event_from_action) {}
 
   // Audio Output Devices API --------------------------------------------
 

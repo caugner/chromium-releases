@@ -3031,7 +3031,7 @@
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
-          "shards": 4
+          "shards": 6
         },
         "test": "components_unittests",
         "test_id_prefix": "ninja://components:components_unittests/"
@@ -6723,7 +6723,7 @@
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
-          "shards": 4
+          "shards": 6
         },
         "test": "components_unittests",
         "test_id_prefix": "ninja://components:components_unittests/"
@@ -12228,7 +12228,7 @@
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
-          "shards": 4
+          "shards": 6
         },
         "test": "components_unittests",
         "test_id_prefix": "ninja://components:components_unittests/"
@@ -16803,7 +16803,7 @@
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
-          "shards": 4
+          "shards": 6
         },
         "test": "components_unittests",
         "test_id_prefix": "ninja://components:components_unittests/"
@@ -19290,8 +19290,12 @@
           ],
           "dimension_sets": [
             {
-              "cpu": "x86-64",
-              "os": "Ubuntu-16.04"
+              "cpu": "x86",
+              "device_os": null,
+              "device_os_flavor": null,
+              "device_playstore_version": null,
+              "device_type": null,
+              "os": "Ubuntu-18.04"
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -20300,7 +20304,7 @@
           "dimension_sets": [
             {
               "cpu": "x86",
-              "os": "Ubuntu-16.04"
+              "os": "Ubuntu-18.04"
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -20330,7 +20334,7 @@
           "dimension_sets": [
             {
               "cpu": "x86",
-              "os": "Ubuntu-16.04"
+              "os": "Ubuntu-18.04"
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -20352,7 +20356,7 @@
           "dimension_sets": [
             {
               "cpu": "x86",
-              "os": "Ubuntu-16.04"
+              "os": "Ubuntu-18.04"
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -21100,7 +21104,7 @@
           "dimension_sets": [
             {
               "cpu": "x86",
-              "os": "Ubuntu-16.04"
+              "os": "Ubuntu-18.04"
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -21138,7 +21142,7 @@
           "dimension_sets": [
             {
               "cpu": "x86",
-              "os": "Ubuntu-16.04"
+              "os": "Ubuntu-18.04"
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -21160,7 +21164,7 @@
           "dimension_sets": [
             {
               "cpu": "x86",
-              "os": "Ubuntu-16.04"
+              "os": "Ubuntu-18.04"
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -22267,7 +22271,7 @@
           "dimension_sets": [
             {
               "cpu": "x86",
-              "os": "Ubuntu-16.04"
+              "os": "Ubuntu-18.04"
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -24289,7 +24293,7 @@
           "dimension_sets": [
             {
               "cpu": "x86",
-              "os": "Ubuntu-16.04"
+              "os": "Ubuntu-18.04"
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -24311,7 +24315,7 @@
           "dimension_sets": [
             {
               "cpu": "x86",
-              "os": "Ubuntu-16.04"
+              "os": "Ubuntu-18.04"
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -24588,6 +24592,7 @@
               "name": "shard #${SHARD_INDEX} logcats"
             }
           ],
+          "quickrun_shards": 3,
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "android_browsertests",
@@ -25566,6 +25571,7 @@
               "name": "shard #${SHARD_INDEX} logcats"
             }
           ],
+          "quickrun_shards": 2,
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "components_browsertests",
@@ -27771,6 +27777,7 @@
               "name": "shard #${SHARD_INDEX} logcats"
             }
           ],
+          "quickrun_shards": 2,
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
         "test": "weblayer_instrumentation_test_apk",
@@ -28437,6 +28444,7 @@
               "name": "shard #${SHARD_INDEX} logcats"
             }
           ],
+          "quickrun_shards": 6,
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
           "shards": 2
         },
@@ -29316,7 +29324,7 @@
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
-          "shards": 4
+          "shards": 6
         },
         "test": "components_unittests",
         "test_id_prefix": "ninja://components:components_unittests/"
@@ -30212,6 +30220,8 @@
             {
               "cpu": "x86-64",
               "device_os": null,
+              "device_os_flavor": null,
+              "device_playstore_version": null,
               "device_type": null,
               "machine_type": "n1-standard-4|e2-standard-4",
               "os": "Ubuntu-16.04|Ubuntu-18.04",
@@ -31081,7 +31091,7 @@
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
-          "shards": 4
+          "shards": 6
         },
         "test": "components_unittests",
         "test_id_prefix": "ninja://components:components_unittests/"
@@ -34430,7 +34440,7 @@
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
-          "shards": 4
+          "shards": 6
         },
         "test": "components_unittests",
         "test_id_prefix": "ninja://components:components_unittests/"
@@ -37219,6 +37229,7 @@
               "name": "shard #${SHARD_INDEX} logcats"
             }
           ],
+          "quickrun_shards": 6,
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
           "shards": 2
         },
@@ -37643,6 +37654,7 @@
               "name": "shard #${SHARD_INDEX} logcats"
             }
           ],
+          "quickrun_shards": 40,
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
           "shards": 15
         },
@@ -39855,7 +39867,7 @@
             }
           ],
           "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com",
-          "shards": 4
+          "shards": 6
         },
         "test": "components_unittests",
         "test_id_prefix": "ninja://components:components_unittests/"
@@ -43665,7 +43677,7 @@
             {
               "cipd_package": "chromium/testing/weblayer-x86",
               "location": "weblayer_instrumentation_test_M96",
-              "revision": "version:96.0.4664.101"
+              "revision": "version:96.0.4664.102"
             },
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
@@ -43753,7 +43765,7 @@
             {
               "cipd_package": "chromium/testing/weblayer-x86",
               "location": "weblayer_instrumentation_test_M97",
-              "revision": "version:97.0.4692.48"
+              "revision": "version:97.0.4692.49"
             },
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
@@ -43929,7 +43941,7 @@
             {
               "cipd_package": "chromium/testing/weblayer-x86",
               "location": "weblayer_instrumentation_test_M96",
-              "revision": "version:96.0.4664.101"
+              "revision": "version:96.0.4664.102"
             },
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
@@ -44017,7 +44029,7 @@
             {
               "cipd_package": "chromium/testing/weblayer-x86",
               "location": "weblayer_instrumentation_test_M97",
-              "revision": "version:97.0.4692.48"
+              "revision": "version:97.0.4692.49"
             },
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
@@ -44268,7 +44280,7 @@
             {
               "cipd_package": "chromium/testing/weblayer-x86",
               "location": "weblayer_instrumentation_test_M96",
-              "revision": "version:96.0.4664.101"
+              "revision": "version:96.0.4664.102"
             },
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
@@ -44356,7 +44368,7 @@
             {
               "cipd_package": "chromium/testing/weblayer-x86",
               "location": "weblayer_instrumentation_test_M97",
-              "revision": "version:97.0.4692.48"
+              "revision": "version:97.0.4692.49"
             },
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
@@ -44532,7 +44544,7 @@
             {
               "cipd_package": "chromium/testing/weblayer-x86",
               "location": "weblayer_instrumentation_test_M96",
-              "revision": "version:96.0.4664.101"
+              "revision": "version:96.0.4664.102"
             },
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
@@ -44620,7 +44632,7 @@
             {
               "cipd_package": "chromium/testing/weblayer-x86",
               "location": "weblayer_instrumentation_test_M97",
-              "revision": "version:97.0.4692.48"
+              "revision": "version:97.0.4692.49"
             },
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
@@ -44871,7 +44883,7 @@
             {
               "cipd_package": "chromium/testing/weblayer-x86",
               "location": "weblayer_instrumentation_test_M96",
-              "revision": "version:96.0.4664.101"
+              "revision": "version:96.0.4664.102"
             },
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
@@ -44959,7 +44971,7 @@
             {
               "cipd_package": "chromium/testing/weblayer-x86",
               "location": "weblayer_instrumentation_test_M97",
-              "revision": "version:97.0.4692.48"
+              "revision": "version:97.0.4692.49"
             },
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
@@ -45135,7 +45147,7 @@
             {
               "cipd_package": "chromium/testing/weblayer-x86",
               "location": "weblayer_instrumentation_test_M96",
-              "revision": "version:96.0.4664.101"
+              "revision": "version:96.0.4664.102"
             },
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
@@ -45223,7 +45235,7 @@
             {
               "cipd_package": "chromium/testing/weblayer-x86",
               "location": "weblayer_instrumentation_test_M97",
-              "revision": "version:97.0.4692.48"
+              "revision": "version:97.0.4692.49"
             },
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
