@@ -457,6 +457,9 @@ if (is_win) {
     } else {
       args += [ "--keystone=0" ]
     }
+    if (enable_chromium_updater) {
+      args += [ "--privileged_helper_id=$privileged_helper_name" ]
+    }
   }
 
   mac_app_bundle("chrome_app") {
@@ -507,6 +510,10 @@ if (is_win) {
       # for runtime_deps at create_bundle nodes (https://crbug.com/1010347).
       data_deps = [ ":chrome_framework" ]
     }
+
+    if (enable_chromium_updater) {
+      deps += [ ":chromium_updater_privileged_helper" ]
+    }
   }
 
   if (verify_dynamic_libraries) {
@@ -535,7 +542,7 @@ if (is_win) {
 
     outputs = []
 
-    foreach(locale, locales) {
+    foreach(locale, platform_pak_locales) {
       if (is_chrome_branded) {
         _strings_file = "google_chrome_strings"
       } else {
@@ -563,7 +570,7 @@ if (is_win) {
           rebase_path("$target_gen_dir/app_infoplist_strings", root_build_dir),
           "-t",
           "main",
-        ] + locales
+        ] + platform_pak_locales
 
     if (is_chrome_branded) {
       deps = [ "//chrome/app:google_chrome_strings" ]
@@ -628,6 +635,17 @@ if (is_win) {
       # this dependency directly copies the file into the framework's
       # resources directory.
       public_deps += [ ":chrome_framework_widevine_signature" ]
+    }
+  }
+
+  if (enable_chromium_updater) {
+    bundle_data("chromium_updater_privileged_helper") {
+      sources = [ "$root_out_dir/$privileged_helper_name" ]
+      outputs = [
+        "{{bundle_contents_dir}}/Library/LaunchServices/{{source_file_part}}",
+      ]
+
+      public_deps = [ "//chrome/updater/mac:privileged_helper" ]
     }
   }
 
@@ -1279,9 +1297,12 @@ if (is_win) {
       outputs =
           [ "$root_out_dir/{{source_file_part}}-$chrome_version_full.breakpad" ]
 
-      # Use an absolute path to dump_syms in case a user has it in their path.
       args = rebase_path(outputs, root_out_dir) + [
-               rebase_path("$root_out_dir/dump_syms"),
+               rebase_path(
+                   get_label_info(
+                           "//third_party/breakpad:dump_syms($host_toolchain)",
+                           "root_out_dir") + "/dump_syms",
+                   root_out_dir),
                "-g",
                rebase_path(
                    "$root_out_dir/{{source_file_part}}.dSYM/Contents/Resources/DWARF/{{source_file_part}}",
@@ -1295,7 +1316,7 @@ if (is_win) {
         "//components/crash/core/app:chrome_crashpad_handler",
         "//third_party/angle:libEGL",
         "//third_party/angle:libGLESv2",
-        "//third_party/breakpad:dump_syms",
+        "//third_party/breakpad:dump_syms($host_toolchain)",
         "//third_party/swiftshader/src/OpenGL/libEGL:swiftshader_libEGL",
         "//third_party/swiftshader/src/OpenGL/libGLESv2:swiftshader_libGLESv2",
         "//third_party/swiftshader/src/Vulkan:swiftshader_libvulkan",
@@ -1886,11 +1907,18 @@ if (is_linux || is_chromeos) {
   # Copies some scripts and resources that are used for desktop integration.
   copy("xdg_mime") {
     sources = [
-      "//chrome/app/theme/$branding_path_component/product_logo_48.png",
       "//chrome/tools/build/linux/chrome-wrapper",
       "//third_party/xdg-utils/scripts/xdg-mime",
       "//third_party/xdg-utils/scripts/xdg-settings",
     ]
+    if (is_linux) {
+      sources +=
+          [ "//chrome/app/theme/$branding_path_component/product_logo_48.png" ]
+    } else {
+      sources += [
+        "//chrome/app/theme/$branding_path_component/linux/product_logo_48.png",
+      ]
+    }
     outputs = [ "$root_out_dir/{{source_file_part}}" ]
   }
 }

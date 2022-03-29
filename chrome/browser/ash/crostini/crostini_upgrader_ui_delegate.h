@@ -42,12 +42,18 @@ class CrostiniUpgraderUIDelegate {
   virtual void AddObserver(CrostiniUpgraderUIObserver* observer) = 0;
   virtual void RemoveObserver(CrostiniUpgraderUIObserver* observer) = 0;
 
+  // Signal to the delegate that a new dialogue instance has been opened. The
+  // dialogue currently automatically re-tries the upgrade up to three
+  // times. This method allows the delegate to distinguish between these retries
+  // and upgrades from separate sessions.
+  virtual void PageOpened() = 0;
+
   // Back up the current container before upgrading. If |show_file_chooser|
   // is true, the user will be able to select the backup location via a file
   // chooser.
   virtual void Backup(const ContainerId& container_id,
                       bool show_file_chooser,
-                      content::WebContents* web_contents) = 0;
+                      base::WeakPtr<content::WebContents> web_contents) = 0;
 
   virtual void StartPrechecks() = 0;
 
@@ -56,7 +62,7 @@ class CrostiniUpgraderUIDelegate {
 
   // Restore the container to the backed up state if an upgrade has failed.
   virtual void Restore(const ContainerId& container_id,
-                       content::WebContents* web_contents) = 0;
+                       base::WeakPtr<content::WebContents> web_contents) = 0;
 
   // Cancel the ongoing upgrade.
   virtual void Cancel() = 0;

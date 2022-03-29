@@ -5,7 +5,6 @@
 #include "chrome/browser/ash/crostini/crostini_upgrader.h"
 
 #include "ash/constants/ash_features.h"
-#include "base/barrier_closure.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
@@ -99,6 +98,50 @@ void CrostiniUpgrader::RemoveObserver(CrostiniUpgraderUIObserver* observer) {
   upgrader_observers_.RemoveObserver(observer);
 }
 
+void CrostiniUpgrader::PageOpened() {
+  // Clear log path so any log messages get buffered.
+  current_log_file_ = absl::nullopt;
+  // Clear the buffer, which may have been previously moved from.
+  log_buffer_ = std::vector<std::string>();
+}
+
+void CrostiniUpgrader::CreateNewLogFile() {
+  base::FilePath path =
+      file_manager::util::GetMyFilesFolderForProfile(profile_).Append(
+          kLogFileBasename);
+  // Create the new log file on the blocking threadpool.
+  log_sequence_->PostTaskAndReplyWithResult(
+      FROM_HERE,
+      base::BindOnce(
+          [](base::FilePath path) -> absl::optional<base::FilePath> {
+            path = base::GetUniquePath(path);
+            base::File file(path,
+                            base::File::FLAG_READ | base::File::FLAG_CREATE);
+            if (!file.IsValid()) {
+              PLOG(ERROR) << "Failed to create log file!";
+              return absl::nullopt;
+            }
+            return path;
+          },
+          path),
+      // Once the file is created, write out the buffered log messages.
+      base::BindOnce(
+          [](base::WeakPtr<CrostiniUpgrader> weak_this,
+             absl::optional<base::FilePath> path) {
+            if (!weak_this)
+              return;
+
+            weak_this->current_log_file_ = path;
+            if (path) {
+              weak_this->WriteLogMessages(std::move(weak_this->log_buffer_));
+              for (auto& observer : weak_this->upgrader_observers_) {
+                observer.OnLogFileCreated(path->BaseName());
+              }
+            }
+          },
+          weak_ptr_factory_.GetWeakPtr()));
+}
+
 CrostiniUpgrader::StatusTracker::StatusTracker(
     base::WeakPtr<CrostiniUpgrader> upgrader,
     ExportImportType type,
@@ -156,12 +199,13 @@ void CrostiniUpgrader::StatusTracker::SetStatusFailedWithMessageUI(
   }
 }
 
-void CrostiniUpgrader::Backup(const ContainerId& container_id,
-                              bool show_file_chooser,
-                              content::WebContents* web_contents) {
+void CrostiniUpgrader::Backup(
+    const ContainerId& container_id,
+    bool show_file_chooser,
+    base::WeakPtr<content::WebContents> web_contents) {
   if (show_file_chooser) {
     CrostiniExportImport::GetForProfile(profile_)->ExportContainer(
-        container_id, web_contents, MakeFactory());
+        container_id, web_contents.get(), MakeFactory());
     return;
   }
   base::FilePath default_path =
@@ -174,13 +218,19 @@ void CrostiniUpgrader::Backup(const ContainerId& container_id,
                      default_path));
 }
 
-void CrostiniUpgrader::OnBackupPathChecked(const ContainerId& container_id,
-                                           content::WebContents* web_contents,
-                                           base::FilePath path,
-                                           bool path_exists) {
+void CrostiniUpgrader::OnBackupPathChecked(
+    const ContainerId& container_id,
+    base::WeakPtr<content::WebContents> web_contents,
+    base::FilePath path,
+    bool path_exists) {
+  if (!web_contents) {
+    // Page has been closed, don't continue
+    return;
+  }
+
   if (path_exists) {
     CrostiniExportImport::GetForProfile(profile_)->ExportContainer(
-        container_id, web_contents, MakeFactory());
+        container_id, web_contents.get(), MakeFactory());
   } else {
     CrostiniExportImport::GetForProfile(profile_)->ExportContainer(
         container_id, path, MakeFactory());
@@ -215,20 +265,11 @@ void CrostiniUpgrader::StartPrechecks() {
     return;
   }
 
-  prechecks_callback_ =
-      base::BarrierClosure(2, /* Number of asynchronous prechecks to wait for */
-                           base::BindOnce(&CrostiniUpgrader::DoPrechecks,
-                                          weak_ptr_factory_.GetWeakPtr()));
+  prechecks_callback_ = base::BindOnce(&CrostiniUpgrader::DoPrechecks,
+                                       weak_ptr_factory_.GetWeakPtr());
 
   pmc_observation_.Observe(pmc);
   pmc->RequestStatusUpdate();
-
-  base::ThreadPool::PostTaskAndReplyWithResult(
-      FROM_HERE, {base::MayBlock()},
-      base::BindOnce(&base::SysInfo::AmountOfFreeDiskSpace,
-                     base::FilePath(crostini::kHomeDirectory)),
-      base::BindOnce(&CrostiniUpgrader::OnAvailableDiskSpace,
-                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void CrostiniUpgrader::PowerChanged(
@@ -247,21 +288,14 @@ void CrostiniUpgrader::PowerChanged(
   DCHECK(pmc_observation_.IsObservingSource(pmc));
   pmc_observation_.Reset();
 
-  prechecks_callback_.Run();
-}
-
-void CrostiniUpgrader::OnAvailableDiskSpace(int64_t bytes) {
-  free_disk_space_ = bytes;
-
-  prechecks_callback_.Run();
+  if (prechecks_callback_) {
+    std::move(prechecks_callback_).Run();
+  }
 }
 
 void CrostiniUpgrader::DoPrechecks() {
   chromeos::crostini_upgrader::mojom::UpgradePrecheckStatus status;
-  if (free_disk_space_ < kDiskRequired) {
-    status = chromeos::crostini_upgrader::mojom::UpgradePrecheckStatus::
-        INSUFFICIENT_SPACE;
-  } else if (content::GetNetworkConnectionTracker()->IsOffline()) {
+  if (content::GetNetworkConnectionTracker()->IsOffline()) {
     status = chromeos::crostini_upgrader::mojom::UpgradePrecheckStatus::
         NETWORK_FAILURE;
   } else if (!power_status_good_) {
@@ -279,45 +313,12 @@ void CrostiniUpgrader::DoPrechecks() {
 void CrostiniUpgrader::Upgrade(const ContainerId& container_id) {
   container_id_ = container_id;
 
-  // Clear log path so any log messages get buffered.
-  current_log_file_ = absl::nullopt;
-  // Clear the buffer, which may have been previously moved from.
-  log_buffer_ = std::vector<std::string>();
-
-  base::FilePath path =
-      file_manager::util::GetMyFilesFolderForProfile(profile_).Append(
-          kLogFileBasename);
-  // Create the new log file on the blocking threadpool.
-  log_sequence_->PostTaskAndReplyWithResult(
-      FROM_HERE,
-      base::BindOnce(
-          [](base::FilePath path) -> absl::optional<base::FilePath> {
-            path = base::GetUniquePath(path);
-            base::File file(path,
-                            base::File::FLAG_READ | base::File::FLAG_CREATE);
-            if (!file.IsValid()) {
-              PLOG(ERROR) << "Failed to create log file!";
-              return absl::nullopt;
-            }
-            return path;
-          },
-          path),
-      // Once the file is created, write out the buffered log messages.
-      base::BindOnce(
-          [](base::WeakPtr<CrostiniUpgrader> weak_this,
-             absl::optional<base::FilePath> path) {
-            if (!weak_this)
-              return;
-
-            weak_this->current_log_file_ = path;
-            if (path) {
-              weak_this->WriteLogMessages(std::move(weak_this->log_buffer_));
-              for (auto& observer : weak_this->upgrader_observers_) {
-                observer.OnLogFileCreated(path->BaseName());
-              }
-            }
-          },
-          weak_ptr_factory_.GetWeakPtr()));
+  if (!current_log_file_.has_value()) {
+    CreateNewLogFile();
+  }
+  OnUpgradeContainerProgress(container_id,
+                             UpgradeContainerProgressStatus::UPGRADING,
+                             {"---- START OF UPGRADE ----"});
 
   // Shut down the existing VM then upgrade. StopVm doesn't give an error if
   // the VM doesn't exist. That's fine.
@@ -360,11 +361,12 @@ void CrostiniUpgrader::OnUpgrade(CrostiniResult result) {
   }
 }
 
-void CrostiniUpgrader::Restore(const ContainerId& container_id,
-                               content::WebContents* web_contents) {
+void CrostiniUpgrader::Restore(
+    const ContainerId& container_id,
+    base::WeakPtr<content::WebContents> web_contents) {
   if (!backup_path_.has_value()) {
     CrostiniExportImport::GetForProfile(profile_)->ImportContainer(
-        container_id, web_contents, MakeFactory());
+        container_id, web_contents.get(), MakeFactory());
     return;
   }
   base::ThreadPool::PostTaskAndReplyWithResult(
@@ -375,13 +377,19 @@ void CrostiniUpgrader::Restore(const ContainerId& container_id,
                      *backup_path_));
 }
 
-void CrostiniUpgrader::OnRestorePathChecked(const ContainerId& container_id,
-                                            content::WebContents* web_contents,
-                                            base::FilePath path,
-                                            bool path_exists) {
+void CrostiniUpgrader::OnRestorePathChecked(
+    const ContainerId& container_id,
+    base::WeakPtr<content::WebContents> web_contents,
+    base::FilePath path,
+    bool path_exists) {
+  if (!web_contents) {
+    // Page has been closed, don't continue
+    return;
+  }
+
   if (!path_exists) {
     CrostiniExportImport::GetForProfile(profile_)->ImportContainer(
-        container_id, web_contents, MakeFactory());
+        container_id, web_contents.get(), MakeFactory());
   } else {
     CrostiniExportImport::GetForProfile(profile_)->ImportContainer(
         container_id, path, MakeFactory());

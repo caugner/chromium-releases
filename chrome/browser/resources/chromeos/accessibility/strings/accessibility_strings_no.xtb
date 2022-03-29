@@ -181,7 +181,7 @@ For å åpne Chrome-menyen, trykk på Alt+F.</translation>
 <translation id="2203046366315513658">Reduser verdien</translation>
 <translation id="2216790501338699346">Nettadresse for link: <ph name="LINK_URL" /></translation>
 <translation id="2220205454259065436">Flytt bakover ett tegn</translation>
-<translation id="2220529011494928058">Rapportér et problem</translation>
+<translation id="2220529011494928058">Rapporter et problem</translation>
 <translation id="2243633977138166243">Trykk på venstre- eller høyrepilen for å navigere; trykk på Enter for å aktivere</translation>
 <translation id="224426591676115802">Tale er ikke tilgjengelig for dette språket: <ph name="LANGUAGE" /></translation>
 <translation id="2247700577781885251">Avslutter læremodus</translation>
@@ -666,6 +666,7 @@ For å åpne Chrome-menyen, trykk på Alt+F.</translation>
 <translation id="5522423213731659107">Hurtigorienteringen er fullført!</translation>
 <translation id="5534303576632885660">hdr</translation>
 <translation id="5539820223028224601">Gainsboro</translation>
+<translation id="554893713779400387">Slå av/på diktering</translation>
 <translation id="5549179427201066174">Slå tilbakemelding via lydsignaler av eller på</translation>
 <translation id="556042886152191864">Knapp</translation>
 <translation id="5561345396546889625">Neste liste</translation>
