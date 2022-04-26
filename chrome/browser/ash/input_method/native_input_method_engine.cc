@@ -45,7 +45,7 @@ namespace input_method {
 
 namespace {
 
-namespace mojom = ::chromeos::ime::mojom;
+namespace mojom = ::ash::ime::mojom;
 
 // These are persisted to logs. Entries should not be renumbered. Numeric values
 // should not be reused. Must stay in sync with IMENonAutocorrectDiacriticStatus
@@ -189,11 +189,9 @@ mojom::InputFieldType TextInputTypeToMojoType(ui::TextInputType type) {
   }
 }
 
-mojom::AutocorrectMode AutocorrectFlagsToMojoType(int flags,
-                                                  bool is_normal_screen) {
-  if (((flags & ui::TEXT_INPUT_FLAG_AUTOCORRECT_OFF) ||
-       (flags & ui::TEXT_INPUT_FLAG_SPELLCHECK_OFF)) ||
-      !is_normal_screen) {
+mojom::AutocorrectMode AutocorrectFlagsToMojoType(int flags) {
+  if ((flags & ui::TEXT_INPUT_FLAG_AUTOCORRECT_OFF) ||
+      (flags & ui::TEXT_INPUT_FLAG_SPELLCHECK_OFF)) {
     return mojom::AutocorrectMode::kDisabled;
   }
   return mojom::AutocorrectMode::kEnabled;
@@ -422,7 +420,8 @@ uint32_t Utf16ToCodepoint(const std::u16string& str) {
   base::ReadUnicodeCharacter(str.data(), str.length(), &index, &codepoint);
 
   // Should only contain a single codepoint.
-  DCHECK_EQ(index, str.length() - 1);
+  DCHECK_GE(index, 0);
+  DCHECK_EQ(static_cast<size_t>(index), str.length() - 1);
   return codepoint;
 }
 
@@ -683,8 +682,7 @@ void NativeInputMethodEngine::ImeObserver::ConnectToImeService(
           &NativeInputMethodEngine::ImeObserver::OnConnectionFactoryBound,
           weak_ptr_factory_.GetWeakPtr()));
 
-  mojo::PendingAssociatedRemote<chromeos::ime::mojom::InputMethodHost>
-      input_method_host;
+  mojo::PendingAssociatedRemote<ime::mojom::InputMethodHost> input_method_host;
   associated_host_receiver_.Bind(
       input_method_host.InitWithNewEndpointAndPassReceiver());
 
@@ -772,18 +770,11 @@ void NativeInputMethodEngine::ImeObserver::OnFocus(
       OverrideXkbLayoutIfNeeded(InputMethodManager::Get()->GetImeKeyboard(),
                                 settings);
 
-      const bool is_normal_screen =
-          InputMethodManager::Get()->GetActiveIMEState()->GetUIStyle() ==
-          InputMethodManager::UIStyle::kNormal;
       auto input_field_info = mojom::InputFieldInfo::New(
-          is_normal_screen ? TextInputTypeToMojoType(context.type)
-                           : (context.type == ui::TEXT_INPUT_TYPE_PASSWORD
-                                  ? mojom::InputFieldType::kPassword
-                                  : mojom::InputFieldType::kNoIME),
-          AutocorrectFlagsToMojoType(context.flags, is_normal_screen),
-          context.should_do_learning && is_normal_screen
-              ? mojom::PersonalizationMode::kEnabled
-              : mojom::PersonalizationMode::kDisabled);
+          TextInputTypeToMojoType(context.type),
+          AutocorrectFlagsToMojoType(context.flags),
+          context.should_do_learning ? mojom::PersonalizationMode::kEnabled
+                                     : mojom::PersonalizationMode::kDisabled);
       auto on_focus_callback = base::BindOnce(
           &NativeInputMethodEngine::ImeObserver::ActivateTextClient,
           weak_ptr_factory_.GetWeakPtr(), text_client_->context_id);
@@ -1192,7 +1183,7 @@ void NativeInputMethodEngine::ImeObserver::DisplaySuggestions(
 }
 
 void NativeInputMethodEngine::ImeObserver::UpdateCandidatesWindow(
-    chromeos::ime::mojom::CandidatesWindowPtr window) {
+    mojom::CandidatesWindowPtr window) {
   if (!IsTextClientActive())
     return;
 

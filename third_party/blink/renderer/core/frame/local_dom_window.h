@@ -31,6 +31,7 @@
 
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
+#include "third_party/blink/public/common/frame/payment_request_token.h"
 #include "third_party/blink/public/common/metrics/post_message_counter.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
@@ -40,20 +41,18 @@
 #include "third_party/blink/renderer/core/editing/ime/input_method_controller.h"
 #include "third_party/blink/renderer/core/editing/spellcheck/spell_checker.h"
 #include "third_party/blink/renderer/core/editing/suggestion/text_suggestion_controller.h"
-#include "third_party/blink/renderer/core/events/page_transition_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/use_counter_impl.h"
-#include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
-#include "third_party/blink/renderer/core/scroll/scrollable_area.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/storage/blink_storage_key.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
-#include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
@@ -61,6 +60,7 @@ namespace blink {
 class BarProp;
 class CSSStyleDeclaration;
 class CustomElementRegistry;
+class DedicatedWorker;
 class Document;
 class DocumentInit;
 class DOMSelection;
@@ -453,9 +453,23 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   void DidReceiveUserActivation();
 
+  // Returns the state of the |PaymentRequestToken| in this document.
+  bool IsPaymentRequestTokenActive() const;
+
+  // Consumes the |PaymentRequestToken| if it was active in this document .
+  bool ConsumePaymentRequestToken();
+
   // Called when a network request buffered an additional `num_bytes` while this
   // frame is in back-forward cache.
   void DidBufferLoadWhileInBackForwardCache(size_t num_bytes);
+
+  // Adds a DedicatedWorker. This is called when a DedicatedWorker is created in
+  // this ExecutionContext.
+  void AddDedicatedWorker(DedicatedWorker* dedicated_worker);
+
+  // Removes a DedicatedWorker This is called when a DedicatedWorker is
+  // destroyed in this ExecutionContext.
+  void RemoveDedicatedWorker(DedicatedWorker* dedicated_worker);
 
   // Whether the window is anonymous or not.
   bool anonymous() const { return anonymous_; }
@@ -524,6 +538,10 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   HeapHashSet<WeakMember<EventListenerObserver>> event_listener_observers_;
   HeapHashSet<WeakMember<UserActivationObserver>> user_activation_observers_;
 
+  // Tracker for delegated PaymentRequest.  This is related to
+  // |Frame::user_activation_state_|.
+  PaymentRequestToken payment_request_token_;
+
   // https://dom.spec.whatwg.org/#window-current-event
   // We represent the "undefined" value as nullptr.
   Member<Event> current_event_;
@@ -580,6 +598,9 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   // due to back-forward cache. This number gets reset when the frame gets out
   // of the back-forward cache.
   size_t total_bytes_buffered_while_in_back_forward_cache_ = 0;
+
+  // The set of DedicatedWorkers that are created in this ExecutionContext.
+  HeapHashSet<Member<DedicatedWorker>> dedicated_workers_;
 
   // Anonymous Iframe:
   // https://github.com/camillelamy/explainers/blob/main/anonymous_iframes.md

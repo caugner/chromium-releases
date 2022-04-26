@@ -4,7 +4,6 @@
 """Definitions of builders in the tryserver.chromium.android builder group."""
 
 load("//lib/branches.star", "branches")
-load("//lib/builder_config.star", "builder_config")
 load("//lib/builders.star", "goma", "os")
 load("//lib/try.star", "try_")
 load("//lib/consoles.star", "consoles")
@@ -53,7 +52,25 @@ try_.compilator_builder(
 )
 
 try_.builder(
-    name = "android-12-x64-fyi-rel",
+    name = "android-12-x64-dbg",
+)
+
+try_.orchestrator_builder(
+    name = "android-12-x64-rel",
+    compilator = "android-12-x64-rel-compilator",
+    # TODO(crbug.com/1225851): Enable it on branch after running on CQ
+    # branch_selector = branches.STANDARD_MILESTONE,
+    main_list_view = "try",
+    tryjob = try_.job(
+        experiment_percentage = 20,
+    ),
+)
+
+try_.compilator_builder(
+    name = "android-12-x64-rel-compilator",
+    # TODO(crbug.com/1225851): Enable it on branch after running on CQ
+    # branch_selector = branches.STANDARD_MILESTONE,
+    main_list_view = "try",
 )
 
 try_.builder(
@@ -97,6 +114,8 @@ try_.builder(
         },
     },
     tryjob = try_.job(),
+    # TODO(crbug/1202741)
+    os = os.LINUX_XENIAL_OR_BIONIC_REMOVE,
     ssd = True,
 )
 
@@ -134,14 +153,6 @@ try_.builder(
 )
 
 try_.builder(
-    name = "android-cronet-lollipop-arm-rel",
-)
-
-try_.builder(
-    name = "android-cronet-marshmallow-arm64-rel",
-)
-
-try_.builder(
     name = "android-cronet-x86-dbg",
 )
 
@@ -151,6 +162,20 @@ try_.builder(
 
 try_.builder(
     name = "android-cronet-x86-dbg-10-tests",
+    branch_selector = branches.STANDARD_MILESTONE,
+    check_for_flakiness = True,
+    main_list_view = "try",
+    tryjob = try_.job(
+        location_regexp = [
+            ".+/[+]/components/cronet/.+",
+            ".+/[+]/components/grpc_support/.+",
+            ".+/[+]/build/android/.+",
+            ".+/[+]/build/config/android/.+",
+        ],
+        location_regexp_exclude = [
+            ".+/[+]/components/cronet/ios/.+",
+        ],
+    ),
 )
 
 try_.builder(
@@ -219,6 +244,11 @@ try_.builder(
 )
 
 try_.builder(
+    name = "android-nougat-x86-rel",
+    mirrors = ["ci/android-nougat-x86-rel"],
+)
+
+try_.builder(
     name = "android-opus-arm-rel",
 )
 
@@ -228,12 +258,14 @@ try_.builder(
 
 try_.builder(
     name = "android-oreo-arm64-dbg",
+    branch_selector = branches.STANDARD_MILESTONE,
 )
 
 try_.builder(
     name = "android-pie-arm64-dbg",
     branch_selector = branches.STANDARD_MILESTONE,
     builderless = False,
+    check_for_flakiness = True,
     cores = 16,
     goma_jobs = goma.jobs.J300,
     main_list_view = "try",
@@ -270,6 +302,7 @@ try_.builder(
 try_.orchestrator_builder(
     name = "android-pie-arm64-rel",
     compilator = "android-pie-arm64-rel-compilator",
+    check_for_flakiness = True,
     branch_selector = branches.STANDARD_MILESTONE,
     main_list_view = "try",
     tryjob = try_.job(),
@@ -278,6 +311,7 @@ try_.orchestrator_builder(
 try_.compilator_builder(
     name = "android-pie-arm64-rel-compilator",
     branch_selector = branches.STANDARD_MILESTONE,
+    check_for_flakiness = True,
     main_list_view = "try",
 )
 
@@ -328,6 +362,10 @@ try_.builder(
 )
 
 try_.builder(
+    name = "android-webview-12-x64-dbg",
+)
+
+try_.builder(
     name = "android-webview-pie-x86-wpt-fyi-rel",
 )
 
@@ -367,29 +405,17 @@ try_.builder(
 try_.builder(
     name = "android_compile_dbg",
     branch_selector = branches.STANDARD_MILESTONE,
-    mirrors = [
-        "ci/Android arm Builder (dbg)",
-    ],
-    try_settings = builder_config.try_settings(
-        include_all_triggered_testers = True,
-        is_compile_only = True,
-    ),
     builderless = not settings.is_main,
     goma_jobs = goma.jobs.J150,
     main_list_view = "try",
     tryjob = try_.job(),
+    # TODO(crbug/1202741)
+    os = os.LINUX_XENIAL_OR_BIONIC_REMOVE,
 )
 
 try_.builder(
     name = "android_compile_x64_dbg",
     branch_selector = branches.STANDARD_MILESTONE,
-    mirrors = [
-        "ci/Android x64 Builder (dbg)",
-    ],
-    try_settings = builder_config.try_settings(
-        include_all_triggered_testers = True,
-        is_compile_only = True,
-    ),
     cores = 16,
     ssd = True,
     main_list_view = "try",
@@ -433,6 +459,8 @@ try_.builder(
     builderless = not settings.is_main,
     main_list_view = "try",
     tryjob = try_.job(),
+    # TODO(crbug/1202741)
+    os = os.LINUX_XENIAL_OR_BIONIC_REMOVE,
 )
 
 try_.builder(
@@ -453,6 +481,8 @@ try_.builder(
     builderless = not settings.is_main,
     main_list_view = "try",
     tryjob = try_.job(),
+    # TODO(crbug/1202741)
+    os = os.LINUX_XENIAL_OR_BIONIC_REMOVE,
 )
 
 try_.builder(
@@ -461,11 +491,13 @@ try_.builder(
 
 try_.builder(
     name = "try-nougat-phone-tester",
+    branch_selector = branches.STANDARD_MILESTONE,
 )
 
 try_.gpu.optional_tests_builder(
     name = "android_optional_gpu_tests_rel",
     branch_selector = branches.STANDARD_MILESTONE,
+    check_for_flakiness = True,
     goma_jobs = goma.jobs.J150,
     main_list_view = "try",
     tryjob = try_.job(
