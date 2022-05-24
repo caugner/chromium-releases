@@ -301,7 +301,8 @@ bool VariationsFieldTrialCreator::SetUpFieldTrials(
     // We log a recognizable token for the crash condition, to allow tests to
     // recognize the crash location in the test output. See:
     // TEST_P(FieldTrialTest, ExtendedSafeModeEndToEnd)
-    LOG(FATAL) << "crash_for_testing";
+    LOG(ERROR) << "crash_for_testing";
+    abort();
   }
 
   // This must be called after |local_state_| is initialized.
@@ -488,7 +489,7 @@ void VariationsFieldTrialCreator::MaybeExtendVariationsSafeMode(
     return;
   }
 
-  DCHECK_EQ(group_name, kSignalAndWriteViaFileUtilGroup);
+  DCHECK_EQ(group_name, kEnabledGroup);
   metrics_state_manager->LogHasSessionShutdownCleanly(
       /*has_session_shutdown_cleanly=*/false,
       /*is_extended_safe_mode=*/true);

@@ -290,7 +290,7 @@ TEST_F(WindowCacheTest, GtkFrameExtents) {
   SetArrayProperty(root(), gtk_frame_extents, Atom::CARDINAL,
                    std::vector<uint32_t>{1, 2, 3, 4});
   cache()->SyncForTest();
-  EXPECT_EQ(info.gtk_frame_extents_px, gfx::Insets(3, 1, 4, 2));
+  EXPECT_EQ(info.gtk_frame_extents_px, gfx::Insets::TLBR(3, 1, 4, 2));
 
   connection()->DeleteProperty(root(), gtk_frame_extents);
   cache()->SyncForTest();
@@ -416,6 +416,21 @@ TEST_F(WindowCacheTest, GetWindowAtPoint) {
   connection()->DeleteProperty(b, Atom::WM_NAME);
   cache()->SyncForTest();
   EXPECT_EQ(cache()->GetWindowAtPoint({150, 150}, root()), c);
+}
+
+// Regression test for https://crbug.com/1316735
+// If both a parent and child window have a WM_NAME, the child window
+// should be returned by GetWindowAtPoint().
+TEST_F(WindowCacheTest, NestedWmName) {
+  connection()->MapWindow(root());
+  SetStringProperty(root(), Atom::WM_NAME, Atom::STRING, "root");
+
+  Window a = CreateWindow(root());
+  connection()->MapWindow(a);
+  SetStringProperty(a, Atom::WM_NAME, Atom::STRING, "a");
+
+  cache()->SyncForTest();
+  EXPECT_EQ(cache()->GetWindowAtPoint({100, 100}, root()), a);
 }
 
 }  // namespace x11

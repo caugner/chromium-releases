@@ -47,7 +47,6 @@ def gpu_android_builder(*, name, **kwargs):
         builder_group = "tryserver.chromium.android",
         builderless = True,
         goma_backend = goma.backend.RBE_PROD,
-        os = os.LINUX_BIONIC_REMOVE,
         ssd = None,
         **kwargs
     )
@@ -85,6 +84,9 @@ gpu_android_builder(
 gpu_android_builder(
     name = "gpu-try-android-m-nexus-5x-64",
     pool = "luci.chromium.gpu.android.nexus5x.try",
+    mirrors = [
+        "ci/Android Release (Nexus 5X)",
+    ],
 )
 
 def gpu_chromeos_builder(*, name, **kwargs):
@@ -93,7 +95,6 @@ def gpu_chromeos_builder(*, name, **kwargs):
         builder_group = "tryserver.chromium.chromiumos",
         builderless = True,
         goma_backend = goma.backend.RBE_PROD,
-        os = os.LINUX_BIONIC_REMOVE,
         ssd = None,
         **kwargs
     )
@@ -118,13 +119,18 @@ gpu_chromeos_builder(
     pool = "luci.chromium.gpu.chromeos.octopus.try",
 )
 
+gpu_chromeos_builder(
+    name = "gpu-fyi-try-chromeos-zork-exp",
+    mirrors = ["ci/gpu-fyi-chromeos-zork-exp"],
+    pool = "luci.chromium.gpu.chromeos.zork.try",
+)
+
 def gpu_linux_builder(*, name, **kwargs):
     return try_.builder(
         name = name,
         builder_group = "tryserver.chromium.linux",
         builderless = True,
         goma_backend = goma.backend.RBE_PROD,
-        os = os.LINUX_BIONIC_REMOVE,
         ssd = None,
         **kwargs
     )
@@ -181,6 +187,10 @@ gpu_linux_builder(
 
 gpu_linux_builder(
     name = "gpu-try-linux-nvidia-rel",
+    mirrors = [
+        "ci/GPU Linux Builder",
+        "ci/Linux Release (NVIDIA)",
+    ],
     pool = "luci.chromium.gpu.linux.nvidia.try",
 )
 

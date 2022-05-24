@@ -259,7 +259,7 @@ const base::Feature kCorsNonWildcardRequestHeadersSupport{
 // Whether the sync client optimization is used for communication between the
 // CorsURLLoader and URLLoader.
 const base::Feature kURLLoaderSyncClient{"URLLoaderSyncClient",
-                                         base::FEATURE_DISABLED_BY_DEFAULT};
+                                         base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Combine URLLoaderClient::OnReceiveResponse and OnStartLoadingResponseBody.
 const base::Feature kCombineResponseBody{"CombineResponseBody",
@@ -268,7 +268,7 @@ const base::Feature kCombineResponseBody{"CombineResponseBody",
 // Don't wait for database write before responding to
 // RestrictedCookieManager::SetCookieFromString.
 const base::Feature kFasterSetCookie{"FasterSetCookie",
-                                     base::FEATURE_DISABLED_BY_DEFAULT};
+                                     base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Allow batching SimpleURLLoaders when the underlying network state is
 // inactive.
@@ -280,5 +280,8 @@ const base::Feature kBatchSimpleURLLoader{"BatchSimpleURLLoader",
 const base::Feature kOmitCorsClientCert{"OmitCorsClientCert",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Read as much of the net::URLRequest as there is space in the Mojo data pipe.
+const base::Feature kOptimizeNetworkBuffers{"OptimizeNetworkBuffers",
+                                            base::FEATURE_DISABLED_BY_DEFAULT};
 }  // namespace features
 }  // namespace network

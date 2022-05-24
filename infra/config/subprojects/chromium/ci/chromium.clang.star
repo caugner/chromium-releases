@@ -3,9 +3,9 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.clang builder group."""
 
-load("//lib/builders.star", "goma", "os", "sheriff_rotations", "xcode")
+load("//lib/builders.star", "os", "sheriff_rotations", "xcode")
 load("//lib/branches.star", "branches")
-load("//lib/ci.star", "ci")
+load("//lib/ci.star", "ci", "rbe_instance", "rbe_jobs")
 load("//lib/consoles.star", "consoles")
 
 ci.defaults.set(
@@ -17,7 +17,7 @@ ci.defaults.set(
     # Naturally the runtime will be ~4-8h on average, depending on config.
     # CFI builds will take even longer - around 11h.
     execution_timeout = 14 * time.hour,
-    os = os.LINUX_BIONIC_SWITCH_TO_DEFAULT,
+    os = os.LINUX_DEFAULT,
     pool = ci.DEFAULT_POOL,
     properties = {
         "perf_dashboard_machine_group": "ChromiumClang",
@@ -96,12 +96,14 @@ def clang_tot_linux_builder(short_name, category = "ToT Linux", **kwargs):
 
 ci.builder(
     name = "CFI Linux CF",
-    goma_backend = goma.backend.RBE_PROD,
+    goma_backend = None,
     console_view_entry = consoles.console_view_entry(
         category = "CFI|Linux",
         short_name = "CF",
     ),
     notifies = ["CFI Linux"],
+    reclient_instance = rbe_instance.DEFAULT,
+    reclient_jobs = rbe_jobs.DEFAULT,
 )
 
 ci.builder(

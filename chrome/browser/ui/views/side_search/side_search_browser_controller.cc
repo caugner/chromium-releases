@@ -11,6 +11,7 @@
 #include "chrome/browser/feature_engagement/tracker_factory.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/page_action/page_action_icon_type.h"
 #include "chrome/browser/ui/side_search/side_search_utils.h"
@@ -110,13 +111,33 @@ class DseImageView : public views::ImageView {
                                 base::Unretained(this))) {
     SetFlipCanvasOnPaintForRTLUI(false);
     SetBorder(views::CreateEmptyBorder(
-        gfx::Insets(0, views::LayoutProvider::Get()->GetDistanceMetric(
-                           views::DISTANCE_RELATED_CONTROL_VERTICAL))));
+        gfx::Insets::VH(0, views::LayoutProvider::Get()->GetDistanceMetric(
+                               views::DISTANCE_RELATED_CONTROL_VERTICAL))));
+    UpdateIconImage();
   }
   ~DseImageView() override = default;
 
   void UpdateIconImage() {
-    SetImage(default_search_icon_source_.GetIconImage());
+    // Attempt to get the default search engine's favicon.
+    auto icon_image = default_search_icon_source_.GetIconImage();
+
+    // Use the DSE's icon image if available.
+    if (!icon_image.IsEmpty()) {
+      SetImage(default_search_icon_source_.GetIconImage());
+      return;
+    }
+
+    // If the icon image is empty use kSearchIcon as a default. It is not
+    // guaranteed that the FaviconService will return a favicon for the search
+    // provider.
+    const int icon_size =
+        ui::TouchUiController::Get()->touch_ui()
+            ? kDefaultTouchableIconSize
+            : ChromeLayoutProvider::Get()->GetDistanceMetric(
+                  ChromeDistanceMetric::
+                      DISTANCE_SIDE_PANEL_HEADER_VECTOR_ICON_SIZE);
+    SetImage(ui::ImageModel::FromVectorIcon(vector_icons::kSearchIcon,
+                                            ui::kColorIcon, icon_size));
   }
 
  private:
@@ -138,9 +159,14 @@ class HeaderView : public views::View {
   METADATA_HEADER(HeaderView);
   HeaderView(base::RepeatingClosure callback, Browser* browser)
       : layout_(SetLayoutManager(std::make_unique<views::FlexLayout>())) {
+    constexpr int kHeaderHeight = 44;
+    SetPreferredSize(gfx::Size(0, kHeaderHeight));
+
+    constexpr int kHorizontalMargin = 8;
     layout_->SetOrientation(views::LayoutOrientation::kHorizontal)
         .SetMainAxisAlignment(views::LayoutAlignment::kStart)
-        .SetCrossAxisAlignment(views::LayoutAlignment::kCenter);
+        .SetCrossAxisAlignment(views::LayoutAlignment::kCenter)
+        .SetInteriorMargin(gfx::Insets::VH(0, kHorizontalMargin));
 
     dse_image_view_ = AddChildView(std::make_unique<DseImageView>(browser));
     dse_image_view_->SetProperty(
@@ -210,7 +236,7 @@ class HeaderView : public views::View {
         views::FlexSpecification(views::MinimumFlexSizeRule::kPreferred,
                                  views::MaximumFlexSizeRule::kPreferred));
     SetBackground(
-        views::CreateThemedSolidBackground(this, ui::kColorDialogBackground));
+        views::CreateThemedSolidBackground(ui::kColorDialogBackground));
     UpdateSpacing();
   }
   ~HeaderView() override = default;
@@ -224,9 +250,6 @@ class HeaderView : public views::View {
     if (feedback_button_)
       feedback_button_->UpdateIcon();
     close_button_->UpdateIcon();
-
-    layout_->SetInteriorMargin(
-        GetLayoutInsets(LayoutInset::TOOLBAR_INTERIOR_MARGIN));
   }
 
   raw_ptr<DseImageView> dse_image_view_ = nullptr;
@@ -264,6 +287,7 @@ views::WebView* ConfigureSidePanel(views::View* side_panel,
       views::kFlexBehaviorKey,
       views::FlexSpecification(views::MinimumFlexSizeRule::kScaleToZero,
                                views::MaximumFlexSizeRule::kUnbounded));
+  web_view->SetBackground(views::CreateThemedSolidBackground(kColorToolbar));
 
   side_panel->AddChildView(std::move(container));
 
@@ -340,6 +364,9 @@ void SideSearchBrowserController::DidFinishNavigation(
   // be shown.
   auto* tab_contents_helper = SideSearchTabContentsHelper::FromWebContents(
       navigation_handle->GetWebContents());
+  if (!tab_contents_helper)
+    return;
+
   if (GetSidePanelToggledOpen() &&
       !tab_contents_helper->CanShowSidePanelForCommittedNavigation()) {
     CloseSidePanel();
@@ -364,12 +391,14 @@ void SideSearchBrowserController::UpdateSidePanelForContents(
   // Ensure that the controller acts as the delegate only to the currently
   // active contents.
   if (old_contents) {
-    SideSearchTabContentsHelper::FromWebContents(old_contents)
-        ->SetDelegate(nullptr);
+    auto* helper = SideSearchTabContentsHelper::FromWebContents(old_contents);
+    if (helper)
+      helper->SetDelegate(nullptr);
   }
   if (new_contents) {
-    SideSearchTabContentsHelper::FromWebContents(new_contents)
-        ->SetDelegate(weak_factory_.GetWeakPtr());
+    auto* helper = SideSearchTabContentsHelper::FromWebContents(new_contents);
+    if (helper)
+      helper->SetDelegate(weak_factory_.GetWeakPtr());
   }
 
   Observe(new_contents);
@@ -413,14 +442,17 @@ void SideSearchBrowserController::ToggleSidePanel() {
 
 bool SideSearchBrowserController::GetSidePanelToggledOpen() const {
   auto* active_contents = browser_view_->GetActiveWebContents();
-  return active_contents
-             ? SideSearchTabContentsHelper::FromWebContents(active_contents)
-                   ->toggled_open()
-             : false;
+  if (!active_contents)
+    return false;
+
+  const auto* helper =
+      SideSearchTabContentsHelper::FromWebContents(active_contents);
+  return helper ? helper->toggled_open() : false;
 }
 
 void SideSearchBrowserController::SidePanelCloseButtonPressed() {
   CloseSidePanel(SideSearchCloseActionType::kTapOnSideSearchCloseButton);
+  browser_view_->RightAlignedSidePanelWasClosed();
 }
 
 void SideSearchBrowserController::OpenSidePanel() {
@@ -458,9 +490,10 @@ void SideSearchBrowserController::CloseSidePanel(
 void SideSearchBrowserController::ClobberAllInCurrentBrowser() {
   auto* tab_strip_model = browser_view_->browser()->tab_strip_model();
   for (int i = 0; i < tab_strip_model->count(); ++i) {
-    SideSearchTabContentsHelper::FromWebContents(
-        tab_strip_model->GetWebContentsAt(i))
-        ->set_toggled_open(false);
+    auto* helper = SideSearchTabContentsHelper::FromWebContents(
+        tab_strip_model->GetWebContentsAt(i));
+    if (helper)
+      helper->set_toggled_open(false);
   }
 }
 
@@ -468,16 +501,21 @@ void SideSearchBrowserController::ClearSideContentsCacheForActiveTab() {
   web_view_->SetWebContents(nullptr);
 
   if (auto* active_contents = browser_view_->GetActiveWebContents()) {
-    SideSearchTabContentsHelper::FromWebContents(active_contents)
-        ->ClearSidePanelContents();
+    auto* helper =
+        SideSearchTabContentsHelper::FromWebContents(active_contents);
+    if (helper)
+      helper->ClearSidePanelContents();
   }
 }
 
 void SideSearchBrowserController::SetSidePanelToggledOpen(bool toggled_open) {
   if (auto* active_contents = browser_view_->GetActiveWebContents()) {
-    SideSearchTabContentsHelper::FromWebContents(active_contents)
-        ->set_toggled_open(toggled_open);
-    side_search::MaybeSaveSideSearchTabSessionData(active_contents);
+    auto* helper =
+        SideSearchTabContentsHelper::FromWebContents(active_contents);
+    if (helper) {
+      helper->set_toggled_open(toggled_open);
+      side_search::MaybeSaveSideSearchTabSessionData(active_contents);
+    }
   }
 }
 
@@ -498,12 +536,21 @@ void SideSearchBrowserController::UpdateSidePanel() {
   auto* tab_contents_helper =
       SideSearchTabContentsHelper::FromWebContents(active_contents);
 
+  // Early return if the tab helper for the active tab is not defined
+  // (crbug.com/1307908).
+  if (!tab_contents_helper)
+    return;
+
   const bool can_show_side_panel_for_page =
       tab_contents_helper->CanShowSidePanelForCommittedNavigation();
   const bool will_show_side_panel =
       can_show_side_panel_for_page && GetSidePanelToggledOpen();
 
+  // When side search is shown we only need to close other side panels for the
+  // basic clobbering experience. The improved experience leverages a
+  // SidePanelVisibilityController on the browser view.
   if (base::FeatureList::IsEnabled(features::kSideSearchDSESupport) &&
+      !base::FeatureList::IsEnabled(features::kSidePanelImprovedClobbering) &&
       will_show_side_panel) {
     browser_view_->CloseOpenRightAlignedSidePanel(/*exclude_lens=*/false,
                                                   /*exclude_side_search=*/true);

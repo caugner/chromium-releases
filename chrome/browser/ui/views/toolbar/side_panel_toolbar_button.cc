@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/read_later/reading_list_model_factory.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/chrome_view_class_properties.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/side_panel/read_later_side_panel_web_view.h"
@@ -38,7 +39,6 @@ SidePanelToolbarButton::SidePanelToolbarButton(Browser* browser)
       reading_list_model_(
           ReadingListModelFactory::GetForBrowserContext(browser_->profile())) {
   SetVectorIcons(kSidePanelIcon, kSidePanelTouchIcon);
-  SetTooltipText(l10n_util::GetStringUTF16(IDS_TOOLTIP_SIDE_PANEL_SHOW));
   button_controller()->set_notify_action(
       views::ButtonController::NotifyAction::kOnPress);
   GetViewAccessibility().OverrideHasPopup(ax::mojom::HasPopup::kMenu);
@@ -120,8 +120,8 @@ void SidePanelToolbarButton::ButtonPressed() {
     side_panel_webview_ =
         browser_view->right_aligned_side_panel()->AddChildView(
             std::move(webview));
-    SetTooltipText(l10n_util::GetStringUTF16(IDS_TOOLTIP_SIDE_PANEL_HIDE));
-    reading_list_model_->MarkAllSeen();
+    if (reading_list_model_->loaded())
+      reading_list_model_->MarkAllSeen();
     dot_indicator_->Hide();
   }
 }
@@ -134,7 +134,7 @@ void SidePanelToolbarButton::HideSidePanel() {
     browser_view->right_aligned_side_panel()->RemoveChildViewT(
         side_panel_webview_.get());
     side_panel_webview_ = nullptr;
-    SetTooltipText(l10n_util::GetStringUTF16(IDS_TOOLTIP_SIDE_PANEL_SHOW));
+    browser_view->RightAlignedSidePanelWasClosed();
   }
 }
 
