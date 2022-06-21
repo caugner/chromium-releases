@@ -572,13 +572,14 @@ public class StripLayoutHelper implements StripLayoutTab.StripLayoutTabDelegate 
     /**
      * Called when all tabs are closed at once.
      */
-    public void allTabsClosed() {
+    public void willCloseAllTabs() {
         computeAndUpdateTabOrders(true);
         mUpdateHost.requestUpdate();
     }
 
     /**
-     * Called when a tab close has been undone and the tab has been restored.
+     * Called when a tab close has been undone and the tab has been restored. This also re-selects
+     * the last tab the user was on before the tab was closed.
      * @param time The current time of the app in ms.
      * @param id   The id of the Tab.
      */
@@ -621,7 +622,7 @@ public class StripLayoutHelper implements StripLayoutTab.StripLayoutTabDelegate 
         if (!mShouldCascadeTabs) {
             int selIndex = mModel.index();
             if (CachedFeatureFlags.isEnabled(ChromeFeatureList.TAB_STRIP_IMPROVEMENTS) && !selected
-                && selIndex >= 0 && selIndex < mStripTabs.length) {
+                    && selIndex >= 0 && selIndex < mStripTabs.length) {
                 // Prioritize focusing on selected tab over newly created unselected tabs.
                 fastExpandTab = mStripTabs[selIndex];
             } else {
@@ -987,7 +988,7 @@ public class StripLayoutHelper implements StripLayoutTab.StripLayoutTabDelegate 
         tab.setIsDying(true);
 
         // 3. Fake a selection on the next tab now.
-        Tab nextTab = mModel.getNextTabIfClosed(tab.getId());
+        Tab nextTab = mModel.getNextTabIfClosed(tab.getId(), /*uponExit=*/false);
         if (nextTab != null) tabSelected(time, nextTab.getId(), tab.getId());
     }
 
@@ -1411,6 +1412,7 @@ public class StripLayoutHelper implements StripLayoutTab.StripLayoutTabDelegate 
     private float calculateOffsetToMakeTabVisible(StripLayoutTab tab, boolean canExpandSelectedTab,
             boolean canExpandLeft, boolean canExpandRight, boolean selected) {
         if (tab == null) return 0.f;
+
         final int selIndex = mModel.index();
         final int index = TabModelUtils.getTabIndexById(mModel, tab.getId());
 
