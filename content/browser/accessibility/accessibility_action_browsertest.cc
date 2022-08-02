@@ -373,7 +373,14 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, HorizontalScroll) {
   EXPECT_EQ(x_step_4, x_before);
 }
 
-IN_PROC_BROWSER_TEST_F(AccessibilityCanvasActionBrowserTest, CanvasGetImage) {
+// Flaky on Mac https://crbug.com/1337760.
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_CanvasGetImage DISABLED_CanvasGetImage
+#else
+#define MAYBE_CanvasGetImage CanvasGetImage
+#endif
+IN_PROC_BROWSER_TEST_F(AccessibilityCanvasActionBrowserTest,
+                       MAYBE_CanvasGetImage) {
   LoadInitialAccessibilityTreeFromHtml(R"HTML(
       <body>
         <canvas aria-label="canvas" id="c" width="4" height="2">
@@ -417,8 +424,14 @@ IN_PROC_BROWSER_TEST_F(AccessibilityCanvasActionBrowserTest, CanvasGetImage) {
   EXPECT_EQ(SK_ColorBLUE, bitmap.getColor(3, 1));
 }
 
+// Flaky on Mac https://crbug.com/1337760.
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_CanvasGetImageScale DISABLED_CanvasGetImageScale
+#else
+#define MAYBE_CanvasGetImageScale CanvasGetImageScale
+#endif
 IN_PROC_BROWSER_TEST_F(AccessibilityCanvasActionBrowserTest,
-                       CanvasGetImageScale) {
+                       MAYBE_CanvasGetImageScale) {
   LoadInitialAccessibilityTreeFromHtml(R"HTML(
       <body>
       <canvas aria-label="canvas" id="c" width="40" height="20">
@@ -561,7 +574,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, TextareaSetValue) {
       target->CreateTextPositionAt(0);
   BrowserAccessibility::AXPosition end_of_line_1 =
       start_position->CreateNextLineEndPosition(
-          ui::AXBoundaryBehavior::kCrossBoundary);
+          {ui::AXBoundaryBehavior::kCrossBoundary,
+           ui::AXBoundaryDetection::kDontCheckInitialPosition});
   EXPECT_EQ(5, end_of_line_1->text_offset());
 #endif
 }
@@ -595,7 +609,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
       target->CreateTextPositionAt(0);
   BrowserAccessibility::AXPosition end_of_line_1 =
       start_position->CreateNextLineEndPosition(
-          ui::AXBoundaryBehavior::kCrossBoundary);
+          {ui::AXBoundaryBehavior::kCrossBoundary,
+           ui::AXBoundaryDetection::kDontCheckInitialPosition});
   EXPECT_EQ(5, end_of_line_1->text_offset());
 #endif
 }
