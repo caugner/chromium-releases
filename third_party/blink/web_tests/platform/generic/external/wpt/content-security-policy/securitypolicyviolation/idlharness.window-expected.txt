@@ -1,5 +1,5 @@
 This is a testharness.js-based test.
-Found 51 tests; 34 PASS, 17 FAIL, 0 TIMEOUT, 0 NOTRUN.
+Found 52 tests; 34 PASS, 18 FAIL, 0 TIMEOUT, 0 NOTRUN.
 PASS idl_test setup
 PASS idl_test validation
 FAIL CSPViolationReportBody interface: existence and properties of interface object assert_own_property: self does not have own property "CSPViolationReportBody" expected property "CSPViolationReportBody" missing
@@ -8,6 +8,7 @@ FAIL CSPViolationReportBody interface object name assert_own_property: self does
 FAIL CSPViolationReportBody interface: existence and properties of interface prototype object assert_own_property: self does not have own property "CSPViolationReportBody" expected property "CSPViolationReportBody" missing
 FAIL CSPViolationReportBody interface: existence and properties of interface prototype object's "constructor" property assert_own_property: self does not have own property "CSPViolationReportBody" expected property "CSPViolationReportBody" missing
 FAIL CSPViolationReportBody interface: existence and properties of interface prototype object's @@unscopables property assert_own_property: self does not have own property "CSPViolationReportBody" expected property "CSPViolationReportBody" missing
+FAIL CSPViolationReportBody interface: operation toJSON() assert_own_property: self does not have own property "CSPViolationReportBody" expected property "CSPViolationReportBody" missing
 FAIL CSPViolationReportBody interface: attribute documentURL assert_own_property: self does not have own property "CSPViolationReportBody" expected property "CSPViolationReportBody" missing
 FAIL CSPViolationReportBody interface: attribute referrer assert_own_property: self does not have own property "CSPViolationReportBody" expected property "CSPViolationReportBody" missing
 FAIL CSPViolationReportBody interface: attribute blockedURL assert_own_property: self does not have own property "CSPViolationReportBody" expected property "CSPViolationReportBody" missing
