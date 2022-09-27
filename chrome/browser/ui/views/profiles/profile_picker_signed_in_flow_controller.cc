@@ -36,6 +36,9 @@ ProfilePickerSignedInFlowController::ProfilePickerSignedInFlowController(
 }
 
 ProfilePickerSignedInFlowController::~ProfilePickerSignedInFlowController() {
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  LOG(WARNING) << "crbug.com/1340791 | Flow controller destruction.";
+#endif
   if (contents())
     contents()->SetDelegate(nullptr);
 }
@@ -127,7 +130,7 @@ GURL ProfilePickerSignedInFlowController::GetSyncConfirmationURL(bool loading) {
   GURL url = GURL(chrome::kChromeUISyncConfirmationURL);
   return AppendSyncConfirmationQueryParams(
       loading ? url.Resolve(chrome::kChromeUISyncConfirmationLoadingPath) : url,
-      /*is_modal=*/false);
+      SyncConfirmationStyle::kWindow);
 }
 
 std::unique_ptr<content::WebContents>

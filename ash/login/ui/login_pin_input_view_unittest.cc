@@ -32,7 +32,8 @@ class LoginPinInputViewTest
 
   void SetUp() override {
     LoginTestBase::SetUp();
-    view_ = new LoginPinInputView(CreateDefaultLoginPalette());
+    view_ = new LoginPinInputView(
+        CreateDefaultLoginPalette(/*color_provider=*/nullptr));
     view_->Init(base::BindRepeating(&LoginPinInputViewTest::OnPinSubmit,
                                     base::Unretained(this)),
                 base::BindRepeating(&LoginPinInputViewTest::OnPinChanged,
@@ -154,14 +155,14 @@ TEST_P(LoginPinInputViewTest, FlagsPreservedOnPaletteChange) {
   EXPECT_FALSE(view_->IsReadOnly());
 
   // Updating the palette doesn't affect the default flags.
-  view_->UpdatePalette(CreateDefaultLoginPalette());
+  view_->UpdatePalette(CreateDefaultLoginPalette(/*color_provider=*/nullptr));
   EXPECT_TRUE(view_->GetVisible());
   EXPECT_FALSE(view_->IsReadOnly());
 
   // After inverting flags and updating the pallette, the flags are preserved.
   view_->SetVisible(false);
   view_->SetReadOnly(true);
-  view_->UpdatePalette(CreateDefaultLoginPalette());
+  view_->UpdatePalette(CreateDefaultLoginPalette(/*color_provider=*/nullptr));
   EXPECT_FALSE(view_->GetVisible());
   EXPECT_TRUE(view_->IsReadOnly());
 }

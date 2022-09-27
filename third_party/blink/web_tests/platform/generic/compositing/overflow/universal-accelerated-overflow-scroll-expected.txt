@@ -30,6 +30,7 @@
       "name": "VerticalScrollbar",
       "position": [87, 2],
       "bounds": [15, 85],
+      "contentsOpaque": true,
       "transform": 1
     },
     {
@@ -49,12 +50,14 @@
       "name": "HorizontalScrollbar",
       "position": [2, 87],
       "bounds": [85, 15],
+      "contentsOpaque": true,
       "transform": 3
     },
     {
       "name": "VerticalScrollbar",
       "position": [87, 2],
       "bounds": [15, 85],
+      "contentsOpaque": true,
       "transform": 3
     },
     {
@@ -88,6 +91,7 @@
       "name": "VerticalScrollbar",
       "position": [87, 2],
       "bounds": [15, 85],
+      "contentsOpaque": true,
       "transform": 5
     },
     {
@@ -128,6 +132,7 @@
       "name": "VerticalScrollbar",
       "position": [87, 2],
       "bounds": [15, 85],
+      "contentsOpaque": true,
       "transform": 7
     },
     {
@@ -148,12 +153,14 @@
       "name": "HorizontalScrollbar",
       "position": [2, 87],
       "bounds": [85, 15],
+      "contentsOpaque": true,
       "transform": 9
     },
     {
       "name": "VerticalScrollbar",
       "position": [87, 2],
       "bounds": [15, 85],
+      "contentsOpaque": true,
       "transform": 9
     },
     {
@@ -186,6 +193,7 @@
       "name": "VerticalScrollbar",
       "position": [87, 2],
       "bounds": [15, 85],
+      "contentsOpaque": true,
       "transform": 11
     },
     {
@@ -212,12 +220,14 @@
       "name": "HorizontalScrollbar",
       "position": [2, 87],
       "bounds": [85, 15],
+      "contentsOpaque": true,
       "transform": 13
     },
     {
       "name": "VerticalScrollbar",
       "position": [87, 2],
       "bounds": [15, 85],
+      "contentsOpaque": true,
       "transform": 13
     },
     {
@@ -244,12 +254,14 @@
       "name": "HorizontalScrollbar",
       "position": [2, 87],
       "bounds": [85, 15],
+      "contentsOpaque": true,
       "transform": 15
     },
     {
       "name": "VerticalScrollbar",
       "position": [87, 2],
       "bounds": [15, 85],
+      "contentsOpaque": true,
       "transform": 15
     },
     {
@@ -283,6 +295,7 @@
       "name": "VerticalScrollbar",
       "position": [87, 2],
       "bounds": [15, 85],
+      "contentsOpaque": true,
       "transform": 17
     },
     {
@@ -317,6 +330,7 @@
       "name": "VerticalScrollbar",
       "position": [87, 2],
       "bounds": [15, 85],
+      "contentsOpaque": true,
       "transform": 20
     },
     {
@@ -351,6 +365,7 @@
       "name": "VerticalScrollbar",
       "position": [87, 2],
       "bounds": [15, 85],
+      "contentsOpaque": true,
       "transform": 23
     },
     {
@@ -385,6 +400,7 @@
       "name": "VerticalScrollbar",
       "position": [87, 2],
       "bounds": [15, 85],
+      "contentsOpaque": true,
       "transform": 26
     },
     {
@@ -516,7 +532,8 @@
     {
       "name": "VerticalScrollbar",
       "position": [785, 0],
-      "bounds": [15, 600]
+      "bounds": [15, 600],
+      "contentsOpaque": true
     }
   ],
   "transforms": [
