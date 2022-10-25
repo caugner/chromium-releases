@@ -1,4 +1,4 @@
-# Copyright 2022 The Chromium Authors. All rights reserved.
+# Copyright 2022 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Definitions of builders in the tryserver.chromium.accessibility builder group."""
@@ -28,11 +28,11 @@ try_.builder(
     name = "linux-blink-web-tests-force-accessibility-rel",
     mirrors = ["ci/linux-blink-web-tests-force-accessibility-rel"],
     tryjob = try_.job(
-        location_regexp = [
-            ".+/[+]/third_party/blink/renderer/modules/accessibility/.+",
-            ".+/[+]/content/renderer/accessibility/.+",
-            ".+/[+]/content/browser/accessibility/.+",
-            ".+/[+]/ui/accessibility/.+",
+        location_filters = [
+            "third_party/blink/renderer/modules/accessibility/.+",
+            "content/renderer/accessibility/.+",
+            "content/browser/accessibility/.+",
+            "ui/accessibility/.+",
         ],
     ),
 )

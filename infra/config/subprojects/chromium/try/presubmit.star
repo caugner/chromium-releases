@@ -1,4 +1,4 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Definitions of builders in the chromium.android builder group."""
@@ -83,7 +83,7 @@ presubmit_builder(
         "starlark_entry_points": ["infra/config/main.star", "infra/config/dev.star"],
     },
     tryjob = try_.job(
-        location_regexp = [r".+/[+]/infra/config/.+"],
+        location_filters = ["infra/config/.+"],
     ),
 )
 
@@ -105,9 +105,9 @@ presubmit_builder(
         ],
     },
     tryjob = try_.job(
-        location_regexp = [
-            r".+/[+]/tools/clang/scripts/update.py",
-            r".+/[+]/DEPS",
+        location_filters = [
+            "tools/clang/scripts/update.py",
+            "DEPS",
         ],
     ),
 )
@@ -120,7 +120,7 @@ presubmit_builder(
         "builder_config_directory": "infra/config/generated/builders",
     },
     tryjob = try_.job(
-        location_regexp = [r".+/[+]/infra/config/generated/builders/.*"],
+        location_filters = ["infra/config/generated/builders/.*"],
     ),
 )
 
