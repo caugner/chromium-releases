@@ -52,7 +52,7 @@ try_.builder(
         "ci/mac-osxbeta-rel",
     ],
     builderless = False,
-    os = os.MAC_DEFAULT,
+    os = os.MAC_13,
 )
 
 # This trybot mirrors the trybot mac-rel
@@ -76,8 +76,15 @@ try_.builder(
 
 try_.builder(
     name = "mac-builder-next-rel",
-    os = os.MAC_12,
+    os = os.MAC_13,
     builderless = False,
+)
+
+try_.builder(
+    name = "mac-perfetto-rel",
+    mirrors = [
+        "ci/mac-perfetto-rel",
+    ],
 )
 
 try_.orchestrator_builder(
@@ -99,15 +106,14 @@ try_.orchestrator_builder(
     ),
     main_list_view = "try",
     use_clang_coverage = True,
+    coverage_test_types = ["overall", "unit"],
     tryjob = try_.job(),
     experiments = {
         "remove_src_checkout_experiment": 100,
-        "enable_weetbix_queries": 100,
-        "weetbix.retry_weak_exonerations": 100,
     },
-    # TODO(crbug.com/1372179): Use orchestrator pool once overloaded test pools
+    # TODO (crbug.com/1372179): Use orchestrator pool once overloaded test pools
     # are addressed
-    # use_orchestrator_pool = True,
+    #use_orchestrator_pool = True,
 )
 
 try_.compilator_builder(
@@ -116,9 +122,6 @@ try_.compilator_builder(
     branch_selector = branches.DESKTOP_EXTENDED_STABLE_MILESTONE,
     main_list_view = "try",
     os = os.MAC_DEFAULT,
-    experiments = {
-        "luci.buildbucket.omit_python2": 100,
-    },
 )
 
 try_.builder(
@@ -152,9 +155,6 @@ try_.compilator_builder(
     os = os.MAC_12,
     # TODO (crbug.com/1245171): Revert when root issue is fixed
     grace_period = 4 * time.minute,
-    experiments = {
-        "luci.buildbucket.omit_python2": 100,
-    },
 )
 
 # NOTE: the following trybots aren't sensitive to Mac version on which
@@ -324,24 +324,21 @@ try_.orchestrator_builder(
     tryjob = try_.job(),
     experiments = {
         "remove_src_checkout_experiment": 100,
-        "enable_weetbix_queries": 100,
-        "weetbix.retry_weak_exonerations": 100,
-        "weetbix.enable_weetbix_exonerations": 100,
     },
-    # TODO(crbug.com/1372179): Use orchestrator pool once overloaded test pools
-    # are addressed
+    # TODO (crbug.com/1372179): Move back to orchestrator bots once they can be
+    # properly rate limited
     # use_orchestrator_pool = True,
+    cores = 2,
+    os = os.LINUX_DEFAULT,
 )
 
 try_.compilator_builder(
     name = "ios-simulator-compilator",
+    # Set builderless to False so that branch builders use builderful bots
     builderless = False,
     check_for_flakiness = True,
     branch_selector = branches.STANDARD_MILESTONE,
     main_list_view = "try",
-    experiments = {
-        "luci.buildbucket.omit_python2": 100,
-    },
     os = os.MAC_DEFAULT,
     ssd = None,
     xcode = xcode.x14main,
@@ -379,7 +376,6 @@ ios_builder(
     tryjob = try_.job(
         location_filters = [
             "ios/.+",
-            "testing/variations/fieldtrial_testing_config.json",
         ],
     ),
 )
@@ -403,6 +399,9 @@ ios_builder(
             "third_party/crashpad/crashpad/.+",
         ],
     ),
+    experiments = {
+        "remove_src_checkout_experiment": 100,
+    },
 )
 
 ios_builder(
