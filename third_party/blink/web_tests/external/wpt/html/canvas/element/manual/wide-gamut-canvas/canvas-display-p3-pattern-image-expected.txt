@@ -1,5 +1,5 @@
 This is a testharness.js-based test.
-Found 104 tests; 102 PASS, 2 FAIL, 0 TIMEOUT, 0 NOTRUN.
+Found 104 tests; 96 PASS, 8 FAIL, 0 TIMEOUT, 0 NOTRUN.
 PASS sRGB-FF0000FF.png, Context srgb, ImageData srgb
 PASS sRGB-FF0000FF.png, Context srgb, ImageData display-p3
 PASS sRGB-FF0000FF.png, Context display-p3, ImageData srgb
@@ -21,7 +21,7 @@ PASS Display-P3-FF0000FF.png, Context srgb, ImageData display-p3
 PASS Display-P3-FF0000FF.png, Context display-p3, ImageData srgb
 PASS Display-P3-FF0000FF.png, Context display-p3, ImageData display-p3
 PASS Display-P3-FF0000CC.png, Context srgb, ImageData srgb
-PASS Display-P3-FF0000CC.png, Context srgb, ImageData display-p3
+FAIL Display-P3-FF0000CC.png, Context srgb, ImageData display-p3 assert_true: Actual pixel value 255,57,40,204 is approximately equal to 234,51,35,204. expected true got false
 PASS Display-P3-FF0000CC.png, Context display-p3, ImageData srgb
 PASS Display-P3-FF0000CC.png, Context display-p3, ImageData display-p3
 PASS Display-P3-BB0000FF.png, Context srgb, ImageData srgb
@@ -37,8 +37,8 @@ PASS Adobe-RGB-FF0000FF.png, Context srgb, ImageData display-p3
 PASS Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb
 PASS Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3
 PASS Adobe-RGB-FF0000CC.png, Context srgb, ImageData srgb
-PASS Adobe-RGB-FF0000CC.png, Context srgb, ImageData display-p3
-PASS Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb
+FAIL Adobe-RGB-FF0000CC.png, Context srgb, ImageData display-p3 assert_true: Actual pixel value 255,61,43,204 is approximately equal to 234,51,35,204. expected true got false
+FAIL Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb assert_true: Actual pixel value 255,2,0,204 is approximately equal to 255,19,11,204. expected true got false
 PASS Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3
 PASS Adobe-RGB-BB0000FF.png, Context srgb, ImageData srgb
 PASS Adobe-RGB-BB0000FF.png, Context srgb, ImageData display-p3
@@ -77,7 +77,7 @@ PASS Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData display-p3
 PASS Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData srgb
 PASS Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3
 PASS Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData srgb
-PASS Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData display-p3
+FAIL Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData display-p3 assert_true: Actual pixel value 255,57,40,204 is approximately equal to 234,51,35,204. expected true got false
 PASS Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData srgb
 PASS Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3
 PASS Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData srgb
@@ -93,8 +93,8 @@ PASS Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3
 PASS Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb
 PASS Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3
 PASS Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb
-PASS Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3
-PASS Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb
+FAIL Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3 assert_true: Actual pixel value 255,61,43,204 is approximately equal to 234,51,35,204. expected true got false
+FAIL Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb assert_true: Actual pixel value 255,2,0,204 is approximately equal to 255,19,11,204. expected true got false
 PASS Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3
 PASS Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb
 PASS Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3

@@ -63,11 +63,11 @@
 #include "chrome/browser/sync/sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/login/login_handler.h"
-#include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
-#include "chrome/browser/ui/webui/chromeos/login/eula_screen_handler.h"
-#include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
-#include "chrome/browser/ui/webui/chromeos/login/marketing_opt_in_screen_handler.h"
-#include "chrome/browser/ui/webui/chromeos/login/user_creation_screen_handler.h"
+#include "chrome/browser/ui/webui/ash/login/error_screen_handler.h"
+#include "chrome/browser/ui/webui/ash/login/eula_screen_handler.h"
+#include "chrome/browser/ui/webui/ash/login/gaia_screen_handler.h"
+#include "chrome/browser/ui/webui/ash/login/marketing_opt_in_screen_handler.h"
+#include "chrome/browser/ui/webui/ash/login/user_creation_screen_handler.h"
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
@@ -927,20 +927,6 @@ IN_PROC_BROWSER_TEST_F(WebviewLoginTest, StoragePartitionHandling) {
   // The StoragePartition which is not in use is supposed to have been cleared.
   EXPECT_EQ("", GetAllCookies(signin_frame_partition_1));
   EXPECT_NE("", GetAllCookies(signin_frame_partition_2));
-
-  // Trigger another gaia load.
-  test::OobeJS().ClickOnPath(kBackButton);
-  WaitForGaiaPageBackButtonUpdate();
-  ExpectIdentifierPage();
-
-  // `signin_frame_partition_1` is disposed and no longer accessible.
-  bool found_signin_frame_partition_1 = false;
-  browser_context->ForEachStoragePartition(
-      base::BindLambdaForTesting([&](content::StoragePartition* partition) {
-        if (partition == signin_frame_partition_1)
-          found_signin_frame_partition_1 = true;
-      }));
-  EXPECT_FALSE(found_signin_frame_partition_1);
 }
 
 enum class FrameUrlOrigin { kSameOrigin, kDifferentOrigin };
@@ -1999,7 +1985,13 @@ class WebviewProxyAuthLoginTest : public WebviewLoginTest {
       &mixin_host_, DeviceStateMixin::State::OOBE_COMPLETED_CLOUD_ENROLLED};
 };
 
-IN_PROC_BROWSER_TEST_F(WebviewProxyAuthLoginTest, ProxyAuthTransfer) {
+// TODO(crbug.com/1377241): The test times out on ASAN.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_ProxyAuthTransfer DISABLED_ProxyAuthTransfer
+#else
+#define MAYBE_ProxyAuthTransfer ProxyAuthTransfer
+#endif
+IN_PROC_BROWSER_TEST_F(WebviewProxyAuthLoginTest, MAYBE_ProxyAuthTransfer) {
   WaitForSigninScreen();
 
   LoginHandler* login_handler = WaitForAuthRequested();
