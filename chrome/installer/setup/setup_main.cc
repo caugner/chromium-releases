@@ -74,6 +74,7 @@
 #include "chrome/installer/setup/setup_util.h"
 #include "chrome/installer/setup/uninstall.h"
 #include "chrome/installer/setup/user_experiment.h"
+#include "chrome/installer/util/app_command.h"
 #include "chrome/installer/util/conditional_work_item_list.h"
 #include "chrome/installer/util/delete_after_reboot_helper.h"
 #include "chrome/installer/util/delete_old_versions.h"
@@ -583,9 +584,15 @@ installer::InstallStatus RenameChromeExecutables(
   install_list->AddDeleteRegValueWorkItem(
       reg_root, clients_key, KEY_WOW64_32KEY,
       google_update::kRegCriticalVersionField);
-  install_list->AddDeleteRegValueWorkItem(reg_root, clients_key,
-                                          KEY_WOW64_32KEY,
-                                          google_update::kRegRenameCmdField);
+  installer::AppCommand(installer::kCmdRenameChromeExe, {})
+      .AddDeleteAppCommandWorkItems(reg_root, install_list.get());
+  installer::AppCommand(installer::kCmdAlternateRenameChromeExe, {})
+      .AddDeleteAppCommandWorkItems(reg_root, install_list.get());
+
+  if (!installer_state->system_install()) {
+    install_list->AddDeleteRegValueWorkItem(
+        reg_root, clients_key, KEY_WOW64_32KEY, installer::kCmdRenameChromeExe);
+  }
 
   // If a channel was specified by policy, update the "channel" registry value
   // with it so that the browser knows which channel to use, otherwise delete
@@ -1546,10 +1553,10 @@ int WINAPI wWinMain(HINSTANCE instance,
   if (is_uninstall)
     persistent_histogram_storage.Disable();
 
-  // Check to make sure current system is Win7 or later. If not, log
+  // Check to make sure current system is Win10 or later. If not, log
   // error message and get out.
   if (!InstallUtil::IsOSSupported()) {
-    LOG(ERROR) << "Chrome only supports Windows 7 or later.";
+    LOG(ERROR) << "Chrome only supports Windows 10 or later.";
     installer_state.WriteInstallerResult(installer::OS_NOT_SUPPORTED,
                                          IDS_INSTALL_OS_NOT_SUPPORTED_BASE,
                                          nullptr);
