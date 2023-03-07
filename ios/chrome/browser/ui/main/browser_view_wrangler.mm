@@ -124,11 +124,9 @@
 // The OTR browser can be reset after creation.
 - (void)setOtrBrowser:(std::unique_ptr<Browser>)browser;
 
-// Creates and sets up a new Browser for the given BrowserState, optionally
-// loading the session from disk.
+// Creates and sets up a new Browser for the given BrowserState.
 - (std::unique_ptr<Browser>)buildBrowserForBrowserState:
-                                (ChromeBrowserState*)browserState
-                                         restoreSession:(BOOL)restoreSession;
+    (ChromeBrowserState*)browserState;
 
 // Creates the correct BrowserCoordinator for the corresponding browser state
 // and Browser.
@@ -159,17 +157,21 @@
 }
 
 - (Browser*)createMainBrowser {
-  _mainBrowser = [self buildBrowserForBrowserState:_browserState
-                                    restoreSession:YES];
+  _mainBrowser = [self buildBrowserForBrowserState:_browserState];
   return _mainBrowser.get();
 }
 
 - (void)createMainCoordinatorAndInterface {
-  DCHECK(_mainBrowser);
+  DCHECK(self.mainBrowser);
 
   // Create the main coordinator, and thus the main interface.
-  _mainBrowserCoordinator = [self coordinatorForBrowser:self.mainBrowser];
+  Browser* mainBrowser = self.mainBrowser;
+  _mainBrowserCoordinator = [self coordinatorForBrowser:mainBrowser];
   [_mainBrowserCoordinator start];
+
+  // Restore the session after creating the coordinator.
+  SessionRestorationBrowserAgent::FromBrowser(mainBrowser)->RestoreSession();
+
   DCHECK(_mainBrowserCoordinator.viewController);
   _mainInterface =
       [[WrangledBrowser alloc] initWithCoordinator:_mainBrowserCoordinator];
@@ -202,22 +204,37 @@
   if (!_mainInterface)
     return nil;
   if (!_incognitoInterface) {
-    // The backing coordinator should not have been created yet.
-    DCHECK(!_incognitoBrowserCoordinator);
-    ChromeBrowserState* otrBrowserState =
-        _browserState->GetOffTheRecordChromeBrowserState();
-    DCHECK(otrBrowserState);
-    _incognitoBrowserCoordinator = [self coordinatorForBrowser:self.otrBrowser];
-    [_incognitoBrowserCoordinator start];
-    DCHECK(_incognitoBrowserCoordinator.viewController);
-    _incognitoInterface = [[WrangledBrowser alloc]
-        initWithCoordinator:_incognitoBrowserCoordinator];
+    _incognitoInterface = [self createOTRInterfaceAfterClosingAllTabs:NO];
   }
   return _incognitoInterface;
 }
 
 - (BOOL)hasIncognitoInterface {
   return _incognitoInterface;
+}
+
+- (WrangledBrowser*)createOTRInterfaceAfterClosingAllTabs:(BOOL)allTabsClosed {
+  DCHECK(!_incognitoInterface);
+
+  // The backing coordinator should not have been created yet.
+  DCHECK(!_incognitoBrowserCoordinator);
+  ChromeBrowserState* otrBrowserState =
+      _browserState->GetOffTheRecordChromeBrowserState();
+  DCHECK(otrBrowserState);
+  Browser* otrBrowser = self.otrBrowser;
+
+  _incognitoBrowserCoordinator = [self coordinatorForBrowser:otrBrowser];
+  [_incognitoBrowserCoordinator start];
+
+  if (!allTabsClosed) {
+    // Restore the session after creating the coordinator, but only if not
+    // recreating the Off-The-Record UI after closing all the tabs.
+    SessionRestorationBrowserAgent::FromBrowser(otrBrowser)->RestoreSession();
+  }
+
+  DCHECK(_incognitoBrowserCoordinator.viewController);
+  return [[WrangledBrowser alloc]
+      initWithCoordinator:_incognitoBrowserCoordinator];
 }
 
 - (Browser*)mainBrowser {
@@ -232,8 +249,7 @@
     DCHECK(_browserState);
     ChromeBrowserState* incognitoBrowserState =
         _browserState->GetOffTheRecordChromeBrowserState();
-    _otrBrowser = [self buildBrowserForBrowserState:incognitoBrowserState
-                                     restoreSession:YES];
+    _otrBrowser = [self buildBrowserForBrowserState:incognitoBrowserState];
   }
   return _otrBrowser.get();
 }
@@ -323,9 +339,12 @@
   ChromeBrowserState* incognitoBrowserState =
       _browserState->GetOffTheRecordChromeBrowserState();
 
-  [self setOtrBrowser:[self buildBrowserForBrowserState:incognitoBrowserState
-                                         restoreSession:NO]];
+  [self setOtrBrowser:[self buildBrowserForBrowserState:incognitoBrowserState]];
   DCHECK(self.otrBrowser->GetWebStateList()->empty());
+
+  // Recreate the off-the-record interface, but do not load the session as
+  // we had just closed all the tabs.
+  _incognitoInterface = [self createOTRInterfaceAfterClosingAllTabs:YES];
 
   if (_currentInterface == nil) {
     self.currentInterface = self.incognitoInterface;
@@ -397,8 +416,7 @@
 }
 
 - (std::unique_ptr<Browser>)buildBrowserForBrowserState:
-                                (ChromeBrowserState*)browserState
-                                         restoreSession:(BOOL)restoreSession {
+    (ChromeBrowserState*)browserState {
   DCHECK(browserState);
   auto browser = Browser::Create(browserState);
   DCHECK_EQ(browser->GetBrowserState(), browserState);
@@ -416,7 +434,7 @@
 
   [self dispatchToEndpointsForBrowser:browser.get()];
 
-  [self setSessionIDForBrowser:browser.get() restoreSession:restoreSession];
+  [self setSessionIDForBrowser:browser.get()];
 
   breakpad::MonitorTabStateForWebStateList(browser->GetWebStateList());
 
@@ -429,8 +447,7 @@
   return browser;
 }
 
-- (void)setSessionIDForBrowser:(Browser*)browser
-                restoreSession:(BOOL)restoreSession {
+- (void)setSessionIDForBrowser:(Browser*)browser {
   // The location were the session and snapshots are stored can change due to
   // multiple factors, such as upgrading Chrome or iOS from a version that did
   // not support multiple windows to one that does (e.g. Chrome M86 or earlier
@@ -452,12 +469,8 @@
   SnapshotBrowserAgent::FromBrowser(browser)->SetSessionID(
       _sceneState.sceneSessionID);
 
-  SessionRestorationBrowserAgent* restorationAgent =
-      SessionRestorationBrowserAgent::FromBrowser(browser);
-
-  restorationAgent->SetSessionID(_sceneState.sceneSessionID);
-  if (restoreSession)
-    restorationAgent->RestoreSession();
+  SessionRestorationBrowserAgent::FromBrowser(browser)->SetSessionID(
+      _sceneState.sceneSessionID);
 }
 
 @end

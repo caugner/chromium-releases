@@ -6,8 +6,8 @@
 
 #include <utility>
 
-#include "base/bind.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
 #include "components/performance_manager/graph/graph_impl.h"
 #include "components/performance_manager/graph/graph_impl_util.h"
 #include "components/performance_manager/graph/page_node_impl.h"
@@ -91,6 +91,11 @@ void FrameNodeImpl::SetIsAdFrame(bool is_ad_frame) {
 void FrameNodeImpl::SetHadFormInteraction() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   document_.had_form_interaction.SetAndMaybeNotify(this, true);
+}
+
+void FrameNodeImpl::SetHadUserEdits() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  document_.had_user_edits.SetAndMaybeNotify(this, true);
 }
 
 void FrameNodeImpl::OnNonPersistentNotificationCreated() {
@@ -228,6 +233,11 @@ bool FrameNodeImpl::had_form_interaction() const {
   return document_.had_form_interaction.value();
 }
 
+bool FrameNodeImpl::had_user_edits() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return document_.had_user_edits.value();
+}
+
 bool FrameNodeImpl::is_audible() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return is_audible_.value();
@@ -248,6 +258,11 @@ FrameNode::Visibility FrameNodeImpl::visibility() const {
 uint64_t FrameNodeImpl::resident_set_kb_estimate() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return resident_set_kb_estimate_;
+}
+
+uint64_t FrameNodeImpl::private_footprint_kb_estimate() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return private_footprint_kb_estimate_;
 }
 
 void FrameNodeImpl::SetIsCurrent(bool is_current) {
@@ -303,6 +318,12 @@ void FrameNodeImpl::SetVisibility(Visibility visibility) {
 void FrameNodeImpl::SetResidentSetKbEstimate(uint64_t rss_estimate) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   resident_set_kb_estimate_ = rss_estimate;
+}
+
+void FrameNodeImpl::SetPrivateFootprintKbEstimate(
+    uint64_t private_footprint_estimate) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  private_footprint_kb_estimate_ = private_footprint_estimate;
 }
 
 void FrameNodeImpl::OnNavigationCommitted(const GURL& url, bool same_document) {
@@ -562,6 +583,11 @@ bool FrameNodeImpl::HadFormInteraction() const {
   return had_form_interaction();
 }
 
+bool FrameNodeImpl::HadUserEdits() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return had_user_edits();
+}
+
 bool FrameNodeImpl::IsAudible() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return is_audible();
@@ -581,6 +607,11 @@ FrameNode::Visibility FrameNodeImpl::GetVisibility() const {
 uint64_t FrameNodeImpl::GetResidentSetKbEstimate() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return resident_set_kb_estimate();
+}
+
+uint64_t FrameNodeImpl::GetPrivateFootprintKbEstimate() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return private_footprint_kb_estimate();
 }
 
 void FrameNodeImpl::AddChildFrame(FrameNodeImpl* child_frame_node) {
@@ -761,6 +792,7 @@ void FrameNodeImpl::DocumentProperties::Reset(FrameNodeImpl* frame_node,
   // Network is busy on navigation.
   network_almost_idle.SetAndMaybeNotify(frame_node, false);
   had_form_interaction.SetAndMaybeNotify(frame_node, false);
+  had_user_edits.SetAndMaybeNotify(frame_node, false);
 }
 
 void FrameNodeImpl::OnWebMemoryMeasurementRequested(

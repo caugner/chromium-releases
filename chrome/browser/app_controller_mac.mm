@@ -13,10 +13,10 @@
 #include <vector>
 
 #include "base/auto_reset.h"
-#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/metrics/histogram_macros.h"
@@ -168,6 +168,11 @@ Browser* ActivateBrowser(Profile* profile) {
       profile->IsGuestSession()
           ? profile->GetPrimaryOTRProfile(/*create_if_needed=*/true)
           : profile);
+
+  if (browser) {
+    browser = browser->GetBrowserForOpeningWebUi();
+  }
+
   if (browser)
     browser->window()->Activate();
   return browser;
@@ -1275,7 +1280,7 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
       }
       [[fallthrough]];  // To create new window.
     case IDC_NEW_WINDOW:
-      CreateBrowser(profile);
+      CreateBrowser(profile->GetOriginalProfile());
       break;
     case IDC_FOCUS_LOCATION:
       chrome::ExecuteCommand(ActivateOrCreateBrowser(profile),
@@ -2020,6 +2025,7 @@ void OpenUrlsInBrowserWithProfile(const std::vector<GURL>& urls,
   } else if (!browser) {
     // if no browser window exists then create one with no tabs to be filled in.
     browser = Browser::Create(Browser::CreateParams(profile, true));
+    browser->window()->Show();
   }
 
   // Various methods to open URLs that we get in a native fashion. We use

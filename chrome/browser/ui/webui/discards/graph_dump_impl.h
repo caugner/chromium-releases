@@ -5,8 +5,8 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_DISCARDS_GRAPH_DUMP_IMPL_H_
 #define CHROME_BROWSER_UI_WEBUI_DISCARDS_GRAPH_DUMP_IMPL_H_
 
-#include "base/callback_forward.h"
 #include "base/containers/flat_map.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_refptr.h"
@@ -101,6 +101,9 @@ class DiscardsGraphDumpImpl : public discards::mojom::GraphDump,
   void OnHadFormInteractionChanged(
       const performance_manager::FrameNode* frame_node) override {}
   // Ignored.
+  void OnHadUserEditsChanged(
+      const performance_manager::FrameNode* frame_node) override {}
+  // Ignored.
   void OnIsAudibleChanged(
       const performance_manager::FrameNode* frame_node) override {}
   // Ignored.
@@ -158,6 +161,9 @@ class DiscardsGraphDumpImpl : public discards::mojom::GraphDump,
       const performance_manager::PageNode* page_node) override {}
   // Ignored.
   void OnHadFormInteractionChanged(
+      const performance_manager::PageNode* page_node) override {}
+  // Ignored
+  void OnHadUserEditsChanged(
       const performance_manager::PageNode* page_node) override {}
   // Ignored.
   void OnTitleUpdated(const performance_manager::PageNode* page_node) override {
