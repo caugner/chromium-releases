@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/containers/flat_set.h"
-#include "base/functional/callback_forward.h"
+#include "base/functional/function_ref.h"
 #include "components/performance_manager/public/freezing/freezing.h"
 #include "components/performance_manager/public/graph/node.h"
 #include "components/performance_manager/public/mojom/coordination_unit.mojom.h"
@@ -39,7 +39,7 @@ enum class PageType {
 // Extensions.
 class PageNode : public Node {
  public:
-  using FrameNodeVisitor = base::RepeatingCallback<bool(const FrameNode*)>;
+  using FrameNodeVisitor = base::FunctionRef<bool(const FrameNode*)>;
   using LifecycleState = mojom::LifecycleState;
   using Observer = PageNodeObserver;
   class ObserverDefaultImpl;
@@ -327,6 +327,12 @@ class PageNodeObserver {
   // not directly reflected on the node.
   virtual void OnFaviconUpdated(const PageNode* page_node) = 0;
 
+  // Fired after `new_page_node` is created but before `page_node` is deleted
+  // from being discarded. See the equivalent function on `WebContentsObserver`
+  // for more detail.
+  virtual void OnAboutToBeDiscarded(const PageNode* page_node,
+                                    const PageNode* new_page_node) = 0;
+
   // Called every time the aggregated freezing vote changes or gets invalidated.
   virtual void OnFreezingVoteChanged(
       const PageNode* page_node,
@@ -373,6 +379,8 @@ class PageNode::ObserverDefaultImpl : public PageNodeObserver {
   void OnHadUserEditsChanged(const PageNode* page_node) override {}
   void OnTitleUpdated(const PageNode* page_node) override {}
   void OnFaviconUpdated(const PageNode* page_node) override {}
+  void OnAboutToBeDiscarded(const PageNode* page_node,
+                            const PageNode* new_page_node) override {}
   void OnFreezingVoteChanged(
       const PageNode* page_node,
       absl::optional<freezing::FreezingVote> previous_vote) override {}

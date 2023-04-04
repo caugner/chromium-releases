@@ -1,4 +1,1 @@
-monorail {
-  component: "FamilyExperiences>Browser"
-}
-team_email: "chrome-kids-eng@google.com"
+mixins: "//components/supervised_user/COMMON_METADATA"
