@@ -23,6 +23,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/ranges/algorithm.h"
+#include "base/sequence_checker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/current_thread.h"
@@ -62,6 +63,7 @@
 #include "net/cert/coalescing_cert_verifier.h"
 #include "net/cookies/cookie_access_delegate.h"
 #include "net/cookies/cookie_monster.h"
+#include "net/cookies/cookie_setting_override.h"
 #include "net/dns/host_cache.h"
 #include "net/dns/mapped_host_resolver.h"
 #include "net/extras/sqlite/sqlite_persistent_cookie_store.h"
@@ -759,12 +761,22 @@ void NetworkContext::GetRestrictedCookieManager(
     mojom::RestrictedCookieManagerRole role,
     const url::Origin& origin,
     const net::IsolationInfo& isolation_info,
+    const net::CookieSettingOverrides& cookie_setting_overrides,
     mojo::PendingRemote<mojom::CookieAccessObserver> cookie_observer) {
   RestrictedCookieManager::ComputeFirstPartySetMetadata(
       origin, url_request_context_->cookie_store(), isolation_info,
       base::BindOnce(&NetworkContext::OnComputedFirstPartySetMetadata,
                      weak_factory_.GetWeakPtr(), std::move(receiver), role,
-                     origin, isolation_info, std::move(cookie_observer)));
+                     origin, isolation_info, cookie_setting_overrides,
+                     std::move(cookie_observer)));
+}
+
+void NetworkContext::OnRCMDisconnect(
+    const network::RestrictedCookieManager* rcm) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  auto it = restricted_cookie_managers_.find(rcm);
+  DCHECK(it != restricted_cookie_managers_.end());
+  restricted_cookie_managers_.erase(it);
 }
 
 void NetworkContext::OnComputedFirstPartySetMetadata(
@@ -772,15 +784,23 @@ void NetworkContext::OnComputedFirstPartySetMetadata(
     mojom::RestrictedCookieManagerRole role,
     const url::Origin& origin,
     const net::IsolationInfo& isolation_info,
+    const net::CookieSettingOverrides& cookie_setting_overrides,
     mojo::PendingRemote<mojom::CookieAccessObserver> cookie_observer,
     net::FirstPartySetMetadata first_party_set_metadata) {
-  restricted_cookie_manager_receivers_.Add(
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  std::unique_ptr<RestrictedCookieManager> ptr =
       std::make_unique<RestrictedCookieManager>(
           role, url_request_context_->cookie_store(),
           cookie_manager_->cookie_settings(), origin, isolation_info,
-          std::move(cookie_observer), std::move(first_party_set_metadata),
-          network_service_->metrics_updater()),
-      std::move(receiver));
+          cookie_setting_overrides, std::move(cookie_observer),
+          std::move(first_party_set_metadata),
+          network_service_->metrics_updater());
+
+  auto callback = base::BindOnce(&NetworkContext::OnRCMDisconnect,
+                                 base::Unretained(this), ptr.get());
+  ptr->InstallReceiver(std::move(receiver), std::move(callback));
+  restricted_cookie_managers_.insert(std::move(ptr));
 }
 
 void NetworkContext::GetTrustTokenQueryAnswerer(
@@ -937,6 +957,30 @@ void NetworkContext::ClearTrustTokenData(mojom::ClearDataFilterPtr filter,
         std::move(done).Run();
       },
       std::move(filter), std::move(done)));
+}
+
+void NetworkContext::ClearTrustTokenSessionOnlyData(
+    ClearTrustTokenSessionOnlyDataCallback callback) {
+  // Only called when Private State Tokens is enabled, i.e.,
+  // `trust_token_store_` is non-null.
+  DCHECK(trust_token_store_);
+  DCHECK(cookie_manager_);
+
+  DeleteCookiePredicate cookie_predicate =
+      cookie_manager_->cookie_settings().CreateDeleteCookieOnExitPredicate();
+
+  auto store_predicate = base::BindRepeating(
+      [](DeleteCookiePredicate predicate, const std::string& origin) {
+        return predicate.Run(origin, true);
+      },
+      std::move(cookie_predicate));
+  trust_token_store_->ExecuteOrEnqueue(base::BindOnce(
+      [](base::RepeatingCallback<bool(const std::string&)> pred,
+         ClearTrustTokenSessionOnlyDataCallback cb, TrustTokenStore* store) {
+        bool any_data_deleted = store->ClearDataForPredicate(std::move(pred));
+        std::move(cb).Run(any_data_deleted);
+      },
+      std::move(store_predicate), std::move(callback)));
 }
 
 void NetworkContext::ClearNetworkingHistoryBetween(
@@ -1307,10 +1351,6 @@ void NetworkContext::SetEnableReferrers(bool enable_referrers) {
   network_delegate_->set_enable_referrers(enable_referrers);
 }
 
-void NetworkContext::SetEnablePreconnect(bool enable_preconnect) {
-  params_->enable_preconnect = enable_preconnect;
-}
-
 #if BUILDFLAG(IS_CHROMEOS)
 void NetworkContext::UpdateAdditionalCertificates(
     mojom::AdditionalCertificatesPtr additional_certificates) {
@@ -1473,25 +1513,25 @@ void NetworkContext::CreateRestrictedUDPSocket(
     const net::IPEndPoint& addr,
     mojom::RestrictedUDPSocketMode mode,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
-    mojom::UDPSocketOptionsPtr options,
+    mojom::RestrictedUDPSocketParamsPtr params,
     mojo::PendingReceiver<mojom::RestrictedUDPSocket> receiver,
     mojo::PendingRemote<mojom::UDPSocketListener> listener,
     CreateRestrictedUDPSocketCallback callback) {
   // SimpleHostResolver is transitively owned by |this|.
   socket_factory_->CreateRestrictedUDPSocket(
-      addr, mode, traffic_annotation, std::move(options), std::move(receiver),
+      addr, mode, traffic_annotation, std::move(params), std::move(receiver),
       std::move(listener), SimpleHostResolver::Create(this),
       std::move(callback));
 }
 
 void NetworkContext::CreateTCPServerSocket(
     const net::IPEndPoint& local_addr,
-    uint32_t backlog,
+    mojom::TCPServerSocketOptionsPtr options,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
     mojo::PendingReceiver<mojom::TCPServerSocket> receiver,
     CreateTCPServerSocketCallback callback) {
   socket_factory_->CreateTCPServerSocket(
-      local_addr, backlog,
+      local_addr, std::move(options),
       static_cast<net::NetworkTrafficAnnotationTag>(traffic_annotation),
       std::move(receiver), std::move(callback));
 }
@@ -2267,7 +2307,8 @@ URLRequestContextOwner NetworkContext::MakeURLRequestContext(
     builder.SetCookieStore(std::move(cookie_store));
   }
 
-  if (base::FeatureList::IsEnabled(features::kPrivateStateTokens)) {
+  if (base::FeatureList::IsEnabled(features::kPrivateStateTokens) ||
+      base::FeatureList::IsEnabled(features::kFledgePst)) {
     trust_token_store_ = std::make_unique<PendingTrustTokenStore>();
 
     base::FilePath trust_token_path;
