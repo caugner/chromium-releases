@@ -21,6 +21,8 @@
 #include "ui/gfx/frame_data.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/transform.h"
+#include "ui/gfx/geometry/vector2d_f.h"
+#include "ui/gfx/test/sk_color_eq.h"
 #include "ui/gl/dc_layer_overlay_params.h"
 #include "ui/gl/direct_composition_child_surface_win.h"
 #include "ui/gl/direct_composition_support.h"
@@ -103,19 +105,13 @@ Microsoft::WRL::ComPtr<ID3D11Texture2D> CreateNV12Texture(
 
   Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
   HRESULT hr = d3d11_device->CreateTexture2D(&desc, &data, &texture);
-  CHECK(SUCCEEDED(hr));
+  EXPECT_HRESULT_SUCCEEDED(hr);
   return texture;
 }
 
-bool AreColorsSimilar(int a, int b) {
-  // The precise colors may differ depending on the video processor, so allow
-  // a margin for error.
-  const int kMargin = 10;
-  return abs(SkColorGetA(a) - SkColorGetA(b)) < kMargin &&
-         abs(SkColorGetR(a) - SkColorGetR(b)) < kMargin &&
-         abs(SkColorGetG(a) - SkColorGetG(b)) < kMargin &&
-         abs(SkColorGetB(a) - SkColorGetB(b)) < kMargin;
-}
+// The precise colors may differ depending on the video processor, so allow a
+// margin for error.
+const int kMaxColorChannelDeviation = 10;
 
 }  // namespace
 
@@ -212,7 +208,7 @@ TEST_F(DCompPresenterTest, NoPresentTwice) {
   gfx::Size texture_size(50, 50);
   Microsoft::WRL::ComPtr<ID3D11Texture2D> texture =
       CreateNV12Texture(d3d11_device, texture_size);
-  EXPECT_NE(texture, nullptr);
+  ASSERT_NE(texture, nullptr);
 
   {
     auto params = std::make_unique<DCLayerOverlayParams>();
@@ -233,7 +229,8 @@ TEST_F(DCompPresenterTest, NoPresentTwice) {
   ASSERT_TRUE(swap_chain);
 
   UINT last_present_count = 0;
-  EXPECT_TRUE(SUCCEEDED(swap_chain->GetLastPresentCount(&last_present_count)));
+  EXPECT_HRESULT_SUCCEEDED(
+      swap_chain->GetLastPresentCount(&last_present_count));
 
   // One present is normal, and a second present because it's the first frame
   // and the other buffer needs to be drawn to.
@@ -255,12 +252,13 @@ TEST_F(DCompPresenterTest, NoPresentTwice) {
   EXPECT_EQ(swap_chain2.Get(), swap_chain.Get());
 
   // It's the same image, so it should have the same swapchain.
-  EXPECT_TRUE(SUCCEEDED(swap_chain->GetLastPresentCount(&last_present_count)));
+  EXPECT_HRESULT_SUCCEEDED(
+      swap_chain->GetLastPresentCount(&last_present_count));
   EXPECT_EQ(2u, last_present_count);
 
   // The image changed, we should get a new present.
   texture = CreateNV12Texture(d3d11_device, texture_size);
-  EXPECT_NE(texture, nullptr);
+  ASSERT_NE(texture, nullptr);
 
   {
     auto params = std::make_unique<DCLayerOverlayParams>();
@@ -275,7 +273,8 @@ TEST_F(DCompPresenterTest, NoPresentTwice) {
 
   Microsoft::WRL::ComPtr<IDXGISwapChain1> swap_chain3 =
       presenter_->GetLayerSwapChainForTesting(0);
-  EXPECT_TRUE(SUCCEEDED(swap_chain3->GetLastPresentCount(&last_present_count)));
+  EXPECT_HRESULT_SUCCEEDED(
+      swap_chain3->GetLastPresentCount(&last_present_count));
   // the present count should increase with the new present
   EXPECT_EQ(3u, last_present_count);
 }
@@ -293,6 +292,7 @@ TEST_F(DCompPresenterTest, SwapchainSizeWithScaledOverlays) {
   gfx::Size texture_size(64, 64);
   Microsoft::WRL::ComPtr<ID3D11Texture2D> texture =
       CreateNV12Texture(d3d11_device, texture_size);
+  ASSERT_NE(texture, nullptr);
 
   // HW supports scaled overlays.
   // The input texture size is maller than the window size.
@@ -316,7 +316,7 @@ TEST_F(DCompPresenterTest, SwapchainSizeWithScaledOverlays) {
   ASSERT_TRUE(swap_chain);
 
   DXGI_SWAP_CHAIN_DESC desc;
-  EXPECT_TRUE(SUCCEEDED(swap_chain->GetDesc(&desc)));
+  EXPECT_HRESULT_SUCCEEDED(swap_chain->GetDesc(&desc));
   // Onscreen quad_rect.size is (100, 100).
   EXPECT_EQ(100u, desc.BufferDesc.Width);
   EXPECT_EQ(100u, desc.BufferDesc.Height);
@@ -344,7 +344,7 @@ TEST_F(DCompPresenterTest, SwapchainSizeWithScaledOverlays) {
       presenter_->GetLayerSwapChainForTesting(0);
   ASSERT_TRUE(swap_chain2);
 
-  EXPECT_TRUE(SUCCEEDED(swap_chain2->GetDesc(&desc)));
+  EXPECT_HRESULT_SUCCEEDED(swap_chain2->GetDesc(&desc));
   // Onscreen quad_rect.size is (32, 48).
   EXPECT_EQ(32u, desc.BufferDesc.Width);
   EXPECT_EQ(48u, desc.BufferDesc.Height);
@@ -363,6 +363,7 @@ TEST_F(DCompPresenterTest, SwapchainSizeWithoutScaledOverlays) {
   gfx::Size texture_size(80, 80);
   Microsoft::WRL::ComPtr<ID3D11Texture2D> texture =
       CreateNV12Texture(d3d11_device, texture_size);
+  ASSERT_NE(texture, nullptr);
 
   gfx::Rect quad_rect = gfx::Rect(42, 42);
 
@@ -381,7 +382,7 @@ TEST_F(DCompPresenterTest, SwapchainSizeWithoutScaledOverlays) {
   ASSERT_TRUE(swap_chain);
 
   DXGI_SWAP_CHAIN_DESC desc;
-  EXPECT_TRUE(SUCCEEDED(swap_chain->GetDesc(&desc)));
+  EXPECT_HRESULT_SUCCEEDED(swap_chain->GetDesc(&desc));
   // Onscreen quad_rect.size is (42, 42).
   EXPECT_EQ(42u, desc.BufferDesc.Width);
   EXPECT_EQ(42u, desc.BufferDesc.Height);
@@ -404,7 +405,7 @@ TEST_F(DCompPresenterTest, SwapchainSizeWithoutScaledOverlays) {
       presenter_->GetLayerSwapChainForTesting(0);
   ASSERT_TRUE(swap_chain2);
 
-  EXPECT_TRUE(SUCCEEDED(swap_chain2->GetDesc(&desc)));
+  EXPECT_HRESULT_SUCCEEDED(swap_chain2->GetDesc(&desc));
   // Onscreen quad_rect.size is (124, 136).
   EXPECT_EQ(124u, desc.BufferDesc.Width);
   EXPECT_EQ(136u, desc.BufferDesc.Height);
@@ -422,6 +423,7 @@ TEST_F(DCompPresenterTest, ProtectedVideos) {
   gfx::Size texture_size(1280, 720);
   Microsoft::WRL::ComPtr<ID3D11Texture2D> texture =
       CreateNV12Texture(d3d11_device, texture_size);
+  ASSERT_NE(texture, nullptr);
 
   gfx::Size window_size(640, 360);
 
@@ -441,7 +443,7 @@ TEST_F(DCompPresenterTest, ProtectedVideos) {
     ASSERT_TRUE(swap_chain);
 
     DXGI_SWAP_CHAIN_DESC desc;
-    EXPECT_TRUE(SUCCEEDED(swap_chain->GetDesc(&desc)));
+    EXPECT_HRESULT_SUCCEEDED(swap_chain->GetDesc(&desc));
     auto display_only_flag = desc.Flags & DXGI_SWAP_CHAIN_FLAG_DISPLAY_ONLY;
     auto hw_protected_flag = desc.Flags & DXGI_SWAP_CHAIN_FLAG_HW_PROTECTED;
     EXPECT_EQ(0u, display_only_flag);
@@ -464,7 +466,7 @@ TEST_F(DCompPresenterTest, ProtectedVideos) {
     ASSERT_TRUE(swap_chain);
 
     DXGI_SWAP_CHAIN_DESC Desc;
-    EXPECT_TRUE(SUCCEEDED(swap_chain->GetDesc(&Desc)));
+    EXPECT_HRESULT_SUCCEEDED(swap_chain->GetDesc(&Desc));
     auto display_only_flag = Desc.Flags & DXGI_SWAP_CHAIN_FLAG_DISPLAY_ONLY;
     auto hw_protected_flag = Desc.Flags & DXGI_SWAP_CHAIN_FLAG_HW_PROTECTED;
     EXPECT_EQ(DXGI_SWAP_CHAIN_FLAG_DISPLAY_ONLY, display_only_flag);
@@ -552,6 +554,7 @@ class DCompPresenterPixelTest : public DCompPresenterTest {
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> texture =
         CreateNV12Texture(d3d11_device, texture_size);
+    ASSERT_NE(texture, nullptr);
 
     auto params = std::make_unique<DCLayerOverlayParams>();
     params->overlay_image.emplace(texture_size, texture);
@@ -587,6 +590,7 @@ class DCompPresenterVideoPixelTest : public DCompPresenterPixelTest {
     gfx::Size texture_size(50, 50);
     Microsoft::WRL::ComPtr<ID3D11Texture2D> texture =
         CreateNV12Texture(d3d11_device, texture_size);
+    ASSERT_NE(texture, nullptr);
 
     {
       auto params = std::make_unique<DCLayerOverlayParams>();
@@ -614,11 +618,10 @@ class DCompPresenterVideoPixelTest : public DCompPresenterPixelTest {
     Sleep(1000);
 
     if (check_color) {
-      SkColor actual_color =
-          GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75));
-      EXPECT_TRUE(AreColorsSimilar(expected_color, actual_color))
-          << std::hex << "Expected " << expected_color << " Actual "
-          << actual_color;
+      EXPECT_SKCOLOR_CLOSE(
+          expected_color,
+          GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75)),
+          kMaxColorChannelDeviation);
     }
   }
 };
@@ -676,11 +679,10 @@ TEST_F(DCompPresenterPixelTest, SoftwareVideoSwapchain) {
   Sleep(1000);
 
   SkColor expected_color = SkColorSetRGB(0xff, 0xb7, 0xff);
-  SkColor actual_color =
-      GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75));
-  EXPECT_TRUE(AreColorsSimilar(expected_color, actual_color))
-      << std::hex << "Expected " << expected_color << " Actual "
-      << actual_color;
+  EXPECT_SKCOLOR_CLOSE(
+      expected_color,
+      GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75)),
+      kMaxColorChannelDeviation);
 }
 
 TEST_F(DCompPresenterPixelTest, VideoHandleSwapchain) {
@@ -695,11 +697,10 @@ TEST_F(DCompPresenterPixelTest, VideoHandleSwapchain) {
   InitializeForPixelTest(window_size, texture_size, content_rect, quad_rect);
 
   SkColor expected_color = SkColorSetRGB(0xe1, 0x90, 0xeb);
-  SkColor actual_color =
-      GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75));
-  EXPECT_TRUE(AreColorsSimilar(expected_color, actual_color))
-      << std::hex << "Expected " << expected_color << " Actual "
-      << actual_color;
+  EXPECT_SKCOLOR_CLOSE(
+      expected_color,
+      GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75)),
+      kMaxColorChannelDeviation);
 }
 
 TEST_F(DCompPresenterPixelTest, SkipVideoLayerEmptyBoundsRect) {
@@ -716,11 +717,10 @@ TEST_F(DCompPresenterPixelTest, SkipVideoLayerEmptyBoundsRect) {
   // No color is written since the visual committed to DirectComposition has no
   // content.
   SkColor expected_color = SK_ColorBLACK;
-  SkColor actual_color =
-      GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75));
-  EXPECT_TRUE(AreColorsSimilar(expected_color, actual_color))
-      << std::hex << "Expected " << expected_color << " Actual "
-      << actual_color;
+  EXPECT_SKCOLOR_CLOSE(
+      expected_color,
+      GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75)),
+      kMaxColorChannelDeviation);
 }
 
 TEST_F(DCompPresenterPixelTest, SkipVideoLayerEmptyContentsRect) {
@@ -743,6 +743,7 @@ TEST_F(DCompPresenterPixelTest, SkipVideoLayerEmptyContentsRect) {
   gfx::Size texture_size(50, 50);
   Microsoft::WRL::ComPtr<ID3D11Texture2D> texture =
       CreateNV12Texture(d3d11_device, texture_size);
+  ASSERT_NE(texture, nullptr);
 
   // Layer with empty content rect.
   auto params = std::make_unique<DCLayerOverlayParams>();
@@ -758,11 +759,10 @@ TEST_F(DCompPresenterPixelTest, SkipVideoLayerEmptyContentsRect) {
   // No color is written since the visual committed to DirectComposition has no
   // content.
   SkColor expected_color = SK_ColorBLACK;
-  SkColor actual_color =
-      GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75));
-  EXPECT_TRUE(AreColorsSimilar(expected_color, actual_color))
-      << std::hex << "Expected " << expected_color << " Actual "
-      << actual_color;
+  EXPECT_SKCOLOR_CLOSE(
+      expected_color,
+      GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75)),
+      kMaxColorChannelDeviation);
 }
 
 TEST_F(DCompPresenterPixelTest, NV12SwapChain) {
@@ -786,18 +786,17 @@ TEST_F(DCompPresenterPixelTest, NV12SwapChain) {
   ASSERT_TRUE(swap_chain);
 
   DXGI_SWAP_CHAIN_DESC1 desc;
-  EXPECT_TRUE(SUCCEEDED(swap_chain->GetDesc1(&desc)));
+  EXPECT_HRESULT_SUCCEEDED(swap_chain->GetDesc1(&desc));
   // Onscreen window_size is (100, 100).
   EXPECT_EQ(DXGI_FORMAT_NV12, desc.Format);
   EXPECT_EQ(100u, desc.Width);
   EXPECT_EQ(100u, desc.Height);
 
   SkColor expected_color = SkColorSetRGB(0xe1, 0x90, 0xeb);
-  SkColor actual_color =
-      GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75));
-  EXPECT_TRUE(AreColorsSimilar(expected_color, actual_color))
-      << std::hex << "Expected " << expected_color << " Actual "
-      << actual_color;
+  EXPECT_SKCOLOR_CLOSE(
+      expected_color,
+      GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75)),
+      kMaxColorChannelDeviation);
 }
 
 TEST_F(DCompPresenterPixelTest, YUY2SwapChain) {
@@ -830,18 +829,17 @@ TEST_F(DCompPresenterPixelTest, YUY2SwapChain) {
   ASSERT_TRUE(swap_chain);
 
   DXGI_SWAP_CHAIN_DESC1 desc;
-  EXPECT_TRUE(SUCCEEDED(swap_chain->GetDesc1(&desc)));
+  EXPECT_HRESULT_SUCCEEDED(swap_chain->GetDesc1(&desc));
   // Onscreen window_size is (100, 100).
   EXPECT_EQ(DXGI_FORMAT_YUY2, desc.Format);
   EXPECT_EQ(100u, desc.Width);
   EXPECT_EQ(100u, desc.Height);
 
   SkColor expected_color = SkColorSetRGB(0xe1, 0x90, 0xeb);
-  SkColor actual_color =
-      GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75));
-  EXPECT_TRUE(AreColorsSimilar(expected_color, actual_color))
-      << std::hex << "Expected " << expected_color << " Actual "
-      << actual_color;
+  EXPECT_SKCOLOR_CLOSE(
+      expected_color,
+      GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75)),
+      kMaxColorChannelDeviation);
 }
 
 TEST_F(DCompPresenterPixelTest, NonZeroBoundsOffset) {
@@ -876,10 +874,9 @@ TEST_F(DCompPresenterPixelTest, NonZeroBoundsOffset) {
   for (const auto& test_case : test_cases) {
     const auto& point = test_case.point;
     const auto& expected_color = test_case.expected_color;
-    SkColor actual_color = pixels[window_size.width() * point.y() + point.x()];
-    EXPECT_TRUE(AreColorsSimilar(expected_color, actual_color))
-        << std::hex << "Expected " << expected_color << " Actual "
-        << actual_color << " at " << point.ToString();
+    EXPECT_SKCOLOR_CLOSE(expected_color, pixels.GetPixel(point),
+                         kMaxColorChannelDeviation)
+        << " at " << point.ToString();
   }
 }
 
@@ -903,6 +900,7 @@ TEST_F(DCompPresenterPixelTest, ResizeVideoLayer) {
   gfx::Size texture_size(50, 50);
   Microsoft::WRL::ComPtr<ID3D11Texture2D> texture =
       CreateNV12Texture(d3d11_device, texture_size);
+  ASSERT_NE(texture, nullptr);
 
   // (1) Test if swap chain is overridden to window size (100, 100).
   {
@@ -921,7 +919,7 @@ TEST_F(DCompPresenterPixelTest, ResizeVideoLayer) {
   ASSERT_TRUE(swap_chain);
 
   DXGI_SWAP_CHAIN_DESC1 desc;
-  EXPECT_TRUE(SUCCEEDED(swap_chain->GetDesc1(&desc)));
+  EXPECT_HRESULT_SUCCEEDED(swap_chain->GetDesc1(&desc));
   // Onscreen window_size is (100, 100).
   EXPECT_EQ(100u, desc.Width);
   EXPECT_EQ(100u, desc.Height);
@@ -938,7 +936,7 @@ TEST_F(DCompPresenterPixelTest, ResizeVideoLayer) {
     PresentAndCheckSwapResult(gfx::SwapResult::SWAP_ACK);
   }
   swap_chain = presenter_->GetLayerSwapChainForTesting(0);
-  EXPECT_TRUE(SUCCEEDED(swap_chain->GetDesc1(&desc)));
+  EXPECT_HRESULT_SUCCEEDED(swap_chain->GetDesc1(&desc));
   // Onscreen window_size is (100, 100).
   EXPECT_EQ(100u, desc.Width);
   EXPECT_EQ(100u, desc.Height);
@@ -965,7 +963,7 @@ TEST_F(DCompPresenterPixelTest, ResizeVideoLayer) {
 
   // Swap chain is set to monitor/onscreen size.
   swap_chain = presenter_->GetLayerSwapChainForTesting(0);
-  EXPECT_TRUE(SUCCEEDED(swap_chain->GetDesc1(&desc)));
+  EXPECT_HRESULT_SUCCEEDED(swap_chain->GetDesc1(&desc));
   EXPECT_EQ(static_cast<UINT>(monitor_size.width()), desc.Width);
   EXPECT_EQ(static_cast<UINT>(monitor_size.height()), desc.Height);
 
@@ -996,7 +994,7 @@ TEST_F(DCompPresenterPixelTest, ResizeVideoLayer) {
 
   // Swap chain is set to monitor size (100, 100).
   swap_chain = presenter_->GetLayerSwapChainForTesting(0);
-  EXPECT_TRUE(SUCCEEDED(swap_chain->GetDesc1(&desc)));
+  EXPECT_HRESULT_SUCCEEDED(swap_chain->GetDesc1(&desc));
   EXPECT_EQ(100u, desc.Width);
   EXPECT_EQ(100u, desc.Height);
 
@@ -1045,13 +1043,13 @@ TEST_F(DCompPresenterPixelTest, SwapChainImage) {
 
   Microsoft::WRL::ComPtr<IDXGISwapChain1> swap_chain;
 
-  ASSERT_TRUE(SUCCEEDED(dxgi_factory->CreateSwapChainForComposition(
-      d3d11_device.Get(), &desc, nullptr, &swap_chain)));
+  ASSERT_HRESULT_SUCCEEDED(dxgi_factory->CreateSwapChainForComposition(
+      d3d11_device.Get(), &desc, nullptr, &swap_chain));
   ASSERT_TRUE(swap_chain);
 
   Microsoft::WRL::ComPtr<ID3D11Texture2D> front_buffer_texture;
-  ASSERT_TRUE(SUCCEEDED(
-      swap_chain->GetBuffer(1u, IID_PPV_ARGS(&front_buffer_texture))));
+  ASSERT_HRESULT_SUCCEEDED(
+      swap_chain->GetBuffer(1u, IID_PPV_ARGS(&front_buffer_texture)));
   ASSERT_TRUE(front_buffer_texture);
 
   Microsoft::WRL::ComPtr<ID3D11Texture2D> back_buffer_texture;
@@ -1060,8 +1058,8 @@ TEST_F(DCompPresenterPixelTest, SwapChainImage) {
   ASSERT_TRUE(back_buffer_texture);
 
   Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;
-  ASSERT_TRUE(SUCCEEDED(d3d11_device->CreateRenderTargetView(
-      back_buffer_texture.Get(), nullptr, &rtv)));
+  ASSERT_HRESULT_SUCCEEDED(d3d11_device->CreateRenderTargetView(
+      back_buffer_texture.Get(), nullptr, &rtv));
   ASSERT_TRUE(rtv);
 
   Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
@@ -1083,7 +1081,7 @@ TEST_F(DCompPresenterPixelTest, SwapChainImage) {
     float clear_color[] = {1.0, 0.0, 0.0, 1.0};
     context->ClearRenderTargetView(rtv.Get(), clear_color);
 
-    ASSERT_TRUE(SUCCEEDED(swap_chain->Present1(0, 0, &present_params)));
+    ASSERT_HRESULT_SUCCEEDED(swap_chain->Present1(0, 0, &present_params));
 
     auto dc_layer_params = std::make_unique<DCLayerOverlayParams>();
     dc_layer_params->overlay_image =
@@ -1097,11 +1095,10 @@ TEST_F(DCompPresenterPixelTest, SwapChainImage) {
     PresentAndCheckSwapResult(gfx::SwapResult::SWAP_ACK);
 
     SkColor expected_color = SK_ColorRED;
-    SkColor actual_color =
-        GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75));
-    EXPECT_TRUE(AreColorsSimilar(expected_color, actual_color))
-        << std::hex << "Expected " << expected_color << " Actual "
-        << actual_color;
+    EXPECT_SKCOLOR_CLOSE(
+        expected_color,
+        GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75)),
+        kMaxColorChannelDeviation);
   }
 
   // Clear to green and present.
@@ -1109,7 +1106,7 @@ TEST_F(DCompPresenterPixelTest, SwapChainImage) {
     float clear_color[] = {0.0, 1.0, 0.0, 1.0};
     context->ClearRenderTargetView(rtv.Get(), clear_color);
 
-    ASSERT_TRUE(SUCCEEDED(swap_chain->Present1(0, 0, &present_params)));
+    ASSERT_HRESULT_SUCCEEDED(swap_chain->Present1(0, 0, &present_params));
 
     auto dc_layer_params = std::make_unique<DCLayerOverlayParams>();
     dc_layer_params->overlay_image =
@@ -1122,17 +1119,16 @@ TEST_F(DCompPresenterPixelTest, SwapChainImage) {
     PresentAndCheckSwapResult(gfx::SwapResult::SWAP_ACK);
 
     SkColor expected_color = SK_ColorGREEN;
-    SkColor actual_color =
-        GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75));
-    EXPECT_TRUE(AreColorsSimilar(expected_color, actual_color))
-        << std::hex << "Expected " << expected_color << " Actual "
-        << actual_color;
+    EXPECT_SKCOLOR_CLOSE(
+        expected_color,
+        GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75)),
+        kMaxColorChannelDeviation);
   }
 
   // Present without clearing.  This will flip front and back buffers so the
   // previous rendered contents (red) will become visible again.
   {
-    ASSERT_TRUE(SUCCEEDED(swap_chain->Present1(0, 0, &present_params)));
+    ASSERT_HRESULT_SUCCEEDED(swap_chain->Present1(0, 0, &present_params));
 
     auto dc_layer_params = std::make_unique<DCLayerOverlayParams>();
     dc_layer_params->overlay_image =
@@ -1145,11 +1141,10 @@ TEST_F(DCompPresenterPixelTest, SwapChainImage) {
     PresentAndCheckSwapResult(gfx::SwapResult::SWAP_ACK);
 
     SkColor expected_color = SK_ColorRED;
-    SkColor actual_color =
-        GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75));
-    EXPECT_TRUE(AreColorsSimilar(expected_color, actual_color))
-        << std::hex << "Expected " << expected_color << " Actual "
-        << actual_color;
+    EXPECT_SKCOLOR_CLOSE(
+        expected_color,
+        GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75)),
+        kMaxColorChannelDeviation);
   }
 
   // Clear to blue without present.
@@ -1168,12 +1163,100 @@ TEST_F(DCompPresenterPixelTest, SwapChainImage) {
     PresentAndCheckSwapResult(gfx::SwapResult::SWAP_ACK);
 
     SkColor expected_color = SK_ColorRED;
-    SkColor actual_color =
-        GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75));
-    EXPECT_TRUE(AreColorsSimilar(expected_color, actual_color))
-        << std::hex << "Expected " << expected_color << " Actual "
-        << actual_color;
+    EXPECT_SKCOLOR_CLOSE(
+        expected_color,
+        GLTestHelper::ReadBackWindowPixel(window_.hwnd(), gfx::Point(75, 75)),
+        kMaxColorChannelDeviation);
   }
+}
+
+// Test that the overlay quad rect's offset is affected by its transform.
+TEST_F(DCompPresenterPixelTest, QuadOffsetAppliedAfterTransform) {
+  if (!presenter_) {
+    return;
+  }
+  // Fails on AMD RX 5500 XT. https://crbug.com/1152565.
+  if (context_ && context_->GetVersionInfo() &&
+      context_->GetVersionInfo()->driver_vendor.find("AMD") !=
+          std::string::npos) {
+    return;
+  }
+
+  // Our overlay quad rect is at 0,50 50x50 and scaled down by 1/2. Since we
+  // expect the transform to affect the quad rect offset, we expect the output
+  // rect to be at 0,25 25x25.
+  const gfx::Rect quad_rect(gfx::Point(0, 50), gfx::Size(50, 50));
+  const gfx::Transform quad_to_root_transform(
+      gfx::AxisTransform2d(0.5, gfx::Vector2dF()));
+
+  Microsoft::WRL::ComPtr<IDCompositionDevice2> dcomp_device =
+      GetDirectCompositionDevice();
+
+  Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device =
+      QueryD3D11DeviceObjectFromANGLE();
+  ASSERT_TRUE(d3d11_device);
+
+  Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+  d3d11_device->GetImmediateContext(&context);
+  ASSERT_TRUE(context);
+
+  gfx::Size window_size(100, 100);
+  EXPECT_TRUE(presenter_->Resize(window_size, 1.0, gfx::ColorSpace(), true));
+  EXPECT_TRUE(presenter_->SetDrawRectangle(gfx::Rect(window_size)));
+
+  InitializeRootAndScheduleRootSurface(window_size, SkColors::kBlack);
+
+  Microsoft::WRL::ComPtr<IDCompositionSurface> surface;
+  ASSERT_HRESULT_SUCCEEDED(dcomp_device->CreateSurface(
+      quad_rect.width(), quad_rect.height(), DXGI_FORMAT_B8G8R8A8_UNORM,
+      DXGI_ALPHA_MODE_IGNORE, &surface));
+  RECT update_rect = D2D1::Rect(0, 0, quad_rect.width(), quad_rect.height());
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> update_texture;
+  POINT update_offset;
+  ASSERT_HRESULT_SUCCEEDED(surface->BeginDraw(
+      &update_rect, IID_PPV_ARGS(&update_texture), &update_offset));
+  Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;
+  ASSERT_HRESULT_SUCCEEDED(d3d11_device->CreateRenderTargetView(
+      update_texture.Get(), nullptr, &rtv));
+  context->ClearRenderTargetView(rtv.Get(), SkColors::kRed.vec());
+  ASSERT_HRESULT_SUCCEEDED(surface->EndDraw());
+
+  auto dc_layer_params = std::make_unique<DCLayerOverlayParams>();
+  dc_layer_params->overlay_image =
+      DCLayerOverlayImage(quad_rect.size(), surface);
+  dc_layer_params->content_rect = gfx::Rect(quad_rect.size());
+  dc_layer_params->quad_rect = quad_rect;
+  dc_layer_params->transform = quad_to_root_transform;
+  dc_layer_params->color_space = gfx::ColorSpace::CreateSRGB();
+  dc_layer_params->z_order = 1;
+
+  presenter_->ScheduleDCLayer(std::move(dc_layer_params));
+  PresentAndCheckSwapResult(gfx::SwapResult::SWAP_ACK);
+
+  // We expect DComp to display the overlay with the same bounds as if viz were
+  // to composite it.
+  const gfx::Rect mapped_quad_rect = quad_to_root_transform.MapRect(quad_rect);
+
+  GLTestHelper::WindowPixels pixels =
+      GLTestHelper::ReadBackWindow(window_.hwnd(), window_size);
+
+  // Check the top edge of the scaled overlay
+  EXPECT_SKCOLOR_CLOSE(SK_ColorBLACK,
+                       pixels.GetPixel(gfx::Point(0, mapped_quad_rect.y() - 1)),
+                       kMaxColorChannelDeviation);
+  EXPECT_SKCOLOR_CLOSE(SK_ColorRED,
+                       GLTestHelper::ReadBackWindowPixel(
+                           window_.hwnd(), gfx::Point(0, mapped_quad_rect.y())),
+                       kMaxColorChannelDeviation);
+
+  // Check the bottom edge of the scaled overlay
+  EXPECT_SKCOLOR_CLOSE(
+      SK_ColorRED,
+      pixels.GetPixel(gfx::Point(0, mapped_quad_rect.bottom() - 1)),
+      kMaxColorChannelDeviation);
+  EXPECT_SKCOLOR_CLOSE(
+      SK_ColorBLACK, pixels.GetPixel(gfx::Point(0, mapped_quad_rect.bottom())),
+      kMaxColorChannelDeviation);
 }
 
 class DCompPresenterBufferCountTest : public DCompPresenterTest,
@@ -1219,6 +1302,7 @@ TEST_P(DCompPresenterBufferCountTest, VideoSwapChainBufferCount) {
 
   Microsoft::WRL::ComPtr<ID3D11Texture2D> texture =
       CreateNV12Texture(d3d11_device, texture_size);
+  ASSERT_NE(texture, nullptr);
 
   auto params = std::make_unique<DCLayerOverlayParams>();
   params->overlay_image.emplace(texture_size, texture);
@@ -1233,7 +1317,7 @@ TEST_P(DCompPresenterBufferCountTest, VideoSwapChainBufferCount) {
   ASSERT_TRUE(swap_chain);
 
   DXGI_SWAP_CHAIN_DESC1 desc;
-  EXPECT_TRUE(SUCCEEDED(swap_chain->GetDesc1(&desc)));
+  EXPECT_HRESULT_SUCCEEDED(swap_chain->GetDesc1(&desc));
   // The expected size is window_size(100, 100).
   EXPECT_EQ(100u, desc.Width);
   EXPECT_EQ(100u, desc.Height);

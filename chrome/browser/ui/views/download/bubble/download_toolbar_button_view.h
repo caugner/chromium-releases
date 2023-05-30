@@ -10,10 +10,15 @@
 #include "chrome/browser/download/bubble/download_display.h"
 #include "chrome/browser/download/bubble/download_icon_state.h"
 #include "chrome/browser/download/download_ui_model.h"
+#include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/gfx/animation/throb_animation.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
+
+namespace gfx {
+class RenderText;
+}
 
 class Browser;
 class BrowserView;
@@ -38,7 +43,8 @@ class DownloadBubbleNavigationHandler {
 // displays the number of ongoing downloads.
 class DownloadToolbarButtonView : public ToolbarButton,
                                   public DownloadDisplay,
-                                  public DownloadBubbleNavigationHandler {
+                                  public DownloadBubbleNavigationHandler,
+                                  public BrowserListObserver {
  public:
   METADATA_HEADER(DownloadToolbarButtonView);
   explicit DownloadToolbarButtonView(BrowserView* browser_view);
@@ -71,6 +77,9 @@ class DownloadToolbarButtonView : public ToolbarButton,
   void CloseDialog(views::Widget::ClosedReason reason) override;
   void ResizeDialog() override;
 
+  // BrowserListObserver
+  void OnBrowserSetLastActive(Browser* browser) override;
+
   // Deactivates the automatic closing of the partial bubble.
   void DeactivateAutoClose();
 
@@ -95,6 +104,11 @@ class DownloadToolbarButtonView : public ToolbarButton,
                                int progress_download_count,
                                SkColor badge_text_color,
                                SkColor badge_background_color);
+  // Returns an reference to the appropriate RenderText for the number of
+  // downloads, to be used in rendering the badge. |progress_download_count|
+  // should be at least 2.
+  gfx::RenderText& GetBadgeText(int progress_download_count,
+                                SkColor badge_text_color);
 
   void ButtonPressed();
   void CreateBubbleDialogDelegate(std::unique_ptr<View> bubble_contents_view);
@@ -112,9 +126,6 @@ class DownloadToolbarButtonView : public ToolbarButton,
 
   // Get the primary view, which may be the full or the partial view.
   std::unique_ptr<View> GetPrimaryView();
-  // Create a scrollable row list view for either the full or the partial view.
-  std::unique_ptr<View> CreateRowListView(
-      std::vector<DownloadUIModel::DownloadUIModelPtr> model_list);
 
   // If |has_pending_download_started_animation_| is true, shows an animation of
   // a download icon moving upwards towards the toolbar icon.

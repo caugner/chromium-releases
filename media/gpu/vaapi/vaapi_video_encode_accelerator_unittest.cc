@@ -143,13 +143,14 @@ class MockVideoEncodeAcceleratorClient : public VideoEncodeAccelerator::Client {
                void(unsigned int, const gfx::Size&, size_t));
   MOCK_METHOD2(BitstreamBufferReady,
                void(int32_t, const BitstreamBufferMetadata&));
-  MOCK_METHOD1(NotifyError, void(VideoEncodeAccelerator::Error));
+  MOCK_METHOD1(NotifyErrorStatus, void(const EncoderStatus&));
   MOCK_METHOD1(NotifyEncoderInfoChange, void(const VideoEncoderInfo&));
 };
 
 class MockVaapiWrapper : public VaapiWrapper {
  public:
-  explicit MockVaapiWrapper(CodecMode mode) : VaapiWrapper(mode) {}
+  explicit MockVaapiWrapper(CodecMode mode)
+      : VaapiWrapper(VADisplayStateHandle(), mode) {}
 
   MOCK_METHOD2(GetVAEncMaxNumOfRefFrames, bool(VideoCodecProfile, size_t*));
   MOCK_METHOD1(CreateContext, bool(const gfx::Size&));

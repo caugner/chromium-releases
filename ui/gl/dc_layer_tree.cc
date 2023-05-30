@@ -222,12 +222,18 @@ bool DCLayerTree::VisualTree::VisualSubtree::Update(
     needs_commit = true;
 
     // All the visual are created together on the first |Update|.
-    DCHECK(!content_visual_);
+    CHECK(!transform_visual_);
+    CHECK(!content_visual_);
+
     hr = dcomp_device->CreateVisual(&clip_visual_);
+    CHECK_EQ(hr, S_OK);
+    hr = dcomp_device->CreateVisual(&transform_visual_);
     CHECK_EQ(hr, S_OK);
     hr = dcomp_device->CreateVisual(&content_visual_);
     CHECK_EQ(hr, S_OK);
-    hr = clip_visual_->AddVisual(content_visual_.Get(), FALSE, nullptr);
+    hr = clip_visual_->AddVisual(transform_visual_.Get(), FALSE, nullptr);
+    CHECK_EQ(hr, S_OK);
+    hr = transform_visual_->AddVisual(content_visual_.Get(), FALSE, nullptr);
     CHECK_EQ(hr, S_OK);
   }
 
@@ -249,19 +255,6 @@ bool DCLayerTree::VisualTree::VisualSubtree::Update(
     }
   }
 
-  if (offset_ != quad_rect_offset) {
-    offset_ = quad_rect_offset;
-    needs_commit = true;
-
-    // Visual offset is applied before transform so it behaves similar to how
-    // the compositor uses transform to map quad rect in layer space to target
-    // space.
-    hr = content_visual_->SetOffsetX(offset_.x());
-    CHECK_EQ(hr, S_OK);
-    hr = content_visual_->SetOffsetY(offset_.y());
-    CHECK_EQ(hr, S_OK);
-  }
-
   if (transform_ != quad_to_root_transform) {
     transform_ = quad_to_root_transform;
     needs_commit = true;
@@ -272,7 +265,20 @@ bool DCLayerTree::VisualTree::VisualSubtree::Update(
         D2D1::Matrix3x2F(transform_.rc(0, 0), transform_.rc(1, 0),  //
                          transform_.rc(0, 1), transform_.rc(1, 1),  //
                          transform_.rc(0, 3), transform_.rc(1, 3));
-    hr = content_visual_->SetTransform(matrix);
+    hr = transform_visual_->SetTransform(matrix);
+    CHECK_EQ(hr, S_OK);
+  }
+
+  if (offset_ != quad_rect_offset) {
+    offset_ = quad_rect_offset;
+    needs_commit = true;
+
+    // Visual offset is applied after transform so it is affected by the
+    // transform, which is consistent with how the compositor maps quad rects to
+    // their target space.
+    hr = content_visual_->SetOffsetX(offset_.x());
+    CHECK_EQ(hr, S_OK);
+    hr = content_visual_->SetOffsetY(offset_.y());
     CHECK_EQ(hr, S_OK);
   }
 
@@ -317,33 +323,48 @@ bool DCLayerTree::VisualTree::UpdateTree(
   // Grow or shrink list of visual subtrees to match pending overlays.
   size_t old_visual_subtrees_size = visual_subtrees_.size();
   if (old_visual_subtrees_size != overlays.size()) {
-    visual_subtrees_.resize(overlays.size());
     needs_rebuild_visual_tree = true;
   }
 
   // Visual for root surface. Cache it to add DelegatedInk visual if needed.
   Microsoft::WRL::ComPtr<IDCompositionVisual2> root_surface_visual;
   bool needs_commit = false;
+  std::vector<std::unique_ptr<VisualSubtree>> visual_subtrees;
+  visual_subtrees.resize(overlays.size());
   // Build or update visual subtree for each overlay.
   for (size_t i = 0; i < overlays.size(); ++i) {
-    DCHECK(visual_subtrees_[i] || i >= old_visual_subtrees_size);
-    if (!visual_subtrees_[i]) {
-      visual_subtrees_[i] = std::make_unique<VisualSubtree>();
-    }
-
-    if (visual_subtrees_[i]->z_order() != overlays[i]->z_order) {
-      visual_subtrees_[i]->set_z_order(overlays[i]->z_order);
-
-      // Z-order is a property of the root visual's child list, not any property
-      // on the subtree's nodes. If it changes, we need to rebuild the tree.
+    IUnknown* dcomp_visual_content =
+        overlays[i]->overlay_image->dcomp_visual_content();
+    // Find matching subtree for each overlay. If subtree is found, move it
+    // from visual subtrees of previous frame to visual subtrees of this frame.
+    auto it = std::find_if(
+        visual_subtrees_.begin(), visual_subtrees_.end(),
+        [dcomp_visual_content](const std::unique_ptr<VisualSubtree>& subtree) {
+          return subtree &&
+                 subtree->dcomp_visual_content() == dcomp_visual_content;
+        });
+    if (it == visual_subtrees_.end()) {
+      // This overlay's visual content does not present in the old visual tree.
+      // Instantiate a new visual subtree.
+      visual_subtrees[i] = std::make_unique<VisualSubtree>();
+      visual_subtrees[i]->set_z_order(overlays[i]->z_order);
       needs_rebuild_visual_tree = true;
+    } else {
+      // Move visual subtree from the old subtrees to new subtrees.
+      visual_subtrees[i] = std::move(*it);
+      if (visual_subtrees[i]->z_order() != overlays[i]->z_order) {
+        visual_subtrees[i]->set_z_order(overlays[i]->z_order);
+        // Z-order is a property of the root visual's child list, not any
+        // property on the subtree's nodes. If it changes, we need to rebuild
+        // the tree.
+        needs_rebuild_visual_tree = true;
+      }
     }
-
     // We don't need to set |needs_rebuild_visual_tree| here since that is only
     // needed when the root visual's children need to be reordered. |Update|
     // only affects the subtree for each child, so only a commit is needed in
     // this case.
-    needs_commit |= visual_subtrees_[i]->Update(
+    needs_commit |= visual_subtrees[i]->Update(
         dc_layer_tree_->dcomp_device_.Get(),
         overlays[i]->overlay_image->dcomp_visual_content(),
         overlays[i]->overlay_image->dcomp_surface_serial(),
@@ -354,9 +375,11 @@ bool DCLayerTree::VisualTree::UpdateTree(
     if (overlays[i]->z_order == 0) {
       // Verify we have single root visual layer.
       DCHECK(!root_surface_visual);
-      root_surface_visual = visual_subtrees_[i]->content_visual();
+      root_surface_visual = visual_subtrees[i]->content_visual();
     }
   }
+  // Update visual_subtrees_ with new values.
+  visual_subtrees_ = std::move(visual_subtrees);
 
   // Note: needs_rebuild_visual_tree might be set in this method,
   // |DCLayerTree::CommitAndClearPendingOverlays|, and can also be set in
