@@ -62,7 +62,9 @@
   [self.viewController prepareForDismissal];
   self.viewController.delegate = nil;
   self.viewController.dispatcher = nil;
+  [self.viewController stop];
   self.viewController = nil;
+  [super stop];
 }
 
 #pragma mark - ClearBrowsingDataUIDelegate

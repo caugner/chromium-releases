@@ -418,7 +418,11 @@ class V4LocalDatabaseManagerTest : public PlatformTest {
             base::SequencedTaskRunner::GetCurrentDefault(),
             base::SequencedTaskRunner::GetCurrentDefault(), task_runner_));
 
-    StartLocalDatabaseManager();
+    const testing::TestInfo* const test_info =
+        testing::UnitTest::GetInstance()->current_test_info();
+    if (std::string(test_info->name()) != "QueuedCheckWithFullHash") {
+      StartLocalDatabaseManager();
+    }
   }
 
   void TearDown() override {
@@ -451,10 +455,10 @@ class V4LocalDatabaseManagerTest : public PlatformTest {
     v4_local_database_manager_->PopulateArtificialDatabase();
   }
 
-  void ReplaceV4Database(
-      const StoreAndHashPrefixes& store_and_hash_prefixes,
-      bool stores_available = false,
-      int64_t store_file_size = kDefaultStoreFileSizeInBytes) {
+  void ReplaceV4Database(const StoreAndHashPrefixes& store_and_hash_prefixes,
+                         bool stores_available = false,
+                         int64_t store_file_size = kDefaultStoreFileSizeInBytes,
+                         bool wait_for_tasks_for_new_db = true) {
     // Disable the V4LocalDatabaseManager first so that if the callback to
     // verify checksum has been scheduled, then it doesn't do anything when it
     // is called back.
@@ -472,7 +476,9 @@ class V4LocalDatabaseManagerTest : public PlatformTest {
     FakeV4Database::Create(
         task_runner_, std::make_unique<StoreMap>(), store_and_hash_prefixes,
         std::move(db_ready_callback), stores_available, store_file_size);
-    WaitForTasksOnTaskRunner();
+    if (wait_for_tasks_for_new_db) {
+      WaitForTasksOnTaskRunner();
+    }
   }
 
   void ResetLocalDatabaseManager() {
@@ -494,7 +500,16 @@ class V4LocalDatabaseManagerTest : public PlatformTest {
 
   void StopLocalDatabaseManager() {
     if (v4_local_database_manager_) {
-      v4_local_database_manager_->StopOnSBThread(true);
+      v4_local_database_manager_->StopOnSBThread(/*shutdown=*/false);
+    }
+
+    // Force destruction of the database.
+    WaitForTasksOnTaskRunner();
+  }
+
+  void ShutdownLocalDatabaseManager() {
+    if (v4_local_database_manager_) {
+      v4_local_database_manager_->StopOnSBThread(/*shutdown=*/true);
     }
 
     // Force destruction of the database.
@@ -1090,6 +1105,26 @@ TEST_F(V4LocalDatabaseManagerTest, CancelPending) {
     EXPECT_TRUE(GetPendingChecks().empty());
     EXPECT_TRUE(client.on_check_browse_url_result_called());
   }
+
+  // Clean up from the database being shut down.
+  StartLocalDatabaseManager();
+  ReplaceV4Database(store_and_hash_prefixes);
+
+  // Test that the client does not get a response for a pending check when safe
+  // browsing is shutdown.
+  {
+    TestClient client(SB_THREAT_TYPE_SAFE, url_bad);
+    EXPECT_FALSE(v4_local_database_manager_->CheckBrowseUrl(
+        url_bad, usual_threat_types_, &client,
+        MechanismExperimentHashDatabaseCache::kNoExperiment));
+    EXPECT_EQ(1ul, GetPendingChecks().size());
+    EXPECT_FALSE(client.on_check_browse_url_result_called());
+    EXPECT_TRUE((*GetPendingChecks().begin())->is_in_pending_checks);
+    ShutdownLocalDatabaseManager();
+    EXPECT_TRUE(GetPendingChecks().empty());
+    EXPECT_FALSE(client.on_check_browse_url_result_called());
+    v4_local_database_manager_->CancelCheck(&client);
+  }
 }
 
 // When the database load flushes the queued requests, make sure that
@@ -1113,6 +1148,36 @@ TEST_F(V4LocalDatabaseManagerTest, CancelQueued) {
   WaitForTasksOnTaskRunner();
   EXPECT_TRUE(client1.on_check_browse_url_result_called());
   EXPECT_TRUE(client2.on_check_browse_url_result_called());
+}
+
+TEST_F(V4LocalDatabaseManagerTest, QueuedCheckWithFullHash) {
+  std::string url_bad_no_scheme("example.com/bad/");
+  const GURL url_bad("https://" + url_bad_no_scheme);
+
+  FullHashStr bad_full_hash(crypto::SHA256HashString(url_bad_no_scheme));
+  const HashPrefixStr bad_hash_prefix(bad_full_hash.substr(0, 5));
+  StoreAndHashPrefixes store_and_hash_prefixes;
+  store_and_hash_prefixes.emplace_back(GetUrlMalwareId(), bad_hash_prefix);
+
+  FullHashInfo fhi(bad_full_hash, GetChromeUrlClientIncidentId(), base::Time());
+  ScopedFakeGetHashProtocolManagerFactory pin(FullHashInfos({fhi}));
+
+  ReplaceV4Database(store_and_hash_prefixes, false,
+                    kDefaultStoreFileSizeInBytes, false);
+  StartLocalDatabaseManager();
+
+  // The fake database returns a matched hash prefix.
+  TestClient client(SB_THREAT_TYPE_BLOCKLISTED_RESOURCE, url_bad);
+  EXPECT_FALSE(v4_local_database_manager_->CheckBrowseUrl(
+      url_bad, usual_threat_types_, &client,
+      MechanismExperimentHashDatabaseCache::kNoExperiment));
+
+  EXPECT_EQ(1ul, GetQueuedChecks().size());
+  WaitForTasksOnTaskRunner();
+  EXPECT_TRUE(GetQueuedChecks().empty());
+
+  WaitForTasksOnTaskRunner();
+  EXPECT_TRUE(client.on_check_browse_url_result_called());
 }
 
 // This test is somewhat similar to TestCheckBrowseUrlWithFakeDbReturnsMatch but

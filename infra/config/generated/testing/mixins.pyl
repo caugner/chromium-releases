@@ -2,6 +2,7 @@
 # Instead:
 # 1. Modify //infra/config/targets/mixins.star
 # 2. Run //infra/config/main.star
+# 3. Run //infra/config/scripts/sync-py-files.py
 
 {
   '10-x86-emulator': {
@@ -360,8 +361,9 @@
   'dawn_end2end_gpu_test': {
     'args': [
       '--use-gpu-in-tests',
-      '--test-launcher-retry-limit=0',
       '--exclusive-device-type-preference=discrete,integrated',
+      '--test-launcher-retry-limit=0',
+      '--test-launcher-batch-limit=512',
     ],
   },
   'disable_check_flakiness_web_tests': {
@@ -491,6 +493,16 @@
         {
           'name': 'runtime_ios_16_4',
           'path': 'Runtime-ios-16.4',
+        },
+      ],
+    },
+  },
+  'ios_runtime_cache_17_0': {
+    'swarming': {
+      'named_caches': [
+        {
+          'name': 'runtime_ios_17_0',
+          'path': 'Runtime-ios-17.0',
         },
       ],
     },
@@ -692,31 +704,6 @@
       },
     },
   },
-  'mac_12_or_13_arm64': {
-    'swarming': {
-      'dimensions': {
-        'cpu': 'arm64',
-        'os': 'Mac-12|Mac-13',
-      },
-    },
-  },
-  'mac_12_or_13_t2_x64': {
-    'swarming': {
-      'dimensions': {
-        'cpu': 'x86-64',
-        'mac_model': 'Macmini8,1',
-        'os': 'Mac-12|Mac-13',
-      },
-    },
-  },
-  'mac_12_or_13_x64': {
-    'swarming': {
-      'dimensions': {
-        'cpu': 'x86-64',
-        'os': 'Mac-12|Mac-13',
-      },
-    },
-  },
   'mac_12_x64': {
     'swarming': {
       'dimensions': {
@@ -746,7 +733,7 @@
       'dimensions': {
         'cpu': 'arm64',
         'mac_model': 'Macmini9,1',
-        'os': 'Mac-13.2',
+        'os': 'Mac-13.4',
         'pool': 'chromium.tests',
         'display_attached': '1',
       },
@@ -757,7 +744,7 @@
       'dimensions': {
         'cpu': 'arm64',
         'mac_model': 'Macmini9,1',
-        'os': 'Mac-12.5',
+        'os': 'Mac-13.4',
         'pool': 'chromium.tests',
         'display_attached': '1',
       },
@@ -784,6 +771,22 @@
     },
   },
   'mac_beta_x64': {
+    'swarming': {
+      'dimensions': {
+        'cpu': 'x86-64',
+        'os': 'Mac-13',
+      },
+    },
+  },
+  'mac_default_arm64': {
+    'swarming': {
+      'dimensions': {
+        'cpu': 'arm64',
+        'os': 'Mac-13',
+      },
+    },
+  },
+  'mac_default_x64': {
     'swarming': {
       'dimensions': {
         'cpu': 'x86-64',
@@ -876,7 +879,7 @@
         {
           'cipd_package': 'infra/tools/mac_toolchain/${platform}',
           'location': '.',
-          'revision': 'git_revision:3e597065cb23c1fe03aeb2ebd792d83e0709c5c2',
+          'revision': 'git_revision:0ecab437ae2532a879b1203efc48f54bc6cadb77',
         },
       ],
     },
@@ -1210,18 +1213,6 @@
       },
     },
   },
-  'win10_intel_uhd_630_stable_dimension_set': {
-    'swarming': {
-      'dimension_sets': [
-        {
-          'display_attached': '1',
-          'gpu': '8086:9bc5-31.0.101.2111',
-          'os': 'Windows-10',
-          'pool': 'chromium.tests.gpu',
-        },
-      ],
-    },
-  },
   'win10_nvidia_gtx_1660_experimental': {
     'swarming': {
       'dimensions': {
@@ -1240,18 +1231,6 @@
         'os': 'Windows-10-18363',
         'pool': 'chromium.tests.gpu',
       },
-    },
-  },
-  'win10_nvidia_gtx_1660_stable_dimension_set': {
-    'swarming': {
-      'dimension_sets': [
-        {
-          'display_attached': '1',
-          'gpu': '10de:2184-27.21.14.5638',
-          'os': 'Windows-10-18363',
-          'pool': 'chromium.tests.gpu',
-        },
-      ],
     },
   },
   'win11': {
@@ -1312,6 +1291,20 @@
       '--readline-timeout',
       '600',
     ],
+  },
+  'xcode_15_beta': {
+    'args': [
+      '--xcode-build-version',
+      '15a5160n',
+    ],
+    'swarming': {
+      'named_caches': [
+        {
+          'name': 'xcode_ios_15a5160n',
+          'path': 'Xcode.app',
+        },
+      ],
+    },
   },
   'xcode_parallelization': {
     'args': [

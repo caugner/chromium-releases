@@ -75,6 +75,7 @@ constexpr CGFloat kHalfSheetCornerRadius = 20;
 
 - (void)stop {
   [self dismissSignOutViewController];
+  self.viewController = nil;
   [super stop];
 }
 

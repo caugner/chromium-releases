@@ -64,6 +64,7 @@
 - (void)stop {
   self.delegate = nil;
   self.viewController = nil;
+  [super stop];
 }
 
 #pragma mark - PromoStyleViewControllerDelegate

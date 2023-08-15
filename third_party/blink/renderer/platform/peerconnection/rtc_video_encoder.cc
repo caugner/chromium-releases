@@ -62,10 +62,12 @@
 
 namespace {
 
+#if !BUILDFLAG(IS_ANDROID)
 // Enabled-by-default: only used as a kill-switch.
 BASE_FEATURE(kForceSoftwareForLowResolutions,
              "ForceSoftwareForLowResolutions",
              base::FEATURE_ENABLED_BY_DEFAULT);
+#endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH) && defined(ARCH_CPU_ARM_FAMILY)
 bool IsRK3399Board() {
@@ -324,6 +326,16 @@ struct CrossThreadCopier<SignaledValue> {
 }  // namespace WTF
 
 namespace blink {
+
+namespace features {
+
+// When disabled, SW is forced at <360p. When enabled, SW is forced at <=360p.
+// Only applicable if `kForceSoftwareForLowResolutions` has not been disabled.
+BASE_FEATURE(kForcingSoftwareIncludes360,
+             "kForcingSoftwareIncludes360",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+}  // namespace features
 
 namespace {
 media::VideoEncodeAccelerator::Config::InterLayerPredMode
@@ -1724,13 +1736,23 @@ int32_t RTCVideoEncoder::InitEncode(
   // problem but some HW encoders already fallback for resolutions not divisible
   // by 4.) At 360p, manual testing suggests HW and SW are roughly on par in
   // terms of quality.
+  //
+  // Android is excluded from this logic because there are situations where a
+  // codec like H264 is available in HW but not SW in which case SW fallback
+  // would result in a change of codec, see https://crbug.com/1469318.
+#if !BUILDFLAG(IS_ANDROID)
+  uint16_t force_sw_height = 359;
+  if (base::FeatureList::IsEnabled(features::kForcingSoftwareIncludes360)) {
+    force_sw_height = 360;
+  }
   if (base::FeatureList::IsEnabled(kForceSoftwareForLowResolutions) &&
-      codec_settings->height < 360) {
+      codec_settings->height <= force_sw_height) {
     LOG(WARNING)
         << "Fallback to SW due to low resolution being less than 360p ("
         << codec_settings->width << "x" << codec_settings->height << ")";
     return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
   }
+#endif
 
   if (profile_ >= media::H264PROFILE_MIN &&
       profile_ <= media::H264PROFILE_MAX &&

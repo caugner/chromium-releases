@@ -24,6 +24,7 @@
 #include "chrome/browser/apps/intent_helper/intent_picker_features.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/extension_ui_util.h"
 #include "chrome/browser/extensions/tab_helper.h"
@@ -75,6 +76,8 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_payments_features.h"
+#include "components/commerce/core/commerce_feature_list.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/features.h"
 #include "components/dom_distiller/core/dom_distiller_features.h"
 #include "components/favicon/content/content_favicon_driver.h"
@@ -103,6 +106,7 @@
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/feature_switch.h"
+#include "services/device/public/cpp/geolocation/geolocation_manager.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -168,8 +172,8 @@ LocationBarView::LocationBarView(Browser* browser,
                                  CommandUpdater* command_updater,
                                  Delegate* delegate,
                                  bool is_popup_mode)
-    : AnimationDelegateViews(this),
-      ChromeOmniboxEditModelDelegate(browser, profile, command_updater),
+    : LocationBar(command_updater),
+      AnimationDelegateViews(this),
       browser_(browser),
       profile_(profile),
       delegate_(delegate),
@@ -193,7 +197,7 @@ LocationBarView::LocationBarView(Browser* browser,
 
 #if BUILDFLAG(IS_MAC)
     geolocation_permission_observation_.Observe(
-        g_browser_process->geolocation_manager());
+        device::GeolocationManager::GetInstance());
 #endif
   }
 }
@@ -222,8 +226,10 @@ void LocationBarView::Init() {
 
   // Initialize the Omnibox view.
   auto omnibox_view = std::make_unique<OmniboxViewViews>(
-      this, std::make_unique<ChromeOmniboxClient>(this, profile_),
-      is_popup_mode_, this, font_list);
+      std::make_unique<ChromeOmniboxClient>(
+          /*location_bar=*/this, browser_, profile_),
+      is_popup_mode_,
+      /*location_bar_view=*/this, font_list);
   omnibox_view->Init();
   omnibox_view_ = AddChildView(std::move(omnibox_view));
   // LocationBarView directs mouse button events from
@@ -297,7 +303,11 @@ void LocationBarView::Init() {
     // first so that they appear on the left side of the icon container.
     // TODO(crbug.com/1318890): Improve the ordering heuristics for page action
     // icons and determine a way to handle simultaneous icon animations.
-    params.types_enabled.push_back(PageActionIconType::kPriceTracking);
+    if (base::FeatureList::IsEnabled(commerce::kPriceInsights)) {
+      params.types_enabled.push_back(PageActionIconType::kPriceInsights);
+    } else {
+      params.types_enabled.push_back(PageActionIconType::kPriceTracking);
+    }
 
     if (side_search::IsEnabledForBrowser(browser_)) {
       params.types_enabled.push_back(PageActionIconType::kSideSearch);
@@ -613,7 +623,7 @@ void LocationBarView::Layout() {
     icon_left = 5;
     text_left = 8;
     icon_indent = 7;
-    text_indent = 5;
+    text_indent = 6;
     icon_keyword_indent = 3;
     text_keyword_indent = -9;
   } else if (OmniboxFieldTrial::IsChromeRefreshIconsEnabled()) {
@@ -929,7 +939,9 @@ SkColor LocationBarView::GetIconLabelBubbleSurroundingForegroundColor() const {
   // will inherit the selected "surrounding foreground color".
   const auto color_id = ShouldShowKeywordBubble()
                             ? kColorOmniboxKeywordSeparator
-                            : kColorOmniboxText;
+                            : (OmniboxFieldTrial::IsChromeRefreshIconsEnabled()
+                                   ? kColorPageActionIcon
+                                   : kColorOmniboxText);
   return GetColorProvider()->GetColor(color_id);
 }
 
@@ -946,9 +958,55 @@ SkColor LocationBarView::GetIconLabelBubbleBackgroundColor() const {
   return GetColorProvider()->GetColor(kColorLocationBarBackground);
 }
 
-bool LocationBarView::ShouldHideContentSettingImage() {
+bool LocationBarView::ShouldHideContentSettingImage(ImageType type) {
   // Content setting icons are hidden at the same time as page action icons.
-  return ShouldHidePageActionIcons();
+  if (ShouldHidePageActionIcons()) {
+    return true;
+  }
+
+  auto* web_contents = GetWebContents();
+  if (web_contents) {
+    auto* hcsm = HostContentSettingsMapFactory::GetForProfile(profile_);
+    switch (type) {
+      case ImageType::COOKIES:
+      case ImageType::IMAGES:
+      case ImageType::JAVASCRIPT:
+      case ImageType::POPUPS:
+        break;
+      case ImageType::GEOLOCATION: {
+        ContentSetting value =
+            hcsm->GetContentSetting(web_contents->GetLastCommittedURL(), GURL(),
+                                    ContentSettingsType::GEOLOCATION);
+        return value == CONTENT_SETTING_ASK;
+      }
+      case ImageType::MIXEDSCRIPT:
+      case ImageType::PROTOCOL_HANDLERS:
+        break;
+      case ImageType::MEDIASTREAM: {
+        ContentSetting mic_value =
+            hcsm->GetContentSetting(web_contents->GetLastCommittedURL(), GURL(),
+                                    ContentSettingsType::MEDIASTREAM_MIC);
+
+        ContentSetting camera_value =
+            hcsm->GetContentSetting(web_contents->GetLastCommittedURL(), GURL(),
+                                    ContentSettingsType::MEDIASTREAM_CAMERA);
+        return mic_value == CONTENT_SETTING_ASK &&
+               camera_value == CONTENT_SETTING_ASK;
+      }
+      case ImageType::ADS:
+      case ImageType::AUTOMATIC_DOWNLOADS:
+      case ImageType::MIDI_SYSEX:
+      case ImageType::SOUND:
+      case ImageType::FRAMEBUST:
+      case ImageType::SENSORS:
+      case ImageType::NOTIFICATIONS_QUIET_PROMPT:
+      case ImageType::CLIPBOARD_READ_WRITE:
+      case ImageType::STORAGE_ACCESS:
+      case ImageType::NUM_IMAGE_TYPES:
+        break;
+    }
+  }
+  return false;
 }
 
 content::WebContents* LocationBarView::GetContentSettingWebContents() {
@@ -1148,30 +1206,6 @@ void LocationBarView::OnPageInfoBubbleClosed(
   }
 
   FocusLocation(false);
-}
-
-GURL LocationBarView::GetDestinationURL() const {
-  return destination_url();
-}
-
-bool LocationBarView::IsInputTypedUrlWithoutScheme() const {
-  return destination_url_entered_without_scheme();
-}
-
-bool LocationBarView::IsInputTypedUrlWithHttpScheme() const {
-  return destination_url_entered_with_http_scheme();
-}
-
-WindowOpenDisposition LocationBarView::GetWindowOpenDisposition() const {
-  return disposition();
-}
-
-ui::PageTransition LocationBarView::GetPageTransition() const {
-  return transition();
-}
-
-base::TimeTicks LocationBarView::GetMatchSelectionTimestamp() const {
-  return match_selection_timestamp();
 }
 
 void LocationBarView::FocusSearch() {

@@ -153,6 +153,14 @@ const char kIosDiscoverFeedLastRefreshTime[] =
 const char kIosDiscoverFeedLastUnseenRefreshTime[] =
     "ios.discover_feed.last_unseen_refresh_time";
 
+// A list of the latest fetched Most Visited Sites.
+const char kIosLatestMostVisitedSites[] = "ios.most_visited_sites";
+
+// Integer representing the number of impressions of the Most Visited Site since
+// a freshness signal.
+const char kIosMagicStackSegmentationMVTImpressionsSinceFreshness[] =
+    "ios.magic_stack_segmentation.most_visited_sites_freshness";
+
 // The number of consecutive times the user dismissed the password bottom sheet.
 // This gets reset to 0 whenever the user selects a password from the bottom
 // sheet or from the keyboard accessory.
@@ -240,6 +248,10 @@ const char kNTPFollowingFeedSortType[] = "ios.ntp.following_feed.sort_type";
 // Preference that determines if the user changed the Following feed sort type.
 const char kDefaultFollowingFeedSortTypeChanged[] =
     "ios.ntp.following_feed_default_sort_type_changed";
+
+// Boolean that is true when OS Lockdown Mode is enabled for their entire device
+// through native iOS settings.
+const char kOSLockdownModeEnabled[] = "ios.os_lockdown_mode_enabled";
 
 // Dictionary preference which tracks day(s) a given destination is clicked from
 // the new overflow menu carousel.
@@ -331,8 +343,18 @@ const char kMixedContentAutoupgradeEnabled[] =
 
 // An int counting the remaining number of times the autofill branding icon
 // should show inside form input accessories.
-const char kAutofillBrandingIconAnimationRemainingCountPrefName[] =
+const char kAutofillBrandingIconAnimationRemainingCount[] =
     "ios.autofill.branding.animation.remaining_count";
+
+// An integer representing the number of times the autofill branding icon has
+// displayed.
+const char kAutofillBrandingIconDisplayCount[] =
+    "ios.autofill.branding.display_count";
+
+// A boolean used to track whether the user has tapped on any of the keyboard
+// accessories when the autofill branding is visible.
+const char kAutofillBrandingKeyboardAccessoriesTapped[] =
+    "ios.autofill.branding.keyboard_accessory_tapped";
 
 // A boolean used to determine if the Price Tracking UI has been shown.
 const char kPriceNotificationsHasBeenShown[] =
