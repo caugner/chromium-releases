@@ -24,10 +24,6 @@
 #import "ios/chrome/browser/ui/content_suggestions/set_up_list/utils.h"
 #import "ios/chrome/browser/ui/favicon/favicon_attributes_with_payload.h"
 
-#if !defined(__has_feature) || !__has_feature(objc_arc)
-#error "This file requires ARC support."
-#endif
-
 @implementation ContentSuggestionsMetricsRecorder {
   PrefService* _localState;
 }
@@ -60,7 +56,19 @@
       }
       break;
     }
-    case ContentSuggestionsModuleType::kShortcuts:
+    case ContentSuggestionsModuleType::kShortcuts: {
+      if (_localState) {
+        // Increment freshness pref since it is an impression of
+        // the latest Most Visited Sites as the top module.
+        int freshness_impression_count = _localState->GetInteger(
+            prefs::
+                kIosMagicStackSegmentationShortcutsImpressionsSinceFreshness);
+        _localState->SetInteger(
+            prefs::kIosMagicStackSegmentationShortcutsImpressionsSinceFreshness,
+            freshness_impression_count + 1);
+      }
+      break;
+    }
     case ContentSuggestionsModuleType::kSetUpListSync:
     case ContentSuggestionsModuleType::kSetUpListDefaultBrowser:
     case ContentSuggestionsModuleType::kSetUpListAutofill:

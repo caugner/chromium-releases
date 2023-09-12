@@ -6,6 +6,9 @@
 
 #include "base/metrics/histogram_functions.h"
 #include "chrome/app/vector_icons/vector_icons.h"
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/picture_in_picture/auto_pip_setting_overlay_view.h"
+#endif
 #include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
 #include "chrome/browser/ui/browser_content_setting_bubble_model_delegate.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -21,9 +24,11 @@
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/ui/frame/frame_utils.h"
 #include "components/omnibox/browser/location_bar_model_impl.h"
+#include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_constants.h"
+#include "third_party/blink/public/common/features.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
@@ -40,6 +45,11 @@
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/window/frame_background.h"
 #include "ui/views/window/window_shape.h"
+
+#if BUILDFLAG(IS_WIN)
+#include "ui/base/win/hwnd_metrics.h"
+#include "ui/views/win/hwnd_util.h"
+#endif
 
 #if !BUILDFLAG(IS_MAC)
 // Mac does not use Aura
@@ -103,10 +113,13 @@ class BackToTabButton : public OverlayWindowImageButton {
 
   explicit BackToTabButton(PressedCallback callback)
       : OverlayWindowImageButton(std::move(callback)) {
+    auto* icon = &vector_icons::kBackToTabIcon;
+    if (OmniboxFieldTrial::IsChromeRefreshIconsEnabled()) {
+      icon = &vector_icons::kBackToTabChromeRefreshIcon;
+    }
     SetImageModel(views::Button::STATE_NORMAL,
-                  ui::ImageModel::FromVectorIcon(vector_icons::kBackToTabIcon,
-                                                 kColorPipWindowForeground,
-                                                 kBackToTabImageSize));
+                  ui::ImageModel::FromVectorIcon(
+                      *icon, kColorPipWindowForeground, kBackToTabImageSize));
 
     const std::u16string back_to_tab_button_label = l10n_util::GetStringUTF16(
         IDS_PICTURE_IN_PICTURE_BACK_TO_TAB_CONTROL_TEXT);
@@ -185,6 +198,17 @@ class WindowEventObserver : public ui::EventObserver {
   raw_ptr<PictureInPictureBrowserFrameView> pip_browser_frame_view_;
   std::unique_ptr<views::EventMonitor> event_monitor_;
 };
+
+void DefinitelyExitPictureInPicture(
+    PictureInPictureBrowserFrameView& frame_view) {
+  if (!PictureInPictureWindowManager::GetInstance()->ExitPictureInPicture()) {
+    // If the picture-in-picture controller has been disconnected for
+    // some reason, then just manually close the window to prevent
+    // getting into a state where the back to tab button no longer
+    // closes the window.
+    frame_view.browser_view()->Close();
+  }
+}
 
 }  // namespace
 
@@ -276,6 +300,12 @@ PictureInPictureBrowserFrameView::PictureInPictureBrowserFrameView(
       CONTEXT_OMNIBOX_PRIMARY, views::style::STYLE_PRIMARY);
   location_icon_view_ = top_bar_container_view_->AddChildView(
       std::make_unique<LocationIconView>(font_list, this, this));
+  if (OmniboxFieldTrial::IsChromeRefreshIconsEnabled()) {
+    // The PageInfo icon should be 8px from the left of the window and 4px from
+    // the right of the origin.
+    location_icon_view_->SetProperty(views::kMarginsKey,
+                                     gfx::Insets::TLBR(0, 8, 0, 4));
+  }
 
   // Creates the window title.
   top_bar_container_view_->AddChildView(
@@ -317,8 +347,7 @@ PictureInPictureBrowserFrameView::PictureInPictureBrowserFrameView(
           [](PictureInPictureBrowserFrameView* frame_view) {
             frame_view->close_reason_ = CloseReason::kBackToTabButton;
             PictureInPictureWindowManager::GetInstance()->FocusInitiator();
-            PictureInPictureWindowManager::GetInstance()
-                ->ExitPictureInPicture();
+            DefinitelyExitPictureInPicture(*frame_view);
           },
           base::Unretained(this))));
 
@@ -327,8 +356,7 @@ PictureInPictureBrowserFrameView::PictureInPictureBrowserFrameView(
       std::make_unique<CloseImageButton>(base::BindRepeating(
           [](PictureInPictureBrowserFrameView* frame_view) {
             frame_view->close_reason_ = CloseReason::kCloseButton;
-            PictureInPictureWindowManager::GetInstance()
-                ->ExitPictureInPicture();
+            DefinitelyExitPictureInPicture(*frame_view);
           },
           base::Unretained(this))));
 
@@ -358,6 +386,18 @@ PictureInPictureBrowserFrameView::PictureInPictureBrowserFrameView(
   show_close_button_animation_.set_delegate(this);
   hide_close_button_animation_.set_continuous(false);
   hide_close_button_animation_.set_delegate(this);
+
+#if !BUILDFLAG(IS_ANDROID)
+  // TODO(crbug.com/1464066): Get the auto pip settings UI when needed, rather
+  // than create it here.
+  const bool is_auto_pip = base::FeatureList::IsEnabled(
+      blink::features::kMediaSessionEnterPictureInPicture);
+  const bool is_setting_ask = true;
+  if (is_auto_pip && is_setting_ask) {
+    auto_pip_setting_overlay_ = AddChildView(
+        std::make_unique<AutoPipSettingOverlayView>(base::DoNothing()));
+  }
+#endif
 
 #if BUILDFLAG(IS_LINUX)
   frame_background_ = std::make_unique<views::FrameBackground>();
@@ -404,6 +444,52 @@ int PictureInPictureBrowserFrameView::GetTopInset(bool restored) const {
 
 int PictureInPictureBrowserFrameView::GetThemeBackgroundXInset() const {
   return 0;
+}
+
+void PictureInPictureBrowserFrameView::OnBrowserViewInitViewsComplete() {
+  BrowserNonClientFrameView::OnBrowserViewInitViewsComplete();
+
+#if BUILDFLAG(IS_WIN)
+  const gfx::Insets insets = GetClientAreaInsets(
+      MonitorFromWindow(HWNDForView(this), MONITOR_DEFAULTTONEAREST));
+#else
+  const gfx::Insets insets;
+#endif
+
+  const gfx::Size initial_browser_size =
+      browser_view()->browser()->override_bounds().size();
+  if (initial_browser_size.width() >=
+          GetMinimumSize().width() + insets.width() &&
+      initial_browser_size.height() >=
+          GetMinimumSize().height() + insets.height()) {
+    return;
+  }
+
+  const absl::optional<blink::mojom::PictureInPictureWindowOptions>
+      pip_options = browser_view()->GetDocumentPictureInPictureOptions();
+
+  if (!pip_options.has_value()) {
+    return;
+  }
+
+  // Get the current display. This is needed by
+  // |AdjustPictureInPictureWindowBounds| to determine the work area
+  // dimensions and the allowed maximum window size.
+  const BrowserWindow* const browser_window =
+      browser_view()->browser()->window();
+  const gfx::NativeWindow native_window =
+      browser_window ? browser_window->GetNativeWindow() : gfx::NativeWindow();
+  const display::Screen* const screen = display::Screen::GetScreen();
+  const display::Display display =
+      browser_window ? screen->GetDisplayNearestWindow(native_window)
+                     : screen->GetDisplayForNewWindows();
+
+  const gfx::Rect window_bounds =
+      PictureInPictureWindowManager::AdjustPictureInPictureWindowBounds(
+          pip_options.value(), display,
+          GetMinimumSize() + gfx::Size(insets.width(), insets.height()));
+
+  browser_view()->browser()->set_override_bounds(window_bounds);
 }
 
 gfx::Rect PictureInPictureBrowserFrameView::GetBoundsForClientView() const {
@@ -502,10 +588,17 @@ void PictureInPictureBrowserFrameView::OnThemeChanged() {
 }
 
 void PictureInPictureBrowserFrameView::Layout() {
-  auto border_thickness = FrameBorderInsets();
-  top_bar_container_view_->SetBoundsRect(
-      gfx::Rect(border_thickness.left(), border_thickness.top(),
-                width() - border_thickness.width(), kTopControlsHeight));
+  gfx::Rect content_area = GetLocalBounds();
+  content_area.Inset(FrameBorderInsets());
+  gfx::Rect top_bar = content_area;
+  top_bar.set_height(kTopControlsHeight);
+  top_bar_container_view_->SetBoundsRect(top_bar);
+#if !BUILDFLAG(IS_ANDROID)
+  if (auto_pip_setting_overlay_) {
+    auto_pip_setting_overlay_->SetBoundsRect(
+        gfx::SubtractRects(content_area, top_bar));
+  }
+#endif
 
   BrowserNonClientFrameView::Layout();
 }
@@ -526,6 +619,10 @@ void PictureInPictureBrowserFrameView::AddedToWidget() {
   hide_back_to_tab_button_animation_.SetContainer(animation_container);
   show_close_button_animation_.SetContainer(animation_container);
   hide_close_button_animation_.SetContainer(animation_container);
+
+  // TODO(https://crbug.com/1475419): Don't force dark mode once we support a
+  // light mode window.
+  GetWidget()->SetColorModeOverride(ui::ColorProviderKey::ColorMode::kDark);
 
   BrowserNonClientFrameView::AddedToWidget();
 }
@@ -643,9 +740,30 @@ LocationBarModel* PictureInPictureBrowserFrameView::GetLocationBarModel()
 
 ui::ImageModel PictureInPictureBrowserFrameView::GetLocationIcon(
     LocationIconView::Delegate::IconFetchedCallback on_icon_fetched) const {
+  ui::ColorId foreground_color_id = kColorOmniboxSecurityChipSecure;
+
+  if (OmniboxFieldTrial::IsChromeRefreshIconsEnabled()) {
+    // If we're animating between colors, use the current color value.
+    if (current_foreground_color_.has_value()) {
+      return ui::ImageModel::FromVectorIcon(
+          location_bar_model_->GetVectorIcon(), *current_foreground_color_,
+          kWindowIconImageSize);
+    }
+
+    foreground_color_id = (top_bar_color_animation_.GetCurrentValue() == 0)
+                              ? kColorPipWindowForegroundInactive
+                              : kColorPipWindowForeground;
+  }
+
   return ui::ImageModel::FromVectorIcon(location_bar_model_->GetVectorIcon(),
-                                        kColorOmniboxSecurityChipSecure,
+                                        foreground_color_id,
                                         kWindowIconImageSize);
+}
+
+absl::optional<ui::ColorId>
+PictureInPictureBrowserFrameView::GetLocationIconBackgroundColorOverride()
+    const {
+  return kColorPipWindowTopBarBackground;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -706,6 +824,14 @@ void PictureInPictureBrowserFrameView::OnWidgetDestroying(
 ///////////////////////////////////////////////////////////////////////////////
 // gfx::AnimationDelegate implementations:
 
+void PictureInPictureBrowserFrameView::AnimationEnded(
+    const gfx::Animation* animation) {
+  if (animation == &top_bar_color_animation_) {
+    current_foreground_color_ = absl::nullopt;
+    location_icon_view_->Update(/*suppress_animations=*/false);
+  }
+}
+
 void PictureInPictureBrowserFrameView::AnimationProgressed(
     const gfx::Animation* animation) {
   if (animation == &top_bar_color_animation_) {
@@ -716,6 +842,10 @@ void PictureInPictureBrowserFrameView::AnimationProgressed(
     window_title_->SetEnabledColor(color);
     for (ContentSettingImageView* view : content_setting_views_) {
       view->SetIconColor(color);
+    }
+    if (OmniboxFieldTrial::IsChromeRefreshIconsEnabled()) {
+      current_foreground_color_ = color;
+      location_icon_view_->Update(/*suppress_animations=*/false);
     }
     return;
   }
@@ -931,6 +1061,15 @@ gfx::ShadowValues PictureInPictureBrowserFrameView::GetShadowValues() {
   int elevation = ChromeLayoutProvider::Get()->GetShadowElevationMetric(
       views::Emphasis::kMaximum);
   return gfx::ShadowValue::MakeMdShadowValues(elevation);
+}
+#endif
+
+#if BUILDFLAG(IS_WIN)
+gfx::Insets PictureInPictureBrowserFrameView::GetClientAreaInsets(
+    HMONITOR monitor) const {
+  const int frame_thickness = ui::GetFrameThickness(monitor);
+  return gfx::Insets::TLBR(0, frame_thickness, frame_thickness,
+                           frame_thickness);
 }
 #endif
 

@@ -111,9 +111,7 @@ public class CustomTabActivityNavigationController
     private final Activity mActivity;
     private final DefaultBrowserProvider mDefaultBrowserProvider;
     private final ObservableSupplierImpl<Boolean> mBackPressStateSupplier =
-            new ObservableSupplierImpl<>() {
-                { set(false); }
-            };
+            new ObservableSupplierImpl<>(false);
 
     @Nullable
     private ToolbarManager mToolbarManager;
@@ -264,11 +262,13 @@ public class CustomTabActivityNavigationController
                 BackPressManager.record(BackPressHandler.Type.TAB_HISTORY);
                 return true;
             }
-        }
-        if (!BackPressManager.isEnabled()) {
             // If enabled, BackPressManager will record this internally. Otherwise, this should
             // be recorded manually.
             BackPressManager.record(BackPressHandler.Type.MINIMIZE_APP_AND_CLOSE_TAB);
+        } else if (BackPressManager.correctTabNavigationOnFallback()) {
+            if (mTabProvider.getTab().canGoBack()) {
+                return false;
+            }
         }
         if (mTabController.dispatchBeforeUnloadIfNeeded()) {
             MinimizeAppAndCloseTabBackPressHandler.record(MinimizeAppAndCloseTabType.CLOSE_TAB);

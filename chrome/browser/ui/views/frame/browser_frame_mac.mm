@@ -77,17 +77,17 @@ bool ShouldHandleKeyboardEvent(const content::NativeWebKeyboardEvent& event) {
 // Bridge Obj-C class for WindowTouchBarDelegate and
 // BrowserWindowTouchBarController.
 @interface BrowserWindowTouchBarViewsDelegate
-    : NSObject<WindowTouchBarDelegate> {
-  raw_ptr<Browser> _browser;  // Weak.
-  NSWindow* _window;  // Weak.
-  base::scoped_nsobject<BrowserWindowTouchBarController> _touchBarController;
-}
+    : NSObject <WindowTouchBarDelegate>
 
 - (BrowserWindowTouchBarController*)touchBarController;
 
 @end
 
-@implementation BrowserWindowTouchBarViewsDelegate
+@implementation BrowserWindowTouchBarViewsDelegate {
+  raw_ptr<Browser> _browser;
+  NSWindow* __weak _window;
+  BrowserWindowTouchBarController* __strong _touchBarController;
+}
 
 - (instancetype)initWithBrowser:(Browser*)browser window:(NSWindow*)window {
   if ((self = [super init])) {
@@ -99,14 +99,14 @@ bool ShouldHandleKeyboardEvent(const content::NativeWebKeyboardEvent& event) {
 }
 
 - (BrowserWindowTouchBarController*)touchBarController {
-  return _touchBarController.get();
+  return _touchBarController;
 }
 
 - (NSTouchBar*)makeTouchBar {
   if (!_touchBarController) {
-    _touchBarController.reset([[BrowserWindowTouchBarController alloc]
-        initWithBrowser:_browser
-                 window:_window]);
+    _touchBarController =
+        [[BrowserWindowTouchBarController alloc] initWithBrowser:_browser
+                                                          window:_window];
   }
   return [_touchBarController makeTouchBar];
 }
@@ -359,7 +359,6 @@ void BrowserFrameMac::PopulateCreateWindowParams(
                        NSWindowStyleMaskMiniaturizable |
                        NSWindowStyleMaskResizable;
 
-  base::scoped_nsobject<NativeWidgetMacNSWindow> ns_window;
   if (browser_view_->GetIsNormalType() || browser_view_->GetIsWebAppType()) {
     params->window_class = remote_cocoa::mojom::WindowClass::kBrowser;
     params->style_mask |= NSWindowStyleMaskFullSizeContentView;
@@ -383,10 +382,10 @@ void BrowserFrameMac::PopulateCreateWindowParams(
 NativeWidgetMacNSWindow* BrowserFrameMac::CreateNSWindow(
     const remote_cocoa::mojom::CreateWindowParams* params) {
   NativeWidgetMacNSWindow* ns_window = NativeWidgetMac::CreateNSWindow(params);
-  touch_bar_delegate_.reset([[BrowserWindowTouchBarViewsDelegate alloc]
+  touch_bar_delegate_ = [[BrowserWindowTouchBarViewsDelegate alloc]
       initWithBrowser:browser_view_->browser()
-               window:ns_window]);
-  [ns_window setWindowTouchBarDelegate:touch_bar_delegate_.get()];
+               window:ns_window];
+  [ns_window setWindowTouchBarDelegate:touch_bar_delegate_];
 
   return ns_window;
 }
@@ -400,9 +399,8 @@ BrowserFrameMac::GetRemoteCocoaApplicationHost() {
 
 void BrowserFrameMac::OnWindowInitialized() {
   if (auto* bridge = GetInProcessNSWindowBridge()) {
-    bridge->SetCommandDispatcher(
-        [[[ChromeCommandDispatcherDelegate alloc] init] autorelease],
-        [[[BrowserWindowCommandHandler alloc] init] autorelease]);
+    bridge->SetCommandDispatcher([[ChromeCommandDispatcherDelegate alloc] init],
+                                 [[BrowserWindowCommandHandler alloc] init]);
   } else {
     if (auto* host = GetHostForBrowser(browser_view_->browser())) {
       host->GetAppShim()->CreateCommandDispatcherForWidget(

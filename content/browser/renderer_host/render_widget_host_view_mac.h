@@ -5,16 +5,13 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_MAC_H_
 #define CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_MAC_H_
 
-#include "base/memory/raw_ptr.h"
-#include "third_party/blink/public/mojom/input/input_handler.mojom-forward.h"
-
 #import <Cocoa/Cocoa.h>
 
 #include <string>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "components/viz/common/surfaces/surface_id.h"
@@ -27,6 +24,7 @@
 #include "content/common/render_widget_host_ns_view.mojom.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom-forward.h"
 #include "third_party/blink/public/mojom/webshare/webshare.mojom.h"
 #include "third_party/blink/public/mojom/widget/record_content_to_visible_time_request.mojom-forward.h"
 #include "ui/accelerated_widget_mac/accelerated_widget_mac.h"
@@ -132,7 +130,8 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void UpdateCursor(const ui::Cursor& cursor) override;
   void DisplayCursor(const ui::Cursor& cursor) override;
   CursorManager* GetCursorManager() override;
-  void OnDidNavigateMainFrameToNewPage() override;
+  void DidNavigateMainFramePreCommit() override;
+  void DidEnterBackForwardCache() override;
   void SetIsLoading(bool is_loading) override;
   void RenderProcessGone() override;
   void ShowWithVisibility(PageVisibilityState page_visibility) final;
@@ -225,7 +224,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
                               RenderWidgetHostViewBase* updated_view) override;
   void OnImeCompositionRangeChanged(
       TextInputManager* text_input_manager,
-      RenderWidgetHostViewBase* updated_view) override;
+      RenderWidgetHostViewBase* updated_view,
+      bool character_bounds_changed,
+      const absl::optional<std::vector<gfx::Rect>>& line_bounds) override;
   void OnSelectionBoundsChanged(
       TextInputManager* text_input_manager,
       RenderWidgetHostViewBase* updated_view) override;
@@ -464,7 +465,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   // When inside a block of handling a keyboard event, returns the
   // RenderWidgetHostImpl to which all keyboard and Ime messages from the NSView
-  // should be fowarded. This exists to preserve historical behavior, and may
+  // should be forwarded. This exists to preserve historical behavior, and may
   // not be the desired behavior.
   // https://crbug.com/831843
   RenderWidgetHostImpl* GetWidgetForKeyboardEvent();
@@ -668,8 +669,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   // Remote accessibility objects corresponding to the NSWindow that this is
   // displayed to the user in.
-  base::scoped_nsobject<NSAccessibilityRemoteUIElement>
-      remote_window_accessible_;
+  NSAccessibilityRemoteUIElement* __strong remote_window_accessible_;
 
   // Used to force the NSApplication's focused accessibility element to be the
   // content::BrowserAccessibilityCocoa accessibility tree when the NSView for

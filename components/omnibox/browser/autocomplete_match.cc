@@ -25,6 +25,7 @@
 #include "components/omnibox/browser/actions/omnibox_action.h"
 #include "components/omnibox/browser/actions/omnibox_action_concepts.h"
 #include "components/omnibox/browser/actions/omnibox_action_in_suggest.h"
+#include "components/omnibox/browser/autocomplete_match_type.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
 #include "components/omnibox/browser/document_provider.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
@@ -306,7 +307,8 @@ AutocompleteMatch::AutocompleteMatch(const AutocompleteMatch& match)
       query_tiles(match.query_tiles),
       suggest_tiles(match.suggest_tiles),
       scoring_signals(match.scoring_signals),
-      culled_by_provider(match.culled_by_provider) {}
+      culled_by_provider(match.culled_by_provider),
+      shortcut_boosted(match.shortcut_boosted) {}
 
 AutocompleteMatch::AutocompleteMatch(AutocompleteMatch&& match) noexcept {
   *this = std::move(match);
@@ -363,6 +365,7 @@ AutocompleteMatch& AutocompleteMatch::operator=(
   suggest_tiles = std::move(match.suggest_tiles);
   scoring_signals = std::move(match.scoring_signals);
   culled_by_provider = std::move(match.culled_by_provider);
+  shortcut_boosted = std::move(match.shortcut_boosted);
 #if BUILDFLAG(IS_ANDROID)
   DestroyJavaObject();
   std::swap(java_match_, match.java_match_);
@@ -437,6 +440,7 @@ AutocompleteMatch& AutocompleteMatch::operator=(
   suggest_tiles = match.suggest_tiles;
   scoring_signals = match.scoring_signals;
   culled_by_provider = match.culled_by_provider;
+  shortcut_boosted = match.shortcut_boosted;
 
 #if BUILDFLAG(IS_ANDROID)
   // In case the target element previously held a java object, release it.
@@ -789,6 +793,11 @@ bool AutocompleteMatch::IsSearchType(Type type) {
          type == AutocompleteMatchType::SEARCH_OTHER_ENGINE ||
          type == AutocompleteMatchType::CALCULATOR ||
          type == AutocompleteMatchType::VOICE_SUGGEST ||
+#if BUILDFLAG(IS_ANDROID)
+         // iOS tests fail if Clipboard searches are annotated as searches.
+         type == AutocompleteMatchType::CLIPBOARD_TEXT ||
+         type == AutocompleteMatchType::CLIPBOARD_IMAGE ||
+#endif
          IsSpecializedSearchType(type);
 }
 
@@ -1021,6 +1030,11 @@ void AutocompleteMatch::LogSearchEngineUsed(
             : SEARCH_ENGINE_OTHER;
     UMA_HISTOGRAM_ENUMERATION("Omnibox.SearchEngineType", search_engine_type,
                               SEARCH_ENGINE_MAX);
+    if (template_url->created_by_policy()) {
+      UMA_HISTOGRAM_ENUMERATION(
+          "Omnibox.SearchEngineType.SetByEnterprisePolicy", search_engine_type,
+          SEARCH_ENGINE_MAX);
+    }
   }
 }
 
@@ -1271,6 +1285,11 @@ bool AutocompleteMatch::IsOnDeviceSearchSuggestion() const {
   return from_on_device_provider && subtypes.contains(271);
 }
 
+bool AutocompleteMatch::IsUrlScoringEligible() const {
+  return scoring_signals.has_value() &&
+         type != AutocompleteMatchType::URL_WHAT_YOU_TYPED;
+}
+
 void AutocompleteMatch::FilterOmniboxActions(
     const std::vector<OmniboxActionId>& allowed_action_ids) {
   // Short circuit if there's nothing to do.
@@ -1501,6 +1520,15 @@ void AutocompleteMatch::MergeScoringSignals(const AutocompleteMatch& other) {
   if (!other.scoring_signals.has_value()) {
     return;
   }
+
+  // Records the ACMatch type of the duplicate match when two or more matches
+  // with different ml scoring signals are merged.
+  const char kACMatchPropertyScoringSignalsMerged[] = "Scoring signals merged";
+  RecordAdditionalInfo(
+      kACMatchPropertyScoringSignalsMerged,
+      GetAdditionalInfo(kACMatchPropertyScoringSignalsMerged) +
+          AutocompleteMatchType::ToString(other.type) + ", " +
+          other.GetAdditionalInfo(kACMatchPropertyScoringSignalsMerged));
 
   if (!scoring_signals.has_value()) {
     scoring_signals = absl::make_optional<ScoringSignals>();

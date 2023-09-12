@@ -69,7 +69,6 @@ public class ReaderModeActionProviderTest {
     public void setUp() {
         MockitoAnnotations.initMocks(this);
         initializeReaderModeBackend();
-        DomDistillerTabUtils.setDistillerHeuristicsForTesting(null);
 
         mMockTab.getUserDataHost().setUserData(
                 ReaderModeManager.USER_DATA_KEY, mMockReaderModeManager);
@@ -86,7 +85,7 @@ public class ReaderModeActionProviderTest {
     private void setReaderModeBackendSignal(boolean isDistillable) {
         TabDistillabilityProvider tabDistillabilityProvider =
                 TabDistillabilityProvider.get(mMockTab);
-        tabDistillabilityProvider.onIsPageDistillableResult(isDistillable, true, false);
+        tabDistillabilityProvider.onIsPageDistillableResult(isDistillable, true, false, false);
     }
 
     @Test
