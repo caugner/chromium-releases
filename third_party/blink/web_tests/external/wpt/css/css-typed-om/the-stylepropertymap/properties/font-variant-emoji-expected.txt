@@ -4,9 +4,10 @@ FAIL Can set 'font-variant-emoji' to CSS-wide keywords: inherit Failed to execut
 FAIL Can set 'font-variant-emoji' to CSS-wide keywords: unset Failed to execute 'set' on 'StylePropertyMap': Invalid propertyName: font-variant-emoji
 FAIL Can set 'font-variant-emoji' to CSS-wide keywords: revert Failed to execute 'set' on 'StylePropertyMap': Invalid propertyName: font-variant-emoji
 FAIL Can set 'font-variant-emoji' to var() references:  var(--A) Failed to execute 'set' on 'StylePropertyMap': Invalid propertyName: font-variant-emoji
-FAIL Can set 'font-variant-emoji' to the 'auto' keyword: auto Failed to execute 'set' on 'StylePropertyMap': Invalid propertyName: font-variant-emoji
+FAIL Can set 'font-variant-emoji' to the 'normal' keyword: normal Failed to execute 'set' on 'StylePropertyMap': Invalid propertyName: font-variant-emoji
 FAIL Can set 'font-variant-emoji' to the 'text' keyword: text Failed to execute 'set' on 'StylePropertyMap': Invalid propertyName: font-variant-emoji
 FAIL Can set 'font-variant-emoji' to the 'emoji' keyword: emoji Failed to execute 'set' on 'StylePropertyMap': Invalid propertyName: font-variant-emoji
+FAIL Can set 'font-variant-emoji' to the 'unicode' keyword: unicode Failed to execute 'set' on 'StylePropertyMap': Invalid propertyName: font-variant-emoji
 PASS Setting 'font-variant-emoji' to a length: 0px throws TypeError
 PASS Setting 'font-variant-emoji' to a length: -3.14em throws TypeError
 PASS Setting 'font-variant-emoji' to a length: 3.14cm throws TypeError

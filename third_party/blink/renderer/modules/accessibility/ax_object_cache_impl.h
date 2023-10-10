@@ -159,10 +159,7 @@ class MODULES_EXPORT AXObjectCacheImpl
   //
 
   void SelectionChanged(Node*) override;
-  // Update reverse relation cache when aria-labelledby or aria-describedby
-  // point to the relation_source.
-  void UpdateReverseTextRelations(const AXObject* relation_source,
-                                  const Vector<String>& target_ids);
+
   // Effects a ChildrenChanged() on the passed-in object, if unignored,
   // otherwise, uses the first unignored ancestor. Returns the object that the
   // children changed occurs on.
@@ -237,11 +234,10 @@ class MODULES_EXPORT AXObjectCacheImpl
 
   void FocusableChangedWithCleanLayout(Node* node);
   void DocumentTitleChanged() override;
-  // Called when a layout tree for a node has just been attached, so we can make
-  // sure we have the right subclass of AXObject.
-  void UpdateCacheAfterNodeIsAttached(Node*) override;
-  // A DOM node was inserted , but does not necessarily have a layout tree.
-  void DidInsertChildrenOfNode(Node*) override;
+  // Called when a node is connected to the document.
+  void NodeIsConnected(Node*) override;
+  // Called when a node is attached to the layout tree.
+  void NodeIsAttached(Node*) override;
 
   void HandleAttributeChanged(const QualifiedName& attr_name,
                               Element*) override;
@@ -396,7 +392,7 @@ class MODULES_EXPORT AXObjectCacheImpl
   void HandleAriaPressedChangedWithCleanLayout(Node*);
   void HandleNodeLostFocusWithCleanLayout(Node*);
   void HandleNodeGainedFocusWithCleanLayout(Node*);
-  void UpdateCacheAfterNodeIsAttachedWithCleanLayout(Node*);
+  void NodeIsAttachedWithCleanLayout(Node*);
   void DidShowMenuListPopupWithCleanLayout(Node*);
   void DidHideMenuListPopupWithCleanLayout(Node*);
   void HandleScrollPositionChangedWithCleanLayout(Node*);
@@ -476,7 +472,7 @@ class MODULES_EXPORT AXObjectCacheImpl
     active_event_from_action_ = event_from_action;
   }
 
-  AXObject* GetActiveAriaModalDialog() const;
+  Element* GetActiveAriaModalDialog() const;
 
   static bool UseAXMenuList() { return use_ax_menu_list_; }
   static bool ShouldCreateAXMenuListFor(LayoutObject* layout_object);
@@ -547,12 +543,14 @@ class MODULES_EXPORT AXObjectCacheImpl
   void MarkDocumentDirty() override;
   void ResetSerializer() override;
   void MarkElementDirty(const Node*) override;
+  void MarkElementDirtyWithCleanLayout(const Node*);
 
   // TODO(accessibility) Create an a11y lifecyvcle that encompasses these.
   // Layout is clean and the cache is processing callbacks.
   bool IsProcessingDeferredEvents() const {
     return processing_deferred_events_;
   }
+  bool EntireDocumentIsDirty() const { return mark_all_dirty_; }
   // Returns true if UpdateTreeIfNeeded has been called and has not finished.
   bool UpdatingTree() { return updating_tree_; }
   // The document/cache are in the tear-down phase.
@@ -574,7 +572,6 @@ class MODULES_EXPORT AXObjectCacheImpl
       ax::mojom::blink::Action event_from_action =
           ax::mojom::blink::Action::kNone,
       const BlinkAXEventIntentsSet& event_intents = BlinkAXEventIntentsSet());
-  void LabelChangedWithCleanLayout(Node*);
   void IdChangedWithCleanLayout(Node*);
   void AriaOwnsChangedWithCleanLayout(Node*);
 
@@ -618,16 +615,17 @@ class MODULES_EXPORT AXObjectCacheImpl
         "blink::WebAXObject");
   };
 
-  // Calls UpdateTreeIfNeededOnce if NeedsUpdate is true on the root AXObject,
-  // and a second time if it is still true.
-  void UpdateTreeIfNeeded();
-  // Updates the AX tree once by walking from the root, calling AXObject::
+  // Updates the AX tree by walking from the root, calling AXObject::
   // UpdateChildrenIfNecessary on each AXObject for which NeedsUpdate is true.
   // This method is part of a11y-during-render, and in particular transitioning
   // to an eager (as opposed to lazy) AX tree update pattern. See
   // https://bugs.chromium.org/p/chromium/issues/detail?id=1342801#c12 for more
   // details.
-  void UpdateTreeIfNeededOnce();
+  void UpdateTreeIfNeeded();
+
+  // Make sure a relation cache exists and is initialized. Mst be called with
+  // clean layout.
+  void EnsureRelationCache();
 
   // Create an AXObject, and do not check if a previous one exists.
   // Also, initialize the object and add it to maps for later retrieval.
@@ -710,15 +708,15 @@ class MODULES_EXPORT AXObjectCacheImpl
     kEditableTextContentChanged = 8,
     kFocusableChanged = 9,
     kIdChanged = 10,
-    kLabelChanged = 11,
-    kMarkDirtyFromHandleLayout = 12,
-    kMarkDirtyFromHandleScroll = 13,
-    kMarkDirtyFromRemove = 14,
-    kNameAttributeChanged = 15,
-    kNodeGainedFocus = 16,
-    kNodeLostFocus = 17,
-    kPostNotificationFromHandleLoadComplete = 18,
-    kPostNotificationFromHandleLoadStart = 19,
+    kMarkDirtyFromHandleLayout = 11,
+    kMarkDirtyFromHandleScroll = 12,
+    kMarkDirtyFromRemove = 13,
+    kNameAttributeChanged = 14,
+    kNodeGainedFocus = 15,
+    kNodeLostFocus = 16,
+    kPostNotificationFromHandleLoadComplete = 17,
+    kPostNotificationFromHandleLoadStart = 18,
+    kPostNotificationFromHandleScrolledToAnchor = 19,
     kRemoveValidationMessageObjectFromFocusedUIElement = 20,
     kRemoveValidationMessageObjectFromValidationMessageObject = 21,
     kRoleChangeFromAriaHasPopup = 22,
@@ -726,14 +724,15 @@ class MODULES_EXPORT AXObjectCacheImpl
     kRoleMaybeChangedFromEventListener = 24,
     kRoleMaybeChangedFromHref = 25,
     kSectionOrRegionRoleMaybeChangedFromLabel = 26,
-    kSectionOrRegionRoleMaybeChangedFromTitle = 27,
-    kTextChangedFromTextChangedNode = 28,
-    kTextMarkerDataAdded = 29,
-    kUpdateActiveMenuOption = 30,
-    kUpdateCacheAfterNodeIsAttached = 31,
-    kUpdateTableRole = 32,
-    kUseMapAttributeChanged = 33,
-    kValidationMessageVisibilityChanged = 34,
+    kSectionOrRegionRoleMaybeChangedFromLabelledBy = 27,
+    kSectionOrRegionRoleMaybeChangedFromTitle = 28,
+    kTextChangedFromTextChangedNode = 29,
+    kTextMarkerDataAdded = 30,
+    kUpdateActiveMenuOption = 31,
+    kNodeIsAttached = 32,
+    kUpdateTableRole = 33,
+    kUseMapAttributeChanged = 34,
+    kValidationMessageVisibilityChanged = 35,
 
     // These updates are associated with an AXID:
     kChildrenChanged = 100,
@@ -789,7 +788,6 @@ class MODULES_EXPORT AXObjectCacheImpl
       ax::mojom::blink::EventFrom event_from,
       ax::mojom::blink::Action event_from_action);
   void MarkAXSubtreeDirty(AXObject*);
-  void MarkElementDirtyWithCleanLayout(const Node*);
   void MarkDocumentDirtyWithCleanLayout();
 
   // Given an object to mark dirty or fire an event on, return an object
@@ -823,7 +821,7 @@ class MODULES_EXPORT AXObjectCacheImpl
   // The currently active aria-modal dialog element, if one has been computed,
   // null if otherwise. This is only ever computed on platforms that have the
   // AriaModalPrunesAXTree setting enabled, such as Mac.
-  WeakMember<AXObject> active_aria_modal_dialog_;
+  WeakMember<Element> active_aria_modal_dialog_;
 
   // If non-null, this is the node that the current aria-activedescendant caused
   // to have the selected state.
@@ -936,7 +934,7 @@ class MODULES_EXPORT AXObjectCacheImpl
 
   // This will return null on platforms without the AriaModalPrunesAXTree
   // setting enabled, or where there is no active ancestral aria-modal dialog.
-  AXObject* AncestorAriaModalDialog(Node* node);
+  Element* AncestorAriaModalDialog(Node* node);
 
   // Ensure the update has not been destroyed (node or axid) and
   // that the document being processed is the one this update is associated
@@ -1060,7 +1058,8 @@ class MODULES_EXPORT AXObjectCacheImpl
       render_accessibility_host_;
 
   Member<BlinkAXTreeSource> ax_tree_source_;
-  std::unique_ptr<ui::AXTreeSerializer<AXObject*>> ax_tree_serializer_;
+  std::unique_ptr<ui::AXTreeSerializer<AXObject*, HeapVector<Member<AXObject>>>>
+      ax_tree_serializer_;
 
   HeapDeque<Member<AXDirtyObject>> dirty_objects_;
 

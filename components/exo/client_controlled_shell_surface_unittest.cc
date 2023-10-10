@@ -1976,12 +1976,30 @@ TEST_P(ClientControlledShellSurfaceTest, PipWindowDragDoesNotAnimate) {
   EXPECT_EQ(gfx::Rect(8, 8, 256, 256), window->layer()->bounds());
   ui::ScopedAnimationDurationScaleMode animation_scale_mode(
       ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
-  std::unique_ptr<ash::WindowResizer> resizer(ash::CreateWindowResizer(
-      window, gfx::PointF(), HTCAPTION, ::wm::WINDOW_MOVE_SOURCE_MOUSE));
-  resizer->Drag(gfx::PointF(10, 10), 0);
-  EXPECT_EQ(gfx::Rect(18, 18, 256, 256), window->layer()->GetTargetBounds());
-  EXPECT_EQ(gfx::Rect(18, 18, 256, 256), window->layer()->bounds());
-  resizer->CompleteDrag();
+
+  {
+    // Move the window with a drag.
+    std::unique_ptr<ash::WindowResizer> resizer(ash::CreateWindowResizer(
+        window, gfx::PointF(), HTCAPTION, ::wm::WINDOW_MOVE_SOURCE_MOUSE));
+    resizer->Drag(gfx::PointF(10, 10), 0);
+
+    // Make sure that the animation is turned off during drag move.
+    EXPECT_FALSE(window->layer()->GetAnimator()->is_animating());
+    EXPECT_EQ(gfx::Rect(18, 18, 256, 256), window->layer()->GetTargetBounds());
+    EXPECT_EQ(gfx::Rect(18, 18, 256, 256), window->layer()->bounds());
+    resizer->CompleteDrag();
+  }
+  {
+    // Resize the window with a drag.
+    std::unique_ptr<ash::WindowResizer> resizer(ash::CreateWindowResizer(
+        window, gfx::PointF(), HTRIGHT, ::wm::WINDOW_MOVE_SOURCE_MOUSE));
+    resizer->Drag(gfx::PointF(100, 0), 0);
+
+    // Make sure that animation is turned off during drag resize.
+    EXPECT_FALSE(window->layer()->GetAnimator()->is_animating());
+    EXPECT_EQ(window->layer()->GetTargetBounds(), window->layer()->bounds());
+    resizer->CompleteDrag();
+  }
 }
 
 TEST_P(ClientControlledShellSurfaceTest,
@@ -2490,6 +2508,56 @@ TEST_P(ClientControlledShellSurfaceTest, SupportsFloatedState) {
         exo::test::ShellSurfaceBuilder().BuildClientControlledShellSurface();
     auto* const window = shell_surface->GetWidget()->GetNativeWindow();
     EXPECT_TRUE(chromeos::wm::CanFloatWindow(window));
+  }
+}
+
+// Test if the surface bounds is correctly set when the scale factor is not
+// explicitly set.
+TEST_P(ClientControlledShellSurfaceTest,
+       SetBoundsWithoutExplicitScaleFactorSet) {
+  UpdateDisplay("800x600*2");
+  aura::Window::Windows root_windows = ash::Shell::GetAllRootWindows();
+
+  const auto primary_display_id =
+      display::Screen::GetScreen()->GetPrimaryDisplay().id();
+
+  const gfx::Size buffer_size(64, 64);
+  std::unique_ptr<Buffer> buffer(
+      new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
+
+  const gfx::Rect bounds_dp(64, 64, 128, 128);
+  const gfx::Rect bounds_px_for_2x = gfx::ScaleToRoundedRect(bounds_dp, 2);
+  {
+    // Set display id, bounds origin, bounds size at the same time via
+    // SetBounds method.
+    auto shell_surface = test::ShellSurfaceBuilder()
+                             .SetNoCommit()
+                             .BuildClientControlledShellSurface();
+    auto* const surface = shell_surface->root_surface();
+
+    shell_surface->SetBounds(primary_display_id, bounds_px_for_2x);
+    surface->Attach(buffer.get());
+    surface->Commit();
+
+    const auto* window = shell_surface->GetWidget()->GetNativeWindow();
+    EXPECT_EQ(bounds_dp, window->GetBoundsInRootWindow());
+  }
+  {
+    // Set display id and bounds origin at the same time via SetBoundsOrigin
+    // method, and set bounds size separately.
+    auto shell_surface = test::ShellSurfaceBuilder()
+                             .SetNoCommit()
+                             .BuildClientControlledShellSurface();
+    auto* const surface = shell_surface->root_surface();
+
+    shell_surface->SetBoundsOrigin(primary_display_id,
+                                   bounds_px_for_2x.origin());
+    shell_surface->SetBoundsSize(bounds_px_for_2x.size());
+    surface->Attach(buffer.get());
+    surface->Commit();
+
+    const auto* window = shell_surface->GetWidget()->GetNativeWindow();
+    EXPECT_EQ(bounds_dp, window->GetBoundsInRootWindow());
   }
 }
 
