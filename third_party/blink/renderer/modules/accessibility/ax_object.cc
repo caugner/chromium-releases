@@ -239,6 +239,7 @@ bool IsValidRole(ax::mojom::blink::Role role) {
     case ax::mojom::blink::Role::kPane:
     case ax::mojom::blink::Role::kPdfActionableHighlight:
     case ax::mojom::blink::Role::kPdfRoot:
+    case ax::mojom::blink::Role::kPreDeprecated:
     case ax::mojom::blink::Role::kTableHeaderContainer:
     case ax::mojom::blink::Role::kTitleBar:
     case ax::mojom::blink::Role::kUnknown:
@@ -607,10 +608,10 @@ void AXObject::SetHasDirtyDescendants(bool dirty) const {
 }
 
 void AXObject::SetAncestorsHaveDirtyDescendants() const {
-  DCHECK(!IsDetached());
-  DCHECK(!AXObjectCache().HasBeenDisposed());
-  DCHECK(!AXObjectCache().IsFrozen());
-  DCHECK(!AXObjectCache().UpdatingTree());
+  CHECK(!IsDetached());
+  CHECK(!AXObjectCache().HasBeenDisposed());
+  CHECK(!AXObjectCache().IsFrozen());
+  CHECK(!AXObjectCache().UpdatingTree());
 
   if (!RuntimeEnabledFeatures::AccessibilityEagerAXTreeUpdateEnabled()) {
     return;
@@ -628,18 +629,6 @@ void AXObject::SetAncestorsHaveDirtyDescendants() const {
     // Need at least the root object to be flagged in order for
     // UpdateTreeIfNeeded() to do anything.
     SetHasDirtyDescendants(true);
-    return;
-  }
-
-  if (AXObjectCache().EntireDocumentIsDirty()) {
-    // No need to walk parent chain when marking the entire document dirty,
-    // as every node will have the bit set. In addition, attempting to repair
-    // the parent chain while marking everything dirty is actually against
-    // the point, because all child-parent relationships will be rebuilt
-    // from the top down.
-    if (LastKnownIsIncludedInTreeValue()) {
-      SetHasDirtyDescendants(true);
-    }
     return;
   }
 
@@ -708,6 +697,7 @@ void AXObject::Init(AXObject* parent) {
                    << "\n* Parent = " << parent_->ToString(true, true)
                    << "\n* Equal to passed-in parent? " << (parent == parent_);
   DCHECK(!is_initializing_);
+  CHECK(!AXObjectCache().IsFrozen());
   base::AutoReset<bool> reentrancy_protector(&is_initializing_, true);
 #endif  // DCHECK_IS_ON()
   // The role must be determined immediately.
@@ -782,6 +772,11 @@ void AXObject::Init(AXObject* parent) {
 }
 
 void AXObject::Detach() {
+#if DCHECK_IS_ON()
+  DCHECK(!is_updating_cached_values_)
+      << "Don't detach in the middle of updating cached values: "
+      << ToString(true, true);
+#endif
   // Prevents LastKnown*() methods from returning the wrong values.
   cached_is_ignored_ = true;
   cached_is_ignored_but_included_in_tree_ = false;
@@ -905,11 +900,21 @@ bool AXObject::IsMissingParent() const {
     // the tree, and without a parent, for potential later reuse.
     // TODO(accessibility) This is ugly. Consider destroying validation message
     // objects between uses instead. See GetOrCreateValidationMessageObject().
-    return !IsRoot() && !IsValidationMessage();
+    bool is_missing = !IsRoot() && !IsValidationMessage();
+    // TODO(accessibility) Restore this check. Removed so that we can ship 119.
+    // CHECK(!is_missing || !AXObjectCache().IsFrozen())
+    //     << "Should not have missing parent in frozen tree: "
+    //     << ToString(true, true);
+    return is_missing;
   }
 
-  if (parent_->IsDetached())
+  if (parent_->IsDetached()) {
+    CHECK(!AXObjectCache().IsFrozen())
+        << "Should not have detached parent in frozen tree: "
+        << ToString(true, true);
+
     return true;
+  }
 
   return false;
 }
@@ -918,7 +923,14 @@ void AXObject::RepairMissingParent() const {
   DCHECK(IsMissingParent());
   DCHECK(!AXObjectCache().HasBeenDisposed());
 
-  SetParent(ComputeParent());
+  AXObject* new_parent = ComputeParent();
+  if (!new_parent) {
+    // If no parent is possible, this is no longer part of the tree.
+    AXObjectCache().RemoveSubtreeWhenSafe(GetNode(), /* remove_root */ true);
+    return;
+  }
+
+  SetParent(new_parent);
 
   SANITIZER_CHECK(!parent_ ||
                   parent_->RoleValue() != ax::mojom::blink::Role::kIframe ||
@@ -1535,17 +1547,6 @@ void AXObject::PopulateAXRelativeBounds(ui::AXRelativeBounds& bounds,
     bounds.transform = std::make_unique<gfx::Transform>(container_transform);
 }
 
-void AXObject::MarkAllImageAXObjectsDirty() {
-  if (RoleValue() == ax::mojom::blink::Role::kImage) {
-    AXObjectCache().MarkAXObjectDirtyWithCleanLayoutAndEvent(
-        this, ax::mojom::blink::EventFrom::kNone,
-        ax::mojom::Action::kAnnotatePageImages);
-  }
-
-  for (auto& child : UnignoredChildren())
-    child->MarkAllImageAXObjectsDirty();
-}
-
 void AXObject::SerializeActionAttributes(ui::AXNodeData* node_data) {
   if (CanSetValueAttribute())
     node_data->AddAction(ax::mojom::blink::Action::kSetValue);
@@ -2033,15 +2034,6 @@ void AXObject::SerializeOtherScreenReaderAttributes(
     node_data->AddBoolAttribute(ax::mojom::blink::BoolAttribute::kModal,
                                 IsModal());
   }
-
-  // aria-dropeffect is deprecated in WAI-ARIA 1.1.
-  Vector<ax::mojom::blink::Dropeffect> dropeffects;
-  Dropeffects(dropeffects);
-  if (!dropeffects.empty()) {
-    for (auto&& dropeffect : dropeffects) {
-      node_data->AddDropeffect(dropeffect);
-    }
-  }
 }
 
 void AXObject::SerializeScrollAttributes(ui::AXNodeData* node_data) {
@@ -2264,12 +2256,6 @@ void AXObject::SerializeUnignoredAttributes(ui::AXNodeData* node_data,
 
   if (IsDefault())
     node_data->AddState(ax::mojom::blink::State::kDefault);
-
-  // aria-grabbed is deprecated in WAI-ARIA 1.1.
-  if (IsGrabbed() != kGrabbedStateUndefined) {
-    node_data->AddBoolAttribute(ax::mojom::blink::BoolAttribute::kGrabbed,
-                                IsGrabbed() == kGrabbedStateTrue);
-  }
 
   if (IsHovered())
     node_data->AddState(ax::mojom::blink::State::kHovered);
@@ -2996,10 +2982,6 @@ bool AXObject::IsFocused() const {
   return false;
 }
 
-AccessibilityGrabbedState AXObject::IsGrabbed() const {
-  return kGrabbedStateUndefined;
-}
-
 bool AXObject::IsHovered() const {
   return false;
 }
@@ -3057,6 +3039,7 @@ bool AXObject::IsVisited() const {
 }
 
 bool AXObject::AccessibilityIsIgnored() const {
+  CHECK(CanAccessCachedValues());
   UpdateCachedAttributeValuesIfNeeded();
 #if defined(AX_FAIL_FAST_BUILD)
   if (!cached_is_ignored_ && IsDetached()) {
@@ -3074,6 +3057,8 @@ bool AXObject::AccessibilityIsIgnored() const {
 }
 
 bool AXObject::AccessibilityIsIgnoredButIncludedInTree() const {
+  CHECK(CanAccessCachedValues());
+
   UpdateCachedAttributeValuesIfNeeded();
   return cached_is_ignored_but_included_in_tree_;
 }
@@ -3081,7 +3066,14 @@ bool AXObject::AccessibilityIsIgnoredButIncludedInTree() const {
 // AccessibilityIsIncludedInTree should be true for all nodes that should be
 // included in the tree, even if they are ignored
 bool AXObject::AccessibilityIsIncludedInTree() const {
+  CHECK(CanAccessCachedValues());
+
   return !AccessibilityIsIgnored() || AccessibilityIsIgnoredButIncludedInTree();
+}
+
+bool AXObject::CanAccessCachedValues() const {
+  return IsDetached() || !NeedsToUpdateCachedValues() ||
+         !AXObjectCache().IsFrozen();
 }
 
 void AXObject::InvalidateCachedValues() {
@@ -3138,8 +3130,9 @@ void AXObject::UpdateCachedAttributeValuesIfNeeded(
       << GetDocument()->Lifecycle().ToString();
 #endif  // DCHECK_IS_ON()
 
-  if (IsMissingParent())
+  if (IsMissingParent()) {
     RepairMissingParent();
+  }
 
   // Mock objects are created by, owned and dependent on their parents.
   // If the mock object's values change, recompute the parent's as well.
@@ -3167,7 +3160,9 @@ void AXObject::UpdateCachedAttributeValuesIfNeeded(
   if (cached_is_inert_ != is_inert ||
       cached_is_aria_hidden_ != is_aria_hidden) {
     // Update children if not already dirty (e.g. during Init() time.
-    SetNeedsToUpdateChildren();
+    if (CanHaveChildren()) {
+      SetNeedsToUpdateChildren();
+    }
     cached_is_inert_ = is_inert;
     cached_is_aria_hidden_ = is_aria_hidden;
   }
@@ -3340,6 +3335,8 @@ bool AXObject::ShouldIgnoreForHiddenOrInert(
 // In practice, it does not matter because nodes in display:none subtrees are
 // marked ignored either way.
 bool AXObject::IsInert() const {
+  CHECK(CanAccessCachedValues());
+
   UpdateCachedAttributeValuesIfNeeded();
   return cached_is_inert_;
 }
@@ -3441,6 +3438,8 @@ bool AXObject::ComputeIsInert(IgnoredReasons* ignored_reasons) const {
 }
 
 bool AXObject::IsAriaHidden() const {
+  CHECK(CanAccessCachedValues());
+
   UpdateCachedAttributeValuesIfNeeded();
   return cached_is_aria_hidden_;
 }
@@ -3503,7 +3502,7 @@ bool AXObject::IsBlockedByAriaModalDialog(
     return false;
   }
 
-  if (!GetNode() || GetNode()->IsPseudoElement()) {
+  if ((!GetNode() || GetNode()->IsPseudoElement()) && ParentObject()) {
     return ParentObject()->IsBlockedByAriaModalDialog();
   }
 
@@ -3639,6 +3638,8 @@ bool AXObject::DispatchEventToAOMEventListeners(Event& event) {
 }
 
 bool AXObject::IsDescendantOfDisabledNode() const {
+  CHECK(CanAccessCachedValues());
+
   UpdateCachedAttributeValuesIfNeeded();
   return cached_is_descendant_of_disabled_node_;
 }
@@ -4072,42 +4073,40 @@ bool AXObject::IsFocusableStyleUsingBestAvailableState() const {
 }
 
 bool AXObject::CanSetFocusAttribute() const {
+  CHECK(CanAccessCachedValues());
+
   UpdateCachedAttributeValuesIfNeeded();
   return cached_can_set_focus_attribute_;
 }
 
-// This does not use Element::IsFocusable(), as that can sometimes recalculate
-// styles because of IsFocusableStyle() check, resetting the document lifecycle.
+// TODO(accessibility) Look at reusing Element::IsFocusable() or
+// AXObject::IsKeyboardFocusable(). As long as we guard against style recalc by
+// returning early if IsHiddenViaStyle() is true, we can call
+// Element::IsKeyboardFocusable(), which would otherwise recalculate style at an
+// awkward time.
 bool AXObject::ComputeCanSetFocusAttribute() const {
   DCHECK(!IsDetached());
   DCHECK(GetDocument());
+
+  // Focusable: web area -- this is the only focusable non-element. Web areas
+  // inside portals are not focusable though (portal contents cannot get focus).
+  if (IsWebArea()) {
+    return true;
+  }
 
   // Objects within a portal are not focusable.
   // Note that they are ignored but can be included in the tree.
   bool inside_portal =
       GetDocument()->GetPage() && GetDocument()->GetPage()->InsidePortal();
-  if (inside_portal)
-    return false;
-
-  // The portal itself is focusable. Portals are treated as buttons in platform
-  // APIs, hiding their subtree.
-  if (RoleValue() == ax::mojom::blink::Role::kPortal)
-    return true;
-
-  // Display-locked nodes that have content-visibility: hidden are not exposed
-  // to accessibility in any way, so they are not focusable. Note that for
-  // content-visibility: auto cases, `ShouldIgnoreNodeDueToDisplayLock()` would
-  // return false, since we're not ignoring the element in that case.
-  if (GetNode() &&
-      DisplayLockUtilities::ShouldIgnoreNodeDueToDisplayLock(
-          *GetNode(), DisplayLockActivationReason::kAccessibility)) {
+  if (inside_portal) {
     return false;
   }
 
-  // Focusable: web area -- this is the only focusable non-element. Web areas
-  // inside portals are not focusable though (portal contents cannot get focus).
-  if (IsWebArea())
+  // The portal itself is focusable. Portals are treated as buttons in platform
+  // APIs, hiding their subtree.
+  if (RoleValue() == ax::mojom::blink::Role::kPortal) {
     return true;
+  }
 
   // NOT focusable: objects with no DOM node, e.g. extra layout blocks inserted
   // as filler, or objects where the node is not an element, such as a text
@@ -4122,8 +4121,9 @@ bool AXObject::ComputeCanSetFocusAttribute() const {
 
   // NOT focusable: child tree owners (it's the content area that will be marked
   // focusable in the a11y tree).
-  if (IsChildTreeOwner())
+  if (IsChildTreeOwner()) {
     return false;
+  }
 
   // NOT focusable: disabled form controls.
   if (IsDisabledFormControl(elem))
@@ -4133,8 +4133,26 @@ bool AXObject::ComputeCanSetFocusAttribute() const {
   // unless they are part of a <datalist>, in which case they can be displayed
   // by the browser process, but not the renderer.
   // TODO(crbug.com/1399852) Address gaps in datalist a11y.
-  if (auto* option = DynamicTo<HTMLOptionElement>(elem))
+  if (auto* option = DynamicTo<HTMLOptionElement>(elem)) {
     return !option->OwnerDataListElement();
+  }
+
+  // Invisible nodes are never focusable.
+  // We already have these cached, so it's a very quick check.
+  // This also prevents implementations of Element::SupportsFocus()
+  // from trying to update style on descendants of content-visibility:hidden
+  // nodes, or display:none nodes, which are the only nodes that don't have
+  // updated style at this point.
+  if (cached_is_hidden_via_style_) {
+    return false;
+  }
+
+  // At this point, all nodes should have updated style. If they don't, it can
+  // cause crashes such as the one at crbug.com/1485059 when
+  // Element::SupportsFocus() calls IsFocusableStyleAfterUpdate() and
+  // the element doesn't have updated style yet, causing layout to update,
+  // resulting in unwanted recursion into ProcessDeferredAccessibilityEvents().
+  CHECK(!elem->NeedsStyleRecalc());
 
   // NOT focusable: hidden elements.
   // TODO(aleventhal) Consider caching visibility when it's safe to compute.
@@ -4149,28 +4167,40 @@ bool AXObject::ComputeCanSetFocusAttribute() const {
   return false;
 }
 
-// We can't use `Element::IsKeyboardFocusable()` since the downstream
-// `Element::IsFocusableStyle()` call will reset the document lifecycle.
-// TODO(crbug.com/1444450) This should be replaced with just a call to
-// element->IsKeyboardFocusable(). This function can be guarded by a
-// DocumentLifecycle::DisallowTransitionScope().
 bool AXObject::IsKeyboardFocusable() const {
-  if (!CanSetFocusAttribute())
+  auto* document = GetDocument();
+  auto* element = GetElement();
+  if (!document || !element) {
     return false;
+  }
+  DocumentLifecycle::DisallowTransitionScope scope(document->Lifecycle());
+  if (IsA<HTMLFrameOwnerElement>(element)) {
+    // TODO(crbug.com/1444450) Frame owner elements return true for
+    // IsFocusable(), because the logic in focus_controller.cc requires them to
+    // be focusable in order to find them and navigate to their contents.
+    // However, frames are not actually focusable. Remove this special-case once
+    // frame owner elements have SupportsFocus() == false.
+    return false;
+  }
 
-  Element* element = GetElement();
-  if (!element) {
-    // TODO(crbug.com/1480563) It is possible to reach this line, though it
-    // isn't clear how. See the linked bug for crash reports. Since we would
-    // prefer not to crash in this case, return false here instead.
-    LOG(ERROR) << "Cannot be focusable without an element: "
-               << ToString(true, true);
+  // Invisible/inert nodes are never focusable.
+  // We already have these cached, so it's a very quick check.
+  // This also prevents implementations of Element::IsKeyboardFocusable()
+  // from trying to update style on descendants of content-visibility:hidden
+  // nodes, or display:none nodes, which are the only nodes that don't have
+  // updated style at this point.
+  if (IsHiddenViaStyle() || IsInert()) {
     return false;
   }
-  if (element->IsScrollableContainerThatShouldBeKeyboardFocusable()) {
-    return true;
-  }
-  return element->tabIndex() >= 0 || IsRootEditableElement(*element);
+
+  // At this point, all nodes should have updated style. If they don't, it can
+  // cause crashes such as the one at crbug.com/1485059 when
+  // Element::IsKeyboardFocusable() calls IsFocusableStyleAfterUpdate() and
+  // the element doesn't have updated style yet, causing layout to update,
+  // resulting in unwanted recursion into ProcessDeferredAccessibilityEvents().
+  CHECK(!element->NeedsStyleRecalc());
+
+  return element->IsKeyboardFocusable();
 }
 
 bool AXObject::CanSetSelectedAttribute() const {
@@ -4416,6 +4446,8 @@ bool AXObject::ComputeIsHiddenViaStyle(const ComputedStyle* style) const {
 }
 
 bool AXObject::IsHiddenViaStyle() const {
+  CHECK(CanAccessCachedValues());
+
   UpdateCachedAttributeValuesIfNeeded();
   return cached_is_hidden_via_style_;
 }
@@ -5186,6 +5218,8 @@ bool AXObject::IsRichlyEditable() const {
 }
 
 AXObject* AXObject::LiveRegionRoot() const {
+  CHECK(CanAccessCachedValues());
+
   UpdateCachedAttributeValuesIfNeeded();
   return cached_live_region_root_;
 }
@@ -5202,12 +5236,16 @@ bool AXObject::LiveRegionAtomic() const {
 }
 
 const AtomicString& AXObject::ContainerLiveRegionStatus() const {
+  CHECK(CanAccessCachedValues());
+
   UpdateCachedAttributeValuesIfNeeded();
   return cached_live_region_root_ ? cached_live_region_root_->LiveRegionStatus()
                                   : g_null_atom;
 }
 
 const AtomicString& AXObject::ContainerLiveRegionRelevant() const {
+  CHECK(CanAccessCachedValues());
+
   UpdateCachedAttributeValuesIfNeeded();
   return cached_live_region_root_
              ? cached_live_region_root_->LiveRegionRelevant()
@@ -5215,12 +5253,16 @@ const AtomicString& AXObject::ContainerLiveRegionRelevant() const {
 }
 
 bool AXObject::ContainerLiveRegionAtomic() const {
+  CHECK(CanAccessCachedValues());
+
   UpdateCachedAttributeValuesIfNeeded();
   return cached_live_region_root_ &&
          cached_live_region_root_->LiveRegionAtomic();
 }
 
 bool AXObject::ContainerLiveRegionBusy() const {
+  CHECK(CanAccessCachedValues());
+
   UpdateCachedAttributeValuesIfNeeded();
   return cached_live_region_root_ &&
          cached_live_region_root_->AOMPropertyOrARIAAttributeIsTrue(
@@ -5592,15 +5634,22 @@ AXObject* AXObject::UnignoredPreviousInPreOrder() const {
 }
 
 AXObject* AXObject::ParentObject() const {
-  if (IsDetached())
+  if (IsDetached()) {
     return nullptr;
+  }
 
   // This can happen when an object in the middle of the tree is suddenly
   // detached, but the children still exist. One example of this is when
   // a <select size="1"> changes to <select size="2">, where the
   // Role::kMenuListPopup is detached.
-  if (IsMissingParent())
+  if (IsMissingParent()) {
     RepairMissingParent();
+    // If the parent cannot be repaired, the entire subtree rooted at this node
+    // will be detached.
+    if (IsDetached()) {
+      return nullptr;
+    }
+  }
 
   return parent_;
 }
@@ -5728,6 +5777,7 @@ void AXObject::UpdateChildrenIfNecessary() {
   }
 #endif
 
+  CHECK(!cached_values_need_update_ || !AXObjectCache().IsFrozen());
   UpdateCachedAttributeValuesIfNeeded();
 
   AddChildren();
@@ -5738,14 +5788,14 @@ bool AXObject::NeedsToUpdateChildren() const {
 }
 
 void AXObject::SetNeedsToUpdateChildren() const {
-  DCHECK(!IsDetached()) << "Cannot update children on a detached node: "
-                        << ToString(true, true);
-  DCHECK(!AXObjectCache().IsFrozen());
-  DCHECK(!AXObjectCache().HasBeenDisposed());
+  CHECK(!IsDetached()) << "Cannot update children on a detached node: "
+                       << ToString(true, true);
+  CHECK(!AXObjectCache().IsFrozen());
+  CHECK(!AXObjectCache().HasBeenDisposed());
   if (children_dirty_) {
     return;
   }
-  DCHECK(!AXObjectCache().UpdatingTree());
+  CHECK(!AXObjectCache().UpdatingTree());
   children_dirty_ = true;
   ClearChildren();
   SetAncestorsHaveDirtyDescendants();
@@ -5774,8 +5824,9 @@ bool AXObject::ShouldDestroyWhenDetachingFromParent() const {
     return true;
   }
 
+  // Image map children are entirely dependent on the parent image.
   if (CachedParentObject() &&
-      CachedParentObject()->RoleValue() == ax::mojom::blink::Role::kImage) {
+      IsA<HTMLImageElement>(CachedParentObject()->GetNode())) {
     return true;
   }
 
@@ -5783,6 +5834,11 @@ bool AXObject::ShouldDestroyWhenDetachingFromParent() const {
 }
 
 void AXObject::DetachFromParent() {
+  if (IsDetached()) {
+    return;
+  }
+  CHECK(!AXObjectCache().IsFrozen())
+      << "Do not detach parent while tree is frozen: " << ToString(true, true);
   if (ShouldDestroyWhenDetachingFromParent()) {
     AXObjectCache().RemoveIncludedSubtree(this, /* remove_root */ true);
   }
@@ -5790,8 +5846,9 @@ void AXObject::DetachFromParent() {
 }
 
 void AXObject::ClearChildren() const {
-  DCHECK(!IsDetached());
-  DCHECK(!AXObjectCache().IsFrozen());
+  CHECK(!IsDetached());
+  CHECK(!AXObjectCache().IsFrozen())
+      << "Do not clear children while tree is frozen: " << ToString(true, true);
 
   // Detach all weak pointers from immediate children to their parents.
   // First check to make sure the child's parent wasn't already reassigned.
@@ -5925,17 +5982,6 @@ void AXObject::ChildrenChangedWithCleanLayout() {
                         << ToString(true, true);
 
   AXObjectCache().MarkAXObjectDirtyWithCleanLayout(this);
-
-  // Special case: when the children of a layout inline are changed, it can
-  // cause whitespace redundancy in the parent object to change as well.
-  if (IsA<LayoutInline>(GetLayoutObject())) {
-    if (AXObject* ax_parent = CachedParentObject()) {
-      if (LayoutBlockFlow* layout_block_flow =
-              DynamicTo<LayoutBlockFlow>(ax_parent->GetLayoutObject())) {
-        ax_parent->ChildrenChangedWithCleanLayout();
-      }
-    }
-  }
 }
 
 Node* AXObject::GetNode() const {
@@ -6359,7 +6405,7 @@ const AXObject* AXObject::TableParent() const {
 int AXObject::GetDOMNodeId() const {
   Node* node = GetNode();
   if (node)
-    return DOMNodeIds::IdForNode(node);
+    return node->GetDomNodeId();
   return 0;
 }
 
@@ -6499,6 +6545,7 @@ gfx::RectF AXObject::LocalBoundingBoxRectForAccessibility() {
   if (!GetLayoutObject())
     return gfx::RectF();
   DCHECK(GetLayoutObject()->IsText());
+  CHECK(!cached_values_need_update_ || !AXObjectCache().IsFrozen());
   UpdateCachedAttributeValuesIfNeeded();
   return cached_local_bounding_box_rect_for_accessibility_;
 }
@@ -7302,7 +7349,6 @@ bool AXObject::SupportsNameFromContents(bool recursive) const {
     case ax::mojom::blink::Role::kMark:
     case ax::mojom::blink::Role::kNone:
     case ax::mojom::blink::Role::kParagraph:
-    case ax::mojom::blink::Role::kPre:
     case ax::mojom::blink::Role::kRegion:
     case ax::mojom::blink::Role::kRuby:
     case ax::mojom::blink::Role::kSection:
@@ -7386,13 +7432,13 @@ bool AXObject::SupportsNameFromContents(bool recursive) const {
     case ax::mojom::blink::Role::kPane:
     case ax::mojom::blink::Role::kPdfActionableHighlight:
     case ax::mojom::blink::Role::kPdfRoot:
+    case ax::mojom::blink::Role::kPreDeprecated:
     case ax::mojom::blink::Role::kTableHeaderContainer:
     case ax::mojom::blink::Role::kTitleBar:
     case ax::mojom::blink::Role::kUnknown:
     case ax::mojom::blink::Role::kWebView:
     case ax::mojom::blink::Role::kWindow:
-      NOTREACHED() << "Role shouldn't occur in Blink: " << ToString(true, true);
-      break;
+      NOTREACHED_NORETURN() << "Role shouldn't occur in Blink: " << ToString(true, true);
   }
 
   return result;
@@ -7518,13 +7564,14 @@ const AXObject* AXObject::LowestCommonAncestor(const AXObject& first,
 
 void AXObject::PreSerializationConsistencyCheck() {
 #if defined(AX_FAIL_FAST_BUILD)
-  DCHECK(!IsDetached()) << "Do not serialize detached nodes: "
-                        << ToString(true, true);
-  DCHECK(AccessibilityIsIncludedInTree())
+  CHECK(!IsDetached()) << "Do not serialize detached nodes: "
+                       << ToString(true, true);
+  CHECK(CanAccessCachedValues());
+  CHECK(AccessibilityIsIncludedInTree())
       << "Do not serialize unincluded nodes: " << ToString(true, true);
-  SANITIZER_CHECK(!IsDetached());
+  CHECK(!IsDetached());
   // Extra checks that only occur during serialization.
-  SANITIZER_CHECK_EQ(IsAriaHidden(), !!FindAncestorWithAriaHidden(this))
+  CHECK_EQ(IsAriaHidden(), !!FindAncestorWithAriaHidden(this))
       << "IsAriaHidden() doesn't match existence of an aria-hidden ancestor: "
       << ToString(true);
 #endif
@@ -7576,6 +7623,10 @@ String AXObject::ToString(bool verbose, bool cached_values_only) const {
 
     if (cached_values_need_update_) {
       string_builder = string_builder + " needsToUpdateCachedValues";
+      if (!CanAccessCachedValues()) {
+        cached_values_only = true;
+        string_builder = string_builder + "/disallowed";
+      }
     }
 
     // Add properties of interest that often contribute to errors:

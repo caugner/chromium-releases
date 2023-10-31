@@ -50,6 +50,7 @@ const CountryLocaleMap& GetAllowedCountryToLocaleMap() {
     map[&kPriceInsightsRegionLaunched] = {{"us", {"en-us"}}};
     map[&kShowDiscountOnNavigationRegionLaunched] = {{"us", {"en-us"}}};
     map[&kShoppingPageTypesRegionLaunched] = {{"us", {"en-us"}}};
+    map[&kParcelTrackingRegionLaunched] = {{"us", {"en-us"}}};
 
     return map;
   }());
@@ -192,6 +193,9 @@ BASE_FEATURE(kPriceTrackingIconColors,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Discount on navigation
+BASE_FEATURE(kShowDiscountOnNavigation,
+             "ShowDiscountOnNavigation",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kShowDiscountOnNavigationRegionLaunched,
              "ShowDiscountOnNavigationRegionLaunched",
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -237,7 +241,7 @@ BASE_FEATURE(kShoppingPageTypes,
 
 BASE_FEATURE(kShoppingPageTypesRegionLaunched,
              "ShoppingPageTypesRegionLaunched",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kRetailCoupons, "RetailCoupons", base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -264,6 +268,13 @@ BASE_FEATURE(kCodeBasedRBD, "CodeBasedRBD", base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kChromeCartDomBasedHeuristics,
              "ChromeCartDomBasedHeuristics",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kParcelTracking,
+             "ParcelTracking",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kParcelTrackingRegionLaunched,
+             "ParcelTrackingRegionLaunched",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Params for Discount Consent V2 in the NTP Cart module.
