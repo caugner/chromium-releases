@@ -28,7 +28,7 @@ test_harness_script = r"""
   domAutomationController._succeeded = false;
   domAutomationController.send = function(msg) {
     domAutomationController._finished = true;
-    if (msg.toLowerCase() == "finished") {
+    if (msg.toLowerCase() == "success") {
       domAutomationController._succeeded = true;
     } else {
       domAutomationController._succeeded = false;
@@ -270,8 +270,10 @@ class GpuProcessIntegrationTest(gpu_integration_test.GpuIntegrationTest):
       self.fail('Target machine must have a GPU')
     if not system_info.gpu.aux_attributes:
       self.fail('Browser must support GPU aux attributes')
+    if not 'gl_renderer' in system_info.gpu.aux_attributes:
+      self.fail('Browser must have gl_renderer in aux attribs')
     if (sys.platform != 'darwin'
-        and len(system_info.gpu.devices[0].device_string) <= 0):
+        and len(system_info.gpu.aux_attributes['gl_renderer']) <= 0):
       # On MacOSX we don't create a context to collect GL strings.1
       self.fail('Must have a non-empty gl_renderer string')
 
@@ -490,9 +492,9 @@ class GpuProcessIntegrationTest(gpu_integration_test.GpuIntegrationTest):
         self.fail('Target machine must have a GPU')
       if not gpu.aux_attributes:
         self.fail('Browser must support GPU aux attributes')
-      if 'SwiftShader' not in gpu.devices[0].device_string:
+      if 'SwiftShader' not in gpu.aux_attributes['gl_renderer']:
         self.fail('Expected "SwiftShader" in GPU info GL renderer string')
-      if 'Google' not in gpu.devices[0].vendor_string:
+      if 'Google' not in gpu.aux_attributes['gl_vendor']:
         self.fail('Expected "Google" in GPU info GL vendor string')
       device = gpu.devices[0]
       if not device:
@@ -529,7 +531,7 @@ class GpuProcessIntegrationTest(gpu_integration_test.GpuIntegrationTest):
 
   def _GpuProcess_mac_webgl_low_power(self, test_path: str) -> None:
     # Ensures that low-power WebGL content stays on the low-power GPU.
-    if not self._IsDualGPUMacLaptop():
+    if not self.IsDualGPUMacLaptop():
       logging.info('Skipping test because not running on dual-GPU Mac laptop')
       return
     # Start with a clean browser instance to ensure the GPU process is in a
@@ -549,7 +551,7 @@ class GpuProcessIntegrationTest(gpu_integration_test.GpuIntegrationTest):
   def _GpuProcess_mac_webgl_high_performance(self, test_path: str) -> None:
     # Ensures that high-performance WebGL content activates the high-performance
     # GPU.
-    if not self._IsDualGPUMacLaptop():
+    if not self.IsDualGPUMacLaptop():
       logging.info('Skipping test because not running on dual-GPU Mac laptop')
       return
     # Start with a clean browser instance to ensure the GPU process is in a
@@ -569,7 +571,7 @@ class GpuProcessIntegrationTest(gpu_integration_test.GpuIntegrationTest):
                                                           ) -> None:
     # Ensures that high-performance WebGL content in a background tab releases
     # the hold on the discrete GPU after 10 seconds.
-    if not self._IsDualGPUMacLaptop():
+    if not self.IsDualGPUMacLaptop():
       logging.info('Skipping test because not running on dual-GPU Mac laptop')
       return
     # Start with a clean browser instance to ensure the GPU process is in a
@@ -606,7 +608,7 @@ class GpuProcessIntegrationTest(gpu_integration_test.GpuIntegrationTest):
                                                         test_path: str) -> None:
     # Ensures that high-performance WebGL content in a background tab releases
     # the hold on the discrete GPU after 10 seconds.
-    if not self._IsDualGPUMacLaptop():
+    if not self.IsDualGPUMacLaptop():
       logging.info('Skipping test because not running on dual-GPU Mac laptop')
       return
     # Start with a clean browser instance to ensure the GPU process is in a

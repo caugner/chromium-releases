@@ -426,6 +426,8 @@ const char* DownloaderToString(CrxDownloader::DownloadMetrics::Downloader d) {
       return "direct";
     case CrxDownloader::DownloadMetrics::kBits:
       return "bits";
+    case CrxDownloader::DownloadMetrics::kBackgroundMac:
+      return "nsurlsession_background";
     default:
       return "unknown";
   }
@@ -706,6 +708,9 @@ base::Value::Dict Component::MakeEventDownloadMetrics(
   event.Set("downloader", DownloaderToString(dm.downloader));
   if (dm.error) {
     event.Set("errorcode", dm.error);
+  }
+  if (dm.extra_code1) {
+    event.Set("extracode1", dm.extra_code1);
   }
   event.Set("url", dm.url.spec());
 

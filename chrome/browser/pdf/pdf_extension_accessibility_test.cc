@@ -77,6 +77,13 @@ std::string DumpPdfAccessibilityTree(const ui::AXTreeUpdate& ax_tree) {
       continue;
     }
 
+    // Exclude the status node and its wrapper node from `ax_tree_dump` if they
+    // exist in the tree. Tests don't expect them to be included in the dump.
+    if (node.role == ax::mojom::Role::kBanner ||
+        node.role == ax::mojom::Role::kStatus) {
+      continue;
+    }
+
     auto indent_found = id_to_indentation.find(node.id);
     int indent = 0;
     if (indent_found != id_to_indentation.end()) {
@@ -139,9 +146,6 @@ constexpr char kExpectedPDFAXTree[] =
     "      staticText '3'\n"
     "        inlineTextBox '3'\n";
 
-// `kPDFLoadedToA11yTreeMsg` must be synced with `IDS_PDF_LOADED_TO_A11Y_TREE`.
-constexpr char kPDFLoadedToA11yTreeMsg[] = "Finished loading PDF";
-
 }  // namespace
 
 // Using ASSERT_TRUE deliberately instead of ASSERT_EQ or ASSERT_STREQ
@@ -167,23 +171,6 @@ class PDFExtensionAccessibilityTest : public PDFExtensionTestBase {
     return disabled;
   }
 
-  // Wait for a transient node with the given name. A transient node is one that
-  // only appears in the accessibility tree for a limited amount of time.
-  // Renderers may use transient nodes for live regions that are not meant to
-  // persist in the tree; i.e. nodes that get announced but are not meant to
-  // appear in navigation. This function first waits for any node with the given
-  // name to be included in the tree. Then, keep looping until no node with the
-  // given name is found in the tree (or keep looping until the test times out).
-  void WaitForTransientNodeWithName(WebContents* web_contents,
-                                    base::StringPiece name) {
-    // Wait until the tree contains a node with the given name.
-    WaitForAccessibilityTreeToContainNodeWithName(web_contents, name);
-    // Then, wait until the node with the given name gets removed from the tree.
-    while (AccessibilityTreeContainsNodeWithName(web_contents, name)) {
-      WaitForAccessibilityTreeToChange(web_contents);
-    }
-  }
-
   ui::AXTreeUpdate GetAccessibilityTreeSnapshotForPdf(
       content::WebContents* web_contents) {
     content::FindAccessibilityNodeCriteria find_criteria;
@@ -207,14 +194,10 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTest,
       embedded_test_server()->GetURL("/pdf/test-bookmarks.pdf"));
   ASSERT_TRUE(guest);
 
-  WebContents* contents = GetActiveWebContents();
-  ASSERT_TRUE(contents);
-  // Wait for the status node to be deleted.
-  WaitForTransientNodeWithName(contents, kPDFLoadedToA11yTreeMsg);
-  WaitForAccessibilityTreeToContainNodeWithName(contents,
+  WaitForAccessibilityTreeToContainNodeWithName(GetActiveWebContents(),
                                                 "1 First Section\r\n");
-
-  ui::AXTreeUpdate ax_tree = GetAccessibilityTreeSnapshotForPdf(contents);
+  ui::AXTreeUpdate ax_tree =
+      GetAccessibilityTreeSnapshotForPdf(GetActiveWebContents());
   std::string ax_tree_dump = DumpPdfAccessibilityTree(ax_tree);
 
   ASSERT_MULTILINE_STREQ(kExpectedPDFAXTree, ax_tree_dump);
@@ -233,12 +216,8 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTest,
   content::BrowserAccessibilityState::GetInstance()->EnableAccessibility();
 
   WebContents* contents = GetActiveWebContents();
-  ASSERT_TRUE(contents);
-  // Wait for the status node to be deleted.
-  WaitForTransientNodeWithName(contents, kPDFLoadedToA11yTreeMsg);
   WaitForAccessibilityTreeToContainNodeWithName(contents,
                                                 "1 First Section\r\n");
-
   ui::AXTreeUpdate ax_tree = GetAccessibilityTreeSnapshotForPdf(contents);
   std::string ax_tree_dump = DumpPdfAccessibilityTree(ax_tree);
   ASSERT_MULTILINE_STREQ(kExpectedPDFAXTree, ax_tree_dump);
@@ -252,9 +231,6 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTest,
       browser(), embedded_test_server()->GetURL("/pdf/test-iframe.html")));
 
   WebContents* contents = GetActiveWebContents();
-  ASSERT_TRUE(contents);
-  // Wait for the status node to be deleted.
-  WaitForTransientNodeWithName(contents, kPDFLoadedToA11yTreeMsg);
   WaitForAccessibilityTreeToContainNodeWithName(contents,
                                                 "1 First Section\r\n");
 
@@ -270,9 +246,6 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTest, PdfAccessibilityInOOPIF) {
       embedded_test_server()->GetURL("/pdf/test-cross-site-iframe.html")));
 
   WebContents* contents = GetActiveWebContents();
-  ASSERT_TRUE(contents);
-  // Wait for the status node to be deleted.
-  WaitForTransientNodeWithName(contents, kPDFLoadedToA11yTreeMsg);
   WaitForAccessibilityTreeToContainNodeWithName(contents,
                                                 "1 First Section\r\n");
 
@@ -296,12 +269,8 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTest,
   ASSERT_TRUE(guest);
 
   WebContents* contents = GetActiveWebContents();
-  ASSERT_TRUE(contents);
-  // Wait for the status node to be deleted.
-  WaitForTransientNodeWithName(contents, kPDFLoadedToA11yTreeMsg);
   WaitForAccessibilityTreeToContainNodeWithName(contents,
                                                 "1 First Section\r\n");
-
   ui::AXTreeUpdate ax_tree = GetAccessibilityTreeSnapshotForPdf(contents);
 
   bool found = false;
@@ -334,18 +303,14 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTest,
   ASSERT_TRUE(guest);
 
   WebContents* contents = GetActiveWebContents();
-  ASSERT_TRUE(contents);
   ASSERT_TRUE(
       content::ExecJs(contents,
                       "document.getElementsByTagName('embed')[0].postMessage("
                       "{type: 'selectAll'});"));
 
   content::BrowserAccessibilityState::GetInstance()->EnableAccessibility();
-  // Wait for the status node to be deleted.
-  WaitForTransientNodeWithName(contents, kPDFLoadedToA11yTreeMsg);
   WaitForAccessibilityTreeToContainNodeWithName(contents,
                                                 "1 First Section\r\n");
-
   ui::AXTreeUpdate ax_tree_update =
       GetAccessibilityTreeSnapshotForPdf(contents);
   ui::AXTree ax_tree(ax_tree_update);
@@ -399,15 +364,12 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTest,
   ASSERT_TRUE(guest);
 
   WebContents* contents = GetActiveWebContents();
-  ASSERT_TRUE(contents);
   ASSERT_TRUE(
       content::ExecJs(contents,
                       "document.getElementsByTagName('embed')[0].postMessage("
                       "{type: 'selectAll'});"));
 
   content::BrowserAccessibilityState::GetInstance()->EnableAccessibility();
-  // Wait for the status node to be deleted.
-  WaitForTransientNodeWithName(contents, kPDFLoadedToA11yTreeMsg);
   WaitForAccessibilityTreeToContainNodeWithName(contents,
                                                 "1 First Section\r\n");
 
@@ -452,8 +414,6 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTest,
 
   base::HistogramTester histograms;
   content::BrowserAccessibilityState::GetInstance()->EnableAccessibility();
-  // Wait for the status node to be deleted.
-  WaitForTransientNodeWithName(contents, kPDFLoadedToA11yTreeMsg);
   WaitForAccessibilityTreeToContainNodeWithName(contents,
                                                 "1 First Section\r\n");
 
@@ -588,15 +548,12 @@ class PDFExtensionAccessibilityTextExtractionTest
             "/" + std::string(file_dir) + "/" +
             test_file_path.BaseName().MaybeAsASCII()));
     ASSERT_TRUE(guest);
-
-    WebContents* contents = GetActiveWebContents();
-    ASSERT_TRUE(contents);
-    // Wait for the status node to be deleted.
-    WaitForTransientNodeWithName(contents, kPDFLoadedToA11yTreeMsg);
-    WaitForAccessibilityTreeToContainNodeWithName(contents, "Page 1");
+    WaitForAccessibilityTreeToContainNodeWithName(GetActiveWebContents(),
+                                                  "Page 1");
 
     // Extract the text content.
-    ui::AXTreeUpdate ax_tree = GetAccessibilityTreeSnapshotForPdf(contents);
+    ui::AXTreeUpdate ax_tree =
+        GetAccessibilityTreeSnapshotForPdf(GetActiveWebContents());
     auto actual_lines = CollectLines(ax_tree);
 
     // Aborts if CollectLines() had a failure.
@@ -866,18 +823,14 @@ class PDFExtensionAccessibilityTreeDumpTest
             "/" + std::string(file_dir) + "/" +
             test_file_path.BaseName().MaybeAsASCII()));
     ASSERT_TRUE(guest);
-
-    WebContents* contents = GetActiveWebContents();
-    ASSERT_TRUE(contents);
-    // Wait for the status node to be deleted.
-    WaitForTransientNodeWithName(contents, kPDFLoadedToA11yTreeMsg);
-    WaitForAccessibilityTreeToContainNodeWithName(contents, "Page 1");
+    WaitForAccessibilityTreeToContainNodeWithName(GetActiveWebContents(),
+                                                  "Page 1");
 
     // Find the embedded PDF and dump the accessibility tree.
     content::FindAccessibilityNodeCriteria find_criteria;
     find_criteria.role = ax::mojom::Role::kPdfRoot;
     ui::AXPlatformNodeDelegate* pdf_root =
-        content::FindAccessibilityNode(contents, find_criteria);
+        content::FindAccessibilityNode(GetActiveWebContents(), find_criteria);
     ASSERT_TRUE(pdf_root);
 
     std::string actual_contents = formatter->Format(pdf_root);
@@ -885,6 +838,10 @@ class PDFExtensionAccessibilityTreeDumpTest
     std::vector<std::string> actual_lines =
         base::SplitString(actual_contents, "\n", base::KEEP_WHITESPACE,
                           base::SPLIT_WANT_NONEMPTY);
+    // TODO(b/1473176): Either keep the banner and status node in the output or
+    // modify `pdf_root` above to remove the banner and status nodes from the
+    // tree so that they are not in the format output.
+    RemoveBannerAndStatusNodesFromFormatOutput(actual_lines, GetParam());
 
     // Validate the dump against the expectation file.
     EXPECT_TRUE(test_helper_.ValidateAgainstExpectation(
@@ -919,6 +876,53 @@ class PDFExtensionAccessibilityTreeDumpTest
     property_filters.emplace_back("name=*", AXPropertyFilter::ALLOW_EMPTY);
 
     return property_filters;
+  }
+
+  void RemoveBannerAndStatusNodesFromFormatOutput(
+      std::vector<std::string>& output_lines,
+      const ui::AXApiType::Type& platform_type) {
+    // The banner and status nodes will be in the second and third lines in the
+    // tree output, respectively. These two nodes are always added to the PDF
+    // accessibility tree after the PDF root node and don't get deleted. So,
+    // it is safe to assume that they are always there in the format output.
+    // Thus, delete the second and third lines from the tree format output.
+    ASSERT_GT(output_lines.size(), 3u);
+    std::string banner_role;
+    std::string status_role;
+    switch (platform_type) {
+      case ui::AXApiType::kBlink:
+        banner_role = "banner";
+        status_role = "status";
+        break;
+      case ui::AXApiType::kLinux:
+        banner_role = "landmark";
+        status_role = "statusbar";
+        break;
+      case ui::AXApiType::kMac:
+        banner_role = "AXLandmarkBanner";
+        status_role = "AXApplicationStatus";
+        break;
+      case ui::AXApiType::kWinIA2:
+        banner_role = "IA2_ROLE_LANDMARK";
+        status_role = "ROLE_SYSTEM_STATUSBAR";
+        break;
+      case ui::AXApiType::kWinUIA:
+        banner_role = "Group";
+        status_role = "StatusBar";
+        break;
+      case ui::AXApiType::kNone:
+        [[fallthrough]];
+      case ui::AXApiType::kAndroid:
+        [[fallthrough]];
+      case ui::AXApiType::kAndroidExternal:
+        [[fallthrough]];
+      case ui::AXApiType::kFuchsia:
+        return;
+    }
+    EXPECT_TRUE(base::Contains(output_lines[1], banner_role));
+    EXPECT_TRUE(base::Contains(output_lines[2], status_role));
+
+    output_lines.erase(output_lines.begin() + 1, output_lines.begin() + 3);
   }
 
   ui::AXInspectTestHelper test_helper_;
@@ -1016,26 +1020,23 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityNavigationTest,
   MimeHandlerViewGuest* guest = LoadPdfGetMimeHandlerView(
       embedded_test_server()->GetURL("/pdf/accessibility/weblinks.pdf"));
   ASSERT_TRUE(guest);
-
-  WebContents* contents = GetActiveWebContents();
-  ASSERT_TRUE(contents);
-  // Wait for the status node to be deleted.
-  WaitForTransientNodeWithName(contents, kPDFLoadedToA11yTreeMsg);
-  WaitForAccessibilityTreeToContainNodeWithName(contents, "Page 1");
+  WaitForAccessibilityTreeToContainNodeWithName(GetActiveWebContents(),
+                                                "Page 1");
 
   // Find the specific link node.
   content::FindAccessibilityNodeCriteria find_criteria;
   find_criteria.role = ax::mojom::Role::kLink;
   find_criteria.name = "http://bing.com";
   ui::AXPlatformNodeDelegate* link_node =
-      content::FindAccessibilityNode(contents, find_criteria);
+      content::FindAccessibilityNode(GetActiveWebContents(), find_criteria);
   ASSERT_TRUE(link_node);
 
   // Invoke action on a link and wait for navigation to complete.
   EXPECT_EQ(ax::mojom::DefaultActionVerb::kJump,
             link_node->GetData().GetDefaultActionVerb());
   content::AccessibilityNotificationWaiter event_waiter(
-      contents, ui::kAXModeComplete, ax::mojom::Event::kLoadComplete);
+      GetActiveWebContents(), ui::kAXModeComplete,
+      ax::mojom::Event::kLoadComplete);
   ui::AXActionData action_data;
   action_data.action = ax::mojom::Action::kDoDefault;
   action_data.target_node_id = link_node->GetData().id;
@@ -1043,7 +1044,7 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityNavigationTest,
   ASSERT_TRUE(event_waiter.WaitForNotification());
 
   // Test that navigation occurred correctly.
-  const GURL& expected_url = contents->GetLastCommittedURL();
+  const GURL& expected_url = GetActiveWebContents()->GetLastCommittedURL();
   EXPECT_EQ("https://bing.com/", expected_url.spec());
 }
 

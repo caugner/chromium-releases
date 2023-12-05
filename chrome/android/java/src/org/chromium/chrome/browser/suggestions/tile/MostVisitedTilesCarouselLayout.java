@@ -28,7 +28,7 @@ public class MostVisitedTilesCarouselLayout extends LinearLayout implements Most
     private Integer mInitialTileNum;
     private Integer mIntervalPaddingsLandscapeTablet;
     private Integer mIntervalPaddingsPortraitTablet;
-    private boolean mIsNtpAsHomeSurfaceEnabled;
+    private boolean mIsNtpAsHomeSurfaceOnTablet;
     private boolean mIsSurfacePolishEnabled;
     private Integer mIntervalPaddingsTabletForPolish;
     private Integer mEdgePaddingsTabletForPolish;
@@ -127,6 +127,10 @@ public class MostVisitedTilesCarouselLayout extends LinearLayout implements Most
                         - 2 * mEdgePaddingsTabletForPolish
                 >= 0;
         if (!isFullFilled) {
+            // When splitting the window, this function is invoked with a different totalWidth value
+            // during the process. Therefore, we must update the edge padding with the appropriate
+            // value once the correct totalWidth is provided at the end of the split.
+            setEdgePaddings(mEdgePaddingsTabletForPolish);
             return;
         }
 
@@ -162,7 +166,7 @@ public class MostVisitedTilesCarouselLayout extends LinearLayout implements Most
         if (mInitialTileNum == null) {
             mInitialTileNum = getChildCount();
         }
-        if (mIsNtpAsHomeSurfaceEnabled && !mIsSurfacePolishEnabled) {
+        if (mIsNtpAsHomeSurfaceOnTablet && !mIsSurfacePolishEnabled) {
             int currentOrientation = getResources().getConfiguration().orientation;
             if ((currentOrientation == Configuration.ORIENTATION_LANDSCAPE
                         && mIntervalPaddingsLandscapeTablet == null)
@@ -181,23 +185,23 @@ public class MostVisitedTilesCarouselLayout extends LinearLayout implements Most
             }
         }
 
-        if (mIsNtpAsHomeSurfaceEnabled && mIsSurfacePolishEnabled) {
+        if (mIsNtpAsHomeSurfaceOnTablet && mIsSurfacePolishEnabled) {
             updateEdgeMarginTablet(widthMeasureSpec);
         }
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
     }
 
     @Override
-    public void setIsNtpAsHomeSurfaceEnabled(boolean isNtpAsHomeSurfaceEnabled) {
-        mIsNtpAsHomeSurfaceEnabled = isNtpAsHomeSurfaceEnabled;
+    public void setIsNtpAsHomeSurfaceOnTablet(boolean isNtpAsHomeSurfaceOnTablet) {
+        mIsNtpAsHomeSurfaceOnTablet = isNtpAsHomeSurfaceOnTablet;
     }
 
     public void setIsSurfacePolishEnabled(boolean isSurfacePolishEnabled) {
         mIsSurfacePolishEnabled = isSurfacePolishEnabled;
     }
 
-    boolean getIsNtpAsHomeSurfaceEnabledForTesting() {
-        return mIsNtpAsHomeSurfaceEnabled;
+    boolean getIsNtpAsHomeSurfaceOnTabletForTesting() {
+        return mIsNtpAsHomeSurfaceOnTablet;
     }
 
     public void setInitialTileNumForTesting(int initialTileNum) {

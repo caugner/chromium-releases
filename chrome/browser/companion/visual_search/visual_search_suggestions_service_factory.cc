@@ -8,10 +8,10 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
-#include "chrome/browser/companion/visual_search/features.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/companion/visual_search/features.h"
 
 namespace companion::visual_search {
 
@@ -43,7 +43,8 @@ VisualSearchSuggestionsServiceFactory::GetInstance() {
   return instance.get();
 }
 
-KeyedService* VisualSearchSuggestionsServiceFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+VisualSearchSuggestionsServiceFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* context) const {
   if (!base::FeatureList::IsEnabled(
           companion::visual_search::features::kVisualSearchSuggestions)) {
@@ -58,8 +59,8 @@ KeyedService* VisualSearchSuggestionsServiceFactory::BuildServiceInstanceFor(
     scoped_refptr<base::SequencedTaskRunner> background_task_runner =
         base::ThreadPool::CreateSequencedTaskRunner(
             {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
-    return new VisualSearchSuggestionsService(opt_guide,
-                                              background_task_runner);
+    return std::make_unique<VisualSearchSuggestionsService>(
+        opt_guide, background_task_runner);
   }
   return nullptr;
 }

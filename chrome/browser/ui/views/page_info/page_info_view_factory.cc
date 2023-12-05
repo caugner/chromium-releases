@@ -321,6 +321,7 @@ const ui::ImageModel PageInfoViewFactory::GetPermissionIcon(
                    : &vector_icons::kCertificateChromeRefreshIcon;
         break;
 #endif
+      case ContentSettingsType::MIDI:
       case ContentSettingsType::MIDI_SYSEX:
         icon = show_blocked_badge ? &vector_icons::kMidiOffChromeRefreshIcon
                                   : &vector_icons::kMidiChromeRefreshIcon;
@@ -451,6 +452,7 @@ const ui::ImageModel PageInfoViewFactory::GetPermissionIcon(
       icon = &vector_icons::kProtectedContentIcon;
       break;
 #endif
+    case ContentSettingsType::MIDI:
     case ContentSettingsType::MIDI_SYSEX:
       icon = &vector_icons::kMidiIcon;
       break;
@@ -504,8 +506,7 @@ const ui::ImageModel PageInfoViewFactory::GetPermissionIcon(
       icon = &vector_icons::kStorageAccessIcon;
       break;
     case ContentSettingsType::AUTO_PICTURE_IN_PICTURE:
-      // TODO(https://crbug.com/1471051): Use real icon.
-      icon = &vector_icons::kSelectWindowIcon;
+      icon = &vector_icons::kPictureInPictureIcon;
       break;
     default:
       // All other |ContentSettingsType|s do not have icons on desktop or are

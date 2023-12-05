@@ -53,6 +53,7 @@
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/managed_ui.h"
 #include "chrome/browser/ui/profiles/profile_view_utils.h"
+#include "chrome/browser/ui/safety_hub/menu_notification_service_factory.h"
 #include "chrome/browser/ui/side_panel/companion/companion_utils.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/app_menu_icon_controller.h"
@@ -63,6 +64,7 @@
 #include "chrome/browser/ui/toolbar/recent_tabs_sub_menu_model.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/web_applications/web_app_launch_utils.h"
+#include "chrome/browser/ui/webui/whats_new/whats_new_util.h"
 #include "chrome/browser/upgrade_detector/upgrade_detector.h"
 #include "chrome/browser/web_applications/mojom/user_display_mode.mojom.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
@@ -79,7 +81,6 @@
 #include "components/dom_distiller/content/browser/uma_helper.h"
 #include "components/dom_distiller/core/dom_distiller_features.h"
 #include "components/dom_distiller/core/url_utils.h"
-#include "components/feature_engagement/public/event_constants.h"
 #include "components/password_manager/content/common/web_ui_constants.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
@@ -140,8 +141,10 @@ DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(AppMenuModel, kIncognitoMenuItem);
 DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(AppMenuModel,
                                       kPasswordAndAutofillMenuItem);
 DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(AppMenuModel, kPasswordManagerMenuItem);
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(AppMenuModel, kShowSearchCompanion);
 DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(ToolsMenuModel, kPerformanceMenuItem);
 DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(ToolsMenuModel, kChromeLabsMenuItem);
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(ToolsMenuModel, kReadingModeMenuItem);
 DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(ExtensionsMenuModel,
                                       kManageExtensionsMenuItem);
 DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(ExtensionsMenuModel,
@@ -638,7 +641,7 @@ class HelpMenuModel : public ui::SimpleMenuModel {
       SetCommandIcon(this, IDC_ABOUT, vector_icons::kInfoRefreshIcon);
     }
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-    if (base::FeatureList::IsEnabled(features::kChromeWhatsNewUI)) {
+    if (whats_new::IsEnabled()) {
       AddItemWithStringId(IDC_CHROME_WHATS_NEW, IDS_CHROME_WHATS_NEW);
       if (features::IsChromeRefresh2023()) {
         SetCommandIcon(this, IDC_CHROME_WHATS_NEW, kReleaseAlertIcon);
@@ -677,6 +680,7 @@ ToolsMenuModel::~ToolsMenuModel() = default;
 // More tools submenu is constructed as follows:
 // - Page specific actions overflow (save page, adding to desktop).
 // - Browser / OS level tools (extensions, task manager).
+// - Reading mode.
 // - Developer tools.
 // - Option to enable profiling.
 void ToolsMenuModel::Build(Browser* browser) {
@@ -685,8 +689,17 @@ void ToolsMenuModel::Build(Browser* browser) {
     AddItemWithStringId(IDC_CREATE_SHORTCUT, IDS_ADD_TO_OS_LAUNCH_SURFACE);
   }
   AddItemWithStringId(IDC_NAME_WINDOW, IDS_NAME_WINDOW);
-  if (commander::IsEnabled())
+  if (commander::IsEnabled()) {
     AddItemWithStringId(IDC_TOGGLE_QUICK_COMMANDS, IDS_TOGGLE_QUICK_COMMANDS);
+  }
+
+  if (base::FeatureList::IsEnabled(features::kSidePanelPinning)) {
+    AddItemWithStringId(IDC_SHOW_READING_MODE_SIDE_PANEL,
+                        IDS_SHOW_READING_MODE_SIDE_PANEL);
+    SetElementIdentifierAt(
+        GetIndexOfCommandId(IDC_SHOW_READING_MODE_SIDE_PANEL).value(),
+        kReadingModeMenuItem);
+  }
 
   AddSeparator(ui::NORMAL_SEPARATOR);
   if (!features::IsChromeRefresh2023()) {
@@ -734,6 +747,8 @@ void ToolsMenuModel::Build(Browser* browser) {
     }
     SetCommandIcon(this, IDC_NAME_WINDOW, kNameWindowIcon);
     SetCommandIcon(this, IDC_TOGGLE_QUICK_COMMANDS, kQuickCommandsIcon);
+    SetCommandIcon(this, IDC_SHOW_READING_MODE_SIDE_PANEL,
+                   kMenuBookChromeRefreshIcon);
     SetCommandIcon(this, IDC_PERFORMANCE, kPerformanceIcon);
     SetCommandIcon(this, IDC_TASK_MANAGER, kTaskManagerIcon);
     SetCommandIcon(this, IDC_DEV_TOOLS, kDeveloperToolsIcon);
@@ -796,6 +811,11 @@ AppMenuModel::AppMenuModel(ui::AcceleratorProvider* provider,
 
 AppMenuModel::~AppMenuModel() = default;
 
+void AppMenuModel::SetHighlightedIdentifier(
+    ui::ElementIdentifier highlighted_menu_identifier) {
+  highlighted_menu_identifier_ = highlighted_menu_identifier;
+}
+
 void AppMenuModel::Init() {
   Build();
 
@@ -823,11 +843,6 @@ void AppMenuModel::ExecuteCommand(int command_id, int event_flags) {
   if (error) {
     error->ExecuteMenuItem(browser_);
     return;
-  }
-
-  if (command_id == IDC_PERFORMANCE) {
-    browser()->window()->NotifyFeatureEngagementEvent(
-        feature_engagement::events::kPerformanceMenuItemActivated);
   }
 
   if (command_id == IDC_VIEW_PASSWORDS) {
@@ -1398,21 +1413,16 @@ bool AppMenuModel::IsCommandIdEnabled(int command_id) const {
 }
 
 bool AppMenuModel::IsCommandIdAlerted(int command_id) const {
-  if ((command_id == IDC_RECENT_TABS_MENU) ||
-      (command_id == AppMenuModel::kMinRecentTabsCommandId)) {
-    return alert_item_ == AlertMenuItem::kReopenTabs;
-  }
-
-  if (command_id == IDC_PERFORMANCE) {
-    return alert_item_ == AlertMenuItem::kPerformance;
-  }
-
   if (command_id == IDC_VIEW_PASSWORDS ||
       command_id == IDC_SHOW_PASSWORD_MANAGER) {
     return alert_item_ == AlertMenuItem::kPasswordManager;
   }
 
   return false;
+}
+
+bool AppMenuModel::IsElementIdAlerted(ui::ElementIdentifier element_id) const {
+  return highlighted_menu_identifier_ == element_id;
 }
 
 bool AppMenuModel::GetAcceleratorForCommandId(
@@ -1460,6 +1470,23 @@ void AppMenuModel::Build() {
                     GetLacrosDataMigrationMenuItemName(), update_icon);
     need_separator = true;
 #endif
+  }
+
+  if (base::FeatureList::IsEnabled(features::kSafetyHub) &&
+      !browser_->profile()->IsGuestSession() &&
+      !browser_->profile()->IsIncognitoProfile()) {
+    auto* safety_hub_menu_notification_service =
+        SafetyHubMenuNotificationServiceFactory::GetForProfile(
+            browser_->profile());
+    absl::optional<MenuNotificationEntry> notification =
+        safety_hub_menu_notification_service->GetNotificationToShow();
+    if (notification.has_value()) {
+      const auto safety_hub_icon = ui::ImageModel::FromVectorIcon(
+          kSecurityIcon, ui::kColorMenuIcon, kDefaultIconSize);
+      AddItemWithIcon(notification->command, notification->label,
+                      safety_hub_icon);
+      need_separator = true;
+    }
   }
 
   if (AddGlobalErrorMenuItems() || need_separator)
@@ -1578,8 +1605,16 @@ void AppMenuModel::Build() {
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
     if (companion::IsCompanionFeatureEnabled()) {
       AddItemWithStringId(IDC_SHOW_SEARCH_COMPANION, IDS_SHOW_SEARCH_COMPANION);
+      SetElementIdentifierAt(
+          GetIndexOfCommandId(IDC_SHOW_SEARCH_COMPANION).value(),
+          kShowSearchCompanion);
     }
 #endif
+    if (features::IsTabOrganization()) {
+      AddItemWithStringId(IDC_ORGANIZE_TABS, IDS_TAB_ORGANIZE_MENU);
+      SetIsNewFeatureAt(GetIndexOfCommandId(IDC_ORGANIZE_TABS).value(), true);
+    }
+
     AddItemWithStringId(IDC_SHOW_TRANSLATE, IDS_SHOW_TRANSLATE);
 
     CreateFindAndEditSubMenu();
@@ -1724,6 +1759,7 @@ void AppMenuModel::Build() {
     SetCommandIcon(this, IDC_VIEW_PASSWORDS, kKeyOpenChromeRefreshIcon);
     SetCommandIcon(this, IDC_ZOOM_MENU, kZoomInIcon);
     SetCommandIcon(this, IDC_PRINT, kPrintMenuIcon);
+    SetCommandIcon(this, IDC_ORGANIZE_TABS, kPaintbrushIcon);
     SetCommandIcon(this, IDC_SHOW_TRANSLATE, kTranslateIcon);
     SetCommandIcon(this, IDC_FIND_AND_EDIT_MENU, kSearchMenuIcon);
     SetCommandIcon(this, IDC_SAVE_AND_SHARE_MENU, kFileSaveChromeRefreshIcon);

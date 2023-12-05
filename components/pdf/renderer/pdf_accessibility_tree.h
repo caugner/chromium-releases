@@ -249,6 +249,13 @@ class PdfAccessibilityTree : public content::PluginAXTreeSource,
 
   ui::AXTree& tree_for_testing() { return tree_; }
 
+  // Sets the ID of a child tree which this node will be hosting. In this way,
+  // multiple trees could be stitched together. Clears any existing descendants
+  // of the hosting node in order to maintain the consistency of the tree
+  // structure, and because they would be hidden by the child tree anyway.
+  bool SetChildTree(const ui::AXNodeID& target_node_id,
+                    const ui::AXTreeID& child_tree_id);
+
 #if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
  protected:
   // Adds a postample page to the accessibility tree which informs the user that
@@ -284,12 +291,6 @@ class PdfAccessibilityTree : public content::PluginAXTreeSource,
   // onto the host tree.
   void UnserializeNodes();
 
-  // Posted with a delay after setting the status node with a message to notify
-  // that it finished loading PDF content into an accessibility tree. The delay
-  // allows screen readers to announce the message before the status node gets
-  // removed from the tree.
-  void RemoveStatusNode();
-
 #if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
   // Called after the OCR data for all images in the PDF have been received.
   // Set the status node with the OCR completion message.
@@ -316,6 +317,8 @@ class PdfAccessibilityTree : public content::PluginAXTreeSource,
 
   // Set the status node's message.
   void SetStatusMessage(int message_id);
+
+  void ResetStatusNodeAttributes();
 
   // Handles an accessibility change only if there is a valid
   // `RenderAccessibility` for the frame. `LoadAccessibility()` will be
@@ -362,8 +365,10 @@ class PdfAccessibilityTree : public content::PluginAXTreeSource,
   uint32_t selection_end_char_index_ = 0;
   uint32_t page_count_ = 0;
   std::unique_ptr<ui::AXNodeData> doc_node_;
+  // The banner node will have an appropriate ARIA landmark for easy navigation
+  // for screen reader users. It will contain the status node below.
+  std::unique_ptr<ui::AXNodeData> banner_node_;
   // The status node contains a notification message for the user.
-  std::unique_ptr<ui::AXNodeData> status_node_wrapper_;
   std::unique_ptr<ui::AXNodeData> status_node_;
   std::vector<std::unique_ptr<ui::AXNodeData>> nodes_;
 
@@ -383,6 +388,7 @@ class PdfAccessibilityTree : public content::PluginAXTreeSource,
   uint32_t next_page_index_ = 0;
 
   bool did_get_a_text_run_ = false;
+  bool did_have_an_image_ = false;
   bool sent_metrics_once_ = false;
 
 #if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)

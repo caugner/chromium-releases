@@ -9,6 +9,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tpcd/experiment/eligibility_service_factory.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/privacy_sandbox/tpcd_experiment_eligibility.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace privacy_sandbox {
 class TrackingProtectionOnboarding;
@@ -17,6 +19,17 @@ class TrackingProtectionOnboarding;
 namespace tpcd::experiment {
 
 class ExperimentManager;
+
+enum class ProfileEligibilityMismatch {
+  kEligibleProfileInExperiment = 0,
+  kIneligibleProfileNotInExperiment = 1,
+  kIneligibleProfileInExperiment = 2,
+  kEligibleProfileNotInExperiment = 3,
+  kMaxValue = kEligibleProfileNotInExperiment,
+};
+
+const char ProfileEligibilityMismatchHistogramName[] =
+    "Privacy.3pcd.ProfileEligibilityMismatch";
 
 class EligibilityService : public KeyedService {
  public:
@@ -37,15 +50,21 @@ class EligibilityService : public KeyedService {
 
   // MarkProfileEligibility should be called for all profiles to set their
   // eligibility, whether currently loaded or created later.
-  void MarkProfileEligibility(bool is_eligible);
+  void MarkProfileEligibility(bool is_client_eligible);
   void BroadcastProfileEligibility();
-  bool IsProfileEligible();
+  privacy_sandbox::TpcdExperimentEligibility ProfileEligibility();
 
   raw_ptr<Profile> profile_;
   // onboarding_service_ may be null for OTR and system profiles.
   raw_ptr<privacy_sandbox::TrackingProtectionOnboarding> onboarding_service_;
   // `ExperimentManager` is a singleton and lives forever.
   raw_ptr<ExperimentManager> experiment_manager_;
+
+  // Set in the constructor, it will always have a value past that point. An
+  // optional is used since the user preferences are sometimes reset before
+  // setting the `profile_eligibility_`.
+  absl::optional<privacy_sandbox::TpcdExperimentEligibility>
+      profile_eligibility_;
 
   base::WeakPtrFactory<EligibilityService> weak_factory_{this};
 };

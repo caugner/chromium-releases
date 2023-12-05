@@ -39,23 +39,36 @@ constexpr char kCustomMergePref[] = "custom.merge.pref";
 // Assigning an id of 0 to all the test prefs.
 const std::unordered_map<std::string, SyncablePrefMetadata>
     kSyncablePrefsDatabase = {
-        {kPref1, {0, syncer::PREFERENCES, false, MergeBehavior::kNone}},
-        {kPref2, {0, syncer::PREFERENCES, false, MergeBehavior::kNone}},
-        {kPref3, {0, syncer::PREFERENCES, false, MergeBehavior::kNone}},
-        {kPrefName, {0, syncer::PREFERENCES, false, MergeBehavior::kNone}},
+        {kPref1,
+         {0, syncer::PREFERENCES, PrefSensitivity::kNone,
+          MergeBehavior::kNone}},
+        {kPref2,
+         {0, syncer::PREFERENCES, PrefSensitivity::kNone,
+          MergeBehavior::kNone}},
+        {kPref3,
+         {0, syncer::PREFERENCES, PrefSensitivity::kNone,
+          MergeBehavior::kNone}},
+        {kPrefName,
+         {0, syncer::PREFERENCES, PrefSensitivity::kNone,
+          MergeBehavior::kNone}},
         {kPriorityPrefName,
-         {0, syncer::PRIORITY_PREFERENCES, false, MergeBehavior::kNone}},
+         {0, syncer::PRIORITY_PREFERENCES, PrefSensitivity::kNone,
+          MergeBehavior::kNone}},
         {kHistorySensitivePrefName,
-         {0, syncer::PREFERENCES, true, MergeBehavior::kNone}},
+         {0, syncer::PREFERENCES, PrefSensitivity::kSensitiveRequiresHistory,
+          MergeBehavior::kNone}},
         {kMergeableListPref,
-         {0, syncer::PREFERENCES, false,
+         {0, syncer::PREFERENCES, PrefSensitivity::kNone,
           MergeBehavior::kMergeableListWithRewriteOnUpdate}},
         {kMergeableDictPref1,
-         {0, syncer::PREFERENCES, false, MergeBehavior::kMergeableDict}},
+         {0, syncer::PREFERENCES, PrefSensitivity::kNone,
+          MergeBehavior::kMergeableDict}},
         {kMergeableDictPref2,
-         {0, syncer::PREFERENCES, false, MergeBehavior::kMergeableDict}},
+         {0, syncer::PREFERENCES, PrefSensitivity::kNone,
+          MergeBehavior::kMergeableDict}},
         {kCustomMergePref,
-         {0, syncer::PREFERENCES, false, MergeBehavior::kCustom}},
+         {0, syncer::PREFERENCES, PrefSensitivity::kNone,
+          MergeBehavior::kCustom}},
 };
 
 base::Value MakeDict(
@@ -2304,7 +2317,7 @@ TEST_F(
 using DualLayerUserPrefStoreHistoryOptInTest = DualLayerUserPrefStoreTest;
 
 TEST_F(DualLayerUserPrefStoreHistoryOptInTest,
-       ShouldNotGetHistorySensitivePrefFromAccountStoreIfHistorySyncOff) {
+       ShouldReturnHistorySensitivePrefFromLocalStoreIfHistorySyncOff) {
   store()->SetIsHistorySyncEnabledForTest(false);
 
   local_store()->SetValueSilently(kHistorySensitivePrefName,
@@ -2317,9 +2330,43 @@ TEST_F(DualLayerUserPrefStoreHistoryOptInTest,
       ValueInStoreIs(*store(), kHistorySensitivePrefName, "local value"));
 
   // Check GetMutableValue().
-  base::Value* value = nullptr;
-  ASSERT_TRUE(store()->GetMutableValue(kHistorySensitivePrefName, &value));
-  EXPECT_EQ(*value, base::Value("local value"));
+  {
+    base::Value* value = nullptr;
+    ASSERT_TRUE(store()->GetMutableValue(kHistorySensitivePrefName, &value));
+    EXPECT_EQ(*value, base::Value("local value"));
+  }
+
+  // Check GetValues().
+  {
+    base::Value::Dict values = store()->GetValues();
+    base::Value* value = values.FindByDottedPath(kHistorySensitivePrefName);
+    ASSERT_TRUE(value);
+    EXPECT_EQ(*value, base::Value("local value"));
+  }
+
+  // Verify that a change in history sync opt-in is reflected.
+  store()->SetIsHistorySyncEnabledForTest(true);
+
+  EXPECT_TRUE(
+      ValueInStoreIs(*store(), kHistorySensitivePrefName, "account value"));
+}
+
+TEST_F(DualLayerUserPrefStoreHistoryOptInTest,
+       ShouldNotGetHistorySensitivePrefFromAccountStoreIfHistorySyncOff) {
+  store()->SetIsHistorySyncEnabledForTest(false);
+
+  account_store()->SetValueSilently(kHistorySensitivePrefName,
+                                    base::Value("account value"), 0);
+
+  // Check GetValue().
+  EXPECT_TRUE(ValueInStoreIsAbsent(*store(), kHistorySensitivePrefName));
+
+  // Check GetMutableValue().
+  EXPECT_FALSE(store()->GetMutableValue(kHistorySensitivePrefName, nullptr));
+
+  // Check GetValues().
+  base::Value::Dict values = store()->GetValues();
+  EXPECT_FALSE(values.FindByDottedPath(kHistorySensitivePrefName));
 
   // Verify that a change in history sync opt-in is reflected.
   store()->SetIsHistorySyncEnabledForTest(true);
@@ -2342,9 +2389,19 @@ TEST_F(DualLayerUserPrefStoreHistoryOptInTest,
       ValueInStoreIs(*store(), kHistorySensitivePrefName, "account value"));
 
   // Check GetMutableValue().
-  base::Value* value = nullptr;
-  ASSERT_TRUE(store()->GetMutableValue(kHistorySensitivePrefName, &value));
-  EXPECT_EQ(*value, base::Value("account value"));
+  {
+    base::Value* value = nullptr;
+    ASSERT_TRUE(store()->GetMutableValue(kHistorySensitivePrefName, &value));
+    EXPECT_EQ(*value, base::Value("account value"));
+  }
+
+  // Check GetValues().
+  {
+    base::Value::Dict values = store()->GetValues();
+    base::Value* value = values.FindByDottedPath(kHistorySensitivePrefName);
+    ASSERT_TRUE(value);
+    EXPECT_EQ(*value, base::Value("account value"));
+  }
 }
 
 TEST_F(DualLayerUserPrefStoreHistoryOptInTest,
@@ -2596,6 +2653,83 @@ TEST_F(DualLayerUserPrefStoreHistoryOptInTest,
   store()->RemoveObserver(&observer);
 }
 
+TEST_F(
+    DualLayerUserPrefStoreHistoryOptInTest,
+    ShouldNotNotifyObserversOnHistoryOptInChangeIfEffectiveValueDoesNotChange) {
+  local_store()->SetValueSilently(kHistorySensitivePrefName,
+                                  base::Value("common value"), 0);
+  account_store()->SetValueSilently(kHistorySensitivePrefName,
+                                    base::Value("common value"), 0);
+
+  syncer::TestSyncService sync_service;
+  sync_service.GetUserSettings()->SetSelectedTypes(
+      /*sync_everything=*/false, syncer::UserSelectableTypeSet());
+  ASSERT_FALSE(sync_service.GetUserSettings()->GetSelectedTypes().Has(
+      syncer::UserSelectableType::kHistory));
+
+  store()->OnSyncServiceInitialized(&sync_service);
+  ASSERT_FALSE(store()->IsHistorySyncEnabledForTest());
+
+  testing::StrictMock<MockPrefStoreObserver> observer;
+  store()->AddObserver(&observer);
+
+  // Turning history sync on should not raise notification since effective value
+  // of `kHistorySensitivePrefName` pref is unchanged.
+  EXPECT_CALL(observer, OnPrefValueChanged(kHistorySensitivePrefName)).Times(0);
+  sync_service.GetUserSettings()->SetSelectedTypes(
+      /*sync_everything=*/false,
+      syncer::UserSelectableTypeSet({syncer::UserSelectableType::kHistory}));
+  sync_service.FireStateChanged();
+  EXPECT_TRUE(store()->IsHistorySyncEnabledForTest());
+
+  // Turning history sync off should not raise notification since effective
+  // value of `kHistorySensitivePrefName` pref is unchanged.
+  EXPECT_CALL(observer, OnPrefValueChanged(kHistorySensitivePrefName)).Times(0);
+  sync_service.GetUserSettings()->SetSelectedTypes(
+      /*sync_everything=*/false, syncer::UserSelectableTypeSet());
+  sync_service.FireStateChanged();
+  EXPECT_FALSE(store()->IsHistorySyncEnabledForTest());
+
+  store()->RemoveObserver(&observer);
+}
+
+TEST_F(DualLayerUserPrefStoreHistoryOptInTest,
+       ShouldNotifyObserversOnHistoryOptInChangeIfEffectiveValueChanges) {
+  account_store()->SetValueSilently(kHistorySensitivePrefName,
+                                    base::Value("account value"), 0);
+
+  syncer::TestSyncService sync_service;
+  sync_service.GetUserSettings()->SetSelectedTypes(
+      /*sync_everything=*/false, syncer::UserSelectableTypeSet());
+  ASSERT_FALSE(sync_service.GetUserSettings()->GetSelectedTypes().Has(
+      syncer::UserSelectableType::kHistory));
+
+  store()->OnSyncServiceInitialized(&sync_service);
+  ASSERT_FALSE(store()->IsHistorySyncEnabledForTest());
+
+  testing::StrictMock<MockPrefStoreObserver> observer;
+  store()->AddObserver(&observer);
+
+  // Turning history sync on should raise notification since effective value
+  // of `kHistorySensitivePrefName` pref changes.
+  EXPECT_CALL(observer, OnPrefValueChanged(kHistorySensitivePrefName)).Times(1);
+  sync_service.GetUserSettings()->SetSelectedTypes(
+      /*sync_everything=*/false,
+      syncer::UserSelectableTypeSet({syncer::UserSelectableType::kHistory}));
+  sync_service.FireStateChanged();
+  EXPECT_TRUE(store()->IsHistorySyncEnabledForTest());
+
+  // Turning history sync off should raise notification since effective value
+  // of `kHistorySensitivePrefName` pref changes.
+  EXPECT_CALL(observer, OnPrefValueChanged(kHistorySensitivePrefName)).Times(1);
+  sync_service.GetUserSettings()->SetSelectedTypes(
+      /*sync_everything=*/false, syncer::UserSelectableTypeSet());
+  sync_service.FireStateChanged();
+  EXPECT_FALSE(store()->IsHistorySyncEnabledForTest());
+
+  store()->RemoveObserver(&observer);
+}
+
 TEST_F(DualLayerUserPrefStoreHistoryOptInTest,
        ShouldNotReactIfHistoryOptInIsUnchanged) {
   local_store()->SetValueSilently(kHistorySensitivePrefName,
@@ -2616,6 +2750,29 @@ TEST_F(DualLayerUserPrefStoreHistoryOptInTest,
   // Should not lead to notification.
   sync_service.FireStateChanged();
   ASSERT_TRUE(store()->IsHistorySyncEnabledForTest());
+
+  store()->RemoveObserver(&observer);
+}
+
+TEST_F(DualLayerUserPrefStoreHistoryOptInTest,
+       ShouldRemoveSensitivePrefsFromAccountStoreUponDisableIfHistorySyncOff) {
+  store()->SetIsHistorySyncEnabledForTest(false);
+
+  base::Value account_value("account value");
+  account_store()->SetValueSilently(kHistorySensitivePrefName,
+                                    account_value.Clone(), 0);
+
+  testing::StrictMock<MockPrefStoreObserver> observer;
+  store()->AddObserver(&observer);
+
+  // No call should be made for `kHistorySensitivePrefName` since history sync
+  // is off and the effective is thus unchanged.
+  EXPECT_CALL(observer, OnPrefValueChanged(kHistorySensitivePrefName)).Times(0);
+
+  store()->DisableTypeAndClearAccountStore(syncer::PREFERENCES);
+
+  EXPECT_TRUE(
+      ValueInStoreIsAbsent(*account_store(), kHistorySensitivePrefName));
 
   store()->RemoveObserver(&observer);
 }

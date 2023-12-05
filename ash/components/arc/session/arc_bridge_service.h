@@ -40,7 +40,6 @@ class BootPhaseMonitorHost;
 class BootPhaseMonitorInstance;
 class CameraHost;
 class CameraInstance;
-class ChromeFeatureFlagsHost;
 class ChromeFeatureFlagsInstance;
 class CastReceiverInstance;
 class ClipboardHost;
@@ -69,7 +68,6 @@ class KeymasterHost;
 class KeymasterInstance;
 class KioskHost;
 class KioskInstance;
-class LockScreenInstance;
 class MediaSessionInstance;
 class MemoryInstance;
 class MetricsHost;
@@ -200,9 +198,7 @@ class ArcBridgeService {
   ConnectionHolder<mojom::CastReceiverInstance>* cast_receiver() {
     return &cast_receiver_;
   }
-  ConnectionHolder<mojom::ChromeFeatureFlagsInstance,
-                   mojom::ChromeFeatureFlagsHost>*
-  chrome_feature_flags() {
+  ConnectionHolder<mojom::ChromeFeatureFlagsInstance>* chrome_feature_flags() {
     return &chrome_feature_flags_;
   }
   ConnectionHolder<mojom::ClipboardInstance, mojom::ClipboardHost>*
@@ -262,9 +258,6 @@ class ArcBridgeService {
   }
   ConnectionHolder<mojom::KioskInstance, mojom::KioskHost>* kiosk() {
     return &kiosk_;
-  }
-  ConnectionHolder<mojom::LockScreenInstance>* lock_screen() {
-    return &lock_screen_;
   }
   ConnectionHolder<mojom::MediaSessionInstance>* media_session() {
     return &media_session_;
@@ -370,9 +363,7 @@ class ArcBridgeService {
       boot_phase_monitor_;
   ConnectionHolder<mojom::CameraInstance, mojom::CameraHost> camera_;
   ConnectionHolder<mojom::CastReceiverInstance> cast_receiver_;
-  ConnectionHolder<mojom::ChromeFeatureFlagsInstance,
-                   mojom::ChromeFeatureFlagsHost>
-      chrome_feature_flags_;
+  ConnectionHolder<mojom::ChromeFeatureFlagsInstance> chrome_feature_flags_;
   ConnectionHolder<mojom::ClipboardInstance, mojom::ClipboardHost> clipboard_;
   ConnectionHolder<mojom::CompatibilityModeInstance> compatibility_mode_;
   ConnectionHolder<mojom::CrashCollectorInstance, mojom::CrashCollectorHost>
@@ -397,7 +388,6 @@ class ArcBridgeService {
   ConnectionHolder<mojom::keymint::KeyMintInstance, mojom::keymint::KeyMintHost>
       keymint_;
   ConnectionHolder<mojom::KioskInstance, mojom::KioskHost> kiosk_;
-  ConnectionHolder<mojom::LockScreenInstance> lock_screen_;
   ConnectionHolder<mojom::MediaSessionInstance> media_session_;
   ConnectionHolder<mojom::MemoryInstance> memory_;
   ConnectionHolder<mojom::MetricsInstance, mojom::MetricsHost> metrics_;

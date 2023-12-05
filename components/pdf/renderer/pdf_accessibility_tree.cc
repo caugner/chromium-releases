@@ -17,6 +17,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/raw_ref.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/notreached.h"
 #include "base/ranges/algorithm.h"
 #include "base/strings/utf_string_conversion_utils.h"
 #include "base/task/single_thread_task_runner.h"
@@ -214,8 +215,13 @@ const float kHeadingFontSizeRatio = 1.2f;
 const float kParagraphLineSpacingRatio = 1.2f;
 
 // Delay before loading all the PDF content into the accessibility tree and
-// removing the status node from an accessibility tree.
-constexpr base::TimeDelta kDelayBeforeRemovingStatusNode = base::Seconds(1);
+// resetting the banner and status nodes in an accessibility tree.
+constexpr base::TimeDelta kDelayBeforeResettingStatusNode = base::Seconds(1);
+
+enum class AttributeUpdateType {
+  kRemove = 0,
+  kAdd,
+};
 
 // This class is used as part of our heuristic to determine which text runs live
 // on the same "line".  As we process runs, we keep a weighted average of the
@@ -506,58 +512,82 @@ std::unique_ptr<ui::AXNodeData> CreateNode(
   return node;
 }
 
+void UpdateStatusNodeLiveRegionAttributes(ui::AXNodeData* node,
+                                          AttributeUpdateType update_type) {
+  CHECK(node);
+  switch (update_type) {
+    case AttributeUpdateType::kAdd:
+      // Encode ARIA live region attributes including aria-atomic, aria-status,
+      // and aria-relevant to define aria-live="polite" for this status node.
+      node->AddBoolAttribute(ax::mojom::BoolAttribute::kLiveAtomic, true);
+      node->AddStringAttribute(ax::mojom::StringAttribute::kLiveStatus,
+                               "polite");
+      node->AddStringAttribute(ax::mojom::StringAttribute::kLiveRelevant,
+                               "additions text");
+      // The status node is the root of live region. Use `kContainerLive*`
+      // attributes to define this node as the root of the live region.
+      node->AddBoolAttribute(ax::mojom::BoolAttribute::kContainerLiveAtomic,
+                             true);
+      node->AddStringAttribute(ax::mojom::StringAttribute::kContainerLiveStatus,
+                               "polite");
+      node->AddStringAttribute(
+          ax::mojom::StringAttribute::kContainerLiveRelevant, "additions text");
+      break;
+    case AttributeUpdateType::kRemove:
+      node->RemoveBoolAttribute(ax::mojom::BoolAttribute::kLiveAtomic);
+      node->RemoveStringAttribute(ax::mojom::StringAttribute::kLiveStatus);
+      node->RemoveStringAttribute(ax::mojom::StringAttribute::kLiveRelevant);
+      node->RemoveBoolAttribute(ax::mojom::BoolAttribute::kContainerLiveAtomic);
+      node->RemoveStringAttribute(
+          ax::mojom::StringAttribute::kContainerLiveStatus);
+      node->RemoveStringAttribute(
+          ax::mojom::StringAttribute::kContainerLiveRelevant);
+      break;
+  }
+}
+
 // TODO(crbug.com/1442928): Need to test this status node with screen readers
 // on other desktop platforms, such as Windows, macOS, and Linux, as well as in
 // the embedded PDF case.
 std::unique_ptr<ui::AXNodeData> CreateStatusNode(
     content::RenderAccessibility* render_accessibility,
-    ui::AXNodeData* node_wrapper) {
+    ui::AXNodeData* parent_node) {
   // Create a status node that conveys a notification message and place the
   // message inside an appropriate ARIA landmark for easy navigation.
   std::unique_ptr<ui::AXNodeData> node =
       CreateNode(ax::mojom::Role::kStatus, ax::mojom::Restriction::kReadOnly,
                  render_accessibility);
-  node->relative_bounds = node_wrapper->relative_bounds;
-  // Encode ARIA live region attributes including aria-atomic, aria-status, and
-  // aria-relevant to define aria-live="polite" for this status node.
-  node->AddBoolAttribute(ax::mojom::BoolAttribute::kLiveAtomic, true);
-  node->AddStringAttribute(ax::mojom::StringAttribute::kLiveStatus, "polite");
-  node->AddStringAttribute(ax::mojom::StringAttribute::kLiveRelevant,
-                           "additions text");
-  // The status node is the root of live region. Use `kContainerLive*`
-  // attributes to define this node as the root of the live region.
-  node->AddBoolAttribute(ax::mojom::BoolAttribute::kContainerLiveAtomic, true);
-  node->AddStringAttribute(ax::mojom::StringAttribute::kContainerLiveStatus,
-                           "polite");
-  node->AddStringAttribute(ax::mojom::StringAttribute::kContainerLiveRelevant,
-                           "additions text");
+  node->relative_bounds = parent_node->relative_bounds;
+  UpdateStatusNodeLiveRegionAttributes(node.get(), AttributeUpdateType::kAdd);
 
-  // As we add this status node to its node wrapper, this node will be added
-  // as the first node to the node wrapper.
-  CHECK(node_wrapper->child_ids.empty());
-  node_wrapper->child_ids.push_back(node->id);
+  // The status node will be added as the first node to its parent node as the
+  // parent node will contain only this status node.
+  CHECK(parent_node->child_ids.empty());
+  parent_node->child_ids.push_back(node->id);
   VLOG(2) << "Creating an OCR status node.";
   return node;
 }
 
-std::unique_ptr<ui::AXNodeData> CreateStatusNodeWrapper(
+// TODO(crbug.com/1442928): May need to give it a proper name or title. Revisit
+// this banner node to understand why it is here besides navigation.
+std::unique_ptr<ui::AXNodeData> CreateBannerNode(
     content::RenderAccessibility* render_accessibility,
     ui::AXNodeData* root_node) {
-  // Create a status node wrapper with an appropriate ARIA landmark for easy
-  // navigation. This wrapper will contain a status node later.
-  std::unique_ptr<ui::AXNodeData> node_wrapper =
+  // Create a banner node with an appropriate ARIA landmark for easy navigation.
+  // This banner node will contain a status node later.
+  std::unique_ptr<ui::AXNodeData> banner_node =
       CreateNode(ax::mojom::Role::kBanner, ax::mojom::Restriction::kReadOnly,
                  render_accessibility);
-  // Set the origin of this wrapper to be offscreen with an 1x1 rectangle as
+  // Set the origin of this node to be offscreen with an 1x1 rectangle as
   // both this wrapper and a status node don't have a visual element. The origin
   // of the doc is (0, 0), so setting (-1, -1) will make this node offscreen.
-  node_wrapper->relative_bounds.bounds = gfx::RectF(-1, -1, 1, 1);
-  node_wrapper->relative_bounds.offset_container_id = root_node->id;
+  banner_node->relative_bounds.bounds = gfx::RectF(-1, -1, 1, 1);
+  banner_node->relative_bounds.offset_container_id = root_node->id;
   // As we create this status node's wrapper right after the PDF root node,
   // this node will be added as the first node to the PDF accessibility tree.
   CHECK(root_node->child_ids.empty());
-  root_node->child_ids.push_back(node_wrapper->id);
-  return node_wrapper;
+  root_node->child_ids.push_back(banner_node->id);
+  return banner_node;
 }
 
 #if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
@@ -1726,10 +1756,8 @@ void PdfAccessibilityTree::DoSetAccessibilityDocInfo(
   // This notification node needs to be added as the first node in the PDF
   // accessibility tree so that the user will reach out to this node first when
   // navigating the PDF accessibility tree.
-  status_node_wrapper_ =
-      CreateStatusNodeWrapper(render_accessibility, doc_node_.get());
-  status_node_ =
-      CreateStatusNode(render_accessibility, status_node_wrapper_.get());
+  banner_node_ = CreateBannerNode(render_accessibility, doc_node_.get());
+  status_node_ = CreateStatusNode(render_accessibility, banner_node_.get());
   SetStatusMessage(IDS_PDF_LOADING_TO_A11Y_TREE);
 
   // Create a PDF accessibility tree with the status node first to notify users
@@ -1743,7 +1771,7 @@ void PdfAccessibilityTree::DoSetAccessibilityDocInfo(
   tree_data_.tree_id = render_accessibility->GetTreeIDForPluginHost();
   tree_data_.focus_id = doc_node_->id;
   update.root_id = doc_node_->id;
-  update.nodes = {*doc_node_, *status_node_wrapper_, *status_node_};
+  update.nodes = {*doc_node_, *banner_node_, *status_node_};
   if (!tree_.Unserialize(update)) {
     LOG(FATAL) << tree_.error();
   }
@@ -1789,7 +1817,7 @@ void PdfAccessibilityTree::DoSetAccessibilityPageInfo(
   if (invalid_plugin_message_received_) {
     if (tree_.root()) {
       tree_.Destroy();
-      status_node_wrapper_.reset();
+      banner_node_.reset();
       status_node_.reset();
     }
     return;
@@ -1803,10 +1831,11 @@ void PdfAccessibilityTree::DoSetAccessibilityPageInfo(
 
   AddPageContent(page_info, page_index, text_runs, chars, page_objects);
 
+  bool has_image = !page_objects.images.empty();
+  did_have_an_image_ |= has_image;
 #if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
   // TODO(crbug.com/1443346): Use a more explicit flag indicating whether any
   // image was sent to the OCR model in `AddRemainingAnnotations()`.
-  bool has_image = !page_objects.images.empty();
   if (features::IsPdfOcrEnabled() && !did_get_a_text_run_ && has_image) {
     if (ocr_service_) {
       // Notify users via the status node that PDF OCR is about to run since
@@ -1823,30 +1852,25 @@ void PdfAccessibilityTree::DoSetAccessibilityPageInfo(
 #endif  // BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
 
   if (page_index == page_count_ - 1) {
-    if (!features::IsPdfOcrEnabled() || did_get_a_text_run_) {
-      // When PDF OCR is off, or when PDF OCR is on and PDF already has
-      // accessible text, notify users that all the PDF content has been loaded
-      // into an accessibility tree.
+    if (!features::IsPdfOcrEnabled() || did_get_a_text_run_ ||
+        !did_have_an_image_) {
+      // In this case, PDF OCR doesn't run. Thus, set the status node to notify
+      // users that the PDF content has been loaded into an accessibility tree.
       // TODO(crbug.com/1473176): Consider merging the code below with
       // `SetOcrCompleteStatus()`.
       SetStatusMessage(IDS_PDF_LOADED_TO_A11Y_TREE);
-      ui::AXTreeUpdate update;
-      update.root_id = doc_node_->id;
-      update.nodes.push_back(*status_node_);
-      if (!tree_.Unserialize(update)) {
-        LOG(FATAL) << tree_.error();
-      }
-      render_accessibility->SetPluginTreeSource(this);
 
-      // Post a delayed task for removing the status node so that screen reader
-      // users can hear the `IDS_PDF_LOADED_TO_A11Y_TREE` message via the status
-      // node before it gets removed.
+      UnserializeNodes();
+      // Reset the status node's attributes after a delay. This delay allows
+      // screen reader to deliver the user the notification message set above.
       base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
           FROM_HERE,
-          base::BindOnce(&PdfAccessibilityTree::RemoveStatusNode, GetWeakPtr()),
-          kDelayBeforeRemovingStatusNode);
+          base::BindOnce(&PdfAccessibilityTree::ResetStatusNodeAttributes,
+                         GetWeakPtr()),
+          kDelayBeforeResettingStatusNode);
+    } else {
+      UnserializeNodes();
     }
-    UnserializeNodes();
   }
 }
 
@@ -1882,18 +1906,8 @@ void PdfAccessibilityTree::UnserializeNodes() {
 
   ui::AXTreeUpdate update;
   update.root_id = doc_node_->id;
-#if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
-  // Note that the status node will be removed if `!features::IsPdfOcrEnabled()`
-  // or `did_get_a_text_run_`, so the status node must not be added to an
-  // `AXTreeUpdate` in either of those cases.
-  if (features::IsPdfOcrEnabled() && !did_get_a_text_run_) {
-    CHECK(status_node_);
-    CHECK(status_node_wrapper_);
-    update.nodes.push_back(*status_node_);
-  }
-#endif  // BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
-
   update.nodes.push_back(*doc_node_);
+  update.nodes.push_back(*status_node_);
   for (const auto& node : nodes_)
     update.nodes.push_back(std::move(*node));
 
@@ -1929,38 +1943,6 @@ void PdfAccessibilityTree::UnserializeNodes() {
     }
 #endif  // BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
   }
-}
-
-void PdfAccessibilityTree::RemoveStatusNode() {
-  content::RenderAccessibility* render_accessibility =
-      GetRenderAccessibilityIfEnabled();
-  if (!render_accessibility) {
-    return;
-  }
-
-  CHECK(doc_node_);
-  CHECK(status_node_wrapper_);
-  CHECK(status_node_);
-  const ui::AXNodeID& status_wrapper_id = status_node_wrapper_->id;
-  CHECK_NE(ui::kInvalidAXNodeID, status_wrapper_id);
-  size_t num_erased = base::EraseIf(
-      doc_node_->child_ids, [&status_wrapper_id](const ui::AXNodeID child_id) {
-        return child_id == status_wrapper_id;
-      });
-  CHECK_EQ(num_erased, 1u);
-
-  ui::AXTreeUpdate update;
-  update.root_id = doc_node_->id;
-  update.node_id_to_clear = status_wrapper_id;
-  update.nodes.push_back(*doc_node_);
-
-  status_node_.reset();
-  status_node_wrapper_.reset();
-
-  if (!tree_.Unserialize(update)) {
-    LOG(FATAL) << tree_.error();
-  }
-  render_accessibility->SetPluginTreeSource(this);
 }
 
 #if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
@@ -2102,6 +2084,31 @@ void PdfAccessibilityTree::SetStatusMessage(int message_id) {
   status_node_->SetNameChecked(message);
 }
 
+void PdfAccessibilityTree::ResetStatusNodeAttributes() {
+  content::RenderAccessibility* render_accessibility =
+      GetRenderAccessibilityIfEnabled();
+  if (!render_accessibility) {
+    return;
+  }
+
+  CHECK(status_node_);
+  // Clear out its live region and name attributes as it is no longer necessary
+  // to keep the status node in this case.
+  UpdateStatusNodeLiveRegionAttributes(status_node_.get(),
+                                       AttributeUpdateType::kRemove);
+  status_node_->RemoveStringAttribute(ax::mojom::StringAttribute::kName);
+
+  ui::AXTreeUpdate update;
+  update.root_id = doc_node_->id;
+  // `status_node_` has been either cleared out or set with a new message, so
+  // add it to `ui::AXTreeUpdate`.
+  update.nodes.push_back(*status_node_);
+  if (!tree_.Unserialize(update)) {
+    LOG(FATAL) << tree_.error();
+  }
+  render_accessibility->SetPluginTreeSource(this);
+}
+
 void PdfAccessibilityTree::UpdateAXTreeDataFromSelection() {
   tree_data_.sel_is_backward = false;
   if (selection_start_page_index_ > selection_end_page_index_) {
@@ -2171,7 +2178,7 @@ void PdfAccessibilityTree::ClearAccessibilityNodes() {
   next_page_index_ = 0;
   doc_node_.reset();
   status_node_.reset();
-  status_node_wrapper_.reset();
+  banner_node_.reset();
   nodes_.clear();
   node_id_to_page_char_index_.clear();
   node_id_to_annotation_info_.clear();
@@ -2502,6 +2509,33 @@ bool PdfAccessibilityTree::ShowContextMenu() {
     return false;
 
   render_accessibility->ShowPluginContextMenu();
+  return true;
+}
+
+bool PdfAccessibilityTree::SetChildTree(const ui::AXNodeID& target_node_id,
+                                        const ui::AXTreeID& child_tree_id) {
+  ui::AXNode* target_node = tree_.GetFromId(target_node_id);
+  if (!target_node) {
+    return false;
+  }
+  // `nodes_` will be empty once they are unserialized to `tree_`.
+  if (!nodes_.empty()) {
+    // The `tree_` is not yet fully loaded, thus unable to stitch.
+    return false;
+  }
+  content::RenderAccessibility* render_accessibility =
+      GetRenderAccessibilityIfEnabled();
+  if (!render_accessibility) {
+    return false;
+  }
+  ui::AXTreeUpdate tree_update;
+  ui::AXNodeData target_node_data = target_node->data();
+  target_node_data.child_ids = {};
+  target_node_data.AddChildTreeId(child_tree_id);
+  tree_update.root_id = doc_node_->id;
+  tree_update.nodes = {target_node_data};
+  CHECK(tree_.Unserialize(tree_update)) << tree_.error();
+  render_accessibility->SetPluginTreeSource(this);
   return true;
 }
 

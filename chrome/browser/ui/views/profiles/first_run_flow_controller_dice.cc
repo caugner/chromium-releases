@@ -37,6 +37,10 @@
 #include "google_apis/gaia/core_account_id.h"
 #include "url/gurl.h"
 
+#if BUILDFLAG(ENABLE_SEARCH_ENGINE_CHOICE)
+#include "chrome/browser/search_engine_choice/search_engine_choice_service_factory.h"
+#endif
+
 namespace {
 
 constexpr base::TimeDelta kDefaultBrowserCheckTimeout = base::Seconds(2);
@@ -51,6 +55,15 @@ bool IsDefaultBrowserDisabledByPolicy() {
   CHECK(pref);
   DCHECK(pref->GetValue()->is_bool());
   return pref->IsManaged() && !pref->GetValue()->GetBool();
+}
+
+void MaybeLogSetAsDefaultSuccess(
+    shell_integration::DefaultWebClientState state) {
+  if (state == shell_integration::IS_DEFAULT) {
+    base::UmaHistogramEnumeration(
+        "ProfilePicker.FirstRun.DefaultBrowser",
+        DefaultBrowserChoice::kSuccessfullySetAsDefault);
+  }
 }
 
 class IntroStepController : public ProfileManagementStepController {
@@ -178,13 +191,13 @@ class DefaultBrowserStepController : public ProfileManagementStepController {
   }
 
   void OnStepCompleted(DefaultBrowserChoice choice) {
-    if (choice == DefaultBrowserChoice::kSetAsDefault) {
+    if (choice == DefaultBrowserChoice::kClickSetAsDefault) {
       CHECK(!IsDefaultBrowserDisabledByPolicy());
       // The worker pointer is reference counted. While it is running, sequence
       // it runs on will hold references to it and it will be automatically
       // freed once all its tasks have finished.
       base::MakeRefCounted<shell_integration::DefaultBrowserWorker>()
-          ->StartSetAsDefault(base::NullCallback());
+          ->StartSetAsDefault(base::BindOnce(&MaybeLogSetAsDefaultSuccess));
     }
     base::UmaHistogramEnumeration("ProfilePicker.FirstRun.DefaultBrowser",
                                   choice);
@@ -398,6 +411,24 @@ void FirstRunFlowControllerDice::HandleIdentityStepsCompleted(
 
   post_host_cleared_callback_ = std::move(post_host_cleared_callback);
 
+#if BUILDFLAG(ENABLE_SEARCH_ENGINE_CHOICE)
+  auto step_finished_callback = base::BindOnce(
+      &FirstRunFlowControllerDice::HandleSwitchToDefaultBrowserStep,
+      base::Unretained(this), is_continue_callback);
+
+  RegisterStep(
+      Step::kSearchEngineChoice,
+      ProfileManagementStepController::CreateForSearchEngineChoice(
+          host(), SearchEngineChoiceServiceFactory::GetForProfile(profile_),
+          std::move(step_finished_callback)));
+  SwitchToStep(Step::kSearchEngineChoice, /*reset_state=*/true);
+#else
+  HandleSwitchToDefaultBrowserStep(is_continue_callback);
+#endif
+}
+
+void FirstRunFlowControllerDice::HandleSwitchToDefaultBrowserStep(
+    bool is_continue_callback) {
   bool should_show_default_browser_step =
       // Proceed with the callback  directly instead of showing the default
       // browser prompt.

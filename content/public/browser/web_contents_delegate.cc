@@ -155,6 +155,15 @@ void WebContentsDelegate::CreateSmsPrompt(
     base::OnceCallback<void()> on_confirm,
     base::OnceCallback<void()> on_cancel) {}
 
+bool WebContentsDelegate::CanUseWindowingControls(
+    RenderFrameHost* requesting_frame) {
+  return false;
+}
+
+bool WebContentsDelegate::GetCanResize() {
+  return false;
+}
+
 bool WebContentsDelegate::IsFullscreenForTabOrPending(
     const WebContents* web_contents) {
   return false;
@@ -396,5 +405,15 @@ base::WeakPtr<WebContentsDelegate> WebContentsDelegate::GetDelegateWeakPtr() {
 bool WebContentsDelegate::IsPrivileged() {
   return false;
 }
+
+bool WebContentsDelegate::IsInPreviewMode() const {
+  return false;
+}
+
+#if !BUILDFLAG(IS_ANDROID)
+bool WebContentsDelegate::ShouldUseInstancedSystemMediaControls() const {
+  return false;
+}
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace content

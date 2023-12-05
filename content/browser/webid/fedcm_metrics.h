@@ -109,6 +109,44 @@ enum class PreventSilentAccessFrameType {
   kMaxValue = kCrossSiteIframe
 };
 
+// This enum describes the status of a revocation call to the FedCM API.
+enum class FedCmRevokeStatus {
+  // Don't change the meaning or the order of these values because they are
+  // being recorded in metrics and in sync with the counterpart in enums.xml.
+  kSuccess,
+  kTooManyRequests,
+  kUnhandledRequest,
+  kNoAccountToRevoke,
+  kRevokeUrlIsCrossOrigin,
+  kRevocationFailedOnServer,
+  kConfigHttpNotFound,
+  kConfigNoResponse,
+  kConfigInvalidResponse,
+  kDisabledInSettings,
+  kDisabledInFlags,
+  kWellKnownHttpNotFound,
+  kWellKnownNoResponse,
+  kWellKnownInvalidResponse,
+  kWellKnownListEmpty,
+  kConfigNotInWellKnown,
+  kWellKnownTooBig,
+  kWellKnownInvalidContentType,
+  kConfigInvalidContentType,
+  kIdpNotPotentiallyTrustworthy,
+
+  kMaxValue = kIdpNotPotentiallyTrustworthy
+};
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class FedCmSetLoginStatusIgnoredReason {
+  kFrameTreeLookupFailed = 0,
+  kInFencedFrame = 1,
+  kCrossOrigin = 2,
+
+  kMaxValue = kCrossOrigin
+};
+
 class CONTENT_EXPORT FedCmMetrics {
  public:
   FedCmMetrics(const GURL& provider,
@@ -207,6 +245,13 @@ class CONTENT_EXPORT FedCmMetrics {
   // FedCM request or for the purpose of MDocs or multi-IDP are not counted.
   void RecordNumRequestsPerDocument(const int num_requests);
 
+  // Records the status of the |Revoke| call.
+  void RecordRevokeStatus(FedCmRevokeStatus status);
+
+  // Records the type of error dialog shown.
+  void RecordErrorDialogType(
+      IdpNetworkRequestManager::FedCmErrorDialogType type);
+
  private:
   // The page's SourceId. Used to log the UKM event Blink.FedCm.
   ukm::SourceId page_source_id_;
@@ -249,6 +294,10 @@ void RecordIdpSignOutNetError(int response_code);
 // Records why there's no valid account in the response.
 void RecordAccountsResponseInvalidReason(
     IdpNetworkRequestManager::AccountsResponseInvalidReason reason);
+
+// Records the reason why we ignored an attempt to set a login status.
+void RecordSetLoginStatusIgnoredReason(FedCmSetLoginStatusIgnoredReason reason);
+
 }  // namespace content
 
 #endif  // CONTENT_BROWSER_WEBID_FEDCM_METRICS_H_

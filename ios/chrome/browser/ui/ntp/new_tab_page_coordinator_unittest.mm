@@ -11,7 +11,7 @@
 #import "components/variations/service/variations_service_client.h"
 #import "ios/chrome/browser/favicon/ios_chrome_large_icon_service_factory.h"
 #import "ios/chrome/browser/ntp/new_tab_page_tab_helper.h"
-#import "ios/chrome/browser/search_engines/template_url_service_factory.h"
+#import "ios/chrome/browser/search_engines/model/template_url_service_factory.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_state_browser_agent.h"
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
@@ -42,12 +42,13 @@
 #import "ios/chrome/browser/ui/ntp/new_tab_page_coordinator+private.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_feature.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_header_view_controller.h"
+#import "ios/chrome/browser/ui/ntp/new_tab_page_mediator.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_metrics_delegate.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_view_controller.h"
 #import "ios/chrome/browser/ui/start_surface/start_surface_recent_tab_browser_agent.h"
 #import "ios/chrome/browser/ui/toolbar/public/fakebox_focuser.h"
-#import "ios/chrome/browser/url_loading/fake_url_loading_browser_agent.h"
-#import "ios/chrome/browser/url_loading/url_loading_notifier_browser_agent.h"
+#import "ios/chrome/browser/url_loading/model/fake_url_loading_browser_agent.h"
+#import "ios/chrome/browser/url_loading/model/url_loading_notifier_browser_agent.h"
 #import "ios/chrome/test/ios_chrome_scoped_testing_chrome_browser_state_manager.h"
 #import "ios/chrome/test/testing_application_context.h"
 #import "ios/testing/scoped_block_swizzler.h"
@@ -154,7 +155,7 @@ class NewTabPageCoordinatorTest : public PlatformTest {
         std::make_unique<FakeAuthenticationServiceDelegate>());
     toolbar_delegate_ =
         OCMProtocolMock(@protocol(NewTabPageControllerDelegate));
-    histogram_tester_.reset(new base::HistogramTester());
+    histogram_tester_ = std::make_unique<base::HistogramTester>();
 
     std::vector<base::test::FeatureRef> enabled;
     enabled.push_back(kEnableDiscoverFeedTopSyncPromo);
@@ -388,6 +389,10 @@ TEST_F(NewTabPageCoordinatorTest, StartIsStartShowing) {
       std::make_unique<ScopedBlockSwizzler>([NewTabPageCoordinator class],
                                             @selector(restoreNTPState),
                                             swizzle_block);
+  // Swizzle out the mediator's setUp method to prevent more VC loading.
+  std::unique_ptr<ScopedBlockSwizzler> mediator_swizzler =
+      std::make_unique<ScopedBlockSwizzler>([NewTabPageMediator class],
+                                            @selector(setUp), swizzle_block);
 
   id coordinator_mock = OCMClassMock([ContentSuggestionsCoordinator class]);
   ContentSuggestionsCoordinator* mockContentSuggestionsCoordinator =

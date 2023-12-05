@@ -54,6 +54,7 @@
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/inspector/identifiers_factory.h"
 #include "third_party/blink/renderer/core/inspector/inspector_audits_issue.h"
+#include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/heap/self_keep_alive.h"
 #include "third_party/blink/renderer/platform/loader/cors/cors.h"
@@ -532,7 +533,8 @@ AttributionSrcLoader::ReportingOriginForUrlIfValid(
     return absl::nullopt;
   }
 
-  UseCounter::Count(window, mojom::blink::WebFeature::kConversionAPIAll);
+  UseCounter::Count(window,
+                    mojom::blink::WebFeature::kAttributionReportingAPIAll);
 
   // Only record the ads APIs counter if enabled in that manner.
   if (RuntimeEnabledFeatures::PrivacySandboxAdsAPIsEnabled(window)) {
@@ -564,7 +566,7 @@ bool AttributionSrcLoader::CanRegister(const KURL& url,
 }
 
 network::mojom::AttributionSupport AttributionSrcLoader::GetSupport() const {
-  return Platform::Current()->GetAttributionReportingSupport();
+  return local_frame_->GetPage()->GetAttributionSupport();
 }
 
 network::AttributionReportingRuntimeFeatures
@@ -817,6 +819,10 @@ void AttributionSrcLoader::ResourceClient::HandleSourceRegistration(
   }
 
   if (!headers.web_source.IsNull()) {
+    // Max header size is 256 KB, use 1M count to encapsulate.
+    base::UmaHistogramCounts1M("Conversions.HeadersSize.RegisterSource",
+                               headers.web_source.length());
+
     if (!network::HasAttributionWebSupport(loader_->GetSupport())) {
       headers.LogSourceIgnored(loader_->local_frame_->DomWindow());
       return;
@@ -838,6 +844,10 @@ void AttributionSrcLoader::ResourceClient::HandleSourceRegistration(
   }
 
   DCHECK(!headers.os_source.IsNull());
+  // Max header size is 256 KB, use 1M count to encapsulate.
+  base::UmaHistogramCounts1M("Conversions.HeadersSize.RegisterOsSource",
+                             headers.os_source.length());
+
   if (!network::HasAttributionOsSupport(loader_->GetSupport())) {
     headers.LogOsSourceIgnored(loader_->local_frame_->DomWindow());
     return;
@@ -873,10 +883,15 @@ void AttributionSrcLoader::ResourceClient::HandleTriggerRegistration(
   }
 
   if (!headers.web_trigger.IsNull()) {
+    // Max header size is 256 KB, use 1M count to encapsulate.
+    base::UmaHistogramCounts1M("Conversions.HeadersSize.RegisterTrigger",
+                               headers.web_trigger.length());
+
     if (!network::HasAttributionWebSupport(loader_->GetSupport())) {
       headers.LogTriggerIgnored(loader_->local_frame_->DomWindow());
       return;
     }
+
     auto trigger_data = attribution_reporting::TriggerRegistration::Parse(
         StringUTF8Adaptor(headers.web_trigger).AsStringPiece());
     if (!trigger_data.has_value()) {
@@ -896,6 +911,10 @@ void AttributionSrcLoader::ResourceClient::HandleTriggerRegistration(
   }
 
   DCHECK(!headers.os_trigger.IsNull());
+  // Max header size is 256 KB, use 1M count to encapsulate.
+  base::UmaHistogramCounts1M("Conversions.HeadersSize.RegisterOsTrigger",
+                             headers.os_trigger.length());
+
   if (!network::HasAttributionOsSupport(loader_->GetSupport())) {
     headers.LogOsTriggerIgnored(loader_->local_frame_->DomWindow());
     return;

@@ -14,6 +14,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/notreached.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
@@ -96,20 +97,28 @@ void Clean(UpdaterScope scope) {
 
   absl::optional<base::FilePath> path = GetInstallDirectory(scope);
   EXPECT_TRUE(path);
-  if (path)
+  if (path) {
     EXPECT_TRUE(base::DeletePathRecursively(*path));
+  }
   EXPECT_TRUE(base::DeleteFile(*GetWakeTaskPlistPath(scope)));
 
   path = GetInstallDirectory(scope);
   EXPECT_TRUE(path);
-  if (path)
+  if (path) {
     EXPECT_TRUE(base::DeletePathRecursively(*path));
+  }
 
   absl::optional<base::FilePath> keystone_path = GetKeystoneFolderPath(scope);
   EXPECT_TRUE(keystone_path);
-  if (keystone_path)
+  if (keystone_path) {
     EXPECT_TRUE(base::DeletePathRecursively(*keystone_path));
+  }
 
+  absl::optional<base::FilePath> cache_path = GetCacheBaseDirectory(scope);
+  EXPECT_TRUE(cache_path);
+  if (cache_path) {
+    EXPECT_TRUE(base::DeletePathRecursively(*cache_path));
+  }
   EXPECT_TRUE(RemoveWakeJobFromLaunchd(scope));
 
   // Also clean up any other versions of the updater that are around.
@@ -136,6 +145,14 @@ void ExpectClean(UpdaterScope scope) {
   // Files must not exist on the file system.
   EXPECT_FALSE(base::PathExists(*GetWakeTaskPlistPath(scope)));
 
+  // Caches must have been removed. On Mac, this is separate from other
+  // updater directories, so we can reliably remove it completely.
+  absl::optional<base::FilePath> cache_path = GetCacheBaseDirectory(scope);
+  EXPECT_TRUE(cache_path);
+  if (cache_path) {
+    EXPECT_FALSE(base::PathExists(*cache_path));
+  }
+
   absl::optional<base::FilePath> path = GetInstallDirectory(scope);
   EXPECT_TRUE(path);
   if (path && base::PathExists(*path)) {
@@ -161,9 +178,10 @@ void ExpectClean(UpdaterScope scope) {
   // Keystone must not exist on the file system.
   absl::optional<base::FilePath> keystone_path = GetKeystoneFolderPath(scope);
   EXPECT_TRUE(keystone_path);
-  if (keystone_path)
+  if (keystone_path) {
     EXPECT_FALSE(
         base::PathExists(keystone_path->AppendASCII(KEYSTONE_NAME ".bundle")));
+  }
 }
 
 void ExpectInstalled(UpdaterScope scope) {
@@ -344,6 +362,12 @@ void InstallApp(UpdaterScope scope,
 }
 
 void UninstallApp(UpdaterScope scope, const std::string& app_id) {
+  const base::FilePath& install_path =
+      base::MakeRefCounted<PersistedData>(
+          scope, CreateGlobalPrefs(scope)->GetPrefService())
+          ->GetExistenceCheckerPath(app_id);
+  VLOG(1) << "Deleting app install path: " << install_path;
+  base::DeletePathRecursively(install_path);
   SetExistenceCheckerPath(scope, app_id,
                           base::FilePath(FILE_PATH_LITERAL("NONE")));
 }
@@ -376,13 +400,29 @@ void SetPlatformPolicies(const base::Value::Dict& values) {
       }
     }
     all_policies[base::SysUTF8ToNSString(app_id)] = app_policies;
-  }
 
-  CFPreferencesSetValue(CFSTR("updatePolicies"),
-                        base::apple::NSToCFPtrCast(all_policies), domain,
-                        kCFPreferencesAnyUser, kCFPreferencesCurrentHost);
+    NSURL* const managed_preferences_url = base::apple::FilePathToNSURL(
+        GetLibraryFolderPath(UpdaterScope::kSystem)
+            ->AppendASCII("Managed Preferences")
+            .AppendASCII("com.google.Keystone.plist"));
+    ASSERT_TRUE([[NSDictionary dictionaryWithObject:all_policies
+                                             forKey:@"updatePolicies"]
+        writeToURL:managed_preferences_url
+        atomically:YES])
+        << "Failed to write " << managed_preferences_url;
+  }
   ASSERT_TRUE(CFPreferencesSynchronize(domain, kCFPreferencesAnyUser,
                                        kCFPreferencesCurrentHost));
+
+  // Force flushing preferences cache by killing the defaults server.
+  base::Process process = base::LaunchProcess({"killall", "cfprefsd"}, {});
+  if (!process.IsValid()) {
+    VLOG(2) << "Failed to launch the process to refresh preferences.";
+  }
+  int exit_code = -1;
+  EXPECT_TRUE(process.WaitForExitWithTimeout(TestTimeouts::action_timeout(),
+                                             &exit_code));
+  EXPECT_EQ(0, exit_code);
 }
 
 }  // namespace updater::test

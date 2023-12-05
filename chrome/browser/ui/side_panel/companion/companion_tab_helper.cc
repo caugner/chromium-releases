@@ -20,6 +20,7 @@
 #include "components/translate/core/common/translate_constants.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/url_util.h"
+#include "ui/base/models/image_model.h"
 
 #if BUILDFLAG(ENABLE_LENS_DESKTOP_GOOGLE_BRANDED_FEATURES)
 #include "chrome/browser/lens/region_search/lens_region_search_controller.h"
@@ -50,7 +51,6 @@ void CompanionTabHelper::ShowCompanionSidePanelForImage(
     const std::vector<uint8_t>& thumbnail_data,
     const gfx::Size& original_size,
     const gfx::Size& downscaled_size,
-    const std::string& image_extension,
     const std::string& content_type) {
   CHECK(delegate_);
 
@@ -188,12 +188,9 @@ void CompanionTabHelper::StartRegionSearch(
     bool use_fullscreen_capture,
     lens::AmbientSearchEntryPoint entry_point) {
 #if BUILDFLAG(ENABLE_LENS_DESKTOP_GOOGLE_BRANDED_FEATURES)
-  // TODO(shaktisahu): Pass a UI entry point for accurate metrics.
-  Browser* browser = companion::GetBrowserForWebContents(web_contents);
-  CHECK(browser);
   if (!lens_region_search_controller_) {
     lens_region_search_controller_ =
-        std::make_unique<lens::LensRegionSearchController>(browser);
+        std::make_unique<lens::LensRegionSearchController>();
   }
   lens_region_search_controller_->Start(web_contents, use_fullscreen_capture,
                                         /*is_google_default_search_provider=*/
@@ -231,6 +228,34 @@ void CompanionTabHelper::DidOpenRequestedURL(
     }
     delegate_->SetCompanionAsActiveEntry(new_contents);
   }
+}
+
+void CompanionTabHelper::CreateAndRegisterLensEntry(
+    const content::OpenURLParams& params,
+    std::u16string combobox_label,
+    const ui::ImageModel favicon) {
+  delegate_->CreateAndRegisterLensEntry(params, combobox_label, favicon);
+}
+
+void CompanionTabHelper::RemoveContextualLensView() {
+  delegate_->RemoveContextualLensView();
+}
+
+void CompanionTabHelper::OpenContextualLensView(
+    const content::OpenURLParams& params) {
+  delegate_->OpenContextualLensView(params);
+}
+
+content::WebContents* CompanionTabHelper::GetLensViewWebContentsForTesting() {
+  return delegate_->GetLensViewWebContentsForTesting();  // IN-TEST
+}
+
+bool CompanionTabHelper::OpenLensResultsInNewTabForTesting() {
+  return delegate_->OpenLensResultsInNewTabForTesting();  // IN-TEST
+}
+
+bool CompanionTabHelper::IsLensLaunchButtonEnabledForTesting() {
+  return delegate_->IsLensLaunchButtonEnabledForTesting();  // IN-TEST
 }
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(CompanionTabHelper);

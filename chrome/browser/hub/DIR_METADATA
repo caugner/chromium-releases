@@ -1,5 +1,1 @@
-monorail: {
-  component: "UI>Browser>Mobile>Hub"
-}
-team_email: "clank-hub-dev@google.com"
-os: ANDROID
+mixins: "//chrome/browser/hub/COMMON_METADATA"

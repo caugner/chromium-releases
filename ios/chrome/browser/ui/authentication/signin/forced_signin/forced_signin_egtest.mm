@@ -251,8 +251,7 @@ void CompleteSigninFlow() {
                                             WebSigninPrimaryButtonMatcher()]
         performAction:grey_tap()];
     [[EarlGrey selectElementWithMatcher:
-                   grey_accessibilityID(
-                       kPromoStylePrimaryActionAccessibilityIdentifier)]
+                   chrome_test_util::SigninScreenPromoPrimaryButtonMatcher()]
         performAction:grey_tap()];
   } else {
     [SigninEarlGreyUI tapSigninConfirmationDialog];
@@ -302,6 +301,11 @@ void CompleteSigninFlow() {
       "-" + base::SysNSStringToUTF8(kPolicyLoaderIOSConfigurationKey));
   config.additional_args.push_back(
       "<dict><key>BrowserSignin</key><integer>2</integer></dict>");
+  if ([self isRunningTest:@selector
+            (testSignOutFromAccountsOnThisDeviceSyncDisabled)]) {
+    config.features_enabled.push_back(
+        syncer::kReplaceSyncPromosWithSignInPromos);
+  }
   return config;
 }
 
@@ -495,15 +499,7 @@ void CompleteSigninFlow() {
 }
 
 // Tests signing out account from accounts on this device with sync disabled.
-// TODO(crbug.com/1487746): Test fails on official builds.
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-#define MAYBE_testSignOutFromAccountsOnThisDeviceSyncDisabled \
-  DISABLED_testSignOutFromAccountsOnThisDeviceSyncDisabled
-#else
-#define MAYBE_testSignOutFromAccountsOnThisDeviceSyncDisabled \
-  testSignOutFromAccountsOnThisDeviceSyncDisabled
-#endif
-- (void)MAYBE_testSignOutFromAccountsOnThisDeviceSyncDisabled {
+- (void)testSignOutFromAccountsOnThisDeviceSyncDisabled {
   // Add account.
   FakeSystemIdentity* fakeIdentity1 = [FakeSystemIdentity fakeIdentity1];
   [SigninEarlGrey addFakeIdentity:fakeIdentity1];
@@ -819,9 +815,8 @@ void CompleteSigninFlow() {
   SetSigninEnterprisePolicyValue(BrowserSigninMode::kForced);
 
   // Dismiss the regular sign-in prompt by skipping it.
-  [[EarlGrey selectElementWithMatcher:
-                 ButtonWithAccessibilityLabelId(
-                     IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_SKIP_BUTTON)]
+  [[EarlGrey
+      selectElementWithMatcher:chrome_test_util::WebSigninSkipButtonMatcher()]
       performAction:grey_tap()];
 
   // Wait and verify that the forced sign-in screen is shown when the policy is
@@ -932,9 +927,8 @@ void CompleteSigninFlow() {
   SimulateExternalAppURLOpeningWithURL(URLToOpen);
 
   // Dismiss the regular sign-in prompt by skipping it.
-  [[EarlGrey selectElementWithMatcher:
-                 ButtonWithAccessibilityLabelId(
-                     IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_SKIP_BUTTON)]
+  [[EarlGrey
+      selectElementWithMatcher:chrome_test_util::WebSigninSkipButtonMatcher()]
       performAction:grey_tap()];
 
   // Wait and verify that the forced sign-in screen is shown when the policy is

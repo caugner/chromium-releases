@@ -21,7 +21,7 @@
 // Need to BUILDFLAG these lines because kSidePanelCompanionEntryPinnedToToolbar
 // does not exist on Android and will break try-bots
 #if (!BUILDFLAG(IS_ANDROID))
-#include "chrome/browser/companion/visual_search/features.h"
+#include "chrome/common/companion/visual_search/features.h"
 #endif
 
 namespace companion {
@@ -121,7 +121,8 @@ std::string CompanionUrlBuilder::BuildCompanionUrlParamProto(
         url_params.mutable_query_start_time();
     int64_t nanoseconds_in_milliseconds = 1e6;
     int64_t time_nanoseconds =
-        text_query_start_time->ToJavaTime() * nanoseconds_in_milliseconds;
+        text_query_start_time->InMillisecondsSinceUnixEpoch() *
+        nanoseconds_in_milliseconds;
     query_start_time->set_seconds(time_nanoseconds /
                                   base::Time::kNanosecondsPerSecond);
     query_start_time->set_nanos(time_nanoseconds %

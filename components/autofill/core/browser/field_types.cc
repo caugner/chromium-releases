@@ -21,7 +21,7 @@ std::ostream& operator<<(std::ostream& o, ServerFieldTypeSet field_type_set) {
     } else {
       first = false;
     }
-    o << FieldTypeToStringPiece(type);
+    o << FieldTypeToStringView(type);
   }
   o << "]";
   return o;
@@ -92,7 +92,6 @@ static constexpr auto kTypeNameToFieldType =
          {"NOT_PASSWORD", NOT_PASSWORD},
          {"SINGLE_USERNAME", SINGLE_USERNAME},
          {"NOT_USERNAME", NOT_USERNAME},
-         {"UPI_VPA", UPI_VPA},
          {"ADDRESS_HOME_STREET_NAME", ADDRESS_HOME_STREET_NAME},
          {"ADDRESS_HOME_HOUSE_NUMBER", ADDRESS_HOME_HOUSE_NUMBER},
          {"ADDRESS_HOME_SUBPREMISE", ADDRESS_HOME_SUBPREMISE},
@@ -202,9 +201,6 @@ bool IsFillableFieldType(ServerFieldType field_type) {
     case CREDIT_CARD_STANDALONE_VERIFICATION_CODE:
       return true;
 
-    case UPI_VPA:
-      return false;
-
     case IBAN_VALUE:
       return true;
 
@@ -255,7 +251,7 @@ bool IsFillableFieldType(ServerFieldType field_type) {
   return false;
 }
 
-std::string_view FieldTypeToStringPiece(ServerFieldType type) {
+std::string_view FieldTypeToStringView(ServerFieldType type) {
   static const base::NoDestructor<
       base::flat_map<ServerFieldType, std::string_view>>
       kFieldTypeToTypeName(base::MakeFlatMap<ServerFieldType, std::string_view>(
@@ -268,6 +264,10 @@ std::string_view FieldTypeToStringPiece(ServerFieldType type) {
     return it->second;
   }
   NOTREACHED_NORETURN();
+}
+
+std::string FieldTypeToString(ServerFieldType type) {
+  return std::string(FieldTypeToStringView(type));
 }
 
 ServerFieldType TypeNameToFieldType(std::string_view type_name) {
@@ -433,8 +433,6 @@ std::string_view FieldTypeToDeveloperRepresentationString(
       return "Credit card verification code";
     case COMPANY_NAME:
       return "Company name";
-    case UPI_VPA:
-      return "UPI VPA";
     case IBAN_VALUE:
       return "IBAN";
     case CREDIT_CARD_STANDALONE_VERIFICATION_CODE:
@@ -556,7 +554,7 @@ FieldTypeGroup GroupTypeOfServerFieldType(ServerFieldType field_type) {
     case FIELD_WITH_DEFAULT_VALUE:
     case MERCHANT_EMAIL_SIGNUP:
     case MERCHANT_PROMO_CODE:
-    case UPI_VPA:
+    case ONE_TIME_CODE:
       return FieldTypeGroup::kNoGroup;
 
     case USERNAME:
@@ -570,7 +568,6 @@ FieldTypeGroup GroupTypeOfServerFieldType(ServerFieldType field_type) {
     case PRICE:
     case SEARCH_TERM:
     case NUMERIC_QUANTITY:
-    case ONE_TIME_CODE:
       return FieldTypeGroup::kUnfillable;
 
     case UNKNOWN_TYPE:
@@ -654,7 +651,7 @@ FieldTypeGroup GroupTypeOfHtmlFieldType(HtmlFieldType field_type) {
       return FieldTypeGroup::kNoGroup;
 
     case HtmlFieldType::kIban:
-      return FieldTypeGroup::kNoGroup;
+      return FieldTypeGroup::kIban;
 
     case HtmlFieldType::kUnspecified:
     case HtmlFieldType::kUnrecognized:
@@ -791,17 +788,17 @@ ServerFieldType HtmlFieldTypeToBestCorrespondingServerFieldType(
     case HtmlFieldType::kCreditCardExp4DigitYear:
       return CREDIT_CARD_EXP_4_DIGIT_YEAR;
 
-    case HtmlFieldType::kUpiVpa:
-      return UPI_VPA;
-
     case HtmlFieldType::kOneTimeCode:
       return ONE_TIME_CODE;
 
+    case HtmlFieldType::kIban:
+      return IBAN_VALUE;
+
     // These types aren't stored; they're transient.
+    case HtmlFieldType::kUpiVpa:
     case HtmlFieldType::kTransactionAmount:
     case HtmlFieldType::kTransactionCurrency:
     case HtmlFieldType::kMerchantPromoCode:
-    case HtmlFieldType::kIban:
       return UNKNOWN_TYPE;
 
     case HtmlFieldType::kUnrecognized:

@@ -618,11 +618,32 @@
       <message name="IDS_PAGE_INFO_COOKIES_SUBTITLE_BLOCKED" desc="Description text in the Page Info dialog to indicate that third-party cookies are blocked on this site.">
         Third-party cookies blocked
       </message>
+      <message name="IDS_PAGE_INFO_TRACKING_PROTECTION_TOGGLE_LIMITED" desc="Summary text in the Page Info dialog to indicate that third-party cookies are limited on this site.">
+        Limited
+      </message>
+      <message name="IDS_PAGE_INFO_TRACKING_PROTECTION_TOGGLE_BLOCKED" desc="Summary text in the Page Info dialog to indicate that third-party cookies are blocked on this site.">
+        Blocked
+      </message>
+      <message name="IDS_PAGE_INFO_TRACKING_PROTECTION_TOGGLE_ALLOWED" desc="Summary text in the Page Info dialog to indicate that third-party cookies are allowed on this site.">
+        Allowed
+      </message>
       <message name="IDS_PAGE_INFO_COOKIES_SUBTITLE_BLOCKED_HIGH_CONFIDENCE" desc="Description text in the Page Info dialog to indicate that third-party cookies are blocked on a site that has a high breakage confidence level.">
         Site not working? Third-party cookies blocked
       </message>
       <message name="IDS_PAGE_INFO_COOKIES_THIRD_PARTY_COOKIES_LABEL" desc="The label used in the Page Info dialog to label a toggle button that when enabled allows third-party cookies and when disabled blocks third-party cookies.">
         Third-party cookies
+      </message>
+      <message name="IDS_PAGE_INFO_TRACKING_PROTECTION_TITLE" desc="The header label of Tracking Protection page.">
+        Tracking Protection
+      </message>
+      <message name="IDS_PAGE_INFO_TRACKING_PROTECTION_DESCRIPTION" desc="Description text for the Tracking Protection subpage in the page info view. Contains a link to the Tracking Protection settings page.">
+        Chrome limits most sites from using third-party cookies to track you as you browse. Visit settings to <ph name="BEGIN_LINK">&lt;link&gt;</ph>manage your tracking protections<ph name="END_LINK">&lt;/link&gt;</ph>
+      </message>
+      <message name="IDS_PAGE_INFO_TRACKING_PROTECTION_BLOCKED_COOKIES_DESCRIPTION" desc="Description text for the Tracking Protection subpage in the page info view if all cookies are blocked. Contains a link to the Tracking Protection settings page.">
+        You blocked sites from using third-party cookies to track you as you browse. Visit settings to <ph name="BEGIN_LINK">&lt;link&gt;</ph>manage your tracking protections<ph name="END_LINK">&lt;/link&gt;</ph>.
+      </message>
+      <message name="IDS_PAGE_INFO_TRACKING_PROTECTION_SUBTITLE_COOKIES_LIMITED" desc="Description text in the Page Info dialog to indicate that third-party cookies are limited on this site.">
+        Third-party cookies limited
       </message>
       <message name="IDS_PAGE_INFO_ANDROID_LOCATION_BLOCKED" desc="The label used in the Page Info dialog to indicate that location has been been disabled for the device in Android settings">
         Turned off for this device
@@ -641,21 +662,6 @@
       </message>
       <message name="IDS_PAGE_INFO_URL_TRUNCATED" desc="Accessibility announcement when the URL in PageInfo switches from full to truncated display">
         URL truncated
-      </message>
-      <message name="IDS_PAGE_INFO_AD_PERSONALIZATION_TITLE" desc="The title of the 'Ad personalization' section in Page Info.">
-        Ad personalization
-      </message>
-      <message name="IDS_PAGE_INFO_AD_PERSONALIZATION_TOPICS_AND_INTEREST_GROUP_DESCRIPTION" desc="The description label that explains to the user that the current site has accessed the Topics API and joined the user to an interest group. The label is located in 'Ad personalization' subpage in page info bubble.">
-        This site defines interests other sites can use to show you ads. This site also gets your interests from Chrome to show you more relevant ads.
-      </message>
-      <message name="IDS_PAGE_INFO_AD_PERSONALIZATION_TOPICS_DESCRIPTION"  desc="The description label that explains to the user that the current site has accessed the Topics API. The label is located in 'Ad personalization' subpage in page info bubble.">
-        This site gets your interests from Chrome to show you more relevant ads
-      </message>
-      <message name="IDS_PAGE_INFO_AD_PERSONALIZATION_INTEREST_GROUP_DESCRIPTION" desc="The description label that explains to the user that the current site has joined the user to an interest group. The label is located in 'Ad personalization' subpage in page info bubble.">
-        This site defines interests other sites can use to show you ads
-      </message>
-      <message name="IDS_PAGE_INFO_AD_MANAGE_INTERESTS" desc="The button label of the 'Manage interests' button in Page Info. The button opens a settings page to manage interests for the site.">
-        Manage interests
       </message>
       <message name="IDS_PAGE_INFO_AD_PRIVACY_HEADER" desc="A label that represents the new ad-related settings. 1) Navigate to any site. 2) Click the icon (often a lock) to the left of the URL in the address bar. Information about the page you're viewing appears. The 'Ad privacy' label will appear above the 'Site settings' button.">
         Ad privacy
