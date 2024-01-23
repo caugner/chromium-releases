@@ -11,6 +11,7 @@
 #include "base/functional/callback_forward.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "chrome/browser/ui/safety_hub/extensions_result.h"
 #include "chrome/browser/ui/safety_hub/menu_notification.h"
 #include "chrome/browser/ui/safety_hub/notification_permission_review_service.h"
 #include "chrome/browser/ui/safety_hub/safe_browsing_result.h"
@@ -41,7 +42,10 @@ SafetyHubModuleInfoElement::SafetyHubModuleInfoElement(
 SafetyHubMenuNotificationService::SafetyHubMenuNotificationService(
     PrefService* pref_service,
     UnusedSitePermissionsService* unused_site_permissions_service,
-    NotificationPermissionsReviewService* notification_permissions_service) {
+    NotificationPermissionsReviewService* notification_permissions_service,
+    extensions::CWSInfoService* extension_info_service,
+    PasswordStatusCheckService* password_check_service,
+    Profile* profile) {
   pref_service_ = std::move(pref_service);
   const base::Value::Dict& stored_notifications =
       pref_service_->GetDict(safety_hub_prefs::kMenuNotificationsPrefsKey);
@@ -67,6 +71,19 @@ SafetyHubMenuNotificationService::SafetyHubMenuNotificationService(
                  base::BindRepeating(&SafetyHubSafeBrowsingResult::GetResult,
                                      base::Unretained(pref_service)),
                  stored_notifications);
+  SetInfoElement(safety_hub::SafetyHubModuleType::EXTENSIONS,
+                 MenuNotificationPriority::LOW, base::Days(10),
+                 base::BindRepeating(&SafetyHubExtensionsResult::GetResult,
+                                     base::Unretained(extension_info_service),
+                                     profile, true),
+                 stored_notifications);
+  SetInfoElement(
+      safety_hub::SafetyHubModuleType::PASSWORDS,
+      MenuNotificationPriority::HIGH, base::Days(0),
+      base::BindRepeating(&PasswordStatusCheckService::GetCachedResult,
+                          base::Unretained(password_check_service)),
+      stored_notifications);
+
   // Listen for changes to the Safe Browsing pref to accommodate the trigger
   // logic.
   registrar_.Init(pref_service);
@@ -75,6 +92,14 @@ SafetyHubMenuNotificationService::SafetyHubMenuNotificationService(
       base::BindRepeating(
           &SafetyHubMenuNotificationService::OnSafeBrowsingPrefUpdate,
           base::Unretained(this)));
+}
+
+void SafetyHubMenuNotificationService::UpdateResultGetterForTesting(
+    safety_hub::SafetyHubModuleType type,
+    base::RepeatingCallback<
+        std::optional<std::unique_ptr<SafetyHubService::Result>>()>
+        result_getter) {
+  module_info_map_[type]->result_getter = result_getter;
 }
 
 SafetyHubMenuNotificationService::~SafetyHubMenuNotificationService() {
@@ -89,11 +114,13 @@ SafetyHubMenuNotificationService::GetNotificationToShow() {
   }
   std::list<SafetyHubMenuNotification*> notifications_to_be_shown;
   MenuNotificationPriority cur_highest_priority = MenuNotificationPriority::LOW;
-  for (auto const& item : result_map.value()) {
-    SafetyHubModuleInfoElement* info_element =
+  for (auto& item : result_map.value()) {
+    const SafetyHubModuleInfoElement* info_element =
         module_info_map_[item.first].get();
     SafetyHubMenuNotification* notification = info_element->notification.get();
-    notification->UpdateResult(std::move(result_map.value()[item.first]));
+    // The result in the ResultMap (item.second) is being moved away from and
+    // thus shouldn't be used again in this method.
+    notification->UpdateResult(std::move(item.second));
     int max_all_time_impressions =
         item.first == safety_hub::SafetyHubModuleType::SAFE_BROWSING ? 3 : 0;
     if (notification->ShouldBeShown(info_element->interval,
@@ -127,6 +154,7 @@ SafetyHubMenuNotificationService::GetNotificationToShow() {
     (*it)->Dismiss();
   }
   notification_to_show->Show();
+
   // The information related to showing the notification needs to be persisted
   // as well.
   SaveNotificationsToPrefs();
@@ -145,7 +173,7 @@ SafetyHubMenuNotificationService::GetResultsFromAllModules() {
     if (!result.has_value()) {
       return absl::nullopt;
     }
-    result_map[item.first] = std::move(result.value());
+    result_map.try_emplace(item.first, std::move(result.value()));
   }
   return result_map;
 }
@@ -176,7 +204,7 @@ SafetyHubMenuNotificationService::GetNotificationFromDict(
   const base::Value::Dict* notification_dict =
       dict.FindDict(pref_dict_key_map_.find(type)->second);
   if (!notification_dict) {
-    auto new_notification = std::make_unique<SafetyHubMenuNotification>();
+    auto new_notification = std::make_unique<SafetyHubMenuNotification>(type);
     if (type == safety_hub::SafetyHubModuleType::SAFE_BROWSING) {
       new_notification->SetOnlyShowAfter(base::Time::Now() + base::Days(1));
     }
@@ -204,4 +232,31 @@ void SafetyHubMenuNotificationService::OnSafeBrowsingPrefUpdate() {
   module_info_map_[safety_hub::SafetyHubModuleType::SAFE_BROWSING]
       ->notification->ResetAllTimeNotificationCount();
   SaveNotificationsToPrefs();
+}
+
+void SafetyHubMenuNotificationService::DismissActiveNotification() {
+  for (auto const& item : module_info_map_) {
+    if (item.second->notification->IsCurrentlyActive()) {
+      item.second->notification->Dismiss();
+    }
+  }
+}
+
+void SafetyHubMenuNotificationService::DismissActiveNotificationOfModule(
+    safety_hub::SafetyHubModuleType module) {
+  SafetyHubMenuNotification* notification =
+      module_info_map_.at(module)->notification.get();
+  if (notification->IsCurrentlyActive()) {
+    notification->Dismiss();
+  }
+}
+
+absl::optional<safety_hub::SafetyHubModuleType>
+SafetyHubMenuNotificationService::GetModuleOfActiveNotification() const {
+  for (auto const& item : module_info_map_) {
+    if (item.second->notification->IsCurrentlyActive()) {
+      return item.second->notification->GetModuleType();
+    }
+  }
+  return absl::nullopt;
 }

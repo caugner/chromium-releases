@@ -81,6 +81,8 @@ bool HasNonLinuxMediaApps(const MediaApps& apps) {
 
 // A customized toggle button for the VC tray's toggle bubble button.
 class ToggleBubbleButton : public IconButton {
+  METADATA_HEADER(ToggleBubbleButton, IconButton)
+
  public:
   ToggleBubbleButton(VideoConferenceTray* tray, PressedCallback callback)
       : IconButton(std::move(callback),
@@ -125,6 +127,9 @@ class ToggleBubbleButton : public IconButton {
   const raw_ptr<VideoConferenceTray, ExperimentalAsh> tray_;
 };
 
+BEGIN_METADATA(ToggleBubbleButton)
+END_METADATA
+
 }  // namespace
 
 VideoConferenceTrayButton::VideoConferenceTrayButton(
@@ -148,10 +153,10 @@ VideoConferenceTrayButton::VideoConferenceTrayButton(
           /*views::Button*=*/this,
           TrayBackgroundViewCatalogName::kVideoConferenceTray)));
 
-  SetBackgroundToggledColorId(cros_tokens::kCrosSysSystemNegativeContainer);
-  SetIconToggledColorId(cros_tokens::kCrosSysSystemOnNegativeContainer);
+  SetBackgroundToggledColor(cros_tokens::kCrosSysSystemNegativeContainer);
+  SetIconToggledColor(cros_tokens::kCrosSysSystemOnNegativeContainer);
 
-  SetBackgroundColorId(cros_tokens::kCrosSysSystemOnBase1);
+  SetBackgroundColor(cros_tokens::kCrosSysSystemOnBase1);
 
   SetToggledVectorIcon(*toggled_icon);
 
@@ -242,6 +247,9 @@ void VideoConferenceTrayButton::UpdateTooltip() {
       l10n_util::GetStringUTF16(capture_state_id)));
 }
 
+BEGIN_METADATA(VideoConferenceTrayButton)
+END_METADATA
+
 VideoConferenceTray::VideoConferenceTray(Shelf* shelf)
     : TrayBackgroundView(shelf,
                          TrayBackgroundViewCatalogName::kVideoConferenceTray) {
@@ -269,16 +277,22 @@ VideoConferenceTray::VideoConferenceTray(Shelf* shelf)
           VIDEO_CONFERENCE_TOGGLE_BUTTON_TYPE_CAMERA));
   camera_icon_->SetVisible(false);
 
-  screen_share_icon_ = tray_container()->AddChildView(
-      std::make_unique<VideoConferenceTrayButton>(
-          base::BindRepeating(&VideoConferenceTray::OnScreenShareButtonClicked,
-                              weak_ptr_factory_.GetWeakPtr()),
-          &kVideoConferenceScreenShareIcon, &kVideoConferenceScreenShareIcon,
-          &kVideoConferenceScreenShareIcon,
-          VIDEO_CONFERENCE_TOGGLE_BUTTON_TYPE_SCREEN_SHARE));
-  // Toggling screen share stops screen share, and removes the item.
-  screen_share_icon_->set_toggle_is_one_way();
-  screen_share_icon_->SetVisible(false);
+  const bool allow_stop_screen_share =
+      base::FeatureList::IsEnabled(features::kVcStopAllScreenShare);
+
+  if (allow_stop_screen_share) {
+    screen_share_icon_ = tray_container()->AddChildView(
+        std::make_unique<VideoConferenceTrayButton>(
+            base::BindRepeating(
+                &VideoConferenceTray::OnScreenShareButtonClicked,
+                weak_ptr_factory_.GetWeakPtr()),
+            &kVideoConferenceScreenShareIcon, &kVideoConferenceScreenShareIcon,
+            &kVideoConferenceScreenShareIcon,
+            VIDEO_CONFERENCE_TOGGLE_BUTTON_TYPE_SCREEN_SHARE));
+    // Toggling screen share stops screen share, and removes the item.
+    screen_share_icon_->set_toggle_is_one_way();
+    screen_share_icon_->SetVisible(false);
+  }
 
   toggle_bubble_button_ =
       tray_container()->AddChildView(std::make_unique<ToggleBubbleButton>(
@@ -294,7 +308,8 @@ VideoConferenceTray::VideoConferenceTray(Shelf* shelf)
   // so force update all state.
   UpdateTrayAndIconsState();
 
-  DCHECK_EQ(4u, tray_container()->children().size())
+  DCHECK_EQ(allow_stop_screen_share ? 4u : 3u,
+            tray_container()->children().size())
       << "Icons must be updated here in case a media session begins prior to "
          "connecting a secondary display.";
 }
@@ -388,9 +403,11 @@ void VideoConferenceTray::OnMicrophonePermissionStateChange() {
 }
 
 void VideoConferenceTray::OnScreenSharingStateChange(bool is_capturing_screen) {
-  screen_share_icon_->SetVisible(is_capturing_screen);
-  screen_share_icon_->SetIsCapturing(
-      /*is_capturing=*/is_capturing_screen);
+  if (screen_share_icon_) {
+    screen_share_icon_->SetVisible(is_capturing_screen);
+    screen_share_icon_->SetIsCapturing(
+        /*is_capturing=*/is_capturing_screen);
+  }
 }
 
 void VideoConferenceTray::OnCameraCapturingStateChange(bool is_capturing) {
@@ -436,9 +453,11 @@ void VideoConferenceTray::UpdateTrayAndIconsState() {
   audio_icon_->SetIsCapturing(controller->IsCapturingMicrophone());
   audio_icon_->SetToggled(/*toggled=*/controller->GetMicrophoneMuted());
 
-  bool is_capturing_screen = controller->IsCapturingScreen();
-  screen_share_icon_->SetVisible(is_capturing_screen);
-  screen_share_icon_->SetIsCapturing(is_capturing_screen);
+  if (screen_share_icon_) {
+    bool is_capturing_screen = controller->IsCapturingScreen();
+    screen_share_icon_->SetVisible(is_capturing_screen);
+    screen_share_icon_->SetIsCapturing(is_capturing_screen);
+  }
 }
 
 IconButton* VideoConferenceTray::GetToggleBubbleButtonForTest() {

@@ -15,6 +15,7 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
+#include "chrome/browser/picture_in_picture/picture_in_picture_occlusion_tracker.h"
 #include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -306,6 +307,12 @@ std::unique_ptr<VideoOverlayWindowViews> VideoOverlayWindowViews::Create(
   }
 #endif  // BUILDFLAG(IS_WIN)
 
+  PictureInPictureOcclusionTracker* tracker =
+      PictureInPictureWindowManager::GetInstance()->GetOcclusionTracker();
+  if (tracker) {
+    tracker->OnPictureInPictureWidgetOpened(overlay_window.get());
+  }
+
   return overlay_window;
 }
 
@@ -430,7 +437,7 @@ void VideoOverlayWindowViews::OnNativeBlur() {
 }
 
 gfx::Size VideoOverlayWindowViews::GetMinimumSize() const {
-  if (overlay_view_) {
+  if (IsOverlayViewShown()) {
     // Make sure that our minimum is sufficiently large to enclose the bubble,
     // plus some margin to make it look nicer.
     gfx::Size overlay_size =
@@ -468,6 +475,8 @@ void VideoOverlayWindowViews::OnNativeWidgetMove() {
   close_controls_view_->SetPosition(GetBounds().size(), quadrant);
   UpdateResizeHandleBounds(quadrant);
 #endif
+
+  views::Widget::OnNativeWidgetMove();
 }
 
 void VideoOverlayWindowViews::OnNativeWidgetSizeChanged(
@@ -642,6 +651,24 @@ void VideoOverlayWindowViews::OnDisplayMetricsChanged(
   }
 }
 
+void VideoOverlayWindowViews::OnViewVisibilityChanged(
+    views::View* observed_view,
+    views::View* starting_view) {
+  // If the visibility is changing due to a parent view/widget, then we don't
+  // care about it.
+  if (starting_view != overlay_view_) {
+    return;
+  }
+
+  // The visibility of `overlay_view_` affects our minimum size.
+  OnSizeConstraintsChanged();
+}
+
+void VideoOverlayWindowViews::OnAutoPipSettingOverlayViewHidden() {
+  // If there is an existing overlay view, remove it now.
+  RemoveOverlayViewIfExists();
+}
+
 gfx::Rect VideoOverlayWindowViews::GetWorkAreaForWindow() const {
   return display::Screen::GetScreen()
       ->GetDisplayNearestWindow(
@@ -691,7 +718,7 @@ void VideoOverlayWindowViews::UpdateMaxSize(const gfx::Rect& work_area) {
 
 bool VideoOverlayWindowViews::ControlsHitTestContainsPoint(
     const gfx::Point& point) {
-  if (IsOverlayViewShown()) {
+  if (overlay_view_) {
     // Let the overlay view consume this event if it wants to.  If not, then
     // ignore any of our controls as well.  This will still permit dragging the
     // window by any parts that aren't consumed by the overlay view.
@@ -1226,12 +1253,7 @@ void VideoOverlayWindowViews::ShowInactive() {
 #endif
 
   // If there is an existing overlay view, remove it now.
-  if (overlay_view_) {
-    // Remove and delete the outgoing view.  Note the trailing `T` on the method
-    // name -- this removes `overlay_view_` and returns a unique_ptr to it which
-    // we then discard.  Without the `T`, it returns nothing and frees nothing.
-    GetContentsView()->RemoveChildViewT(overlay_view_.ExtractAsDangling());
-  }
+  RemoveOverlayViewIfExists();
 
   // TODO(crbug.com/1472386): Confirm whether the anchor should remain as FLOAT.
   auto overlay_view =
@@ -1243,11 +1265,12 @@ void VideoOverlayWindowViews::ShowInactive() {
   // Re-add it if needed.
   if (overlay_view) {
     overlay_view_ = GetContentsView()->AddChildView(std::move(overlay_view));
+    overlay_view_->views::View::AddObserver(this);
+    auto_pip_setting_overlay_view_observation_.Observe(overlay_view_);
     // Also update the bounds, since that's already happened for everything
     // else, potentially, during widget resize.
     overlay_view_->SetBoundsRect(gfx::Rect(GetBounds().size()));
-    overlay_view_->ShowBubble(
-        GetNativeView(), AutoPipSettingOverlayView::PipWindowType::kVideoPip);
+    overlay_view_->ShowBubble(GetNativeView());
     SetBounds(CalculateAndUpdateWindowBounds());
   }
 
@@ -1256,6 +1279,8 @@ void VideoOverlayWindowViews::ShowInactive() {
 }
 
 void VideoOverlayWindowViews::Hide() {
+  // If there is an existing overlay view, remove it now.
+  RemoveOverlayViewIfExists();
   views::Widget::Hide();
   MaybeUnregisterFrameSinkHierarchy();
 }
@@ -1600,4 +1625,16 @@ void VideoOverlayWindowViews::MaybeUnregisterFrameSinkHierarchy() {
 
 bool VideoOverlayWindowViews::IsOverlayViewShown() const {
   return overlay_view_ && overlay_view_->GetVisible();
+}
+
+void VideoOverlayWindowViews::RemoveOverlayViewIfExists() {
+  if (overlay_view_) {
+    auto_pip_setting_overlay_view_observation_.Reset();
+    // Remove and delete the outgoing view.  Note the trailing `T` on the method
+    // name -- this removes `overlay_view_` and returns a unique_ptr to it which
+    // we then discard.  Without the `T`, it returns nothing and frees nothing.
+    overlay_view_->views::View::RemoveObserver(this);
+    GetContentsView()->RemoveChildViewT(overlay_view_.ExtractAsDangling());
+    OnSizeConstraintsChanged();
+  }
 }

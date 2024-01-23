@@ -35,7 +35,8 @@ class MockAttributionReportingContentBrowserClientBase : public SuperClass {
                RenderFrameHost*,
                const url::Origin* source_origin,
                const url::Origin* destination_origin,
-               const url::Origin* reporting_origin),
+               const url::Origin* reporting_origin,
+               bool* can_bypass),
               (override));
 
   MOCK_METHOD(bool,
@@ -52,7 +53,12 @@ class MockAttributionReportingContentBrowserClientBase : public SuperClass {
               IsPrivacySandboxReportingDestinationAttested,
               (content::BrowserContext * browser_context,
                const url::Origin& destination_origin,
-               content::PrivacySandboxInvokingAPI invoking_api),
+               content::PrivacySandboxInvokingAPI invoking_api,
+               bool post_impression_reporting),
+              (override));
+  MOCK_METHOD(bool,
+              AddPrivacySandboxAttestationsObserver,
+              (PrivacySandboxAttestationsObserver*),
               (override));
 };
 

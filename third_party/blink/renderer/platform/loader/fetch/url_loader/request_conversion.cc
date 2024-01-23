@@ -112,6 +112,7 @@ mojom::ResourceType RequestContextToResourceType(
     // Subresource
     case mojom::blink::RequestContextType::DOWNLOAD:
     case mojom::blink::RequestContextType::MANIFEST:
+    case mojom::blink::RequestContextType::SPECULATION_RULES:
     case mojom::blink::RequestContextType::SUBRESOURCE:
     case mojom::blink::RequestContextType::SUBRESOURCE_WEBBUNDLE:
       return mojom::ResourceType::kSubResource;
@@ -354,7 +355,7 @@ void PopulateResourceRequest(const ResourceRequestHead& src,
   dest->enable_upload_progress = src.ReportUploadProgress();
   dest->throttling_profile_id = src.GetDevToolsToken();
   dest->trust_token_params = ConvertTrustTokenParams(src.TrustTokenParams());
-  dest->target_address_space = src.GetTargetAddressSpace();
+  dest->required_ip_address_space = src.GetTargetAddressSpace();
 
   if (base::UnguessableToken window_id = src.GetFetchWindowId())
     dest->fetch_window_id = absl::make_optional(window_id);
@@ -420,6 +421,8 @@ void PopulateResourceRequest(const ResourceRequestHead& src,
   dest->attribution_reporting_src_token = src.GetAttributionSrcToken();
 
   dest->shared_dictionary_writer_enabled = src.SharedDictionaryWriterEnabled();
+
+  dest->is_ad_tagged = src.IsAdResource();
 }
 
 }  // namespace blink

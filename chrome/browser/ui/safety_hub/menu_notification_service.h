@@ -10,8 +10,10 @@
 #include <memory>
 
 #include "base/time/time.h"
+#include "chrome/browser/extensions/cws_info_service.h"
 #include "chrome/browser/ui/safety_hub/menu_notification.h"
 #include "chrome/browser/ui/safety_hub/notification_permission_review_service.h"
+#include "chrome/browser/ui/safety_hub/password_status_check_service.h"
 #include "chrome/browser/ui/safety_hub/safety_hub_constants.h"
 #include "chrome/browser/ui/safety_hub/safety_hub_service.h"
 #include "chrome/browser/ui/safety_hub/unused_site_permissions_service.h"
@@ -65,7 +67,10 @@ class SafetyHubMenuNotificationService : public KeyedService {
   explicit SafetyHubMenuNotificationService(
       PrefService* pref_service,
       UnusedSitePermissionsService* unused_site_permissions_service,
-      NotificationPermissionsReviewService* notification_permissions_service);
+      NotificationPermissionsReviewService* notification_permissions_service,
+      extensions::CWSInfoService* extension_info_service,
+      PasswordStatusCheckService* password_check_service,
+      Profile* profile);
   SafetyHubMenuNotificationService(const SafetyHubMenuNotificationService&) =
       delete;
   SafetyHubMenuNotificationService& operator=(
@@ -78,9 +83,26 @@ class SafetyHubMenuNotificationService : public KeyedService {
   // returned.
   absl::optional<MenuNotificationEntry> GetNotificationToShow();
 
+  // Dismisses all the active menu notifications.
+  void DismissActiveNotification();
+
+  // Dismisses the active menu notification of the specified module.
+  void DismissActiveNotificationOfModule(
+      safety_hub::SafetyHubModuleType module);
+
+  // Returns the module of the notification that is currently active.
+  absl::optional<safety_hub::SafetyHubModuleType>
+  GetModuleOfActiveNotification() const;
+
   // Returns the |service_info_map_|. For testing purposes only.
   SafetyHubMenuNotification* GetNotificationForTesting(
       safety_hub::SafetyHubModuleType service_type);
+
+  void UpdateResultGetterForTesting(
+      safety_hub::SafetyHubModuleType type,
+      base::RepeatingCallback<
+          std::optional<std::unique_ptr<SafetyHubService::Result>>()>
+          result_getter);
 
  private:
   // Gets the latest result from each Safety Hub service. Will return
@@ -120,6 +142,8 @@ class SafetyHubMenuNotificationService : public KeyedService {
           {safety_hub::SafetyHubModuleType::NOTIFICATION_PERMISSIONS,
            "notification-permissions"},
           {safety_hub::SafetyHubModuleType::SAFE_BROWSING, "safe-browsing"},
+          {safety_hub::SafetyHubModuleType::EXTENSIONS, "extensions"},
+          {safety_hub::SafetyHubModuleType::PASSWORDS, "passwords"},
       };
 
   // Preference service that persists the notifications.

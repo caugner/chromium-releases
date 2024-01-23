@@ -23,9 +23,6 @@ constexpr base::FeatureParam<std::string> kKidFriendlyContentFeedEndpoint{
 
 // Enables local parent approvals for the blocked website on the Family Link
 // user's device.
-// The feature includes one experiment parameter: "preferred_button", which
-// determines which button is displayed as the preferred option in the
-// interstitial UI (i.e. dark blue button).
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
 BASE_FEATURE(kLocalWebApprovals,
              "LocalWebApprovals",
@@ -39,10 +36,12 @@ BASE_FEATURE(kLocalWebApprovals,
 // Proto fetcher experiments.
 BASE_FEATURE(kEnableProtoApiForClassifyUrl,
              "EnableProtoApiForClassifyUrl",
-             base::FEATURE_DISABLED_BY_DEFAULT);
-BASE_FEATURE(kUseBuiltInRetryingMechanismForListFamilyMembers,
-             "UseBuiltInRetryingMechanismForListFamilyMembers",
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+// Request priority experiment for ClassifyUrl (for critical path of rendering).
+BASE_FEATURE(kHighestRequestPriorityForClassifyUrl,
+             "HighestRequestPriorityForClassifyUrl",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 bool IsGoogleBrandedBuild() {
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
@@ -56,7 +55,7 @@ bool IsLocalWebApprovalsEnabled() {
   // TODO(crbug.com/1272462, b/261729051):
   // Move this logic to SupervisedUserService, once it's migrated to
   // components, and de-release the intended usage of
-  // WebsiteParentApproval::IsLocalApprovalSupported for Andoird.
+  // WebsiteParentApproval::IsLocalApprovalSupported for Android.
 #if BUILDFLAG(IS_ANDROID)
   return base::FeatureList::IsEnabled(kLocalWebApprovals) &&
          IsGoogleBrandedBuild();
@@ -67,11 +66,6 @@ bool IsLocalWebApprovalsEnabled() {
 
 bool IsProtoApiForClassifyUrlEnabled() {
   return base::FeatureList::IsEnabled(kEnableProtoApiForClassifyUrl);
-}
-
-bool IsRetryMechanismForListFamilyMembersEnabled() {
-  return base::FeatureList::IsEnabled(
-      kUseBuiltInRetryingMechanismForListFamilyMembers);
 }
 
 // The following flags control whether supervision features are enabled on
@@ -113,6 +107,19 @@ bool CanDisplayFirstTimeInterstitialBanner() {
 BASE_FEATURE(kClearingCookiesKeepsSupervisedUsersSignedIn,
              "ClearingCookiesKeepsSupervisedUsersSignedIn",
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kForceGoogleSafeSearchForSupervisedUsers,
+             "ForceGoogleSafeSearchForSupervisedUsers",
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
+             // For Android and ChromeOS, the long-standing behaviour is that
+             // Safe Search is force-enabled by the browser, irrespective of the
+             // parent configuration.
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#else
+             // For other platforms, Safe Search is controlled by the parent
+             // configuration in Family Link.
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif
 
 // The URL which the "Managed by your parent" UI links to. This is defined as a
 // FeatureParam (but with the currently correct default) because:

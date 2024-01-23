@@ -198,6 +198,13 @@ BASE_FEATURE(kZeroSuggestPrefetchingOnWeb,
              "ZeroSuggestPrefetchingOnWeb",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
+// Enables storing successful query/match in the shortcut database.
+// Desktop will populate db regardless of this feature.
+// Android will not populate db regardless of this feature.
+BASE_FEATURE(kOmniboxPopulateShortcutsDatabase,
+             "OmniboxPopulateShortcutsDatabase",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Features to provide head and tail non personalized search suggestion from
 // compact on device models. More specifically, feature name with suffix
 // Incognito / NonIncognito  will only controls behaviors under incognito /
@@ -231,7 +238,7 @@ BASE_FEATURE(kDocumentProvider,
 // suggestions are available to all clients who meet the other requirements.
 BASE_FEATURE(kDocumentProviderNoSetting,
              "OmniboxDocumentProviderNoSetting",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, the requirement to be in an active Sync state is removed and
 // Drive suggestions are available to all clients who meet the other
@@ -265,12 +272,6 @@ BASE_FEATURE(kAdaptiveSuggestionsCount,
 BASE_FEATURE(kClipboardSuggestionContentHidden,
              "ClipboardSuggestionContentHidden",
              enabled_by_default_android_only);
-
-// If enabled, clipboard suggestion for distinct clip data will not show after
-// first use.
-BASE_FEATURE(kSuppressClipboardSuggestionAfterFirstUsed,
-             "SuppressClipboardSuggestionAfterFirstUsed",
-             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // If enabled, company entity icons may be replaced by a search loupe.
 BASE_FEATURE(kCompanyEntityIconAdjustment,
@@ -539,4 +540,12 @@ bool IsOmniboxCr23CustomizeGuardedFeatureEnabled(const base::Feature& feature) {
 BASE_FEATURE(kOmniboxTouchDownTriggerForPrefetch,
              "OmniboxTouchDownTriggerForPrefetch",
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+// If enabled, site search engines defined by policy are saved into prefs and
+// committed to the keyword database, so that they can be accessed from the
+// Omnibox and the Settings page.
+BASE_FEATURE(kSiteSearchSettingsPolicy,
+             "SiteSearchSettingsPolicy",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 }  // namespace omnibox

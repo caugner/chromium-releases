@@ -200,6 +200,10 @@ void FedCmMetrics::RecordSignInStateMatchStatus(
     ukm_builder.SetFedCmSessionID(session_id_);
     ukm_builder.Record(ukm::UkmRecorder::Get());
   };
+
+  ukm::builders::Blink_FedCm fedcm_builder(page_source_id_);
+  RecordUkm(fedcm_builder);
+
   ukm::builders::Blink_FedCmIdp fedcm_idp_builder(provider_source_id_);
   RecordUkm(fedcm_idp_builder);
 
@@ -391,12 +395,12 @@ void FedCmMetrics::RecordNumRequestsPerDocument(const int num_requests) {
                               num_requests);
 }
 
-void FedCmMetrics::RecordRevokeStatus(FedCmRevokeStatus status) {
+void FedCmMetrics::RecordDisconnectStatus(FedCmDisconnectStatus status) {
   if (is_disabled_) {
     return;
   }
   auto RecordUkm = [&](auto& ukm_builder) {
-    ukm_builder.SetStatus_Revoke2(static_cast<int>(status));
+    ukm_builder.SetStatus_Disconnect(static_cast<int>(status));
     ukm_builder.SetFedCmSessionID(session_id_);
     ukm_builder.Record(ukm::UkmRecorder::Get());
   };
@@ -406,23 +410,25 @@ void FedCmMetrics::RecordRevokeStatus(FedCmRevokeStatus status) {
   ukm::builders::Blink_FedCmIdp fedcm_idp_builder(provider_source_id_);
   RecordUkm(fedcm_idp_builder);
 
-  base::UmaHistogramEnumeration("Blink.FedCm.Status.Revoke2", status);
+  base::UmaHistogramEnumeration("Blink.FedCm.Status.Disconnect", status);
 }
 
-void RecordPreventSilentAccess(RenderFrameHost& rfh,
-                               PreventSilentAccessFrameType frame_type) {
-  base::UmaHistogramEnumeration("Blink.FedCm.PreventSilentAccessFrameType",
-                                frame_type);
+void FedCmMetrics::RecordErrorDialogResult(FedCmErrorDialogResult result) {
+  if (is_disabled_) {
+    return;
+  }
+  auto RecordUkm = [&](auto& ukm_builder) {
+    ukm_builder.SetError_ErrorDialogResult(static_cast<int>(result));
+    ukm_builder.SetFedCmSessionID(session_id_);
+    ukm_builder.Record(ukm::UkmRecorder::Get());
+  };
+  ukm::builders::Blink_FedCm fedcm_builder(page_source_id_);
+  RecordUkm(fedcm_builder);
 
-  // Ensure the lifecycle state as GetPageUkmSourceId doesn't support the
-  // prerendering page. As FederatedAithRequest runs behind the
-  // BrowserInterfaceBinders, the service doesn't receive any request while
-  // prerendering, and the CHECK should always meet the condition.
-  CHECK(
-      !rfh.IsInLifecycleState(RenderFrameHost::LifecycleState::kPrerendering));
-  ukm::builders::Blink_FedCm ukm_builder(rfh.GetPageUkmSourceId());
-  ukm_builder.SetPreventSilentAccessFrameType(static_cast<int>(frame_type));
-  ukm_builder.Record(ukm::UkmRecorder::Get());
+  ukm::builders::Blink_FedCmIdp fedcm_idp_builder(provider_source_id_);
+  RecordUkm(fedcm_idp_builder);
+
+  base::UmaHistogramEnumeration("Blink.FedCm.Error.ErrorDialogResult", result);
 }
 
 void FedCmMetrics::RecordErrorDialogType(
@@ -442,6 +448,59 @@ void FedCmMetrics::RecordErrorDialogType(
   RecordUkm(fedcm_idp_builder);
 
   base::UmaHistogramEnumeration("Blink.FedCm.Error.ErrorDialogType", type);
+}
+
+void FedCmMetrics::RecordTokenResponseTypeMetrics(
+    IdpNetworkRequestManager::FedCmTokenResponseType type) {
+  if (is_disabled_) {
+    return;
+  }
+  auto RecordUkm = [&](auto& ukm_builder) {
+    ukm_builder.SetError_TokenResponseType(static_cast<int>(type));
+    ukm_builder.SetFedCmSessionID(session_id_);
+    ukm_builder.Record(ukm::UkmRecorder::Get());
+  };
+  ukm::builders::Blink_FedCm fedcm_builder(page_source_id_);
+  RecordUkm(fedcm_builder);
+
+  ukm::builders::Blink_FedCmIdp fedcm_idp_builder(provider_source_id_);
+  RecordUkm(fedcm_idp_builder);
+
+  base::UmaHistogramEnumeration("Blink.FedCm.Error.TokenResponseType", type);
+}
+
+void FedCmMetrics::RecordErrorUrlTypeMetrics(
+    IdpNetworkRequestManager::FedCmErrorUrlType type) {
+  if (is_disabled_) {
+    return;
+  }
+  auto RecordUkm = [&](auto& ukm_builder) {
+    ukm_builder.SetError_ErrorUrlType(static_cast<int>(type));
+    ukm_builder.SetFedCmSessionID(session_id_);
+    ukm_builder.Record(ukm::UkmRecorder::Get());
+  };
+  // We do not record the RP-keyed equivalent because the error URL is passed by
+  // the IDP.
+  ukm::builders::Blink_FedCmIdp fedcm_idp_builder(provider_source_id_);
+  RecordUkm(fedcm_idp_builder);
+
+  base::UmaHistogramEnumeration("Blink.FedCm.Error.ErrorUrlType", type);
+}
+
+void RecordPreventSilentAccess(RenderFrameHost& rfh,
+                               PreventSilentAccessFrameType frame_type) {
+  base::UmaHistogramEnumeration("Blink.FedCm.PreventSilentAccessFrameType",
+                                frame_type);
+
+  // Ensure the lifecycle state as GetPageUkmSourceId doesn't support the
+  // prerendering page. As FederatedAithRequest runs behind the
+  // BrowserInterfaceBinders, the service doesn't receive any request while
+  // prerendering, and the CHECK should always meet the condition.
+  CHECK(
+      !rfh.IsInLifecycleState(RenderFrameHost::LifecycleState::kPrerendering));
+  ukm::builders::Blink_FedCm ukm_builder(rfh.GetPageUkmSourceId());
+  ukm_builder.SetPreventSilentAccessFrameType(static_cast<int>(frame_type));
+  ukm_builder.Record(ukm::UkmRecorder::Get());
 }
 
 void RecordApprovedClientsExistence(bool has_approved_clients) {

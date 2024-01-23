@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/tabs/organization/tab_organization_service.h"
 #include "chrome/browser/ui/tabs/organization/tab_organization_service_factory.h"
+#include "chrome/browser/ui/tabs/organization/tab_organization_utils.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -67,10 +68,12 @@ TabSearchBubbleHost::TabSearchBubbleHost(views::Button* button,
         base::UmaHistogramMediumTimes("Tabs.TabSearch.WindowDisplayedDuration3",
                                       time_elapsed);
       })) {
-  if (features::IsTabOrganization()) {
+  if (TabOrganizationUtils::GetInstance()->IsEnabled(profile)) {
     auto* const tab_organization_service =
         TabOrganizationServiceFactory::GetForProfile(profile);
-    tab_organization_service->AddObserver(this);
+    if (tab_organization_service) {
+      tab_organization_service->AddObserver(this);
+    }
   }
   auto menu_button_controller = std::make_unique<views::MenuButtonController>(
       button,
@@ -82,27 +85,28 @@ TabSearchBubbleHost::TabSearchBubbleHost(views::Button* button,
 }
 
 TabSearchBubbleHost::~TabSearchBubbleHost() {
-  if (features::IsTabOrganization()) {
+  if (TabOrganizationUtils::GetInstance()->IsEnabled(profile_)) {
     auto* const tab_organization_service =
         TabOrganizationServiceFactory::GetForProfile(profile_);
-    tab_organization_service->RemoveObserver(this);
+    if (tab_organization_service) {
+      tab_organization_service->RemoveObserver(this);
+    }
   }
 }
 
 void TabSearchBubbleHost::OnWidgetVisibilityChanged(views::Widget* widget,
                                                     bool visible) {
-  DCHECK_EQ(webui_bubble_manager_.GetBubbleWidget(), widget);
-  if (visible && bubble_created_time_.has_value()) {
-    button_->GetWidget()
-        ->GetCompositor()
-        ->RequestSuccessfulPresentationTimeForNextFrame(base::BindOnce(
+  CHECK_EQ(webui_bubble_manager_.GetBubbleWidget(), widget);
+  if (visible && widget && bubble_created_time_.has_value()) {
+    widget->GetCompositor()->RequestSuccessfulPresentationTimeForNextFrame(
+        base::BindOnce(
             [](base::TimeTicks bubble_created_time,
                bool bubble_using_cached_web_contents,
                base::TimeTicks presentation_timestamp) {
               base::UmaHistogramMediumTimes(
                   bubble_using_cached_web_contents
-                      ? "Tabs.TabSearch.WindowTimeToShowCachedWebView"
-                      : "Tabs.TabSearch.WindowTimeToShowUncachedWebView",
+                      ? "Tabs.TabSearch.WindowTimeToShowCachedWebView2"
+                      : "Tabs.TabSearch.WindowTimeToShowUncachedWebView2",
                   presentation_timestamp - bubble_created_time);
             },
             *bubble_created_time_,
@@ -119,15 +123,37 @@ void TabSearchBubbleHost::OnWidgetDestroying(views::Widget* widget) {
   pressed_lock_.reset();
 }
 
-void TabSearchBubbleHost::OnStartRequest(const Browser* browser) {
+void TabSearchBubbleHost::OnOrganizationAccepted(const Browser* browser) {
+  if (browser != GetBrowser()) {
+    return;
+  }
+  // Don't show IPH if the user already has other tab groups.
+  if (browser->tab_strip_model()->group_model()->ListTabGroups().size() > 1) {
+    return;
+  }
+  BrowserFeaturePromoController* const promo_controller =
+      BrowserFeaturePromoController::GetForView(button_);
+  if (promo_controller) {
+    promo_controller->MaybeShowPromo(
+        feature_engagement::kIPHTabOrganizationSuccessFeature);
+  }
+}
+
+void TabSearchBubbleHost::OnUserInvokedFeature(const Browser* browser) {
   if (browser == GetBrowser()) {
-    profile_->GetPrefs()->SetInteger(tab_search_prefs::kTabSearchTabIndex, 1);
-    ShowTabSearchBubble(false);
+    const int tab_organization_tab_index = 1;
+    ShowTabSearchBubble(false, tab_organization_tab_index);
   }
 }
 
 bool TabSearchBubbleHost::ShowTabSearchBubble(
-    bool triggered_by_keyboard_shortcut) {
+    bool triggered_by_keyboard_shortcut,
+    int tab_index) {
+  if (tab_index >= 0) {
+    profile_->GetPrefs()->SetInteger(tab_search_prefs::kTabSearchTabIndex,
+                                     tab_index);
+  }
+
   if (webui_bubble_manager_.GetBubbleWidget())
     return false;
 
@@ -137,7 +163,7 @@ bool TabSearchBubbleHost::ShowTabSearchBubble(
   if (controller)
     controller->EndPromo(
         feature_engagement::kIPHTabSearchFeature,
-        user_education::FeaturePromoCloseReason::kFeatureEngaged);
+        user_education::EndFeaturePromoReason::kFeatureEngaged);
 
   absl::optional<gfx::Rect> anchor;
   if (button_->GetWidget()->IsFullscreen() && !button_->IsDrawn()) {

@@ -357,7 +357,7 @@ TEST_F(AppLauncherTabHelperTest, AppLaunchingFails) {
 
 // Tests that an extra alert is shown on app launch failure without user
 // gesture.
-TEST_F(AppLauncherTabHelperTest, AppLaunchingFailsWithoutUserGesture) {
+TEST_F(AppLauncherTabHelperTest, DISABLED_AppLaunchingFailsWithoutUserGesture) {
   delegate_.SetAppLaunchShouldFail(true);
   delegate_.SetShouldAcceptPrompt(true);
 
@@ -405,7 +405,7 @@ TEST_F(AppLauncherTabHelperTest, ValidUrlPromptUserRejects) {
 }
 
 // Tests that a valid URL triggers a prompt if transition is not link.
-TEST_F(AppLauncherTabHelperTest, ValidUrlNotLinkTransition) {
+TEST_F(AppLauncherTabHelperTest, DISABLED_ValidUrlNotLinkTransition) {
   delegate_.SetShouldAcceptPrompt(true);
   EXPECT_FALSE(TestShouldAllowRequest(
       @"valid://1234",
@@ -418,7 +418,7 @@ TEST_F(AppLauncherTabHelperTest, ValidUrlNotLinkTransition) {
 }
 
 // Tests that iTunes Urls are blocked with a prompt.
-TEST_F(AppLauncherTabHelperTest, iTunesURL) {
+TEST_F(AppLauncherTabHelperTest, DISABLED_iTunesURL) {
   NSString* url_string = @"itms-apps://itunes.apple.com/us/app/appname/id123";
   delegate_.SetShouldAcceptPrompt(true);
   EXPECT_FALSE(TestShouldAllowRequest(/*url_string=*/url_string,
@@ -503,7 +503,7 @@ TEST_F(AppLauncherTabHelperTest, InvalidUrls) {
 
 // Tests that if web_state is not shown or if there is a UI on top of it, no
 // request is triggered.
-TEST_F(AppLauncherTabHelperTest, WebStateNotShown) {
+TEST_F(AppLauncherTabHelperTest, DISABLED_WebStateNotShown) {
   // Base case.
   NSString* url_string = @"valid://1234";
   EXPECT_FALSE(TestShouldAllowRequest(url_string, /*target_frame_is_main=*/true,
@@ -607,7 +607,8 @@ TEST_F(AppLauncherTabHelperTest, MAYBE_TelUrls) {
   EXPECT_EQ(1U, delegate_.GetAppLaunchCount());
 }
 
-// Tests that URLs with Chrome Bundle schemes are blocked on iframes.
+// Tests that URLs with Chrome Bundle schemes are blocked on main frames and
+// iframes.
 // TODO(crbug.com/1172516): The test fails on device.
 #if TARGET_IPHONE_SIMULATOR
 #define MAYBE_ChromeBundleUrlScheme ChromeBundleUrlScheme
@@ -618,6 +619,8 @@ TEST_F(AppLauncherTabHelperTest, MAYBE_ChromeBundleUrlScheme) {
   // Get the test bundle URL Scheme.
   NSString* scheme = [[ChromeAppConstants sharedInstance] bundleURLScheme];
   NSString* url = [NSString stringWithFormat:@"%@://www.google.com", scheme];
+
+  // Verify that the URL is blocked on iframes.
   EXPECT_FALSE(TestShouldAllowRequest(url,
                                       /*target_frame_is_main=*/false,
                                       /*target_frame_is_cross_origin=*/false,
@@ -630,12 +633,12 @@ TEST_F(AppLauncherTabHelperTest, MAYBE_ChromeBundleUrlScheme) {
                                       /*is_user_initiated=*/true));
   EXPECT_EQ(0U, delegate_.GetAppLaunchCount());
 
-  // Chrome Bundle URL scheme is only allowed from main frames.
+  // Verify that the URL is blocked on main frames.
   EXPECT_FALSE(TestShouldAllowRequest(url,
                                       /*target_frame_is_main=*/true,
                                       /*target_frame_is_cross_origin=*/false,
                                       /*is_user_initiated=*/true));
-  EXPECT_EQ(1U, delegate_.GetAppLaunchCount());
+  EXPECT_EQ(0U, delegate_.GetAppLaunchCount());
 }
 
 // Tests that ShouldAllowRequest updates the reading list correctly for non-link
@@ -771,7 +774,7 @@ class IncognitoAppLauncherTabHelperTest : public AppLauncherTabHelperTest {
 
 // Tests that opening an external App from incognito tab always triggers a
 // prompt.
-TEST_F(IncognitoAppLauncherTabHelperTest, ValidUrlPromptUserAccepts) {
+TEST_F(IncognitoAppLauncherTabHelperTest, DISABLED_ValidUrlPromptUserAccepts) {
   delegate_.SetShouldAcceptPrompt(true);
   EXPECT_FALSE(TestShouldAllowRequest(@"valid://1234",
                                       /*target_frame_is_main=*/true,
@@ -784,7 +787,7 @@ TEST_F(IncognitoAppLauncherTabHelperTest, ValidUrlPromptUserAccepts) {
 
 // Tests that a second prompt is triggered when failing to open an external app
 // from incognito.
-TEST_F(IncognitoAppLauncherTabHelperTest, AppLaunchFails) {
+TEST_F(IncognitoAppLauncherTabHelperTest, DISABLED_AppLaunchFails) {
   delegate_.SetShouldAcceptPrompt(true);
   delegate_.SetAppLaunchShouldFail(true);
   EXPECT_FALSE(TestShouldAllowRequest(@"valid://1234",

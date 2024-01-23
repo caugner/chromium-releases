@@ -24,6 +24,7 @@
 #include "net/cookies/cookie_setting_override.h"
 #include "net/cookies/cookie_util.h"
 #include "net/cookies/site_for_cookies.h"
+#include "net/first_party_sets/first_party_set_metadata.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/origin.h"
@@ -67,8 +68,20 @@ std::unique_ptr<net::CanonicalCookie> MakeCanonicalCookie(
       /*expiration=*/base::Time(), /*last_access=*/base::Time(),
       /*last_update=*/base::Time(),
       /*secure=*/true, /*httponly=*/false, net::CookieSameSite::UNSPECIFIED,
-      net::CookiePriority::COOKIE_PRIORITY_DEFAULT, /*same_party=*/false,
-      cookie_partition_key);
+      net::CookiePriority::COOKIE_PRIORITY_DEFAULT, cookie_partition_key);
+}
+
+std::unique_ptr<net::CanonicalCookie> MakeCanonicalSameSiteNoneCookie(
+    const std::string& name,
+    const std::string& domain,
+    absl::optional<net::CookiePartitionKey> cookie_partition_key =
+        absl::nullopt) {
+  return net::CanonicalCookie::CreateUnsafeCookieForTesting(
+      name, "1", domain, /*path=*/"/", /*creation=*/base::Time(),
+      /*expiration=*/base::Time(), /*last_access=*/base::Time(),
+      /*last_update=*/base::Time(),
+      /*secure=*/true, /*httponly=*/false, net::CookieSameSite::NO_RESTRICTION,
+      net::CookiePriority::COOKIE_PRIORITY_DEFAULT, cookie_partition_key);
 }
 
 struct TestCase {
@@ -80,7 +93,7 @@ struct TestCase {
 };
 
 class CookieSettingsTest
-    : public testing::TestWithParam<std::tuple<bool, TestCase>> {
+    : public testing::TestWithParam<std::tuple<bool, bool, TestCase>> {
  public:
   CookieSettingsTest()
       : task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {
@@ -126,16 +139,20 @@ class CookieSettingsTest
     return std::get<0>(GetParam());
   }
 
+  bool IsTrackingProtectionEnabledFor3pcd() const {
+    return std::get<1>(GetParam());
+  }
+
   bool IsStorageAccessGrantEligible() const {
-    return std::get<1>(GetParam()).storage_access_grant_eligible;
+    return std::get<2>(GetParam()).storage_access_grant_eligible;
   }
 
   bool IsTopLevelStorageAccessGrantEligible() const {
-    return std::get<1>(GetParam()).top_level_storage_access_grant_eligible;
+    return std::get<2>(GetParam()).top_level_storage_access_grant_eligible;
   }
 
   bool Is3pcdSupportEligible() const {
-    return std::get<1>(GetParam()).eligible_for_3pcd_support;
+    return std::get<2>(GetParam()).eligible_for_3pcd_support;
   }
 
   net::CookieSettingOverrides GetCookieSettingOverrides() const {
@@ -988,41 +1005,46 @@ TEST_P(CookieSettingsTest, IsCookieAccessible) {
   settings.set_block_third_party_cookies(false);
 
   std::unique_ptr<net::CanonicalCookie> cookie =
-      MakeCanonicalCookie("name", kURL);
+      MakeCanonicalSameSiteNoneCookie("name", kURL);
 
-  EXPECT_TRUE(
-      settings.IsCookieAccessible(*cookie, GURL(kURL), net::SiteForCookies(),
-                                  url::Origin::Create(GURL(kOtherURL)),
-                                  GetCookieSettingOverrides(), &status));
+  EXPECT_TRUE(settings.IsCookieAccessible(
+      *cookie, GURL(kURL), net::SiteForCookies(),
+      url::Origin::Create(GURL(kOtherURL)), net::FirstPartySetMetadata(),
+      GetCookieSettingOverrides(), &status));
   EXPECT_TRUE(status.HasWarningReason(
       net::CookieInclusionStatus::WARN_THIRD_PARTY_PHASEOUT));
 
   settings.set_block_third_party_cookies(true);
+  if (IsTrackingProtectionEnabledFor3pcd()) {
+    settings.set_tracking_protection_enabled_for_3pcd(true);
+  }
 
   // Third-party cookies are blocked, so the cookie should not be accessible by
   // default in a third-party context.
   status.ResetForTesting();
-  EXPECT_FALSE(
-      settings.IsCookieAccessible(*cookie, GURL(kURL), net::SiteForCookies(),
-                                  url::Origin::Create(GURL(kOtherURL)),
-                                  GetCookieSettingOverrides(), &status));
+  EXPECT_FALSE(settings.IsCookieAccessible(
+      *cookie, GURL(kURL), net::SiteForCookies(),
+      url::Origin::Create(GURL(kOtherURL)), net::FirstPartySetMetadata(),
+      GetCookieSettingOverrides(), &status));
   EXPECT_FALSE(status.HasWarningReason(
       net::CookieInclusionStatus::WARN_THIRD_PARTY_PHASEOUT));
   EXPECT_TRUE(status.HasExclusionReason(
-      IsForceThirdPartyCookieBlockingFlagEnabled()
+      IsForceThirdPartyCookieBlockingFlagEnabled() ||
+              IsTrackingProtectionEnabledFor3pcd()
           ? net::CookieInclusionStatus::EXCLUDE_THIRD_PARTY_PHASEOUT
           : net::CookieInclusionStatus::EXCLUDE_USER_PREFERENCES));
 
   // Note that the SiteForCookies matches nothing, so this is a third-party
   // context even though the `url` matches the `top_frame_origin`.
   status.ResetForTesting();
-  EXPECT_EQ(
-      settings.IsCookieAccessible(*cookie, GURL(kURL), net::SiteForCookies(),
-                                  url::Origin::Create(GURL(kURL)),
-                                  GetCookieSettingOverrides(), &status),
-      IsStorageAccessGrantEligible());
+  EXPECT_EQ(settings.IsCookieAccessible(
+                *cookie, GURL(kURL), net::SiteForCookies(),
+                url::Origin::Create(GURL(kURL)), net::FirstPartySetMetadata(),
+                GetCookieSettingOverrides(), &status),
+            IsStorageAccessGrantEligible());
   EXPECT_THAT(status.HasExclusionReason(
-                  IsForceThirdPartyCookieBlockingFlagEnabled()
+                  IsForceThirdPartyCookieBlockingFlagEnabled() ||
+                          IsTrackingProtectionEnabledFor3pcd()
                       ? net::CookieInclusionStatus::EXCLUDE_THIRD_PARTY_PHASEOUT
                       : net::CookieInclusionStatus::EXCLUDE_USER_PREFERENCES),
               Not(IsStorageAccessGrantEligible()));
@@ -1033,10 +1055,10 @@ TEST_P(CookieSettingsTest, IsCookieAccessible) {
 
   // No override can overrule a site-specific setting.
   status.ResetForTesting();
-  EXPECT_FALSE(
-      settings.IsCookieAccessible(*cookie, GURL(kURL), net::SiteForCookies(),
-                                  url::Origin::Create(GURL(kOtherURL)),
-                                  GetCookieSettingOverrides(), &status));
+  EXPECT_FALSE(settings.IsCookieAccessible(
+      *cookie, GURL(kURL), net::SiteForCookies(),
+      url::Origin::Create(GURL(kOtherURL)), net::FirstPartySetMetadata(),
+      GetCookieSettingOverrides(), &status));
   // Cookies blocked by a site-specific setting should still use
   // `EXCLUDE_USER_PREFERENCES` reason.
   EXPECT_TRUE(status.HasExclusionReason(
@@ -1047,12 +1069,13 @@ TEST_P(CookieSettingsTest, IsCookieAccessible) {
   settings.set_content_settings(
       ContentSettingsType::COOKIES,
       {CreateSetting("*", "*", CONTENT_SETTING_BLOCK)});
-  EXPECT_FALSE(
-      settings.IsCookieAccessible(*cookie, GURL(kURL), net::SiteForCookies(),
-                                  url::Origin::Create(GURL(kOtherURL)),
-                                  GetCookieSettingOverrides(), &status));
+  EXPECT_FALSE(settings.IsCookieAccessible(
+      *cookie, GURL(kURL), net::SiteForCookies(),
+      url::Origin::Create(GURL(kOtherURL)), net::FirstPartySetMetadata(),
+      GetCookieSettingOverrides(), &status));
   EXPECT_TRUE(status.HasExclusionReason(
-      IsForceThirdPartyCookieBlockingFlagEnabled()
+      IsForceThirdPartyCookieBlockingFlagEnabled() ||
+              IsTrackingProtectionEnabledFor3pcd()
           ? net::CookieInclusionStatus::EXCLUDE_THIRD_PARTY_PHASEOUT
           : net::CookieInclusionStatus::EXCLUDE_USER_PREFERENCES));
 }
@@ -1061,6 +1084,9 @@ TEST_P(CookieSettingsTest, IsCookieAccessible_PartitionedCookies) {
   CookieSettings settings;
   net::CookieInclusionStatus status;
   settings.set_block_third_party_cookies(true);
+  if (IsTrackingProtectionEnabledFor3pcd()) {
+    settings.set_tracking_protection_enabled_for_3pcd(true);
+  }
 
   std::unique_ptr<net::CanonicalCookie> partitioned_cookie =
       MakeCanonicalCookie(
@@ -1069,16 +1095,16 @@ TEST_P(CookieSettingsTest, IsCookieAccessible_PartitionedCookies) {
 
   EXPECT_TRUE(settings.IsCookieAccessible(
       *partitioned_cookie, GURL(kURL), net::SiteForCookies(),
-      url::Origin::Create(GURL(kOtherURL)), GetCookieSettingOverrides(),
-      &status));
+      url::Origin::Create(GURL(kOtherURL)), net::FirstPartySetMetadata(),
+      GetCookieSettingOverrides(), &status));
 
   // If third-party cookie blocking is disabled, the partitioned cookie should
   // still be available
   settings.set_block_third_party_cookies(false);
   EXPECT_TRUE(settings.IsCookieAccessible(
       *partitioned_cookie, GURL(kURL), net::SiteForCookies(),
-      url::Origin::Create(GURL(kOtherURL)), GetCookieSettingOverrides(),
-      &status));
+      url::Origin::Create(GURL(kOtherURL)), net::FirstPartySetMetadata(),
+      GetCookieSettingOverrides(), &status));
 
   // If there is a site-specific content setting blocking cookies, then
   // partitioned cookies should not be available.
@@ -1088,8 +1114,8 @@ TEST_P(CookieSettingsTest, IsCookieAccessible_PartitionedCookies) {
       {CreateSetting(kURL, "*", CONTENT_SETTING_BLOCK)});
   EXPECT_FALSE(settings.IsCookieAccessible(
       *partitioned_cookie, GURL(kURL), net::SiteForCookies(),
-      url::Origin::Create(GURL(kOtherURL)), GetCookieSettingOverrides(),
-      &status));
+      url::Origin::Create(GURL(kOtherURL)), net::FirstPartySetMetadata(),
+      GetCookieSettingOverrides(), &status));
 
   // If third-party cookie blocking is enabled and there is a site-specific
   // content setting blocking the top-frame origin's cookies, then the
@@ -1100,8 +1126,8 @@ TEST_P(CookieSettingsTest, IsCookieAccessible_PartitionedCookies) {
       {CreateSetting("*", kOtherURL, CONTENT_SETTING_BLOCK)});
   EXPECT_FALSE(settings.IsCookieAccessible(
       *partitioned_cookie, GURL(kURL), net::SiteForCookies(),
-      url::Origin::Create(GURL(kOtherURL)), GetCookieSettingOverrides(),
-      &status));
+      url::Origin::Create(GURL(kOtherURL)), net::FirstPartySetMetadata(),
+      GetCookieSettingOverrides(), &status));
 
   // If third-party cookie blocking is enabled and there is a site-specific
   // setting for the top-frame origin that only applies on an unrelated site,
@@ -1111,8 +1137,8 @@ TEST_P(CookieSettingsTest, IsCookieAccessible_PartitionedCookies) {
       {CreateSetting(kUnrelatedURL, kOtherURL, CONTENT_SETTING_BLOCK)});
   EXPECT_TRUE(settings.IsCookieAccessible(
       *partitioned_cookie, GURL(kURL), net::SiteForCookies(),
-      url::Origin::Create(GURL(kOtherURL)), GetCookieSettingOverrides(),
-      &status));
+      url::Origin::Create(GURL(kOtherURL)), net::FirstPartySetMetadata(),
+      GetCookieSettingOverrides(), &status));
 
   // If third-party cookie blocking is enabled and there is a matching Storage
   // Access setting whose value is BLOCK, then the partitioned cookie should
@@ -1126,8 +1152,8 @@ TEST_P(CookieSettingsTest, IsCookieAccessible_PartitionedCookies) {
       {CreateSetting(kURL, kOtherURL, CONTENT_SETTING_BLOCK)});
   EXPECT_TRUE(settings.IsCookieAccessible(
       *partitioned_cookie, GURL(kURL), net::SiteForCookies(),
-      url::Origin::Create(GURL(kOtherURL)), GetCookieSettingOverrides(),
-      &status));
+      url::Origin::Create(GURL(kOtherURL)), net::FirstPartySetMetadata(),
+      GetCookieSettingOverrides(), &status));
 
   // Partitioned cookies are not affected by 3pc phaseout, so the
   // *_THIRD_PARTY_PHASEOUT warning/exclusion reason is irrelevant.
@@ -1137,15 +1163,62 @@ TEST_P(CookieSettingsTest, IsCookieAccessible_PartitionedCookies) {
       net::CookieInclusionStatus::EXCLUDE_THIRD_PARTY_PHASEOUT));
 }
 
+TEST_P(CookieSettingsTest, IsCookieAccessible_SitesInFirstPartySets) {
+  CookieSettings settings;
+  net::CookieInclusionStatus status;
+  url::Origin top_level_origin = url::Origin::Create(GURL(kFPSOwnerURL));
+
+  net::SchemefulSite primary((GURL(kFPSOwnerURL)));
+  net::FirstPartySetEntry frame_entry(primary, net::SiteType::kAssociated, 1u);
+  net::FirstPartySetEntry top_frame_entry(primary, net::SiteType::kPrimary,
+                                          absl::nullopt);
+
+  settings.set_block_third_party_cookies(true);
+  if (IsTrackingProtectionEnabledFor3pcd()) {
+    settings.set_tracking_protection_enabled_for_3pcd(true);
+  }
+
+  std::unique_ptr<net::CanonicalCookie> cookie =
+      MakeCanonicalSameSiteNoneCookie("name", kFPSMemberURL);
+
+  EXPECT_FALSE(settings.IsCookieAccessible(
+      *cookie, GURL(kFPSMemberURL), net::SiteForCookies(), top_level_origin,
+      net::FirstPartySetMetadata(), GetCookieSettingOverrides(), &status));
+  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+      {IsForceThirdPartyCookieBlockingFlagEnabled() ||
+               IsTrackingProtectionEnabledFor3pcd()
+           ? net::CookieInclusionStatus::EXCLUDE_THIRD_PARTY_PHASEOUT
+           : net::CookieInclusionStatus::EXCLUDE_USER_PREFERENCES}));
+
+  status.ResetForTesting();
+  // EXCLUDE_THIRD_PARTY_BLOCKED_WITHIN_FIRST_PARTY_SET should be added with the
+  // FirstPartySetMetadata indicating the cookie url and the top-level url are
+  // in the same FPS.
+  EXPECT_FALSE(settings.IsCookieAccessible(
+      *cookie, GURL(kFPSMemberURL), net::SiteForCookies(), top_level_origin,
+      net::FirstPartySetMetadata(&frame_entry, &top_frame_entry),
+      GetCookieSettingOverrides(), &status));
+  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+      {IsForceThirdPartyCookieBlockingFlagEnabled() ||
+               IsTrackingProtectionEnabledFor3pcd()
+           ? net::CookieInclusionStatus::EXCLUDE_THIRD_PARTY_PHASEOUT
+           : net::CookieInclusionStatus::EXCLUDE_USER_PREFERENCES,
+       net::CookieInclusionStatus::
+           EXCLUDE_THIRD_PARTY_BLOCKED_WITHIN_FIRST_PARTY_SET}));
+}
+
 TEST_P(CookieSettingsTest, AnnotateAndMoveUserBlockedCookies_CrossSiteEmbed) {
   CookieSettings settings;
   settings.set_block_third_party_cookies(true);
+  if (IsTrackingProtectionEnabledFor3pcd()) {
+    settings.set_tracking_protection_enabled_for_3pcd(true);
+  }
 
   net::CookieAccessResultList maybe_included_cookies = {
-      {*MakeCanonicalCookie("third_party", kURL), {}},
-      {*MakeCanonicalCookie("cookie", kURL), {}}};
+      {*MakeCanonicalSameSiteNoneCookie("third_party", kURL), {}},
+      {*MakeCanonicalSameSiteNoneCookie("cookie", kURL), {}}};
   net::CookieAccessResultList excluded_cookies = {
-      {*MakeCanonicalCookie("excluded_other", kURL),
+      {*MakeCanonicalSameSiteNoneCookie("excluded_other", kURL),
        // The ExclusionReason below is irrelevant, as long as there is
        // one.
        net::CookieAccessResult(net::CookieInclusionStatus(
@@ -1205,7 +1278,8 @@ TEST_P(CookieSettingsTest, AnnotateAndMoveUserBlockedCookies_CrossSiteEmbed) {
                     HasExactlyExclusionReasonsForTesting(
                         std::vector<
                             net::CookieInclusionStatus::ExclusionReason>{
-                            IsForceThirdPartyCookieBlockingFlagEnabled()
+                            IsForceThirdPartyCookieBlockingFlagEnabled() ||
+                                    IsTrackingProtectionEnabledFor3pcd()
                                 ? net::CookieInclusionStatus::
                                       EXCLUDE_THIRD_PARTY_PHASEOUT
                                 : net::CookieInclusionStatus::
@@ -1219,7 +1293,8 @@ TEST_P(CookieSettingsTest, AnnotateAndMoveUserBlockedCookies_CrossSiteEmbed) {
                             net::CookieInclusionStatus::ExclusionReason>{
                             net::CookieInclusionStatus::ExclusionReason::
                                 EXCLUDE_SECURE_ONLY,
-                            IsForceThirdPartyCookieBlockingFlagEnabled()
+                            IsForceThirdPartyCookieBlockingFlagEnabled() ||
+                                    IsTrackingProtectionEnabledFor3pcd()
                                 ? net::CookieInclusionStatus::
                                       EXCLUDE_THIRD_PARTY_PHASEOUT
                                 : net::CookieInclusionStatus::
@@ -1231,7 +1306,8 @@ TEST_P(CookieSettingsTest, AnnotateAndMoveUserBlockedCookies_CrossSiteEmbed) {
                     HasExactlyExclusionReasonsForTesting(
                         std::vector<
                             net::CookieInclusionStatus::ExclusionReason>{
-                            IsForceThirdPartyCookieBlockingFlagEnabled()
+                            IsForceThirdPartyCookieBlockingFlagEnabled() ||
+                                    IsTrackingProtectionEnabledFor3pcd()
                                 ? net::CookieInclusionStatus::
                                       EXCLUDE_THIRD_PARTY_PHASEOUT
                                 : net::CookieInclusionStatus::
@@ -1246,7 +1322,8 @@ TEST_P(CookieSettingsTest,
   settings.set_block_third_party_cookies(false);
 
   net::CookieAccessResultList maybe_included_cookies = {
-      {*MakeCanonicalCookie("third_party", kURL), {}}};
+      {*MakeCanonicalCookie("lax_by_default", kURL), {}},
+      {*MakeCanonicalSameSiteNoneCookie("third_party", kURL), {}}};
   net::CookieAccessResultList excluded_cookies = {};
   url::Origin origin = url::Origin::Create(GURL(kOtherURL));
 
@@ -1261,15 +1338,25 @@ TEST_P(CookieSettingsTest,
   // Verify that the allowed cookie has the expected warning reason.
   EXPECT_THAT(
       maybe_included_cookies,
-      ElementsAre(MatchesCookieWithAccessResult(
-          net::MatchesCookieWithName("third_party"),
-          MatchesCookieAccessResult(
-              AllOf(net::IsInclude(),
-                    net::HasExactlyWarningReasonsForTesting(
-                        std::vector<net::CookieInclusionStatus::WarningReason>{
+      UnorderedElementsAre(
+          MatchesCookieWithAccessResult(
+              net::MatchesCookieWithName("lax_by_default"),
+              MatchesCookieAccessResult(
+                  AllOf(net::IsInclude(),
+                        Not(net::HasWarningReason(
                             net::CookieInclusionStatus::WarningReason::
-                                WARN_THIRD_PARTY_PHASEOUT})),
-              _, _, _))));
+                                WARN_THIRD_PARTY_PHASEOUT))),
+                  _, _, _)),
+          MatchesCookieWithAccessResult(
+              net::MatchesCookieWithName("third_party"),
+              MatchesCookieAccessResult(
+                  AllOf(net::IsInclude(),
+                        net::HasExactlyWarningReasonsForTesting(
+                            std::vector<
+                                net::CookieInclusionStatus::WarningReason>{
+                                net::CookieInclusionStatus::WarningReason::
+                                    WARN_THIRD_PARTY_PHASEOUT})),
+                  _, _, _))));
 }
 
 TEST_P(CookieSettingsTest,
@@ -1278,7 +1365,7 @@ TEST_P(CookieSettingsTest,
   settings.set_block_third_party_cookies(false);
 
   net::CookieAccessResultList maybe_included_cookies = {
-      {*MakeCanonicalCookie("cookie", kDomainURL), {}}};
+      {*MakeCanonicalSameSiteNoneCookie("cookie", kDomainURL), {}}};
   net::CookieAccessResultList excluded_cookies = {};
   url::Origin origin = url::Origin::Create(GURL(kDomainURL));
 
@@ -1327,11 +1414,14 @@ TEST_P(CookieSettingsTest,
        AnnotateAndMoveUserBlockedCookies_SameSiteEmbed_ThirdPartyContext) {
   CookieSettings settings;
   settings.set_block_third_party_cookies(true);
+  if (IsTrackingProtectionEnabledFor3pcd()) {
+    settings.set_tracking_protection_enabled_for_3pcd(true);
+  }
 
   net::CookieAccessResultList maybe_included_cookies = {
-      {*MakeCanonicalCookie("cookie", kDomainURL), {}}};
+      {*MakeCanonicalSameSiteNoneCookie("cookie", kDomainURL), {}}};
   net::CookieAccessResultList excluded_cookies = {
-      {*MakeCanonicalCookie("excluded_other", kDomainURL),
+      {*MakeCanonicalSameSiteNoneCookie("excluded_other", kDomainURL),
        // The ExclusionReason below is irrelevant, as long as there is one.
        net::CookieAccessResult(net::CookieInclusionStatus(
            net::CookieInclusionStatus::ExclusionReason::EXCLUDE_SECURE_ONLY))}};
@@ -1382,7 +1472,8 @@ TEST_P(CookieSettingsTest,
                     HasExactlyExclusionReasonsForTesting(
                         std::vector<
                             net::CookieInclusionStatus::ExclusionReason>{
-                            IsForceThirdPartyCookieBlockingFlagEnabled()
+                            IsForceThirdPartyCookieBlockingFlagEnabled() ||
+                                    IsTrackingProtectionEnabledFor3pcd()
                                 ? net::CookieInclusionStatus::
                                       EXCLUDE_THIRD_PARTY_PHASEOUT
                                 : net::CookieInclusionStatus::
@@ -1396,7 +1487,8 @@ TEST_P(CookieSettingsTest,
                             net::CookieInclusionStatus::ExclusionReason>{
                             net::CookieInclusionStatus::ExclusionReason::
                                 EXCLUDE_SECURE_ONLY,
-                            IsForceThirdPartyCookieBlockingFlagEnabled()
+                            IsForceThirdPartyCookieBlockingFlagEnabled() ||
+                                    IsTrackingProtectionEnabledFor3pcd()
                                 ? net::CookieInclusionStatus::
                                       EXCLUDE_THIRD_PARTY_PHASEOUT
                                 : net::CookieInclusionStatus::
@@ -1409,9 +1501,14 @@ TEST_P(CookieSettingsTest,
        AnnotateAndMoveUserBlockedCookies_SitesInFirstPartySet) {
   CookieSettings settings;
   settings.set_block_third_party_cookies(true);
+  if (IsTrackingProtectionEnabledFor3pcd()) {
+    settings.set_tracking_protection_enabled_for_3pcd(true);
+  }
 
   net::CookieAccessResultList maybe_included_cookies = {
-      {*MakeCanonicalCookie("third_party_but_member", kFPSMemberURL), {}}};
+      {*MakeCanonicalSameSiteNoneCookie("third_party_but_member",
+                                        kFPSMemberURL),
+       {}}};
   net::CookieAccessResultList excluded_cookies = {};
 
   url::Origin origin = url::Origin::Create(GURL(kFPSOwnerURL));
@@ -1450,7 +1547,8 @@ TEST_P(CookieSettingsTest,
             MatchesCookieAccessResult(
                 HasExactlyExclusionReasonsForTesting(
                     std::vector<net::CookieInclusionStatus::ExclusionReason>{
-                        IsForceThirdPartyCookieBlockingFlagEnabled()
+                        IsForceThirdPartyCookieBlockingFlagEnabled() ||
+                                IsTrackingProtectionEnabledFor3pcd()
                             ? net::CookieInclusionStatus::
                                   EXCLUDE_THIRD_PARTY_PHASEOUT
                             : net::CookieInclusionStatus::
@@ -1473,14 +1571,19 @@ TEST_P(
       {CreateSetting(kFPSOwnerURL, kFPSOwnerURL, CONTENT_SETTING_BLOCK)});
 
   std::unique_ptr<net::CanonicalCookie> cookie =
-      MakeCanonicalCookie("third_party_but_member", kFPSMemberURL);
+      MakeCanonicalSameSiteNoneCookie("third_party_but_member", kFPSMemberURL);
 
   url::Origin top_frame_origin = url::Origin::Create(GURL(kFPSOwnerURL));
 
+  net::SchemefulSite primary((GURL(kFPSOwnerURL)));
+  net::FirstPartySetEntry frame_entry(primary, net::SiteType::kAssociated, 1u);
+  net::FirstPartySetEntry top_frame_entry(primary, net::SiteType::kPrimary,
+                                          absl::nullopt);
   // Without third-party-cookie-blocking enabled, the cookie is accessible, even
   // though cookies are blocked for the top-level URL.
   ASSERT_TRUE(settings.IsCookieAccessible(
       *cookie, GURL(kFPSMemberURL), net::SiteForCookies(), top_frame_origin,
+      net::FirstPartySetMetadata(&frame_entry, &top_frame_entry),
       GetCookieSettingOverrides(), &status));
 
   EXPECT_TRUE(status.HasWarningReason(
@@ -1489,14 +1592,12 @@ TEST_P(
   // Now we enable third-party-cookie-blocking, and verify that the right
   // exclusion reasons are still applied.
   settings.set_block_third_party_cookies(true);
+  if (IsTrackingProtectionEnabledFor3pcd()) {
+    settings.set_tracking_protection_enabled_for_3pcd(true);
+  }
 
   net::CookieAccessResultList maybe_included_cookies = {{*cookie, {}}};
   net::CookieAccessResultList excluded_cookies = {};
-
-  net::SchemefulSite primary((GURL(kFPSOwnerURL)));
-  net::FirstPartySetEntry frame_entry(primary, net::SiteType::kAssociated, 1u);
-  net::FirstPartySetEntry top_frame_entry(primary, net::SiteType::kPrimary,
-                                          absl::nullopt);
 
   const bool expected_allowed = false;
 
@@ -1529,7 +1630,8 @@ TEST_P(
             MatchesCookieAccessResult(
                 HasExactlyExclusionReasonsForTesting(
                     std::vector<net::CookieInclusionStatus::ExclusionReason>{
-                        IsForceThirdPartyCookieBlockingFlagEnabled()
+                        IsForceThirdPartyCookieBlockingFlagEnabled() ||
+                                IsTrackingProtectionEnabledFor3pcd()
                             ? net::CookieInclusionStatus::
                                   EXCLUDE_THIRD_PARTY_PHASEOUT
                             : net::CookieInclusionStatus::
@@ -1685,12 +1787,17 @@ const TestCase kOverrideTestCases[] = {
 INSTANTIATE_TEST_SUITE_P(
     /* no prefix */,
     CookieSettingsTest,
-    testing::Combine(testing::Bool(), testing::ValuesIn(kOverrideTestCases)),
+    testing::Combine(testing::Bool(),
+                     testing::Bool(),
+                     testing::ValuesIn(kOverrideTestCases)),
     // Print test name. `info` is type of std::tuple<bool, TestCase>.
     [](const testing::TestParamInfo<CookieSettingsTest::ParamType>& info) {
       std::stringstream ss;
       ss << (std::get<0>(info.param) ? "testing_3pcb_on" : "testing_3pcb_off")
-         << "_AND_" << std::get<1>(info.param).test_name;
+         << "_AND_"
+         << (std::get<1>(info.param) ? "tracking_protection_3pcb_on"
+                                     : "tracking_protection_3pcb_off")
+         << "_AND_" << std::get<2>(info.param).test_name;
       std::string s = ss.str();
       return ss.str();
     });

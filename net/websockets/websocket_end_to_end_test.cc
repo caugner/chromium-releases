@@ -342,7 +342,8 @@ class WebSocketEndToEndTest : public TestWithTaskEnvironment {
                                                   context_.get());
     channel_->SendAddChannelRequest(
         GURL(socket_url), sub_protocols_, origin, site_for_cookies,
-        isolation_info, HttpRequestHeaders(), TRAFFIC_ANNOTATION_FOR_TESTS);
+        /*has_storage_access=*/false, isolation_info, HttpRequestHeaders(),
+        TRAFFIC_ANNOTATION_FOR_TESTS);
     event_interface_->WaitForResponse();
     return !event_interface_->failed();
   }
@@ -532,7 +533,7 @@ TEST_F(WebSocketEndToEndTest, MAYBE_ProxyPacUsed) {
   const auto& info = proxy_delegate_->resolved_proxy_info();
   EXPECT_EQ(ws_url, info.url);
   EXPECT_TRUE(info.proxy_info.is_http());
-  EXPECT_EQ(info.proxy_info.ToPacString(),
+  EXPECT_EQ(info.proxy_info.ToDebugString(),
             base::StrCat({"PROXY ", proxy_server.host_port_pair().ToString()}));
 }
 

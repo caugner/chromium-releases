@@ -26,7 +26,7 @@ robolectric_toolchain = "//build/toolchain/android:robolectric_$host_cpu"
 # toolchains. Checking |is_android| here would therefore be too restrictive.
 if (is_android || is_chromeos) {
   import("//build/config/android/channel.gni")
-  import("//build/config/chromecast_build.gni")
+  import("//build/config/cast.gni")
   import("//build/config/clang/clang.gni")
   import("//build/config/dcheck_always_on.gni")
   import("//build/toolchain/siso.gni")
@@ -67,7 +67,7 @@ if (is_android || is_chromeos) {
 
     # The default to use for android:minSdkVersion for targets that do
     # not explicitly set it.
-    default_min_sdk_version = 24
+    default_min_sdk_version = 26
 
     # Static analysis can be either "on" or "off" or "build_server". This
     # controls how android lint, error-prone, bytecode checks are run. This
@@ -133,13 +133,6 @@ if (is_android || is_chromeos) {
     default_android_sdk_root = public_android_sdk_root
     default_android_sdk_version = public_android_sdk_version
     default_android_sdk_build_tools_version = "34.0.0"
-    public_android_sdk = true
-  }
-
-  if (android_sdk_release == "tprivacysandbox") {
-    default_android_sdk_root = public_android_sdk_root
-    default_android_sdk_version = "TiramisuPrivacySandbox"
-    default_android_sdk_build_tools_version = "33.0.0"
     public_android_sdk = true
   }
 

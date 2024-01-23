@@ -8,6 +8,7 @@
 #include <cstdint>
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -15,7 +16,6 @@
 #include "base/base64.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
-#include "base/functional/invoke.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -23,6 +23,7 @@
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_experiments.h"
+#include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_form_test_utils.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/field_types.h"
@@ -110,7 +111,7 @@ struct ManualOverride {
 
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 // Creates the override specification passed as a parameter to
-// `features::kAutofillOverridePredictions`.
+// `features::test::kAutofillOverridePredictions`.
 std::string CreateManualOverridePrediction(
     const std::vector<ManualOverride>& overrides) {
   std::vector<std::string> override_specs;
@@ -982,7 +983,7 @@ TEST_F(FormStructureTestImpl,
          .is_autofillable = true,
          .should_be_queried = true,
          .field_count = 4,
-         .autofill_count = 3},
+         .autofill_count = 4},
         {.expected_heuristic_type = {NAME_FIRST, NAME_MIDDLE, NAME_LAST,
                                      EMAIL_ADDRESS}}}});
 }
@@ -2418,13 +2419,6 @@ TEST_F(FormStructureTestImpl,
       AutofillUploadContents::DOM_MUTATION_AFTER_XHR ==
           static_cast<int>(SubmissionIndicatorEvent::DOM_MUTATION_AFTER_XHR),
       "DOM_MUTATION_AFTER_XHR enumerator does not match!");
-  static_assert(AutofillUploadContents::
-                        PROVISIONALLY_SAVED_FORM_ON_START_PROVISIONAL_LOAD ==
-                    static_cast<int>(
-                        SubmissionIndicatorEvent::
-                            PROVISIONALLY_SAVED_FORM_ON_START_PROVISIONAL_LOAD),
-                "PROVISIONALLY_SAVED_FORM_ON_START_PROVISIONAL_LOAD enumerator "
-                "does not match!");
   static_assert(
       AutofillUploadContents::PROBABLE_FORM_SUBMISSION ==
           static_cast<int>(SubmissionIndicatorEvent::PROBABLE_FORM_SUBMISSION),
@@ -4617,6 +4611,8 @@ TEST_F(FormStructureTestImpl, EncodeUploadRequest_WithSingleUsernameVoteType) {
   FormStructure form_structure(form);
   form_structure.field(0)->set_single_username_vote_type(
       AutofillUploadContents::Field::STRONG);
+  form_structure.field(0)->set_is_most_recent_single_username_candidate(
+      IsMostRecentSingleUsernameCandidate::kMostRecentCandidate);
   for (auto& fs_field : form_structure)
     fs_field->host_form_signature = form_structure.form_signature();
 
@@ -4628,6 +4624,8 @@ TEST_F(FormStructureTestImpl, EncodeUploadRequest_WithSingleUsernameVoteType) {
   ASSERT_EQ(1u, uploads.size());
   EXPECT_EQ(form_structure.field(0)->single_username_vote_type(),
             uploads.front().field(0).single_username_vote_type());
+  EXPECT_TRUE(
+      uploads.front().field(0).is_most_recent_single_username_candidate());
 }
 
 TEST_F(FormStructureTestImpl, EncodeUploadRequest_WithSingleUsernameData) {
@@ -5048,6 +5046,49 @@ TEST_F(FormStructureTestImpl,
   }
 }
 
+TEST_F(FormStructureTestImpl,
+       ParseQueryResponse_MergeAutofillAndPasswordsPredictions) {
+  FormData form_data;
+  form_data.url = GURL("http://foo.com");
+
+  FormFieldData field;
+  field.form_control_type = FormControlType::kInputText;
+  field.name = u"name";
+  field.unique_renderer_id = test::MakeFieldRendererId();
+  field.host_form_signature = FormSignature(12345);
+  form_data.fields = {field};
+
+  FormStructure form(form_data);
+  form.DetermineHeuristicTypes(GeoIpCountryCode(""), nullptr, nullptr);
+
+  // Setup the query response.
+  AutofillQueryResponse response;
+  std::vector<FormStructure*> forms{&form};
+  std::vector<FormSignature> encoded_signatures =
+      test::GetEncodedSignatures(forms);
+  // Main frame response.
+  auto* main_frame_form_suggestion = response.add_form_suggestions();
+  AddFieldPredictionToForm(form_data.fields[0], EMAIL_ADDRESS,
+                           main_frame_form_suggestion);
+  // Iframe response.
+  encoded_signatures.emplace_back(12345);
+  auto* iframe_form_suggestion = response.add_form_suggestions();
+  AddFieldPredictionToForm(form_data.fields[0], SINGLE_USERNAME,
+                           iframe_form_suggestion);
+
+  std::string response_string = SerializeAndEncode(response);
+
+  // Parse the response and update the field type predictions.
+  FormStructure::ParseApiQueryResponse(response_string, forms,
+                                       encoded_signatures, nullptr, nullptr);
+  ASSERT_EQ(form.field_count(), 1U);
+
+  // Validate field 0.
+  EXPECT_THAT(forms[0]->field(0)->server_predictions(),
+              ElementsAre(EqualsPrediction(EMAIL_ADDRESS),
+                          EqualsPrediction(SINGLE_USERNAME)));
+}
+
 // Tests that the signatures of a field's FormFieldData::host_form_signature are
 // used as a fallback if the form's signature does not contain useful type
 // predictions.
@@ -5283,12 +5324,12 @@ TEST_F(FormStructureTestImpl, ParseApiQueryResponseWithManualOverrides) {
   // Only the prediction for the first field is overridden.
   base::test::ScopedFeatureList features;
   base::FieldTrialParams feature_parameters{
-      {features::kAutofillOverridePredictionsSpecification.name,
+      {features::test::kAutofillOverridePredictionsSpecification.name,
        CreateManualOverridePrediction({{CalculateFormSignature(form),
                                         CalculateFieldSignatureForField(field1),
                                         {USERNAME}}})}};
   features.InitAndEnableFeatureWithParameters(
-      features::kAutofillOverridePredictions, feature_parameters);
+      features::test::kAutofillOverridePredictions, feature_parameters);
 
   // Make serialized API response.
   AutofillQueryResponse api_response;
@@ -5348,12 +5389,12 @@ TEST_F(FormStructureTestImpl,
   // through".
   base::test::ScopedFeatureList features;
   base::FieldTrialParams feature_parameters{
-      {features::kAutofillOverridePredictionsSpecification.name,
+      {features::test::kAutofillOverridePredictionsSpecification.name,
        CreateManualOverridePrediction(
            {{kFormSignature, kFieldSignature, {NAME_FIRST}},
             {kFormSignature, kFieldSignature, {}}})}};
   features.InitAndEnableFeatureWithParameters(
-      features::kAutofillOverridePredictions, feature_parameters);
+      features::test::kAutofillOverridePredictions, feature_parameters);
 
   // Make serialized API response.
   AutofillQueryResponse api_response;
@@ -5409,12 +5450,12 @@ TEST_F(FormStructureTestImpl,
   // through".
   base::test::ScopedFeatureList features;
   base::FieldTrialParams feature_parameters{
-      {features::kAutofillOverridePredictionsSpecification.name,
+      {features::test::kAutofillOverridePredictionsSpecification.name,
        CreateManualOverridePrediction(
            {{kFormSignature, kFieldSignature, {NAME_FIRST}},
             {kFormSignature, kFieldSignature, {}}})}};
   features.InitAndEnableFeatureWithParameters(
-      features::kAutofillOverridePredictions, feature_parameters);
+      features::test::kAutofillOverridePredictions, feature_parameters);
 
   // Make serialized API response.
   AutofillQueryResponse api_response;
@@ -5488,13 +5529,13 @@ TEST_F(FormStructureTestImpl,
   // through".
   base::test::ScopedFeatureList features;
   base::FieldTrialParams feature_parameters{
-      {features::kAutofillOverridePredictionsSpecification.name,
+      {features::test::kAutofillOverridePredictionsSpecification.name,
        CreateManualOverridePrediction(
            {{kFormSignature, kFieldSignature, {NAME_FIRST}},
             {kFormSignature, kFieldSignature, {}},
             {kFormSignature, kFieldSignature, {COMPANY_NAME}}})}};
   features.InitAndEnableFeatureWithParameters(
-      features::kAutofillOverridePredictions, feature_parameters);
+      features::test::kAutofillOverridePredictions, feature_parameters);
 
   // Make serialized API response.
   AutofillQueryResponse api_response;
@@ -5553,14 +5594,14 @@ TEST_F(FormStructureTestImpl,
   // Only the prediction for the first field is overridden.
   base::test::ScopedFeatureList features;
   base::FieldTrialParams feature_parameters{
-      {features::
+      {features::test::
            kAutofillOverridePredictionsForAlternativeFormSignaturesSpecification
                .name,
        CreateManualOverridePrediction({{CalculateAlternativeFormSignature(form),
                                         CalculateFieldSignatureForField(field1),
                                         {USERNAME}}})}};
   features.InitAndEnableFeatureWithParameters(
-      features::kAutofillOverridePredictions, feature_parameters);
+      features::test::kAutofillOverridePredictions, feature_parameters);
 
   // Make serialized API response.
   AutofillQueryResponse api_response;
@@ -5612,14 +5653,14 @@ TEST_F(FormStructureTestImpl,
   // Only the prediction for the first field is overridden.
   base::test::ScopedFeatureList features;
   base::FieldTrialParams feature_parameters{
-      {features::
+      {features::test::
            kAutofillOverridePredictionsForAlternativeFormSignaturesSpecification
                .name,
        CreateManualOverridePrediction({{CalculateAlternativeFormSignature(form),
                                         CalculateFieldSignatureForField(field1),
                                         {USERNAME}}})}};
   features.InitAndEnableFeatureWithParameters(
-      features::kAutofillOverridePredictions, feature_parameters);
+      features::test::kAutofillOverridePredictions, feature_parameters);
 
   // Make serialized API response.
   AutofillQueryResponse api_response;
@@ -5648,6 +5689,61 @@ TEST_F(FormStructureTestImpl,
   EXPECT_THAT(forms[0]->field(1)->server_predictions(),
               ElementsAre(EqualsPrediction(
                   PASSWORD, FieldPrediction::SOURCE_PASSWORDS_DEFAULT)));
+}
+
+// Tests that server overrides have lower priority than manual overrides.
+TEST_F(FormStructureTestImpl,
+       ParseApiQueryResponseReplaceServerOverrideWithManualOverride) {
+  FormFieldData name_field =
+      CreateTestFormField("name", "name", "", FormControlType::kInputText);
+  FormFieldData password_field = CreateTestFormField(
+      "password", "password", "", FormControlType::kInputText);
+  FormData form;
+  form.fields = {name_field, password_field};
+  form.url = GURL("http://foo.com");
+  FormStructure form_structure(form);
+  std::vector<FormStructure*> forms{&form_structure};
+
+  // The feature is only initialized here because the parameters contain the
+  // form and field signatures. Only the prediction for the first field is
+  // overridden.
+  base::test::ScopedFeatureList features;
+  base::FieldTrialParams feature_parameters{
+      {features::test::
+           kAutofillOverridePredictionsForAlternativeFormSignaturesSpecification
+               .name,
+       CreateManualOverridePrediction(
+           {{CalculateAlternativeFormSignature(form),
+             CalculateFieldSignatureForField(name_field),
+             {USERNAME}}})}};
+  features.InitAndEnableFeatureWithParameters(
+      features::test::kAutofillOverridePredictions, feature_parameters);
+
+  // Make serialized API response.
+  AutofillQueryResponse api_response;
+  auto* form_suggestion = api_response.add_form_suggestions();
+  AddFieldPredictionsToForm(
+      form.fields[0],
+      {CreateFieldPrediction(EMAIL_ADDRESS, FieldPrediction::SOURCE_OVERRIDE)},
+      form_suggestion);
+  AddFieldPredictionsToForm(
+      form.fields[1],
+      {CreateFieldPrediction(PASSWORD, FieldPrediction::SOURCE_OVERRIDE)},
+      form_suggestion);
+
+  FormStructure::ParseApiQueryResponse(SerializeAndEncode(api_response), forms,
+                                       test::GetEncodedSignatures(forms),
+                                       nullptr, nullptr);
+
+  ASSERT_EQ(forms[0]->field_count(), 2u);
+
+  // The prediction for the first field comes from the manual override.
+  EXPECT_THAT(forms[0]->field(0)->server_predictions(),
+              ElementsAre(EqualsPrediction(
+                  USERNAME, FieldPrediction::SOURCE_MANUAL_OVERRIDE)));
+  EXPECT_THAT(forms[0]->field(1)->server_predictions(),
+              ElementsAre(EqualsPrediction(PASSWORD,
+                                           FieldPrediction::SOURCE_OVERRIDE)));
 }
 #endif
 
@@ -5747,9 +5843,8 @@ TEST_F(FormStructureTestImpl, ParseQueryResponse_AuthorDefinedTypes) {
   EXPECT_EQ(EMAIL_ADDRESS, forms[0]->field(0)->server_type());
   EXPECT_EQ(EMAIL_ADDRESS, forms[0]->field(0)->Type().GetStorableType());
   EXPECT_EQ(ACCOUNT_CREATION_PASSWORD, forms[0]->field(1)->server_type());
-  // TODO(crbug.com/613666): Should be a properly defined type, and not
-  // UNKNOWN_TYPE.
-  EXPECT_EQ(UNKNOWN_TYPE, forms[0]->field(1)->Type().GetStorableType());
+  EXPECT_EQ(ACCOUNT_CREATION_PASSWORD,
+            forms[0]->field(1)->Type().GetStorableType());
 }
 
 // Tests that, when the flag is off, we will not set the predicted type to
@@ -6636,8 +6731,7 @@ TEST_F(FormStructureTestImpl, ExperimentalServerPredictionsAreSeparate) {
 
 // Tests that ParseFieldTypesWithPatterns() sets (only) the PatternSource.
 TEST_P(FormStructureTest_ForPatternSource, ParseFieldTypesWithPatterns) {
-  FormData form;
-  test::CreateTestAddressFormData(&form);
+  FormData form = test::CreateTestAddressFormData();
   FormStructure form_structure(form);
   test_api(form_structure).ParseFieldTypesWithPatterns(pattern_source());
   ASSERT_THAT(form_structure.fields(), Not(IsEmpty()));
@@ -6693,7 +6787,7 @@ TEST_F(FormStructureTestImpl, DetermineRanks) {
   auto extract = [&form_structure](size_t (AutofillField::*fun)() const) {
     std::vector<size_t> result;
     for (const auto& field : form_structure.fields()) {
-      result.push_back(base::invoke(fun, *field));
+      result.push_back(std::invoke(fun, *field));
     }
     return result;
   };
@@ -6714,8 +6808,7 @@ TEST_F(FormStructureTestImpl, GetFormTypes_AutocompleteUnrecognized) {
   base::test::ScopedFeatureList feature(
       features::kAutofillPredictionsForAutocompleteUnrecognized);
 
-  FormData form;
-  test::CreateTestAddressFormData(&form);
+  FormData form = test::CreateTestAddressFormData();
   for (FormFieldData& field : form.fields) {
     field.parsed_autocomplete =
         AutocompleteParsingResult{.field_type = HtmlFieldType::kUnrecognized};
@@ -6772,6 +6865,86 @@ TEST_F(FormStructureTestImpl, SingleFieldEmailHeuristicsEnabled) {
     EXPECT_EQ(EMAIL_ADDRESS, form_structure.field(0)->heuristic_type());
     EXPECT_TRUE(form_structure.IsAutofillable());
   }
+}
+
+TEST_F(FormStructureTestImpl, EncodeUploadRequest_SetsInitialValueChanged) {
+  FormData form = test::GetFormData(
+      {.fields = {
+           // Field 1: Expect `initial_value_changed` not set because the field
+           // had no pre-filled value.
+           {.role = NAME_FIRST},
+           // Field 2: Expect `initial_value_changed == false` because `value`
+           // doesn't change.
+           {.role = NAME_LAST, .value = u"Doe"},
+           // Field 3: Expect `initial_value_changed == true` because `value` is
+           // changed (below).
+           {.role = EMAIL_ADDRESS, .value = u"test@example.com"},
+           // Field 4: Expect `initial_value_changed` not set because the field
+           // type resolves to `UNKNOWN_TYPE`.
+           {.role = USERNAME, .value = u"username"}}});
+  // Form structure preserving the state from page load.
+  FormStructure cached_form_structure(form);
+  // Form structure containing the state on submit.
+  FormStructure form_structure(form);
+
+  cached_form_structure.DetermineHeuristicTypes(GeoIpCountryCode(""), nullptr,
+                                                nullptr);
+
+  // Simulate user changed non-pre-filled field value.
+  form_structure.field(0)->value = u"John";
+  // Simulate user changed pre-filled field value.
+  form_structure.field(2)->value = u"changed@example.com";
+
+  // Sets `initial_value_changed` on `form_structure::fields_`.
+  form_structure.RetrieveFromCache(
+      cached_form_structure,
+      FormStructure::RetrieveFromCacheReason::kFormImport);
+
+  const std::vector<AutofillUploadContents> uploads =
+      form_structure.EncodeUploadRequest(
+          /*available_field_types=*/{}, /*form_was_autofilled=*/false,
+          /*login_form_signature=*/"", /*observed_submission=*/true);
+  ASSERT_EQ(uploads.size(), 1UL);
+  const AutofillUploadContents& upload = uploads[0];
+
+  ASSERT_EQ(upload.field_size(), 4);
+  // Field 1.
+  EXPECT_FALSE(upload.field(0).has_initial_value_changed());
+  // Field 2.
+  EXPECT_TRUE(upload.field(1).has_initial_value_changed());
+  EXPECT_FALSE(upload.field(1).initial_value_changed());
+  // Field 3.
+  EXPECT_TRUE(upload.field(2).has_initial_value_changed());
+  EXPECT_TRUE(upload.field(2).initial_value_changed());
+  // Field 4.
+  EXPECT_FALSE(upload.field(3).has_initial_value_changed());
+}
+
+// Tests that Autofill does not send votes for a field that was filled with
+// fallback.
+TEST_F(FormStructureTestImpl,
+       EncodeUploadRequest_SkipFieldsFilledWithFallback) {
+  FormData form = test::GetFormData({.fields = {{.role = NAME_FIRST}}});
+  FormStructure form_structure(form);
+
+  std::vector<AutofillUploadContents> uploads =
+      form_structure.EncodeUploadRequest(
+          /*available_field_types=*/{}, /*form_was_autofilled=*/false,
+          /*login_form_signature=*/"", /*observed_submission=*/true);
+  ASSERT_GE(uploads.size(), 1u);
+  AutofillUploadContents upload = uploads[0];
+  EXPECT_EQ(upload.field_size(), 1);
+
+  // Set the autofilled type of the field as something different from its
+  // classified type, representing that the field was filled using this type as
+  // fallback.
+  form_structure.field(0)->set_autofilled_type(NAME_FULL);
+  uploads = form_structure.EncodeUploadRequest(
+      /*available_field_types=*/{}, /*form_was_autofilled=*/false,
+      /*login_form_signature=*/"", /*observed_submission=*/true);
+  ASSERT_GE(uploads.size(), 1u);
+  upload = uploads[0];
+  EXPECT_EQ(upload.field_size(), 0);
 }
 
 }  // namespace autofill

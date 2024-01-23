@@ -33,7 +33,7 @@
 #include "components/password_manager/core/browser/field_info_manager.h"
 #include "components/password_manager/core/browser/form_fetcher_impl.h"
 #include "components/password_manager/core/browser/form_parsing/form_data_parser.h"
-#include "components/password_manager/core/browser/password_change_success_tracker_impl.h"
+#include "components/password_manager/core/browser/form_parsing/password_field_prediction.h"
 #include "components/password_manager/core/browser/password_feature_manager.h"
 #include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/password_form_filling.h"
@@ -42,20 +42,23 @@
 #include "components/password_manager/core/browser/password_manager_driver.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
-#include "components/password_manager/core/browser/password_store_backend_error.h"
+#include "components/password_manager/core/browser/password_store/interactions_stats.h"
+#include "components/password_manager/core/browser/password_store/password_store_backend_error.h"
+#include "components/password_manager/core/browser/password_store/psl_matching_helper.h"
 #include "components/password_manager/core/browser/possible_username_data.h"
-#include "components/password_manager/core/browser/psl_matching_helper.h"
-#include "components/password_manager/core/browser/statistics_table.h"
 #include "components/password_manager/core/browser/votes_uploader.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "components/webauthn/android/webauthn_cred_man_delegate.h"
 #endif  // BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(IS_MAC)
+#include "components/os_crypt/sync/os_crypt.h"
+#endif
 
 using autofill::FieldDataManager;
 using autofill::FieldRendererId;
@@ -94,11 +97,6 @@ bool FormContainsFieldWithName(const FormData& form,
                               &FormFieldData::name);
 }
 
-bool IsPhished(const PasswordForm& credentials) {
-  return credentials.password_issues.find(InsecureType::kPhished) !=
-         credentials.password_issues.end();
-}
-
 void LogUsingPossibleUsername(PasswordManagerClient* client,
                               bool is_used,
                               const char* message) {
@@ -116,21 +114,36 @@ bool IsCurrentUserEvicted(PasswordManagerClient* client) {
       password_manager::prefs::kUnenrolledFromGoogleMobileServicesDueToErrors);
 }
 
+bool IsAuthError(std::optional<PasswordStoreBackendError> error) {
+  return error.has_value() &&
+         (error.value().type ==
+              PasswordStoreBackendErrorType::kAuthErrorResolvable ||
+          error.value().type ==
+              PasswordStoreBackendErrorType::kAuthErrorUnresolvable);
+}
+
 bool ShouldShowErrorMessage(
-    absl::optional<PasswordStoreBackendError> backend_error,
+    std::optional<PasswordStoreBackendError> profile_store_backend_error,
+    std::optional<PasswordStoreBackendError> account_store_backend_error,
     PasswordManagerClient* client) {
-  if (!backend_error.has_value())
+  std::optional<PasswordStoreBackendError> auth_error;
+  if (IsAuthError(account_store_backend_error)) {
+    auth_error = account_store_backend_error;
+  } else if (IsAuthError(profile_store_backend_error)) {
+    // This is possible only before the store split. This needs to be removed
+    // after the profile store starts to be used only for non-syncing passwords.
+    auth_error = profile_store_backend_error;
+  }
+
+  if (!auth_error.has_value()) {
     return false;
-  PasswordStoreBackendError error = backend_error.value();
-  bool is_auth_error =
-      (error.type == PasswordStoreBackendErrorType::kAuthErrorResolvable) ||
-      (error.type == PasswordStoreBackendErrorType::kAuthErrorUnresolvable);
-  if (!is_auth_error)
+  }
+  if (IsCurrentUserEvicted(client)) {
     return false;
-  if (IsCurrentUserEvicted(client))
-    return false;
-  DCHECK(error.recovery_type !=
-         PasswordStoreBackendErrorRecoveryType::kUnrecoverable);
+  }
+  CHECK(auth_error.value().recovery_type !=
+        PasswordStoreBackendErrorRecoveryType::kUnrecoverable);
+
   return true;
 }
 #endif
@@ -207,6 +220,16 @@ bool UsernameOutsideOfFormHasHigherPriority(
               FormDataParser::UsernameDetectionMethod::kServerSidePrediction);
 }
 
+#if BUILDFLAG(IS_MAC)
+bool ShouldShowKeychainErrorBubble(
+    absl::optional<PasswordStoreBackendError> backend_error) {
+  if (!backend_error.has_value()) {
+    return false;
+  }
+  return backend_error.value().type ==
+         PasswordStoreBackendErrorType::kKeychainError;
+}
+#endif
 }  // namespace
 
 PasswordFormManager::PasswordFormManager(
@@ -385,39 +408,13 @@ void PasswordFormManager::Save() {
     newly_blocklisted_ = false;
   }
 
-  // This is potentially the conclusion of a password change flow. It might also
-  // not be related to such a flow at all, but the tracker will figure it out.
-  PasswordChangeSuccessTracker::EndEvent end_event =
-      HasGeneratedPassword() ? PasswordChangeSuccessTracker::EndEvent::
-                                   kManualFlowGeneratedPasswordChosen
-                             : PasswordChangeSuccessTracker::EndEvent::
-                                   kManualFlowOwnPasswordChosen;
-  client_->GetPasswordChangeSuccessTracker()->OnChangePasswordFlowCompleted(
-      parsed_submitted_form_->url,
-      base::UTF16ToUTF8(GetPendingCredentials().username_value), end_event,
-      IsPhished(GetPendingCredentials()));
-
   password_save_manager_->Save(observed_form(), *parsed_submitted_form_);
-
   client_->UpdateFormManagers();
 }
 
 void PasswordFormManager::Update(const PasswordForm& credentials_to_update) {
-  // This is potentially the conclusion of a password change flow. It might also
-  // not be related to such a flow at all, but the tracker will figure it out.
-  PasswordChangeSuccessTracker::EndEvent end_event =
-      HasGeneratedPassword() ? PasswordChangeSuccessTracker::EndEvent::
-                                   kManualFlowGeneratedPasswordChosen
-                             : PasswordChangeSuccessTracker::EndEvent::
-                                   kManualFlowOwnPasswordChosen;
-  client_->GetPasswordChangeSuccessTracker()->OnChangePasswordFlowCompleted(
-      parsed_submitted_form_->url,
-      base::UTF16ToUTF8(GetPendingCredentials().username_value), end_event,
-      IsPhished(credentials_to_update));
-
   password_save_manager_->Update(credentials_to_update, observed_form(),
                                  *parsed_submitted_form_);
-
   client_->UpdateFormManagers();
 }
 
@@ -746,23 +743,39 @@ void PasswordFormManager::OnFetchCompleted() {
   autofills_left_ = kMaxTimesAutofill;
 
 #if BUILDFLAG(IS_ANDROID)
-  absl::optional<PasswordStoreBackendError> backend_error =
+  std::optional<PasswordStoreBackendError> profile_backend_error =
       form_fetcher_->GetProfileStoreBackendError();
-  if (ShouldShowErrorMessage(backend_error, client_)) {
-    // If there is no FormData, this is an http authentication form. We don't
-    // show the message for it because it would be hidden behind a sign in
-    // dialog and the user could miss it.
-    if (observed_form() != nullptr) {
-      std::unique_ptr<PasswordForm> password_form =
-          parser_.Parse(*observed_form(), FormDataParser::Mode::kFilling,
-                        GetStoredUsernames());
-      client_->ShowPasswordManagerErrorMessage(
-          password_form && (password_form->IsLikelySignupForm() ||
-                            password_form->IsLikelyChangePasswordForm() ||
-                            password_form->IsLikelyResetPasswordForm())
-              ? password_manager::ErrorMessageFlowType::kSaveFlow
-              : password_manager::ErrorMessageFlowType::kFillFlow,
-          backend_error->type);
+  std::optional<PasswordStoreBackendError> account_backend_error =
+      form_fetcher_->GetAccountStoreBackendError();
+  // If there is no FormData, this is an http authentication form. We don't
+  // show the message for it because it would be hidden behind a sign in
+  // dialog and the user could miss it.
+  if (observed_form() != nullptr &&
+      ShouldShowErrorMessage(profile_backend_error, account_backend_error,
+                             client_)) {
+    std::unique_ptr<PasswordForm> password_form = parser_.Parse(
+        *observed_form(), FormDataParser::Mode::kFilling, GetStoredUsernames());
+    // If ShouldShowErrorMessage returns true, at least one of the store errors
+    // is an auth error.
+    password_manager::PasswordStoreBackendErrorType error_type =
+        IsAuthError(account_backend_error) ? account_backend_error->type
+                                           : profile_backend_error->type;
+    client_->ShowPasswordManagerErrorMessage(
+        password_form && (password_form->IsLikelySignupForm() ||
+                          password_form->IsLikelyChangePasswordForm() ||
+                          password_form->IsLikelyResetPasswordForm())
+            ? password_manager::ErrorMessageFlowType::kSaveFlow
+            : password_manager::ErrorMessageFlowType::kFillFlow,
+        error_type);
+  }
+#elif BUILDFLAG(IS_MAC)
+  if (ShouldShowKeychainErrorBubble(
+          form_fetcher_->GetProfileStoreBackendError())) {
+    client_->NotifyKeychainError();
+  } else {
+    if (OSCrypt::IsEncryptionAvailable() && client_->GetPrefs()) {
+      client_->GetPrefs()->SetInteger(
+          password_manager::prefs::kRelaunchChromeBubbleDismissedCounter, 0);
     }
   }
 #endif
@@ -852,6 +865,7 @@ bool PasswordFormManager::ProvisionallySave(
   if (parsed_submitted_form) {
     metrics_recorder_->CalculateParsingDifferenceOnSavingAndFilling(
         *parsed_submitted_form.get());
+    CalculateFillingAssistanceMetric(*parsed_submitted_form);
   }
 
   bool have_password_to_save =
@@ -869,11 +883,11 @@ bool PasswordFormManager::ProvisionallySave(
   parsed_submitted_form_ = std::move(parsed_submitted_form);
   submitted_form_ = submitted_form;
   is_submitted_ = true;
-  CalculateFillingAssistanceMetric(submitted_form);
   CalculateSubmittedFormFrameMetric();
   CalculateSubmittedFormTypeMetric();
   metrics_recorder_->set_possible_username_used(false);
-  votes_uploader_.clear_single_username_vote_data();
+  votes_uploader_.clear_single_username_votes_data();
+  votes_uploader_.set_should_send_username_first_flow_votes(false);
 
   if (possible_usernames && !possible_usernames->empty()) {
     HandleUsernameFirstFlow(*possible_usernames,
@@ -1142,7 +1156,7 @@ void PasswordFormManager::PresaveGeneratedPasswordInternal(
 }
 
 void PasswordFormManager::CalculateFillingAssistanceMetric(
-    const FormData& submitted_form) {
+    const PasswordForm& parsed_submitted_form) {
   std::set<std::pair<std::u16string, PasswordForm::Store>> saved_usernames;
   std::set<std::pair<std::u16string, PasswordForm::Store>> saved_passwords;
 
@@ -1155,7 +1169,7 @@ void PasswordFormManager::CalculateFillingAssistanceMetric(
   }
 
   metrics_recorder_->CalculateFillingAssistanceMetric(
-      submitted_form, saved_usernames, saved_passwords, IsBlocklisted(),
+      parsed_submitted_form, saved_usernames, saved_passwords, IsBlocklisted(),
       form_fetcher_->GetInteractionsStats(),
       client_->GetPasswordFeatureManager()
           ->ComputePasswordAccountStorageUsageLevel());
@@ -1350,23 +1364,43 @@ void PasswordFormManager::HandleUsernameFirstFlow(
   bool should_prefer_username_found_outside_of_form =
       ShouldPreferUsernameFoundOutsideOfForm(best_candidate,
                                              in_form_username_detection_method);
-  if (!should_prefer_username_found_outside_of_form) {
-    return;
-  }
+  votes_uploader_.set_should_send_username_first_flow_votes(
+      should_prefer_username_found_outside_of_form);
 
   if (!best_candidate.has_value()) {
     // Happens when there is no username field in the password form as well.
     // If no single username typing preceded single password typing, set
     // empty single username vote data for the fallback classifier.
-    votes_uploader_.set_single_username_vote_data(SingleUsernameVoteData());
+    votes_uploader_.add_single_username_vote_data(SingleUsernameVoteData());
     return;
   }
+
   const UsernameFoundOutsideOfForm& picked_username = best_candidate.value();
-  votes_uploader_.set_single_username_vote_data(SingleUsernameVoteData(
-      picked_username.data.renderer_id, picked_username.data.value,
-      picked_username.data.form_predictions.value_or(FormPredictions()),
-      form_fetcher_->GetBestMatches(),
-      picked_username.password_form_had_matching_username));
+  if (base::FeatureList::IsEnabled(
+          features::kUsernameFirstFlowWithIntermediateValuesVoting)) {
+    // Cache voting data for all candidates outside of the password form.
+    // Will send votes only if `should_prefer_username_found_outside_of_form` is
+    // true or there is an `IN_FORM_OVERRULE` vote among any of them.
+    for (const auto& it : possible_usernames) {
+      votes_uploader_.add_single_username_vote_data(SingleUsernameVoteData(
+          it.second.renderer_id, it.second.value,
+          it.second.form_predictions.value_or(FormPredictions()),
+          form_fetcher_->GetBestMatches(),
+          FormMatchesUsername(*parsed_submitted_form_.get(), it.second.value)));
+    }
+  } else {
+    // Cache voting data for the best possible username candidate user modified
+    // field.
+    votes_uploader_.add_single_username_vote_data(SingleUsernameVoteData(
+        picked_username.data.renderer_id, picked_username.data.value,
+        picked_username.data.form_predictions.value_or(FormPredictions()),
+        form_fetcher_->GetBestMatches(),
+        picked_username.password_form_had_matching_username));
+  }
+
+  if (!should_prefer_username_found_outside_of_form) {
+    return;
+  }
 
   // Suggest the possible username value in a prompt in three cases:
   // (1) If single username field is a server override.

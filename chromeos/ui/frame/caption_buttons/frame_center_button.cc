@@ -5,11 +5,13 @@
 #include "chromeos/ui/frame/caption_buttons/frame_center_button.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "base/i18n/rtl.h"
 #include "base/numerics/safe_conversions.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "chromeos/ui/vector_icons/vector_icons.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/hit_test.h"
@@ -48,7 +50,9 @@ constexpr float kDefaultHighlightOpacityForDark = 0.20f;
 }  // namespace
 
 FrameCenterButton::FrameCenterButton(PressedCallback callback)
-    : FrameCaptionButton(callback, views::CAPTION_BUTTON_ICON_CENTER, HTMENU) {
+    : FrameCaptionButton(std::move(callback),
+                         views::CAPTION_BUTTON_ICON_CENTER,
+                         HTMENU) {
   SetAccessibleName(l10n_util::GetStringUTF16(IDS_APP_ACCNAME_CENTER));
   background_color_changed_subscription_ = AddBackgroundColorChangedCallback(
       base::BindRepeating(&FrameCenterButton::OnBackgroundColorChanged,
@@ -200,8 +204,8 @@ void FrameCenterButton::DrawIconContents(gfx::Canvas* canvas,
                     std::min(text_->GetStringSize().width(), max_text_width),
                     text_->GetStringSize().height());
       text_->SetDisplayRect(text_bounds);
-      text_->SetColor(
-          SkColorSetA(GetButtonColor(GetBackgroundColor()), flags.getAlphaf()));
+      text_->SetColor(SkColorSetA(GetButtonColor(GetBackgroundColor()),
+                                  flags.getAlphaf() * SK_AlphaOPAQUE));
       text_->Draw(canvas);
       offset += text_bounds.width();
     }
@@ -246,8 +250,8 @@ void FrameCenterButton::DrawIconContents(gfx::Canvas* canvas,
         std::min(text_->GetStringSize().width(), available_text_width),
         text_->GetStringSize().height());
     text_->SetDisplayRect(text_bounds);
-    text_->SetColor(
-        SkColorSetA(GetButtonColor(GetBackgroundColor()), flags.getAlphaf()));
+    text_->SetColor(SkColorSetA(GetButtonColor(GetBackgroundColor()),
+                                flags.getAlphaf() * SK_AlphaOPAQUE));
     text_->Draw(canvas);
     current_offset += text_bounds.width() + kMarginBetweenContents;
   }

@@ -648,6 +648,9 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_SHOW_PASSWORD_MANAGER:
       ShowPasswordManager(browser_);
       break;
+    case IDC_SHOW_PASSWORD_CHECKUP:
+      ShowPasswordCheck(browser_);
+      break;
     case IDC_SHOW_PAYMENT_METHODS:
       ShowPaymentMethods(browser_);
       break;
@@ -1281,6 +1284,8 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_PASSWORDS_AND_AUTOFILL_MENU,
                                         !guest_session);
   command_updater_.UpdateCommandEnabled(IDC_SHOW_PASSWORD_MANAGER,
+                                        !guest_session);
+  command_updater_.UpdateCommandEnabled(IDC_SHOW_PASSWORD_CHECKUP,
                                         !guest_session);
   command_updater_.UpdateCommandEnabled(IDC_SHOW_PAYMENT_METHODS,
                                         !guest_session);

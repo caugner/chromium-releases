@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_VOTE_UPLOADS_TEST_MATCHERS_H_
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_VOTE_UPLOADS_TEST_MATCHERS_H_
 
+#include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/test_utils/vote_uploads_test_matchers.h"
 #include "components/autofill/core/common/signatures.h"
@@ -73,6 +74,50 @@ MATCHER_P(UploadedSingleUsernameVoteTypeIs, expected_type, "") {
   return true;
 }
 
+MATCHER_P(UploadedSingleUsernameVoteIsMostRecentCandidate,
+          is_most_recent_single_username_candidate,
+          "") {
+  if (is_most_recent_single_username_candidate ==
+      autofill::IsMostRecentSingleUsernameCandidate::
+          kNotPartOfUsernameFirstFlow) {
+    // Variable not set - don't check if the flag is set.
+    return true;
+  }
+  for (const auto& field : arg) {
+    autofill::ServerFieldType vote = field->possible_types().empty()
+                                         ? autofill::UNKNOWN_TYPE
+                                         : *field->possible_types().begin();
+    if (vote == autofill::SINGLE_USERNAME || vote == autofill::NOT_USERNAME) {
+      // `is_most_recent_single_username_candidate` is not set.
+      if (field->is_most_recent_single_username_candidate() ==
+          autofill::IsMostRecentSingleUsernameCandidate::
+              kNotPartOfUsernameFirstFlow) {
+        *result_listener
+            << "Expected vote is_most_recent_single_username_candidate for the "
+               "field "
+            << field->name << " is "
+            << static_cast<int>(is_most_recent_single_username_candidate)
+            << ", but it was not set.";
+        return false;
+      }
+      // `is_most_recent_single_username_candidate` is incorrect.
+      if (field->is_most_recent_single_username_candidate() !=
+          is_most_recent_single_username_candidate) {
+        *result_listener
+            << "Expected vote is_most_recent_single_username_candidate for the "
+               "field "
+            << field->name << " is "
+            << static_cast<int>(is_most_recent_single_username_candidate)
+            << ", but found "
+            << static_cast<int>(
+                   field->is_most_recent_single_username_candidate());
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 inline auto EqualsSingleUsernameDataVector(
     std::vector<autofill::AutofillUploadContents::SingleUsernameData>
         expected_data) {
@@ -116,7 +161,7 @@ inline auto PasswordsWereRevealed(bool passwords_were_revealed) {
 }
 
 MATCHER_P(HasPasswordAttributesVote, is_vote_expected, "") {
-  absl::optional<std::pair<autofill::PasswordAttribute, bool>> vote =
+  std::optional<std::pair<autofill::PasswordAttribute, bool>> vote =
       arg.get_password_attributes_vote();
   EXPECT_EQ(is_vote_expected, vote.has_value());
   return true;

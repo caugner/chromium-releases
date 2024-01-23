@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "ash/ambient/ambient_access_token_controller.h"
-#include "ash/ambient/ambient_photo_cache.h"
 #include "ash/ambient/ambient_photo_controller.h"
 #include "ash/ambient/ambient_ui_launcher.h"
 #include "ash/ambient/ambient_view_delegate_impl.h"
@@ -190,8 +189,6 @@ class ASH_EXPORT AmbientController
 
   AmbientViewDelegate* ambient_view_delegate() { return &delegate_; }
 
-  AmbientPhotoCache* ambient_photo_cache() { return photo_cache_.get(); }
-
   AmbientAccessTokenController* access_token_controller() {
     return &access_token_controller_;
   }
@@ -206,6 +203,18 @@ class ASH_EXPORT AmbientController
   // by `OnLoginLockScreenStateChanged` method as a parameter to pass
   // the correct information to the method.
   enum LockScreenState { kLogin, kLocked, kUnlocked };
+
+  // Tracks the progression of states with `AmbientUiLauncher`.
+  enum class AmbientUiLauncherState {
+    // Waiting for `Initialize()` to finish.
+    kInitializing,
+    // `Initialize()` has completed successfully.
+    kRendering,
+    // After `Finalize()` (not in the middle of launching or rendering an
+    // ambient session).
+    kInactive,
+  };
+
   friend class AmbientAshTestBase;
   friend class AmbientControllerTest;
   FRIEND_TEST_ALL_PREFIXES(AmbientControllerTest,
@@ -214,10 +223,6 @@ class ASH_EXPORT AmbientController
 
   AmbientPhotoController* ambient_photo_controller() {
     return ambient_ui_launcher_->GetAmbientPhotoController();
-  }
-
-  AmbientPhotoCache* get_backup_photo_cache_for_testing() {
-    return backup_photo_cache_.get();
   }
 
   // Hide or close Ambient mode UI.
@@ -294,8 +299,6 @@ class ASH_EXPORT AmbientController
 
   AmbientAccessTokenController access_token_controller_;
   std::unique_ptr<AmbientBackendController> ambient_backend_controller_;
-  std::unique_ptr<AmbientPhotoCache> photo_cache_;
-  std::unique_ptr<AmbientPhotoCache> backup_photo_cache_;
   std::unique_ptr<AmbientWeatherController> ambient_weather_controller_;
 
   // Monitors the device inactivity and controls the auto-show of ambient.
@@ -321,7 +324,6 @@ class ASH_EXPORT AmbientController
 
   base::ScopedObservation<BacklightsForcedOffSetter, ScreenBacklightObserver>
       backlights_forced_off_observation_{this};
-  std::unique_ptr<AmbientWeatherController::ScopedRefresher> weather_refresher_;
 
   // Observes user profile prefs for ambient.
   std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
@@ -362,6 +364,8 @@ class ASH_EXPORT AmbientController
   // Flag used to monitor if receiving events, such as mouse/key/touch, from
   // `ash::Shell`.
   bool is_receiving_pretarget_events_ = false;
+
+  AmbientUiLauncherState ui_launcher_state_ = AmbientUiLauncherState::kInactive;
 
   std::unique_ptr<AmbientSessionMetricsRecorder> session_metrics_recorder_;
 

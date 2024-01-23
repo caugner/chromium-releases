@@ -472,6 +472,13 @@ class CORE_EXPORT DocumentLoader : public GarbageCollected<DocumentLoader>,
   void UpdateSubresourceLoadMetrics(
       const SubresourceLoadMetrics& subresource_load_metrics);
 
+  const AtomicString& GetCookieDeprecationLabel() const {
+    return cookie_deprecation_label_;
+  }
+
+  // Gets the content settings for the current {frame, navigation commit} tuple.
+  const mojom::RendererContentSettingsPtr& GetContentSettings();
+
  protected:
   // Based on its MIME type, if the main document's response corresponds to an
   // MHTML archive, then every resources will be loaded from this archive.
@@ -796,6 +803,7 @@ class CORE_EXPORT DocumentLoader : public GarbageCollected<DocumentLoader>,
 
   WebVector<WebHistoryItem> navigation_api_back_entries_;
   WebVector<WebHistoryItem> navigation_api_forward_entries_;
+  Member<HistoryItem> navigation_api_previous_entry_;
 
   // This is the interface that handles generated code cache
   // requests to fetch code cache when loading resources.
@@ -838,6 +846,14 @@ class CORE_EXPORT DocumentLoader : public GarbageCollected<DocumentLoader>,
   // before JavaScript context creation (i.e. CreateParserPostCommit).
   const base::flat_map<mojom::blink::RuntimeFeature, bool>
       modified_runtime_features_;
+
+  // The cookie deprecation label for cookie deprecation facilitated testing.
+  // Will be used in
+  // //third_party/blink/renderer/modules/cookie_deprecation_label.
+  const AtomicString cookie_deprecation_label_;
+
+  // Renderer-enforced content settings are stored on a per-document basis.
+  mojom::RendererContentSettingsPtr content_settings_;
 };
 
 DECLARE_WEAK_IDENTIFIER_MAP(DocumentLoader);

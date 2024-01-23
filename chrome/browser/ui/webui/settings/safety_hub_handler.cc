@@ -15,8 +15,11 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+#include "chrome/browser/extensions/cws_info_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
+#include "chrome/browser/ui/safety_hub/extensions_result.h"
+#include "chrome/browser/ui/safety_hub/menu_notification_service_factory.h"
 #include "chrome/browser/ui/safety_hub/notification_permission_review_service.h"
 #include "chrome/browser/ui/safety_hub/notification_permission_review_service_factory.h"
 #include "chrome/browser/ui/safety_hub/password_status_check_service.h"
@@ -364,6 +367,26 @@ void SafetyHubHandler::HandleResetNotificationPermissionForOrigins(
   SendNotificationPermissionReviewList();
 }
 
+void SafetyHubHandler::HandleDismissActiveMenuNotification(
+    const base::Value::List& args) {
+  SafetyHubMenuNotificationServiceFactory::GetForProfile(profile_)
+      ->DismissActiveNotification();
+}
+
+void SafetyHubHandler::HandleDismissPasswordMenuNotification(
+    const base::Value::List& args) {
+  SafetyHubMenuNotificationServiceFactory::GetForProfile(profile_)
+      ->DismissActiveNotificationOfModule(
+          safety_hub::SafetyHubModuleType::PASSWORDS);
+}
+
+void SafetyHubHandler::HandleDismissExtensionsMenuNotification(
+    const base::Value::List& args) {
+  SafetyHubMenuNotificationServiceFactory::GetForProfile(profile_)
+      ->DismissActiveNotificationOfModule(
+          safety_hub::SafetyHubModuleType::EXTENSIONS);
+}
+
 void SafetyHubHandler::HandleBlockNotificationPermissionForOrigins(
     const base::Value::List& args) {
   CHECK_EQ(1U, args.size());
@@ -608,6 +631,7 @@ SafetyHubHandler::GetSafetyHubModulesWithRecommendations() {
   if (CardHasRecommendations(GetSafeBrowsingCardData())) {
     modules.insert(SafetyHubModule::kSafeBrowsing);
   }
+  // Extensions module
   if (GetNumberOfExtensionsThatNeedReview() > 0) {
     modules.insert(SafetyHubModule::kExtensions);
   }
@@ -669,6 +693,21 @@ void SafetyHubHandler::RegisterMessages() {
       "resetNotificationPermissionForOrigins",
       base::BindRepeating(
           &SafetyHubHandler::HandleResetNotificationPermissionForOrigins,
+          base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "dismissActiveMenuNotification",
+      base::BindRepeating(
+          &SafetyHubHandler::HandleDismissActiveMenuNotification,
+          base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "dismissSafetyHubPasswordMenuNotification",
+      base::BindRepeating(
+          &SafetyHubHandler::HandleDismissPasswordMenuNotification,
+          base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "dismissSafetyHubExtensionsMenuNotification",
+      base::BindRepeating(
+          &SafetyHubHandler::HandleDismissExtensionsMenuNotification,
           base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "blockNotificationPermissionForOrigins",
@@ -733,10 +772,18 @@ void SafetyHubHandler::SendNotificationPermissionReviewList() {
       service->PopulateNotificationPermissionReviewData());
 }
 
-// TODO(1443466): Replace with the actual method implementation once blocking
-// https://crrev.com/c/4911755 is merged.
 int SafetyHubHandler::GetNumberOfExtensionsThatNeedReview() {
-  return 0;
+  extensions::CWSInfoService* cws_info_service =
+      extensions::CWSInfoServiceFactory::GetForProfile(profile_);
+  absl::optional<std::unique_ptr<SafetyHubService::Result>> sh_result =
+      SafetyHubExtensionsResult::GetResult(cws_info_service, profile_, false);
+  if (!sh_result.has_value()) {
+    return 0;
+  }
+
+  auto* result = static_cast<SafetyHubExtensionsResult*>(sh_result->get());
+
+  return result->GetNumTriggeringExtensions();
 }
 
 void SafetyHubHandler::SetClockForTesting(base::Clock* clock) {

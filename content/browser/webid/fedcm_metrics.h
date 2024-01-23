@@ -44,7 +44,7 @@ enum class FedCmRequestIdTokenStatus {
   kIdTokenInvalidResponse,
   kIdTokenInvalidRequest,                  // obsolete
   kClientMetadataMissingPrivacyPolicyUrl,  // obsolete
-  kThirdPartyCookiesBlocked,
+  kThirdPartyCookiesBlocked,               // obsolete
   kDisabledInSettings,
   kDisabledInFlags,
   kWellKnownHttpNotFound,
@@ -64,8 +64,10 @@ enum class FedCmRequestIdTokenStatus {
   kAccountsInvalidContentType,
   kIdTokenInvalidContentType,
   kSilentMediationFailure,
+  kIdTokenIdpErrorResponse,
+  kIdTokenCrossSiteIdpErrorResponse,
 
-  kMaxValue = kSilentMediationFailure
+  kMaxValue = kIdTokenCrossSiteIdpErrorResponse
 };
 
 // This enum describes whether user sign-in states between IDP and browser
@@ -109,16 +111,16 @@ enum class PreventSilentAccessFrameType {
   kMaxValue = kCrossSiteIframe
 };
 
-// This enum describes the status of a revocation call to the FedCM API.
-enum class FedCmRevokeStatus {
+// This enum describes the status of a disconnect call to the FedCM API.
+enum class FedCmDisconnectStatus {
   // Don't change the meaning or the order of these values because they are
   // being recorded in metrics and in sync with the counterpart in enums.xml.
   kSuccess,
   kTooManyRequests,
   kUnhandledRequest,
-  kNoAccountToRevoke,
-  kRevokeUrlIsCrossOrigin,
-  kRevocationFailedOnServer,
+  kNoAccountToDisconnect,
+  kDisconnectUrlIsCrossOrigin,
+  kDisconnectFailedOnServer,
   kConfigHttpNotFound,
   kConfigNoResponse,
   kConfigInvalidResponse,
@@ -145,6 +147,23 @@ enum class FedCmSetLoginStatusIgnoredReason {
   kCrossOrigin = 2,
 
   kMaxValue = kCrossOrigin
+};
+
+// This enum describes the result of the error dialog.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class FedCmErrorDialogResult {
+  kMoreDetails = 0,
+  kGotItWithoutMoreDetails = 1,
+  kGotItWithMoreDetails = 2,
+  kCloseWithoutMoreDetails = 3,
+  kCloseWithMoreDetails = 4,
+  kSwipeWithoutMoreDetails = 5,
+  kSwipeWithMoreDetails = 6,
+  kOtherWithoutMoreDetails = 7,
+  kOtherWithMoreDetails = 8,
+
+  kMaxValue = kOtherWithMoreDetails
 };
 
 class CONTENT_EXPORT FedCmMetrics {
@@ -245,12 +264,24 @@ class CONTENT_EXPORT FedCmMetrics {
   // FedCM request or for the purpose of MDocs or multi-IDP are not counted.
   void RecordNumRequestsPerDocument(const int num_requests);
 
-  // Records the status of the |Revoke| call.
-  void RecordRevokeStatus(FedCmRevokeStatus status);
+  // Records the status of the disconnect call.
+  void RecordDisconnectStatus(FedCmDisconnectStatus status);
 
   // Records the type of error dialog shown.
   void RecordErrorDialogType(
       IdpNetworkRequestManager::FedCmErrorDialogType type);
+
+  // Records the outcome of the error dialog.
+  void RecordErrorDialogResult(FedCmErrorDialogResult result);
+
+  // Records the type of token response received.
+  void RecordTokenResponseTypeMetrics(
+      IdpNetworkRequestManager::FedCmTokenResponseType type);
+
+  // Records whether the error URL is same-site cross-origin, same-origin or
+  // cross-site with the config URL.
+  void RecordErrorUrlTypeMetrics(
+      IdpNetworkRequestManager::FedCmErrorUrlType type);
 
  private:
   // The page's SourceId. Used to log the UKM event Blink.FedCm.

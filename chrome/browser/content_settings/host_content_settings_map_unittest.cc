@@ -82,19 +82,23 @@ class MockUserModifiableProvider
     : public content_settings::UserModifiableProvider {
  public:
   ~MockUserModifiableProvider() override = default;
-  MOCK_CONST_METHOD2(
-      GetRuleIterator,
-      std::unique_ptr<content_settings::RuleIterator>(ContentSettingsType,
-                                                      bool));
+  MOCK_CONST_METHOD3(GetRuleIterator,
+                     std::unique_ptr<content_settings::RuleIterator>(
+                         ContentSettingsType,
+                         bool,
+                         const content_settings::PartitionKey&));
 
-  MOCK_METHOD5(SetWebsiteSetting,
+  MOCK_METHOD6(SetWebsiteSetting,
                bool(const ContentSettingsPattern&,
                     const ContentSettingsPattern&,
                     ContentSettingsType,
                     base::Value&&,
-                    const content_settings::ContentSettingConstraints&));
+                    const content_settings::ContentSettingConstraints&,
+                    const content_settings::PartitionKey&));
 
-  MOCK_METHOD1(ClearAllContentSettingsRules, void(ContentSettingsType));
+  MOCK_METHOD2(ClearAllContentSettingsRules,
+               void(ContentSettingsType,
+                    const content_settings::PartitionKey&));
 
   MOCK_METHOD0(ShutdownOnUIThread, void());
 
@@ -2325,4 +2329,52 @@ TEST_F(HostContentSettingsMapTest, Increments3pcSettingsMetrics) {
   t.ExpectUniqueSample(base_histogram + ".AllowThirdParty", 3, 1);
   t.ExpectUniqueSample(base_histogram + ".TemporaryAllowThirdParty", 1, 1);
   t.ExpectUniqueSample(base_histogram + ".DomainWildcardAllowThirdParty", 1, 1);
+}
+
+// Regression test for https://crbug.com/1497777.
+TEST_F(HostContentSettingsMapTest, IncognitoInheritSaaAndRenew) {
+  TestingProfile profile;
+  GURL host("https://example.com/");
+  auto type = ContentSettingsType::STORAGE_ACCESS;
+
+  // Create StorageAccess permission in regular profile.
+  auto* map = HostContentSettingsMapFactory::GetForProfile(&profile);
+  content_settings::ContentSettingConstraints constraint;
+  constraint.set_lifetime(base::Hours(1));
+  map->SetContentSettingDefaultScope(host, host, type, CONTENT_SETTING_ALLOW,
+                                     constraint);
+
+  // Create OTR profile.
+  Profile* otr_profile =
+      profile.GetPrimaryOTRProfile(/*create_if_needed=*/true);
+  auto* otr_map = HostContentSettingsMapFactory::GetForProfile(otr_profile);
+
+  // Check that only the regular profile is allowed.
+  EXPECT_EQ(CONTENT_SETTING_ALLOW, map->GetContentSetting(host, host, type));
+  EXPECT_EQ(CONTENT_SETTING_ASK, otr_map->GetContentSetting(host, host, type));
+
+  // Renew the setting on the OTR profile and check that it still returns ASK.
+  otr_map->RenewContentSetting(host, host, type,
+                               ContentSetting::CONTENT_SETTING_ALLOW);
+  EXPECT_EQ(CONTENT_SETTING_ASK, otr_map->GetContentSetting(host, host, type));
+}
+
+TEST_F(HostContentSettingsMapTest, ShutdownDuringExpirationAsanTest) {
+  TestingProfile profile;
+
+  auto host_content_settings_map = base::MakeRefCounted<HostContentSettingsMap>(
+      profile.GetPrefs(), false, true, true, true);
+  ContentSettingsPattern pattern =
+      ContentSettingsPattern::FromString("[*.]example.com");
+
+  base::TimeDelta ttl = base::Seconds(1);
+  content_settings::ContentSettingConstraints constraints;
+  constraints.set_lifetime(ttl);
+
+  host_content_settings_map->SetContentSettingCustomScope(
+      pattern, ContentSettingsPattern::Wildcard(),
+      ContentSettingsType::GEOLOCATION, CONTENT_SETTING_ALLOW, constraints);
+
+  host_content_settings_map->ShutdownOnUIThread();
+  FastForwardTime(ttl);
 }
