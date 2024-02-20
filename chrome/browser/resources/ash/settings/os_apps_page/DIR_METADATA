@@ -1,5 +1,1 @@
-monorail: {
-  component: "Platform>Apps>Foundation>AppManagement"
-}
-team_email: "chromeos-apps-foundation-team@google.com"
-os: CHROME_OS
+mixins: "//chrome/browser/resources/ash/settings/os_apps_page/COMMON_METADATA"

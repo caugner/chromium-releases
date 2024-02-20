@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 
+#include <compare>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -73,6 +74,9 @@ using FieldPropertiesMask = std::underlying_type_t<FieldPropertiesFlags>;
 // For the HTML snippet |<option value="US">United States</option>|, the
 // value is "US" and the contents is "United States".
 struct SelectOption {
+  friend bool operator==(const SelectOption& lhs,
+                         const SelectOption& rhs) = default;
+
   std::u16string value;
   std::u16string content;
 };
@@ -81,11 +85,16 @@ struct SelectOption {
 class Section {
  public:
   struct Autocomplete {
+    friend auto operator<=>(const Autocomplete& lhs,
+                            const Autocomplete& rhs) = default;
+    friend bool operator==(const Autocomplete& lhs,
+                           const Autocomplete& rhs) = default;
+
     std::string section;
     HtmlFieldMode mode = HtmlFieldMode::kNone;
   };
 
-  using Default = base::StrongAlias<struct DefaultTag, absl::monostate>;
+  using Default = absl::monostate;
 
   struct FieldIdentifier {
     FieldIdentifier() = default;
@@ -96,9 +105,10 @@ class Section {
           local_frame_id(local_frame_id),
           field_renderer_id(field_renderer_id) {}
 
-    friend bool operator==(const FieldIdentifier& a, const FieldIdentifier& b);
-    friend bool operator!=(const FieldIdentifier& a, const FieldIdentifier& b);
-    friend bool operator<(const FieldIdentifier& a, const FieldIdentifier& b);
+    friend auto operator<=>(const FieldIdentifier& lhs,
+                            const FieldIdentifier& rhs) = default;
+    friend bool operator==(const FieldIdentifier& lhs,
+                           const FieldIdentifier& rhs) = default;
 
     std::string field_name;
     size_t local_frame_id;
@@ -114,9 +124,12 @@ class Section {
   Section(const Section& section);
   ~Section();
 
-  friend bool operator==(const Section& a, const Section& b);
-  friend bool operator!=(const Section& a, const Section& b);
-  friend bool operator<(const Section& a, const Section& b);
+  // `absl::variant` does not implement `operator<=>` - therefore the ordering
+  // needs to be specified manually. Once `absl::variant` is `std::variant`,
+  // this return type can become `auto`.
+  friend std::strong_ordering operator<=>(const Section& lhs,
+                                          const Section& rhs) = default;
+  friend bool operator==(const Section& lhs, const Section& rhs) = default;
   explicit operator bool() const;
 
   bool is_from_autocomplete() const;
@@ -176,6 +189,7 @@ struct FormFieldData {
   // - FormFieldData::form_control_ax_id,
   // - FormFieldData::section,
   // - FormFieldData::is_autofilled,
+  // - FormFieldData::is_user_edited,
   // - FormFieldData::properties_mask,
   // - FormFieldData::is_enabled,
   // - FormFieldData::is_readonly,
@@ -193,7 +207,13 @@ struct FormFieldData {
   FormFieldData& operator=(FormFieldData&&);
   ~FormFieldData();
 
-  // An identifier that is unique across all fields in all frames.
+  // Uniquely identifies the DOM element that this field represents.
+  //
+  // It does *not* uniquely identify this FormFieldData object (there is no such
+  // kind of identifier because FormFieldData is a value type). In particular,
+  // they're not guaranteed to be unique FormData::fields; see FormData::fields
+  // for details.
+  //
   // Must not be leaked to renderer process. See FieldGlobalId for details.
   FieldGlobalId global_id() const { return {host_frame, unique_renderer_id}; }
 
@@ -206,8 +226,6 @@ struct FormFieldData {
 
   // TODO(crbug/1211834): This function is deprecated. Use
   // FormFieldData::DeepEqual() instead.
-  // Returns true if both fields are identical, ignoring value- and
-  // parsing related members.
   bool SameFieldAs(const FormFieldData& field) const;
 
   // Returns true for all of textfield-looking types: text, password,
@@ -273,7 +291,7 @@ struct FormFieldData {
 
   FormControlType form_control_type = FormControlType::kInputText;
   std::string autocomplete_attribute;
-  absl::optional<AutocompleteParsingResult> parsed_autocomplete;
+  std::optional<AutocompleteParsingResult> parsed_autocomplete;
   std::u16string placeholder;
   std::u16string css_classes;
   std::u16string aria_label;
@@ -285,13 +303,13 @@ struct FormFieldData {
   // comparison in SameFieldAs().
   LocalFrameToken host_frame;
 
-  // An identifier of the field that is unique among the field from the same
-  // frame. In the browser process, it should only be used in conjunction with
-  // |host_frame| to identify a field; see global_id(). It is not persistent
-  // between page loads and therefore not used in comparison in SameFieldAs().
+  // Uniquely identifies the DOM element that this field represents among the
+  // field DOM elements in the same frame.
+  // In the browser process, use global_id() instead.
+  // See global_id() for details on the properties and pitfalls.
   FieldRendererId unique_renderer_id;
 
-  // Unique renderer ID of the enclosing form in the same frame.
+  // Renderer ID of the owning form in the same frame.
   FormRendererId host_form_id;
 
   // The signature of the field's renderer form, that is, the signature of the
@@ -338,6 +356,28 @@ struct FormFieldData {
   uint64_t max_length = std::numeric_limits<uint32_t>::max();
 
   bool is_autofilled = false;
+
+  // Whether the user has edited this field since page load or resetting the
+  // field.
+  //
+  // Examples that count as edits:
+  // - Typing into a text control.
+  // - Pasting into a text control.
+  // - Clicking and selecting an option of a <select> counts.
+  // - Unfocusing a <select> using TAB (because of the keydown event).
+  //
+  // Examples that do not count as edits:
+  // - Autofill.
+  // - Typing into a contenteditable.
+  // - Setting the field's value directly in JavaScript.
+  // - Untrusted events (see JavaScript's Event.isTrusted).
+  //
+  // The property is sticky: a user-edited field becomes non-user-edited only
+  // when the form is reset (JavaScript's HTMLFormElement.reset()).
+  // TODO(crbug.com/1501627): On iOS, also non-trusted events reset the
+  // property.
+  bool is_user_edited = false;
+
   CheckStatus check_status = CheckStatus::kNotCheckable;
   bool is_focusable = true;
   bool is_visible = true;
@@ -377,8 +417,6 @@ struct FormFieldData {
   bool force_override = false;
 };
 
-// TODO(crbug.com/1482526): Eliminate references to this function where
-// possible.
 std::string_view FormControlTypeToString(FormControlType type);
 
 // Consider using the FormControlType enum instead.
@@ -422,6 +460,7 @@ std::ostream& operator<<(std::ostream& os, const FormFieldData& field);
     EXPECT_EQ(expected.max_length, actual.max_length);                         \
     EXPECT_EQ(expected.css_classes, actual.css_classes);                       \
     EXPECT_EQ(expected.is_autofilled, actual.is_autofilled);                   \
+    EXPECT_EQ(expected.is_user_edited, actual.is_user_edited);                 \
     EXPECT_EQ(expected.section, actual.section);                               \
     EXPECT_EQ(expected.check_status, actual.check_status);                     \
     EXPECT_EQ(expected.properties_mask, actual.properties_mask);               \
