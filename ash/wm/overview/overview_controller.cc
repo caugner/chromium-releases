@@ -33,6 +33,7 @@
 #include "base/ranges/algorithm.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/trace_event/trace_event.h"
+#include "chromeos/ash/components/standalone_browser/standalone_browser_features.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/presentation_time_recorder.h"
@@ -96,7 +97,11 @@ OverviewEnterExitType MaybeOverrideEnterExitTypeForHomeScreen(
 
 OverviewController::OverviewController()
     : occlusion_pause_duration_for_end_(kOcclusionPauseDurationForEnd),
-      delayed_animation_task_delay_(kTransition) {
+      delayed_animation_task_delay_(kTransition),
+      // Currently, lacros windows do not have a snapshot while they are
+      // evicted.
+      windows_have_snapshot_(!base::FeatureList::IsEnabled(
+          standalone_browser::features::kLacrosOnly)) {
   Shell::Get()->activation_client()->AddObserver(this);
   CHECK_EQ(g_instance, nullptr);
   g_instance = this;
@@ -159,6 +164,32 @@ bool OverviewController::EndOverview(OverviewEndAction end_action,
   DesksController::Get()->MaybeDismissPersistentDeskRemovalToast();
 
   return true;
+}
+
+bool OverviewController::CanEnterOverview() const {
+  if (!DesksController::Get()->CanEnterOverview()) {
+    return false;
+  }
+
+  if (SnapGroupController* snap_group_controller = SnapGroupController::Get();
+      snap_group_controller && !snap_group_controller->CanEnterOverview()) {
+    return false;
+  }
+
+  // Don't allow entering overview if there is a system modal dialog or chromeOS
+  // is running in kiosk app session.
+  Shell* shell = Shell::Get();
+  if (Shell::IsSystemModalWindowOpen() ||
+      shell->screen_pinning_controller()->IsPinned()) {
+    return false;
+  }
+
+  // Don't allow a window overview if the user session is not active or
+  // transitioning to active.
+  const session_manager::SessionState session_state =
+      shell->session_controller()->GetSessionState();
+  return session_state == session_manager::SessionState::ACTIVE ||
+         session_state == session_manager::SessionState::LOGGED_IN_NOT_ACTIVE;
 }
 
 bool OverviewController::InOverviewSession() const {
@@ -278,32 +309,6 @@ void OverviewController::OnWindowActivating(ActivationReason reason,
                                             aura::Window* lost_active) {
   if (InOverviewSession())
     overview_session_->OnWindowActivating(reason, gained_active, lost_active);
-}
-
-bool OverviewController::CanEnterOverview() const {
-  if (!DesksController::Get()->CanEnterOverview()) {
-    return false;
-  }
-
-  if (SnapGroupController* snap_group_controller = SnapGroupController::Get();
-      snap_group_controller && !snap_group_controller->CanEnterOverview()) {
-    return false;
-  }
-
-  // Don't allow a window overview if the user session is not active (e.g.
-  // locked or in user-adding screen) or a modal dialog is open or running in
-  // kiosk app session.
-  Shell* shell = Shell::Get();
-  return shell->session_controller()->GetSessionState() ==
-             session_manager::SessionState::ACTIVE &&
-         !Shell::IsSystemModalWindowOpen() &&
-         !shell->screen_pinning_controller()->IsPinned();
-}
-
-void OverviewController::OnPineWidgetShown() {
-  if (pine_callback_for_test_) {
-    std::move(pine_callback_for_test_).Run();
-  }
 }
 
 void OverviewController::ToggleOverview(OverviewEnterExitType type) {
@@ -482,8 +487,12 @@ void OverviewController::ToggleOverview(OverviewEnterExitType type) {
       }
     }
 
-    // Suspend occlusion tracker until the enter animation is complete.
-    PauseOcclusionTracker();
+    // If we don't need to force windows to be visible to get showable content
+    // (i.e. they have a snapshot), suspend occlusion tracker until the enter
+    // animation is complete.
+    if (windows_have_snapshot_) {
+      PauseOcclusionTracker();
+    }
 
     overview_session_ = std::make_unique<OverviewSession>(this);
     // We may want to slide in the overview grid in some cases, even if not
@@ -507,6 +516,9 @@ void OverviewController::ToggleOverview(OverviewEnterExitType type) {
       AddEnterAnimationObserver(std::move(force_delay_observer));
     }
 
+    // We do not pause the occlusion tracker (like we do for exit) because
+    // windows that become visible as the animation starts should be marked as
+    // visible the instant they are visible.
     if (start_animations_.empty())
       OnStartingAnimationComplete(/*canceled=*/false);
 
@@ -545,7 +557,9 @@ void OverviewController::OnStartingAnimationComplete(bool canceled) {
     observer.OnOverviewModeStartingAnimationComplete(canceled);
   }
 
-  UnpauseOcclusionTracker(kOcclusionPauseDurationForStart);
+  if (windows_have_snapshot_) {
+    UnpauseOcclusionTracker(kOcclusionPauseDurationForStart);
+  }
   TRACE_EVENT_NESTABLE_ASYNC_END1("ui", "OverviewController::EnterOverview",
                                   this, "canceled", canceled);
 }
