@@ -567,7 +567,8 @@ ExtensionFunction::ResponseAction WindowsGetAllFunction::Run() {
   ExtensionTabUtil::PopulateTabBehavior populate_tab_behavior =
       extractor.populate_tabs() ? ExtensionTabUtil::kPopulateTabs
                                 : ExtensionTabUtil::kDontPopulateTabs;
-  for (auto* controller : WindowControllerList::GetInstance()->windows()) {
+  for (WindowController* controller :
+       WindowControllerList::GetInstance()->windows()) {
     if (!controller->GetBrowser() ||
         !windows_util::CanOperateOnWindow(this, controller,
                                           extractor.type_filters())) {
@@ -1760,8 +1761,10 @@ ExtensionFunction::ResponseAction TabsMoveFunction::Run() {
       if (!error.empty()) {
         return RespondNow(Error(std::move(error)));
       }
-      if (web_contents && ExtensionTabUtil::TabIsInSavedTabGroup(
-                              web_contents, tab_strip_model)) {
+      if (web_contents &&
+          ExtensionTabUtil::TabIsInSavedTabGroup(web_contents,
+                                                 tab_strip_model) &&
+          !ExtensionHasLockedFullscreenPermission(extension())) {
         return RespondNow(
             Error(tabs_constants::kSavedTabGroupNotEditableError));
       }
@@ -1915,8 +1918,10 @@ ExtensionFunction::ResponseAction TabsReloadFunction::Run() {
   }
 
   // Prevent Reloading if the tab is in a savedTabGroup.
-  if (web_contents && ExtensionTabUtil::TabIsInSavedTabGroup(
-                          web_contents, browser->tab_strip_model())) {
+  if (web_contents &&
+      ExtensionTabUtil::TabIsInSavedTabGroup(web_contents,
+                                             browser->tab_strip_model()) &&
+      !ExtensionHasLockedFullscreenPermission(extension())) {
     return RespondNow(Error(tabs_constants::kSavedTabGroupNotEditableError));
   }
 
@@ -2092,8 +2097,10 @@ ExtensionFunction::ResponseAction TabsGroupFunction::Run() {
       return RespondNow(Error(std::move(error)));
     }
 
-    if (web_contents && ExtensionTabUtil::TabIsInSavedTabGroup(
-                            web_contents, tab_browser->tab_strip_model())) {
+    if (web_contents &&
+        ExtensionTabUtil::TabIsInSavedTabGroup(
+            web_contents, tab_browser->tab_strip_model()) &&
+        !ExtensionHasLockedFullscreenPermission(extension())) {
       return RespondNow(Error(tabs_constants::kSavedTabGroupNotEditableError));
     }
 
@@ -2177,7 +2184,8 @@ ExtensionFunction::ResponseAction TabsUngroupFunction::Run() {
       return RespondNow(Error(std::move(error)));
     }
     if (web_contents &&
-        ExtensionTabUtil::TabIsInSavedTabGroup(web_contents, tab_strip_model)) {
+        ExtensionTabUtil::TabIsInSavedTabGroup(web_contents, tab_strip_model) &&
+        !ExtensionHasLockedFullscreenPermission(extension())) {
       return RespondNow(Error(tabs_constants::kSavedTabGroupNotEditableError));
     }
 
@@ -2791,7 +2799,8 @@ ExtensionFunction::ResponseAction TabsDiscardFunction::Run() {
   }
 
   // Check that the tab is not in a SavedTabGroup.
-  if (contents && ExtensionTabUtil::TabIsInSavedTabGroup(contents, nullptr)) {
+  if (contents && ExtensionTabUtil::TabIsInSavedTabGroup(contents, nullptr) &&
+      !ExtensionHasLockedFullscreenPermission(extension())) {
     return RespondNow(Error(tabs_constants::kSavedTabGroupNotEditableError));
   }
 
@@ -2834,7 +2843,8 @@ ExtensionFunction::ResponseAction TabsGoForwardFunction::Run() {
     return RespondNow(Error(tabs_constants::kNotFoundNextPageError));
 
   // Check that the tab is not in a SavedTabGroup.
-  if (ExtensionTabUtil::TabIsInSavedTabGroup(web_contents, nullptr)) {
+  if (ExtensionTabUtil::TabIsInSavedTabGroup(web_contents, nullptr) &&
+      !ExtensionHasLockedFullscreenPermission(extension())) {
     return RespondNow(Error(tabs_constants::kSavedTabGroupNotEditableError));
   }
 
@@ -2859,7 +2869,8 @@ ExtensionFunction::ResponseAction TabsGoBackFunction::Run() {
     return RespondNow(Error(tabs_constants::kNotFoundNextPageError));
 
   // Check that the tab is not part of a saved tab group.
-  if (ExtensionTabUtil::TabIsInSavedTabGroup(web_contents, nullptr)) {
+  if (ExtensionTabUtil::TabIsInSavedTabGroup(web_contents, nullptr) &&
+      !ExtensionHasLockedFullscreenPermission(extension())) {
     return RespondNow(Error(tabs_constants::kSavedTabGroupNotEditableError));
   }
 
