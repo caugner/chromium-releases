@@ -12,7 +12,7 @@
 #include "base/memory/weak_ptr.h"
 #include "components/country_codes/country_codes.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "components/search_engines/search_engine_choice_utils.h"
+#include "components/search_engines/search_engine_choice/search_engine_choice_utils.h"
 
 namespace policy {
 class PolicyService;
@@ -71,11 +71,20 @@ class SearchEngineChoiceService : public KeyedService {
   void RecordChoiceMade(ChoiceMadeLocation choice_location,
                         TemplateURLService* template_url_service);
 
+  // Records metrics about what was displayed on the choice screen for this
+  // profile, as captured by `display_state`.
+  // Note that due to various constraints, this might end up being a no-op and
+  // not record anything.
+  void MaybeRecordChoiceScreenDisplayState(
+      const ChoiceScreenDisplayState& display_state) const;
+
  private:
   // Checks if the search engine choice should be prompted again, based on
   // experiment parameters. If a reprompt is needed, some preferences related to
   // the choice are cleared, which triggers a reprompt on the next page load.
   void PreprocessPrefsForReprompt();
+
+  void ProcessPendingChoiceScreenDisplayState();
 
   int GetCountryIdInternal();
 

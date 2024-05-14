@@ -61,16 +61,17 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
 // Font that should be used in current size class.
 - (UIFont*)currentFont;
 
-// Length of autocomplete text.
-@property(nonatomic) size_t autocompleteTextLength;
-
 // Tap gesture recognizer for this view.
 @property(nonatomic, strong) UITapGestureRecognizer* tapGestureRecognizer;
 
 @end
 
-@implementation OmniboxTextFieldExperimental
+@implementation OmniboxTextFieldExperimental {
+  /// Length of autocomplete text.
+  NSUInteger _autocompleteTextLength;
+}
 
+@synthesize additionalText = _additionalText;
 @dynamic delegate;
 
 #pragma mark - Public methods
@@ -127,8 +128,6 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
 
 - (void)setText:(NSAttributedString*)text
     userTextLength:(size_t)userTextLength {
-  self.autocompleteTextLength = text.length - userTextLength;
-
   DCHECK_LE(userTextLength, text.length);
   if (userTextLength > 0) {
     [self exitPreEditState];
@@ -154,17 +153,17 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
 }
 
 - (NSString*)autocompleteText {
-  if (self.autocompleteTextLength > 0) {
-    // In crbug.com/1237851, sometimes self.autocompleteTextLength is greater
+  if ([self hasAutocompleteText]) {
+    // In crbug.com/1237851, sometimes _autocompleteTextLength is greater
     // than self.text.length, causing the subtraction below to overflow,
     // breaking
     // `-substringToIndex:`. This shouldn't happen, so use the DCHECK to catch
     // it to help debug and default to the end of the string if an overflow
     // would occur.
-    DCHECK(self.text.length >= self.autocompleteTextLength);
+    DCHECK(self.text.length >= _autocompleteTextLength);
     NSUInteger userTextEndIndex =
-        self.text.length >= self.autocompleteTextLength
-            ? self.text.length - self.autocompleteTextLength
+        self.text.length >= _autocompleteTextLength
+            ? self.text.length - _autocompleteTextLength
             : self.text.length;
     return [self.text substringFromIndex:userTextEndIndex];
   }
@@ -172,22 +171,35 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
 }
 
 - (NSString*)userText {
-  // In crbug.com/1237851, sometimes self.autocompleteTextLength is greater than
+  // In crbug.com/1237851, sometimes `_autocompleteTextLength` is greater than
   // self.text.length, causing the subtraction below to overflow, breaking
   // `-substringToIndex:`. This shouldn't happen, so use the DCHECK to catch it
   // to help debug and default to the end of the string if an overflow would
   // occur.
-  DCHECK(self.text.length >= self.autocompleteTextLength);
-  NSUInteger userTextEndIndex =
-      self.text.length >= self.autocompleteTextLength
-          ? self.text.length - self.autocompleteTextLength
-          : self.text.length;
+  DCHECK(self.text.length >= _autocompleteTextLength);
+  NSUInteger userTextEndIndex = self.text.length >= _autocompleteTextLength
+                                    ? self.text.length - _autocompleteTextLength
+                                    : self.text.length;
   return [self.text substringToIndex:userTextEndIndex];
 }
 
 - (NSString*)markedText {
   DCHECK([self conformsToProtocol:@protocol(UITextInput)]);
   return [self textInRange:[self markedTextRange]];
+}
+
+- (NSString*)displayedText {
+  return self.text;
+}
+
+- (BOOL)hasAutocompleteText {
+  return _autocompleteTextLength > 0;
+}
+
+- (void)clearAutocompleteText {
+  if ([self hasAutocompleteText]) {
+    self.text = self.userText;
+  }
 }
 
 - (NSRange)selectedNSRange {
@@ -203,7 +215,7 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
 
 - (NSTextAlignment)bestTextAlignment {
   if ([self isFirstResponder]) {
-    return [self bestAlignmentForText:self.text];
+    return DetermineBestAlignmentForText(self.text);
   }
   return NSTextAlignmentNatural;
 }
@@ -811,44 +823,16 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
   self.selectedTextRange = textRange;
 }
 
-- (void)acceptAutocompleteText {
-  [self setText:self.text];
-  self.autocompleteTextLength = 0;
-}
-
-- (BOOL)hasAutocompleteText {
-  return self.autocompleteTextLength > 0;
-}
-
-- (void)clearAutocompleteText {
-  if ([self hasAutocompleteText]) {
-    self.text = self.userText;
-    self.autocompleteTextLength = 0;
-  }
-}
-
 #pragma mark - helpers
 
-- (NSTextAlignment)bestAlignmentForText:(NSString*)text {
-  if (text.length) {
-    NSString* lang = CFBridgingRelease(CFStringTokenizerCopyBestStringLanguage(
-        (CFStringRef)text, CFRangeMake(0, text.length)));
-
-    if ([NSLocale characterDirectionForLanguage:lang] ==
-        NSLocaleLanguageDirectionRightToLeft) {
-      return NSTextAlignmentRight;
-    }
-  }
-  return NSTextAlignmentLeft;
-}
-
-- (NSString*)displayedText {
-  return self.text;
+- (void)acceptAutocompleteText {
+  [self setText:self.text];
 }
 
 // Helper method used to set the text of this field.
 - (void)setTextInternal:(NSAttributedString*)text
      autocompleteLength:(NSUInteger)autocompleteLength {
+  _autocompleteTextLength = autocompleteLength;
   // Extract substrings for the permanent text and the autocomplete text.  The
   // former needs to retain any text attributes from the original string.
   NSUInteger beginningOfAutocomplete = text.length - autocompleteLength;
@@ -935,16 +919,6 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
   for (UIView* subview in self.subviews)
     [layers addObject:subview.layer];
   return layers;
-}
-
-- (BOOL)isTextFieldLTR {
-  return [[self class] userInterfaceLayoutDirectionForSemanticContentAttribute:
-                           self.semanticContentAttribute] ==
-         UIUserInterfaceLayoutDirectionLeftToRight;
-}
-
-- (CGRect)layoutLeftViewForBounds:(CGRect)bounds {
-  return CGRectZero;
 }
 
 @end

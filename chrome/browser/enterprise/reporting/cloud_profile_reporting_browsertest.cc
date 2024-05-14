@@ -57,7 +57,6 @@ class CloudProfileReportingServiceTest : public PlatformBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(CloudProfileReportingServiceTest, LaunchTest) {
-  base::RunLoop().RunUntilIdle();
   ReportScheduler* report_scheduler =
       CloudProfileReportingServiceFactory::GetForProfile(
           chrome_test_utils::GetProfile(this))

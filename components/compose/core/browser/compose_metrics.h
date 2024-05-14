@@ -121,7 +121,8 @@ enum class ComposeSessionEventTypes {
   kEditClicked = 19,
   kCancelEditClicked = 20,
   kAnyModifierUsed = 21,
-  kMaxValue = kAnyModifierUsed,
+  kRedoClicked = 22,
+  kMaxValue = kRedoClicked,
 };
 
 // Enum for recording the show status of the Compose context menu item.
@@ -144,7 +145,8 @@ enum class ComposeShowStatus {
   kIncorrectScheme = 10,
   kFormFieldNestedInFencedFrame = 11,
   kFeatureFlagDisabled = 12,
-  kMaxValue = kFeatureFlagDisabled,
+  kDisabledOnChromeOS = 13,
+  kMaxValue = kDisabledOnChromeOS,
 };
 
 enum class EvalLocation : int {
@@ -200,6 +202,8 @@ struct ComposeSessionEvents {
   unsigned int msbb_dialog_shown_count = 0;
   // Times the user has pressed "undo" this session.
   unsigned int undo_count = 0;
+  // Times the user has pressed "redo" this session.
+  unsigned int redo_count = 0;
   // Compose request after input edited.
   unsigned int update_input_count = 0;
   // Tiems the user has pressed the "Retry" button.
@@ -255,16 +259,26 @@ enum class OpenComposeDialogResult {
   kAutofillFormFieldDataNotFound = 5,
   kNoWebContents = 6,
   kFailedCreatingComposeDialogView = 7,
-  kMaxValue = kFailedCreatingComposeDialogView
+  kAutofillFormDataNotFoundAfterSelectAll = 8,
+  kMaxValue = kAutofillFormDataNotFoundAfterSelectAll
 };
 
-// Enum to log if the inner text succusfuly found an offset
+// Enum to log if the inner text successfuly found an offset
 // Keep in sync with ComposeInnerTextNodeOffset in
 // src/tools/metrics/histograms/metadata/compose/enums.xml.
 enum class ComposeInnerTextNodeOffset {
   kNoOffsetFound = 0,
   kOffsetFound = 1,
   kMaxValue = kOffsetFound
+};
+
+// Enum to log if all text was selected on behalf of the user.
+// Keep in sync with ComposeSelectAllStatus in
+// src/tools/metrics/histograms/metadata/compose/enums.xml.
+enum class ComposeSelectAllStatus {
+  kNoSelectAll = 0,
+  kSelectedAll = 1,
+  kMaxValue = kSelectedAll
 };
 
 // Class that automatically reports any UKM metrics for the page-level Compose
@@ -378,6 +392,8 @@ void LogComposeSessionDuration(
 
 void LogComposeRequestFeedback(EvalLocation eval_location,
                                ComposeRequestFeedback feedback);
+
+void LogComposeSelectAllStatus(ComposeSelectAllStatus select_all_status);
 
 }  // namespace compose
 

@@ -16,9 +16,11 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/password_manager/android/password_manager_eviction_util.h"
+#include "chrome/browser/password_manager/android/password_manager_util_bridge.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/browser_sync/sync_to_signin_migration.h"
 #include "components/password_manager/core/browser/features/password_features.h"
+#include "components/password_manager/core/browser/password_manager_buildflags.h"
 #include "components/password_manager/core/browser/password_manager_constants.h"
 #include "components/password_manager/core/browser/password_store/split_stores_and_local_upm.h"
 #include "components/prefs/pref_service.h"
@@ -270,8 +272,17 @@ void MaybeActivateSplitStoresAndLocalUpm(
       break;
     }
   }
-
   RecordActivationError(user_type, error);
+
+  if (ActivationError::kUnenrolled == error ||
+      ActivationError::kInitialUpmMigrationMissing == error) {
+    // Initial UPM was not activated properly. Attempt to migrate passwords
+    // to local GMSCore.
+    state_to_set_on_success = kOffAndMigrationPending;
+    error = CheckMinGmsVersionAndFlagEnabled(
+        password_manager::features::kUnifiedPasswordManagerSyncOnlyInGMSCore);
+  }
+
   if (error == ActivationError::kNone) {
     pref_service->SetInteger(kPasswordsUseUPMLocalAndSeparateStores,
                              static_cast<int>(state_to_set_on_success));
@@ -370,10 +381,31 @@ UseUpmLocalAndSeparateStoresState GetSplitStoresAndLocalUpmPrefValue(
   NOTREACHED_NORETURN();
 }
 
-bool CanUseUPMBackend(bool is_pwd_sync_enabled, PrefService* pref_service) {
+bool AreMinUpmRequirementsMet() {
+  if (!IsInternalBackendPresent()) {
+    return false;
+  }
+
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSkipLocalUpmGmsCoreVersionCheckForTesting)) {
+    return true;
+  }
+
+  int gms_version = 0;
+  // GMSCore version could not be parsed, probably no GMSCore installed.
+  if (!base::StringToInt(
+          base::android::BuildInfo::GetInstance()->gms_version_code(),
+          &gms_version)) {
+    return false;
+  }
+
+  // If the GMSCore version is pre-UPM an update is required.
+  return gms_version >= password_manager::features::kAccountUpmMinGmsVersion;
+}
+
+bool ShouldUseUpmWiring(bool is_pwd_sync_enabled, PrefService* pref_service) {
   // TODO(crbug.com/1327294): Re-evaluate if the SyncService can be passed here
   // instead of the `is_pwd_sync_enabled` boolean.
-  // TODO(crbug.com/1500201): Re-evaluate unenrollment.
   if (is_pwd_sync_enabled &&
       password_manager_upm_eviction::IsCurrentUserEvicted(pref_service)) {
     return false;

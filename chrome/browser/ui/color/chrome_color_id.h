@@ -98,6 +98,7 @@
   E_CPONLY(kColorDownloadBubbleInfoIcon) \
   E_CPONLY(kColorDownloadBubbleRowHover) \
   E_CPONLY(kColorDownloadBubbleShowAllDownloadsIcon) \
+  E_CPONLY(kColorDownloadBubblePrimaryIcon) \
   /* Download shelf colors. */ \
   E_CPONLY(kColorDownloadItemForeground) \
   E_CPONLY(kColorDownloadItemForegroundDangerous) \
@@ -269,6 +270,9 @@
   E_CPONLY(kColorNewTabPageWallpaperSearchButtonBackground) \
   E_CPONLY(kColorNewTabPageWallpaperSearchButtonBackgroundHovered) \
   E_CPONLY(kColorNewTabPageWallpaperSearchButtonForeground) \
+  /* New Tab Page Colors for Doodle Share Button. */ \
+  E_CPONLY(kColorNewTabPageDoodleShareButtonBackground) \
+  E_CPONLY(kColorNewTabPageDoodleShareButtonIcon) \
   /* Omnibox colors. */ \
   E_CPONLY(kColorOmniboxAnswerIconBackground) \
   E_CPONLY(kColorOmniboxAnswerIconForeground) \
@@ -571,6 +575,7 @@
   E_CPONLY(kColorSidePanelFilterChipBackgroundSelected) \
   E_CPONLY(kColorSidePanelHeaderButtonIcon) \
   E_CPONLY(kColorSidePanelHeaderButtonIconDisabled) \
+  E_CPONLY(kColorSidePanelHoverResizeAreaHandle) \
   E_CPONLY(kColorSidePanelResizeAreaHandle) \
   E_CPONLY(kColorSidePanelScrollbarThumb) \
   E_CPONLY(kColorSidePanelTextfieldBorder) \

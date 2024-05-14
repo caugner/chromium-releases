@@ -15,8 +15,7 @@ import {TestPersonalizationHubBrowserProxy} from './test_personalization_hub_bro
 suite('<settings-personalization-page>', () => {
   let personalizationPage: SettingsPersonalizationPageElement;
   let personalizationHubBrowserProxy: TestPersonalizationHubBrowserProxy;
-  const shouldShowMultitaskingInPersonalization =
-      loadTimeData.getBoolean('shouldShowMultitaskingInPersonalization');
+  const shouldShowMultitaskingInPersonalization = loadTimeData.getBoolean('shouldShowMultitaskingInPersonalization');
 
   async function createPersonalizationPage(): Promise<void> {
     personalizationPage =
@@ -90,23 +89,23 @@ suite('<settings-personalization-page>', () => {
       await deepLinkToSetting(settingMojom.Setting.kSnapWindowSuggestions);
 
       const multitaskingSettingsSubsection =
-          personalizationPage.shadowRoot!.querySelector<HTMLButtonElement>(
-              '#snapWindowSuggestionsSubsection');
+        personalizationPage.shadowRoot!.querySelector<HTMLButtonElement>(
+          '#snapWindowSuggestionsSubsection');
       assertTrue(!!multitaskingSettingsSubsection);
       await assertElementIsDeepLinked(multitaskingSettingsSubsection);
     });
   } else {
     test(
-        'Multitasking settings subsection is not visible with feature disabled',
-        async () => {
-          await createPersonalizationPage();
+      'Multitasking settings subsection is not visible with feature disabled',
+      async () => {
+        await createPersonalizationPage();
 
-          const multitaskingSettingsSubsection =
-              personalizationPage.shadowRoot!.querySelector<HTMLButtonElement>(
-                  '#snapWindowSuggestionsSubsection');
-          assertFalse(
-              isVisible(multitaskingSettingsSubsection),
-              'Multitasking settings subsection should not be visible.');
-        });
+        const multitaskingSettingsSubsection =
+          personalizationPage.shadowRoot!.querySelector<HTMLButtonElement>(
+            '#snapWindowSuggestionsSubsection');
+        assertFalse(
+          isVisible(multitaskingSettingsSubsection),
+          'Multitasking settings subsection should not be visible.');
+      });
   }
 });

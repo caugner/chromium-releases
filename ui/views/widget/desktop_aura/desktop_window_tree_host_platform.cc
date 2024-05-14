@@ -23,6 +23,7 @@
 #include "ui/aura/native_window_occlusion_tracker.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/owned_window_anchor.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
@@ -98,8 +99,7 @@ ui::PlatformWindowOpacity GetPlatformWindowOpacity(
 }
 
 ui::PlatformWindowType GetPlatformWindowType(
-    Widget::InitParams::Type window_type,
-    bool requires_accelerated_widget) {
+    Widget::InitParams::Type window_type) {
   switch (window_type) {
     case Widget::InitParams::TYPE_WINDOW:
       return ui::PlatformWindowType::kWindow;
@@ -110,8 +110,7 @@ ui::PlatformWindowType GetPlatformWindowType(
     case Widget::InitParams::TYPE_DRAG:
       return ui::PlatformWindowType::kDrag;
     case Widget::InitParams::TYPE_BUBBLE:
-      return requires_accelerated_widget ? ui::PlatformWindowType::kTooltip
-                                         : ui::PlatformWindowType::kBubble;
+      return ui::PlatformWindowType::kBubble;
     default:
       return ui::PlatformWindowType::kPopup;
   }
@@ -133,11 +132,10 @@ ui::PlatformWindowShadowType GetPlatformWindowShadowType(
 
 ui::PlatformWindowInitProperties ConvertWidgetInitParamsToInitProperties(
     const Widget::InitParams& params,
-    bool requires_accelerated_widget,
     float device_scale_factor) {
   ui::PlatformWindowInitProperties properties;
-  properties.type =
-      GetPlatformWindowType(params.type, requires_accelerated_widget);
+  properties.type = GetPlatformWindowType(params.type);
+  properties.accept_events = params.accept_events;
   properties.activatable =
       params.activatable == Widget::InitParams::Activatable::kYes;
   properties.force_show_in_taskbar = params.force_show_in_taskbar;
@@ -272,14 +270,8 @@ void DesktopWindowTreeHostPlatform::Init(const Widget::InitParams& params) {
   if (params.type == Widget::InitParams::TYPE_WINDOW)
     GetContentWindow()->SetProperty(aura::client::kAnimationsDisabledKey, true);
 
-#if defined(USE_AURA) && (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS))
-  const bool requires_accelerated_widget = params.requires_accelerated_widget;
-#else
-  const bool requires_accelerated_widget = false;
-#endif
   ui::PlatformWindowInitProperties properties =
-      ConvertWidgetInitParamsToInitProperties(
-          params, requires_accelerated_widget, device_scale_factor());
+      ConvertWidgetInitParamsToInitProperties(params, device_scale_factor());
   AddAdditionalInitProperties(params, &properties);
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -341,7 +333,21 @@ void DesktopWindowTreeHostPlatform::OnWidgetInitDone() {
       GetWindowMaskForClipping().isEmpty());
 }
 
-void DesktopWindowTreeHostPlatform::OnActiveWindowChanged(bool active) {}
+void DesktopWindowTreeHostPlatform::OnActiveWindowChanged(bool active) {
+#if BUILDFLAG(IS_OZONE)
+  // When bubbles are accelerated widgets, `window_children_` can contain a
+  // bubble where `bubble->is_active_` is true, while `this->is_active_` is
+  // false.
+  // When WindowFocusedFromInputEvent makes a window of this tree host
+  // active, we enter this condition where `active && !is_active_` because
+  // subwindows do not get active state from the OS on some platforms (E.g.
+  // Wayland). So we need to ensure Activate is conveyed to the platform_window.
+  if (base::FeatureList::IsEnabled(features::kOzoneBubblesUsePlatformWidgets) &&
+      active && !is_active_ && !window_children_.empty()) {
+    Activate();
+  }
+#endif
+}
 
 std::unique_ptr<corewm::Tooltip>
 DesktopWindowTreeHostPlatform::CreateTooltip() {
@@ -475,7 +481,12 @@ void DesktopWindowTreeHostPlatform::Show(ui::WindowShowState show_state,
         IsActive() ? show_state : ui::SHOW_STATE_INACTIVE);
   }
 
-  GetContentWindow()->Show();
+  // compositor()->SetVisible(true) might have already led to content_window
+  // Show() via OnCompositorVisibilityChanging(). Calling Show() a second time
+  // has side effects, so skip it.
+  if (!GetContentWindow()->IsVisible()) {
+    GetContentWindow()->Show();
+  }
 }
 
 bool DesktopWindowTreeHostPlatform::IsVisible() const {
@@ -607,10 +618,6 @@ void DesktopWindowTreeHostPlatform::Deactivate() {
 
 bool DesktopWindowTreeHostPlatform::IsActive() const {
   return is_active_;
-}
-
-bool DesktopWindowTreeHostPlatform::CanMaximize() {
-  return GetWidget()->widget_delegate()->CanMaximize();
 }
 
 void DesktopWindowTreeHostPlatform::Maximize() {
@@ -746,10 +753,6 @@ void DesktopWindowTreeHostPlatform::FrameTypeChanged() {
   // the button assets don't update otherwise.
   if (GetWidget()->non_client_view())
     GetWidget()->non_client_view()->UpdateFrame();
-}
-
-bool DesktopWindowTreeHostPlatform::CanFullscreen() {
-  return GetWidget()->widget_delegate()->CanFullscreen();
 }
 
 void DesktopWindowTreeHostPlatform::SetFullscreen(bool fullscreen,
@@ -968,13 +971,21 @@ void DesktopWindowTreeHostPlatform::OnActivationChanged(bool active) {
 }
 
 std::optional<gfx::Size>
-DesktopWindowTreeHostPlatform::GetMinimumSizeForWindow() {
+DesktopWindowTreeHostPlatform::GetMinimumSizeForWindow() const {
   return native_widget_delegate_->GetMinimumSize();
 }
 
 std::optional<gfx::Size>
-DesktopWindowTreeHostPlatform::GetMaximumSizeForWindow() {
+DesktopWindowTreeHostPlatform::GetMaximumSizeForWindow() const {
   return native_widget_delegate_->GetMaximumSize();
+}
+
+bool DesktopWindowTreeHostPlatform::CanMaximize() const {
+  return GetWidget()->widget_delegate()->CanMaximize();
+}
+
+bool DesktopWindowTreeHostPlatform::CanFullscreen() const {
+  return GetWidget()->widget_delegate()->CanFullscreen();
 }
 
 SkPath DesktopWindowTreeHostPlatform::GetWindowMaskForWindowShapeInPixels() {

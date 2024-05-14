@@ -49,6 +49,7 @@ const char kInnerTextNodeOffsetFound[] =
 const char kComposeContextMenuCtr[] = "Compose.ContextMenu.CTR";
 const char kOpenComposeDialogResult[] =
     "Compose.ContextMenu.OpenComposeDialogResult";
+const char kComposeSelectAll[] = "Compose.ContextMenu.SelectedAll";
 
 namespace {
 
@@ -116,6 +117,10 @@ void LogComposeSessionEventCounts(std::optional<EvalLocation> eval_location,
   if (session_events.undo_count > 0) {
     base::UmaHistogramEnumeration(histogram,
                                   ComposeSessionEventTypes::kUndoClicked);
+  }
+  if (session_events.redo_count > 0) {
+    base::UmaHistogramEnumeration(histogram,
+                                  ComposeSessionEventTypes::kRedoClicked);
   }
   bool has_used_modifier = false;
   if (session_events.shorten_count > 0) {
@@ -477,6 +482,10 @@ void LogComposeRequestFeedback(EvalLocation eval_location,
       base::StrCat(
           {"Compose.", EvalLocationString(eval_location), ".Request.Feedback"}),
       feedback);
+}
+
+void LogComposeSelectAllStatus(ComposeSelectAllStatus select_all_status) {
+  base::UmaHistogramEnumeration(kComposeSelectAll, select_all_status);
 }
 
 }  // namespace compose
