@@ -39,6 +39,7 @@
 #include "base/uuid.h"
 #include "build/build_config.h"
 #include "components/services/storage/public/mojom/cache_storage_control.mojom.h"
+#include "components/ukm/test_ukm_recorder.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/process_lock.h"
 #include "content/browser/renderer_host/code_cache_host_impl.h"
@@ -98,8 +99,10 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
+#include "services/network/public/mojom/service_worker_router_info.mojom-shared.h"
 #include "storage/browser/blob/blob_handle.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/loader/url_loader_throttle.h"
@@ -115,6 +118,8 @@ using blink::mojom::CacheStorageError;
 namespace content {
 
 namespace {
+using MainResourceLoadCompletedUkmEntry =
+    ukm::builders::ServiceWorker_MainResourceLoadCompleted;
 
 // V8ScriptRunner::setCacheTimeStamp() stores 16 byte data (marker + tag +
 // timestamp).
@@ -1267,24 +1272,12 @@ IN_PROC_BROWSER_TEST_F(UserAgentServiceWorkerBrowserTest, NavigatorUserAgent) {
   run_loop.Run();
 }
 
-class ServiceWorkerEagerCacheStorageSetupTest
-    : public ServiceWorkerBrowserTest {
- public:
-  ServiceWorkerEagerCacheStorageSetupTest() {
-    feature_list_.InitAndEnableFeature(
-        blink::features::kEagerCacheStorageSetupForServiceWorkers);
-  }
-
- private:
-  base::test::ScopedFeatureList feature_list_;
-};
-
 // Regression test for https://crbug.com/1077916.
 // Update the service worker by registering a worker with different script url.
 // This test makes sure the worker can handle the fetch event using CacheStorage
 // API.
-// TODO(crbug.com/1087869): flaky on all platforms.
-IN_PROC_BROWSER_TEST_F(ServiceWorkerEagerCacheStorageSetupTest,
+// TODO(crbug.com/40695132): flaky on all platforms.
+IN_PROC_BROWSER_TEST_F(ServiceWorkerBrowserTest,
                        DISABLED_UpdateOnScriptUrlChange) {
   StartServerAndNavigateToSetup();
   EXPECT_TRUE(NavigateToURL(shell(),
@@ -1331,7 +1324,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerEagerCacheStorageSetupTest,
   EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
 }
 
-// TODO(crbug.com/709385): ServiceWorkerNavigationPreloadTest should be
+// TODO(crbug.com/40514526): ServiceWorkerNavigationPreloadTest should be
 // converted to WPT.
 class ServiceWorkerNavigationPreloadTest : public ServiceWorkerBrowserTest {
  public:
@@ -4101,7 +4094,7 @@ class ServiceWorkerBrowserTestWithStoragePartitioning
       : base::test::WithFeatureOverride(
             net::features::kThirdPartyStoragePartitioning),
         scoped_feature_list_(blink::features::kPlzDedicatedWorker) {}
-  bool ThirdPartyStoragePartitioningEnabled() {
+  bool ThirdPartyStoragePartitioningEnabled() const {
     return IsParamFeatureEnabled();
   }
 
@@ -4119,11 +4112,11 @@ class ServiceWorkerBrowserTestWithStoragePartitioning
 
   std::vector<GURL> GetClientURLsForStorageKey(const blink::StorageKey& key) {
     std::vector<GURL> urls;
-    for (auto it = wrapper()->context()->GetClientContainerHostIterator(
+    for (auto it = wrapper()->context()->GetServiceWorkerClients(
              key, /*include_reserved_clients=*/true,
              /*include_back_forward_cached_clients=*/false);
-         !it->IsAtEnd(); it->Advance()) {
-      urls.push_back(it->GetContainerHost()->url());
+         !it.IsAtEnd(); ++it) {
+      urls.push_back(it->url());
     }
     return urls;
   }
@@ -5084,7 +5077,12 @@ class ServiceWorkerStaticRouterRaceNetworkAndFetchHandlerSourceBrowserTest
   }
 
   scoped_refptr<ServiceWorkerVersion> SetupAndRegisterServiceWorker() {
-    return SetupAndRegisterServiceWorkerInternal(kSwScriptUrl);
+    scoped_refptr<ServiceWorkerVersion> version =
+        SetupAndRegisterServiceWorkerInternal(kSwScriptUrl);
+
+    // Remove any UKMs recorded during setup
+    test_ukm_recorder().Purge();
+    return version;
   }
 
   scoped_refptr<ServiceWorkerVersion>
@@ -5108,6 +5106,10 @@ class ServiceWorkerStaticRouterRaceNetworkAndFetchHandlerSourceBrowserTest
 
   net::EmbeddedTestServer* https_server() { return https_server_.get(); }
 
+  ukm::TestAutoSetUkmRecorder& test_ukm_recorder() {
+    return *test_ukm_recorder_;
+  }
+
  protected:
   void SetUpOnMainThread() override {
     ServiceWorkerBrowserTest::SetUpOnMainThread();
@@ -5116,6 +5118,7 @@ class ServiceWorkerStaticRouterRaceNetworkAndFetchHandlerSourceBrowserTest
     RegisterRequestMonitorForRequestCount(https_server());
     RegisterRequestHandlerForSlowResponsePage(embedded_test_server());
     RegisterRequestHandlerForSlowResponsePage(https_server());
+    test_ukm_recorder_ = std::make_unique<ukm::TestAutoSetUkmRecorder>();
   }
 
   scoped_refptr<ServiceWorkerVersion> SetupAndRegisterServiceWorkerInternal(
@@ -5232,6 +5235,7 @@ class ServiceWorkerStaticRouterRaceNetworkAndFetchHandlerSourceBrowserTest
       request_log_;
   base::test::ScopedFeatureList feature_list_;
   std::unique_ptr<net::EmbeddedTestServer> https_server_;
+  std::unique_ptr<ukm::TestAutoSetUkmRecorder> test_ukm_recorder_;
 };
 
 IN_PROC_BROWSER_TEST_F(
@@ -5256,6 +5260,24 @@ IN_PROC_BROWSER_TEST_F(
   // when the result from the fetch handler is used.
   EXPECT_NE("fetch-handler",
             observer.GetNormalizedResponseHeader("X-Response-From"));
+
+  // Check if the ukm shows the expected matched / actual source
+  auto entries = test_ukm_recorder().GetEntriesByName(
+      MainResourceLoadCompletedUkmEntry::kEntryName);
+  ASSERT_EQ(entries.size(), 1u);
+
+  auto* entry = entries[0].get();
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry,
+      MainResourceLoadCompletedUkmEntry::kMatchedFirstRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kRace));
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry, MainResourceLoadCompletedUkmEntry::kActualRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kNetwork));
 }
 
 IN_PROC_BROWSER_TEST_F(
@@ -5332,7 +5354,7 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ("[ServiceWorkerRaceNetworkRequest] Response from the network",
             GetInnerText());
 }
-// TODO(crbug.com/1491332) Add tests for
+// TODO(crbug.com/40074498) Add tests for
 // kURLLoadOptionSendSSLInfoForCertificateError
 
 IN_PROC_BROWSER_TEST_F(
@@ -5367,7 +5389,7 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ("[ServiceWorkerRaceNetworkRequest] Not found", GetInnerText());
 }
 
-// TODO(crbug.com/1431421): Flaky on Fuchsia.
+// TODO(crbug.com/40263529): Flaky on Fuchsia.
 #if BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_NetworkRequest_Wins_FetchHandler_Fallback \
   DISABLED_NetworkRequest_Wins_FetchHandler_Fallback
@@ -5436,7 +5458,7 @@ IN_PROC_BROWSER_TEST_F(
             GetInnerText());
 }
 
-// TODO(crbug.com/1431421): Flaky on Fuchsia.
+// TODO(crbug.com/40263529): Flaky on Fuchsia.
 #if BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_NetworkRequest_Wins_Redirect DISABLED_NetworkRequest_Wins_Redirect
 #else
@@ -5464,7 +5486,7 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ(0, GetRequestCount(path_after_redirect));
 }
 
-// TODO(crbug.com/1431421): Flaky on Fuchsia.
+// TODO(crbug.com/40263529): Flaky on Fuchsia.
 #if BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_NetworkRequest_Wins_Redirect_PassThrough \
   DISABLED_NetworkRequest_Wins_Redirect_PassThrough
@@ -5515,6 +5537,24 @@ IN_PROC_BROWSER_TEST_F(
   // when the result from the fetch handler is used.
   EXPECT_EQ("fetch-handler",
             observer.GetNormalizedResponseHeader("X-Response-From"));
+
+  // Check if the ukm shows the expected matched / actual source
+  auto entries = test_ukm_recorder().GetEntriesByName(
+      MainResourceLoadCompletedUkmEntry::kEntryName);
+  ASSERT_EQ(entries.size(), 1u);
+
+  auto* entry = entries[0].get();
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry,
+      MainResourceLoadCompletedUkmEntry::kMatchedFirstRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kRace));
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry, MainResourceLoadCompletedUkmEntry::kActualRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kFetchEvent));
 }
 
 IN_PROC_BROWSER_TEST_F(
@@ -5533,7 +5573,7 @@ IN_PROC_BROWSER_TEST_F(
   // the server.
   EXPECT_EQ(1, GetRequestCount(relative_url));
 
-  // TODO(crbug.com/1420517) Ensure if the network error result is from
+  // TODO(crbug.com/40258805) Ensure if the network error result is from
   // RaceNetworkRequest. The current code only tests if the network error
   // happens.
   ASSERT_TRUE(embedded_test_server()->ShutdownAndWaitUntilComplete());
@@ -5553,7 +5593,7 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ("[ServiceWorkerRaceNetworkRequest] Not found", GetInnerText());
 }
 
-// TODO(crbug.com/1431421): Flaky on Fuchsia.
+// TODO(crbug.com/40263529): Flaky on Fuchsia.
 #if BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_FetchHandler_Wins_Redirect DISABLED_FetchHandler_Wins_Redirect
 #else
@@ -5578,7 +5618,7 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ(0, GetRequestCount(path_after_redirect));
 }
 
-// TODO(crbug.com/1431421): Flaky on Fuchsia.
+// TODO(crbug.com/40263529): Flaky on Fuchsia.
 #if BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_FetchHandler_Wins_Redirect_PassThrough \
   DISABLED_FetchHandler_Wins_Redirect_PassThrough
@@ -5630,7 +5670,7 @@ IN_PROC_BROWSER_TEST_F(
   // fetch handler but the fetch handler request will reuse the response from
   // RaceNetworkRequest.
   //
-  // TODO(crbug.com/1420517) Add the mechanism to wait for the fetch handler
+  // TODO(crbug.com/40258805) Add the mechanism to wait for the fetch handler
   // completion signal to ensure the request count is exactly not incremented
   // anymore. Currently we don't record the UMA for the fetch handler completion
   // if the RaceNetworkRequest wins.
@@ -5669,7 +5709,7 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ(2, GetRequestCount(relative_url_for_clone));
 }
 
-// TODO(crbug.com/1431421): Flaky on Fuchsia.
+// TODO(crbug.com/40263529): Flaky on Fuchsia.
 #if BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_Subresource_NetworkRequest_Wins \
   DISABLED_Subresource_NetworkRequest_Wins
@@ -5822,7 +5862,7 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ(1, GetRequestCount(path3));
 }
 
-// TODO(crbug.com/1431421): Flaky on Fuchsia.
+// TODO(crbug.com/40263529): Flaky on Fuchsia.
 #if BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_Subresource_NetworkRequest_Wins_Redirect \
   DISABLED_Subresource_NetworkRequest_Wins_Redirect
@@ -5851,7 +5891,7 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ(0, GetRequestCount(path_after_redirect));
 }
 
-// TODO(crbug.com/1431421): Flaky on Fuchsia.
+// TODO(crbug.com/40263529): Flaky on Fuchsia.
 #if BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_Subresource_NetworkRequest_Wins_Redirect_PassThrough \
   DISABLED_Subresource_NetworkRequest_Wins_Redirect_PassThrough
@@ -5918,7 +5958,7 @@ IN_PROC_BROWSER_TEST_F(
   // the server.
   EXPECT_EQ(1, GetRequestCount(relative_url));
 
-  // TODO(crbug.com/1420517) Ensure if the network error result is from
+  // TODO(crbug.com/40258805) Ensure if the network error result is from
   // RaceNetworkRequest. The current code only tests if the network error
   // happens.
   ASSERT_TRUE(embedded_test_server()->ShutdownAndWaitUntilComplete());
@@ -5966,8 +6006,8 @@ IN_PROC_BROWSER_TEST_F(
                    "response.status)"));
 }
 
-// TODO(crbug.com/1431421): Flaky on Fuchsia.
-// TODO(crbug.com/1517557): Flaky on Android.
+// TODO(crbug.com/40263529): Flaky on Fuchsia.
+// TODO(crbug.com/41490535): Flaky on Android.
 #if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ANDROID)
 #define MAYBE_Subresource_FetchHandler_Wins_Redirect \
   DISABLED_Subresource_FetchHandler_Wins_Redirect
@@ -5996,7 +6036,7 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ(0, GetRequestCount(path_after_redirect));
 }
 
-// TODO(crbug.com/1431421): Flaky on Fuchsia.
+// TODO(crbug.com/40263529): Flaky on Fuchsia.
 #if BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_Subresource_FetchHandler_Wins_Redirect_PassThrough \
   DISABLED_Subresource_FetchHandler_Wins_Redirect_PassThrough
@@ -6045,7 +6085,7 @@ IN_PROC_BROWSER_TEST_F(
   // fetch handler but the fetch handler request will reuse the response from
   // RaceNetworkRequest.
   //
-  // TODO(crbug.com/1420517) Add the mechanism to wait for the fetch handler
+  // TODO(crbug.com/40258805) Add the mechanism to wait for the fetch handler
   // completion signal to ensure the request count is exactly not incremented
   // anymore. Currently we don't record the UMA for the fetch handler
   // completion if the RaceNetworkRequest wins.
@@ -6730,10 +6770,19 @@ class ServiceWorkerStaticRouterBrowserTest : public ServiceWorkerBrowserTest {
   }
   ~ServiceWorkerStaticRouterBrowserTest() override = default;
 
+  void SetUpOnMainThread() override {
+    ServiceWorkerBrowserTest::SetUpOnMainThread();
+    test_ukm_recorder_ = std::make_unique<ukm::TestAutoSetUkmRecorder>();
+  }
+
   WebContents* web_contents() const { return shell()->web_contents(); }
 
   RenderFrameHost* GetPrimaryMainFrame() {
     return web_contents()->GetPrimaryMainFrame();
+  }
+
+  ukm::TestAutoSetUkmRecorder& test_ukm_recorder() {
+    return *test_ukm_recorder_;
   }
 
   void SetupAndRegisterServiceWorker(TestType type) {
@@ -6764,6 +6813,9 @@ class ServiceWorkerStaticRouterBrowserTest : public ServiceWorkerBrowserTest {
     StopServiceWorker(active_version_.get());
     ASSERT_EQ(blink::EmbeddedWorkerStatus::kStopped,
               active_version_->running_status());
+
+    // Remove any UKMs recorded during setup
+    test_ukm_recorder().Purge();
   }
 
   int GetRequestCount(const std::string& relative_url) const {
@@ -6870,12 +6922,52 @@ class ServiceWorkerStaticRouterBrowserTest : public ServiceWorkerBrowserTest {
   base::test::ScopedFeatureList feature_list_;
   scoped_refptr<ServiceWorkerVersion> active_version_;
   base::HistogramTester histogram_tester_;
+  std::unique_ptr<ukm::TestAutoSetUkmRecorder> test_ukm_recorder_;
 };
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
-                       MainResourceNetworkFetchHandler) {
+                       MainResourceFromFetchEventRule) {
   SetupAndRegisterServiceWorker(TestType::kNetwork);
   ReloadBlockUntilNavigationsComplete(shell(), 1);
+  // UKM records reloads conducted in `ReloadBlockUntilNavigationComplete`.
+  // Remove them to make sue UKM only has record for main test.
+  test_ukm_recorder().Purge();
+
+  const std::string relative_url = "/service_worker/fetch_event_rule";
+  ASSERT_TRUE(
+      NavigateToURL(shell(), embedded_test_server()->GetURL(relative_url)));
+  EXPECT_EQ("[ServiceWorkerStaticRouter] Response from the fetch handler",
+            GetInnerText());
+  // The result should be got from the fetch handler, and no network access is
+  // expected.
+  EXPECT_EQ(0, GetRequestCount(relative_url));
+
+  // Check if the ukm shows the expected matched / actual source
+  auto entries = test_ukm_recorder().GetEntriesByName(
+      MainResourceLoadCompletedUkmEntry::kEntryName);
+  ASSERT_EQ(entries.size(), 1u);
+
+  auto* entry = entries[0].get();
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry,
+      MainResourceLoadCompletedUkmEntry::kMatchedFirstRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kFetchEvent));
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry, MainResourceLoadCompletedUkmEntry::kActualRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kFetchEvent));
+}
+
+IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
+                       MainResourceNoRuleMatchedResponseFromFetchHandler) {
+  SetupAndRegisterServiceWorker(TestType::kNetwork);
+  ReloadBlockUntilNavigationsComplete(shell(), 1);
+  // UKM records reloads conducted in `ReloadBlockUntilNavigationComplete`.
+  // Remove them to make sue UKM only has record for main test.
+  test_ukm_recorder().Purge();
 
   const std::string relative_url = "/service_worker/fetch_handler";
   ASSERT_TRUE(
@@ -6885,10 +6977,24 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
   // The result should be got from the fetch handler, and no network access is
   // expected.
   EXPECT_EQ(0, GetRequestCount(relative_url));
+
+  // Check if the ukm shows the expected matched / actual source
+  auto entries = test_ukm_recorder().GetEntriesByName(
+      MainResourceLoadCompletedUkmEntry::kEntryName);
+  ASSERT_EQ(entries.size(), 1u);
+
+  auto* entry = entries[0].get();
+
+  EXPECT_FALSE(ukm::TestAutoSetUkmRecorder::EntryHasMetric(
+      entry,
+      MainResourceLoadCompletedUkmEntry::kMatchedFirstRouterSourceTypeName));
+
+  EXPECT_FALSE(ukm::TestAutoSetUkmRecorder::EntryHasMetric(
+      entry, MainResourceLoadCompletedUkmEntry::kActualRouterSourceTypeName));
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
-                       MainResourceNetworkFallback) {
+                       MainResourceFromNetworkRule) {
   SetupAndRegisterServiceWorker(TestType::kNetwork);
   WorkerRunningStatusObserver observer(public_context());
   const std::string relative_url = "/service_worker/direct";
@@ -6906,10 +7012,27 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
   histogram_tester().ExpectBucketCount(
       "ServiceWorker.StartWorker.Purpose",
       static_cast<int>(ServiceWorkerMetrics::EventType::STATIC_ROUTER), 1);
+
+  // Check if the ukm shows the expected matched / actual source
+  auto entries = test_ukm_recorder().GetEntriesByName(
+      MainResourceLoadCompletedUkmEntry::kEntryName);
+  ASSERT_EQ(entries.size(), 1u);
+
+  auto* entry = entries[0].get();
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry,
+      MainResourceLoadCompletedUkmEntry::kMatchedFirstRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kNetwork));
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry, MainResourceLoadCompletedUkmEntry::kActualRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kNetwork));
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
-                       SubresourceNetworkFetchHandler) {
+                       SubresourceNoRuleMatchedResponseFromFetchHandler) {
   SetupAndRegisterServiceWorker(TestType::kNetwork);
   ReloadBlockUntilNavigationsComplete(shell(), 1);
   StopServiceWorker(version().get());
@@ -6925,7 +7048,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
-                       SubresourceNetworkFallback) {
+                       SubresourceFromNetworkRule) {
   SetupAndRegisterServiceWorker(TestType::kNetwork);
   ReloadBlockUntilNavigationsComplete(shell(), 1);
   StopServiceWorker(version().get());
@@ -7059,6 +7182,24 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
             GetInnerText());
   // The result should be got from the cache.
   EXPECT_EQ(0, GetRequestCount(relative_url));
+
+  // Check if the ukm shows the expected matched / actual source
+  auto entries = test_ukm_recorder().GetEntriesByName(
+      MainResourceLoadCompletedUkmEntry::kEntryName);
+  ASSERT_EQ(entries.size(), 1u);
+
+  auto* entry = entries[0].get();
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry,
+      MainResourceLoadCompletedUkmEntry::kMatchedFirstRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kCache));
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry, MainResourceLoadCompletedUkmEntry::kActualRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kCache));
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
@@ -7072,6 +7213,24 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
             GetInnerText());
   // The result should be got from the network.
   EXPECT_EQ(1, GetRequestCount(relative_url));
+
+  // Check if the ukm shows the expected matched / actual source
+  auto entries = test_ukm_recorder().GetEntriesByName(
+      MainResourceLoadCompletedUkmEntry::kEntryName);
+  ASSERT_EQ(entries.size(), 1u);
+
+  auto* entry = entries[0].get();
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry,
+      MainResourceLoadCompletedUkmEntry::kMatchedFirstRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kCache));
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry, MainResourceLoadCompletedUkmEntry::kActualRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kNetwork));
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
@@ -7086,12 +7245,34 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
             GetInnerText());
   // The result should be got from the cache.
   EXPECT_EQ(0, GetRequestCount(relative_url));
+
+  // Check if the ukm shows the expected matched / actual source
+  auto entries = test_ukm_recorder().GetEntriesByName(
+      MainResourceLoadCompletedUkmEntry::kEntryName);
+  ASSERT_EQ(entries.size(), 1u);
+
+  auto* entry = entries[0].get();
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry,
+      MainResourceLoadCompletedUkmEntry::kMatchedFirstRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kCache));
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry, MainResourceLoadCompletedUkmEntry::kActualRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kCache));
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
                        MainResourceCacheStorageMissDueToNameMismatch) {
   SetupAndRegisterServiceWorker(TestType::kNetwork);
   ReloadBlockUntilNavigationsComplete(shell(), 1);
+
+  // UKM records reloads conducted in `ReloadBlockUntilNavigationComplete`.
+  // Remove them to make sue UKM only has record for main test.
+  test_ukm_recorder().Purge();
 
   const std::string relative_url = "/service_worker/cache_with_wrong_name";
   WaitUntilRelativeUrlStoredInCache(relative_url);
@@ -7101,6 +7282,24 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,
             GetInnerText());
   // Due to the cache miss, the result should be got from the network.
   EXPECT_EQ(1, GetRequestCount(relative_url));
+
+  // Check if the ukm shows the expected matched / actual source
+  auto entries = test_ukm_recorder().GetEntriesByName(
+      MainResourceLoadCompletedUkmEntry::kEntryName);
+  ASSERT_EQ(entries.size(), 1u);
+
+  auto* entry = entries[0].get();
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry,
+      MainResourceLoadCompletedUkmEntry::kMatchedFirstRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kCache));
+
+  ukm::TestAutoSetUkmRecorder::ExpectEntryMetric(
+      entry, MainResourceLoadCompletedUkmEntry::kActualRouterSourceTypeName,
+      static_cast<std::int64_t>(
+          network::mojom::ServiceWorkerRouterSourceType::kNetwork));
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerStaticRouterBrowserTest,

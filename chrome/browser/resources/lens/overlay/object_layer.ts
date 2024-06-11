@@ -2,7 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {assert} from '//resources/js/assert.js';
+import './strings.m.js';
+
+import {assert, assertInstanceof} from '//resources/js/assert.js';
+import {loadTimeData} from '//resources/js/load_time_data.js';
 import {PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import type {DomRepeat} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
@@ -12,17 +15,16 @@ import type {CenterRotatedBox} from './geometry.mojom-webui.js';
 import type {LensPageCallbackRouter} from './lens.mojom-webui.js';
 import {getTemplate} from './object_layer.html.js';
 import type {OverlayObject} from './overlay_object.mojom-webui.js';
+import {focusShimmerOnRegion, ShimmerControlRequester, unfocusShimmer} from './overlay_shimmer.js';
+import {Polygon_CoordinateType} from './polygon.mojom-webui.js';
 import type {PostSelectionBoundingBox} from './post_selection_renderer.js';
-import type {GestureEvent} from './selection_utils.js';
+import type {CursorData} from './selection_overlay.js';
+import {CursorType, type GestureEvent} from './selection_utils.js';
+import {toPercent} from './values_converter.js';
 
 // The percent of the selection layer width and height the object needs to take
 // up to be considered full page.
 const FULLSCREEN_OBJECT_THRESHOLD_PERCENT = 0.95;
-
-// Takes the value between 0-1 and returns a string in the from '__%';
-function toPercent(value: number): string {
-  return `${value * 100}%`;
-}
 
 // Returns true if the object has a valid bounding box and is renderable by the
 // ObjectLayer.
@@ -61,7 +63,9 @@ function compareArea(object1: OverlayObject, object2: OverlayObject): number {
 
 export interface ObjectLayerElement {
   $: {
+    highlightImg: HTMLImageElement,
     objectsContainer: DomRepeat,
+    objectSelectionCanvas: HTMLCanvasElement,
   };
 }
 
@@ -79,19 +83,42 @@ export class ObjectLayerElement extends PolymerElement {
 
   static get properties() {
     return {
+      canvasHeight: Number,
+      canvasWidth: Number,
+      canvasPhysicalHeight: Number,
+      canvasPhysicalWidth: Number,
       renderedObjects: {
         type: Array,
         value: () => [],
       },
+      debugMode: {
+        type: Boolean,
+        value: loadTimeData.getBoolean('enableDebuggingMode'),
+        reflectToAttribute: true,
+      },
+      screenshotDataUri: String,
     };
   }
 
+  private canvasHeight: number;
+  private canvasWidth: number;
+  private canvasPhysicalHeight: number;
+  private canvasPhysicalWidth: number;
+  private context: CanvasRenderingContext2D;
+  // The data URI of the current overlay screenshot.
+  private screenshotDataUri: string;
   // The objects rendered in this layer.
   private renderedObjects: OverlayObject[];
 
   private readonly router: LensPageCallbackRouter =
       BrowserProxyImpl.getInstance().callbackRouter;
   private objectsReceivedListenerId: number|null = null;
+
+  override ready() {
+    super.ready();
+
+    this.context = this.$.objectSelectionCanvas.getContext('2d')!;
+  }
 
   override connectedCallback() {
     super.connectedCallback();
@@ -131,6 +158,115 @@ export class ObjectLayerElement extends PolymerElement {
     }));
 
     return true;
+  }
+
+  private handlePointerEnter(event: PointerEvent) {
+    assertInstanceof(event.target, HTMLElement);
+    const object =
+      this.$.objectsContainer.itemForElement(event.target);
+    this.drawObject(object);
+    this.dispatchEvent(new CustomEvent<CursorData>(
+        'set-cursor',
+        {bubbles: true, composed: true, detail: {cursor: CursorType.POINTER}}));
+  }
+
+  private handlePointerLeave() {
+    this.clearCanvas();
+    unfocusShimmer(this, ShimmerControlRequester.SEGMENTATION);
+    this.dispatchEvent(new CustomEvent<CursorData>(
+        'set-cursor',
+        {bubbles: true, composed: true, detail: {cursor: CursorType.DEFAULT}}));
+  }
+
+  setCanvasSizeTo(width: number, height: number) {
+    // Resetting the canvas width and height also clears the canvas.
+    this.canvasWidth = width;
+    this.canvasHeight = height;
+    this.canvasPhysicalWidth = width * window.devicePixelRatio;
+    this.canvasPhysicalHeight = height * window.devicePixelRatio;
+    this.context.setTransform(
+        window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+  }
+
+  private drawObject(object: OverlayObject) {
+    const polygons = object.geometry.segmentationPolygon;
+    if (!polygons) {
+      return;
+    }
+    const objectBoundingBox = object.geometry.boundingBox;
+    // Fit a square around the bounding box to use for gradient coordinates.
+    const longestEdge =
+        Math.max(objectBoundingBox.box.width, objectBoundingBox.box.height);
+    const left = (objectBoundingBox.box.x - longestEdge / 2) * this.canvasWidth;
+    const top = (objectBoundingBox.box.y - longestEdge / 2) * this.canvasHeight;
+    const right =
+        (objectBoundingBox.box.x + longestEdge / 2) * this.canvasWidth;
+    const bottom =
+        (objectBoundingBox.box.y + longestEdge / 2) * this.canvasHeight;
+
+    let leftMostPoint = 0;
+    let rightMostPoint = 0;
+    let topMostPoint = 0;
+    let bottomMostPoint = 0;
+
+    this.context.beginPath();
+    for (const polygon of polygons) {
+      // TODO(b/330183480): Currently, we are assuming that polygon
+      // coordinates are normalized. We should still implement
+      // rendering in case this assumption is ever violated.
+      if (polygon.coordinateType !== Polygon_CoordinateType.kNormalized) {
+        continue;
+      }
+
+      const firstVertex = polygon.vertex[0];
+      topMostPoint = firstVertex.y;
+      bottomMostPoint = firstVertex.y;
+      leftMostPoint = firstVertex.x;
+      rightMostPoint = firstVertex.x;
+
+      this.context.moveTo(
+          firstVertex.x * this.canvasWidth, firstVertex.y * this.canvasHeight);
+      for (const vertex of polygon.vertex.slice(1)) {
+        this.context.lineTo(
+            vertex.x * this.canvasWidth, vertex.y * this.canvasHeight);
+
+        topMostPoint = Math.min(topMostPoint, vertex.y);
+        bottomMostPoint = Math.max(bottomMostPoint, vertex.y);
+        leftMostPoint = Math.min(leftMostPoint, vertex.x);
+        rightMostPoint = Math.max(rightMostPoint, vertex.x);
+      }
+    }
+
+    // Focus the shimmer on the segmentation object.
+    focusShimmerOnRegion(
+        this, topMostPoint, leftMostPoint, rightMostPoint - leftMostPoint,
+        bottomMostPoint - topMostPoint, ShimmerControlRequester.SEGMENTATION);
+
+    // Draw the highlight image clipped to the path.
+    this.context.save();
+    this.context.clip();
+    this.context.drawImage(
+        this.$.highlightImg, 0, 0, this.canvasWidth, this.canvasHeight);
+    this.context.restore();
+
+    // Stroke the path on top of the image.
+    this.context.lineCap = 'round';
+    this.context.lineJoin = 'round';
+    this.context.lineWidth = 4;
+    const gradient = this.context.createLinearGradient(
+        left,
+        top,
+        right,
+        bottom,
+    );
+    gradient.addColorStop(0, '#0177DC');
+    gradient.addColorStop(1, '#D5E3FF');
+    this.context.strokeStyle = gradient;
+    this.context.stroke();
+  }
+
+  private clearCanvas() {
+    this.context.clearRect(0, 0, this.canvasWidth, this.canvasHeight);
   }
 
   private onObjectsReceived(objects: OverlayObject[]) {

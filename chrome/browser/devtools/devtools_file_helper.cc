@@ -7,6 +7,7 @@
 #include <set>
 #include <vector>
 
+#include "base/base64.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -127,10 +128,23 @@ class SelectFileDialog : public ui::SelectFileDialog::Listener {
   CanceledCallback canceled_callback_;
 };
 
-void WriteToFile(const base::FilePath& path, const std::string& content) {
+void WriteToFile(const base::FilePath& path,
+                 const std::string& content,
+                 bool is_base64) {
   DCHECK(!path.empty());
 
-  base::WriteFile(path, content);
+  if (!is_base64) {
+    base::WriteFile(path, content);
+    return;
+  }
+
+  const std::optional<std::vector<uint8_t>> decoded_content =
+      base::Base64Decode(content);
+  if (decoded_content) {
+    base::WriteFile(path, decoded_content.value());
+  } else {
+    LOG(ERROR) << "Invalid base64. Not writing " << path;
+  }
 }
 
 void AppendToFile(const base::FilePath& path, const std::string& content) {
@@ -236,11 +250,13 @@ DevToolsFileHelper::~DevToolsFileHelper() = default;
 void DevToolsFileHelper::Save(const std::string& url,
                               const std::string& content,
                               bool save_as,
+                              bool is_base64,
                               SaveCallback saveCallback,
                               base::OnceClosure cancelCallback) {
   auto it = saved_files_.find(url);
   if (it != saved_files_.end() && !save_as) {
-    SaveAsFileSelected(url, content, std::move(saveCallback), it->second);
+    SaveAsFileSelected(url, content, is_base64, std::move(saveCallback),
+                       it->second);
     return;
   }
 
@@ -263,7 +279,7 @@ void DevToolsFileHelper::Save(const std::string& url,
       url::DecodeURLEscapeSequences(escaped_content,
                                     url::DecodeURLMode::kUTF8OrIsomorphic,
                                     &unescaped_content);
-      // TODO(crbug.com/1324254): Due to filename encoding on Windows we can't
+      // TODO(crbug.com/40839171): Due to filename encoding on Windows we can't
       // expect to always be able to convert to UTF8 and back
       std::string unescaped_content_string =
           base::UTF16ToUTF8(unescaped_content.view());
@@ -271,10 +287,10 @@ void DevToolsFileHelper::Save(const std::string& url,
     } else {
       suggested_file_name = url;
     }
-    // TODO(crbug.com/1324254): Truncate a UTF8 string in a better way
+    // TODO(crbug.com/40839171): Truncate a UTF8 string in a better way
     if (suggested_file_name.length() > 64)
       suggested_file_name = suggested_file_name.substr(0, 64);
-    // TODO(crbug.com/1324254): Ensure suggested_file_name is an ASCII string
+    // TODO(crbug.com/40839171): Ensure suggested_file_name is an ASCII string
     if (!g_last_save_path.Pointer()->empty()) {
       initial_path = g_last_save_path.Pointer()->DirName().AppendASCII(
           suggested_file_name);
@@ -286,12 +302,12 @@ void DevToolsFileHelper::Save(const std::string& url,
     }
   }
 
-  SelectFileDialog::Show(base::BindOnce(&DevToolsFileHelper::SaveAsFileSelected,
-                                        weak_factory_.GetWeakPtr(), url,
-                                        content, std::move(saveCallback)),
-                         std::move(cancelCallback), web_contents_,
-                         ui::SelectFileDialog::SELECT_SAVEAS_FILE,
-                         initial_path);
+  SelectFileDialog::Show(
+      base::BindOnce(&DevToolsFileHelper::SaveAsFileSelected,
+                     weak_factory_.GetWeakPtr(), url, content, is_base64,
+                     std::move(saveCallback)),
+      std::move(cancelCallback), web_contents_,
+      ui::SelectFileDialog::SELECT_SAVEAS_FILE, initial_path);
 }
 
 void DevToolsFileHelper::Append(const std::string& url,
@@ -307,6 +323,7 @@ void DevToolsFileHelper::Append(const std::string& url,
 
 void DevToolsFileHelper::SaveAsFileSelected(const std::string& url,
                                             const std::string& content,
+                                            bool is_base64,
                                             SaveCallback callback,
                                             const base::FilePath& path) {
   *g_last_save_path.Pointer() = path;
@@ -317,8 +334,9 @@ void DevToolsFileHelper::SaveAsFileSelected(const std::string& url,
   base::Value::Dict& files_map = update.Get();
   files_map.Set(base::MD5String(url), base::FilePathToValue(path));
   std::string file_system_path = path.AsUTF8Unsafe();
-  std::move(callback).Run(file_system_path);
-  file_task_runner_->PostTask(FROM_HERE, BindOnce(&WriteToFile, path, content));
+  file_task_runner_->PostTask(
+      FROM_HERE, BindOnce(&WriteToFile, path, content, is_base64)
+                     .Then(BindOnce(std::move(callback), file_system_path)));
 }
 
 void DevToolsFileHelper::AddFileSystem(

@@ -9,6 +9,7 @@
 
 #include "ash/calendar/calendar_client.h"
 #include "ash/calendar/calendar_controller.h"
+#include "ash/constants/ash_switches.h"
 #include "ash/glanceables/common/glanceables_view_id.h"
 #include "ash/public/cpp/ash_view_ids.h"
 #include "ash/session/session_controller_impl.h"
@@ -28,6 +29,7 @@
 #include "ash/system/unified/unified_system_tray_bubble.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/ash_test_util.h"
+#include "base/command_line.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
@@ -94,7 +96,10 @@ class CalendarViewControllerTestObserver
 
 class CalendarViewTest : public AshTestBase {
  public:
-  CalendarViewTest() = default;
+  CalendarViewTest() {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kGlanceablesIgnoreEnableMergeRequestBuildFlag);
+  }
   CalendarViewTest(const CalendarViewTest&) = delete;
   CalendarViewTest& operator=(const CalendarViewTest&) = delete;
   ~CalendarViewTest() override = default;
@@ -112,11 +117,9 @@ class CalendarViewTest : public AshTestBase {
   }
 
   void TearDown() override {
-    widget_.reset();
-
+    DestroyCalendarViewWidget();
     Shell::Get()->calendar_controller()->RegisterClientForUser(account_id_,
                                                                nullptr);
-
     AshTestBase::TearDown();
   }
 
@@ -157,12 +160,19 @@ class CalendarViewTest : public AshTestBase {
     auto calendar_view = std::make_unique<CalendarView>(
         /*use_glanceables_container_style=*/false);
 
+    // This awkward-looking thing is to ensure that calendar_view_ (a raw_ptr)
+    // doesn't outlive the calendar view it points to, which is otherwise
+    // destroyed as part of Widget::SetContentsView().
+    calendar_view_ = nullptr;
     calendar_view_ = widget_->SetContentsView(std::move(calendar_view));
   }
 
   void CloseEventList() { calendar_view_->CloseEventList(); }
 
-  void DestroyCalendarViewWidget() { widget_.reset(); }
+  void DestroyCalendarViewWidget() {
+    calendar_view_ = nullptr;
+    widget_.reset();
+  }
 
   // Calendar has some arbitrary delays to allow itself to load, otherwise the
   // test assertions run too early and fail. We hook into the `OnCalendarLoaded`
@@ -340,7 +350,7 @@ class CalendarViewTest : public AshTestBase {
   calendar_test_utils::CalendarClientTestImpl client_;
   std::unique_ptr<views::Widget> widget_;
   // Owned by `widget_`.
-  raw_ptr<CalendarView, DanglingUntriaged> calendar_view_ = nullptr;
+  raw_ptr<CalendarView> calendar_view_ = nullptr;
   std::unique_ptr<CalendarEventListView> event_list_view_;
   static base::Time fake_time_;
 };
@@ -1415,6 +1425,8 @@ class CalendarViewAnimationTest
       : AshTestBase(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {
     scoped_feature_list_.InitWithFeatureState(
         ash::features::kMultiCalendarSupport, IsMultiCalendarEnabled());
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kGlanceablesIgnoreEnableMergeRequestBuildFlag);
   }
   CalendarViewAnimationTest(const CalendarViewAnimationTest&) = delete;
   CalendarViewAnimationTest& operator=(const CalendarViewAnimationTest&) =
@@ -1448,6 +1460,10 @@ class CalendarViewAnimationTest
   }
 
   void TearDown() override {
+    calendar_list_model_ = nullptr;
+    calendar_model_ = nullptr;
+    calendar_view_ = nullptr;
+
     widget_.reset();
     time_overrides_.reset();
     scoped_feature_list_.Reset();
@@ -1458,6 +1474,10 @@ class CalendarViewAnimationTest
   bool IsMultiCalendarEnabled() { return GetParam(); }
 
   void CreateCalendarView() {
+    // Don't allow calendar_view_ to temporarily dangle while we're replacing
+    // the Widget's contents view. Otherwise, inside SetContentsView() the old
+    // calendar_view_ will be destroyed and will temporarily dangle.
+    calendar_view_ = nullptr;
     calendar_view_ = widget_->SetContentsView(std::make_unique<CalendarView>(
         /*use_glanceables_container_style=*/false));
   }
@@ -1604,10 +1624,10 @@ class CalendarViewAnimationTest
  private:
   std::unique_ptr<views::Widget> widget_;
   // Owned by `widget_`.
-  raw_ptr<CalendarView, DanglingUntriaged> calendar_view_ = nullptr;
+  raw_ptr<CalendarView> calendar_view_ = nullptr;
   std::unique_ptr<base::subtle::ScopedTimeClockOverrides> time_overrides_;
-  raw_ptr<CalendarListModel, DanglingUntriaged> calendar_list_model_;
-  raw_ptr<CalendarModel, DanglingUntriaged> calendar_model_;
+  raw_ptr<CalendarListModel> calendar_list_model_ = nullptr;
+  raw_ptr<CalendarModel> calendar_model_ = nullptr;
   std::unique_ptr<calendar_test_utils::CalendarClientTestImpl> calendar_client_;
   base::test::ScopedFeatureList scoped_feature_list_;
 };
@@ -3356,4 +3376,53 @@ TEST_P(CalendarViewWithUpNextViewAnimationTest,
   // After the view is settled, it should scroll to today's row.
   EXPECT_EQ(GetPositionOfToday(), scroll_view()->GetVisibleRect().y());
 }
+
+// Tests that the up-next view can show up after showing the event listview
+// first. Regression test for b/336722659.
+TEST_P(CalendarViewWithUpNextViewAnimationTest,
+       ShowUpNextViewAfterEventListViewCorrectly) {
+  ui::ScopedAnimationDurationScaleMode test_duration_mode(
+      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+  base::Time date;
+  ASSERT_TRUE(base::Time::FromString("30 Nov 2023 10:00 GMT", &date));
+  task_environment()->AdvanceClock(date - base::Time::Now());
+  SetTodayFromTime(date);
+  CreateCalendarView();
+  ui::LayerAnimationStoppedWaiter animation_waiter;
+  animation_waiter.Wait(current_month()->layer());
+  task_environment()->FastForwardBy(
+      calendar_test_utils::kAnimationSettleDownDuration);
+
+  // There's no `up_next_view()` before the events are fetched.
+  EXPECT_FALSE(calendar_view()->up_next_view());
+
+  // Open the event list view for today.
+  ASSERT_EQ(u"30",
+            static_cast<views::LabelButton*>(current_month()->children()[32])
+                ->GetText());
+  GestureTapOn(
+      static_cast<views::LabelButton*>(current_month()->children()[32]));
+
+  animation_waiter.Wait(calendar_sliding_surface_view()->layer());
+  animation_waiter.Wait(current_label()->layer());
+  ASSERT_TRUE(event_list_view());
+  EXPECT_TRUE(event_list_view()->GetVisible());
+  task_environment()->FastForwardBy(
+      calendar_test_utils::kAnimationSettleDownDuration);
+
+  // Fetch an event that starts in 6 mins.
+  MockEventsFetched(calendar_utils::GetStartOfMonthUTC(date),
+                    CreateUpcomingEvents(date + base::Minutes(6)));
+  EXPECT_FALSE(calendar_view()->up_next_view());
+
+  // Close the event list view.
+  CloseEventList();
+  animation_waiter.Wait(calendar_sliding_surface_view()->layer());
+  animation_waiter.Wait(current_label()->layer());
+  EXPECT_FALSE(event_list_view());
+
+  // `up_next_view()` should be visible.
+  EXPECT_TRUE(calendar_view()->up_next_view()->GetVisible());
+}
+
 }  // namespace ash

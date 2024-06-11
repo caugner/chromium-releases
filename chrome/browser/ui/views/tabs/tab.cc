@@ -112,6 +112,10 @@ constexpr int kTabAlertIndicatorCloseButtonPaddingAdjustmentTouchUI = 8;
 constexpr int kTabAlertIndicatorCloseButtonPaddingAdjustment = 6;
 constexpr int kTabAlertIndicatorCloseButtonPaddingAdjustmentRefresh = 4;
 
+// When the DiscardRingImprovements feature is enabled, increase the radius of
+// the discard ring by this amount if there is enough space.
+constexpr int kIncreasedDiscardIndicatorRadiusDp = 2;
+
 bool g_show_hover_card_on_mouse_hover = true;
 
 // Helper functions ------------------------------------------------------------
@@ -231,12 +235,6 @@ Tab::Tab(TabSlotController* controller)
   // onto opaque parts of a not-entirely-opaque layer.
   title_->SetSkipSubpixelRenderingOpacityCheck(true);
 
-  if (features::IsChromeRefresh2023() &&
-      base::FeatureList::IsEnabled(features::kChromeRefresh2023TopChromeFont)) {
-    title_->SetTextContext(views::style::CONTEXT_LABEL);
-    title_->SetTextStyle(views::style::STYLE_BODY_4_EMPHASIS);
-  }
-
   AddChildView(title_.get());
 
   SetEventTargeter(std::make_unique<views::ViewTargeter>(this));
@@ -324,7 +322,10 @@ void Tab::Layout(PassKey) {
     // Height should go to the bottom of the tab for the crashed tab animation
     // to pop out of the bottom.
     favicon_bounds.set_y(contents_rect.y() +
-                         Center(gfx::kFaviconSize, gfx::kFaviconSize));
+                         Center(features::IsChromeRefresh2023()
+                                    ? gfx::kFaviconSize
+                                    : contents_rect.height(),
+                                gfx::kFaviconSize));
     if (center_icon_) {
       // When centering the favicon, the favicon is allowed to escape the normal
       // contents rect.
@@ -332,6 +333,16 @@ void Tab::Layout(PassKey) {
     } else {
       MaybeAdjustLeftForPinnedTab(&favicon_bounds, gfx::kFaviconSize);
     }
+
+    if (base::FeatureList::IsEnabled(
+            performance_manager::features::kDiscardRingImprovements)) {
+      icon_->EnlargeDiscardIndicatorRadius(
+          width() - 2 * tab_style()->GetBottomCornerRadius() >=
+                  gfx::kFaviconSize + 2 * kIncreasedDiscardIndicatorRadiusDp
+              ? kIncreasedDiscardIndicatorRadiusDp
+              : 0);
+    }
+
     // Add space for insets outside the favicon bounds.
     favicon_bounds.Inset(-icon_->GetInsets());
     favicon_bounds.set_size(icon_->GetPreferredSize());
@@ -714,7 +725,8 @@ void Tab::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   }
 }
 
-gfx::Size Tab::CalculatePreferredSize() const {
+gfx::Size Tab::CalculatePreferredSize(
+    const views::SizeBounds& available_size) const {
   return gfx::Size(tab_style()->GetStandardWidth(),
                    GetLayoutConstant(TAB_HEIGHT));
 }

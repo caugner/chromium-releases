@@ -410,10 +410,6 @@ bool AnchorEvaluatorImpl::AllowAnchor() const {
     case Mode::kRight:
     case Mode::kTop:
     case Mode::kBottom:
-    case Mode::kBaseLeft:
-    case Mode::kBaseRight:
-    case Mode::kBaseTop:
-    case Mode::kBaseBottom:
       return true;
     case Mode::kNone:
     case Mode::kSize:
@@ -430,22 +426,16 @@ bool AnchorEvaluatorImpl::AllowAnchorSize() const {
     case Mode::kRight:
     case Mode::kTop:
     case Mode::kBottom:
-    case Mode::kBaseLeft:
-    case Mode::kBaseRight:
-    case Mode::kBaseTop:
-    case Mode::kBaseBottom:
       return false;
   }
 }
 
 bool AnchorEvaluatorImpl::IsYAxis() const {
-  return GetMode() == Mode::kTop || GetMode() == Mode::kBottom ||
-         GetMode() == Mode::kBaseTop || GetMode() == Mode::kBaseBottom;
+  return GetMode() == Mode::kTop || GetMode() == Mode::kBottom;
 }
 
 bool AnchorEvaluatorImpl::IsRightOrBottom() const {
-  return GetMode() == Mode::kRight || GetMode() == Mode::kBottom ||
-         GetMode() == Mode::kBaseRight || GetMode() == Mode::kBaseBottom;
+  return GetMode() == Mode::kRight || GetMode() == Mode::kBottom;
 }
 
 bool AnchorEvaluatorImpl::ShouldUseScrollAdjustmentFor(
@@ -522,29 +512,6 @@ std::optional<LayoutUnit> AnchorEvaluatorImpl::EvaluateAnchorSize(
                                      self_writing_direction_.GetWritingMode());
 }
 
-std::optional<LogicalRect>
-AnchorEvaluatorImpl::GetAdditionalFallbackBoundsRect() const {
-  if (!query_object_) {
-    return std::nullopt;
-  }
-  const ScopedCSSName* position_fallback_bounds =
-      query_object_->StyleRef().PositionFallbackBounds();
-  if (!position_fallback_bounds || !AnchorQuery()) {
-    return std::nullopt;
-  }
-  const LogicalAnchorReference* reference =
-      AnchorQuery()->AnchorReference(*query_object_, position_fallback_bounds);
-  if (!reference) {
-    return std::nullopt;
-  }
-  // `reference->rect` is in container's writing direction. Convert it to self
-  // writing direction, but the offset is still relative to container.
-  WritingModeConverter self_converter(self_writing_direction_,
-                                      container_converter_.OuterSize());
-  return self_converter.ToLogical(
-      container_converter_.ToPhysical(reference->rect));
-}
-
 std::optional<PhysicalOffset> AnchorEvaluatorImpl::ComputeAnchorCenterOffsets(
     const ComputedStyleBuilder& builder) {
   // Parameter `percentage` is unused for any non-percentage anchor value.
@@ -602,25 +569,25 @@ AnchorEvaluatorImpl::ComputeInsetAreaOffsetsForLayout(
   // Note that the inset adjustment is already set to zero above, so there's
   // nothing to do here for nullopt values.
   if (std::optional<blink::AnchorQuery> query = physical_inset_area.UsedTop()) {
-    AnchorScope anchor_scope(AnchorScope::Mode::kBaseTop, this);
+    AnchorScope anchor_scope(AnchorScope::Mode::kTop, this);
     top = Evaluate(query.value(), position_anchor,
                    /* inset_area_offsets */ std::nullopt);
   }
   if (std::optional<blink::AnchorQuery> query =
           physical_inset_area.UsedBottom()) {
-    AnchorScope anchor_scope(AnchorScope::Mode::kBaseBottom, this);
+    AnchorScope anchor_scope(AnchorScope::Mode::kBottom, this);
     bottom = Evaluate(query.value(), position_anchor,
                       /* inset_area_offsets */ std::nullopt);
   }
   if (std::optional<blink::AnchorQuery> query =
           physical_inset_area.UsedLeft()) {
-    AnchorScope anchor_scope(AnchorScope::Mode::kBaseLeft, this);
+    AnchorScope anchor_scope(AnchorScope::Mode::kLeft, this);
     left = Evaluate(query.value(), position_anchor,
                     /* inset_area_offsets */ std::nullopt);
   }
   if (std::optional<blink::AnchorQuery> query =
           physical_inset_area.UsedRight()) {
-    AnchorScope anchor_scope(AnchorScope::Mode::kBaseRight, this);
+    AnchorScope anchor_scope(AnchorScope::Mode::kRight, this);
     right = Evaluate(query.value(), position_anchor,
                      /* inset_area_offsets */ std::nullopt);
   }

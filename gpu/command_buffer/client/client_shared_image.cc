@@ -9,6 +9,7 @@
 
 #include "base/check_is_test.h"
 #include "base/containers/contains.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "components/viz/common/resources/shared_image_format_utils.h"
 #include "gpu/command_buffer/common/gpu_memory_buffer_support.h"
 #include "gpu/command_buffer/common/shared_image_capabilities.h"
@@ -121,8 +122,8 @@ BASE_FEATURE(kUseUniversalGetTextureTargetFunction,
              "UseUniversalGetTextureTargetFunction",
              base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kDestroySharedImageAutomatically,
-             "DestroySharedImageAutomatically",
+BASE_FEATURE(kEnableAutomaticSharedImageManagement,
+             "EnableAutomaticSharedImageManagement",
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 ClientSharedImage::ScopedMapping::ScopedMapping() = default;
@@ -278,7 +279,7 @@ ClientSharedImage::~ClientSharedImage() {
     return;
   }
 
-  if (base::FeatureList::IsEnabled(kDestroySharedImageAutomatically) ||
+  if (base::FeatureList::IsEnabled(kEnableAutomaticSharedImageManagement) ||
       marked_for_destruction_) {
     auto sii = sii_holder_->Get();
     if (sii) {
@@ -393,6 +394,15 @@ scoped_refptr<ClientSharedImage> ClientSharedImage::ImportUnowned(
       exported_shared_image.mailbox_, exported_shared_image.metadata_,
       exported_shared_image.creation_sync_token_,
       exported_shared_image.texture_target_));
+}
+
+void ClientSharedImage::OnMemoryDump(
+    base::trace_event::ProcessMemoryDump* pmd,
+    const base::trace_event::MemoryAllocatorDumpGuid& buffer_dump_guid,
+    int importance) {
+  auto tracing_guid = GetGUIDForTracing();
+  pmd->CreateSharedGlobalAllocatorDump(tracing_guid);
+  pmd->AddOwnershipEdge(buffer_dump_guid, tracing_guid, importance);
 }
 
 // static

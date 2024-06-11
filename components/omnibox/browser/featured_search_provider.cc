@@ -12,7 +12,9 @@
 #include "build/build_config.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_match_classification.h"
 #include "components/omnibox/browser/autocomplete_provider_client.h"
+#include "components/omnibox/browser/in_memory_url_index_types.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_data.h"
@@ -28,7 +30,11 @@ constexpr bool kIsDesktop = !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS);
 
 // Scored higher than history URL provider suggestions since inputs like '@b'
 // would default 'bing.com' instead (history URL provider seems to ignore '@'
-// prefix in the input).
+// prefix in the input). Featured Enterprise search ranks higher than "ask
+// google" suggestions, which ranks higher than the other starter pack
+// suggestions.
+const int FeaturedSearchProvider::kAskGoogleRelevance = 1460;
+const int FeaturedSearchProvider::kFeaturedEnterpriseSearchRelevance = 1470;
 const int FeaturedSearchProvider::kStarterPackRelevance = 1450;
 
 FeaturedSearchProvider::FeaturedSearchProvider(
@@ -41,19 +47,23 @@ FeaturedSearchProvider::FeaturedSearchProvider(
 void FeaturedSearchProvider::Start(const AutocompleteInput& input,
                                    bool minimal_changes) {
   matches_.clear();
+
+  // In zero suggest, show an informational IPH message.  All other
+  // FeaturedSearchProvider suggestions require a non-empty input, so it's safe
+  // to return early in zps.
+  if (input.IsZeroSuggest()) {
+    if (OmniboxFieldTrial::IsStarterPackIPHEnabled()) {
+      AddIPHMatch();
+    }
+    return;
+  }
+
   if (input.focus_type() != metrics::OmniboxFocusType::INTERACTION_DEFAULT ||
       (input.type() == metrics::OmniboxInputType::EMPTY)) {
     return;
   }
 
   DoStarterPackAutocompletion(input);
-
-  // TODO(crbug.com/333762301): Implement smarter triggering for the IPH match.
-  //  As is, the IPH message will always be displayed. This might make sense to
-  //  move to the ZPS provider.
-  if (OmniboxFieldTrial::IsStarterPackIPHEnabled()) {
-    AddIPHMatch();
-  }
 }
 
 FeaturedSearchProvider::~FeaturedSearchProvider() = default;
@@ -79,6 +89,10 @@ void FeaturedSearchProvider::DoStarterPackAutocompletion(
         }
 
         AddStarterPackMatch(*match, input);
+      } else if (base::FeatureList::IsEnabled(
+                     omnibox::kShowFeaturedEnterpriseSiteSearch) &&
+                 match->featured_by_policy()) {
+        AddFeaturedEnterpriseSearchMatch(*match, input);
       }
     }
   }
@@ -126,7 +140,7 @@ void FeaturedSearchProvider::AddStarterPackMatch(
       match.description = l10n_util::GetStringFUTF16(
           IDS_OMNIBOX_INSTANT_KEYWORD_CHAT_TEXT, template_url.keyword(),
           template_url.short_name());
-      match.relevance += 10;
+      match.relevance = kAskGoogleRelevance;
     } else {
       std::u16string short_name = template_url.short_name();
       if (template_url.short_name() == u"Tabs") {
@@ -166,8 +180,43 @@ void FeaturedSearchProvider::AddIPHMatch() {
   // Use this suggestion's contents field to display a message to the user that
   // cannot be acted upon.
   match.contents = l10n_util::GetStringUTF16(IDS_OMNIBOX_GEMINI_IPH);
-  match.contents_class.emplace_back(0, ACMatchClassification::NONE);
-  match.from_keyword = true;
+
+  // Bolds just the "@gemini" portion of the IPH string. The rest of the string
+  // is dimmed.
+  TermMatches term_matches = MatchTermInString(u"@gemini", match.contents, 0);
+  match.contents_class = ClassifyTermMatches(
+      term_matches, match.contents.size(), ACMatchClassification::MATCH,
+      ACMatchClassification::DIM);
+
+  matches_.push_back(match);
+}
+
+void FeaturedSearchProvider::AddFeaturedEnterpriseSearchMatch(
+    const TemplateURL& template_url,
+    const AutocompleteInput& input) {
+  if (!kIsDesktop || input.current_page_classification() ==
+                         metrics::OmniboxEventProto::NTP_REALBOX) {
+    return;
+  }
+
+  AutocompleteMatch match(this, kFeaturedEnterpriseSearchRelevance, false,
+                          AutocompleteMatchType::FEATURED_ENTERPRISE_SEARCH);
+
+  match.fill_into_edit = template_url.keyword();
+  match.inline_autocompletion =
+      match.fill_into_edit.substr(input.text().length());
+  match.destination_url = GURL(template_url.url());
+  match.transition = ui::PAGE_TRANSITION_GENERATED;
+  match.description = l10n_util::GetStringFUTF16(
+      IDS_OMNIBOX_INSTANT_KEYWORD_SEARCH_TEXT, template_url.keyword(),
+      template_url.short_name());
+  match.description_class = {
+      {0, ACMatchClassification::NONE},
+      {template_url.keyword().size(), ACMatchClassification::DIM}};
+  match.contents.clear();
+  match.contents_class = {{}};
+  match.allowed_to_be_default_match = false;
+  match.keyword = template_url.keyword();
 
   matches_.push_back(match);
 }

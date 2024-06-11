@@ -15,6 +15,8 @@
 #include "chrome/browser/ui/download/download_item_mode.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/download/public/common/download_danger_type.h"
+#include "components/prefs/pref_service.h"
+#include "components/safe_browsing/core/common/features.h"
 #include "components/safe_browsing/core/common/proto/csd.pb.h"
 #include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -365,8 +367,6 @@ void DownloadBubbleRowViewInfo::Reset() {
 }
 
 bool DownloadBubbleRowViewInfo::ShouldShowDeepScanNotice() const {
-  return model_->GetDangerType() ==
-             download::DOWNLOAD_DANGER_TYPE_PROMPT_FOR_SCANNING &&
-         safe_browsing::IsEnhancedProtectionEnabled(
-             *model_->profile()->GetPrefs());
+  return ShouldShowDeepScanPromptNotice(model_->profile(),
+                                        model_->GetDangerType());
 }

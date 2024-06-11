@@ -87,9 +87,6 @@ import org.chromium.components.embedder_support.delegate.WebContentsDelegateAndr
 public abstract class BaseCustomTabActivity extends ChromeActivity<BaseCustomTabActivityComponent> {
     protected static Integer sOverrideCoreCountForTesting;
 
-    // Fallback study name used for experiments ids.
-    public static final String GSA_FALLBACK_STUDY_NAME = "GsaExperiments";
-
     protected BaseCustomTabRootUiCoordinator mBaseCustomTabRootUiCoordinator;
     protected BrowserServicesIntentDataProvider mIntentDataProvider;
     protected CustomTabDelegateFactory mDelegateFactory;
@@ -463,8 +460,15 @@ public abstract class BaseCustomTabActivity extends ChromeActivity<BaseCustomTab
     @Override
     public void finishNativeInitialization() {
         if (isTaskRoot()) {
-            UsageStatsService.createPageViewObserverIfEnabled(
-                    this, getActivityTabProvider(), getTabContentManagerSupplier());
+            getProfileProviderSupplier()
+                    .runSyncOrOnAvailable(
+                            (profileProvider) -> {
+                                UsageStatsService.createPageViewObserverIfEnabled(
+                                        this,
+                                        profileProvider.getOriginalProfile(),
+                                        getActivityTabProvider(),
+                                        getTabContentManagerSupplier());
+                            });
         }
         if (!getIntentDataProvider().isWebappOrWebApkActivity()) {
             mTabController.finishNativeInitialization();
@@ -766,8 +770,7 @@ public abstract class BaseCustomTabActivity extends ChromeActivity<BaseCustomTab
         if (experimentIds != null) {
             // When ids are set through the intent, we don't want them to override the existing ids.
             boolean override = false;
-            UmaSessionStats.registerExternalExperiment(
-                    GSA_FALLBACK_STUDY_NAME, experimentIds, override);
+            UmaSessionStats.registerExternalExperiment(experimentIds, override);
         }
         super.maybePreconnect();
     }

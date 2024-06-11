@@ -41,7 +41,7 @@ class CONTENT_EXPORT PermissionControllerDelegate {
   // failed, timed out or succeeded, the |callback| will be run. The order of
   // statuses in the returned vector will correspond to the order of requested
   // permission types.
-  // TODO(crbug.com/1462930): `RequestPermissions` and
+  // TODO(crbug.com/40275129): `RequestPermissions` and
   // `RequestPermissionsFromCurrentDocument` do exactly the same things. Merge
   // them together.
   virtual void RequestPermissions(
@@ -127,6 +127,7 @@ class CONTENT_EXPORT PermissionControllerDelegate {
       content::RenderProcessHost* render_process_host,
       content::RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
+      bool should_include_device_status,
       base::RepeatingCallback<void(PermissionStatus)> callback) = 0;
 
   // Unregisters from permission status change notifications. The

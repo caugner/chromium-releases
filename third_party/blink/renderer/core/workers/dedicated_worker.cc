@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/feature_list.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/trace_event/typed_macros.h"
 #include "base/unguessable_token.h"
@@ -198,6 +199,7 @@ void DedicatedWorker::postMessage(ScriptState* script_state,
 void DedicatedWorker::Start() {
   TRACE_EVENT("blink.worker", "DedicatedWorker::Start");
   DCHECK(GetExecutionContext()->IsContextThread());
+  start_time_ = base::TimeTicks::Now();
 
   // This needs to be done after the UpdateStateIfNeeded is called as
   // calling into the debugger can cause a breakpoint.
@@ -234,6 +236,9 @@ void DedicatedWorker::Start() {
     return;
   }
 
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("blink.worker",
+                                    "LegacyDedicatedWorker Specific Setup",
+                                    TRACE_ID_LOCAL(this));
   mojo::PendingRemote<network::mojom::blink::URLLoaderFactory>
       blob_url_loader_factory;
   if (script_request_url_.ProtocolIs("blob")) {
@@ -393,6 +398,10 @@ void DedicatedWorker::OnFinished(
     mojo::PendingRemote<mojom::blink::BackForwardCacheControllerHost>
         back_forward_cache_controller_host) {
   DCHECK(GetExecutionContext()->IsContextThread());
+  TRACE_EVENT("blink.worker", "DedicatedWorker::OnFinished");
+  TRACE_EVENT_NESTABLE_ASYNC_END0("blink.worker",
+                                  "LegacyDedicatedWorker Specific Setup",
+                                  TRACE_ID_LOCAL(this));
   if (classic_script_loader_->Canceled()) {
     // Do nothing.
   } else if (classic_script_loader_->Failed()) {
@@ -436,6 +445,8 @@ void DedicatedWorker::ContinueStart(
     RejectCoepUnsafeNone reject_coep_unsafe_none,
     mojo::PendingRemote<mojom::blink::BackForwardCacheControllerHost>
         back_forward_cache_controller_host) {
+  UMA_HISTOGRAM_TIMES("Worker.TopLevelScript.LoadStartedTime",
+                      base::TimeTicks::Now() - start_time_);
   context_proxy_->StartWorkerGlobalScope(
       CreateGlobalScopeCreationParams(
           script_url, referrer_policy,
@@ -516,7 +527,7 @@ DedicatedWorker::CreateGlobalScopeCreationParams(
           ? mojom::blink::ScriptType::kClassic
           : mojom::blink::ScriptType::kModule;
 
-  return std::make_unique<GlobalScopeCreationParams>(
+  auto params = std::make_unique<GlobalScopeCreationParams>(
       script_url, script_type, options_->name(), execution_context->UserAgent(),
       execution_context->GetUserAgentMetadata(), CreateWebWorkerFetchContext(),
       mojo::Clone(
@@ -541,6 +552,8 @@ DedicatedWorker::CreateGlobalScopeCreationParams(
       /*interface_registry=*/nullptr,
       std::move(agent_group_scheduler_compositor_task_runner),
       top_level_frame_security_origin, execution_context->HasStorageAccess());
+  params->dedicated_worker_start_time = start_time_;
+  return params;
 }
 
 scoped_refptr<WebWorkerFetchContext>

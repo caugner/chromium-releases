@@ -20,7 +20,6 @@
 #include "chrome/browser/signin/dice_tab_helper.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/process_dice_header_delegate_impl.h"
-#include "chrome/browser/signin/signin_features.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/profiles/profile_picker.h"
 #include "chrome/browser/ui/startup/first_run_service.h"
@@ -81,7 +80,6 @@ const DeepQuery kSearchEngineChoiceActionButton{"search-engine-choice-app",
 
 struct TestParam {
   std::string test_suffix;
-  bool with_default_browser_step = false;
   bool with_search_engine_choice_step = false;
   bool with_privacy_sandbox_enabled = false;
 };
@@ -93,12 +91,7 @@ std::string ParamToTestSuffix(const ::testing::TestParamInfo<TestParam>& info) {
 // Permutations of supported parameters.
 const TestParam kTestParams[] = {
     {.test_suffix = "Default"},
-    {.test_suffix = "WithDefaultBrowserStep",
-     .with_default_browser_step = true},
     {.test_suffix = "WithSearchEngineChoiceStep",
-     .with_search_engine_choice_step = true},
-    {.test_suffix = "WithDefaultBrowserAndSearchEngineChoiceSteps",
-     .with_default_browser_step = true,
      .with_search_engine_choice_step = true},
     {.test_suffix = "WithSearchEngineChoiceAndPrivacySandboxEnabled",
      .with_search_engine_choice_step = true,
@@ -266,10 +259,6 @@ class FirstRunParameterizedInteractiveUiTest
   FirstRunParameterizedInteractiveUiTest() {
     std::vector<base::test::FeatureRefAndParams> enabled_features_and_params;
     std::vector<base::test::FeatureRef> disabled_features;
-    enabled_features_and_params.push_back(
-        {kForYouFre,
-         {{kForYouFreWithDefaultBrowserStep.name,
-           WithDefaultBrowserStep() ? "forced" : "no"}}});
 
     if (WithSearchEngineChoiceStep()) {
       scoped_chrome_build_override_ = std::make_unique<base::AutoReset<bool>>(
@@ -302,6 +291,10 @@ class FirstRunParameterizedInteractiveUiTest
     // Change the country to belgium so that the search engine choice test works
     // as intended.
     command_line->AppendSwitchASCII(switches::kSearchEngineChoiceCountry, "BE");
+
+    // The default browser step is normally only shown on Windows. If it's
+    // forced, it should be shown on the other platforms for testing.
+    command_line->AppendSwitch(switches::kForceFreDefaultBrowserStep);
   }
 
   void SetUp() override {
@@ -330,10 +323,6 @@ class FirstRunParameterizedInteractiveUiTest
       SearchEngineChoiceDialogService::SetDialogDisabledForTests(
           /*dialog_disabled=*/false);
     }
-  }
-
-  bool WithDefaultBrowserStep() const {
-    return GetParam().with_default_browser_step;
   }
 
   bool WithSearchEngineChoiceStep() const {
@@ -415,8 +404,7 @@ IN_PROC_BROWSER_TEST_P(FirstRunParameterizedInteractiveUiTest, CloseWindow) {
           .SetMustRemainVisible(false));
   WaitForPickerClosed();
 
-  EXPECT_EQ(kForYouFreCloseShouldProceed.Get(), proceed_future.Get());
-
+  EXPECT_TRUE(proceed_future.Get());
   ASSERT_TRUE(IsProfileNameDefault());
 
   // Checking the expected metrics from this flow.
@@ -528,8 +516,7 @@ IN_PROC_BROWSER_TEST_P(FirstRunParameterizedInteractiveUiTest, SignInAndSync) {
       If([&] { return WithSearchEngineChoiceStep(); },
          CompleteSearchEngineChoiceStep()),
 
-      If([&] { return WithDefaultBrowserStep(); },
-         CompleteDefaultBrowserStep()));
+      CompleteDefaultBrowserStep());
 
   WaitForPickerClosed();
 
@@ -549,11 +536,9 @@ IN_PROC_BROWSER_TEST_P(FirstRunParameterizedInteractiveUiTest, SignInAndSync) {
       "Signin.SyncOptIn.Completed",
       signin_metrics::AccessPoint::ACCESS_POINT_FOR_YOU_FRE, 1);
 
-  if (WithDefaultBrowserStep()) {
-    histogram_tester().ExpectUniqueSample(
-        "ProfilePicker.FirstRun.DefaultBrowser",
-        DefaultBrowserChoice::kClickSetAsDefault, 1);
-  }
+  histogram_tester().ExpectUniqueSample(
+      "ProfilePicker.FirstRun.DefaultBrowser",
+      DefaultBrowserChoice::kClickSetAsDefault, 1);
 
   if (WithSearchEngineChoiceStep()) {
     histogram_tester().ExpectBucketCount(
@@ -629,8 +614,8 @@ IN_PROC_BROWSER_TEST_P(FirstRunParameterizedInteractiveUiTest, DeclineSync) {
 
       If([&] { return WithSearchEngineChoiceStep(); },
          CompleteSearchEngineChoiceStep()),
-      If([&] { return WithDefaultBrowserStep(); },
-         CompleteDefaultBrowserStep()));
+
+      CompleteDefaultBrowserStep());
 
   // Wait for the picker to be closed and deleted.
   WaitForPickerClosed();
@@ -770,11 +755,11 @@ IN_PROC_BROWSER_TEST_P(FirstRunParameterizedInteractiveUiTest,
 
       If([&] { return WithSearchEngineChoiceStep(); },
          CompleteSearchEngineChoiceStep()),
-      If([&] { return WithDefaultBrowserStep(); },
-         CompleteDefaultBrowserStep()));
+
+      CompleteDefaultBrowserStep());
 
   WaitForPickerClosed();
-  EXPECT_EQ(kForYouFreCloseShouldProceed.Get(), proceed_future.Get());
+  EXPECT_TRUE(proceed_future.Get());
 
   ASSERT_TRUE(IsProfileNameDefault());
 
@@ -840,8 +825,8 @@ IN_PROC_BROWSER_TEST_P(FirstRunParameterizedInteractiveUiTest,
 
       If([&] { return WithSearchEngineChoiceStep(); },
          CompleteSearchEngineChoiceStep()),
-      If([&] { return WithDefaultBrowserStep(); },
-         CompleteDefaultBrowserStep()));
+
+      CompleteDefaultBrowserStep());
 
   // Wait for the picker to be closed and deleted.
   WaitForPickerClosed();

@@ -316,14 +316,13 @@ class RenderViewContextMenu
   void AppendSearchLensForImageItems();
   void AppendSearchWebForImageItems();
   void AppendProtocolHandlerSubMenu();
+  // TODO(b/316143236): Remove this method (along with the methods called by it)
+  // once `kPasswordManualFallbackAvailable` is rolled out.
   void AppendPasswordItems();
   void AppendSharingItems();
-#if !BUILDFLAG(IS_FUCHSIA)
   void AppendClickToCallItem();
-#endif
   void AppendRegionSearchItem();
   void AppendLiveCaptionItem();
-  bool AppendFollowUnfollowItem();
   void AppendSendTabToSelfItem(bool add_separator);
   void AppendUserNotesItems();
   bool AppendQRCodeGeneratorItem(bool for_image,

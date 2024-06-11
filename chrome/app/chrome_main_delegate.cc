@@ -424,7 +424,7 @@ bool HandleVersionSwitches(const base::CommandLine& command_line) {
   return false;
 }
 
-// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// TODO(crbug.com/40118868): Revisit the macro expression once build flag switch
 // of lacros-chrome is complete.
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
 // Show the man page if --help or -h is on the command line.
@@ -797,12 +797,11 @@ void OnResourceExhausted() {
 }
 #endif  // !BUILDFLAG(IS_WIN)
 
-#if BUILDFLAG(IS_OZONE)
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
 void AddFeatureFlagsToCommandLine() {
   CHECK(!base::FeatureList::GetInstance());
   base::ScopedAddFeatureFlags flags(base::CommandLine::ForCurrentProcess());
 
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
   const auto& init_params = *chromeos::BrowserParamsProxy::Get();
   if (init_params.IsVariableRefreshRateAlwaysOn()) {
     flags.EnableIfNotSet(features::kEnableVariableRefreshRateAlwaysOn);
@@ -811,16 +810,8 @@ void AddFeatureFlagsToCommandLine() {
   if (init_params.IsPdfOcrEnabled()) {
     flags.EnableIfNotSet(features::kPdfOcr);
   }
-#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
-
-  // Disable currently unsupported web features per platform properties.
-  if (!ui::OzonePlatform::GetInstance()
-           ->GetPlatformProperties()
-           .supports_color_picker_dialog) {
-    flags.DisableIfNotSet(features::kEyeDropper);
-  }
 }
-#endif  // BUILDFLAG(IS_OZONE)
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
 bool IsCanaryDev() {
   const auto channel = chrome::GetChannel();
@@ -905,7 +896,6 @@ std::optional<int> ChromeMainDelegate::PostEarlyInitialization(
   base::win::AllowDarkModeForApp(true);
 #endif
 
-#if !BUILDFLAG(IS_FUCHSIA)
   // Schedule the cleanup of persistent histogram files. These tasks must only
   // be scheduled in the main browser after taking the process singleton. They
   // cannot be scheduled immediately after InstantiatePersistentHistograms()
@@ -922,7 +912,6 @@ std::optional<int> ChromeMainDelegate::PostEarlyInitialization(
       base::PathService::Get(chrome::DIR_USER_DATA, &metrics_dir)) {
     PersistentHistogramsCleanup(metrics_dir);
   }
-#endif  // !BUILDFLAG(IS_FUCHSIA)
 
   // Chrome disallows cookies by default. All code paths that want to use
   // cookies need to go through one of Chrome's URLRequestContexts which have
@@ -943,11 +932,8 @@ std::optional<int> ChromeMainDelegate::PostEarlyInitialization(
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableLacrosForkZygotesAtLoginScreen)) {
-    // If prelaunched at login screen, block waiting for the user to login.
-    MaybeBlockAtLoginScreen(/*after_zygotes_fork=*/true);
-  }
+  // If prelaunched at login screen, block waiting for the user to login.
+  MaybeBlockAtLoginScreen(/*after_zygotes_fork=*/true);
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
@@ -956,16 +942,9 @@ std::optional<int> ChromeMainDelegate::PostEarlyInitialization(
   chrome::SetLacrosDefaultPathsFromInitParams(init_params.DefaultPaths().get());
 #endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
-#if BUILDFLAG(IS_OZONE)
-  // Initialize Ozone platform and add required feature flags as per platform's
-  // properties. Must be added before feature list is created otherwise the
-  // added flag won't be picked up.
-#if BUILDFLAG(IS_LINUX)
-  ui::SetOzonePlatformForLinuxIfNeeded(*base::CommandLine::ForCurrentProcess());
-#endif
-  ui::OzonePlatform::PreEarlyInitialization();
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
   AddFeatureFlagsToCommandLine();
-#endif  // BUILDFLAG(IS_OZONE)
+#endif
 
   // The DBus initialization above is needed for FeatureList creation here;
   // features are needed for Mojo initialization; and Mojo initialization is
@@ -975,13 +954,22 @@ std::optional<int> ChromeMainDelegate::PostEarlyInitialization(
           ->chrome_feature_list_creator();
   chrome_feature_list_creator->CreateFeatureList();
 
-  // Force emitting `ThreadController` profiler metadata on Canary and Dev only,
-  // since they are the only channels where the data is used.
-  base::features::Init(
-      IsCanaryDev()
-          ? base::features::EmitThreadControllerProfilerMetadata::kForce
-          : base::features::EmitThreadControllerProfilerMetadata::
-                kFeatureDependent);
+#if BUILDFLAG(IS_OZONE)
+  // Initialize Ozone platform and add required feature flags as per platform's
+  // properties.
+#if BUILDFLAG(IS_LINUX)
+  ui::SetOzonePlatformForLinuxIfNeeded(*base::CommandLine::ForCurrentProcess());
+#endif
+  ui::OzonePlatform::PreEarlyInitialization();
+
+  // Disable currently unsupported web features per platform properties.
+  if (!ui::OzonePlatform::GetInstance()
+           ->GetPlatformProperties()
+           .supports_color_picker_dialog) {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        features::kEyeDropperNotSupported);
+  }
+#endif  // BUILDFLAG(IS_OZONE)
 
   content::InitializeMojoCore();
 
@@ -1086,7 +1074,7 @@ std::optional<int> ChromeMainDelegate::PostEarlyInitialization(
   chrome::CacheChannelInfo();
 #endif
 
-  // TODO(https://crbug.com/1360376): Consider deferring this to run after
+  // TODO(crbug.com/40237627): Consider deferring this to run after
   // startup.
   RequestUnwindPrerequisitesInstallation(chrome::GetChannel());
 
@@ -1159,10 +1147,11 @@ void ChromeMainDelegate::CommonEarlyInitialization(InvokedIn invoked_in) {
                        }},
       invoked_in);
 
+  const bool is_canary_dev = IsCanaryDev();
   const bool emit_crashes =
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC) || \
     BUILDFLAG(IS_WIN)
-      IsCanaryDev();
+      is_canary_dev;
 #else
       false;
 #endif
@@ -1170,6 +1159,14 @@ void ChromeMainDelegate::CommonEarlyInitialization(InvokedIn invoked_in) {
   base::HangWatcher::InitializeOnMainThread(hang_watcher_process_type,
                                             /*is_zygote_child=*/is_zygote_child,
                                             emit_crashes);
+
+  // Force emitting `ThreadController` profiler metadata on Canary and Dev only,
+  // since they are the only channels where the data is used.
+  base::features::Init(
+      is_canary_dev
+          ? base::features::EmitThreadControllerProfilerMetadata::kForce
+          : base::features::EmitThreadControllerProfilerMetadata::
+                kFeatureDependent);
 }
 
 #if BUILDFLAG(IS_WIN)
@@ -1306,7 +1303,7 @@ std::optional<int> ChromeMainDelegate::BasicStartupComplete() {
     return 0;  // Got a --credits switch; exit with a success error code.
   }
 
-  // TODO(crbug.com/1052397): Revisit the macro expression once build flag
+  // TODO(crbug.com/40118868): Revisit the macro expression once build flag
   // switch of lacros-chrome is complete.
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
   // This will directly exit if the user asked for help.
@@ -1507,14 +1504,6 @@ void ChromeMainDelegate::PreSandboxStartup() {
 
   crash_reporter::InitializeCrashKeys();
 
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableLacrosForkZygotesAtLoginScreen)) {
-    // If prelaunched at login screen, block waiting for the user to login.
-    MaybeBlockAtLoginScreen(/*after_zygotes_fork=*/false);
-  }
-#endif
-
 #if BUILDFLAG(IS_POSIX)
   ChromeCrashReporterClient::Create();
 #endif
@@ -1559,7 +1548,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
         chromeos::BrowserParamsProxy::Get();
     chrome::SetLacrosDefaultPathsFromInitParams(
         init_params->DefaultPaths().get());
-    // TODO(crbug.com/1357874): Currently, when launching Lacros at login
+    // TODO(crbug.com/40861376): Currently, when launching Lacros at login
     // screen, and if resource file sharing is also enabled, Lacros will block
     // here waiting for login. That's before the Zygote process is forked, so we
     // can't take full advantage of the pre-launching optimization. Investigate
@@ -1785,7 +1774,6 @@ void ChromeMainDelegate::SandboxInitialized(const std::string& process_type) {
   SuppressWindowsErrorDialogs();
 #endif
 
-#if !BUILDFLAG(IS_FUCHSIA)
   // If this is a browser process, initialize the persistent histograms system.
   // This is done as soon as possible to ensure metrics collection coverage.
   // For Fuchsia, persistent histogram initialization is done after field trial
@@ -1812,7 +1800,6 @@ void ChromeMainDelegate::SandboxInitialized(const std::string& process_type) {
       NOTREACHED();
     }
   }
-#endif  // !BUILDFLAG(IS_FUCHSIA)
 
 #if BUILDFLAG(ENABLE_NACL)
   ChromeContentClient::SetNaClEntryFunctions(nacl_plugin::PPP_GetInterface,
@@ -2000,6 +1987,12 @@ void ChromeMainDelegate::InitializeMemorySystem() {
       command_line->GetSwitchValueASCII(switches::kProcessType);
   const bool is_browser_process = process_type.empty();
   const bool gwp_asan_boost_sampling = is_browser_process || IsCanaryDev();
+  const memory_system::DispatcherParameters::AllocationTraceRecorderInclusion
+      allocation_recorder_inclusion =
+          is_browser_process ? memory_system::DispatcherParameters::
+                                   AllocationTraceRecorderInclusion::kDynamic
+                             : memory_system::DispatcherParameters::
+                                   AllocationTraceRecorderInclusion::kIgnore;
 
   memory_system::Initializer()
       .SetGwpAsanParameters(gwp_asan_boost_sampling, process_type)
@@ -2007,8 +2000,6 @@ void ChromeMainDelegate::InitializeMemorySystem() {
                                     GetProfileParamsProcess(*command_line))
       .SetDispatcherParameters(memory_system::DispatcherParameters::
                                    PoissonAllocationSamplerInclusion::kEnforce,
-                               memory_system::DispatcherParameters::
-                                   AllocationTraceRecorderInclusion::kDynamic,
-                               process_type)
+                               allocation_recorder_inclusion, process_type)
       .Initialize(memory_system_);
 }

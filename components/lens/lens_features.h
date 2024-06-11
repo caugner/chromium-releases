@@ -196,9 +196,18 @@ extern std::string GetPreconnectKeyForLens();
 COMPONENT_EXPORT(LENS_FEATURES)
 extern bool GetShouldIssueProcessPrewarmingForLens();
 
-// Returns whether the Lens overlay is enabled
+// Returns whether the kLensOverlay Feature is enabled.
 COMPONENT_EXPORT(LENS_FEATURES)
 extern bool IsLensOverlayEnabled();
+
+// Returns the finch configured help center URL for lens permission modal.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern std::string GetLensOverlayHelpCenterURL();
+
+// Returns the minimum amount of physical memory required to enable the Lens
+// overlay feature.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern int GetLensOverlayMinRamMb();
 
 // Returns the finch configured results search URL to use as base for queries.
 COMPONENT_EXPORT(LENS_FEATURES)
@@ -208,6 +217,13 @@ extern std::string GetLensOverlayResultsSearchURL();
 // feature.
 COMPONENT_EXPORT(LENS_FEATURES)
 extern int GetLensOverlayImageCompressionQuality();
+
+// Returns the finch configured image compression quality for the full
+// screenshot being used for the lens overlay feature. This is different than
+// the "image" compression quality because it is stays on the client to be
+// displayed on the overlay.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern int GetLensOverlayScreenshotRenderQuality();
 
 // Returns the finch configured max image area for the Lens overlay feature.
 COMPONENT_EXPORT(LENS_FEATURES)
@@ -224,6 +240,67 @@ extern int GetLensOverlayImageMaxWidth();
 // Returns the finch configured endpoint URL for the Lens overlay.
 COMPONENT_EXPORT(LENS_FEATURES)
 extern std::string GetLensOverlayEndpointURL();
+
+// Returns whether to highlight text and object bounding boxes for debugging.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern bool IsLensOverlayDebuggingEnabled();
+
+// Returns whether to use oauth for signed in requests to the endpoint.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern bool UseOauthForLensOverlayRequests();
+
+// Returns the time before the Lens overlay cluster info is invalid, in seconds.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern int GetLensOverlayClusterInfoLifetimeSeconds();
+
+// Returns whether to include the search context with text-only Lens Overlay
+// requests.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern bool UseSearchContextForTextOnlyLensOverlayRequests();
+
+// Returns the margin in pixels to add to the top and bottom of word bounding
+// boxes.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern int GetLensOverlayVerticalTextMargin();
+
+// Returns the margin in pixels to add to the left and right of word bounding
+// boxes.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern int GetLensOverlayHorizontalTextMargin();
+
+// Returns whether to show the lens overlay search bubble.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern bool IsLensOverlaySearchBubbleEnabled();
+
+// Returns whether to render the Lens overlay shimmer.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern bool IsLensOverlayShimmerEnabled();
+
+// Returns whether to allow dragging the Lens overlay selection box.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern bool IsLensOverlaySelectionDraggingEnabled();
+
+// Returns whether to require that Google is the user's DSE (default search
+// engine) for the Lens overlay feature to be enabled.
+//
+// NOTE: This should only be used for internal testing.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern bool IsLensOverlayGoogleDseRequired();
+
+// Returns the finch configured loading image URL for the results in Lens
+// Overlay.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern std::string GetLensOverlayResultsSearchLoadingURL();
+
+// Returns the ideal height of the region that is created when a user taps
+// rather than drags.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern int GetLensOverlayTapRegionHeight();
+
+// Returns the ideal width of the region that is created when a user taps
+// rather than drags.
+COMPONENT_EXPORT(LENS_FEATURES)
+extern int GetLensOverlayTapRegionWidth();
 }  // namespace lens::features
 
 #endif  // COMPONENTS_LENS_LENS_FEATURES_H_

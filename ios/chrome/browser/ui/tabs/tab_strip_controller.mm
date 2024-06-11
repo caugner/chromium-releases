@@ -10,6 +10,7 @@
 
 #import "base/apple/bundle_locations.h"
 #import "base/apple/foundation_util.h"
+#import "base/debug/dump_without_crashing.h"
 #import "base/i18n/rtl.h"
 #import "base/ios/ios_util.h"
 #import "base/memory/raw_ptr.h"
@@ -224,7 +225,7 @@ const CGFloat kSymbolSize = 18;
   BOOL _highlightsSelectedTab;
 
   // YES when in reordering mode.
-  // TODO(crbug.com/1327313): This is redundant with `_draggedTab`.  Remove it.
+  // TODO(crbug.com/40841094): This is redundant with `_draggedTab`.  Remove it.
   BOOL _isReordering;
 
   // The tab that is currently being dragged.  nil when not in reordering mode.
@@ -491,7 +492,7 @@ const CGFloat kSymbolSize = 18;
                             underName:kNewTabButtonGuide];
 
     _isIncognito = _browser->GetBrowserState()->IsOffTheRecord();
-    // TODO(crbug.com/600829): Rewrite layout code and convert these masks to
+    // TODO(crbug.com/41247629): Rewrite layout code and convert these masks to
     // to trailing and leading margins rather than right and bottom.
     _buttonNewTab.autoresizingMask = (UIViewAutoresizingFlexibleRightMargin |
                                       UIViewAutoresizingFlexibleBottomMargin);
@@ -950,7 +951,7 @@ const CGFloat kSymbolSize = 18;
   _fullscreenDisabler = nullptr;
 
   int fromIndex = [self webStateListIndexForTabView:_draggedTab];
-  // TODO(crbug.com/1049882): We're seeing crashes where fromIndex is
+  // TODO(crbug.com/40117861): We're seeing crashes where fromIndex is
   // kInvalidIndex, indicating that the dragged tab is no longer in the
   // WebStateList. This could happen if a tab closed itself during a drag.
   // Investigate this further, but for now, simply test `fromIndex` before
@@ -1258,16 +1259,12 @@ const CGFloat kSymbolSize = 18;
       break;
     }
     case WebStateListChange::Type::kGroupCreate:
-      NOTREACHED() << "Old Tab Strip doesn't support Tab Groups.";
-      break;
     case WebStateListChange::Type::kGroupVisualDataUpdate:
-      NOTREACHED() << "Old Tab Strip doesn't support Tab Groups.";
-      break;
     case WebStateListChange::Type::kGroupMove:
-      NOTREACHED() << "Old Tab Strip doesn't support Tab Groups.";
-      break;
     case WebStateListChange::Type::kGroupDelete:
-      NOTREACHED() << "Old Tab Strip doesn't support Tab Groups.";
+      // This can happen on iPad if tab-groups-in-grid and tab-groups-on-ipad
+      // are enabled, but not modern-tab-strip.
+      base::debug::DumpWithoutCrashing();
       break;
   }
 
@@ -1831,7 +1828,7 @@ const CGFloat kSymbolSize = 18;
 // Called when the TabView's close button was tapped.
 - (void)tabViewCloseButtonPressed:(TabView*)tabView {
   // Ignore taps while in reordering mode.
-  // TODO(crbug.com/754287): We should just hide the close buttons instead.
+  // TODO(crbug.com/40534506): We should just hide the close buttons instead.
   if ([self isReorderingTabs])
     return;
 

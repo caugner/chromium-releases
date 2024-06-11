@@ -34,7 +34,7 @@ export class MlTableElement extends CustomElement {
           signalName.replaceAll(/[A-Z]/g, ' $&').toLowerCase());
     });
 
-    this.$all<HTMLDivElement>('.thead .th')
+    this.$all<HTMLElement>('.thead .th')
         .forEach(th => th.title = th.textContent!);
 
     Object.values(ResponseFilter).forEach(responseFilter => {
@@ -128,6 +128,12 @@ export class MlTableElement extends CustomElement {
           tr.childElementCount ===
           this.getRequiredElement('.thead .tr').childElementCount);
     });
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'ml-table': MlTableElement;
   }
 }
 

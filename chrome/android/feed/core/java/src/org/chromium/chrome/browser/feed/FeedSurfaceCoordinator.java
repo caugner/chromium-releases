@@ -58,6 +58,7 @@ import org.chromium.chrome.browser.ui.signin.PersonalizedSigninPromoView;
 import org.chromium.chrome.browser.user_education.UserEducationHelper;
 import org.chromium.chrome.browser.xsurface.HybridListRenderer;
 import org.chromium.chrome.browser.xsurface.ProcessScope;
+import org.chromium.chrome.browser.xsurface.feed.FeedCardOpeningReliabilityLogger;
 import org.chromium.chrome.browser.xsurface.feed.FeedLaunchReliabilityLogger;
 import org.chromium.chrome.browser.xsurface.feed.FeedLaunchReliabilityLogger.SurfaceType;
 import org.chromium.chrome.browser.xsurface.feed.FeedSurfaceScope;
@@ -107,6 +108,7 @@ public class FeedSurfaceCoordinator
     private final ObserverList<SurfaceCoordinator.Observer> mObservers = new ObserverList<>();
     private final FeedActionDelegate mActionDelegate;
     private final HelpAndFeedbackLauncher mHelpAndFeedbackLauncher;
+    private final boolean mUseStaggeredLayout;
 
     // FeedReliabilityLogger params.
     private final @SurfaceType int mSurfaceType;
@@ -338,8 +340,12 @@ public class FeedSurfaceCoordinator
     }
 
     // Returns the index of the section header (for you and following tab header).
-    private int getSectionHeaderPosition() {
+    int getSectionHeaderPosition() {
         return mSectionHeaderIndex;
+    }
+
+    boolean useStaggeredLayout() {
+        return mUseStaggeredLayout;
     }
 
     /**
@@ -420,6 +426,7 @@ public class FeedSurfaceCoordinator
         mSectionHeaderIndex = 0;
         mToolbarHeight = toolbarHeight;
         mTabStripHeightSupplier = tabStripHeightSupplier;
+        mUseStaggeredLayout = DeviceFormFactor.isNonMultiDisplayContextOnTablet(mActivity);
 
         mRootView = new RootView(mActivity);
         mRootView.setPadding(0, mTabStripHeightSupplier.get(), 0, 0);
@@ -487,11 +494,17 @@ public class FeedSurfaceCoordinator
                 SectionHeaderListProperties.EXPANDING_DRAWER_VIEW_KEY,
                 optionsCoordinator.getView());
 
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.FEED_CONTAINMENT)) {
+            int padding =
+                    mActivity.getResources().getDimensionPixelSize(R.dimen.feed_header_top_margin);
+            mNtpHeader.setPadding(0, 0, 0, padding);
+        }
+
         // Mediator should be created before any Stream changes.
         boolean useUiConfig =
                 ntpHeader != null
                         && ChromeFeatureList.sSurfacePolish.isEnabled()
-                        && DeviceFormFactor.isNonMultiDisplayContextOnTablet(mActivity);
+                        && mUseStaggeredLayout;
         mMediator =
                 new FeedSurfaceMediator(
                         this,
@@ -800,7 +813,11 @@ public class FeedSurfaceCoordinator
                         ChromeFeatureList.FEED_USER_INTERACTION_RELIABILITY_REPORT)) {
                     userInteractionLogger = mSurfaceScope.getUserInteractionReliabilityLogger();
                 }
-                mReliabilityLogger = new FeedReliabilityLogger(launchLogger, userInteractionLogger);
+                FeedCardOpeningReliabilityLogger cardOpeningLogger =
+                        mSurfaceScope.getCardOpeningReliabilityLogger();
+                mReliabilityLogger =
+                        new FeedReliabilityLogger(
+                                launchLogger, userInteractionLogger, cardOpeningLogger);
                 launchLogger.logUiStarting(mSurfaceType, mEmbeddingSurfaceCreatedTimeNs);
             }
 
@@ -811,20 +828,30 @@ public class FeedSurfaceCoordinator
         RecyclerView view;
         if (mHybridListRenderer != null) {
             // XSurface returns a View, but it should be a RecyclerView.
-            boolean useStaggeredLayout =
-                    DeviceFormFactor.isNonMultiDisplayContextOnTablet(mActivity);
             view =
                     (RecyclerView)
                             mHybridListRenderer.bind(
-                                    mContentManager, mViewportView, useStaggeredLayout);
+                                    mContentManager, mViewportView, mUseStaggeredLayout);
             view.setId(R.id.feed_stream_recycler_view);
             view.setClipToPadding(false);
-            if (ChromeFeatureList.sSurfacePolish.isEnabled()) {
-                view.setBackground(
-                        AppCompatResources.getDrawable(
-                                mActivity, R.drawable.home_surface_background));
+
+            if (ChromeFeatureList.isEnabled(ChromeFeatureList.FEED_CONTAINMENT)) {
+                // Used to draw containment background.
+                view.addItemDecoration(
+                        new FeedItemDecoration(
+                                mActivity,
+                                this,
+                                (resId) -> {
+                                    return AppCompatResources.getDrawable(mActivity, resId);
+                                }));
             } else {
-                view.setBackgroundColor(SemanticColorUtils.getDefaultBgColor(mActivity));
+                if (ChromeFeatureList.sSurfacePolish.isEnabled()) {
+                    view.setBackground(
+                            AppCompatResources.getDrawable(
+                                    mActivity, R.drawable.home_surface_background));
+                } else {
+                    view.setBackgroundColor(SemanticColorUtils.getDefaultBgColor(mActivity));
+                }
             }
 
             // Work around https://crbug.com/943873 where default focus highlight shows up after
@@ -942,9 +969,11 @@ public class FeedSurfaceCoordinator
                 if (header instanceof NewTabPageLayout) {
                     lateralPaddingsPx = 0;
                 } else if (header == mSectionHeaderView) {
-                    mSectionHeaderView.setBackground(
-                            AppCompatResources.getDrawable(
-                                    mActivity, R.drawable.home_surface_background));
+                    if (!ChromeFeatureList.isEnabled(ChromeFeatureList.FEED_CONTAINMENT)) {
+                        mSectionHeaderView.setBackground(
+                                AppCompatResources.getDrawable(
+                                        mActivity, R.drawable.home_surface_background));
+                    }
                 } else if (header == mSigninPromoView) {
                     lateralPaddingsPx =
                             mActivity
@@ -964,11 +993,19 @@ public class FeedSurfaceCoordinator
             mHeaderCount = headerList.size();
             mMediator.notifyHeadersChanged(mHeaderCount);
         }
-        // The section header is the last header to be added, save its index.
-        mSectionHeaderIndex = headerViews.size() - 1;
+        // The section header is the last header to be added, excluding sign-in promo if it is
+        // visible, save its index.
+        mSectionHeaderIndex =
+                headerViews.size()
+                        - (mSigninPromoView != null
+                                        && mSigninPromoView.getVisibility() == View.VISIBLE
+                                ? 2
+                                : 1);
     }
 
-    /** @return The {@link SectionHeaderListProperties} model for the Feed section header. */
+    /**
+     * @return The {@link SectionHeaderListProperties} model for the Feed section header.
+     */
     PropertyModel getSectionHeaderModelForTest() {
         return mSectionHeaderModel;
     }

@@ -51,9 +51,10 @@ export enum ContentSettingsTypes {
   SERIAL_PORTS = 'serial-ports',
   SOUND = 'sound',
   STORAGE_ACCESS = 'storage-access',
+  TRACKING_PROTECTION = 'tracking-protection',
   USB_DEVICES = 'usb-devices',
   VR = 'vr',
-  WINDOW_MANAGEMENT = 'window-placement',
+  WINDOW_MANAGEMENT = 'window-management',
   ZOOM_LEVELS = 'zoom-levels',
   WEB_PRINTING = 'web-printing',
 
@@ -61,6 +62,7 @@ export enum ContentSettingsTypes {
   // are used everywhere where ContentSettingsTypes is used in JS.
   PDF_DOCUMENTS = 'pdfDocuments',
   SITE_DATA = 'site-data',
+  OFFER_WRITING_HELP = 'offer-writing-help',
 }
 
 /**

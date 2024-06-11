@@ -12,6 +12,7 @@
 #include "base/functional/callback.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
+#include "components/performance_manager/public/features.h"
 #include "components/performance_manager/public/graph/frame_node.h"
 #include "components/performance_manager/public/graph/graph.h"
 #include "components/performance_manager/public/graph/page_node.h"
@@ -21,6 +22,7 @@
 #include "components/performance_manager/resource_attribution/node_data_describers.h"
 #include "components/performance_manager/resource_attribution/performance_manager_aliases.h"
 #include "components/performance_manager/resource_attribution/worker_client_pages.h"
+#include "content/public/browser/browsing_instance_id.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -28,19 +30,21 @@ namespace resource_attribution {
 
 namespace {
 
+using performance_manager::features::kResourceAttributionIncludeOrigins;
+
 template <typename FrameOrWorkerNode>
-std::optional<OriginInPageContext> OriginInPageContextForNode(
+std::optional<OriginInBrowsingInstanceContext>
+OriginInBrowsingInstanceContextForNode(
     const FrameOrWorkerNode* node,
-    const PageNode* page_node) {
-  const auto url = node->GetURL();
-  if (!url.is_valid()) {
+    content::BrowsingInstanceId browsing_instance) {
+  if (!base::FeatureList::IsEnabled(kResourceAttributionIncludeOrigins)) {
     return std::nullopt;
   }
-  // TODO(http://crbug.com/333248839): Instead of creating the Origin from an
-  // URL, which loses some information, should store it as a node property. See
-  // https://chromium.googlesource.com/chromium/src/+/main/docs/security/origin-vs-url.md.
-  return OriginInPageContext(url::Origin::Create(url),
-                             page_node->GetResourceContext());
+  const std::optional<url::Origin> origin = node->GetOrigin();
+  if (!origin.has_value()) {
+    return std::nullopt;
+  }
+  return OriginInBrowsingInstanceContext(origin.value(), browsing_instance);
 }
 
 }  // namespace
@@ -138,25 +142,37 @@ void MemoryMeasurementProvider::OnMemorySummary(
           CHECK(inserted);
           accumulate_summary(f->GetPageNode()->GetResourceContext(), summary,
                              MeasurementAlgorithm::kSum);
-          std::optional<OriginInPageContext> origin_in_page_context =
-              OriginInPageContextForNode(f, f->GetPageNode());
-          if (origin_in_page_context.has_value()) {
-            accumulate_summary(origin_in_page_context.value(), summary,
-                               MeasurementAlgorithm::kSum);
+          std::optional<OriginInBrowsingInstanceContext>
+              origin_in_browsing_instance_context =
+                  OriginInBrowsingInstanceContextForNode(
+                      f, f->GetBrowsingInstanceId());
+          if (origin_in_browsing_instance_context.has_value()) {
+            accumulate_summary(origin_in_browsing_instance_context.value(),
+                               summary, MeasurementAlgorithm::kSum);
           }
         },
         [&](const WorkerNode* w, MemorySummaryMeasurement summary) {
           bool inserted = accumulate_summary(w->GetResourceContext(), summary,
                                              MeasurementAlgorithm::kSplit);
           CHECK(inserted);
-          for (const PageNode* page_node : GetWorkerClientPages(w)) {
+
+          auto [client_pages, client_browsing_instances] =
+              GetWorkerClientPagesAndBrowsingInstances(w);
+
+          for (const PageNode* page_node : client_pages) {
             accumulate_summary(page_node->GetResourceContext(), summary,
                                MeasurementAlgorithm::kSum);
-            std::optional<OriginInPageContext> origin_in_page_context =
-                OriginInPageContextForNode(w, page_node);
-            if (origin_in_page_context.has_value()) {
-              accumulate_summary(origin_in_page_context.value(), summary,
-                                 MeasurementAlgorithm::kSum);
+          }
+
+          for (content::BrowsingInstanceId browsing_instance :
+               client_browsing_instances) {
+            std::optional<OriginInBrowsingInstanceContext>
+                origin_in_browsing_instance_context =
+                    OriginInBrowsingInstanceContextForNode(w,
+                                                           browsing_instance);
+            if (origin_in_browsing_instance_context.has_value()) {
+              accumulate_summary(origin_in_browsing_instance_context.value(),
+                                 summary, MeasurementAlgorithm::kSum);
             }
           }
         });

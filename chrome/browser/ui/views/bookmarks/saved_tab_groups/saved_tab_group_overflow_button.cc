@@ -27,6 +27,11 @@
 #include "ui/views/controls/highlight_path_generator.h"
 #include "ui/views/view_class_properties.h"
 
+namespace {
+static constexpr int kDefaultIconSize = 16;
+static constexpr int kUIUpdateIconSize = 20;
+}  // namespace
+
 namespace tab_groups {
 
 SavedTabGroupOverflowButton::SavedTabGroupOverflowButton(
@@ -71,17 +76,18 @@ void SavedTabGroupOverflowButton::OnThemeChanged() {
   views::MenuButton::OnThemeChanged();
 
   ui::ColorProvider* color_provider = GetColorProvider();
-  const SkColor overflow_color =
-      color_provider->GetColor(kColorBookmarkButtonIcon);
-  const gfx::VectorIcon& icon = features::IsChromeRefresh2023()
-                                    ? kBookmarkbarOverflowRefreshIcon
-                                    : kOverflowChevronIcon;
+  bool is_ui_update = IsTabGroupsSaveUIUpdateEnabled();
+  const gfx::VectorIcon& icon = is_ui_update ? kSavedTabGroupBarEverythingIcon
+                                             : kBookmarkbarOverflowRefreshIcon;
+  const int icon_size = is_ui_update ? kUIUpdateIconSize : kDefaultIconSize;
   SetImageModel(
       views::Button::STATE_NORMAL,
-      ui::ImageModel::FromVectorIcon(IsTabGroupsSaveUIUpdateEnabled()
-                                         ? kSavedTabGroupBarEverythingIcon
-                                         : icon,
-                                     overflow_color));
+      ui::ImageModel::FromVectorIcon(
+          icon, color_provider->GetColor(kColorBookmarkButtonIcon), icon_size));
+  SetImageModel(
+      views::Button::STATE_DISABLED,
+      ui::ImageModel::FromVectorIcon(
+          icon, color_provider->GetColor(ui::kColorIconDisabled), icon_size));
   return;
 }
 

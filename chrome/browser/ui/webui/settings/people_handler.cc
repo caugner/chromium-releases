@@ -27,7 +27,6 @@
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/chrome_signin_pref_names.h"
-#include "chrome/browser/signin/dice_web_signin_interceptor.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/signin_error_controller_factory.h"
 #include "chrome/browser/signin/signin_promo.h"
@@ -51,6 +50,7 @@
 #include "components/signin/public/base/consent_level.h"
 #include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/base/signin_pref_names.h"
+#include "components/signin/public/base/signin_prefs.h"
 #include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/accounts_mutator.h"
@@ -155,10 +155,11 @@ void ParseConfigurationArguments(const base::Value::List& args,
                                  SyncConfigInfo* config,
                                  const base::Value** callback_id) {
   const std::string& json = args[1].GetString();
-  if ((*callback_id = &args[0]) && !json.empty())
+  if ((*callback_id = &args[0]) && !json.empty()) {
     CHECK(GetConfiguration(json, config));
-  else
+  } else {
     NOTREACHED();
+  }
 }
 
 std::string GetSyncErrorAction(SyncStatusActionType action_type) {
@@ -219,7 +220,40 @@ bool IsChangePrimaryAccountAllowed(Profile* profile, const std::string& email) {
       email,
       identity_manager->GetPrimaryAccountInfo(ConsentLevel::kSignin).email);
 }
+
+bool IsSigninPaused(signin::IdentityManager* identity_manager) {
+  return !identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSync) &&
+         identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin) &&
+         identity_manager->HasAccountWithRefreshTokenInPersistentErrorState(
+             identity_manager->GetPrimaryAccountId(
+                 signin::ConsentLevel::kSignin));
+}
 #endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
+
+settings::SignedInState GetSignedInState(
+    signin::IdentityManager* identity_manager) {
+  if (identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSync)) {
+    return settings::SignedInState::Syncing;
+  }
+
+  if (identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin)) {
+    if (identity_manager->HasAccountWithRefreshTokenInPersistentErrorState(
+            identity_manager->GetPrimaryAccountId(
+                signin::ConsentLevel::kSignin))) {
+      return settings::SignedInState::SignedInPaused;
+    }
+
+    return settings::SignedInState::SignedIn;
+  }
+
+  // Not signed, but at least one account is signed in on the web.
+  if (!identity_manager->GetAccountsWithRefreshTokens().empty()) {
+    return settings::SignedInState::WebOnlySignedIn;
+  }
+
+  return settings::SignedInState::SignedOut;
+}
+
 }  // namespace
 
 namespace settings {
@@ -236,8 +270,9 @@ PeopleHandler::PeopleHandler(Profile* profile)
 
 PeopleHandler::~PeopleHandler() {
   // Early exit if running unit tests (no actual WebUI is attached).
-  if (!web_ui())
+  if (!web_ui()) {
     return;
+  }
 
   // Remove this class as an observer to prevent calls back into this class
   // while destroying.
@@ -345,23 +380,25 @@ void PeopleHandler::OnJavascriptAllowed() {
       base::BindRepeating(&PeopleHandler::UpdateSyncStatus,
                           base::Unretained(this)));
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
-  profile_pref_registrar_->Add(
-      prefs::kChromeSigninInterceptionUserChoice,
+  SigninPrefs::ObserveSigninPrefsChanges(
+      *profile_pref_registrar_,
       base::BindRepeating(&PeopleHandler::UpdateChromeSigninUserChoiceInfo,
                           base::Unretained(this)));
 #endif
 
   signin::IdentityManager* identity_manager(
       IdentityManagerFactory::GetInstance()->GetForProfile(profile_));
-  if (identity_manager)
+  if (identity_manager) {
     identity_manager_observation_.Observe(identity_manager);
+  }
 
   // This is intentionally not using GetSyncService(), to go around the
   // Profile::IsSyncAllowed() check.
   syncer::SyncService* sync_service =
       SyncServiceFactory::GetForProfile(profile_);
-  if (sync_service)
+  if (sync_service) {
     sync_service_observation_.Observe(sync_service);
+  }
 }
 
 void PeopleHandler::OnJavascriptDisallowed() {
@@ -395,7 +432,8 @@ void PeopleHandler::DisplayGaiaLoginInNewTabOrWindow(
   // If the identity manager already has a primary account, this is a
   // re-auth scenario, and we need to ensure that the user signs in with the
   // same email address.
-  if (identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSync)) {
+  if (identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSync) ||
+      IsSigninPaused(identity_manager)) {
     SigninErrorController* error_controller =
         SigninErrorControllerFactory::GetForProfile(profile_);
     DCHECK(error_controller->HasError());
@@ -462,11 +500,11 @@ void PeopleHandler::HandleGetStoredAccounts(const base::Value::List& args) {
 }
 
 void PeopleHandler::OnExtendedAccountInfoUpdated(const AccountInfo& info) {
-  FireWebUIListener("stored-accounts-updated", GetStoredAccountsList());
+  UpdateStoredAccounts();
 }
 
 void PeopleHandler::OnExtendedAccountInfoRemoved(const AccountInfo& info) {
-  FireWebUIListener("stored-accounts-updated", GetStoredAccountsList());
+  UpdateStoredAccounts();
 }
 
 void PeopleHandler::OnRefreshTokenUpdatedForAccount(
@@ -481,7 +519,20 @@ void PeopleHandler::OnAccountsInCookieUpdated(
     const GoogleServiceAuthError& error) {
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
   UpdateChromeSigninUserChoiceInfo();
+  UpdateSyncStatus();
 #endif
+}
+
+void PeopleHandler::OnErrorStateOfRefreshTokenUpdatedForAccount(
+    const CoreAccountInfo& account_info,
+    const GoogleServiceAuthError& error,
+    signin_metrics::SourceForRefreshTokenOperation token_operation_source) {
+  signin::IdentityManager* identity_manager =
+      IdentityManagerFactory::GetForProfile(profile_);
+  if (identity_manager->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin) ==
+      account_info) {
+    UpdateSyncStatus();
+  }
 }
 
 base::Value::List PeopleHandler::GetStoredAccountsList() {
@@ -508,16 +559,18 @@ base::Value::List PeopleHandler::GetStoredAccountsList() {
   }
 
   // Guest mode does not have a primary account (or an IdentityManager).
-  if (profile_->IsGuestSession())
+  if (profile_->IsGuestSession()) {
     return base::Value::List();
+  }
   // If DICE is disabled for this profile or unsupported on this platform (e.g.
   // Chrome OS) or Lacros main profile (sync with a different account than the
   // device account is not allowed), then show only the primary account,
   // whether or not that account has consented to sync.
   AccountInfo primary_account_info = identity_manager->FindExtendedAccountInfo(
       identity_manager->GetPrimaryAccountInfo(ConsentLevel::kSignin));
-  if (!primary_account_info.IsEmpty())
+  if (!primary_account_info.IsEmpty()) {
     accounts.Append(GetAccountValue(identity_manager, primary_account_info));
+  }
   return accounts;
 }
 
@@ -550,7 +603,7 @@ void PeopleHandler::HandleSetEncryptionPassphrase(
   // Check the SyncService is up and running before retrieving SyncUserSettings,
   // which contains the encryption-related APIs.
   if (!GetSyncService() || !GetSyncService()->IsEngineInitialized()) {
-    // TODO(crbug.com/1139060): HandleSetDatatypes() also returns a success
+    // TODO(crbug.com/40725814): HandleSetDatatypes() also returns a success
     // status in this case. Consider returning a failure in both methods. Maybe
     // the CloseSyncSetup() call can also be removed.
     CloseSyncSetup();
@@ -589,7 +642,7 @@ void PeopleHandler::HandleSetDecryptionPassphrase(
   // Check the SyncService is up and running before retrieving SyncUserSettings,
   // which contains the encryption-related APIs.
   if (!GetSyncService() || !GetSyncService()->IsEngineInitialized()) {
-    // TODO(crbug.com/1139060): HandleSetDatatypes() also returns a success
+    // TODO(crbug.com/40725814): HandleSetDatatypes() also returns a success
     // status in this case. Consider returning a failure in both methods. Maybe
     // the CloseSyncSetup() call can also be removed.
     CloseSyncSetup();
@@ -612,15 +665,17 @@ void PeopleHandler::HandleShowSyncSetupUI(const base::Value::List& args) {
 
   syncer::SyncService* service = GetSyncService();
 
-  if (service && !sync_blocker_)
+  if (service && !sync_blocker_) {
     sync_blocker_ = service->GetSetupInProgressHandle();
+  }
 
   // Mark Sync as requested by the user. It might already be requested, but
   // it's not if this is either the first time the user is setting up Sync, or
   // Sync was set up but then was reset via the dashboard. This also pokes the
   // SyncService to start up immediately, i.e. bypass deferred startup.
-  if (service)
+  if (service) {
     service->SetSyncFeatureRequested();
+  }
 
   GetLoginUIService()->SetLoginUI(this);
 
@@ -755,8 +810,7 @@ void PeopleHandler::HandleTurnOffSync(bool delete_profile,
           signin_metrics::SourceForRefreshTokenOperation::kSettings_Signout);
     }
 
-    if (switches::IsExplicitBrowserSigninUIOnDesktopEnabled(
-            switches::ExplicitBrowserSigninPhase::kFull)) {
+    if (switches::IsExplicitBrowserSigninUIOnDesktopEnabled()) {
       // In Uno, Gaia logout tab invalidating the account will lead to a sign in
       // paused state. Unset the primary account to ensure it is removed from
       // chrome. The `AccountReconcilor` will revoke refresh tokens for accounts
@@ -812,8 +866,9 @@ void PeopleHandler::HandleStartKeyRetrieval(const base::Value::List& args) {
 #endif
 
   Browser* browser = chrome::FindBrowserWithTab(web_ui()->GetWebContents());
-  if (!browser)
+  if (!browser) {
     return;
+  }
 
   OpenTabForSyncKeyRetrieval(
       browser, syncer::TrustedVaultUserActionTriggerForUMA::kSettings);
@@ -897,12 +952,14 @@ void PeopleHandler::CloseSyncSetup() {
 void PeopleHandler::InitializeSyncBlocker() {
   DCHECK(web_ui());
   WebContents* web_contents = web_ui()->GetWebContents();
-  if (!web_contents)
+  if (!web_contents) {
     return;
+  }
 
   syncer::SyncService* service = GetSyncService();
-  if (!service)
+  if (!service) {
     return;
+  }
 
   // The user opened settings directly to the syncSetup sub-page, because they
   // clicked "Settings" in the browser sync consent dialog or because they
@@ -926,8 +983,9 @@ void PeopleHandler::OnPrimaryAccountChanged(
       // SetupInProgressHandle right now to avoid a temporary "missing Sync
       // confirmation" error in the avatar menu. See crbug.com/928696.
       syncer::SyncService* service = GetSyncService();
-      if (service && !sync_blocker_)
+      if (service && !sync_blocker_) {
         sync_blocker_ = service->GetSetupInProgressHandle();
+      }
       UpdateSyncStatus();
       break;
     }
@@ -945,6 +1003,8 @@ void PeopleHandler::OnPrimaryAccountChanged(
     case signin::PrimaryAccountChangeEvent::Type::kSet:
     case signin::PrimaryAccountChangeEvent::Type::kCleared:
       UpdateChromeSigninUserChoiceInfo();
+      UpdateStoredAccounts();
+      UpdateSyncStatus();
       break;
     case signin::PrimaryAccountChangeEvent::Type::kNone:
       break;
@@ -1033,14 +1093,12 @@ base::Value::Dict PeopleHandler::GetSyncStatusDictionary() const {
                   GetSyncErrorAction(status_labels.action_type));
 
   sync_status.Set("managed", disallowed_by_policy);
-  // TODO(crbug.com/40745012): audit js usages of |disabled| and |signedIn|
-  // fields, update it to use the right field, comments around and conditions
-  // here. Perhaps removal of one of these to fields is possible.
+  // TODO(crbug.com/40745012): audit js usages of |disabled| and |signedInState|
+  // (sync part) fields, update it to use the right field, comments around and
+  // conditions here. Perhaps removal of one of these to fields is possible.
   sync_status.Set("disabled", !service || disallowed_by_policy);
-  // NOTE: This means signed-in for *sync*. It can be false when the user is
-  // signed-in to the content area or to the browser.
-  sync_status.Set("signedIn", identity_manager->HasPrimaryAccount(
-                                  signin::ConsentLevel::kSync));
+  sync_status.Set("signedInState",
+                  static_cast<int>(GetSignedInState(identity_manager)));
   sync_status.Set("signedInUsername",
                   signin_ui_util::GetAuthenticatedUsername(profile_));
   sync_status.Set("hasUnrecoverableError",
@@ -1137,11 +1195,16 @@ void PeopleHandler::UpdateSyncStatus() {
   FireWebUIListener("sync-status-changed", GetSyncStatusDictionary());
 }
 
+void PeopleHandler::UpdateStoredAccounts() {
+  FireWebUIListener("stored-accounts-updated", GetStoredAccountsList());
+}
+
 void PeopleHandler::MarkFirstSetupComplete() {
   syncer::SyncService* service = GetSyncService();
   // The sync service may be nullptr if it has been just disabled by policy.
-  if (!service)
+  if (!service) {
     return;
+  }
 
   // Sync is usually already requested at this point, but it might not be if
   // Sync was reset from the dashboard while this page was open. (In most
@@ -1172,13 +1235,15 @@ void PeopleHandler::MarkFirstSetupComplete() {
 
 void PeopleHandler::MaybeMarkSyncConfiguring() {
 #if !BUILDFLAG(IS_CHROMEOS_ASH)
-  if (IsProfileAuthNeededOrHasErrors())
+  if (IsProfileAuthNeededOrHasErrors()) {
     return;
+  }
 #endif
   syncer::SyncService* service = GetSyncService();
   // The sync service may be nullptr if it has been just disabled by policy.
-  if (service && service->IsEngineInitialized())
+  if (service && service->IsEngineInitialized()) {
     configuring_sync_ = true;
+  }
 }
 
 bool PeopleHandler::IsProfileAuthNeededOrHasErrors() {
@@ -1193,25 +1258,25 @@ base::Value::Dict PeopleHandler::GetChromeSigninUserChoiceInfo() {
       IdentityManagerFactory::GetForProfile(profile_);
   // Gets the Chrome signed in account or the first signed in account in the
   // cooke jar, refresh token should be available too.
-  std::string signed_in_email =
-      signin_ui_util::GetSingleAccountForPromos(identity_manager).email;
+  AccountInfo account =
+      signin_ui_util::GetSingleAccountForPromos(identity_manager);
 
   bool should_show_settings =
       !signin::IsImplicitBrowserSigninOrExplicitDisabled(
           identity_manager, profile_->GetPrefs()) &&
-      !signed_in_email.empty();
+      !account.IsEmpty();
 
   ChromeSigninUserChoice choice =
       should_show_settings
-          ? DiceWebSigninInterceptor::GetChromeSigninUserChoice(
-                *profile_->GetPrefs(), signed_in_email)
+          ? SigninPrefs(*profile_->GetPrefs())
+                .GetChromeSigninInterceptionUserChoice(account.gaia)
           : ChromeSigninUserChoice::kNoChoice;
 
   base::Value::Dict chrome_signin_user_choice_info;
   chrome_signin_user_choice_info.Set("shouldShowSettings",
                                      should_show_settings);
   chrome_signin_user_choice_info.Set("choice", static_cast<int>(choice));
-  chrome_signin_user_choice_info.Set("signedInEmail", signed_in_email);
+  chrome_signin_user_choice_info.Set("signedInEmail", account.email);
 
   return chrome_signin_user_choice_info;
 }
@@ -1238,13 +1303,16 @@ void PeopleHandler::HandleSetChromeSigninUserChoice(
   std::string signed_in_email = args[1].GetString();
   CHECK(!signed_in_email.empty());
 
-  DiceWebSigninInterceptor::SetChromeSigninUserChoice(
-      *profile_->GetPrefs(), signed_in_email, user_choice);
+  AccountInfo account = signin_ui_util::GetSingleAccountForPromos(
+      IdentityManagerFactory::GetForProfile(profile_));
+  CHECK_EQ(account.email, signed_in_email);
+
+  SigninPrefs(*profile_->GetPrefs())
+      .SetChromeSigninInterceptionUserChoice(account.gaia, user_choice);
 }
 
 void PeopleHandler::UpdateChromeSigninUserChoiceInfo() {
-  if (switches::IsExplicitBrowserSigninUIOnDesktopEnabled(
-          switches::ExplicitBrowserSigninPhase::kFull)) {
+  if (switches::IsExplicitBrowserSigninUIOnDesktopEnabled()) {
     FireWebUIListener("chrome-signin-user-choice-info-change",
                       GetChromeSigninUserChoiceInfo());
   }

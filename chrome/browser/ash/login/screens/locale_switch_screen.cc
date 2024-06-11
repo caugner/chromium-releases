@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ash/login/screens/locale_switch_screen.h"
 
+#include "ash/constants/ash_features.h"
 #include "base/containers/contains.h"
 #include "base/time/time.h"
 #include "chrome/browser/ash/base/locale_util.h"
@@ -17,6 +18,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/webui/ash/login/locale_switch_screen_handler.h"
+#include "chromeos/ash/components/osauth/public/auth_session_storage.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/language/core/common/locale_util.h"
 #include "components/prefs/pref_service.h"
@@ -41,6 +43,7 @@ bool IsAllInfoFetched(const AccountInfo& info) {
 
 // static
 std::string LocaleSwitchScreen::GetResultString(Result result) {
+  // LINT.IfChange(UsageMetrics)
   switch (result) {
     case Result::kLocaleFetchFailed:
       return "LocaleFetchFailed";
@@ -57,6 +60,7 @@ std::string LocaleSwitchScreen::GetResultString(Result result) {
     case Result::kNotApplicable:
       return BaseScreen::kNotApplicable;
   }
+  // LINT.ThenChange(//tools/metrics/histograms/metadata/oobe/histograms.xml)
 }
 
 LocaleSwitchScreen::LocaleSwitchScreen(base::WeakPtr<LocaleSwitchView> view,
@@ -99,6 +103,13 @@ bool LocaleSwitchScreen::MaybeSkip(WizardContext& wizard_context) {
 }
 
 void LocaleSwitchScreen::ShowImpl() {
+  if (ash::features::AreLocalPasswordsEnabledForConsumers()) {
+    if (context()->extra_factors_token) {
+      session_refresher_ = AuthSessionStorage::Get()->KeepAlive(
+          context()->extra_factors_token.value());
+    }
+  }
+
   user_manager::User* user = user_manager::UserManager::Get()->GetActiveUser();
   DCHECK(user->is_profile_created());
   Profile* profile = ProfileHelper::Get()->GetProfileByUser(user);
@@ -148,6 +159,7 @@ void LocaleSwitchScreen::ShowImpl() {
 }
 
 void LocaleSwitchScreen::HideImpl() {
+  session_refresher_.reset();
   ResetState();
 }
 

@@ -23,13 +23,13 @@
 #include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
-#include "chrome/browser/signin/signin_features.h"
 #include "components/signin/core/browser/about_signin_internals.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/public/base/consent_level.h"
 #include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/base/signin_client.h"
 #include "components/signin/public/base/signin_metrics.h"
+#include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/identity_manager/accounts_mutator.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/identity_utils.h"
@@ -430,6 +430,17 @@ void DiceResponseHandler::ProcessDiceSigninHeader(
     }
   }
 
+  if (base::FeatureList::IsEnabled(
+          ::switches::kPreconnectAccountCapabilitiesPostSignin)) {
+    // The user is signing in, which means that account fetching will shortly be
+    // triggered.
+    //
+    // Notify identity manager. This will trigger pre-connecting the network
+    // socket to the AccountCapabilities endpoint, in parallel with the LST and
+    // access token requests (instead of waiting for these to complete).
+    identity_manager_->PrepareForAddingNewAccount();
+  }
+
   token_fetchers_.push_back(std::make_unique<DiceTokenFetcher>(
       gaia_id, email, authorization_code, signin_client_, account_reconcilor_,
       std::move(delegate), registration_token_helper_factory_, this));
@@ -539,13 +550,28 @@ void DiceResponseHandler::OnTokenExchangeSuccess(
       identity_manager_->PickAccountIdForAccount(gaia_id, email);
   bool is_new_account =
       !identity_manager_->HasAccountWithRefreshToken(account_id);
+
   // If this is a reauth, do not update the access point.
-  identity_manager_->GetAccountsMutator()->AddOrUpdateAccount(
-      gaia_id, email, refresh_token, is_under_advanced_protection,
+  signin_metrics::AccessPoint access_point =
       is_new_account ? token_fetcher->delegate()->GetAccessPoint()
-                     : signin_metrics::AccessPoint::ACCESS_POINT_UNKNOWN,
-      signin_metrics::SourceForRefreshTokenOperation::
-          kDiceResponseHandler_Signin
+                     : signin_metrics::AccessPoint::ACCESS_POINT_UNKNOWN;
+  // Specifically set the token operation source in case the error was updated
+  // through a sign in from a password sign in promo, as this will indicate
+  // whether to move the password to account storage or not.
+  // TODO(crbug.com/339157240): Change the way this is implemented to not use
+  // SourceForRefreshTokenOperation as an indicator of the reauthentication
+  // source.
+  signin_metrics::SourceForRefreshTokenOperation token_operation_source =
+      token_fetcher->delegate()->GetAccessPoint() ==
+              signin_metrics::AccessPoint::ACCESS_POINT_PASSWORD_BUBBLE
+          ? signin_metrics::SourceForRefreshTokenOperation::
+                kDiceResponseHandler_PasswordPromoSignin
+          : signin_metrics::SourceForRefreshTokenOperation::
+                kDiceResponseHandler_Signin;
+
+  identity_manager_->GetAccountsMutator()->AddOrUpdateAccount(
+      gaia_id, email, refresh_token, is_under_advanced_protection, access_point,
+      token_operation_source
 #if BUILDFLAG(ENABLE_BOUND_SESSION_CREDENTIALS)
       ,
       wrapped_binding_key

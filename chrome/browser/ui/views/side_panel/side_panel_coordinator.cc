@@ -14,6 +14,7 @@
 #include "base/functional/callback_forward.h"
 #include "base/metrics/user_metrics.h"
 #include "base/strings/strcat.h"
+#include "base/time/time.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/feature_engagement/tracker_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -45,6 +46,7 @@
 #include "components/feature_engagement/public/feature_constants.h"
 #include "components/lens/lens_features.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/user_education/common/feature_promo_result.h"
 #include "ui/actions/action_id.h"
 #include "ui/base/interaction/element_tracker.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -231,7 +233,7 @@ class SidePanelContentSwappingContainer : public views::View {
       std::move(callback).Run(entry, std::move(content_view));
     } else {
       entry->CacheView(std::move(content_view));
-      loading_entry_ = entry;
+      loading_entry_ = entry->GetWeakPtr();
       loaded_callback_ = std::move(callback);
       content_proxy->SetAvailableCallback(
           base::BindOnce(&SidePanelContentSwappingContainer::RunLoadedCallback,
@@ -257,23 +259,23 @@ class SidePanelContentSwappingContainer : public views::View {
     show_immediately_for_testing_ = no_delays_for_testing;
   }
 
-  SidePanelEntry* loading_entry() const { return loading_entry_; }
+  SidePanelEntry* loading_entry() const {
+    return loading_entry_ ? loading_entry_.get() : nullptr;
+  }
 
  private:
   void RunLoadedCallback() {
     DCHECK(!loaded_callback_.is_null());
-    SidePanelEntry* entry = loading_entry_;
+    SidePanelEntry* entry = loading_entry_.get();
     loading_entry_ = nullptr;
     std::move(loaded_callback_).Run(entry, std::nullopt);
   }
 
   // When true, don't delay switching panels.
   bool show_immediately_for_testing_;
-  // If the SidePanelEntry is ever discarded by the SidePanelCoordinator then we
-  // are always either immediately switching to a different entry (where this
-  // value would be reset) or closing the side panel (where this would be
-  // destroyed).
-  raw_ptr<SidePanelEntry> loading_entry_ = nullptr;
+  // Use a weak pointer so that loading side panel entry can be reset
+  // automatically if the entry is destroyed.
+  base::WeakPtr<SidePanelEntry> loading_entry_ = nullptr;
   PopulateSidePanelCallback loaded_callback_;
 };
 
@@ -311,7 +313,8 @@ SidePanelCoordinator::SidePanelCoordinator(BrowserView* browser_view)
     browser_view_->unified_side_panel()->AddHeaderView(CreateHeader());
   }
 
-  if (features::IsSidePanelPinningEnabled()) {
+  if (features::IsSidePanelPinningEnabled() &&
+      !browser_view_->GetIsWebAppType()) {
     browser_view_->MaybeShowStartupFeaturePromo(
         feature_engagement::kIPHSidePanelGenericMenuFeature);
   }
@@ -394,16 +397,7 @@ void SidePanelCoordinator::SetSidePanelButtonTooltipText(
 }
 
 void SidePanelCoordinator::Close() {
-  if (!IsSidePanelShowing() ||
-      browser_view_->unified_side_panel()->IsClosing()) {
-    return;
-  }
-  if (views::View* content_container = GetContentContainerView()) {
-    content_container->SetProperty(
-        kSidePanelContentStateKey,
-        static_cast<std::underlying_type_t<SidePanelContentState>>(
-            SidePanelContentState::kReadyToHide));
-  }
+  Close(/*supress_animations=*/false);
 }
 
 void SidePanelCoordinator::Toggle() {
@@ -487,15 +481,6 @@ void SidePanelCoordinator::UpdatePinState() {
     return;
   }
 
-  // Signal that the user has used the Pin feature.
-  browser_view_->NotifyFeatureEngagementEvent(
-      feature_engagement::events::kSidePanelPinned);
-
-  // Close IPH for side panel pinning, if shown.
-  browser_view_->CloseFeaturePromo(
-      feature_engagement::kIPHSidePanelGenericPinnableFeature,
-      user_education::EndFeaturePromoReason::kFeatureEngaged);
-
   std::optional<actions::ActionId> action_id =
       GetActionItem(current_entry_->key())->GetActionId();
   CHECK(action_id.has_value());
@@ -525,6 +510,9 @@ void SidePanelCoordinator::UpdatePinState() {
   header_pin_button_->GetViewAccessibility().AnnounceText(
       l10n_util::GetStringUTF16(updated_pin_state ? IDS_SIDE_PANEL_PINNED
                                                   : IDS_SIDE_PANEL_UNPINNED));
+
+  // Close/cancel IPH for side panel pinning, if shown.
+  MaybeEndPinPromo(/*pinned=*/true);
 }
 
 std::optional<SidePanelEntry::Id> SidePanelCoordinator::GetCurrentEntryId()
@@ -585,7 +573,8 @@ bool SidePanelCoordinator::IsSidePanelEntryShowing(
 
 void SidePanelCoordinator::Show(
     SidePanelEntry* entry,
-    std::optional<SidePanelUtil::SidePanelOpenTrigger> open_trigger) {
+    std::optional<SidePanelUtil::SidePanelOpenTrigger> open_trigger,
+    bool supress_animations) {
   // Side panel is not supported for non-normal browsers.
   if (!browser_view_->browser()->is_type_normal()) {
     return;
@@ -650,6 +639,9 @@ void SidePanelCoordinator::Show(
     if (content_wrapper->loading_entry()) {
       content_wrapper->ResetLoadingEntryIfNecessary();
     }
+    if (browser_view_->toolbar()->pinned_toolbar_actions_container()) {
+      NotifyPinnedContainerOfActiveStateChange(entry->key(), true);
+    }
     return;
   }
 
@@ -658,7 +650,28 @@ void SidePanelCoordinator::Show(
 
   content_wrapper->RequestEntry(
       entry, base::BindOnce(&SidePanelCoordinator::PopulateSidePanel,
-                            base::Unretained(this)));
+                            base::Unretained(this), supress_animations));
+}
+
+void SidePanelCoordinator::Close(bool supress_animations) {
+  if (!IsSidePanelShowing() ||
+      browser_view_->unified_side_panel()->IsClosing()) {
+    return;
+  }
+
+  if (current_entry_ &&
+      browser_view_->toolbar()->pinned_toolbar_actions_container()) {
+    NotifyPinnedContainerOfActiveStateChange(current_entry_->key(), false);
+  }
+  if (views::View* content_container = GetContentContainerView()) {
+    content_container->SetProperty(
+        kSidePanelContentStateKey,
+        static_cast<std::underlying_type_t<SidePanelContentState>>(
+            supress_animations ? SidePanelContentState::kHideImmediately
+                               : SidePanelContentState::kReadyToHide));
+  }
+
+  MaybeEndPinPromo(/*pinned=*/false);
 }
 
 views::View* SidePanelCoordinator::GetContentContainerView() const {
@@ -737,6 +750,7 @@ void SidePanelCoordinator::InitializeSidePanel() {
 }
 
 void SidePanelCoordinator::PopulateSidePanel(
+    bool supress_animations,
     SidePanelEntry* entry,
     std::optional<std::unique_ptr<views::View>> content_view) {
   if (!header_combobox_) {
@@ -759,17 +773,15 @@ void SidePanelCoordinator::PopulateSidePanel(
   // the currently hosted SidePanelEntry.
   DCHECK(content_wrapper->children().size() <= 1);
 
-  // Side panel is opened when the `content_container` is made visible for the
-  // first time. The subsequent calls of `PopulateSidePanel()` that have visible
-  // `content_container` is to update the content of the side panel.
-  const bool opening_side_panel = !content_container->GetVisible();
+  const bool opening_side_panel = !IsSidePanelShowing();
 
   content_wrapper->SetVisible(true);
   content_container->SetVisible(true);
   content_container->SetProperty(
       kSidePanelContentStateKey,
       static_cast<std::underlying_type_t<SidePanelContentState>>(
-          SidePanelContentState::kReadyToShow));
+          supress_animations ? SidePanelContentState::kShowImmediately
+                             : SidePanelContentState::kReadyToShow));
 
   if (current_entry_ && content_wrapper->children().size()) {
     auto current_entry_view =
@@ -805,7 +817,8 @@ void SidePanelCoordinator::PopulateSidePanel(
   UpdateNewTabButtonState();
   UpdateHeaderPinButtonState();
 
-  // Notify the observers if the side panel is opened (made visible).
+  // Notify the observers when the side panel is opened (made visible). However,
+  // the observers are not renotified when the side panel entry changes.
   if (opening_side_panel) {
     for (SidePanelViewStateObserver& view_state_observer :
          view_state_observers_) {
@@ -932,7 +945,7 @@ std::unique_ptr<views::View> SidePanelCoordinator::CreateHeader() {
 
   auto* header_close_button = header->AddChildView(CreateControlButton(
       header.get(),
-      base::BindRepeating(&SidePanelCoordinator::Close, base::Unretained(this)),
+      base::BindRepeating(&SidePanelUI::Close, base::Unretained(this)),
       views::kIcCloseIcon, l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE),
       kSidePanelCloseButtonElementId,
       ChromeLayoutProvider::Get()->GetDistanceMetric(
@@ -1083,6 +1096,78 @@ void SidePanelCoordinator::NotifyPinnedContainerOfActiveStateChange(
   }
 }
 
+void SidePanelCoordinator::MaybeQueuePinPromo() {
+  // Which feature is shown and on what delay depends on the specific side
+  // panel that is showing.
+  constexpr base::TimeDelta kImpressionSuccessDuration = base::Seconds(6);
+  const base::Feature* iph_feature = nullptr;
+  base::TimeDelta delay;
+  if (current_entry_->key().id() == SidePanelEntryId::kLensOverlayResults) {
+    iph_feature = &feature_engagement::kIPHSidePanelLensOverlayPinnableFeature;
+    delay = kImpressionSuccessDuration;
+  } else {
+    iph_feature = &feature_engagement::kIPHSidePanelGenericPinnableFeature;
+    // No delay (current behavior).
+  }
+
+  // If the desired promo hasn't changed, there's nothing to do.
+  if (pending_pin_promo_ == iph_feature) {
+    return;
+  }
+
+  // End or cancel the current promo.
+  if (pending_pin_promo_) {
+    MaybeEndPinPromo(/*pinned=*/false);
+  }
+
+  // Queue up the next promo to be shown, if there is one that can be shown.
+  pending_pin_promo_ = iph_feature;
+  if (iph_feature && !browser_view_->CanShowFeaturePromo(*iph_feature)
+                          .is_blocked_this_instance()) {
+    pin_promo_timer_.Start(FROM_HERE, delay,
+                           base::BindOnce(&SidePanelCoordinator::ShowPinPromo,
+                                          base::Unretained(this)));
+  }
+}
+
+void SidePanelCoordinator::ShowPinPromo() {
+  if (!pending_pin_promo_) {
+    return;
+  }
+
+  browser_view_->browser()->window()->MaybeShowFeaturePromo(
+      *pending_pin_promo_);
+}
+
+void SidePanelCoordinator::MaybeEndPinPromo(bool pinned) {
+  if (!pending_pin_promo_) {
+    return;
+  }
+
+  if (pinned) {
+    browser_view_->CloseFeaturePromo(
+        *pending_pin_promo_,
+        user_education::EndFeaturePromoReason::kFeatureEngaged);
+    if (pending_pin_promo_ ==
+        &feature_engagement::kIPHSidePanelLensOverlayPinnableFeature) {
+      browser_view_->NotifyPromoFeatureUsed(
+          feature_engagement::kIPHSidePanelLensOverlayPinnableFeature);
+      browser_view_->MaybeShowFeaturePromo(
+          feature_engagement::kIPHSidePanelLensOverlayPinnableFollowupFeature);
+    } else {
+      browser_view_->NotifyFeatureEngagementEvent(
+          feature_engagement::events::kSidePanelPinned);
+    }
+  } else {
+    browser_view_->CloseFeaturePromo(
+        *pending_pin_promo_,
+        user_education::EndFeaturePromoReason::kAbortPromo);
+  }
+
+  pin_promo_timer_.Stop();
+  pending_pin_promo_ = nullptr;
+}
+
 void SidePanelCoordinator::OnEntryRegistered(SidePanelRegistry* registry,
                                              SidePanelEntry* entry) {
   if (combobox_model_) {
@@ -1143,22 +1228,6 @@ void SidePanelCoordinator::OnEntryWillDeregister(SidePanelRegistry* registry,
       // is removed, to when the new active entry's view is shown. This can
       // determine if the user will notice a flash in the side panel in between
       // different entries being shown.
-    }
-
-    // If the entry is being deregistered there is no chance it could be
-    // reopened during the closing animation, handle closing clean up here since
-    // |current_entry_| will not exist after the side panel is closed.
-    if (current_entry_) {
-      // Reset current_entry_ first to prevent current_entry->OnEntryHidden()
-      // from calling multiple times. This could happen in the edge cases when
-      // callback inside current_entry->OnEntryHidden() is calling Close() to
-      // trigger race condition.
-      auto* current_entry = current_entry_.get();
-      current_entry_.reset();
-      if (browser_view_->toolbar()->pinned_toolbar_actions_container()) {
-        NotifyPinnedContainerOfActiveStateChange(current_entry->key(), false);
-      }
-      current_entry->OnEntryHidden();
     }
 
     if (auto* new_active_entry =
@@ -1228,7 +1297,8 @@ void SidePanelCoordinator::OnTabStripModelChanged(
     // Attempt to find a suitable entry to be shown after the tab switch and if
     // one is found, show it.
     if (auto* new_active_entry = GetNewActiveEntryOnTabChanged()) {
-      Show(new_active_entry, SidePanelUtil::SidePanelOpenTrigger::kTabChanged);
+      Show(new_active_entry, SidePanelUtil::SidePanelOpenTrigger::kTabChanged,
+           /*supress_animations=*/true);
       if (combobox_model_) {
         SetSelectedEntryInCombobox(new_active_entry->key());
       }
@@ -1247,12 +1317,13 @@ void SidePanelCoordinator::OnTabStripModelChanged(
         auto* active_entry = old_contextual_registry->active_entry().value();
         active_entry->CacheView(std::move(current_entry_view));
       }
-      Close();
+      Close(/*supress_animations=*/true);
     }
   } else if (new_contextual_registry &&
              new_contextual_registry->active_entry().has_value()) {
     Show(new_contextual_registry->active_entry().value(),
-         SidePanelUtil::SidePanelOpenTrigger::kTabChanged);
+         SidePanelUtil::SidePanelOpenTrigger::kTabChanged,
+         /*supress_animations=*/true);
   }
 }
 
@@ -1312,8 +1383,7 @@ void SidePanelCoordinator::UpdateHeaderPinButtonState() {
 
   if (!current_pinned_state) {
     // Show IPH for side panel pinning icon.
-    browser_view_->browser()->window()->MaybeShowFeaturePromo(
-        feature_engagement::kIPHSidePanelGenericPinnableFeature);
+    MaybeQueuePinPromo();
   }
 }
 
@@ -1369,9 +1439,6 @@ void SidePanelCoordinator::OnViewVisibilityChanged(views::View* observed_view,
       if (global_registry_->GetEntryForKey(current_entry->key()) ==
           current_entry) {
         closing_global = true;
-      }
-      if (browser_view_->toolbar()->pinned_toolbar_actions_container()) {
-        NotifyPinnedContainerOfActiveStateChange(current_entry->key(), false);
       }
       current_entry->OnEntryHidden();
     }

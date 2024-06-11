@@ -308,6 +308,7 @@ class ViewAXPlatformNodeDelegateMenuTest
                               MenuItemView::Type::kTitle);
 
     submenu_ = menu_->GetSubmenu();
+    owner_->GetRootView()->AddChildView(submenu_);
     submenu_->GetMenuItemAt(3)->SetSelected(true);
   }
 
@@ -469,21 +470,6 @@ TEST_F(ViewAXPlatformNodeDelegateTest, SetNameAndDescription) {
   EXPECT_EQ(button_accessibility()->GetDescription(), "");
   EXPECT_EQ(button_accessibility()->GetDescriptionFrom(),
             ax::mojom::DescriptionFrom::kNone);
-
-  // Setting the name to the empty string without explicitly setting the
-  // source to reflect that should trigger a DCHECK in SetName.
-  EXPECT_DCHECK_DEATH_WITH(
-      button_accessibility()->SetName("", ax::mojom::NameFrom::kAttribute),
-      "Check failed: name.empty\\(\\) == name_from == "
-      "ax::mojom::NameFrom::kAttributeExplicitlyEmpty");
-
-  // Setting the name to a non-empty string with a NameFrom of
-  // kAttributeExplicitlyEmpty should trigger a DCHECK in SetName.
-  EXPECT_DCHECK_DEATH_WITH(
-      button_accessibility()->SetName(
-          "foo", ax::mojom::NameFrom::kAttributeExplicitlyEmpty),
-      "Check failed: name.empty\\(\\) == name_from == "
-      "ax::mojom::NameFrom::kAttributeExplicitlyEmpty");
 
   button_accessibility()->SetName(
       "", ax::mojom::NameFrom::kAttributeExplicitlyEmpty);
@@ -789,7 +775,7 @@ TEST_F(ViewAXPlatformNodeDelegateTest, TreeNavigationWithLeafViews) {
   EXPECT_FALSE(contents_view->IsChildOfLeaf());
   EXPECT_FALSE(parent_view->IsChildOfLeaf());
 #if !BUILDFLAG(USE_ATK)
-  // TODO(crbug.com/1100047): IsChildOfLeaf always returns false on Linux.
+  // TODO(crbug.com/40702759): IsChildOfLeaf always returns false on Linux.
   EXPECT_TRUE(child_view_1->IsChildOfLeaf());
   EXPECT_TRUE(child_view_2->IsChildOfLeaf());
   EXPECT_TRUE(child_view_3->IsChildOfLeaf());

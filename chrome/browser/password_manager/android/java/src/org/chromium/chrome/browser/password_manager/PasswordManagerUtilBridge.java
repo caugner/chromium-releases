@@ -4,9 +4,12 @@
 
 package org.chromium.chrome.browser.password_manager;
 
+import android.content.pm.PackageInfo;
+
 import org.jni_zero.CalledByNative;
 import org.jni_zero.NativeMethods;
 
+import org.chromium.base.PackageUtils;
 import org.chromium.components.prefs.PrefService;
 
 /** Wrapper for utilities in password_manager_util. */
@@ -55,6 +58,20 @@ public class PasswordManagerUtilBridge {
         return PasswordManagerBackendSupportHelper.getInstance().isBackendPresent();
     }
 
+    @CalledByNative
+    public static boolean isPlayStoreAppPresent() {
+        PackageInfo packageInfo = PackageUtils.getPackageInfo("com.android.vending", 0);
+        return packageInfo != null;
+    }
+
+    /**
+     * Returns whether Chrome's internal backend is available and the minimum GMS Core requirements
+     * for UPM are met.
+     */
+    public static boolean areMinUpmRequirementsMet() {
+        return PasswordManagerUtilBridgeJni.get().areMinUpmRequirementsMet();
+    }
+
     /**
      * Checks whether the UPM with sync only available in GMS Core is active for this client.
      *
@@ -72,6 +89,8 @@ public class PasswordManagerUtilBridge {
         boolean usesSplitStoresAndUPMForLocal(PrefService prefService);
 
         boolean isGmsCoreUpdateRequired(PrefService prefService, boolean isPwdSyncEnabled);
+
+        boolean areMinUpmRequirementsMet();
 
         boolean isUnifiedPasswordManagerSyncOnlyInGMSCoreEnabled();
     }

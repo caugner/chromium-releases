@@ -84,6 +84,7 @@ import org.chromium.ui.dragdrop.DragDropGlobalState;
 import org.chromium.ui.dragdrop.DragDropMetricUtils.DragDropTabResult;
 import org.chromium.ui.dragdrop.DragDropMetricUtils.DragDropType;
 import org.chromium.ui.dragdrop.DropDataAndroid;
+import org.chromium.ui.widget.ToastManager;
 
 import java.lang.ref.WeakReference;
 import java.util.Collections;
@@ -91,7 +92,6 @@ import java.util.HashSet;
 import java.util.Set;
 
 /** Tests for {@link TabDragSource}. */
-@EnableFeatures(ChromeFeatureList.TAB_LINK_DRAG_DROP_ANDROID)
 @DisableFeatures(ChromeFeatureList.DRAG_DROP_TAB_TEARING)
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(qualifiers = "sw600dp", sdk = VERSION_CODES.S, shadows = ShadowToast.class)
@@ -208,6 +208,7 @@ public class TabDragSourceTest {
         }
         mSourceInstance.setManufacturerAllowlistForTesting(null);
         ShadowToast.reset();
+        ToastManager.resetForTesting();
     }
 
     @EnableFeatures({ChromeFeatureList.TAB_DRAG_DROP_ANDROID})
@@ -239,7 +240,6 @@ public class TabDragSourceTest {
     }
 
     @DisableFeatures(ChromeFeatureList.TAB_DRAG_DROP_ANDROID)
-    @EnableFeatures(ChromeFeatureList.TAB_LINK_DRAG_DROP_ANDROID)
     @Test
     public void test_startTabDragAction_withTabLinkDragDropFF_returnsTrueForValidTab() {
         // Act and verify.
@@ -334,7 +334,6 @@ public class TabDragSourceTest {
         ChromeFeatureList.TAB_DRAG_DROP_ANDROID,
         ChromeFeatureList.DRAG_DROP_TAB_TEARING
     })
-    @EnableFeatures(ChromeFeatureList.TAB_LINK_DRAG_DROP_ANDROID)
     public void test_startTabDragAction_returnFalseForNonSplitScreen() {
         // Set params.
         when(mMultiWindowUtils.isInMultiWindowMode(mActivity)).thenReturn(false);
@@ -352,7 +351,6 @@ public class TabDragSourceTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.TAB_LINK_DRAG_DROP_ANDROID)
     @DisableFeatures({
         ChromeFeatureList.TAB_DRAG_DROP_ANDROID,
         ChromeFeatureList.DRAG_DROP_TAB_TEARING
@@ -380,7 +378,7 @@ public class TabDragSourceTest {
     @Test
     @DisableFeatures(ChromeFeatureList.TAB_DRAG_DROP_ANDROID)
     @EnableFeatures(ChromeFeatureList.DRAG_DROP_TAB_TEARING)
-    public void test_startTabDragAction_returnTrueForNonSplitScreenTabTearingWithMultipleTabs() {
+    public void test_startTabDragAction_FullScreenTabTearingWithMultipleTabs() {
         // Set params.
         when(mMultiWindowUtils.isInMultiWindowMode(mActivity)).thenReturn(false);
         mSourceInstance.setManufacturerAllowlistForTesting(new HashSet<>());
@@ -409,7 +407,7 @@ public class TabDragSourceTest {
     @Test
     @DisableFeatures(ChromeFeatureList.TAB_DRAG_DROP_ANDROID)
     @EnableFeatures(ChromeFeatureList.DRAG_DROP_TAB_TEARING)
-    public void test_startTabDragAction_returnFalseForNonSplitScreenTabTearingWithOneTab() {
+    public void test_startTabDragAction_FullScreenTabTearingWithOneTab() {
         // Set params.
         when(mMultiWindowUtils.isInMultiWindowMode(mActivity)).thenReturn(false);
         mSourceInstance.setManufacturerAllowlistForTesting(new HashSet<>());
@@ -424,6 +422,67 @@ public class TabDragSourceTest {
                         DRAG_START_POINT,
                         TAB_POSITION_X,
                         TAB_WIDTH));
+    }
+
+    @Test
+    @DisableFeatures(ChromeFeatureList.TAB_DRAG_DROP_ANDROID)
+    @EnableFeatures(ChromeFeatureList.DRAG_DROP_TAB_TEARING)
+    public void test_startTabDragAction_FullScreenTabTearingWithMaxChromeInstances() {
+        // Set params.
+        when(mMultiWindowUtils.isInMultiWindowMode(mActivity)).thenReturn(false);
+        mSourceInstance.setManufacturerAllowlistForTesting(new HashSet<>());
+        when(mTabModelSelector.getTotalTabCount()).thenReturn(2);
+        MultiWindowUtils.setInstanceCountForTesting(5);
+        MultiWindowUtils.setMaxInstancesForTesting(5);
+
+        // Verify.
+        assertTrue(
+                "Tab drag should start.",
+                mSourceInstance.startTabDragAction(
+                        mTabsToolbarView,
+                        mTabBeingDragged,
+                        DRAG_START_POINT,
+                        TAB_POSITION_X,
+                        TAB_WIDTH));
+        var dropDataCaptor = ArgumentCaptor.forClass(ChromeDropDataAndroid.class);
+        verify(mDragDropDelegate)
+                .startDragAndDrop(
+                        eq(mTabsToolbarView),
+                        any(DragShadowBuilder.class),
+                        dropDataCaptor.capture());
+        assertFalse(
+                "DropData.allowTabTearing value is incorrect.",
+                dropDataCaptor.getValue().allowTabTearing);
+    }
+
+    @Test
+    @DisableFeatures(ChromeFeatureList.TAB_DRAG_DROP_ANDROID)
+    @EnableFeatures(ChromeFeatureList.DRAG_DROP_TAB_TEARING)
+    public void test_startTabDragAction_SplitScreenTabTearingWithMaxChromeInstances() {
+        // Set params.
+        mSourceInstance.setManufacturerAllowlistForTesting(new HashSet<>());
+        when(mTabModelSelector.getTotalTabCount()).thenReturn(2);
+        MultiWindowUtils.setInstanceCountForTesting(5);
+        MultiWindowUtils.setMaxInstancesForTesting(5);
+
+        // Verify.
+        assertTrue(
+                "Tab drag should start.",
+                mSourceInstance.startTabDragAction(
+                        mTabsToolbarView,
+                        mTabBeingDragged,
+                        DRAG_START_POINT,
+                        TAB_POSITION_X,
+                        TAB_WIDTH));
+        var dropDataCaptor = ArgumentCaptor.forClass(ChromeDropDataAndroid.class);
+        verify(mDragDropDelegate)
+                .startDragAndDrop(
+                        eq(mTabsToolbarView),
+                        any(DragShadowBuilder.class),
+                        dropDataCaptor.capture());
+        assertFalse(
+                "DropData.allowTabTearing value is incorrect.",
+                dropDataCaptor.getValue().allowTabTearing);
     }
 
     @Test
@@ -459,7 +518,6 @@ public class TabDragSourceTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.TAB_LINK_DRAG_DROP_ANDROID)
     @DisableFeatures(ChromeFeatureList.TAB_DRAG_DROP_ANDROID)
     public void test_onProvideShadowMetrics_withTabLinkDragDropFF() {
         // Call startDrag to set class variables.
@@ -630,6 +688,35 @@ public class TabDragSourceTest {
         verify(mSourceStripLayoutHelper, times(1)).clearTabDragState();
         // Verify destination strip not invoked.
         verifyNoInteractions(mDestStripLayoutHelper);
+    }
+
+    @Test
+    @DisableFeatures(ChromeFeatureList.TAB_DRAG_DROP_ANDROID)
+    @EnableFeatures(ChromeFeatureList.DRAG_DROP_TAB_TEARING)
+    public void test_onDrag_unhandledDropOutside_maxChromeInstances() {
+        HistogramWatcher histogramExpectation =
+                HistogramWatcher.newBuilder()
+                        .expectIntRecord(
+                                "Android.DragDrop.Tab.FromStrip.Result",
+                                DragDropTabResult.IGNORED_MAX_INSTANCES)
+                        .expectNoRecords("Android.DragDrop.Tab.Type")
+                        .expectNoRecords("Android.DragDrop.Tab.ReorderStripWithDragDrop")
+                        .expectNoRecords("Android.DragDrop.Tab.Duration.WithinDestStrip")
+                        .build();
+
+        MultiWindowUtils.setInstanceCountForTesting(5);
+        MultiWindowUtils.setMaxInstancesForTesting(5);
+
+        new DragEventInvoker().dragExit(mSourceInstance).end(false);
+
+        assertNotNull(ShadowToast.getLatestToast());
+        TextView textView = (TextView) ShadowToast.getLatestToast().getView();
+        String actualText = textView == null ? "" : textView.getText().toString();
+        assertEquals(
+                "Text for toast shown does not match.",
+                ContextUtils.getApplicationContext().getString(R.string.max_number_of_windows),
+                actualText);
+        histogramExpectation.assertExpected();
     }
 
     /** Test for {@link #ONDRAG_TEST_CASES} - Scenario D.1 */

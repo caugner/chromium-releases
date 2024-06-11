@@ -22,10 +22,12 @@ class Browser;
 @protocol GridToolbarsConfigurationProvider;
 @protocol GridToolbarsMutator;
 @protocol TabCollectionConsumer;
+@protocol TabGridIdleStatusHandler;
 @class TabGridToolbarsConfiguration;
 @protocol TabGridToolbarsMainTabGridDelegate;
 @protocol TabGroupsCommands;
 @protocol TabPresentationDelegate;
+class TabBasedIPHBrowserAgent;
 class WebStateList;
 
 namespace web {
@@ -62,6 +64,11 @@ class WebState;
 @property(nonatomic, weak) id<TabPresentationDelegate> tabPresentationDelegate;
 // Tab Groups Dispatcher.
 @property(nonatomic, weak) id<TabGroupsCommands> dispatcher;
+// Tab grid idle status handler.
+@property(nonatomic, weak) id<TabGridIdleStatusHandler>
+    tabGridIdleStatusHandler;
+// Browser agent to trigger tab based IPH.
+@property(nonatomic, assign) TabBasedIPHBrowserAgent* tabBasedIPHBrowserAgent;
 
 @end
 

@@ -43,7 +43,7 @@
 
 @media (forced-colors: active) {
   :host {
-    /* TODO(crbug.com/1176612): cr-toggle heavily relies on
+    /* TODO(crbug.com/40168415): cr-toggle heavily relies on
        background-color to convey various states (on/off,
        enabled/disabled). Until proper specs for HCM exist, turn off
        forced-colors automatic adjustments so that the cr-toggle is at
@@ -160,11 +160,6 @@
   background-color: var(--cr-toggle-checked-button-color);
   transform: translate(var(--cr-toggle-knob-position-end_), -50%);
 }
-
-:host-context([dir=rtl]):host([checked]) #knob {
-  transform: translate3d(-18px, 0, 0);
-}
-
 
 :host-context([dir=rtl]) #knob {
   left: 0;
