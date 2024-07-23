@@ -18,6 +18,7 @@
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
 #include "third_party/blink/renderer/core/html/html_span_element.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
+#include "third_party/blink/renderer/core/script/classic_script.h"
 #include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
@@ -51,6 +52,7 @@ constexpr char kCameraMicrophoneAllowedString[] =
     "Camera and microphone allowed";
 
 constexpr base::TimeDelta kDefaultTimeout = base::Milliseconds(500);
+constexpr base::TimeDelta kSmallTimeout = base::Milliseconds(50);
 
 class LocalePlatformSupport : public TestingPlatformSupport {
  public:
@@ -240,13 +242,13 @@ class TestPermissionService : public PermissionService {
   void AddPermissionObserver(
       PermissionDescriptorPtr permission,
       MojoPermissionStatus last_known_status,
-      bool should_include_device_status,
+      mojo::PendingRemote<PermissionObserver> observer) override {}
+  void AddPageEmbeddedPermissionObserver(
+      PermissionDescriptorPtr permission,
+      MojoPermissionStatus last_known_status,
       mojo::PendingRemote<PermissionObserver> observer) override {
-    EXPECT_TRUE(should_include_device_status);
-    auto inserted_result = observers_.insert(
-        permission->name,
-        mojo::Remote<PermissionObserver>(std::move(observer)));
-    CHECK(inserted_result.is_new_entry);
+    observers_.insert(permission->name,
+                      mojo::Remote<PermissionObserver>(std::move(observer)));
     if (run_loop_) {
       run_loop_->Quit();
     }
@@ -387,19 +389,20 @@ class HTMLPemissionElementTest : public HTMLPemissionElementTestBase {
 // `SimTest(base::test::TaskEnvironment::TimeSource::MOCK_TIME)` once migration
 // to blink_unittests_v2 completes. We then can simply use
 // `time_environment()->FastForwardBy()`
-class ClickingEnabledChecker {
+class DeferredChecker {
  public:
-  explicit ClickingEnabledChecker(HTMLPermissionElement* element)
-      : element_(element) {}
+  explicit DeferredChecker(HTMLPermissionElement* element,
+                           WebLocalFrameImpl* main_frame = nullptr)
+      : element_(element), main_frame_(main_frame) {}
 
-  ClickingEnabledChecker(const ClickingEnabledChecker&) = delete;
-  ClickingEnabledChecker& operator=(const ClickingEnabledChecker&) = delete;
+  DeferredChecker(const DeferredChecker&) = delete;
+  DeferredChecker& operator=(const DeferredChecker&) = delete;
 
   void CheckClickingEnabledAfterDelay(base::TimeDelta time,
                                       bool expected_enabled) {
     base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE,
-        WTF::BindOnce(&ClickingEnabledChecker::CheckClickingEnabled,
+        WTF::BindOnce(&DeferredChecker::CheckClickingEnabled,
                       base::Unretained(this), expected_enabled),
         time);
     run_loop_ = std::make_unique<base::RunLoop>();
@@ -407,25 +410,47 @@ class ClickingEnabledChecker {
   }
 
   void CheckClickingEnabled(bool enabled) {
+    CHECK(element_);
     EXPECT_EQ(element_->IsClickingEnabled(), enabled);
     if (run_loop_) {
       run_loop_->Quit();
     }
   }
 
-  void ResetClickingEnabled() {
-    element_->EnableClicking(
-        HTMLPermissionElement::DisableReason::kRecentlyAttachedToLayoutTree);
-    element_->EnableClicking(
-        HTMLPermissionElement::DisableReason::kIntersectionChanged);
-    element_->EnableClicking(
-        HTMLPermissionElement::DisableReason::kInvalidStyle);
+  void CheckConsoleMessageAfterDelay(
+      base::TimeDelta time,
+      unsigned int expected_count,
+      std::optional<String> expected_text = std::nullopt) {
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE,
+        WTF::BindOnce(&DeferredChecker::CheckConsoleMessage,
+                      base::Unretained(this), expected_count,
+                      std::move(expected_text)),
+        time);
+    run_loop_ = std::make_unique<base::RunLoop>();
+    run_loop_->Run();
+  }
 
-    EXPECT_EQ(element_->IsClickingEnabled(), true);
+  void CheckConsoleMessage(unsigned int expected_count,
+                           std::optional<String> expected_text = std::nullopt) {
+    CHECK(main_frame_);
+    auto& console_messages =
+        static_cast<frame_test_helpers::TestWebFrameClient*>(
+            main_frame_->Client())
+            ->ConsoleMessages();
+    EXPECT_EQ(console_messages.size(), expected_count);
+
+    if (expected_text.has_value()) {
+      EXPECT_TRUE(console_messages.back().Contains(expected_text.value()));
+    }
+    if (run_loop_) {
+      run_loop_->Quit();
+    }
   }
 
  private:
-  Persistent<HTMLPermissionElement> element_;
+  Persistent<HTMLPermissionElement> element_ = nullptr;
+  Persistent<WebLocalFrameImpl> main_frame_ = nullptr;
   std::unique_ptr<base::RunLoop> run_loop_;
 };
 
@@ -453,6 +478,17 @@ TEST_F(HTMLPemissionElementTest, InitializeInnerText) {
     EXPECT_NE(0, rect->width());
     EXPECT_NE(0, rect->height());
   }
+}
+
+// Regression test for crbug.com/341875650, check that a detached layout tree
+// permission element doesn't crash the renderer process.
+TEST_F(HTMLPemissionElementTest, AfterDetachLayoutTreeCrashTest) {
+  auto* permission_element = CreatePermissionElement("camera");
+  RegistrationWaiter(permission_element).Wait();
+  permission_element->SetForceReattachLayoutTree();
+  UpdateAllLifecyclePhasesForTest();
+  RegistrationWaiter(permission_element).Wait();
+  // We end up here if the renderer process did not crash.
 }
 
 TEST_F(HTMLPemissionElementTest, SetInnerTextAfterRegistrationSingleElement) {
@@ -725,7 +761,7 @@ TEST_F(HTMLPemissionElementSimTest, BlockedByPermissionsPolicy) {
 
 TEST_F(HTMLPemissionElementSimTest, EnableClickingAfterDelay) {
   auto* permission_element = CreatePermissionElement(GetDocument(), "camera");
-  ClickingEnabledChecker checker(permission_element);
+  DeferredChecker checker(permission_element);
   permission_element->DisableClickingIndefinitely(
       HTMLPermissionElement::DisableReason::kInvalidStyle);
   checker.CheckClickingEnabled(/*enabled=*/false);
@@ -747,7 +783,7 @@ TEST_F(HTMLPemissionElementSimTest, EnableClickingAfterDelay) {
 
 TEST_F(HTMLPemissionElementSimTest, BadContrastDisablesElement) {
   auto* permission_element = CreatePermissionElement(GetDocument(), "camera");
-  ClickingEnabledChecker checker(permission_element);
+  DeferredChecker checker(permission_element);
   // Red on white is sufficient contrast.
   permission_element->setAttribute(
       html_names::kStyleAttr,
@@ -787,7 +823,7 @@ TEST_F(HTMLPemissionElementSimTest, BadContrastDisablesElement) {
 TEST_F(HTMLPemissionElementSimTest, FontSizeCanDisableElement) {
   GetDocument().GetSettings()->SetDefaultFontSize(12);
   auto* permission_element = CreatePermissionElement(GetDocument(), "camera");
-  ClickingEnabledChecker checker(permission_element);
+  DeferredChecker checker(permission_element);
 
   // Normal font-size for baseline.
   permission_element->setAttribute(html_names::kStyleAttr,
@@ -823,9 +859,230 @@ TEST_F(HTMLPemissionElementSimTest, FontSizeCanDisableElement) {
     permission_element->setAttribute(html_names::kStyleAttr,
                                      AtomicString(font_size_string.c_str()));
     GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kTest);
-    checker.CheckClickingEnabled(test.enabled);
-    checker.ResetClickingEnabled();
+    checker.CheckClickingEnabledAfterDelay(kDefaultTimeout, test.enabled);
+    permission_element->EnableClicking(
+        HTMLPermissionElement::DisableReason::kRecentlyAttachedToLayoutTree);
+    permission_element->EnableClicking(
+        HTMLPermissionElement::DisableReason::kIntersectionVisibilityChanged);
+    permission_element->EnableClicking(
+        HTMLPermissionElement::DisableReason::kInvalidStyle);
+
+    EXPECT_TRUE(permission_element->IsClickingEnabled());
   }
+}
+
+class HTMLPemissionElementDispatchValidationEventTest
+    : public HTMLPemissionElementSimTest {
+ public:
+  HTMLPemissionElementDispatchValidationEventTest() = default;
+
+  ~HTMLPemissionElementDispatchValidationEventTest() override = default;
+
+  HTMLPermissionElement* CreateElementAndWaitForRegistration() {
+    auto& document = GetDocument();
+    HTMLPermissionElement* permission_element =
+        MakeGarbageCollected<HTMLPermissionElement>(document);
+    permission_element->setAttribute(html_names::kTypeAttr,
+                                     AtomicString("camera"));
+    permission_element->setAttribute(
+        html_names::kOnvalidationstatuschangeAttr,
+        AtomicString("console.log('event dispatched')"));
+    document.body()->AppendChild(permission_element);
+    document.UpdateStyleAndLayout(DocumentUpdateReason::kTest);
+    DeferredChecker checker(permission_element, &MainFrame());
+    checker.CheckConsoleMessage(/*expected_count*/ 1u, "event dispatched");
+    EXPECT_FALSE(permission_element->isValid());
+    EXPECT_EQ(permission_element->invalidReason(), "unsuccessful_registration");
+    permission_service()->set_should_defer_registered_callback(
+        /*should_defer*/ true);
+    checker.CheckConsoleMessageAfterDelay(base::Milliseconds(600),
+                                          /*expected_count*/ 1u,
+                                          "event dispatched");
+    EXPECT_FALSE(permission_element->isValid());
+    EXPECT_EQ(permission_element->invalidReason(), "unsuccessful_registration");
+    std::move(permission_service()->TakePEPCRegisteredCallback()).Run();
+    RegistrationWaiter(permission_element).Wait();
+    permission_service()->set_should_defer_registered_callback(
+        /*should_defer*/ false);
+    return permission_element;
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+// Test receiving event after registration
+TEST_F(HTMLPemissionElementDispatchValidationEventTest, Registration) {
+  auto* permission_element = CreateElementAndWaitForRegistration();
+  DeferredChecker checker(permission_element, &MainFrame());
+  checker.CheckConsoleMessage(
+      /*expected_count*/ 2u, "event dispatched");
+  EXPECT_TRUE(permission_element->isValid());
+}
+
+// Test receiving event after several times disabling (temporarily or
+// indefinitely) + enabling a single reason and verify the `isValid` and
+// `invalidReason` attrs.
+TEST_F(HTMLPemissionElementDispatchValidationEventTest, DisableEnableClicking) {
+  const struct {
+    HTMLPermissionElement::DisableReason reason;
+    String expected_invalid_reason;
+  } kTestData[] = {
+      {HTMLPermissionElement::DisableReason::kIntersectionVisibilityChanged,
+       String("intersection_changed")},
+      {HTMLPermissionElement::DisableReason::kRecentlyAttachedToLayoutTree,
+       String("recently_attached")},
+      {HTMLPermissionElement::DisableReason::kInvalidStyle,
+       String("style_invalid")}};
+  for (const auto& data : kTestData) {
+    auto* permission_element = CreateElementAndWaitForRegistration();
+    DeferredChecker checker(permission_element, &MainFrame());
+    checker.CheckConsoleMessage(
+        /*expected_count*/ 2u);
+    EXPECT_TRUE(permission_element->isValid());
+    permission_element->DisableClickingIndefinitely(data.reason);
+    base::RunLoop().RunUntilIdle();
+    checker.CheckConsoleMessage(
+        /*expected_count*/ 3u, "event dispatched");
+    EXPECT_FALSE(permission_element->isValid());
+    EXPECT_EQ(permission_element->invalidReason(),
+              data.expected_invalid_reason);
+    // Calling |DisableClickingTemporarily| for a reason that is currently
+    // disabling clicking does not do anything.
+    permission_element->DisableClickingTemporarily(data.reason,
+                                                   base::Milliseconds(600));
+    checker.CheckConsoleMessageAfterDelay(kSmallTimeout,
+                                          /*expected_count*/ 3u,
+                                          "event dispatched");
+    EXPECT_FALSE(permission_element->isValid());
+    EXPECT_EQ(permission_element->invalidReason(),
+              data.expected_invalid_reason);
+    // Calling |EnableClickingAfterDelay| for a reason that is currently
+    // disabling clicking will result in a validation change event.
+    permission_element->EnableClickingAfterDelay(data.reason, kSmallTimeout);
+    EXPECT_FALSE(permission_element->isValid());
+    EXPECT_EQ(permission_element->invalidReason(),
+              data.expected_invalid_reason);
+    checker.CheckConsoleMessageAfterDelay(kSmallTimeout,
+                                          /*expected_count*/ 4u,
+                                          "event dispatched");
+    EXPECT_TRUE(permission_element->isValid());
+    // Calling |EnableClickingAfterDelay| for a reason that is currently *not*
+    // disabling clicking does not do anything.
+    permission_element->EnableClickingAfterDelay(data.reason, kSmallTimeout);
+    checker.CheckConsoleMessageAfterDelay(kSmallTimeout,
+                                          /*expected_count*/ 4u);
+
+    permission_element->DisableClickingTemporarily(data.reason, kSmallTimeout);
+    base::RunLoop().RunUntilIdle();
+    checker.CheckConsoleMessage(
+        /*expected_count*/ 5u, "event dispatched");
+    EXPECT_FALSE(permission_element->isValid());
+    EXPECT_EQ(permission_element->invalidReason(),
+              data.expected_invalid_reason);
+    checker.CheckConsoleMessageAfterDelay(kSmallTimeout,
+                                          /*expected_count*/ 6u,
+                                          "event dispatched");
+    EXPECT_TRUE(permission_element->isValid());
+
+    GetDocument().body()->RemoveChild(permission_element);
+    ConsoleMessages().clear();
+  }
+}
+
+// Test restart the timer caused by `DisableClickingTemporarily` or
+// `EnableClickingAfterDelay`. And verify that `invalidReason` changing could
+// result in an event.
+TEST_F(HTMLPemissionElementDispatchValidationEventTest,
+       ChangeReasonRestartTimer) {
+  auto* permission_element = CreateElementAndWaitForRegistration();
+  DeferredChecker checker(permission_element, &MainFrame());
+  checker.CheckConsoleMessage(
+      /*expected_count*/ 2u, "event dispatched");
+  EXPECT_TRUE(permission_element->isValid());
+  permission_element->DisableClickingTemporarily(
+      HTMLPermissionElement::DisableReason::kRecentlyAttachedToLayoutTree,
+      kSmallTimeout);
+  base::RunLoop().RunUntilIdle();
+  checker.CheckConsoleMessage(
+      /*expected_count*/ 3u, "event dispatched");
+  EXPECT_FALSE(permission_element->isValid());
+  EXPECT_EQ(permission_element->invalidReason(), "recently_attached");
+  permission_element->DisableClickingTemporarily(
+      HTMLPermissionElement::DisableReason::kInvalidStyle, kDefaultTimeout);
+  // Reason change to the "longest alive" reason, in this case is
+  // `kInvalidStyle`
+  base::RunLoop().RunUntilIdle();
+  checker.CheckConsoleMessage(/*expected_count*/ 4u, "event dispatched");
+  EXPECT_FALSE(permission_element->isValid());
+  EXPECT_EQ(permission_element->invalidReason(), "style_invalid");
+  permission_element->DisableClickingTemporarily(
+      HTMLPermissionElement::DisableReason::kRecentlyAttachedToLayoutTree,
+      base::Milliseconds(100));
+  EXPECT_FALSE(permission_element->isValid());
+  EXPECT_EQ(permission_element->invalidReason(), "style_invalid");
+  permission_element->EnableClickingAfterDelay(
+      HTMLPermissionElement::DisableReason::kInvalidStyle, kSmallTimeout);
+  checker.CheckConsoleMessageAfterDelay(kSmallTimeout,
+                                        /*expected_count*/ 5u);
+  EXPECT_FALSE(permission_element->isValid());
+  EXPECT_EQ(permission_element->invalidReason(), "recently_attached");
+  checker.CheckConsoleMessageAfterDelay(kSmallTimeout,
+                                        /*expected_count*/ 6u,
+                                        "event dispatched");
+  EXPECT_TRUE(permission_element->isValid());
+}
+
+// Test receiving event after disabling (temporarily or indefinitely) + enabling
+// multiple reasons and verify the `isValid` and `invalidReason` attrs.
+TEST_F(HTMLPemissionElementDispatchValidationEventTest,
+       DisableEnableClickingDifferentReasons) {
+  auto* permission_element = CreateElementAndWaitForRegistration();
+  DeferredChecker checker(permission_element, &MainFrame());
+  checker.CheckConsoleMessage(
+      /*expected_count*/ 2u, "event dispatched");
+  EXPECT_TRUE(permission_element->isValid());
+  permission_element->DisableClickingTemporarily(
+      HTMLPermissionElement::DisableReason::kIntersectionVisibilityChanged,
+      kDefaultTimeout);
+  base::RunLoop().RunUntilIdle();
+  checker.CheckConsoleMessage(
+      /*expected_count*/ 3u, "event dispatched");
+  EXPECT_FALSE(permission_element->isValid());
+  EXPECT_EQ(permission_element->invalidReason(), "intersection_changed");
+
+  // Disable indefinitely will stop the timer.
+  permission_element->DisableClickingIndefinitely(
+      HTMLPermissionElement::DisableReason::kInvalidStyle);
+  base::RunLoop().RunUntilIdle();
+  // `invalidReason` change from temporary `intersection` to indefinitely
+  // `style`
+  checker.CheckConsoleMessage(
+      /*expected_count*/ 4u, "event dispatched");
+  EXPECT_FALSE(permission_element->isValid());
+  EXPECT_EQ(permission_element->invalidReason(), "style_invalid");
+  checker.CheckConsoleMessageAfterDelay(kDefaultTimeout,
+                                        /*expected_count*/ 4u);
+  permission_element->DisableClickingTemporarily(
+      HTMLPermissionElement::DisableReason::kIntersectionVisibilityChanged,
+      kDefaultTimeout);
+  EXPECT_FALSE(permission_element->isValid());
+  EXPECT_EQ(permission_element->invalidReason(), "style_invalid");
+
+  // Enable the indefinitely disabling reason, the timer will start with the
+  // remaining temporary reason in the map.
+  permission_element->EnableClicking(
+      HTMLPermissionElement::DisableReason::kInvalidStyle);
+  base::RunLoop().RunUntilIdle();
+  // `invalidReason` change from `style` to temporary `intersection`
+  checker.CheckConsoleMessage(
+      /*expected_count*/ 5u, "event dispatched");
+  EXPECT_FALSE(permission_element->isValid());
+  EXPECT_EQ(permission_element->invalidReason(), "intersection_changed");
+  checker.CheckConsoleMessageAfterDelay(kDefaultTimeout,
+                                        /*expected_count*/ 6u,
+                                        "event dispatched");
+  EXPECT_TRUE(permission_element->isValid());
 }
 
 class HTMLPemissionElementFencedFrameTest : public HTMLPemissionElementSimTest {
@@ -963,7 +1220,7 @@ class HTMLPemissionElementIntersectionTest
         To<HTMLDivElement>(GetDocument().QuerySelector(AtomicString("div")));
 
     WaitForFullyVisibleChanged(permission_element, /*fully_visible*/ true);
-    ClickingEnabledChecker checker(permission_element);
+    DeferredChecker checker(permission_element);
     checker.CheckClickingEnabledAfterDelay(kDefaultTimeout,
                                            /*expected_enabled*/ true);
 
@@ -987,7 +1244,7 @@ TEST_F(HTMLPemissionElementIntersectionTest, IntersectionChanged) {
   auto* permission_element = To<HTMLPermissionElement>(
       GetDocument().QuerySelector(AtomicString("permission")));
   WaitForFullyVisibleChanged(permission_element, /*fully_visible*/ true);
-  ClickingEnabledChecker checker(permission_element);
+  DeferredChecker checker(permission_element);
   checker.CheckClickingEnabledAfterDelay(kDefaultTimeout,
                                          /*expected_enabled*/ true);
   GetDocument().View()->LayoutViewport()->ScrollBy(
@@ -1023,7 +1280,7 @@ TEST_F(HTMLPemissionElementIntersectionTest,
   auto* div =
       To<HTMLDivElement>(GetDocument().QuerySelector(AtomicString("div")));
   WaitForFullyVisibleChanged(permission_element, /*fully_visible*/ true);
-  ClickingEnabledChecker checker(permission_element);
+  DeferredChecker checker(permission_element);
   checker.CheckClickingEnabledAfterDelay(kDefaultTimeout,
                                          /*expected_enabled*/ true);
 
@@ -1087,7 +1344,7 @@ class HTMLPemissionElementLayoutChangeTest
         To<HTMLPermissionElement>(GetDocument().QuerySelector(element));
     GetDocument().View()->UpdateAllLifecyclePhasesForTest();
     EXPECT_EQ(permission_element->IsFullyVisibleForTesting(), true);
-    ClickingEnabledChecker checker(permission_element);
+    DeferredChecker checker(permission_element);
     checker.CheckClickingEnabledAfterDelay(kDefaultTimeout,
                                            /*expected_enabled*/ true);
     return permission_element;
@@ -1114,7 +1371,7 @@ TEST_F(HTMLPemissionElementLayoutChangeTest, InvalidatePEPCAfterMove) {
       AtomicString("position: relative; top: 100px; left: 100px"));
   GetDocument().View()->UpdateAllLifecyclePhasesForTest();
   EXPECT_FALSE(permission_element->IsClickingEnabled());
-  ClickingEnabledChecker checker(permission_element);
+  DeferredChecker checker(permission_element);
   checker.CheckClickingEnabledAfterDelay(kDefaultTimeout,
                                          /*expected_enabled*/ true);
 }
@@ -1136,7 +1393,7 @@ TEST_F(HTMLPemissionElementLayoutChangeTest, InvalidatePEPCAfterResize) {
                                    AtomicString(" height: 1em; width: 30px;"));
   GetDocument().View()->UpdateAllLifecyclePhasesForTest();
   EXPECT_FALSE(permission_element->IsClickingEnabled());
-  ClickingEnabledChecker checker(permission_element);
+  DeferredChecker checker(permission_element);
   checker.CheckClickingEnabledAfterDelay(kDefaultTimeout,
                                          /*expected_enabled*/ true);
 }
@@ -1159,7 +1416,7 @@ TEST_F(HTMLPemissionElementLayoutChangeTest, InvalidatePEPCAfterMoveContainer) {
   auto* permission_element = CreatePermissionElement(
       *child_frame->GetFrame()->GetDocument(), "camera");
   EXPECT_FALSE(permission_element->IsClickingEnabled());
-  ClickingEnabledChecker checker(permission_element);
+  DeferredChecker checker(permission_element);
   checker.CheckClickingEnabledAfterDelay(kDefaultTimeout,
                                          /*expected_enabled*/ true);
   auto* iframe = To<HTMLIFrameElement>(
@@ -1191,7 +1448,43 @@ TEST_F(HTMLPemissionElementLayoutChangeTest,
   GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kTest);
   GetDocument().View()->UpdateAllLifecyclePhasesForTest();
   EXPECT_FALSE(permission_element->IsClickingEnabled());
-  ClickingEnabledChecker checker(permission_element);
+  DeferredChecker checker(permission_element);
+  checker.CheckClickingEnabledAfterDelay(kDefaultTimeout,
+                                         /*expected_enabled*/ true);
+}
+
+TEST_F(HTMLPemissionElementLayoutChangeTest,
+       InvalidatePEPCLayoutInAnimationFrameCallback) {
+  SimRequest main_resource("https://example.test/", "text/html");
+  LoadURL("https://example.test/");
+  main_resource.Complete(R"HTML(
+  <body>
+    <permission
+      style=' height: 3em; width: 40px;' id='camera' type='camera'>
+  </body>
+  )HTML");
+
+  Compositor().BeginFrame();
+  auto* permission_element =
+      CheckAndQueryPermissionElement(AtomicString("permission"));
+  GetDocument().View()->UpdateAllLifecyclePhasesForTest();
+  // Run an animation frame callback which mutates the style of the element and
+  // causes a synchronous style update. This should not result in an
+  // "intersection changed" lifecycle state update, but still lock the element
+  // temporarily.
+  ClassicScript::CreateUnspecifiedScript(
+      "window.requestAnimationFrame(function() {\n"
+      "  var camera = document.getElementById('camera');\n"
+      "  camera.style.width = '10px';\n"
+      "  camera.getBoundingClientRect();\n"
+      "  camera.style.width = '40px';\n"
+      "\n"
+      "});\n")
+      ->RunScript(&Window());
+  Compositor().BeginFrame();
+  GetDocument().View()->UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(permission_element->IsClickingEnabled());
+  DeferredChecker checker(permission_element);
   checker.CheckClickingEnabledAfterDelay(kDefaultTimeout,
                                          /*expected_enabled*/ true);
 }

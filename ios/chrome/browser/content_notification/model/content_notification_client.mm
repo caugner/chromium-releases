@@ -22,6 +22,12 @@ ContentNotificationClient::~ContentNotificationClient() = default;
 
 void ContentNotificationClient::HandleNotificationInteraction(
     UNNotificationResponse* response) {
+  // Need to check if it is a content notification first to avoid conflicts with
+  // other clients.
+  if (![response.notification.request.content.categoryIdentifier
+          isEqualToString:kContentNotificationFeedbackCategoryIdentifier]) {
+    return;
+  }
   // In order to send delivered NAUs, the payload has been modified for it to be
   // processed on `HandleNotificationReception()`. Before reusing the payload,
   // remove the NAU body paramater from the payload to return it to its normal
@@ -44,6 +50,9 @@ void ContentNotificationClient::HandleNotificationInteraction(
   if ([response.actionIdentifier
           isEqualToString:kContentNotificationFeedbackActionIdentifier]) {
     config.actionType = NAUActionTypeFeedbackClicked;
+    base::UmaHistogramEnumeration(
+        kContentNotificationActionHistogramName,
+        NotificationActionType::kNotificationActionTypeFeedbackClicked);
     NSDictionary<NSString*, NSString*>* feedbackPayload =
         contentNotificationService->GetFeedbackPayload(payload);
     loadFeedbackWithPayloadAndClientId(feedbackPayload,
@@ -51,18 +60,25 @@ void ContentNotificationClient::HandleNotificationInteraction(
   } else if ([response.actionIdentifier
                  isEqualToString:UNNotificationDefaultActionIdentifier]) {
     config.actionType = NAUActionTypeOpened;
+    base::UmaHistogramEnumeration(
+        kContentNotificationActionHistogramName,
+        NotificationActionType::kNotificationActionTypeOpened);
     const GURL& url = contentNotificationService->GetDestinationUrl(payload);
     if (url.is_empty()) {
       base::UmaHistogramBoolean("ContentNotifications.OpenURLAction.HasURL",
                                 false);
-      loadUrlInNewTab(GURL("chrome://newtab"));
+      return;
     }
     base::UmaHistogramBoolean("ContentNotifications.OpenURLAction.HasURL",
                               true);
     loadUrlInNewTab(url);
   } else if ([response.actionIdentifier
                  isEqualToString:UNNotificationDismissActionIdentifier]) {
+    base::UmaHistogramBoolean("ContentNotifications.DismissAction", true);
     config.actionType = NAUActionTypeDismissed;
+    base::UmaHistogramEnumeration(
+        kContentNotificationActionHistogramName,
+        NotificationActionType::kNotificationActionTypeDismissed);
   }
   // TODO(crbug.com/337871560): Three way patch NAU and adding completion
   // handler.
@@ -70,32 +86,11 @@ void ContentNotificationClient::HandleNotificationInteraction(
 }
 
 // TODO(crbug.com/338875261): Add background refresh support.
-// Log a Delivered NAU from here. Only works when not in the background. This
-// method doesn't modify the payload and doesn't pass it forward, it is
-// readonly.
+// Delivered NAUs are currently being sent from the push_notification_delegate,
+// and in the future they should be here once background refresh is available.
 UIBackgroundFetchResult ContentNotificationClient::HandleNotificationReception(
     NSDictionary<NSString*, id>* payload) {
-  ContentNotificationService* contentNotificationService =
-      ContentNotificationServiceFactory::GetForBrowserState(
-          GetLastUsedBrowserState());
-  NSString* notificationBody =
-      [payload objectForKey:kContentNotificationNAUBodyParameter];
-  if (notificationBody) {
-    // Send NAU.
-    ContentNotificationNAUConfiguration* config =
-        [[ContentNotificationNAUConfiguration alloc] init];
-    config.actionType = NAUActionTypeDisplayed;
-    // Create a new payload without the parameter to mimic the original payload,
-    // to be sent with the NAU.
-    NSMutableDictionary<NSString*, id>* newPayload = [payload mutableCopy];
-    [newPayload removeObjectForKey:kContentNotificationNAUBodyParameter];
-    UNMutableNotificationContent* content =
-        [[UNMutableNotificationContent alloc] init];
-    content.body = notificationBody;
-    content.userInfo = [newPayload copy];
-    config.content = content;
-    contentNotificationService->SendNAUForConfiguration(config);
-  }
+
   return UIBackgroundFetchResultNoData;
 }
 

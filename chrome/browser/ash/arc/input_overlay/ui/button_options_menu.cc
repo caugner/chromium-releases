@@ -116,7 +116,7 @@ class DoneButton : public views::LabelButton {
       : LabelButton(std::move(pressed_callback),
                     l10n_util::GetStringUTF16(
                         IDS_INPUT_OVERLAY_EDITING_DONE_BUTTON_LABEL)) {
-    SetAccessibleName(
+    GetViewAccessibility().SetName(
         l10n_util::GetStringUTF16(IDS_INPUT_OVERLAY_EDITING_DONE_BUTTON_LABEL));
 
     SetBackground(views::CreateThemedRoundedRectBackground(
@@ -282,13 +282,15 @@ void ButtonOptionsMenu::AddDoneButton() {
 }
 
 void ButtonOptionsMenu::OnTrashButtonPressed() {
-  RecordButtonOptionsMenuFunctionTriggered(ButtonOptionsMenuFunction::kDelete);
+  RecordButtonOptionsMenuFunctionTriggered(controller_->GetPackageName(),
+                                           ButtonOptionsMenuFunction::kDelete);
   controller_->RemoveAction(action_);
 }
 
 void ButtonOptionsMenu::OnDoneButtonPressed() {
   controller_->SaveToProtoFile();
-  RecordButtonOptionsMenuFunctionTriggered(ButtonOptionsMenuFunction::kDone);
+  RecordButtonOptionsMenuFunctionTriggered(controller_->GetPackageName(),
+                                           ButtonOptionsMenuFunction::kDone);
 
   controller_->SetEditingListVisibility(/*visible=*/true);
 

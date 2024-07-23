@@ -10,7 +10,7 @@
             "builder_id": {
               "bucket": "ci",
               "builder": "win-arm64-rel",
-              "project": "chromium-m126"
+              "project": "chromium-m127"
             },
             "builder_spec": {
               "build_gs_bucket": "chromium-win-archive",
@@ -34,39 +34,6 @@
                 "config": "chromium"
               }
             }
-          },
-          {
-            "builder_id": {
-              "bucket": "ci",
-              "builder": "win11-arm64-rel-tests",
-              "project": "chromium-m126"
-            },
-            "builder_spec": {
-              "build_gs_bucket": "chromium-win-archive",
-              "builder_group": "chromium.win",
-              "execution_mode": "TEST",
-              "legacy_chromium_config": {
-                "apply_configs": [
-                  "mb"
-                ],
-                "build_config": "Release",
-                "config": "chromium",
-                "target_arch": "arm",
-                "target_bits": 64,
-                "target_platform": "win"
-              },
-              "legacy_gclient_config": {
-                "apply_configs": [
-                  "use_clang_coverage"
-                ],
-                "config": "chromium"
-              },
-              "parent": {
-                "bucket": "ci",
-                "builder": "win-arm64-rel",
-                "project": "chromium-m126"
-              }
-            }
           }
         ]
       },
@@ -74,14 +41,7 @@
         {
           "bucket": "ci",
           "builder": "win-arm64-rel",
-          "project": "chromium-m126"
-        }
-      ],
-      "builder_ids_in_scope_for_testing": [
-        {
-          "bucket": "ci",
-          "builder": "win11-arm64-rel-tests",
-          "project": "chromium-m126"
+          "project": "chromium-m127"
         }
       ],
       "mirroring_builder_group_and_names": [
@@ -89,12 +49,12 @@
           "builder": "win-arm64-rel",
           "group": "tryserver.chromium.win"
         }
-      ]
+      ],
+      "retry_failed_shards": true
     }
   },
   "$build/reclient": {
     "instance": "rbe-chromium-trusted",
-    "jobs": 250,
     "metrics_project": "chromium-reclient-metrics",
     "scandeps_server": true
   },
@@ -116,6 +76,9 @@
     ]
   },
   "builder_group": "chromium.win",
+  "gardener_rotations": [
+    "chrome_browser_release"
+  ],
   "recipe": "chromium",
   "sheriff_rotations": [
     "chrome_browser_release"

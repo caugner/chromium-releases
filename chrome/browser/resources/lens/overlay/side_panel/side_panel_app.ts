@@ -4,6 +4,7 @@
 
 import '../strings.m.js';
 import '//resources/cr_components/searchbox/realbox.js';
+import './side_panel_ghost_loader.js';
 
 import {ColorChangeUpdater} from '//resources/cr_components/color_change_listener/colors_css_updater.js';
 import {assert} from '//resources/js/assert.js';
@@ -16,6 +17,7 @@ import type {LensSidePanelPageHandlerInterface} from '../lens.mojom-webui.js';
 import {getTemplate} from './side_panel_app.html.js';
 import {SidePanelBrowserProxyImpl} from './side_panel_browser_proxy.js';
 import type {SidePanelBrowserProxy} from './side_panel_browser_proxy.js';
+import type {SidePanelGhostLoaderElement} from './side_panel_ghost_loader.js';
 
 // The url query parameter keys for the viewport size.
 const VIEWPORT_HEIGHT_KEY = 'bih';
@@ -24,7 +26,8 @@ const VIEWPORT_WIDTH_KEY = 'biw';
 export interface LensSidePanelAppElement {
   $: {
     results: HTMLIFrameElement,
-    loadingResultsImage: HTMLImageElement,
+    ghostLoader: SidePanelGhostLoaderElement,
+    networkErrorPage: HTMLDivElement,
   };
 }
 
@@ -44,6 +47,16 @@ export class LensSidePanelAppElement extends PolymerElement {
         value: false,
         reflectToAttribute: true,
       },
+      isErrorPageVisible: {
+        type: Boolean,
+        value: false,
+        reflectToAttribute: true,
+      },
+      /* Used to decide whether to show back arrow onFocusOut in searchbox. */
+      wasBackArrowAvailable: {
+        type: Boolean,
+        value: false,
+      },
       isLoadingResults: {
         type: Boolean,
         value: true,
@@ -54,11 +67,17 @@ export class LensSidePanelAppElement extends PolymerElement {
         value: loadTimeData.getString('resultsLoadingUrl'),
         readOnly: true,
       },
+      darkMode: {
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('darkMode'),
+        reflectToAttribute: true,
+      },
     };
   }
 
   // Public for use in browser tests.
   isBackArrowVisible: boolean;
+  private isErrorPageVisible: boolean;
   // Whether the results iframe is currently loading. This needs to be done via
   // browser because the iframe is cross-origin. Default true since the side
   // panel can open before a navigation has started.
@@ -69,13 +88,24 @@ export class LensSidePanelAppElement extends PolymerElement {
 
   private browserProxy: SidePanelBrowserProxy =
       SidePanelBrowserProxyImpl.getInstance();
+  private darkMode: boolean;
   private listenerIds: number[];
   private pageHandler: LensSidePanelPageHandlerInterface;
+  private wasBackArrowAvailable: boolean;
 
   constructor() {
     super();
     this.pageHandler = SidePanelBrowserProxyImpl.getInstance().handler;
     ColorChangeUpdater.forDocument().start();
+  }
+
+  override ready() {
+    super.ready();
+
+    this.shadowRoot!.querySelector<HTMLElement>('cr-realbox')
+        ?.addEventListener('focusin', () => this.onSearchboxFocusIn_());
+    this.shadowRoot!.querySelector<HTMLElement>('cr-realbox')
+        ?.addEventListener('focusout', () => this.onSearchboxFocusOut_());
   }
 
   override connectedCallback() {
@@ -88,6 +118,8 @@ export class LensSidePanelAppElement extends PolymerElement {
           this.setIsLoadingResults.bind(this)),
       this.browserProxy.callbackRouter.setBackArrowVisible.addListener(
           this.setBackArrowVisible.bind(this)),
+      this.browserProxy.callbackRouter.setShowErrorPage.addListener(
+          this.setShowErrorPage.bind(this)),
     ];
   }
 
@@ -122,10 +154,29 @@ export class LensSidePanelAppElement extends PolymerElement {
     // to force a reload. We cannot get the currently displayed URL from the
     // frame because of cross-origin restrictions.
     this.$.results.src = url.href;
+    // Remove focus from the input when results are loaded. Does not have
+    // any effect if input is not focused.
+    this.shadowRoot!.querySelector<HTMLElement>('cr-realbox')
+        ?.shadowRoot!.querySelector<HTMLElement>('input')
+        ?.blur();
   }
 
   private setBackArrowVisible(visible: boolean) {
     this.isBackArrowVisible = visible;
+    this.wasBackArrowAvailable = visible;
+  }
+
+  private setShowErrorPage(shouldShowErrorPage: boolean) {
+    this.isErrorPageVisible =
+        shouldShowErrorPage && loadTimeData.getBoolean('enableErrorPage');
+  }
+
+  private onSearchboxFocusIn_() {
+    this.isBackArrowVisible = false;
+  }
+
+  private onSearchboxFocusOut_() {
+    this.isBackArrowVisible = this.wasBackArrowAvailable;
   }
 }
 

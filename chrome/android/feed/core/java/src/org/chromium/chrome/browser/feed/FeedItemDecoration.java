@@ -19,27 +19,28 @@ public class FeedItemDecoration extends RecyclerView.ItemDecoration {
         Drawable getDrawable(int resId);
     }
 
-    // This should be consistent with the gutter value defined in http://shortn/_ZVrTS16q0c.
-    private static final int STAGGERED_GUTTER_COLUMN_PADDING = 12;
-
     private final FeedSurfaceCoordinator mCoordinator;
     private final Drawable mTopRoundedBackground;
     private final Drawable mBottomRoundedBackground;
     private final Drawable mBottomLeftRoundedBackground;
     private final Drawable mBottomRightRoundedBackground;
     private final Drawable mNotRoundedBackground;
-    private final int mExtraPadding;
+    private final int mGutterPadding;
+    private final int mAdditionalBottomCardPadding;
 
     public FeedItemDecoration(
             Context context,
             FeedSurfaceCoordinator coordinator,
-            DrawableProvider drawableProvider) {
+            DrawableProvider drawableProvider,
+            int gutterPadding) {
         mCoordinator = coordinator;
 
         mTopRoundedBackground =
                 drawableProvider.getDrawable(R.drawable.home_surface_ui_background_top_rounded);
         mNotRoundedBackground =
                 drawableProvider.getDrawable(R.drawable.home_surface_ui_background_not_rounded);
+        mBottomRoundedBackground =
+                drawableProvider.getDrawable(R.drawable.home_surface_ui_background_bottom_rounded);
         if (mCoordinator.useStaggeredLayout()) {
             mBottomLeftRoundedBackground =
                     drawableProvider.getDrawable(
@@ -47,19 +48,14 @@ public class FeedItemDecoration extends RecyclerView.ItemDecoration {
             mBottomRightRoundedBackground =
                     drawableProvider.getDrawable(
                             R.drawable.home_surface_ui_background_bottomright_rounded);
-            mBottomRoundedBackground = null;
-            mExtraPadding =
-                    context.getResources()
-                            .getDimensionPixelSize(R.dimen.feed_containment_horizontal_padding);
-
         } else {
-            mBottomRoundedBackground =
-                    drawableProvider.getDrawable(
-                            R.drawable.home_surface_ui_background_bottom_rounded);
             mBottomLeftRoundedBackground = null;
             mBottomRightRoundedBackground = null;
-            mExtraPadding = 0;
         }
+        mGutterPadding = gutterPadding;
+        mAdditionalBottomCardPadding =
+                context.getResources()
+                        .getDimensionPixelSize(R.dimen.feed_containment_bottom_card_padding);
     }
 
     @Override
@@ -86,6 +82,13 @@ public class FeedItemDecoration extends RecyclerView.ItemDecoration {
             Rect bounds = new Rect();
             parent.getDecoratedBoundsWithMargins(child, bounds);
 
+            // The last card comes with the divider which may overlap the bottom edge of
+            // the feed containment. To work around this, we add an additional bottom padding to
+            // the card.
+            if (isLastViewInFeedContainment(position)) {
+                bounds.bottom += mAdditionalBottomCardPadding;
+            }
+
             // Draw the background for the view.
             Drawable background = getBackgroundDrawable(position);
             background.setBounds(bounds);
@@ -98,11 +101,19 @@ public class FeedItemDecoration extends RecyclerView.ItemDecoration {
         // column may not be equal due to the unfilled empty space at the end of one column.
         // We need to find the bottom position of last card in each column so that we can
         // "expand" the last card of the shorter column to be on par with the other column.
+
         int leftColumnBottom = 0;
         int rightColumnBottom = 0;
         boolean reachLastViewInFeedContainment = false;
-        for (int i = 0; i < parent.getChildCount(); ++i) {
-            View child = parent.getChildAt(i);
+        boolean reachFullSpanBottomViewInFeedContainment = false;
+
+        // Scan the child views until finding the one that is laid in multi-column. `i` is the index
+        // that points to such view after the for loop.
+        int indexOfFirstViewInMultiColumn = 0;
+        for (;
+                indexOfFirstViewInMultiColumn < parent.getChildCount();
+                ++indexOfFirstViewInMultiColumn) {
+            View child = parent.getChildAt(indexOfFirstViewInMultiColumn);
             int position = parent.getChildAdapterPosition(child);
 
             // Skip the non-feed elements.
@@ -111,17 +122,23 @@ public class FeedItemDecoration extends RecyclerView.ItemDecoration {
             }
 
             // Skip the views which take the full span, like section header and sign-in promo.
-            int columnIndex =
-                    mCoordinator
-                            .getHybridListRenderer()
-                            .getListLayoutHelper()
-                            .getColumnIndex(child);
-            if (columnIndex == -1) {
-                continue;
+            int columnIndex = getColumnIndex(child);
+            if (columnIndex != -1) {
+                break;
             }
+        }
+        // Continue checking the child views that are laid in multi-column in order to find the
+        // bottom position of each column.
+        for (int i = indexOfFirstViewInMultiColumn; i < parent.getChildCount(); ++i) {
+            View child = parent.getChildAt(i);
+            int position = parent.getChildAdapterPosition(child);
+            int columnIndex = getColumnIndex(child);
 
-            if (isLastViewInFeedContainment(position)) {
-                reachLastViewInFeedContainment = true;
+            // There may be full-span view, like loading more indicator, beyond the card views
+            // laid in multi-column. If so, don't need to go further.
+            if (columnIndex == -1) {
+                reachFullSpanBottomViewInFeedContainment = true;
+                break;
             }
 
             Rect bounds = new Rect();
@@ -136,10 +153,20 @@ public class FeedItemDecoration extends RecyclerView.ItemDecoration {
                     rightColumnBottom = bounds.bottom;
                 }
             }
+
+            // Don't need to go further if reaching the last view in feed containment.
+            if (isLastViewInFeedContainment(position)) {
+                reachLastViewInFeedContainment = true;
+                break;
+            }
         }
         int minBottom = Math.min(leftColumnBottom, rightColumnBottom);
         int maxBottom = Math.max(leftColumnBottom, rightColumnBottom);
+        // We may just show the feed in single column even staggered layout is used, like the
+        // following feed. When this occurs, minBottom is 0.
+        boolean multiColumn = minBottom > 0;
 
+        // Now update the bounds and draw the background.
         for (int i = 0; i < parent.getChildCount(); ++i) {
             View child = parent.getChildAt(i);
             int position = parent.getChildAdapterPosition(child);
@@ -154,37 +181,41 @@ public class FeedItemDecoration extends RecyclerView.ItemDecoration {
 
             // Extend the bounds to compensate the gutter between columns and the unfilled empty
             // space.
-            int columnIndex =
-                    mCoordinator
-                            .getHybridListRenderer()
-                            .getListLayoutHelper()
-                            .getColumnIndex(child);
-            if (columnIndex == -1) {
-                // For the full-span view, like section header or sign-in promo, we only need to
-                // add extra padding on the right since the original right padding is not
-                // enough.
-                bounds.right += mExtraPadding;
-            } else {
-                if (columnIndex == 0) {
-                    // For the card in the left column, include the gutter space.
-                    bounds.right += 2 * STAGGERED_GUTTER_COLUMN_PADDING;
-                } else {
-                    // For the card at the right column, include the extra padding on the right.
-                    bounds.right += mExtraPadding;
-                }
+            int columnIndex = getColumnIndex(child);
+            if (multiColumn) {
+                if (columnIndex != -1) {
+                    if (columnIndex == 0) {
+                        // For the card in the left column, include the gutter space.
+                        bounds.right += 2 * mGutterPadding;
+                    }
 
-                // For the bottom card in the shorter column, expand it to match the bottom card
-                // in the other column.
-                if (reachLastViewInFeedContainment
-                        && minBottom != maxBottom
-                        && bounds.bottom == minBottom) {
-                    bounds.bottom += maxBottom - minBottom;
+                    // For the bottom card in the shorter column, expand it to match the bottom card
+                    // in the other column.
+                    if ((reachLastViewInFeedContainment || reachFullSpanBottomViewInFeedContainment)
+                            && minBottom != maxBottom
+                            && bounds.bottom == minBottom) {
+                        bounds.bottom += maxBottom - minBottom;
+                    }
+
+                    // The last card comes with the divider which may overlap the bottom edge of
+                    // the feed containment if the last card is in the longer column. To work around
+                    // this, we add an additional bottom padding to both bottom cards.
+                    if (reachLastViewInFeedContainment && bounds.bottom == maxBottom) {
+                        bounds.bottom += mAdditionalBottomCardPadding;
+                    }
                 }
+            }
+
+            // Add an additional bottom padding for the last card that takes the full span.
+            if ((columnIndex == -1 || !multiColumn) && isLastViewInFeedContainment(position)) {
+                bounds.bottom += mAdditionalBottomCardPadding;
             }
 
             // Draw the background for the extended bounds.
             Drawable background;
-            if (reachLastViewInFeedContainment && bounds.bottom == maxBottom) {
+            if (multiColumn
+                    && reachLastViewInFeedContainment
+                    && bounds.bottom == maxBottom + mAdditionalBottomCardPadding) {
                 background =
                         (columnIndex == 0)
                                 ? mBottomLeftRoundedBackground
@@ -195,6 +226,12 @@ public class FeedItemDecoration extends RecyclerView.ItemDecoration {
             background.setBounds(bounds);
             background.draw(canvas);
         }
+    }
+
+    // Returns the column index of the view in the staggered layout. Returns -1 if the view
+    // takes the full span.
+    private int getColumnIndex(View view) {
+        return mCoordinator.getHybridListRenderer().getListLayoutHelper().getColumnIndex(view);
     }
 
     private boolean belongsToFeedContainment(int position) {
@@ -211,18 +248,14 @@ public class FeedItemDecoration extends RecyclerView.ItemDecoration {
     private Drawable getBackgroundDrawable(int position) {
         if (position == mCoordinator.getSectionHeaderPosition()) {
             return mTopRoundedBackground;
-        } else if (!mCoordinator.useStaggeredLayout() && isLastViewInFeedContainment(position)) {
+        } else if (isLastViewInFeedContainment(position)) {
             return mBottomRoundedBackground;
         } else {
             return mNotRoundedBackground;
         }
     }
 
-    int getGutterPaddingForTesting() {
-        return STAGGERED_GUTTER_COLUMN_PADDING * 2;
-    }
-
-    int getExtraPaddingForTesting() {
-        return mExtraPadding;
+    int getAdditionalBottomCardPaddingForTesting() {
+        return mAdditionalBottomCardPadding;
     }
 }

@@ -196,7 +196,7 @@ std::u16string GetAdditionalA11yMessage(
       return l10n_util::GetStringUTF16(
           IDS_ACC_REMOVE_SUGGESTION_FOCUSED_PREFIX);
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       break;
   }
   return std::u16string();
@@ -472,6 +472,7 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
       {"realboxSeparator", IDS_AUTOCOMPLETE_MATCH_DESCRIPTION_SEPARATOR},
       {"removeSuggestion", IDS_OMNIBOX_REMOVE_SUGGESTION},
       {"searchBoxHint", IDS_GOOGLE_SEARCH_BOX_EMPTY_HINT_MD},
+      {"searchBoxHintMultimodal", IDS_GOOGLE_SEARCH_BOX_EMPTY_HINT_MULTIMODAL},
       {"showSuggestions", IDS_TOOLTIP_HEADER_SHOW_SUGGESTIONS_BUTTON},
       {"voiceSearchButtonLabel", IDS_TOOLTIP_MIC_SEARCH}};
   source->AddLocalizedStrings(kStrings);
@@ -688,10 +689,11 @@ std::string SearchboxHandler::ActionVectorIconToResourceName(
       icon.name == omnibox::kStarActiveChromeRefreshIcon.name) {
     return kStarActiveIconResourceName;
   }
-  NOTREACHED() << "Every vector icon returned by OmniboxAction::GetVectorIcon "
-                  "must have an equivalent SVG resource for the NTP Realbox. "
-                  "icon.name: '"
-               << icon.name << "'";
+  NOTREACHED_IN_MIGRATION()
+      << "Every vector icon returned by OmniboxAction::GetVectorIcon "
+         "must have an equivalent SVG resource for the NTP Realbox. "
+         "icon.name: '"
+      << icon.name << "'";
   return "";
 }
 

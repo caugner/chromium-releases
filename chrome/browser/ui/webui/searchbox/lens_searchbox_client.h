@@ -7,6 +7,7 @@
 
 #include "components/lens/proto/server/lens_overlay_response.pb.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
+#include "components/sessions/core/session_id.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "url/gurl.h"
 
@@ -20,6 +21,9 @@ class LensSearchboxClient {
   // Returns the URL of the current page in the WebContents.
   virtual const GURL& GetPageURL() const = 0;
 
+  // Returns the current tab ID.
+  virtual SessionID GetTabId() const = 0;
+
   // Returns the appropriate classification based on the current mode.
   virtual metrics::OmniboxEventProto::PageClassification GetPageClassification()
       const = 0;
@@ -30,6 +34,10 @@ class LensSearchboxClient {
   // Returns the Lens response. Used to report iil= in the Suggest requests.
   virtual const lens::proto::LensOverlayInteractionResponse& GetLensResponse()
       const = 0;
+
+  // Called when the user modifies the text in any way (add, delete, paste,
+  // cut, etc.).
+  virtual void OnTextModified() = 0;
 
   // Called when the user removes the thumbnail.
   virtual void OnThumbnailRemoved() = 0;

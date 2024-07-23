@@ -35,7 +35,6 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
@@ -46,6 +45,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/time/default_tick_clock.h"
 #include "base/time/time.h"
+#include "base/trace_event/named_trigger.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "build/branding_buildflags.h"
@@ -596,6 +596,7 @@ void StartWatchingForProcessShutdownHangs() {
   // This HangWatcher scope is covering the shutdown phase up to the end of the
   // process. Intentionally leak this instance so that it is not destroyed
   // before process termination.
+  base::HangWatcher::SetShuttingDown();
   auto* watcher = new base::WatchHangsInScope(base::Seconds(30));
   ANNOTATE_LEAKING_OBJECT_PTR(watcher);
   std::ignore = watcher;
@@ -838,7 +839,7 @@ int ChromeBrowserMainParts::PreEarlyInitialization() {
     if (!upgrade_util::RelaunchChromeBrowser(
             *base::CommandLine::ForCurrentProcess())) {
       // The relaunch failed. Feel free to panic now.
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
     }
 
     // Note, cannot return RESULT_CODE_NORMAL_EXIT here as this code needs to
@@ -1223,6 +1224,8 @@ void ChromeBrowserMainParts::PostCreateThreads() {
   tracing::MaybeSetupSystemTracingFromFieldTrial();
   tracing::SetupBackgroundTracingFromCommandLine();
   tracing::SetupPresetTracingFromFieldTrial();
+  base::trace_event::EmitNamedTrigger(
+      base::trace_event::kStartupTracingTriggerName);
 
   for (auto& chrome_extra_part : chrome_extra_parts_)
     chrome_extra_part->PostCreateThreads();
@@ -1854,7 +1857,7 @@ void ChromeBrowserMainParts::WillRunMainMessageLoop(
 #if BUILDFLAG(IS_ANDROID)
   // Chrome on Android does not use default MessageLoop. It has its own
   // Android specific MessageLoop
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 #else
   DCHECK(base::CurrentUIThread::IsSet());
 
@@ -1894,7 +1897,7 @@ void ChromeBrowserMainParts::PostMainMessageLoopRun() {
 #if BUILDFLAG(IS_ANDROID)
   // Chrome on Android does not use default MessageLoop. It has its own
   // Android specific MessageLoop
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 #else
   // Shutdown the UpgradeDetector here before `ChromeBrowserMainPartsAsh`
   // disconnects DBus services in its PostDestroyThreads.
@@ -1943,7 +1946,7 @@ void ChromeBrowserMainParts::PostDestroyThreads() {
 #if BUILDFLAG(IS_ANDROID)
   // On Android, there is no quit/exit. So the browser's main message loop will
   // not finish.
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 #else
 
   for (auto& chrome_extra_part : chrome_extra_parts_) {

@@ -4,8 +4,10 @@
 
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
-#include "chrome/browser/ui/side_panel/side_panel_entry_id.h"
-#include "chrome/browser/ui/side_panel/side_panel_ui.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+#include "chrome/browser/ui/views/side_panel/side_panel_entry_id.h"
+#include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/web_ui_mocha_browser_test.h"
 #include "content/public/common/url_constants.h"
@@ -21,7 +23,7 @@ class ReadAnythingMochaBrowserTest : public WebUIMochaBrowserTest {
   }
 
   void RunSidePanelTest(const std::string& file, const std::string& trigger) {
-    auto* side_panel_ui = SidePanelUI::GetSidePanelUIForBrowser(browser());
+    auto* side_panel_ui = browser()->GetFeatures().side_panel_ui();
     side_panel_ui->Show(SidePanelEntryId::kReadAnything);
     auto* web_contents =
         side_panel_ui->GetWebContentsForTest(SidePanelEntryId::kReadAnything);
@@ -32,8 +34,6 @@ class ReadAnythingMochaBrowserTest : public WebUIMochaBrowserTest {
     ASSERT_TRUE(RunTestOnWebContents(web_contents, file, trigger, true));
     side_panel_ui->Close();
   }
-
-  base::test::ScopedFeatureList scoped_feature_list_{features::kReadAnything};
 };
 
 using ReadAnythingMochaTest = ReadAnythingMochaBrowserTest;
@@ -146,6 +146,11 @@ IN_PROC_BROWSER_TEST_F(ReadAnythingMochaTest,
 
 IN_PROC_BROWSER_TEST_F(ReadAnythingMochaTest, LanguageChanged) {
   RunSidePanelTest("side_panel/read_anything/language_change_test.js",
+                   "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(ReadAnythingMochaTest, VoiceSelection) {
+  RunSidePanelTest("side_panel/read_anything/voice_selection_test.js",
                    "mocha.run()");
 }
 

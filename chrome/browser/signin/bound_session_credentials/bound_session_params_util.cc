@@ -42,7 +42,8 @@ bool AreParamsValid(const BoundSessionParams& bound_session_params) {
   }
 
   GURL site(bound_session_params.site());
-  if (!site.is_valid()) {
+  // Site must be valid and must be in canonical form.
+  if (!site.is_valid() || site.spec() != bound_session_params.site()) {
     return false;
   }
 
@@ -91,9 +92,16 @@ bool IsCookieCredentialValid(const Credential& credential, const GURL& site) {
   return true;
 }
 
+BoundSessionKey GetBoundSessionKey(
+    const BoundSessionParams& bound_session_params) {
+  DCHECK(AreParamsValid(bound_session_params));
+  return {.site = GURL(bound_session_params.site()),
+          .session_id = bound_session_params.session_id()};
+}
+
 bool AreSameSessionParams(const BoundSessionParams& lhs,
                           const BoundSessionParams& rhs) {
-  return lhs.site() == rhs.site() && lhs.session_id() == rhs.session_id();
+  return GetBoundSessionKey(lhs) == GetBoundSessionKey(rhs);
 }
 
 GURL ResolveEndpointPath(const GURL& request_url,

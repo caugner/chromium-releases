@@ -42,6 +42,7 @@
 #include "chrome/browser/chrome_resource_bundle_helper.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/lifetime/browser_shutdown.h"
+#include "chrome/browser/mac/code_sign_clone_manager.h"
 #include "chrome/browser/metrics/chrome_feature_list_creator.h"
 #include "chrome/browser/startup_data.h"
 #include "chrome/common/buildflags.h"
@@ -155,6 +156,7 @@
 #include "chrome/browser/ash/dbus/ash_dbus_helper.h"
 #include "chrome/browser/ash/dbus_schedqos_state_handler.h"
 #include "chrome/browser/ash/startup_settings_cache.h"
+#include "chromeos/ash/components/memory/memory.h"
 #include "chromeos/ash/components/memory/mglru.h"
 #include "content/public/common/content_features.h"
 #include "ui/lottie/resource.h"  // nogncheck
@@ -327,7 +329,7 @@ void AdjustLinuxOOMScore(const std::string& process_type) {
     // we want to assign a score that is somewhat representative for debugging.
     score = content::kLowestRendererOomScore;
   } else {
-    NOTREACHED() << "Unknown process type";
+    NOTREACHED_IN_MIGRATION() << "Unknown process type";
   }
   // In the case of a 0 score, still try to adjust it. Most likely the score is
   // 0 already, but it may not be if this process inherited a higher score from
@@ -1121,6 +1123,8 @@ void ChromeMainDelegate::CommonEarlyInitialization(InvokedIn invoked_in) {
   if (is_browser_process) {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     ash::InitializeMGLRU();
+
+    ash::LockMainProgramText();
 #endif
   }
 
@@ -1797,7 +1801,7 @@ void ChromeMainDelegate::SandboxInitialized(const std::string& process_type) {
           /*persistent_histograms_enabled=*/true,
           /*storage=*/kPersistentHistogramStorageMappedFile);
     } else {
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
     }
   }
 
@@ -1812,20 +1816,21 @@ absl::variant<int, content::MainFunctionParams> ChromeMainDelegate::RunProcess(
     const std::string& process_type,
     content::MainFunctionParams main_function_params) {
 #if BUILDFLAG(IS_ANDROID)
-  NOTREACHED();  // Android provides a subclass and shares no code here.
+  NOTREACHED_IN_MIGRATION();  // Android provides a subclass and shares no code
+                              // here.
 #else
+
+#if BUILDFLAG(IS_MAC) || (BUILDFLAG(ENABLE_NACL) && !BUILDFLAG(IS_LINUX) && \
+                          !BUILDFLAG(IS_CHROMEOS))
   static const MainFunction kMainFunctions[] = {
 #if BUILDFLAG(IS_MAC)
-    {switches::kRelauncherProcess, mac_relauncher::internal::RelauncherMain},
-#endif
-
-  // This entry is not needed on Linux, where the NaCl loader
-  // process is launched via nacl_helper instead.
-#if BUILDFLAG(ENABLE_NACL) && !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS)
-    {switches::kNaClLoaderProcess, NaClMain},
-#else
-    {"<invalid>", nullptr},  // To avoid constant array of size 0
-                             // when NaCl disabled
+      {switches::kRelauncherProcess, mac_relauncher::internal::RelauncherMain},
+      {switches::kCodeSignCloneCleanupProcess,
+       code_sign_clone_manager::internal::ChromeCodeSignCloneCleanupMain},
+#elif BUILDFLAG(ENABLE_NACL) && !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS)
+      // This entry is not needed on Linux, where the NaCl loader
+      // process is launched via nacl_helper instead.
+      {switches::kNaClLoaderProcess, NaClMain},
 #endif
   };
 
@@ -1833,6 +1838,9 @@ absl::variant<int, content::MainFunctionParams> ChromeMainDelegate::RunProcess(
     if (process_type == kMainFunctions[i].name)
       return kMainFunctions[i].function(std::move(main_function_params));
   }
+#endif  // BUILDFLAG(IS_MAC) || (BUILDFLAG(ENABLE_NACL) && !BUILDFLAG(IS_LINUX)
+        // && !BUILDFLAG(IS_CHROMEOS))
+
 #endif  // !BUILDFLAG(IS_ANDROID)
 
   return std::move(main_function_params);

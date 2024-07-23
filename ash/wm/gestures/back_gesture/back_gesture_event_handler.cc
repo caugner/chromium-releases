@@ -28,6 +28,7 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
 #include "base/containers/contains.h"
+#include "base/debug/crash_logging.h"
 #include "base/i18n/rtl.h"
 #include "base/metrics/user_metrics.h"
 #include "chromeos/ui/base/app_types.h"
@@ -342,7 +343,7 @@ bool BackGestureEventHandler::MaybeHandleBackGesture(
     case ui::ET_GESTURE_SCROLL_UPDATE:
       if (!going_back_started_)
         break;
-      DCHECK(back_gesture_affordance_);
+      CHECK(back_gesture_affordance_);
       back_gesture_affordance_->Update(x_drag_amount_, y_drag_amount_,
                                        during_reverse_dragging_);
       return true;
@@ -351,11 +352,16 @@ bool BackGestureEventHandler::MaybeHandleBackGesture(
     case ui::ET_GESTURE_END: {
       if (!going_back_started_)
         break;
-      DCHECK(back_gesture_affordance_);
+      CHECK(back_gesture_affordance_);
       // Complete the back gesture if the affordance is activated or fling
       // with large enough velocity. Note, complete can be different actions
       // while in different scenarios, but always fading out the affordance at
       // the end.
+      SCOPED_CRASH_KEY_BOOL("286590216", "back_gesture_affordance_1",
+                            back_gesture_affordance_ != nullptr);
+      SCOPED_CRASH_KEY_BOOL("286590216", "going_back_started_1",
+                            going_back_started_);
+      SCOPED_CRASH_KEY_NUMBER("286590216", "event.type", event->type());
       if (back_gesture_affordance_->IsActivated() ||
           (event->type() == ui::ET_SCROLL_FLING_START &&
            event->details().velocity_x() >= kFlingVelocityForGoingBack)) {
@@ -418,6 +424,11 @@ bool BackGestureEventHandler::MaybeHandleBackGesture(
             }
           }
         }
+        SCOPED_CRASH_KEY_BOOL("286590216", "back_gesture_affordance_2",
+                              back_gesture_affordance_ != nullptr);
+        SCOPED_CRASH_KEY_BOOL("286590216", "going_back_started_2",
+                              going_back_started_);
+        CHECK(back_gesture_affordance_);
         back_gesture_affordance_->Complete();
       } else {
         back_gesture_affordance_->Abort();

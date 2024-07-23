@@ -8,7 +8,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/trace_event/optional_trace_event.h"
 #include "components/viz/common/features.h"
-#include "content/browser/renderer_host/cursor_manager.h"
 #include "content/browser/renderer_host/frame_tree.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/renderer_host/render_frame_host_delegate.h"
@@ -17,10 +16,11 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
-#include "content/browser/renderer_host/render_widget_host_input_event_router.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/renderer_host/render_widget_host_view_child_frame.h"
 #include "content/common/features.h"
+#include "content/common/input/cursor_manager.h"
+#include "content/common/input/render_widget_host_input_event_router.h"
 #include "third_party/blink/public/common/frame/frame_visual_properties.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/mojom/frame/intrinsic_sizing_info.mojom.h"
@@ -263,6 +263,7 @@ bool CrossProcessFrameConnector::TransformPointToCoordSpaceForView(
 
 void CrossProcessFrameConnector::ForwardAckedTouchpadZoomEvent(
     const blink::WebGestureEvent& event,
+    blink::mojom::InputEventResultSource ack_source,
     blink::mojom::InputEventResultState ack_result) {
   auto* root_view = GetRootRenderWidgetHostView();
   if (!root_view)
@@ -272,7 +273,7 @@ void CrossProcessFrameConnector::ForwardAckedTouchpadZoomEvent(
   const gfx::PointF root_point =
       view_->TransformPointToRootCoordSpaceF(event.PositionInWidget());
   root_event.SetPositionInWidget(root_point);
-  root_view->GestureEventAck(root_event, ack_result);
+  root_view->GestureEventAck(root_event, ack_source, ack_result);
 }
 
 bool CrossProcessFrameConnector::BubbleScrollEvent(
@@ -303,11 +304,14 @@ bool CrossProcessFrameConnector::BubbleScrollEvent(
                                          resent_gesture_event);
 }
 
-bool CrossProcessFrameConnector::HasFocus() {
+CrossProcessFrameConnector::RootViewFocusState
+CrossProcessFrameConnector::HasFocus() {
   RenderWidgetHostViewBase* root_view = GetRootRenderWidgetHostView();
-  if (root_view)
-    return root_view->HasFocus();
-  return false;
+  if (!root_view) {
+    return RootViewFocusState::kNullView;
+  }
+  return root_view->HasFocus() ? RootViewFocusState::kFocused
+                               : RootViewFocusState::kNotFocused;
 }
 
 void CrossProcessFrameConnector::FocusRootView() {

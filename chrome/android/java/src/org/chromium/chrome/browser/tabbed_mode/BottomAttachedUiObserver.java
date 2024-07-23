@@ -4,22 +4,28 @@
 
 package org.chromium.chrome.browser.tabbed_mode;
 
-import android.content.Context;
-
 import androidx.annotation.ColorInt;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.view.WindowInsetsCompat;
 
+import org.chromium.base.Callback;
 import org.chromium.base.ObserverList;
 import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelStateProvider;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManager;
+import org.chromium.chrome.browser.keyboard_accessory.AccessorySheetVisualStateProvider;
+import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteCoordinator;
+import org.chromium.chrome.browser.omnibox.suggestions.OmniboxSuggestionsVisualState;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarStateProvider;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetContent;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetObserver;
+import org.chromium.ui.InsetObserver;
+
+import java.util.Optional;
 
 /**
  * An observer class that listens for changes in UI components that are attached to the bottom of
@@ -31,17 +37,34 @@ public class BottomAttachedUiObserver
         implements BrowserControlsStateProvider.Observer,
                 SnackbarStateProvider.Observer,
                 OverlayPanelStateProvider.Observer,
-                BottomSheetObserver {
+                BottomSheetObserver,
+                AutocompleteCoordinator.OmniboxSuggestionsVisualStateObserver,
+                AccessorySheetVisualStateProvider.Observer,
+                InsetObserver.WindowInsetObserver {
+
     /**
      * An observer to be notified of changes to what kind of UI is currently bordering the bottom of
      * the screen.
      */
     public interface Observer {
-        void onBottomAttachedColorChanged(@Nullable @ColorInt Integer color);
+        /**
+         * Called when the color of the bottom UI that is attached to the bottom of the screen
+         * changes.
+         *
+         * @param color The color of the UI that is attached to the bottom of the screen.
+         * @param forceShowDivider Whether the divider should be forced to show.
+         * @param disableAnimation Whether the color change animation should be disabled.
+         */
+        void onBottomAttachedColorChanged(
+                @Nullable @ColorInt Integer color,
+                boolean forceShowDivider,
+                boolean disableAnimation);
     }
 
+    private boolean mBottomNavbarPresent;
     private final ObserverList<Observer> mObservers;
     private @Nullable @ColorInt Integer mBottomAttachedColor;
+    private boolean mShouldShowDivider;
 
     private final BottomSheetController mBottomSheetController;
     private boolean mBottomSheetVisible;
@@ -61,10 +84,22 @@ public class BottomAttachedUiObserver
     private boolean mOverlayPanelVisible;
     private boolean mOverlayPanelPeeked;
 
+    private Optional<OmniboxSuggestionsVisualState> mOmniboxSuggestionsVisualState;
+    private boolean mOmniboxSuggestionsVisible;
+    private @Nullable @ColorInt Integer mOmniboxSuggestionsColor;
+
+    private final InsetObserver mInsetObserver;
+
+    private ObservableSupplier<AccessorySheetVisualStateProvider>
+            mAccessorySheetVisualStateProviderSupplier;
+    private Callback<AccessorySheetVisualStateProvider> mAccessorySheetProviderSupplierObserver;
+    private AccessorySheetVisualStateProvider mAccessorySheetVisualStateProvider;
+    private boolean mAccessorySheetVisible;
+    private @Nullable @ColorInt Integer mAccessorySheetColor;
+
     /**
      * Build the observer that listens to changes in the UI bordering the bottom.
      *
-     * @param context The {@link Context} for accessing resources (e.g. color).
      * @param browserControlsStateProvider Supplies a {@link BrowserControlsStateProvider} for the
      *     browser controls.
      * @param snackbarStateProvider Supplies a {@link SnackbarStateProvider} to watch for snackbars
@@ -73,12 +108,23 @@ public class BottomAttachedUiObserver
      *     for changes to contextual search and the overlay panel.
      * @param bottomSheetController A {@link BottomSheetController} to interact with and watch for
      *     changes to the bottom sheet.
+     * @param omniboxSuggestionsVisualState An optional {@link OmniboxSuggestionsVisualState} for
+     *     access to the visual state of the omnibox suggestions.
+     * @param accessorySheetVisualStateProviderSupplier Supplies an {@link
+     *     AccessorySheetVisualStateProvider} to watch for visual changes to the keyboard accessory
+     *     sheet.
+     * @param insetObserver An {@link InsetObserver} to listen for changes to the window insets.
      */
     public BottomAttachedUiObserver(
-            BrowserControlsStateProvider browserControlsStateProvider,
-            SnackbarStateProvider snackbarStateProvider,
+            @NonNull BrowserControlsStateProvider browserControlsStateProvider,
+            @NonNull SnackbarStateProvider snackbarStateProvider,
             @NonNull ObservableSupplier<ContextualSearchManager> contextualSearchManagerSupplier,
-            BottomSheetController bottomSheetController) {
+            @NonNull BottomSheetController bottomSheetController,
+            @NonNull Optional<OmniboxSuggestionsVisualState> omniboxSuggestionsVisualState,
+            @NonNull
+                    ObservableSupplier<AccessorySheetVisualStateProvider>
+                            accessorySheetVisualStateProviderSupplier,
+            InsetObserver insetObserver) {
         mObservers = new ObserverList<>();
 
         mBrowserControlsStateProvider = browserControlsStateProvider;
@@ -90,6 +136,26 @@ public class BottomAttachedUiObserver
         mBottomSheetController = bottomSheetController;
         mBottomSheetController.addObserver(this);
 
+        mInsetObserver = insetObserver;
+        mInsetObserver.addObserver(this);
+        checkIfBottomNavbarIsPresent();
+
+        mAccessorySheetVisualStateProviderSupplier = accessorySheetVisualStateProviderSupplier;
+        mAccessorySheetProviderSupplierObserver =
+                (visualStateProvider) -> {
+                    if (mAccessorySheetVisualStateProvider != null) {
+                        mAccessorySheetVisualStateProvider.removeObserver(this);
+                    }
+                    mAccessorySheetVisible = false;
+                    mAccessorySheetColor = null;
+                    mAccessorySheetVisualStateProvider = visualStateProvider;
+                    if (mAccessorySheetVisualStateProvider != null) {
+                        mAccessorySheetVisualStateProvider.addObserver(this);
+                    }
+                };
+        mAccessorySheetVisualStateProviderSupplier.addObserver(
+                mAccessorySheetProviderSupplierObserver);
+
         contextualSearchManagerSupplier.addObserver(
                 (manager) -> {
                     if (manager == null) return;
@@ -99,12 +165,19 @@ public class BottomAttachedUiObserver
                                         if (mOverlayPanelStateProvider != null) {
                                             mOverlayPanelStateProvider.removeObserver(this);
                                         }
+                                        mOverlayPanelVisible = false;
+                                        mOverlayPanelColor = null;
                                         mOverlayPanelStateProvider = provider;
                                         if (mOverlayPanelStateProvider != null) {
                                             mOverlayPanelStateProvider.addObserver(this);
                                         }
                                     });
                 });
+
+        mOmniboxSuggestionsVisualState = omniboxSuggestionsVisualState;
+        mOmniboxSuggestionsVisualState.ifPresent(
+                coordinator ->
+                        coordinator.setOmniboxSuggestionsVisualStateObserver(Optional.of(this)));
     }
 
     /**
@@ -122,6 +195,17 @@ public class BottomAttachedUiObserver
     }
 
     public void destroy() {
+        mOmniboxSuggestionsVisualState.ifPresent(
+                autocompleteCoordinator ->
+                        autocompleteCoordinator.setOmniboxSuggestionsVisualStateObserver(
+                                Optional.empty()));
+        if (mAccessorySheetVisualStateProviderSupplier != null) {
+            mAccessorySheetVisualStateProviderSupplier.removeObserver(
+                    mAccessorySheetProviderSupplierObserver);
+        }
+        if (mAccessorySheetVisualStateProvider != null) {
+            mAccessorySheetVisualStateProvider.removeObserver(this);
+        }
         if (mBottomSheetController != null) {
             mBottomSheetController.removeObserver(this);
         }
@@ -134,25 +218,41 @@ public class BottomAttachedUiObserver
         if (mSnackbarStateProvider != null) {
             mSnackbarStateProvider.removeObserver(this);
         }
+        if (mInsetObserver != null) {
+            mInsetObserver.removeObserver(this);
+        }
     }
 
     private void updateBottomAttachedColor() {
         @Nullable
         @ColorInt
-        Integer bottomAttachedColor = calculateBottomAttachedColor();
-        if (mBottomAttachedColor == null && bottomAttachedColor == null) {
+        Integer bottomAttachedColor = mBottomNavbarPresent ? calculateBottomAttachedColor() : null;
+        boolean shouldShowDivider = mBottomNavbarPresent && shouldShowDivider();
+        if (mBottomAttachedColor == null
+                && bottomAttachedColor == null
+                && shouldShowDivider == mShouldShowDivider) {
             return;
         }
-        if (mBottomAttachedColor != null && mBottomAttachedColor.equals(bottomAttachedColor)) {
+        if (mBottomAttachedColor != null
+                && mBottomAttachedColor.equals(bottomAttachedColor)
+                && shouldShowDivider == mShouldShowDivider) {
             return;
         }
         mBottomAttachedColor = bottomAttachedColor;
+        mShouldShowDivider = shouldShowDivider;
         for (Observer observer : mObservers) {
-            observer.onBottomAttachedColorChanged(mBottomAttachedColor);
+            observer.onBottomAttachedColorChanged(
+                    mBottomAttachedColor, mShouldShowDivider, shouldDisableAnimation());
         }
     }
 
     private @Nullable @ColorInt Integer calculateBottomAttachedColor() {
+        if (mAccessorySheetVisible && mAccessorySheetColor != null) {
+            return mAccessorySheetColor;
+        }
+        if (mOmniboxSuggestionsVisible && mOmniboxSuggestionsColor != null) {
+            return mOmniboxSuggestionsColor;
+        }
         if (mBottomSheetVisible) {
             // This can cause a null return intentionally to indicate that a bottom sheet is showing
             // a page preview / web content.
@@ -170,6 +270,27 @@ public class BottomAttachedUiObserver
             return mSnackbarColor;
         }
         return null;
+    }
+
+    /** The divider should be visible for partial width bottom-attached UI. */
+    private boolean shouldShowDivider() {
+        if (mBottomSheetVisible) {
+            return !mBottomSheetController.isFullWidth();
+        }
+        if (mOverlayPanelVisible) {
+            return !mOverlayPanelStateProvider.isFullWidthSizePanel();
+        }
+        if (mSnackbarVisible) {
+            return !mSnackbarStateProvider.isFullWidth();
+        }
+        return false;
+    }
+
+    /** In certain cases, the animation should be disabled for better visual polish. */
+    private boolean shouldDisableAnimation() {
+        // The accessory sheet shows after the keyboard has already covered over the bottom UI -
+        // animation here would look odd since the previous color is outdated.
+        return mAccessorySheetVisible;
     }
 
     // Browser Controls (Tab group UI, Read Aloud)
@@ -261,4 +382,51 @@ public class BottomAttachedUiObserver
 
     @Override
     public void onSheetStateChanged(int newState, int reason) {}
+
+    // Omnibox Suggestions
+
+    @Override
+    public void onOmniboxSessionStateChange(boolean visible) {
+        mOmniboxSuggestionsVisible = visible;
+        updateBottomAttachedColor();
+    }
+
+    @Override
+    public void onOmniboxSuggestionsBackgroundColorChanged(int color) {
+        mOmniboxSuggestionsColor = color;
+        updateBottomAttachedColor();
+    }
+
+    // InsetObserver.WindowInsetObserver
+
+    @Override
+    public void onInsetChanged(int left, int top, int right, int bottom) {
+        checkIfBottomNavbarIsPresent();
+    }
+
+    /**
+     * Observe for changes to the navbar insets - in some situations, the presence of the navbar at
+     * the bottom may change (e.g. the 3-button navbar may move from the bottom to the left or right
+     * after an orientation change).
+     */
+    private void checkIfBottomNavbarIsPresent() {
+        WindowInsetsCompat windowInsets = mInsetObserver.getLastRawWindowInsets();
+        if (windowInsets != null) {
+            boolean bottomNavbarPresent =
+                    windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom > 0;
+            if (mBottomNavbarPresent != bottomNavbarPresent) {
+                mBottomNavbarPresent = bottomNavbarPresent;
+                updateBottomAttachedColor();
+            }
+        }
+    }
+
+    // AccessorySheetVisualStateProvider.Observer
+
+    @Override
+    public void onAccessorySheetStateChanged(boolean visible, @ColorInt int color) {
+        mAccessorySheetVisible = visible;
+        mAccessorySheetColor = color;
+        updateBottomAttachedColor();
+    }
 }

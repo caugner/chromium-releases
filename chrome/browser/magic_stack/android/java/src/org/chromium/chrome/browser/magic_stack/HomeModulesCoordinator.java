@@ -41,10 +41,10 @@ public class HomeModulesCoordinator implements ModuleDelegate, OnViewCreatedCall
     private HomeModulesMediator mMediator;
     private final HomeModulesRecyclerView mRecyclerView;
     private final ModelList mModel;
-    private final HomeModulesContextMenuManager mHomeModulesContextMenuManager;
     private final ObservableSupplier<Profile> mProfileSupplier;
     private final ModuleRegistry mModuleRegistry;
 
+    private HomeModulesContextMenuManager mHomeModulesContextMenuManager;
     private SimpleRecyclerViewAdapter mAdapter;
     private CirclePagerIndicatorDecoration mPageIndicatorDecoration;
     private SnapHelper mSnapHelper;
@@ -124,7 +124,15 @@ public class HomeModulesCoordinator implements ModuleDelegate, OnViewCreatedCall
     private void maybeSetUpAdapter() {
         if (mAdapter != null) return;
 
-        mAdapter = new SimpleRecyclerViewAdapter(mModel);
+        mAdapter =
+                new SimpleRecyclerViewAdapter(mModel) {
+                    @Override
+                    public void onViewRecycled(ViewHolder holder) {
+                        holder.itemView.setOnLongClickListener(null);
+                        holder.itemView.setOnCreateContextMenuListener(null);
+                        super.onViewRecycled(holder);
+                    }
+                };
         mModuleRegistry.registerAdapter(mAdapter, this::onViewCreated);
         mRecyclerView.setAdapter(mAdapter);
     }
@@ -300,7 +308,8 @@ public class HomeModulesCoordinator implements ModuleDelegate, OnViewCreatedCall
     @Override
     public void onModuleClicked(@ModuleType int moduleType, int modulePosition) {
         int hostSurface = mModuleDelegateHost.getHostSurfaceType();
-        HomeModulesMetricsUtils.recordModuleClicked(hostSurface, moduleType, modulePosition);
+        HomeModulesMetricsUtils.recordModuleClicked(
+                hostSurface, moduleType, modulePosition, mModuleDelegateHost.isHomeSurface());
     }
 
     @Override
@@ -361,7 +370,8 @@ public class HomeModulesCoordinator implements ModuleDelegate, OnViewCreatedCall
                             contextMenu, view, moduleProvider);
                 });
         int position = mMediator.findModuleIndexInRecyclerView(moduleType, mAdapter.getItemCount());
-        HomeModulesMetricsUtils.recordModuleShown(getHostSurfaceType(), moduleType, position);
+        HomeModulesMetricsUtils.recordModuleShown(
+                getHostSurfaceType(), moduleType, position, mModuleDelegateHost.isHomeSurface());
     }
 
     /**
@@ -381,6 +391,10 @@ public class HomeModulesCoordinator implements ModuleDelegate, OnViewCreatedCall
         if (mHomeModulesConfigManager != null) {
             mHomeModulesConfigManager.removeListener(mHomeModulesStateListener);
             mHomeModulesConfigManager = null;
+        }
+        if (mHomeModulesContextMenuManager != null) {
+            mHomeModulesContextMenuManager.destroy();
+            mHomeModulesContextMenuManager = null;
         }
     }
 
@@ -416,5 +430,9 @@ public class HomeModulesCoordinator implements ModuleDelegate, OnViewCreatedCall
 
     Set<Integer> getFilteredEnabledModuleSetForTesting() {
         return mMediator.getFilteredEnabledModuleSet();
+    }
+
+    public HomeModulesContextMenuManager getHomeModulesContextMenuManagerForTesting() {
+        return mHomeModulesContextMenuManager;
     }
 }

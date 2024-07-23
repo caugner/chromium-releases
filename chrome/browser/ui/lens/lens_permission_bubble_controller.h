@@ -55,12 +55,17 @@ class LensPermissionBubbleController {
 
   LensPermissionBubbleController(
       BrowserWindowInterface* browser_window_interface,
-      PrefService* pref_service);
+      PrefService* pref_service,
+      std::string invocation_source);
   LensPermissionBubbleController(const LensPermissionBubbleController&) =
       delete;
   LensPermissionBubbleController& operator=(
       const LensPermissionBubbleController&) = delete;
   ~LensPermissionBubbleController();
+
+  const views::Widget* dialog_widget_for_testing() {
+    return dialog_widget_.get();
+  }
 
   // Shows a tab-modal dialog. `callback` is called when the permission is
   // granted, whether by user directly accepting this dialog or indirectly via
@@ -80,6 +85,8 @@ class LensPermissionBubbleController {
   void OnPermissionDialogClose();
   void OnPermissionPreferenceUpdated(RequestPermissionCallback callback);
 
+  // Invocation source for the lens overlay.
+  std::string invocation_source_;
   // The associated browser.
   raw_ptr<BrowserWindowInterface> browser_window_interface_ = nullptr;
   // The pref service associated with the current profile.

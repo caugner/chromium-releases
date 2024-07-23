@@ -1,5 +1,12 @@
 <!DOCTYPE html>
 <html>
+<head>
+  <style>
+    permission {
+      font-size: xxx-large;
+    }
+  </style>
+</head>
 <body>
   <permission id="geolocation" type="geolocation">
   <permission id="microphone" type="microphone">
@@ -24,6 +31,23 @@
 
     function click(element) {
       element.click();
+    }
+
+    // Waits until the given permission element is granted.
+    function notifyWhenGranted(id) {
+      if (document.getElementById(id).matches(':granted')) {
+        console.log(id + '-granted');
+      } else {
+        window.setTimeout(() => {
+          notifyWhenGranted(id);
+        }, 50);
+      }
+    }
+
+    function setFontSizeSmall() {
+      document.querySelectorAll('permission').forEach((el) => {
+        el.style.fontSize = 'small';
+      });
     }
   </script>
 </body>

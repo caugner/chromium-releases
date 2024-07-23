@@ -10,7 +10,6 @@
 #include "cc/slim/layer.h"
 #include "cc/slim/solid_color_layer.h"
 #include "cc/slim/ui_resource_layer.h"
-#include "chrome/android/chrome_jni_headers/TabStripSceneLayer_jni.h"
 #include "chrome/browser/android/compositor/decoration_title.h"
 #include "chrome/browser/android/compositor/layer/tab_handle_layer.h"
 #include "chrome/browser/android/compositor/layer_title_cache.h"
@@ -21,6 +20,9 @@
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/rounded_corners_f.h"
 #include "ui/gfx/geometry/transform.h"
+
+// Must come after all headers that specialize FromJniType() / ToJniType().
+#include "chrome/android/chrome_jni_headers/TabStripSceneLayer_jni.h"
 
 using base::android::JavaParamRef;
 using base::android::JavaRef;
@@ -535,8 +537,11 @@ void TabStripSceneLayer::PutGroupIndicatorLayer(
   DecorationTitle* title_layer =
       layer_title_cache->GetGroupTitleLayer(id, incognito);
   if (title_layer) {
-    float title_y = (height - title_layer->size().height()) / 2.f;
+    // Ensure we're using the updated title bitmap prior to accessing/updating
+    // any properties.
     title_layer->SetUIResourceIds();
+
+    float title_y = (height - title_layer->size().height()) / 2.f;
     title_layer->setOpacity(1.0f);
     title_layer->setBounds(gfx::Size(width - (title_text_padding * 2), height));
     title_layer->layer()->SetPosition(gfx::PointF(title_text_padding, title_y));

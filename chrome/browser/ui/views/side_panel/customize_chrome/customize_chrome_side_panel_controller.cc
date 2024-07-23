@@ -10,8 +10,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/side_panel/customize_chrome/customize_chrome_tab_helper.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/side_panel/customize_chrome/customize_chrome_tab_helper.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_coordinator.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_registry_observer.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_web_ui_view.h"
@@ -39,8 +40,6 @@ CustomizeChromeSidePanelController::~CustomizeChromeSidePanelController() =
     default;
 
 void CustomizeChromeSidePanelController::CreateAndRegisterEntry() {
-  const int icon_size = ChromeLayoutProvider::Get()->GetDistanceMetric(
-      ChromeDistanceMetric::DISTANCE_SIDE_PANEL_HEADER_VECTOR_ICON_SIZE);
   auto* registry = SidePanelRegistry::Get(web_contents_);
 
   if (!registry)
@@ -48,11 +47,6 @@ void CustomizeChromeSidePanelController::CreateAndRegisterEntry() {
 
   auto entry = std::make_unique<SidePanelEntry>(
       SidePanelEntry::Id::kCustomizeChrome,
-      l10n_util::GetStringUTF16(IDS_SIDE_PANEL_CUSTOMIZE_CHROME_TITLE),
-      ui::ImageModel::FromVectorIcon(features::IsChromeRefresh2023()
-                                         ? vector_icons::kEditChromeRefreshIcon
-                                         : vector_icons::kEditIcon,
-                                     ui::kColorIcon, icon_size),
       base::BindRepeating(
           &CustomizeChromeSidePanelController::CreateCustomizeChromeWebView,
           base::Unretained(this)));
@@ -149,5 +143,5 @@ CustomizeChromeSidePanelController::CreateCustomizeChromeWebView() {
 
 SidePanelUI* CustomizeChromeSidePanelController::GetSidePanelUI() const {
   auto* browser = chrome::FindBrowserWithTab(web_contents_);
-  return browser ? SidePanelUI::GetSidePanelUIForBrowser(browser) : nullptr;
+  return browser ? browser->GetFeatures().side_panel_ui() : nullptr;
 }

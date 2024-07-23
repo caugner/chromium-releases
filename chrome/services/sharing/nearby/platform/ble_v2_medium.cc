@@ -13,6 +13,7 @@
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_restrictions.h"
+#include "chrome/services/sharing/nearby/platform/ble_v2_gatt_client.h"
 #include "chrome/services/sharing/nearby/platform/ble_v2_gatt_server.h"
 #include "chrome/services/sharing/nearby/platform/ble_v2_remote_peripheral.h"
 #include "chrome/services/sharing/nearby/platform/ble_v2_server_socket.h"
@@ -61,6 +62,55 @@ void CancelPendingTasks(
   }
 }
 
+std::string_view ConnectResultToString(bluetooth::mojom::ConnectResult result) {
+  switch (result) {
+    case bluetooth::mojom::ConnectResult::SUCCESS:
+      return "Success";
+    case bluetooth::mojom::ConnectResult::AUTH_CANCELED:
+      return "Auth Canceled";
+    case bluetooth::mojom::ConnectResult::AUTH_FAILED:
+      return "Auth Failed";
+    case bluetooth::mojom::ConnectResult::AUTH_REJECTED:
+      return "Auth Rejected";
+    case bluetooth::mojom::ConnectResult::AUTH_TIMEOUT:
+      return "Auth Timeout";
+    case bluetooth::mojom::ConnectResult::FAILED:
+      return "Failed";
+    case bluetooth::mojom::ConnectResult::INPROGRESS:
+      return "In Progress";
+    case bluetooth::mojom::ConnectResult::UNKNOWN:
+      return "Unknown";
+    case bluetooth::mojom::ConnectResult::UNSUPPORTED_DEVICE:
+      return "Unsupported Device";
+    case bluetooth::mojom::ConnectResult::DEVICE_NO_LONGER_IN_RANGE:
+      return "Device No Longer In Range";
+    case bluetooth::mojom::ConnectResult::NOT_READY:
+      return "Not Ready";
+    case bluetooth::mojom::ConnectResult::ALREADY_CONNECTED:
+      return "Already Connected";
+    case bluetooth::mojom::ConnectResult::ALREADY_EXISTS:
+      return "Already Exists";
+    case bluetooth::mojom::ConnectResult::NOT_CONNECTED:
+      return "Not Connected";
+    case bluetooth::mojom::ConnectResult::DOES_NOT_EXIST:
+      return "Does Not Exist";
+    case bluetooth::mojom::ConnectResult::INVALID_ARGS:
+      return "Invalid Args";
+    case bluetooth::mojom::ConnectResult::NON_AUTH_TIMEOUT:
+      return "Non Auth Timeout";
+    case bluetooth::mojom::ConnectResult::NO_MEMORY:
+      return "No Memory";
+    case bluetooth::mojom::ConnectResult::JNI_ENVIRONMENT:
+      return "JNI Environment";
+    case bluetooth::mojom::ConnectResult::JNI_THREAD_ATTACH:
+      return "JNI Thread Attach";
+    case bluetooth::mojom::ConnectResult::WAKELOCK:
+      return "Wakelock";
+  }
+
+  NOTREACHED_NORETURN();
+}
+
 }  // namespace
 
 BleV2Medium::BleV2Medium(
@@ -72,9 +122,7 @@ BleV2Medium::BleV2Medium(
 }
 
 BleV2Medium::~BleV2Medium() {
-  // For thread safety, shut down on the |task_runner_|. The destructor is
-  // blocking. It is expected that BleV2Medium calls are not made from the
-  // main thread.
+  // For thread safety, shut down on the |task_runner_|.
   base::WaitableEvent shutdown_waitable_event;
   task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&BleV2Medium::Shutdown, base::Unretained(this),
@@ -85,6 +133,11 @@ BleV2Medium::~BleV2Medium() {
 bool BleV2Medium::StartAdvertising(
     const api::ble_v2::BleAdvertisementData& advertising_data,
     api::ble_v2::AdvertiseParameters advertise_set_parameters) {
+  if (!features::IsNearbyBleV2Enabled()) {
+    DVLOG(1) << __func__ << ": BleV2 is disabled.";
+    return false;
+  }
+
   // Before starting the advertising, register the GATT Services if supported
   // to make GATT advertisements available. To accommodate the asynchronous
   // nature of registering the GATT services via `RegisterGattServices()`,
@@ -114,6 +167,13 @@ bool BleV2Medium::StartAdvertising(
           << __func__
           << ": failed register GATT Services before starting advertising; "
              "stopping advertising";
+      metrics::RecordStartAdvertisingResult(
+          /*success=*/false,
+          /*is_extended_advertisement=*/false);
+      metrics::RecordStartAdvertisingFailureReason(
+          /*reason=*/metrics::StartAdvertisingFailureReason::
+              kFailedToRegisterGattServices,
+          /*is_extended_advertisement=*/false);
       return false;
     }
   }
@@ -230,6 +290,11 @@ std::unique_ptr<BleV2Medium::AdvertisingSession> BleV2Medium::StartAdvertising(
     const api::ble_v2::BleAdvertisementData& advertising_data,
     api::ble_v2::AdvertiseParameters advertise_set_parameters,
     BleV2Medium::AdvertisingCallback callback) {
+  if (!features::IsNearbyBleV2Enabled()) {
+    DVLOG(1) << __func__ << ": BleV2 is disabled.";
+    return nullptr;
+  }
+
   // TODO(b/318839357): deprecate the 'bool StartAdvertising' function.
   if (StartAdvertising(advertising_data, advertise_set_parameters)) {
     if (callback.start_advertising_result) {
@@ -257,6 +322,11 @@ std::unique_ptr<BleV2Medium::AdvertisingSession> BleV2Medium::StartAdvertising(
 }
 
 bool BleV2Medium::StopAdvertising() {
+  if (!features::IsNearbyBleV2Enabled()) {
+    DVLOG(1) << __func__ << ": BleV2 is disabled.";
+    return false;
+  }
+
   CD_LOG(INFO, Feature::NEARBY_INFRA)
       << __func__ << " Clearing registered advertisements.";
   registered_advertisements_map_.clear();
@@ -279,6 +349,11 @@ std::unique_ptr<BleV2Medium::ScanningSession> BleV2Medium::StartScanning(
     const Uuid& service_uuid,
     api::ble_v2::TxPowerLevel tx_power_level,
     BleV2Medium::ScanningCallback callback) {
+  if (!features::IsNearbyBleV2Enabled()) {
+    DVLOG(1) << __func__ << ": BleV2 is disabled.";
+    return nullptr;
+  }
+
   if (!IsScanning()) {
     discovered_ble_peripherals_map_.clear();
     service_uuid_to_session_ids_map_.clear();
@@ -395,6 +470,11 @@ std::unique_ptr<BleV2Medium::ScanningSession> BleV2Medium::StartScanning(
 
 std::unique_ptr<api::ble_v2::GattServer> BleV2Medium::StartGattServer(
     api::ble_v2::ServerGattConnectionCallback callback) {
+  if (!features::IsNearbyBleV2Enabled()) {
+    DVLOG(1) << __func__ << ": BleV2 is disabled.";
+    return nullptr;
+  }
+
   if (!features::IsNearbyBleV2GattServerEnabled()) {
     return nullptr;
   }
@@ -418,12 +498,46 @@ std::unique_ptr<api::ble_v2::GattClient> BleV2Medium::ConnectToGattServer(
     api::ble_v2::BlePeripheral& peripheral,
     api::ble_v2::TxPowerLevel tx_power_level,
     api::ble_v2::ClientGattConnectionCallback callback) {
-  NOTIMPLEMENTED();
-  return nullptr;
+  if (!features::IsNearbyBleV2Enabled()) {
+    DVLOG(1) << __func__ << ": BleV2 is disabled.";
+    return nullptr;
+  }
+
+  base::WaitableEvent connect_to_gatt_server_waitable_event;
+  CHECK(adapter_.is_bound());
+  mojo::PendingRemote<bluetooth::mojom::Device> device;
+  task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&BleV2Medium::DoConnectToGattServer,
+                     base::Unretained(this), &device, peripheral.GetAddress(),
+                     &connect_to_gatt_server_waitable_event));
+  base::ScopedAllowBaseSyncPrimitives allow_wait;
+  connect_to_gatt_server_waitable_event.Wait();
+
+  if (!device) {
+    LOG(WARNING) << __func__ << ": could not connect to the GATT server";
+    metrics::RecordConnectToRemoteGattServerResult(/*success=*/false);
+    return nullptr;
+  }
+
+  metrics::RecordConnectToRemoteGattServerResult(/*success=*/true);
+
+  // `tx_power_level` has no equivalent parameter in the Bluetooth Adapter
+  // layer, so it is ignored.
+  //
+  // TODO(b/311430390): When Nearby Connections uses
+  // `ClientGattConnectionCallback`, pass it into `BleV2GattClient` to trigger
+  // events for characteristic subscription and disconnect.
+  return std::make_unique<nearby::chrome::BleV2GattClient>(std::move(device));
 }
 
 std::unique_ptr<api::ble_v2::BleServerSocket> BleV2Medium::OpenServerSocket(
     const std::string& service_id) {
+  if (!features::IsNearbyBleV2Enabled()) {
+    DVLOG(1) << __func__ << ": BleV2 is disabled.";
+    return nullptr;
+  }
+
   // TODO(b/320554697): This function has no purpose in BLE V2 and can be
   // removed once implementation of the GATT Server advertising is complete.
   // Note that other platforms still use this function for now.
@@ -440,6 +554,11 @@ std::unique_ptr<api::ble_v2::BleSocket> BleV2Medium::Connect(
 }
 
 bool BleV2Medium::IsExtendedAdvertisementsAvailable() {
+  if (!features::IsNearbyBleV2Enabled()) {
+    DVLOG(1) << __func__ << ": BleV2 is disabled.";
+    return false;
+  }
+
   if (!features::IsNearbyBleV2ExtendedAdvertisingEnabled()) {
     return false;
   }
@@ -457,8 +576,20 @@ bool BleV2Medium::GetRemotePeripheral(const std::string& mac_address,
 
 bool BleV2Medium::GetRemotePeripheral(api::ble_v2::BlePeripheral::UniqueId id,
                                       GetRemotePeripheralCallback callback) {
-  NOTIMPLEMENTED();
-  return false;
+  auto it =
+      std::find_if(discovered_ble_peripherals_map_.begin(),
+                   discovered_ble_peripherals_map_.end(),
+                   [&](const auto& address_device_pair) {
+                     return address_device_pair.second.GetUniqueId() == id;
+                   });
+
+  if (it == discovered_ble_peripherals_map_.end()) {
+    LOG(WARNING) << __func__ << ": no match for device at id = " << id;
+    return false;
+  }
+
+  std::move(callback)(it->second);
+  return true;
 }
 
 void BleV2Medium::PresentChanged(bool present) {
@@ -627,6 +758,54 @@ void BleV2Medium::OnRegisterGattServices(
   }
 }
 
+void BleV2Medium::DoConnectToGattServer(
+    mojo::PendingRemote<bluetooth::mojom::Device>* device,
+    const std::string& address,
+    base::WaitableEvent* connect_to_gatt_server_waitable_event) {
+  CHECK(task_runner_->RunsTasksInCurrentSequence());
+  pending_connect_to_gatt_server_waitable_events_.insert(
+      connect_to_gatt_server_waitable_event);
+  CHECK(adapter_.is_bound());
+  adapter_->ConnectToDevice(
+      address, base::BindOnce(
+                   &BleV2Medium::OnConnectToGattServer, base::Unretained(this),
+                   /*gatt_connection_start_time*/ base::TimeTicks::Now(),
+                   device, connect_to_gatt_server_waitable_event));
+}
+
+void BleV2Medium::OnConnectToGattServer(
+    base::TimeTicks gatt_connection_start_time,
+    mojo::PendingRemote<bluetooth::mojom::Device>* out_device,
+    base::WaitableEvent* connect_to_gatt_server_waitable_event,
+    bluetooth::mojom::ConnectResult result,
+    mojo::PendingRemote<bluetooth::mojom::Device> in_device) {
+  CHECK(task_runner_->RunsTasksInCurrentSequence());
+  if (!pending_connect_to_gatt_server_waitable_events_.contains(
+          connect_to_gatt_server_waitable_event)) {
+    // The event has already been signaled.
+    return;
+  }
+
+  *out_device = std::move(in_device);
+
+  VLOG(1) << __func__
+          << ": ConnectToDevice() result = " << ConnectResultToString(result);
+
+  if (result != bluetooth::mojom::ConnectResult::SUCCESS) {
+    CHECK(!in_device);
+    metrics::RecordConnectToRemoteGattServerFailureReason(result);
+  } else {
+    metrics::RecordConnectToRemoteGattServerDuration(
+        /*duration=*/base::TimeTicks::Now() - gatt_connection_start_time);
+  }
+
+  if (!connect_to_gatt_server_waitable_event->IsSignaled()) {
+    connect_to_gatt_server_waitable_event->Signal();
+    pending_connect_to_gatt_server_waitable_events_.erase(
+        connect_to_gatt_server_waitable_event);
+  }
+}
+
 void BleV2Medium::Shutdown(base::WaitableEvent* shutdown_waitable_event) {
   CHECK(task_runner_->RunsTasksInCurrentSequence());
 
@@ -643,6 +822,7 @@ void BleV2Medium::Shutdown(base::WaitableEvent* shutdown_waitable_event) {
   // Cancel all pending connect/listen calls. This is sequence safe because all
   // changes to the pending-event sets are sequenced.
   CancelPendingTasks(pending_register_gatt_services_waitable_events_);
+  CancelPendingTasks(pending_connect_to_gatt_server_waitable_events_);
 
   shutdown_waitable_event->Signal();
 }

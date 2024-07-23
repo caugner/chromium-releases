@@ -315,6 +315,15 @@ const ui::AXNodeData& ViewAXPlatformNodeDelegate::GetData() const {
 
   // Clear the data, then populate it.
   data_ = ui::AXNodeData();
+
+  if (!view()->GetWidget()) {
+    // This is to be consistent with what Views expect and what is being done in
+    // ViewAccessibility::GetAccessibleNodeData if the widget is null.
+    data_.role = ax::mojom::Role::kUnknown;
+    data_.SetRestriction(ax::mojom::Restriction::kDisabled);
+    return data_;
+  }
+
   GetAccessibleNodeData(&data_);
 
   // View::IsDrawn is true if a View is visible and all of its ancestors are
@@ -697,7 +706,7 @@ gfx::RectF ViewAXPlatformNodeDelegate::RelativeToContainerBounds(
   gfx::RectF relative_bounds = bounds;
   relative_bounds.Offset(scroll_x, 0);
 
-  gfx::RectF container_bounds = data_.relative_bounds.bounds;
+  gfx::RectF container_bounds = gfx::RectF(view()->GetBoundsInScreen());
   container_bounds.set_origin(gfx::PointF());
   gfx::RectF intersection = relative_bounds;
   intersection.Intersect(container_bounds);
@@ -926,8 +935,10 @@ std::optional<int32_t> ViewAXPlatformNodeDelegate::GetCellId(
     return std::nullopt;
 
   const ui::AXNodeData& cell_data = ax_cell->GetData();
-  if (cell_data.role == ax::mojom::Role::kCell)
+  if (cell_data.role == ax::mojom::Role::kCell ||
+      cell_data.role == ax::mojom::Role::kGridCell) {
     return cell_data.id;
+  }
 
   return std::nullopt;
 }

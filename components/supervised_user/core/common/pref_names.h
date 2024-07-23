@@ -70,14 +70,19 @@ inline constexpr char kSupervisedUserSecondCustodianProfileURL[] =
 // Whether the supervised user may approve extension permission requests. If
 // false, extensions should not be able to request new permissions, and new
 // extensions should not be installable.
+//
+// Only valid if supervised_user::
+// IsSupervisedUserSkipParentApprovalToInstallExtensionsEnabled() is false.
 inline constexpr char kSupervisedUserExtensionsMayRequestPermissions[] =
     "profile.managed.extensions_may_request_permissions";
 
 // Whether the supervised user may approve extension permission requests, under
-// the updated supervised user extension handling flow (feature flag
-// `kEnableSupervisedUserExtensionInstallationWithoutApproval`).
+// the updated supervised user extension handling flow.
 // If true extensions can be installed without parental approval, if false
 // the parent must grant approvoal on each installation.
+//
+// Only valid if supervised_user::
+// IsSupervisedUserSkipParentApprovalToInstallExtensionsEnabled() is true.
 inline constexpr char kSkipParentApprovalToInstallExtensions[] =
     "profile.managed.skip_parent_approval_to_install_extensions";
 
@@ -89,6 +94,7 @@ inline constexpr char kSupervisedUserApprovedExtensions[] =
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 // The supervised user ID.
+// TODO(b/342097235): this pref is being deprecated.
 inline constexpr char kSupervisedUserId[] = "profile.managed_user_id";
 
 // Maps host names to whether the host is manually allowed or blocked.

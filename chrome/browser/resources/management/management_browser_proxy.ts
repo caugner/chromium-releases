@@ -106,6 +106,12 @@ export interface ManagementBrowserProxy {
   getLocalTrustRootsInfo(): Promise<boolean>;
 
   /**
+   * @return Whether uploading of downloads or screenshots to cloud storages is
+   *     configured.
+   */
+  getFilesUploadToCloudInfo(): Promise<string>;
+
+  /**
    * @return List of items to display in device reporting section.
    */
   getDeviceReportingInfo(): Promise<DeviceReportingResponse[]>;
@@ -124,6 +130,11 @@ export interface ManagementBrowserProxy {
    * @return The list of browser reporting info messages.
    */
   initBrowserReportingInfo(): Promise<BrowserReportingResponse[]>;
+
+  /**
+   * @return The list of profile reporting info messages.
+   */
+  initProfileReportingInfo(): Promise<BrowserReportingResponse[]>;
 }
 
 export class ManagementBrowserProxyImpl implements ManagementBrowserProxy {
@@ -142,6 +153,10 @@ export class ManagementBrowserProxyImpl implements ManagementBrowserProxy {
   // <if expr="is_chromeos">
   getLocalTrustRootsInfo() {
     return sendWithPromise('getLocalTrustRootsInfo');
+  }
+
+  getFilesUploadToCloudInfo() {
+    return sendWithPromise('getFilesUploadToCloudInfo');
   }
 
   getDeviceReportingInfo() {
@@ -163,6 +178,10 @@ export class ManagementBrowserProxyImpl implements ManagementBrowserProxy {
 
   initBrowserReportingInfo() {
     return sendWithPromise('initBrowserReportingInfo');
+  }
+
+  initProfileReportingInfo() {
+    return sendWithPromise('initProfileReportingInfo');
   }
 
   static getInstance(): ManagementBrowserProxy {

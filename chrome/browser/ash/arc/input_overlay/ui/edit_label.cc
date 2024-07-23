@@ -31,6 +31,7 @@
 #include "ui/compositor/layer.h"
 #include "ui/gfx/geometry/transform.h"
 #include "ui/gfx/geometry/transform_util.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/animation/animation_builder.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
@@ -67,7 +68,7 @@ std::u16string GetAccessibleNameSuffixForDirection(Direction direction) {
       return l10n_util ::GetStringUTF16(
           IDS_INPUT_OVERLAY_JOYSTICK_DIRECTION_RIGHT_A11Y_LABEL);
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
   }
 }
 
@@ -218,11 +219,11 @@ void EditLabel::UpdateAccessibleName() {
   switch (action_->GetType()) {
     case ActionType::TAP:
       if (unassigned) {
-        SetAccessibleName(l10n_util::GetStringFUTF16(
+        GetViewAccessibility().SetName(l10n_util::GetStringFUTF16(
             IDS_INPUT_OVERLAY_EDIT_LABEL_BUTTON_KEYBOARD_UNASSIGNED_A11Y_TPL,
             suffix_instruction));
       } else {
-        SetAccessibleName(l10n_util::GetStringFUTF16(
+        GetViewAccessibility().SetName(l10n_util::GetStringFUTF16(
             IDS_INPUT_OVERLAY_EDIT_LABEL_BUTTON_KEYBOARD_A11Y_TPL, a11y_name,
             suffix_instruction));
       }
@@ -231,18 +232,18 @@ void EditLabel::UpdateAccessibleName() {
       const std::u16string direction =
           GetAccessibleNameSuffixForDirection(direction_index_);
       if (unassigned) {
-        SetAccessibleName(l10n_util::GetStringFUTF16(
+        GetViewAccessibility().SetName(l10n_util::GetStringFUTF16(
             IDS_INPUT_OVERLAY_EDIT_LABEL_JOYSTICK_KEYBOARD_UNASSIGNED_A11Y_TPL,
             direction, suffix_instruction));
       } else {
-        SetAccessibleName(l10n_util::GetStringFUTF16(
+        GetViewAccessibility().SetName(l10n_util::GetStringFUTF16(
             IDS_INPUT_OVERLAY_EDIT_LABEL_JOYSTICK_KEYBOARD_A11Y_TPL, a11y_name,
             direction, suffix_instruction));
       }
       break;
     }
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
   }
 }
 
@@ -277,9 +278,11 @@ void EditLabel::OnFocus() {
   SetToFocused();
   if (for_editing_list_) {
     controller_->AddActionHighlightWidget(action_);
-    RecordEditingListFunctionTriggered(EditingListFunction::kEditLabelFocused);
+    RecordEditingListFunctionTriggered(controller_->GetPackageName(),
+                                       EditingListFunction::kEditLabelFocused);
   } else {
     RecordButtonOptionsMenuFunctionTriggered(
+        controller_->GetPackageName(),
         ButtonOptionsMenuFunction::kEditLabelFocused);
   }
 }
@@ -338,11 +341,13 @@ bool EditLabel::OnKeyPressed(const ui::KeyEvent& event) {
   }
 
   SetTextLabel(new_bind);
+  const std::string& package_name = controller_->GetPackageName();
   if (for_editing_list_) {
-    RecordEditingListFunctionTriggered(EditingListFunction::kKeyAssigned);
+    RecordEditingListFunctionTriggered(package_name,
+                                       EditingListFunction::kKeyAssigned);
   } else {
     RecordButtonOptionsMenuFunctionTriggered(
-        ButtonOptionsMenuFunction::kKeyAssigned);
+        package_name, ButtonOptionsMenuFunction::kKeyAssigned);
   }
 
   std::unique_ptr<InputElement> input;
@@ -365,7 +370,7 @@ bool EditLabel::OnKeyPressed(const ui::KeyEvent& event) {
       break;
     }
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
   }
   DCHECK(input);
   controller_->OnInputBindingChange(action_, std::move(input));

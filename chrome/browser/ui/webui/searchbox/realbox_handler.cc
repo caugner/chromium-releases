@@ -163,6 +163,9 @@ bool RealboxOmniboxClient::IsPasteAndGoEnabled() const {
 }
 
 SessionID RealboxOmniboxClient::GetSessionID() const {
+  if (lens_searchbox_client_) {
+    return lens_searchbox_client_->GetTabId();
+  }
   return sessions::SessionTabHelper::IdForTab(web_contents_);
 }
 
@@ -366,6 +369,10 @@ void RealboxHandler::OnFocusChanged(bool focused) {
 
 void RealboxHandler::QueryAutocomplete(const std::u16string& input,
                                        bool prevent_inline_autocomplete) {
+  if (lens_searchbox_client_) {
+    lens_searchbox_client_->OnTextModified();
+  }
+
   // TODO(tommycli): We use the input being empty as a signal we are requesting
   // on-focus suggestions. It would be nice if we had a more explicit signal.
   bool is_on_focus = input.empty();
@@ -461,22 +468,6 @@ void RealboxHandler::PopupElementSizeChanged(const gfx::Size& size) {
   }
 }
 
-void RealboxHandler::OnResultChanged(AutocompleteController* controller,
-                                     bool default_match_changed) {
-  // Handles case where the searchbox input has a thumbnail. All lhs icons
-  // of a match should match this thumbnail.
-  if (lens_searchbox_client_) {
-    const GURL& thumbnail = GURL(lens_searchbox_client_->GetThumbnail());
-    if (!thumbnail.is_empty()) {
-      for (AutocompleteMatch& match : const_cast<AutocompleteResult&>(
-               autocomplete_controller()->result())) {
-        match.image_url = thumbnail;
-      }
-    }
-  }
-  SearchboxHandler::OnResultChanged(controller, default_match_changed);
-}
-
 void RealboxHandler::DeleteAutocompleteMatch(uint8_t line, const GURL& url) {
   const AutocompleteMatch* match = GetMatchWithUrl(line, url);
   if (!match || !match->SupportsDeletion()) {
@@ -540,7 +531,7 @@ searchbox::mojom::SelectionLineState ConvertLineState(
       return searchbox::mojom::SelectionLineState::
           kFocusedButtonRemoveSuggestion;
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       break;
   }
   return searchbox::mojom::SelectionLineState::kNormal;

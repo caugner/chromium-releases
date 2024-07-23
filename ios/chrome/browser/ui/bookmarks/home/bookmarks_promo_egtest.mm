@@ -60,20 +60,6 @@ using chrome_test_util::SettingsDoneButton;
     config.additional_args.push_back(
         "<dict><key>SyncTypesListDisabled</key><array><string>bookmarks</"
         "string></array></dict>");
-  } else if ([self isRunningTest:@selector(testNoSyncPromo)]) {
-    config.features_disabled.push_back(kEnableReviewAccountSettingsPromo);
-  } else if ([self isRunningTest:@selector
-                   (testAccountSettingsPromoWithBookmarksOff)] ||
-             [self isRunningTest:@selector
-                   (testAccountSettingsViewedFromBookmarksManager)] ||
-             [self isRunningTest:@selector
-                   (testAccountSettingsPromoWithBookmarksOn)] ||
-             [self isRunningTest:@selector
-                   (testSignOutFromAccountSettingsFromBookmarksManager)] ||
-             [self isRunningTest:@selector(testNoReviewAccountSettingsPromo)] ||
-             [self isRunningTest:@selector(testUndoSignInTypeDisabled)] ||
-             [self isRunningTest:@selector(testUndoSignInTypeEnabled)]) {
-    config.features_enabled.push_back(kEnableReviewAccountSettingsPromo);
   }
 
   return config;
@@ -346,16 +332,31 @@ using chrome_test_util::SettingsDoneButton;
   [SigninEarlGreyUI verifySigninPromoNotVisible];
 }
 
-// Tests that no sync promo is shown if the user is signed in only and
-- (void)testNoSyncPromo {
+// Tests that account settings promo is displayed when the bookmark view is
+// opened from an incognito tab.
+// See: crbug.com/339472472.
+- (void)testAccountSettingsHiddenFromIncognitoTab {
   FakeSystemIdentity* fakeIdentity1 = [FakeSystemIdentity fakeIdentity1];
   [SigninEarlGrey signinWithFakeIdentity:fakeIdentity1];
+
+  [ChromeEarlGrey openNewIncognitoTab];
   // By default, `signinWithFakeIdentity` above enables bookmarks data type, so
-  // turn it off to ensure that the sync promo isn't ever shown.
+  // turn it off.
   [SigninEarlGrey setSelectedType:(syncer::UserSelectableType::kBookmarks)
                           enabled:NO];
   [BookmarkEarlGreyUI openBookmarks];
-  [SigninEarlGreyUI verifySigninPromoNotVisible];
+  [SigninEarlGreyUI verifySigninPromoVisibleWithMode:
+                        SigninPromoViewModeSignedInWithPrimaryAccount];
+
+  // Open the settings using the sign-in promo.
+  [[EarlGrey
+      selectElementWithMatcher:grey_allOf(PrimarySignInButton(),
+                                          grey_sufficientlyVisible(), nil)]
+      performAction:grey_tap()];
+  [[EarlGrey
+      selectElementWithMatcher:grey_accessibilityID(
+                                   kManageSyncTableViewAccessibilityIdentifier)]
+      assertWithMatcher:grey_sufficientlyVisible()];
 }
 
 // Tests that review account settings promo is shown if the user is signed in

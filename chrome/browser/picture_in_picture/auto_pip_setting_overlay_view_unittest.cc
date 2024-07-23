@@ -39,15 +39,18 @@ class AutoPipSettingOverlayViewTest : public views::ViewsTestBase {
     ViewsTestBase::SetUp();
 
     // Create setting overlay widget.
-    widget_ = CreateTestWidget();
+    widget_ =
+        CreateTestWidget(views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET);
     widget_->Show();
 
     // Create parent Widget.
-    parent_widget_ = CreateTestWidget();
+    parent_widget_ =
+        CreateTestWidget(views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET);
     parent_widget_->Show();
 
     // Create the anchor Widget.
-    anchor_view_widget_ = CreateTestWidget();
+    anchor_view_widget_ =
+        CreateTestWidget(views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET);
     anchor_view_widget_->Show();
     auto* anchor_view =
         anchor_view_widget_->SetContentsView(std::make_unique<views::View>());
@@ -123,14 +126,14 @@ TEST_F(AutoPipSettingOverlayViewTest, TestViewInitialization) {
 }
 
 TEST_F(AutoPipSettingOverlayViewTest, TestBackgroundLayerAnimation) {
-  // Background layer opacity should start at 0.0f and end at 0.70f.
+  // Background layer opacity should start at 0.0f and end at 0.60f.
   EXPECT_EQ(0.0f, background()->layer()->opacity());
-  EXPECT_EQ(0.70f, background()->layer()->GetTargetOpacity());
+  EXPECT_EQ(0.60f, background()->layer()->GetTargetOpacity());
 
   // Progress animation to its end position. Background layer should fade in to
-  // a 0.70f opacity.
+  // a 0.60f opacity.
   background()->layer()->GetAnimator()->StopAnimating();
-  EXPECT_EQ(0.70f, background()->layer()->GetTargetOpacity());
+  EXPECT_EQ(0.60f, background()->layer()->opacity());
 }
 
 TEST_F(AutoPipSettingOverlayViewTest, TestWantsEvent) {

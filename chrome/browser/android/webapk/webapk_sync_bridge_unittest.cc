@@ -107,8 +107,6 @@ class WebApkSyncBridgeTest : public ::testing::Test {
         .WillByDefault(testing::Return(true));
   }
 
-  void TearDown() override { DestroyManagers(); }
-
   void InitSyncBridge() {
     base::RunLoop loop;
 
@@ -130,15 +128,6 @@ class WebApkSyncBridgeTest : public ::testing::Test {
   }
 
  protected:
-  void DestroyManagers() {
-    if (sync_bridge_) {
-      sync_bridge_.reset();
-    }
-    if (database_factory_) {
-      database_factory_.reset();
-    }
-  }
-
   syncer::MockModelTypeChangeProcessor& processor() { return mock_processor_; }
   FakeWebApkDatabaseFactory& database_factory() { return *database_factory_; }
 
@@ -148,8 +137,8 @@ class WebApkSyncBridgeTest : public ::testing::Test {
   }
 
  private:
-  std::unique_ptr<WebApkSyncBridge> sync_bridge_;
   std::unique_ptr<FakeWebApkDatabaseFactory> database_factory_;
+  std::unique_ptr<WebApkSyncBridge> sync_bridge_;
   raw_ptr<FakeWebApkSpecificsFetcher>
       specifics_fetcher_;  // owned by sync_bridge_; should not be accessed
                            // before InitSyncBridge() or after sync_bridge_ is
@@ -158,6 +147,12 @@ class WebApkSyncBridgeTest : public ::testing::Test {
   testing::NiceMock<syncer::MockModelTypeChangeProcessor> mock_processor_;
   base::test::SingleThreadTaskEnvironment task_environment_;
 };
+
+TEST_F(WebApkSyncBridgeTest,
+       ManifestIdStrToAppId_DoesNotCrashOnEmptyStringOrInvalidManifestId) {
+  EXPECT_EQ(ManifestIdStrToAppId(""), "");
+  EXPECT_EQ(ManifestIdStrToAppId("%%"), "");
+}
 
 TEST_F(WebApkSyncBridgeTest, AppWasUsedRecently) {
   InitSyncBridge();
@@ -874,6 +869,18 @@ TEST_F(WebApkSyncBridgeTest, OnWebApkUsed_CreateNewSyncEntry) {
                 .last_used_time_windows_epoch_micros());
   EXPECT_TRUE(db_registry.at(ManifestIdStrToAppId(manifest_id))
                   ->is_locally_installed());
+}
+
+TEST_F(WebApkSyncBridgeTest,
+       OnWebApkUninstalled_DoesNotCrashOnEmptyStringOrInvalidManifestId) {
+  EXPECT_CALL(processor(), ModelReadyToSync).Times(1);
+  EXPECT_CALL(processor(), Put).Times(0);
+  EXPECT_CALL(processor(), Delete).Times(0);
+
+  InitSyncBridge();
+
+  sync_bridge().OnWebApkUninstalled("");
+  sync_bridge().OnWebApkUninstalled("%%");
 }
 
 TEST_F(WebApkSyncBridgeTest, OnWebApkUninstalled_AppTooOld) {

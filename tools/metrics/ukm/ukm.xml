@@ -8094,11 +8094,51 @@ be describing additional metrics about the same event.
       privacy.
     </summary>
   </metric>
+  <metric name="ProactiveNudgeDisabledForSite" enum="Boolean">
+    <summary>
+      True if the proactive nudge was disabled for this site during this page
+      load. Added in M126.
+    </summary>
+  </metric>
+  <metric name="ProactiveNudgeDisabledGlobally" enum="Boolean">
+    <summary>
+      True if the proactive nudge was globally disabled this page load. Added in
+      M126.
+    </summary>
+  </metric>
+  <metric name="ProactiveNudgeOpened">
+    <summary>
+      The number of times the Compose dialog is opened from the proactive nudge
+      during this page load. Recorded everytime the nudge is opened. Added in
+      M126.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <quantiles type="std-percentiles"/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
   <metric name="ProactiveNudgeShouldShow">
     <summary>
-      The number of times the Compose proactive nudge should show during This
+      The number of times the Compose proactive nudge should show during this
       page load. Recorded any time Compose is asked to show the proactive nudge
       even if it is eventually not shown. Added in M125.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <quantiles type="std-percentiles"/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
+  <metric name="ProactiveNudgeShown">
+    <summary>
+      The number of times the Compose proactive nudge is shown during this page
+      load. Recorded everytime a request to show the nudge returns true. Added
+      in M126.
     </summary>
     <aggregation>
       <history>
@@ -8236,6 +8276,19 @@ be describing additional metrics about the same event.
       </history>
     </aggregation>
   </metric>
+  <metric name="StartedWithProactiveNudge" enum="Boolean">
+    <summary>
+      True if the session started with the proactive nudge rather than the
+      context menu option. Added in M126.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <enumeration/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
   <metric name="UndoCount">
     <summary>
       How many times the user pressed the &quot;undo&quot; button in this
@@ -8271,6 +8324,27 @@ be describing additional metrics about the same event.
         </statistics>
       </history>
     </aggregation>
+  </metric>
+  <metric name="EditingTime">
+    <summary>
+      Number of seconds the user spent editing the field. Includes time between
+      key presses, up to 5 seconds each. Bucketed using
+      GetExponentialBucketMinForUserTiming().
+    </summary>
+  </metric>
+  <metric name="FieldSignature">
+    <summary>
+      The signature of the field. This is the hash identifier used to denote
+      this field. See components/autofill/core/common/signatures_util.cc for
+      more details.
+    </summary>
+  </metric>
+  <metric name="FormSignature">
+    <summary>
+      The signature of the form. This is the hash identifier used to denote this
+      form. See components/autofill/core/common/signatures_util.cc for more
+      details.
+    </summary>
   </metric>
   <metric name="IsAutofillFieldType" enum="Boolean">
     <summary>
@@ -10126,6 +10200,40 @@ be describing additional metrics about the same event.
   </metric>
 </event>
 
+<event name="FingerprintingProtection" singular="True">
+  <owner>rizvis@google.com</owner>
+  <owner>theslasa@google.com</owner>
+  <owner>trishalfonso@google.com</owner>
+  <summary>
+    Recorded for page loads where fingerprinting protection filtering policy was
+    evaluated.
+  </summary>
+  <metric name="ActivationDecision">
+    <summary>
+      Enum that records the policy decision to activate subresource filtering
+      for a page load. 0 = Unknown, 1 = Activated, 2 = Disabled, 3 = Deprecated
+      value, 4 = URL allowlisted, 5 = Activation conditions not met. 'Activated'
+      indicates that subresource filtering was activated. All other reasons
+      indicate that subresource filtering was not activated.
+    </summary>
+  </metric>
+  <metric name="AllowlistSource">
+    <summary>
+      Enum that records the source of the fingerprinting protection filtering
+      allowlist entry. 0 = Unknown, 1 = UserBypass, 2 = Enterprise. Recorded
+      only when `ActivationDecision` is &quot;URL allowlisted&quot;
+    </summary>
+  </metric>
+  <metric name="DryRun">
+    <summary>
+      Records `1` if the fingerprinting protection filtering was activated in
+      dry-run mode. In dry-run mode, fingerprinting protection filtering policy
+      is evaluated against resources loaded on the page, but subresource
+      blocking is not actually applied.
+    </summary>
+  </metric>
+</event>
+
 <event name="FlocPageLoad" singular="True">
   <owner>yaoxia@chromium.org</owner>
   <owner>jkarlin@chromium.org</owner>
@@ -10184,6 +10292,105 @@ be describing additional metrics about the same event.
   </metric>
 </event>
 
+<event name="GameControls.ButtonOptionsMenuFunctionTriggered">
+  <owner>cuicuiruan@google.com</owner>
+  <owner>pjlee@google.com</owner>
+  <owner>arc-gaming@google.com</owner>
+  <summary>
+    Logged when Game Controls' options menu button functions are triggered.
+  </summary>
+  <metric name="Function" enum="GameControlsButtonOptionsMenuFunction">
+    <summary>
+      The functions on the button options menu.
+    </summary>
+  </metric>
+</event>
+
+<event name="GameControls.EditDeleteMenuFuctionTriggered">
+  <owner>cuicuiruan@google.com</owner>
+  <owner>pjlee@google.com</owner>
+  <owner>arc-gaming@google.com</owner>
+  <summary>
+    Logged when Game Controls edit-delete menu functions are triggered.
+  </summary>
+  <metric name="Function" enum="GameControlsEditDeleteMenuFunction">
+    <summary>
+      The functions on the edit-delete menu.
+    </summary>
+  </metric>
+</event>
+
+<event name="GameControls.EditingListFunctionTriggered">
+  <owner>cuicuiruan@google.com</owner>
+  <owner>pjlee@google.com</owner>
+  <owner>arc-gaming@google.com</owner>
+  <summary>
+    Logged when Game Controls editing list functions are triggered.
+  </summary>
+  <metric name="Function" enum="GameControlsEditingListFunction">
+    <summary>
+      The functions on the editing list.
+    </summary>
+  </metric>
+</event>
+
+<event name="GameControls.ToggleWithMappingSource">
+  <owner>cuicuiruan@google.com</owner>
+  <owner>pjlee@google.com</owner>
+  <owner>arc-gaming@google.com</owner>
+  <summary>
+    Logged when Game Controls feature or hint is toggled on or off.
+  </summary>
+  <metric name="Function" enum="GameControlsToggleFunction">
+    <summary>
+      Toggle the feature or mapping hint.
+    </summary>
+  </metric>
+  <metric name="MappingSource" enum="GameControlsMappingSource">
+    <summary>
+      Toggle the feature or mapping hint.
+    </summary>
+  </metric>
+  <metric name="ToggleOn" enum="Boolean">
+    <summary>
+      Whether the function is toggled on or off.
+    </summary>
+  </metric>
+</event>
+
+<event name="GameDashboard.ControlsFeatureToggleState">
+  <owner>cuicuiruan@google.com</owner>
+  <owner>phshah@chromium.org</owner>
+  <owner>arc-gaming@google.com</owner>
+  <summary>
+    Logged when Game Controls feature is toggled on or off.
+  </summary>
+  <metric name="ToggleOn" enum="Boolean">
+    <summary>
+      Game Controls feature is toggled on or off.
+    </summary>
+  </metric>
+</event>
+
+<event name="GameDashboard.ControlsHintToggleSource">
+  <owner>cuicuiruan@google.com</owner>
+  <owner>phshah@chromium.org</owner>
+  <owner>arc-gaming@google.com</owner>
+  <summary>
+    Logged when Game Controls mapping hint is toggled on or off.
+  </summary>
+  <metric name="Source" enum="GameDashboardMenu">
+    <summary>
+      Where the mapping hint is toggled from.
+    </summary>
+  </metric>
+  <metric name="ToggleOn" enum="Boolean">
+    <summary>
+      Game Controls mapping hint is toggled on or off.
+    </summary>
+  </metric>
+</event>
+
 <event name="GameDashboard.EditControlsWithEmptyState">
   <owner>cuicuiruan@google.com</owner>
   <owner>phshah@chromium.org</owner>
@@ -10194,6 +10401,20 @@ be describing additional metrics about the same event.
   <metric name="Empty" enum="Boolean">
     <summary>
       Whether Game Controls is empty.
+    </summary>
+  </metric>
+</event>
+
+<event name="GameDashboard.FunctionTriggered">
+  <owner>cuicuiruan@google.com</owner>
+  <owner>phshah@chromium.org</owner>
+  <owner>arc-gaming@google.com</owner>
+  <summary>
+    Logged when the game dashboard functions are triggered.
+  </summary>
+  <metric name="Function" enum="GameDashboardFunction">
+    <summary>
+      Game dashboard function.
     </summary>
   </metric>
 </event>
@@ -10246,6 +10467,34 @@ be describing additional metrics about the same event.
   </metric>
 </event>
 
+<event name="GameDashboard.ToolbarClickToExpandState">
+  <owner>cuicuiruan@google.com</owner>
+  <owner>phshah@chromium.org</owner>
+  <owner>arc-gaming@google.com</owner>
+  <summary>
+    Logged when the game dashboard toolbar is expanded or collapsed.
+  </summary>
+  <metric name="Expanded" enum="Boolean">
+    <summary>
+      Whether the toolbar is expanded.
+    </summary>
+  </metric>
+</event>
+
+<event name="GameDashboard.ToolbarNewLocation">
+  <owner>cuicuiruan@google.com</owner>
+  <owner>phshah@chromium.org</owner>
+  <owner>arc-gaming@google.com</owner>
+  <summary>
+    Logged when the game dashboard toolbar is snapped to a new location.
+  </summary>
+  <metric name="Location" enum="GameDashboardToolbarSnapLocation">
+    <summary>
+      Toolbar new snap location.
+    </summary>
+  </metric>
+</event>
+
 <event name="GameDashboard.ToolbarToggleState">
   <owner>cuicuiruan@google.com</owner>
   <owner>phshah@chromium.org</owner>
@@ -10256,6 +10505,21 @@ be describing additional metrics about the same event.
   <metric name="ToggleOn" enum="Boolean">
     <summary>
       Whether the toolbar is toggled on or off.
+    </summary>
+  </metric>
+</event>
+
+<event name="GameDashboard.WelcomeDialogNotificationToggleState">
+  <owner>cuicuiruan@google.com</owner>
+  <owner>phshah@chromium.org</owner>
+  <owner>arc-gaming@google.com</owner>
+  <summary>
+    Logged when the game dashboard welcome dialog notification is toggled on or
+    off.
+  </summary>
+  <metric name="ToggleOn" enum="Boolean">
+    <summary>
+      Welcome dialog notification is toggled on or off.
     </summary>
   </metric>
 </event>
@@ -12965,7 +13229,16 @@ be describing additional metrics about the same event.
     <summary>
       Bitmask of the reasons why the page was not restored from the back-forward
       cache. See contents::BackForwardCacheMetrics::NotRestoredReason for the
-      meaning of the individual bits.
+      meaning of the individual bits. This entry records the features numbered
+      from 0 to 63.
+    </summary>
+  </metric>
+  <metric name="BackForwardCache.NotRestoredReasons2">
+    <summary>
+      Bitmask of the reasons why the page was not restored from the back-forward
+      cache. See contents::BackForwardCacheMetrics::NotRestoredReason for the
+      meaning of the individual bits. This entry records the features numbered
+      from 64 to 127.
     </summary>
   </metric>
   <metric name="CrossOriginSubframesFeatures">
@@ -13814,6 +14087,9 @@ be describing additional metrics about the same event.
 </event>
 
 <event name="IOS.URLMismatchInLegacyAndSlimNavigationManager">
+  <obsolete>
+    Deprecated 2024/06
+  </obsolete>
   <owner>ajuma@chromium.org</owner>
   <owner>gambard@chromium.org</owner>
   <summary>
@@ -13956,6 +14232,153 @@ be describing additional metrics about the same event.
       display_cutout.mojom). It can never be kAuto as we ignore events when the
       page is not trying to use the viewport fit API.
     </summary>
+  </metric>
+</event>
+
+<event name="Lens.Overlay.Overlay.UserAction">
+  <owner>jdonnelly@google.com</owner>
+  <owner>lens-chrome@google.com</owner>
+  <summary>
+    Recorded each time the user interactions with the Lens Overlay, enumerated
+    by those actions.
+  </summary>
+  <metric name="UserAction" enum="LensOverlayUserAction">
+    <summary>
+      The user interaction with the Lens Overlay.
+    </summary>
+  </metric>
+</event>
+
+<event name="Lens.Overlay.SessionEnd">
+  <owner>jdonnelly@google.com</owner>
+  <owner>lens-chrome@google.com</owner>
+  <summary>
+    Recorded once when the Lens Overlay feature is dismissed. Measures the
+    invocation source of the session, the duration, and whether a search
+    performed in the session.
+  </summary>
+  <metric name="InvocationResultedInSearch" enum="Boolean">
+    <summary>
+      Indicates whether or not a search was performed at any point since the
+      overlay was invoked.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <enumeration/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
+  <metric name="InvocationSource" enum="LensOverlayInvocationSource">
+    <summary>
+      The UI entry point used to invoke the Lens Overlay feature.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <enumeration/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
+  <metric name="SessionDuration">
+    <summary>
+      Measures the elapsed time between when the overlay was invoked and when it
+      was dismissed.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <quantiles type="std-percentiles"/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
+</event>
+
+<event name="Lens.Overlay.TimeToFirstInteraction">
+  <owner>jdonnelly@google.com</owner>
+  <owner>lens-chrome@google.com</owner>
+  <summary>
+    Recorded once when the user first interacts with the overlay. Measures the
+    elapsed time (ms) between when the overlay was invoked and when the user
+    first interacts with the overlay. Nothing is logged when the user enters
+    through the image context menu.
+  </summary>
+  <metric name="AllEntryPoints">
+    <summary>
+      Time to first interaction for all entry points.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <quantiles type="std-percentiles"/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
+  <metric name="AppMenu">
+    <summary>
+      Time to first interaction when overlay invoked through the app menu.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <quantiles type="std-percentiles"/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
+  <metric name="ContentAreaContextMenuPage">
+    <summary>
+      Time to first interaction when overlay invoked through the page content
+      area context menu.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <quantiles type="std-percentiles"/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
+  <metric name="FindInPage">
+    <summary>
+      Time to first interaction when overlay invoked through the find in page
+      button.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <quantiles type="std-percentiles"/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
+  <metric name="Omnibox">
+    <summary>
+      Time to first interaction when overlay invoked through the omnibox.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <quantiles type="std-percentiles"/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
+  <metric name="Toolbar">
+    <summary>
+      Time to first interaction when overlay invoked through the toolbar.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <quantiles type="std-percentiles"/>
+        </statistics>
+      </history>
+    </aggregation>
   </metric>
 </event>
 
@@ -16912,6 +17335,16 @@ be describing additional metrics about the same event.
   <metric name="AnchorIndex">
     <summary>
       The index of the anchor element in NavigationPredictor's |top_urls_|.
+    </summary>
+  </metric>
+  <metric name="DistanceFromLastPointerDown">
+    <summary>
+      Vertical distance from the center of the anchor element to the most recent
+      pointerdown that started a scroll, as a percentage of screen height. This
+      value is between -100 and 100 (inclusive), and is negative when the
+      pointerdown was below the anchor's center (positive otherwise). This will
+      only be set for anchor elements that are in the viewport. Linearly
+      bucketed with a bucket size of 10.
     </summary>
   </metric>
   <metric name="EnteredViewportCount">
@@ -20370,6 +20803,27 @@ be describing additional metrics about the same event.
     <summary>
       Records the outcome of a password form submission.
     </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <enumeration/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
+  <metric name="Submission.SubmissionResult.GeneratedPassword"
+      enum="PasswordFormSubmissionResult">
+    <summary>
+      Records the outcome of a password form submission for forms on which users
+      generated passwords.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <enumeration/>
+        </statistics>
+      </history>
+    </aggregation>
   </metric>
   <metric name="Submission.SubmittedFormType2" enum="PasswordFormType2">
     <summary>
@@ -21771,6 +22225,71 @@ be describing additional metrics about the same event.
   </summary>
 </event>
 
+<event name="PlusAddresses.Submission">
+  <owner>jkeitel@google.com</owner>
+  <owner>vizcay@google.com</owner>
+  <summary>
+    An email was submitted in a form for which the user had previously seen a
+    plus address suggestions. More precisely, this event is recorded whenever a
+    user submits a form that contains a form field for which a plus address
+    suggestion was shown and the form field contains either a plus address or
+    the current profile's GAIA email.
+  </summary>
+  <metric name="CheckoutOrCartPage" enum="Boolean">
+    <summary>
+      Boolean value representing whether commerce heuristics suggest that the
+      main frame URL belongs to a checkout or a cart page.
+    </summary>
+  </metric>
+  <metric name="FieldCountBrowserForm">
+    <summary>
+      The number of fields in the browser form. This uses exponential bucketing
+      with a spacing of 1.15.
+    </summary>
+  </metric>
+  <metric name="FieldCountRendererForm">
+    <summary>
+      The number of fields in the renderer form. This uses exponential bucketing
+      with a spacing of 1.15.
+    </summary>
+  </metric>
+  <metric name="ManagedProfile" enum="Boolean">
+    <summary>
+      Boolean value representing whether the active profile is managed.
+    </summary>
+  </metric>
+  <metric name="NewlyCreatedPlusAddress" enum="Boolean">
+    <summary>
+      Boolean value representing whether the submitted email was newly created
+      for this submission.
+    </summary>
+  </metric>
+  <metric name="PasswordFormType" enum="AutofillPasswordFormType">
+    <summary>
+      The password manager classification of the form focused by the user when
+      showing the plus address suggestion.
+    </summary>
+  </metric>
+  <metric name="PlusAddressCount" enum="PlusAddressCountBucket">
+    <summary>
+      The (bucketed) number of plus addresses the user had when shown the plus
+      address suggestion.
+    </summary>
+  </metric>
+  <metric name="SubmittedPlusAddress" enum="Boolean">
+    <summary>
+      Boolean value representing whether the submitted email was a plus address.
+    </summary>
+  </metric>
+  <metric name="SuggestionContext"
+      enum="AutofillPlusAddressDelegateSuggestionContext">
+    <summary>
+      The context in which the plus address suggestion (filling or creation) was
+      shown in the Autofill UI.
+    </summary>
+  </metric>
+</event>
+
 <event name="Popup.Closed">
   <owner>csharrison@chromium.org</owner>
   <owner>jkarlin@chromium.org</owner>
@@ -22744,6 +23263,20 @@ be describing additional metrics about the same event.
       content::PreloadingPredictor or ChromePreloadingPredictor.
     </summary>
   </metric>
+  <metric name="SamplingAmount">
+    <summary>
+      Indicates whether the number of preloading predictions for the associated
+      page was over a limit and needed to be downsampled. All events for a given
+      page logged at the same time have the same SamplingAmount. The value is
+      the exponentially bucketed value of (1,000,000 - (1,000,000 *
+      sampling_rate)). The multiplication by 1,000,000 is because we cannot log
+      floating point values in UKM, and we have larger values indicate more
+      sampling so that a lack of sampling can be unambiguous by having its own
+      bucket. For example, if the number of predictions was under the limit and
+      no sampling was done, then the value would be 0. If the number of
+      predictions was double the limit, the value would be 500,000.
+    </summary>
+  </metric>
   <metric name="TimeToNextNavigation">
     <summary>
       The amount of time the prediction took to reach the next navigation, in
@@ -22781,6 +23314,20 @@ be describing additional metrics about the same event.
     <summary>
       The type of preloading predictor which made the preloading prediction.
       Values are from content::PreloadingPredictor or ChromePreloadingPredictor.
+    </summary>
+  </metric>
+  <metric name="SamplingAmount">
+    <summary>
+      Indicates whether the number of preloading predictions for the associated
+      page was over a limit and needed to be downsampled. All events for a given
+      page logged at the same time have the same SamplingAmount. The value is
+      the exponentially bucketed value of (1,000,000 - (1,000,000 *
+      sampling_rate)). The multiplication by 1,000,000 is because we cannot log
+      floating point values in UKM, and we have larger values indicate more
+      sampling so that a lack of sampling can be unambiguous by having its own
+      bucket. For example, if the number of predictions was under the limit and
+      no sampling was done, then the value would be 0. If the number of
+      predictions was double the limit, the value would be 500,000.
     </summary>
   </metric>
   <metric name="TimeToNextNavigation">
@@ -24614,6 +25161,14 @@ be describing additional metrics about the same event.
       The result of the router evaluation of the Static Routing API. This
       indicates which source type is specified to get the resource. This will be
       recorded only when the router has matched the incoming resource.
+    </summary>
+  </metric>
+  <metric name="RouterEvaluationTime">
+    <summary>
+      Time spent for the SW static routing API router evaluation to handle a
+      request. Recorded when the service worker has associated routing info, and
+      the browser or renderer is processing requests. Duration in units of micro
+      seconds.
     </summary>
   </metric>
   <metric name="RouterRuleCount">
@@ -26839,10 +27394,11 @@ be describing additional metrics about the same event.
     &quot;background&quot;, and &quot;closed&quot;.
   </summary>
   <metric name="ConnectednessToActiveTab">
+    <obsolete>
+      Deprecated as of 06/2024.
+    </obsolete>
     <summary>
-      How connected the tab is to the active tab, if `NewState` isn't `Active`.
-      Computed from tab switches in the current session, and represents a
-      probability in the range [0.0, 1.0].
+      Deprecated.
     </summary>
   </metric>
   <metric name="NewState" enum="TabRevisitTracker.TabState">
@@ -27146,6 +27702,26 @@ be describing additional metrics about the same event.
     <summary>
       The state of site data access (e.g. blocked, allowed, etc) for the the
       current page load prior to the user re-enabling 3PC.
+    </summary>
+  </metric>
+</event>
+
+<event name="ThirdPartyCookies.TopLevelDeprecationTrial">
+  <owner>3pcd-core@google.com</owner>
+  <owner>jdh@chromium.org</owner>
+  <summary>
+    Recorded when there is a change in the status of the TopLevelTpcd
+    deprecation trial.
+  </summary>
+  <metric name="Enabled" enum="Boolean">
+    <summary>
+      True if the trial was enabled. False if the trial was disabled.
+    </summary>
+  </metric>
+  <metric name="MatchSubdomains" enum="Boolean">
+    <summary>
+      True iff the token used to enable the trial is/was valid for subdomains of
+      the origin store in the token.
     </summary>
   </metric>
 </event>
@@ -29884,8 +30460,8 @@ be describing additional metrics about the same event.
 </event>
 
 <event name="WebApp.DailyInteraction">
-  <owner>glenrob@chromium.org</owner>
-  <owner>benwells@chromium.org</owner>
+  <owner>dmurph@chromium.org</owner>
+  <owner>pwa-team@google.com</owner>
   <summary>
     Features of a web app recorded at most once per day if a user interacted
     with the web app. Recorded for installed and/or promotable (installable) web
@@ -30066,7 +30642,7 @@ be describing additional metrics about the same event.
 <event name="WebOTPImpact">
   <owner>yigu@chromium.org</owner>
   <owner>goto@chromium.org</owner>
-  <owner>web-identity@google.com</owner>
+  <owner>web-identity-eng@google.com</owner>
   <summary>
     Records in the browser process when a document is destroyed.
   </summary>

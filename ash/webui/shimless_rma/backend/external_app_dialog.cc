@@ -15,10 +15,10 @@
 #include "base/functional/callback.h"
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/input/native_web_keyboard_event.h"
 #include "components/permissions/permission_request_manager.h"
 #include "content/public/browser/console_message.h"
 #include "content/public/browser/file_select_listener.h"
-#include "content/public/common/input/native_web_keyboard_event.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/display/display.h"
@@ -113,12 +113,6 @@ std::string_view ConsoleMessageLevelToString(
   }
 }
 
-bool IsEscapeEvent(const content::NativeWebKeyboardEvent& event) {
-  return event.GetType() ==
-             content::NativeWebKeyboardEvent::Type::kRawKeyDown &&
-         event.windows_key_code == ui::VKEY_ESCAPE;
-}
-
 }  // namespace
 
 ExternalAppDialog::InitParams::InitParams() = default;
@@ -172,7 +166,8 @@ ExternalAppDialog::ExternalAppDialog(const InitParams& params)
   set_dialog_modal_type(ui::MODAL_TYPE_SYSTEM);
   set_dialog_title(base::UTF8ToUTF16(params.app_name));
 
-  views::Widget::InitParams widget_params{};
+  views::Widget::InitParams widget_params{
+      views::Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET};
   widget_params.z_order = ui::ZOrderLevel::kFloatingWindow;
   web_dialog_view_ = new views::WebDialogView(
       params.context, this, std::make_unique<WebContentsHandler>());
@@ -222,33 +217,6 @@ void ExternalAppDialog::RequestMediaAccessPermission(
   }
   shimless_rma_delegate_->ProcessMediaAccessRequest(
       web_contents, request, std::move(callback), /*extension=*/nullptr);
-}
-
-void ExternalAppDialog::EnterFullscreenModeForTab(
-    content::RenderFrameHost* requesting_frame,
-    const blink::mojom::FullscreenOptions& options) {
-  widget_->SetFullscreen(true);
-}
-
-void ExternalAppDialog::ExitFullscreenModeForTab(
-    content::WebContents* web_contents) {
-  widget_->SetFullscreen(false);
-}
-
-content::KeyboardEventProcessingResult
-ExternalAppDialog::PreHandleKeyboardEvent(
-    content::WebContents* source,
-    const content::NativeWebKeyboardEvent& event) {
-  if (widget_->IsFullscreen() && IsEscapeEvent(event)) {
-    ExitFullscreenModeForTab(source);
-    return content::KeyboardEventProcessingResult::HANDLED;
-  }
-  return content::KeyboardEventProcessingResult::NOT_HANDLED;
-}
-
-bool ExternalAppDialog::IsFullscreenForTabOrPending(
-    const content::WebContents* web_contents) {
-  return widget_->IsFullscreen();
 }
 
 void ExternalAppDialog::OnDidAddMessageToConsole(

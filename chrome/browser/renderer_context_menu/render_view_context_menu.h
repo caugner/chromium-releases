@@ -18,6 +18,7 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/autofill/autofill_context_menu_manager.h"
+#include "chrome/common/chrome_render_frame.mojom.h"
 #include "components/compose/buildflags.h"
 #include "components/custom_handlers/protocol_handler_registry.h"
 #include "components/lens/buildflags.h"
@@ -61,19 +62,16 @@ class Profile;
 class ReadWriteCardObserver;
 class SpellingMenuObserver;
 class SpellingOptionsSubMenuObserver;
-#if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
-class PdfOcrMenuObserver;
-#endif  // BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
 
 namespace content {
 class RenderFrameHost;
 class WebContents;
-}
+}  // namespace content
 
 namespace extensions {
 class Extension;
 class MenuItem;
-}
+}  // namespace extensions
 
 namespace gfx {
 class Point;
@@ -83,7 +81,7 @@ namespace blink {
 namespace mojom {
 class MediaPlayerAction;
 }
-}
+}  // namespace blink
 
 namespace ui {
 class DataTransferEndpoint;
@@ -112,6 +110,8 @@ class RenderViewContextMenu
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kExitFullscreenMenuItem);
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kComposeMenuItem);
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kRegionSearchItem);
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kSearchForImageItem);
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kSearchForVideoFrameItem);
 
   using ExecutePluginActionCallback =
       base::OnceCallback<void(content::RenderFrameHost*,
@@ -136,7 +136,6 @@ class RenderViewContextMenu
   void ExecuteCommand(int command_id, int event_flags) override;
   void AddSpellCheckServiceItem(bool is_checked) override;
   void AddAccessibilityLabelsServiceItem(bool is_checked) override;
-  void AddPdfOcrMenuItem() override;
 
   // Registers a one-time callback that will be called the next time a context
   // menu is shown.
@@ -304,7 +303,6 @@ class RenderViewContextMenu
   // cases, e.g. these are only appended if a screen reader is enabled.
   bool AppendAccessibilityLabelsItems();
 #if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
-  void AppendPdfOcrItems();
   void AppendLayoutExtractionItem();
 #endif  // BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
   void AppendSearchProvider();
@@ -400,7 +398,8 @@ class RenderViewContextMenu
 #endif  // BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
 
   void MediaPlayerAction(const blink::mojom::MediaPlayerAction& action);
-  void SearchForVideoFrame(const gfx::ImageSkia& image);
+  void SearchForVideoFrame(const SkBitmap& bitmap,
+                           const gfx::Rect& region_bounds);
   void PluginActionAt(const gfx::Point& location,
                       blink::mojom::PluginActionType plugin_action);
 
@@ -431,6 +430,20 @@ class RenderViewContextMenu
       supervised_user::FilteringBehavior filtering_behavior,
       supervised_user::FilteringBehaviorReason reason,
       bool uncertain);
+
+  // Opens the Lens overlay to search a region defined by the given bounds of
+  // the view and the image to be searched. Tab bounds and view bounds are
+  // relative to the screen and in DP, while image bounds are relative to the
+  // view and in physical pixels. The device scale factor is supplied to scale
+  // the image bounds properly.
+  void OpenLensOverlayWithPreselectedRegion(
+      mojo::AssociatedRemote<chrome::mojom::ChromeRenderFrame>
+          chrome_render_frame,
+      const gfx::Rect& tab_bounds,
+      const gfx::Rect& view_bounds,
+      float device_scale_factor,
+      const SkBitmap& region_bytes,
+      const gfx::Rect& region_bitmap);
 
 #if BUILDFLAG(IS_CHROMEOS)
   // Shows the standalone clipboard history menu. `event_flags` describes the
@@ -472,12 +485,6 @@ class RenderViewContextMenu
   std::unique_ptr<AccessibilityLabelsMenuObserver>
       accessibility_labels_menu_observer_;
   ui::SimpleMenuModel accessibility_labels_submenu_model_;
-
-#if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
-  // An observer that handles PDF OCR items.
-  std::unique_ptr<PdfOcrMenuObserver> pdf_ocr_submenu_model_observer_;
-  std::unique_ptr<ui::SimpleMenuModel> pdf_ocr_submenu_model_;
-#endif  // BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
 
 #if !BUILDFLAG(IS_MAC)
   // An observer that handles the submenu for showing spelling options. This

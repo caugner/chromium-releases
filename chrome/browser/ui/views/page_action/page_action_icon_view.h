@@ -83,6 +83,8 @@ class PageActionIconView : public IconLabelBubbleView {
   void RemovePageIconViewObserver(PageActionIconViewObserver* observer);
 
   // Updates the color of the icon, this must be set before the icon is drawn.
+  // TODO(crbug.com/352245808): Color overrides should be moved into the
+  // IconLabelBubbleView superclass.
   void SetIconColor(SkColor icon_color);
   SkColor GetIconColor() const;
 
@@ -104,6 +106,7 @@ class PageActionIconView : public IconLabelBubbleView {
 
   SkColor GetLabelColorForTesting() const;
 
+  std::optional<actions::ActionId> action_id() { return action_id_; }
   const char* name_for_histograms() const { return name_for_histograms_; }
   bool ephemeral() const { return ephemeral_; }
 
@@ -134,6 +137,7 @@ class PageActionIconView : public IconLabelBubbleView {
                      IconLabelBubbleView::Delegate* parent_delegate,
                      Delegate* delegate,
                      const char* name_for_histograms,
+                     std::optional<actions::ActionId> action_id = std::nullopt,
                      bool ephemeral = true,
                      const gfx::FontList& = gfx::FontList());
 
@@ -212,6 +216,10 @@ class PageActionIconView : public IconLabelBubbleView {
 
   // The command ID executed when the user clicks this icon.
   const int command_id_;
+
+  // The ID for the associated ActionItem for this icon.
+  // This should eventually replace the above |command_id_|.
+  std::optional<actions::ActionId> action_id_;
 
   // String that represents the page action type for metrics purposes.
   const char* const name_for_histograms_;

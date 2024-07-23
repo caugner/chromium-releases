@@ -24,31 +24,10 @@
 #import "net/base/net_errors.h"
 #import "ui/base/l10n/l10n_util.h"
 
-DownloadManagerMediator::DownloadManagerMediator() : weak_ptr_factory_(this) {
-  // Register for backgrounding and foregrounding notifications.
-  application_backgrounding_observer_ = [[NSNotificationCenter defaultCenter]
-      addObserverForName:UIApplicationDidEnterBackgroundNotification
-                  object:nil
-                   queue:nil
-              usingBlock:
-                  base::CallbackToBlock(
-                      base::IgnoreArgs<NSNotification*>(base::BindRepeating(
-                          &DownloadManagerMediator::AppDidEnterBackground,
-                          weak_ptr_factory_.GetWeakPtr())))];
+DownloadManagerMediator::DownloadManagerMediator() : weak_ptr_factory_(this) {}
 
-  application_foregrounding_observer_ = [[NSNotificationCenter defaultCenter]
-      addObserverForName:UIApplicationWillEnterForegroundNotification
-                  object:nil
-                   queue:nil
-              usingBlock:
-                  base::CallbackToBlock(
-                      base::IgnoreArgs<NSNotification*>(base::BindRepeating(
-                          &DownloadManagerMediator::AppWillEnterForeground,
-                          weak_ptr_factory_.GetWeakPtr())))];
-}
 DownloadManagerMediator::~DownloadManagerMediator() {
   DCHECK(!application_foregrounding_observer_);
-  DCHECK(!application_backgrounding_observer_);
   SetDownloadTask(nullptr);
   if (identity_manager_) {
     identity_manager_->RemoveObserver(this);
@@ -86,6 +65,9 @@ void DownloadManagerMediator::SetPrefService(PrefService* pref_service) {
 void DownloadManagerMediator::SetConsumer(
     id<DownloadManagerConsumer> consumer) {
   consumer_ = consumer;
+  if (base::FeatureList::IsEnabled(kIOSSaveToDrive)) {
+    SetGoogleDriveAppInstalled(IsGoogleDriveAppInstalled());
+  }
   UpdateConsumer();
 }
 
@@ -170,13 +152,20 @@ bool DownloadManagerMediator::IsSaveToDriveAvailable() const {
                                        drive_service_, pref_service_);
 }
 
-void DownloadManagerMediator::Disconnect() {
-  if (application_backgrounding_observer_) {
-    [[NSNotificationCenter defaultCenter]
-        removeObserver:application_backgrounding_observer_];
-    application_backgrounding_observer_ = nil;
-  }
+void DownloadManagerMediator::StartObservingNotifications() {
+  DCHECK(!application_foregrounding_observer_);
+  application_foregrounding_observer_ = [[NSNotificationCenter defaultCenter]
+      addObserverForName:UIApplicationWillEnterForegroundNotification
+                  object:nil
+                   queue:nil
+              usingBlock:
+                  base::CallbackToBlock(
+                      base::IgnoreArgs<NSNotification*>(base::BindRepeating(
+                          &DownloadManagerMediator::AppWillEnterForeground,
+                          weak_ptr_factory_.GetWeakPtr())))];
+}
 
+void DownloadManagerMediator::StopObservingNotifications() {
   if (application_foregrounding_observer_) {
     [[NSNotificationCenter defaultCenter]
         removeObserver:application_foregrounding_observer_];
@@ -187,7 +176,9 @@ void DownloadManagerMediator::Disconnect() {
 #pragma mark - Private
 
 void DownloadManagerMediator::UpdateConsumer() {
-  if (app_in_background_) {
+  if (base::FeatureList::IsEnabled(kIOSDownloadNoUIUpdateInBackground) &&
+      UIApplication.sharedApplication.applicationState ==
+          UIApplicationStateBackground) {
     // If the app is in the background, do nothing.
     return;
   }
@@ -197,7 +188,7 @@ void DownloadManagerMediator::UpdateConsumer() {
     return;
   }
   DownloadManagerState state = GetDownloadManagerState();
-
+  base::FilePath filename = download_task_->GenerateFileName();
   if (base::FeatureList::IsEnabled(kIOSSaveToDrive)) {
     [consumer_ setMultipleDestinationsAvailable:IsSaveToDriveAvailable()];
     DownloadFileDestination destination = upload_task_ == nullptr
@@ -209,8 +200,9 @@ void DownloadManagerMediator::UpdateConsumer() {
     id<SystemIdentity> identity =
         upload_task_ ? upload_task_->GetIdentity() : nil;
     [consumer_ setSaveToDriveUserEmail:identity.userEmail];
-    [consumer_ setInstallDriveButtonVisible:!IsGoogleDriveAppInstalled()
+    [consumer_ setInstallDriveButtonVisible:!is_google_drive_app_installed_
                                    animated:NO];
+    [consumer_ setCanOpenFile:filename.MatchesExtension(".pdf")];
   } else if (state == kDownloadManagerStateSucceeded &&
              !IsGoogleDriveAppInstalled()) {
     [consumer_ setInstallDriveButtonVisible:YES animated:YES];
@@ -221,14 +213,16 @@ void DownloadManagerMediator::UpdateConsumer() {
   [consumer_ setCountOfBytesExpectedToReceive:download_task_->GetTotalBytes()];
   [consumer_ setProgress:GetDownloadManagerProgress()];
 
-  base::FilePath filename = download_task_->GenerateFileName();
   [consumer_ setFileName:base::apple::FilePathToNSString(filename)];
-
   int a11y_announcement = GetDownloadManagerA11yAnnouncement();
   if (a11y_announcement != -1) {
     UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,
                                     l10n_util::GetNSString(a11y_announcement));
   }
+}
+
+void DownloadManagerMediator::SetGoogleDriveAppInstalled(bool installed) {
+  is_google_drive_app_installed_ = installed;
 }
 
 void DownloadManagerMediator::MoveToUserDocumentsIfFileExists(
@@ -328,12 +322,11 @@ void DownloadManagerMediator::SetUploadTask(UploadTask* task) {
   }
 }
 
-void DownloadManagerMediator::AppDidEnterBackground() {
-  app_in_background_ = true;
-}
-
 void DownloadManagerMediator::AppWillEnterForeground() {
-  app_in_background_ = false;
+  CHECK(base::FeatureList::IsEnabled(kIOSDownloadNoUIUpdateInBackground));
+  if (base::FeatureList::IsEnabled(kIOSSaveToDrive)) {
+    SetGoogleDriveAppInstalled(IsGoogleDriveAppInstalled());
+  }
   UpdateConsumer();
 }
 

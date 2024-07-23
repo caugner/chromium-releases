@@ -4,8 +4,12 @@
     width: 100%;
   }
 
+  .hidden {
+    display: none;
+  }
+
   #backgroundScrim {
-    background-color: #151C264D;
+    background-color: rgba(0, 0 ,0, 0.3);
     inset: 0;
     position: absolute;
   }
@@ -18,11 +22,16 @@
     position: absolute;
   }
 
-  #closeButton,
-  #feedbackButton {
-    --cr-icon-button-icon-size: 24px;
+  :host(:not([initial-flash-animation-has-ended])) #buttonContainer {
+    opacity: 0;
+    visibility: hidden;
+  }
+
+  .action-button {
+    --cr-icon-button-icon-size: 20px;
     --cr-icon-button-size: 36px;
     --cr-icon-button-fill-color: white;
+    background-color: rgba(var(--color-scrim-rgb), 0.6);
   }
 
   #closeButton {
@@ -33,31 +42,168 @@
     display: none;
   }
 
-  #feedbackButton {
-    --cr-icon-image: url("feedback.svg");
+  #copyToast {
+    justify-content: space-between;
   }
 
-  initial-toast {
+  #moreOptions {
+    width: 156px;
+  }
+
+  #moreOptionsButton {
+    margin-inline-start: 120px;
+  }
+
+  #moreOptionsMenu {
+    background: var(--color-selection-element);
+    border-radius: 8px;
+    display: none;
+    margin-top: 8px;
+    padding: 8px 0px;
+    /* Needed to prevent mouse flicker on option hover. */
+    cursor: default;
+  }
+
+  :host([more-options-menu-visible]) #moreOptionsMenu {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .menu-item {
+    align-items: center;
+    display: flex;
+    padding-inline-start: 16px;
+    height: 36px;
+  }
+
+  .menu-item:hover {
+    background-color: rgba(var(--color-scrim-rgb), 0.05);
+  }
+
+  .menu-item:active {
+    background-color: rgba(var(--color-scrim-rgb), 0.10);
+  }
+
+  .menu-item-label {
+    color: var(--color-scrim);
+    font-size: 13px;
+    font-style: normal;
+    font-weight: 500;
+    line-height: normal;
+  }
+
+  .menu-item-icon {
+    background-color: var(--color-primary);
+    height: 20px;
+    mask-position: center;
+    mask-repeat: no-repeat;
+    mask-size: 100%;
+    width: 20px;
+    margin-inline-end: 12px;
+  }
+
+  .feedback {
+    mask-image: url("feedback.svg");
+  }
+
+  .activity {
+    mask-image: url("//resources/cr_components/searchbox/icons/google_g_cr23.svg");
+  }
+
+  .learn-more {
+    mask-image: url("learn_more.svg");
+  }
+
+  .app-container :not(lens-selection-overlay) {
+    transition: opacity 150ms linear;
+  }
+
+  :host([is-closing]) .app-container :not(lens-selection-overlay) {
+    opacity: 0;
+  }
+
+  cursor-tooltip {
+    left: 0;
+    position: fixed;
+    top: 0;
+    /* Don't display the tooltip until the cursor location is determined. */
+    transform: scale(0);
+    width: 100%;
+    z-index: 6;  /* Keep aligned with cursor and context menu. */
+  }
+
+  initial-gradient {
     pointer-events: none;
   }
 </style>
-<div class="app-container" on-selection-overlay-clicked="closeInitialToast"
-    on-pointer-released="hideInitialToastGradient"
-    on-screenshot-rendered="onScreenshotRendered">
+<div class="app-container"
+    on-initial-flash-animation-end="onInitialFlashAnimationEnd"
+    on-screenshot-rendered="onScreenshotRendered"
+    on-selection-overlay-clicked="handleSelectionOverlayClicked"
+    on-pointer-released="handlePointerReleased"
+    on-text-copied="showTextCopiedToast"
+    on-pointerenter="handlePointerEnter"
+    on-pointerleave="handlePointerLeave"
+    style="
+    --color-primary: [[skColorToHex_(theme.primary)]];
+    --color-shader-layer-1: [[skColorToHex_(theme.shaderLayer1)]];
+    --color-shader-layer-2: [[skColorToHex_(theme.shaderLayer2)]];
+    --color-shader-layer-3: [[skColorToHex_(theme.shaderLayer3)]];
+    --color-shader-layer-4: [[skColorToHex_(theme.shaderLayer4)]];
+    --color-shader-layer-5: [[skColorToHex_(theme.shaderLayer5)]];
+    --color-scrim: [[skColorToHex_(theme.scrim)]];
+    --color-scrim-rgb: [[skColorToRgb_(theme.scrim)]];
+    --color-surface-container-highest-light: [[skColorToHex_(theme.surfaceContainerHighestLight)]];
+    --color-surface-container-highest-dark: [[skColorToHex_(theme.surfaceContainerHighestDark)]];
+    --color-selection-element: [[skColorToHex_(theme.selectionElement)]];">
+  <cr-toast id="copyToast" duration="4000">
+    <div>$i18n{copyToastMessage}</div>
+    <cr-button on-click="onHideToastClick">
+      $i18n{dismiss}
+    </cr-button>
+  </cr-toast>
   <div id="backgroundScrim" on-click="onBackgroundScrimClicked"
-      hidden$="[[!isImageRendered]]"></div>
-  <!-- Do not render selection overlay if data URI is empty. -->
-  <template is="dom-if" if="[[screenshotDataUri.length]]">
-    <lens-selection-overlay
-        screenshot-data-uri="[[screenshotDataUri]]"></lens-selection-overlay>
-  </template>
-  <initial-toast id="initialToast"></initial-toast>
+      hidden$="[[!isImageRendered]]"
+      on-pointerenter="handlePointerEnterBackgroundScrim"
+      on-pointerleave="handlePointerLeaveBackgroundScrim"></div>
+  <lens-selection-overlay id="selectionOverlay" theme="[[theme]]"
+      screenshot-data-uri="[[screenshotDataUri]]"
+      class$="[[getSelectionOverlayClass(screenshotDataUri)]]"
+      on-pointerenter="handlePointerEnterSelectionOverlay"
+      on-pointerleave="handlePointerLeaveSelectionOverlay">
+  </lens-selection-overlay>
+  <initial-gradient id="initialGradient"></initial-gradient>
   <div id="buttonContainer">
-    <cr-icon-button id="feedbackButton" class="action-button"
-        on-click="onFeedbackButtonClick" aria-label="$i18n{sendFeedback}"
-        title="$i18n{sendFeedback}"></cr-icon-button>
+    <div id="moreOptions">
+      <cr-icon-button iron-icon="cr:more-vert" id="moreOptionsButton"
+          class="action-button" on-click="onMoreOptionsButtonClick"
+          aria-label="$i18n{moreOptions}"
+          title="$i18n{moreOptions}">
+      </cr-icon-button>
+      <div id="moreOptionsMenu">
+        <div class="menu-item" on-click="onMyActivityClick"
+            aria-label="$i18n{myActivity}">
+          <span class="menu-item-icon activity"></span>
+          <span id="myActivity"
+              class="menu-item-label">$i18n{myActivity}</span>
+        </div>
+        <div class="menu-item" on-click="onLearnMoreClick"
+            aria-label="$i18n{learnMore}">
+          <span class="menu-item-icon learn-more"></span>
+          <span id="learnMore"
+              class="menu-item-label">$i18n{learnMore}</span>
+        </div>
+        <div class="menu-item" on-click="onFeedbackClick"
+            aria-label="$i18n{sendFeedback}">
+          <span class="menu-item-icon feedback"></span>
+          <span id="sendFeedback"
+              class="menu-item-label">$i18n{sendFeedback}</span>
+        </div>
+      </div>
+    </div>
     <cr-icon-button id="closeButton" class="action-button"
         on-click="onCloseButtonClick" aria-label="$i18n{close}"
         title="$i18n{close}"></cr-icon-button>
   </div>
+  <cursor-tooltip id="cursorTooltip"></cursor-tooltip>
 </div>

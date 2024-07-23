@@ -6,6 +6,7 @@
 
 #import <utility>
 
+#import "base/feature_list.h"
 #import "base/functional/bind.h"
 #import "base/logging.h"
 #import "components/autofill/core/browser/webdata/addresses/autofill_profile_sync_bridge.h"
@@ -21,23 +22,25 @@
 #import "components/dom_distiller/core/dom_distiller_service.h"
 #import "components/history/core/browser/history_service.h"
 #import "components/keyed_service/core/service_access_type.h"
-#import "components/metrics/demographics/user_demographics.h"
 #import "components/password_manager/core/browser/password_store/password_store_interface.h"
 #import "components/password_manager/core/browser/sharing/password_receiver_service.h"
 #import "components/password_manager/core/browser/sharing/password_sender_service.h"
+#import "components/plus_addresses/settings/plus_address_setting_service.h"
 #import "components/plus_addresses/webdata/plus_address_webdata_service.h"
 #import "components/reading_list/core/dual_reading_list_model.h"
 #import "components/reading_list/core/reading_list_model.h"
+#import "components/saved_tab_groups/tab_group_sync_service.h"
 #import "components/supervised_user/core/browser/supervised_user_settings_service.h"
+#import "components/sync/base/features.h"
 #import "components/sync/base/report_unrecoverable_error.h"
 #import "components/sync/base/sync_util.h"
+#import "components/sync/model/forwarding_model_type_controller_delegate.h"
 #import "components/sync/service/sync_api_component_factory.h"
 #import "components/sync/service/sync_service.h"
 #import "components/sync/service/trusted_vault_synthetic_field_trial.h"
 #import "components/sync_sessions/session_sync_service.h"
 #import "components/sync_user_events/user_event_service.h"
 #import "components/trusted_vault/trusted_vault_service.h"
-#import "components/variations/service/google_groups_updater_service.h"
 #import "components/webauthn/core/browser/passkey_model.h"
 #import "ios/chrome/browser/bookmarks/model/account_bookmark_sync_service_factory.h"
 #import "ios/chrome/browser/bookmarks/model/local_or_syncable_bookmark_sync_service_factory.h"
@@ -46,15 +49,18 @@
 #import "ios/chrome/browser/dom_distiller/model/dom_distiller_service_factory.h"
 #import "ios/chrome/browser/favicon/model/favicon_service_factory.h"
 #import "ios/chrome/browser/history/model/history_service_factory.h"
-#import "ios/chrome/browser/metrics/model/google_groups_updater_service_factory.h"
+#import "ios/chrome/browser/metrics/model/ios_chrome_metrics_service_accessor.h"
 #import "ios/chrome/browser/passwords/model/ios_chrome_account_password_store_factory.h"
 #import "ios/chrome/browser/passwords/model/ios_chrome_password_receiver_service_factory.h"
 #import "ios/chrome/browser/passwords/model/ios_chrome_password_sender_service_factory.h"
 #import "ios/chrome/browser/passwords/model/ios_chrome_profile_password_store_factory.h"
+#import "ios/chrome/browser/plus_addresses/model/plus_address_setting_service_factory.h"
 #import "ios/chrome/browser/power_bookmarks/model/power_bookmark_service_factory.h"
 #import "ios/chrome/browser/reading_list/model/reading_list_model_factory.h"
+#import "ios/chrome/browser/saved_tab_groups/model/tab_group_sync_service_factory.h"
 #import "ios/chrome/browser/shared/model/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
+#import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/signin/model/chrome_account_manager_service_factory.h"
 #import "ios/chrome/browser/signin/model/identity_manager_factory.h"
 #import "ios/chrome/browser/supervised_user/model/supervised_user_settings_service_factory.h"
@@ -71,6 +77,15 @@
 #import "ios/web/public/thread/web_task_traits.h"
 #import "ios/web/public/thread/web_thread.h"
 #import "services/network/public/cpp/shared_url_loader_factory.h"
+
+namespace {
+
+// A global variable is needed to detect "multiprofile" (multi-BrowserState)
+// scenarios where more than one profile try to register a synthetic field
+// trial.
+bool trusted_vault_synthetic_field_trial_registered = false;
+
+}  // namespace
 
 IOSChromeSyncClient::IOSChromeSyncClient(ChromeBrowserState* browser_state)
     : browser_state_(browser_state) {
@@ -112,6 +127,7 @@ IOSChromeSyncClient::IOSChromeSyncClient(ChromeBrowserState* browser_state)
           account_bookmark_sync_service,
           PowerBookmarkServiceFactory::GetForBrowserState(browser_state_),
           supervised_user_settings_service,
+          PlusAddressSettingServiceFactory::GetForBrowserState(browser_state_),
           ios::WebDataServiceFactory::GetPlusAddressWebDataForBrowserState(
               browser_state_, ServiceAccessType::IMPLICIT_ACCESS),
           /*TODO(crbug.com/330201909) implement for iOS
@@ -214,9 +230,23 @@ IOSChromeSyncClient::GetPasswordSenderService() {
 syncer::ModelTypeController::TypeVector
 IOSChromeSyncClient::CreateModelTypeControllers(
     syncer::SyncService* sync_service) {
-  // The iOS port does not have any platform-specific datatypes.
-  return component_factory_->CreateCommonModelTypeControllers(
-      /*disabled_types=*/{}, sync_service);
+  syncer::ModelTypeController::TypeVector controllers =
+      component_factory_->CreateCommonModelTypeControllers(
+          /*disabled_types=*/{}, sync_service);
+
+  if (IsTabGroupSyncEnabled()) {
+    // TODO(crbug.com/344893270): Move this controller to
+    // CreateCommonModelTypeControllers().
+    controllers.push_back(std::make_unique<syncer::ModelTypeController>(
+        syncer::SAVED_TAB_GROUP, /*delegate_for_full_sync_mode=*/
+        std::make_unique<syncer::ForwardingModelTypeControllerDelegate>(
+            GetControllerDelegateForModelType(syncer::SAVED_TAB_GROUP).get()),
+        /*delegate_for_transport_mode=*/
+        std::make_unique<syncer::ForwardingModelTypeControllerDelegate>(
+            GetControllerDelegateForModelType(syncer::SAVED_TAB_GROUP).get())));
+  }
+
+  return controllers;
 }
 
 syncer::SyncInvalidationsService*
@@ -247,6 +277,14 @@ IOSChromeSyncClient::GetControllerDelegateForModelType(syncer::ModelType type) {
     case syncer::WEBAUTHN_CREDENTIAL:
       return IOSPasskeyModelFactory::GetForBrowserState(browser_state_)
           ->GetModelTypeControllerDelegate();
+    case syncer::SAVED_TAB_GROUP: {
+      if (IsTabGroupSyncEnabled()) {
+        return tab_groups::TabGroupSyncServiceFactory::GetForBrowserState(
+                   browser_state_)
+            ->GetSavedTabGroupControllerDelegate();
+      }
+      NOTREACHED_NORETURN();
+    }
 
     // We don't exercise this function for certain datatypes, because their
     // controllers get the delegate elsewhere.
@@ -258,11 +296,11 @@ IOSChromeSyncClient::GetControllerDelegateForModelType(syncer::ModelType type) {
     case syncer::DEVICE_INFO:
     case syncer::READING_LIST:
     case syncer::SESSIONS:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return base::WeakPtr<syncer::ModelTypeControllerDelegate>();
 
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return base::WeakPtr<syncer::ModelTypeControllerDelegate>();
   }
 }
@@ -281,17 +319,6 @@ bool IOSChromeSyncClient::IsCustomPassphraseAllowed() {
     return supervised_user_settings_service->IsCustomPassphraseAllowed();
   }
   return true;
-}
-
-void IOSChromeSyncClient::OnLocalSyncTransportDataCleared() {
-  DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  metrics::ClearDemographicsPrefs(browser_state_->GetPrefs());
-
-  GoogleGroupsUpdaterService* google_groups_updater =
-      GoogleGroupsUpdaterServiceFactory::GetForBrowserState(browser_state_);
-  if (google_groups_updater != nullptr) {
-    google_groups_updater->ClearSigninScopedState();
-  }
 }
 
 bool IOSChromeSyncClient::IsPasswordSyncAllowed() {
@@ -319,6 +346,25 @@ void IOSChromeSyncClient::RegisterTrustedVaultAutoUpgradeSyntheticFieldTrial(
     const syncer::TrustedVaultAutoUpgradeSyntheticFieldTrialGroup& group) {
   CHECK(group.is_valid());
 
-  // TODO(crbug.com/338544832): Implement plumbing.
-  NOTIMPLEMENTED();
+  if (!base::FeatureList::IsEnabled(
+          syncer::kTrustedVaultAutoUpgradeSyntheticFieldTrial)) {
+    // Disabled via variations, as additional safeguard.
+    return;
+  }
+
+  // If `trusted_vault_synthetic_field_trial_registered` is true, and given that
+  // each SyncService invokes this function at most once, it means that multiple
+  // BrowserState instances are trying to register a synthetic field trial. In
+  // that case, register a special "conflict" group.
+  const std::string group_name =
+      trusted_vault_synthetic_field_trial_registered
+          ? syncer::TrustedVaultAutoUpgradeSyntheticFieldTrialGroup::
+                GetMultiProfileConflictGroupName()
+          : group.name();
+
+  trusted_vault_synthetic_field_trial_registered = true;
+
+  IOSChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial(
+      syncer::kTrustedVaultAutoUpgradeSyntheticFieldTrialName, group_name,
+      variations::SyntheticTrialAnnotationMode::kCurrentLog);
 }

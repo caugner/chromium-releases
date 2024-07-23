@@ -55,7 +55,11 @@ const char* const Partitions::kAllocatedObjectPoolName =
 
 BASE_FEATURE(kBlinkUseLargeEmptySlotSpanRingForBufferRoot,
              "BlinkUseLargeEmptySlotSpanRingForBufferRoot",
+#if BUILDFLAG(IS_MAC)
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#else
              base::FEATURE_DISABLED_BY_DEFAULT);
+#endif
 
 #if PA_BUILDFLAG(USE_STARSCAN)
 // Runs PCScan on WTF partitions.
@@ -122,6 +126,11 @@ partition_alloc::PartitionOptions PartitionOptionsFromFeatures() {
   opts.backup_ref_ptr = brp_setting;
   opts.memory_tagging = {.enabled = memory_tagging};
   opts.use_pool_offset_freelists = use_pool_offset_freelists;
+  opts.use_small_single_slot_spans =
+      base::FeatureList::IsEnabled(
+          base::features::kPartitionAllocUseSmallSingleSlotSpans)
+          ? partition_alloc::PartitionOptions::kEnabled
+          : partition_alloc::PartitionOptions::kDisabled;
   return opts;
 }
 

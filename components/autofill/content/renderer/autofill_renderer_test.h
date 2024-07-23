@@ -48,18 +48,24 @@ class MockAutofillDriver : public mojom::AutofillDriver {
                mojom::SubmissionSource source),
               (override));
   MOCK_METHOD(void,
+              CaretMovedInFormField,
+              (const FormData& form,
+               FieldRendererId field_id,
+               const gfx::Rect& caret_bounds),
+              (override));
+  MOCK_METHOD(void,
               TextFieldDidChange,
               (const FormData& form,
-               const FormFieldData& field,
+               FieldRendererId field_id,
                base::TimeTicks timestamp),
               (override));
   MOCK_METHOD(void,
               TextFieldDidScroll,
-              (const FormData& form, const FormFieldData& field),
+              (const FormData& form, FieldRendererId field_id),
               (override));
   MOCK_METHOD(void,
               SelectControlDidChange,
-              (const FormData& form, const FormFieldData& field),
+              (const FormData& form, FieldRendererId field_id),
               (override));
   MOCK_METHOD(void,
               SelectOrSelectListFieldOptionsDidChange,
@@ -68,14 +74,15 @@ class MockAutofillDriver : public mojom::AutofillDriver {
   MOCK_METHOD(void,
               JavaScriptChangedAutofilledValue,
               (const FormData& form,
-               const FormFieldData& field,
+               FieldRendererId field_id,
                const std::u16string& old_value,
                bool formatting_ony),
               (override));
   MOCK_METHOD(void,
               AskForValuesToFill,
               (const FormData& form,
-               const FormFieldData& field,
+               FieldRendererId field_id,
+               const gfx::Rect& caret_bounds,
                AutofillSuggestionTriggerSource trigger_source),
               (override));
   MOCK_METHOD(void, HidePopup, (), (override));
@@ -85,7 +92,7 @@ class MockAutofillDriver : public mojom::AutofillDriver {
               (override));
   MOCK_METHOD(void,
               FocusOnFormField,
-              (const FormData& form, const FormFieldData& field),
+              (const FormData& form, FieldRendererId field_id),
               (override));
   MOCK_METHOD(void,
               DidFillAutofillFormData,

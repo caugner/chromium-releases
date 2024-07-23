@@ -50,7 +50,6 @@ import org.chromium.chrome.browser.ntp.NewTabPageLayout;
 import org.chromium.chrome.browser.privacy.settings.PrivacyPreferencesManagerImpl;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.share.ShareDelegate;
-import org.chromium.chrome.browser.toolbar.ToolbarFeatures;
 import org.chromium.chrome.browser.toolbar.top.Toolbar;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.ui.native_page.TouchEnabledDelegate;
@@ -64,7 +63,6 @@ import org.chromium.chrome.browser.xsurface.feed.FeedLaunchReliabilityLogger.Sur
 import org.chromium.chrome.browser.xsurface.feed.FeedSurfaceScope;
 import org.chromium.chrome.browser.xsurface.feed.FeedUserInteractionReliabilityLogger;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
-import org.chromium.components.browser_ui.styles.SemanticColorUtils;
 import org.chromium.components.browser_ui.widget.displaystyle.UiConfig;
 import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.components.feature_engagement.Tracker;
@@ -176,6 +174,12 @@ public class FeedSurfaceCoordinator
         protected void onConfigurationChanged(Configuration newConfig) {
             super.onConfigurationChanged(newConfig);
             mUiConfig.updateDisplayStyle();
+        }
+
+        @Override
+        protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+            super.onSizeChanged(width, height, oldWidth, oldHeight);
+            mRecyclerView.post(mRecyclerView::invalidateItemDecorations);
         }
 
         @Override
@@ -430,16 +434,16 @@ public class FeedSurfaceCoordinator
 
         mRootView = new RootView(mActivity);
         mRootView.setPadding(0, mTabStripHeightSupplier.get(), 0, 0);
-        if (ToolbarFeatures.isDynamicTopChromeEnabled()) {
-            mTabStripHeightChangeCallback =
-                    newHeight ->
-                            mRootView.setPadding(
-                                    mRootView.getPaddingLeft(),
-                                    newHeight,
-                                    mRootView.getPaddingRight(),
-                                    mRootView.getPaddingBottom());
-            mTabStripHeightSupplier.addObserver(mTabStripHeightChangeCallback);
-        }
+
+        mTabStripHeightChangeCallback =
+                newHeight ->
+                        mRootView.setPadding(
+                                mRootView.getPaddingLeft(),
+                                newHeight,
+                                mRootView.getPaddingRight(),
+                                mRootView.getPaddingBottom());
+        mTabStripHeightSupplier.addObserver(mTabStripHeightChangeCallback);
+
         mUiConfig = new UiConfig(mRootView);
         mRecyclerView = setUpView();
         mStreamViewResizer =
@@ -495,16 +499,34 @@ public class FeedSurfaceCoordinator
                 optionsCoordinator.getView());
 
         if (ChromeFeatureList.isEnabled(ChromeFeatureList.FEED_CONTAINMENT)) {
-            int padding =
+            int bottomPadding =
                     mActivity.getResources().getDimensionPixelSize(R.dimen.feed_header_top_margin);
-            mNtpHeader.setPadding(0, 0, 0, padding);
+            mNtpHeader.setPadding(
+                    mNtpHeader.getPaddingLeft(),
+                    mNtpHeader.getPaddingTop(),
+                    mNtpHeader.getPaddingRight(),
+                    bottomPadding);
+
+            // Apply negative margins to the NTP header in order to compensate the containment
+            // paddings applied to the whole NTP. This is to allow all the elements in the NTP
+            // header to keep using their existing margins/paddings settings.
+            if (!mUseStaggeredLayout) {
+                int margin =
+                        -mActivity
+                                .getResources()
+                                .getDimensionPixelSize(R.dimen.feed_containment_margin);
+                ViewGroup.MarginLayoutParams layoutParams =
+                        new ViewGroup.MarginLayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.WRAP_CONTENT);
+                layoutParams.setMarginStart(margin);
+                layoutParams.setMarginEnd(margin);
+                mNtpHeader.setLayoutParams(layoutParams);
+            }
         }
 
         // Mediator should be created before any Stream changes.
-        boolean useUiConfig =
-                ntpHeader != null
-                        && ChromeFeatureList.sSurfacePolish.isEnabled()
-                        && mUseStaggeredLayout;
+        boolean useUiConfig = ntpHeader != null && mUseStaggeredLayout;
         mMediator =
                 new FeedSurfaceMediator(
                         this,
@@ -827,11 +849,21 @@ public class FeedSurfaceCoordinator
 
         RecyclerView view;
         if (mHybridListRenderer != null) {
+            int gutterPadding = -1;
+            if (mUseStaggeredLayout) {
+                gutterPadding =
+                        mActivity
+                                .getResources()
+                                .getDimensionPixelSize(
+                                        ChromeFeatureList.isEnabled(
+                                                        ChromeFeatureList.FEED_CONTAINMENT)
+                                                ? R.dimen.feed_containment_gutter_padding_per_column
+                                                : R.dimen.feed_gutter_padding_per_column);
+            }
             // XSurface returns a View, but it should be a RecyclerView.
             view =
                     (RecyclerView)
-                            mHybridListRenderer.bind(
-                                    mContentManager, mViewportView, mUseStaggeredLayout);
+                            mHybridListRenderer.bind(mContentManager, mViewportView, gutterPadding);
             view.setId(R.id.feed_stream_recycler_view);
             view.setClipToPadding(false);
 
@@ -843,16 +875,11 @@ public class FeedSurfaceCoordinator
                                 this,
                                 (resId) -> {
                                     return AppCompatResources.getDrawable(mActivity, resId);
-                                }));
-            } else {
-                if (ChromeFeatureList.sSurfacePolish.isEnabled()) {
-                    view.setBackground(
-                            AppCompatResources.getDrawable(
-                                    mActivity, R.drawable.home_surface_background));
-                } else {
-                    view.setBackgroundColor(SemanticColorUtils.getDefaultBgColor(mActivity));
-                }
+                                },
+                                gutterPadding));
             }
+            view.setBackground(
+                    AppCompatResources.getDrawable(mActivity, R.drawable.home_surface_background));
 
             // Work around https://crbug.com/943873 where default focus highlight shows up after
             // toggling dark mode.
@@ -958,30 +985,36 @@ public class FeedSurfaceCoordinator
     private void setHeaders(List<View> headerViews) {
         // Build the list of headers we want, and then replace existing headers.
         List<FeedListContentManager.FeedContent> headerList = new ArrayList<>();
+        boolean hasSigninPromoView = false;
         for (View header : headerViews) {
             // Feed header view in multi does not need padding added.
             int lateralPaddingsPx = getLateralPaddingsPx();
-            if (header == mSectionHeaderView) {
-                lateralPaddingsPx = 0;
-            }
 
-            if (ChromeFeatureList.sSurfacePolish.isEnabled()) {
-                if (header instanceof NewTabPageLayout) {
-                    lateralPaddingsPx = 0;
-                } else if (header == mSectionHeaderView) {
-                    if (!ChromeFeatureList.isEnabled(ChromeFeatureList.FEED_CONTAINMENT)) {
-                        mSectionHeaderView.setBackground(
-                                AppCompatResources.getDrawable(
-                                        mActivity, R.drawable.home_surface_background));
-                    }
-                } else if (header == mSigninPromoView) {
-                    lateralPaddingsPx =
-                            mActivity
-                                    .getResources()
-                                    .getDimensionPixelSize(R.dimen.signin_promo_lateral_paddings);
-                    ((PersonalizedSigninPromoView) mSigninPromoView)
-                            .setCardBackgroundResource(R.drawable.home_surface_ui_background);
+            if (header instanceof NewTabPageLayout) {
+                lateralPaddingsPx = 0;
+            } else if (header == mSectionHeaderView) {
+                lateralPaddingsPx = 0;
+                if (!ChromeFeatureList.isEnabled(ChromeFeatureList.FEED_CONTAINMENT)) {
+                    mSectionHeaderView.setBackground(
+                            AppCompatResources.getDrawable(
+                                    mActivity, R.drawable.home_surface_background));
                 }
+            } else if (header == mSigninPromoView) {
+                hasSigninPromoView = true;
+                lateralPaddingsPx =
+                        mActivity
+                                .getResources()
+                                .getDimensionPixelSize(
+                                        ChromeFeatureList.isEnabled(
+                                                        ChromeFeatureList.FEED_CONTAINMENT)
+                                                ? R.dimen
+                                                        .feed_containment_signin_promo_lateral_paddings
+                                                : R.dimen.signin_promo_lateral_paddings);
+                ((PersonalizedSigninPromoView) mSigninPromoView)
+                        .setCardBackgroundResource(
+                                ChromeFeatureList.isEnabled(ChromeFeatureList.FEED_CONTAINMENT)
+                                        ? R.drawable.home_surface_background_rounded
+                                        : R.drawable.home_surface_ui_background);
             }
 
             FeedListContentManager.NativeViewContent content =
@@ -993,14 +1026,9 @@ public class FeedSurfaceCoordinator
             mHeaderCount = headerList.size();
             mMediator.notifyHeadersChanged(mHeaderCount);
         }
-        // The section header is the last header to be added, excluding sign-in promo if it is
-        // visible, save its index.
-        mSectionHeaderIndex =
-                headerViews.size()
-                        - (mSigninPromoView != null
-                                        && mSigninPromoView.getVisibility() == View.VISIBLE
-                                ? 2
-                                : 1);
+        // The section header is the last header to be added, excluding sign-in promo, save its
+        // index.
+        mSectionHeaderIndex = headerViews.size() - (hasSigninPromoView ? 2 : 1);
     }
 
     /**

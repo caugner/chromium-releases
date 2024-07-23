@@ -2,6 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#if defined(UNSAFE_BUFFERS_BUILD)
+// TODO(https://crbug.com/344639839): fix the unsafe buffer errors in this file,
+// then remove this pragma.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "ui/views/view.h"
 
 #include <algorithm>
@@ -607,9 +613,6 @@ gfx::Size View::GetMaximumSize() const {
 }
 
 int View::GetHeightForWidth(int w) const {
-  if (HasLayoutManager()) {
-    return GetLayoutManager()->GetPreferredHeightForWidth(this, w);
-  }
   return GetPreferredSize(SizeBounds(w, {})).height();
 }
 
@@ -2617,10 +2620,8 @@ void View::OnBlur() {}
 void View::Focus() {
   OnFocus();
 
-#if !BUILDFLAG(IS_CHROMEOS_LACROS)
   // TODO(crbug.com/40285437) - Get this working on Lacros as well.
   UpdateTooltipForFocus();
-#endif
 
   // TODO(pbos): Investigate if parts of this can run unconditionally.
   if (!suppress_default_focus_handling_) {
@@ -2994,6 +2995,12 @@ void View::AddChildViewAtImpl(View* view, size_t index) {
   // Make sure that the accessible focusable state of the descendants of the
   // `view` is correct.
   view->GetViewAccessibility().UpdateFocusableStateRecursive();
+
+  if (widget) {
+    // There are scenarios where we might be reparenting a view from a widget
+    // that was closed to a widget that is not closed.
+    view->GetViewAccessibility().OnWidgetUpdated(widget, old_widget);
+  }
 
   // Need to notify the layout manager because one of the callbacks below might
   // want to know the view's new preferred size, minimum size, etc.
@@ -3677,7 +3684,8 @@ void View::AdvanceFocusIfNecessary() {
   // unfocusable. If the view is still focusable or is not focused, we can
   // return early avoiding further unnecessary checks. Focusability check is
   // performed first as it tends to be faster.
-  if (GetViewAccessibility().IsAccessibilityFocusable() || !HasFocus()) {
+  if (GetViewAccessibility().ViewAccessibility::IsAccessibilityFocusable() ||
+      !HasFocus()) {
     return;
   }
 

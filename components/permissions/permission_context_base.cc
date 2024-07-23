@@ -475,8 +475,9 @@ void PermissionContextBase::DecidePermission(
       &PermissionContextBase::PermissionDecided, weak_factory_.GetWeakPtr(),
       request_data.id, request_data.requesting_origin,
       request_data.embedding_origin);
-  auto cleanup_cb = base::BindOnce(&PermissionContextBase::CleanUpRequest,
-                                   weak_factory_.GetWeakPtr(), request_data.id);
+  auto cleanup_cb = base::BindOnce(
+      &PermissionContextBase::CleanUpRequest, weak_factory_.GetWeakPtr(),
+      request_data.id, request_data.embedded_permission_element_initiated);
   PermissionRequestID permission_request_id = request_data.id;
 
   std::unique_ptr<PermissionRequest> request_ptr =
@@ -560,7 +561,10 @@ void PermissionContextBase::RemoveObserver(
 
 void PermissionContextBase::MaybeUpdatePermissionStatusWithDeviceStatus() {
   const bool has_device_permission =
-      PermissionsClient::Get()->HasDevicePermission(content_settings_type());
+      has_device_permission_for_test_.has_value()
+          ? has_device_permission_for_test_.value()
+          : PermissionsClient::Get()->HasDevicePermission(
+                content_settings_type());
   const bool should_notify_observers =
       last_has_device_permission_result_.has_value() &&
       has_device_permission != last_has_device_permission_result_;
@@ -611,8 +615,18 @@ void PermissionContextBase::NotifyPermissionSet(
   std::move(callback).Run(content_setting);
 }
 
-void PermissionContextBase::CleanUpRequest(const PermissionRequestID& id) {
+void PermissionContextBase::CleanUpRequest(
+    const PermissionRequestID& id,
+    bool embedded_permission_element_initiated) {
   size_t success = pending_requests_.erase(id.ToString());
+  // A request from an embedded permission element requires a notification
+  // `OnPermissionChanged` when changing the device status, which is currently
+  // unavailable. We compare the device status with the cached status and notify
+  // `OnPermissionChanged` here. We should remove this line once the device
+  // status change observer is implemented.
+  if (embedded_permission_element_initiated) {
+    MaybeUpdatePermissionStatusWithDeviceStatus();
+  }
   DCHECK(success == 1) << "Missing request " << id.ToString();
 }
 
@@ -630,18 +644,23 @@ void PermissionContextBase::UpdateContentSetting(const GURL& requesting_origin,
       is_one_time ? content_settings::mojom::SessionModel::ONE_TIME
                   : content_settings::mojom::SessionModel::DURABLE);
 
-#if !BUILDFLAG(IS_ANDROID)
-  // The Permissions module in Safety check will revoke permissions after
-  // a finite amount of time if the permission can be revoked.
-  if (content_settings::CanBeAutoRevoked(content_settings_type_,
-                                         content_setting, is_one_time)) {
-    // For #2, by definition, that should be all of them. If that changes in
-    // the future, consider whether revocation for such permission makes
-    // sense, and/or change this to an early return so that we don't
-    // unnecessarily record timestamps where we don't need them.
-    constraints.set_track_last_visit_for_autoexpiration(true);
+#if BUILDFLAG(IS_ANDROID)
+  if (base::FeatureList::IsEnabled(
+          features::kRecordPermissionExpirationTimestamps)) {
+#endif  // BUILDFLAG(IS_ANDROID)
+    // The Permissions module in Safety check will revoke permissions after
+    // a finite amount of time if the permission can be revoked.
+    if (content_settings::CanBeAutoRevoked(content_settings_type_,
+                                           content_setting, is_one_time)) {
+      // For #2, by definition, that should be all of them. If that changes in
+      // the future, consider whether revocation for such permission makes
+      // sense, and/or change this to an early return so that we don't
+      // unnecessarily record timestamps where we don't need them.
+      constraints.set_track_last_visit_for_autoexpiration(true);
+    }
+#if BUILDFLAG(IS_ANDROID)
   }
-#endif  // !BUILDFLAG(IS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
   if (is_one_time) {
     if (base::FeatureList::IsEnabled(

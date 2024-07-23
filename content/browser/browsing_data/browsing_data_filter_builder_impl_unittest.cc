@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/342213636): Remove this and spanify to fix the errors.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "content/browser/browsing_data/browsing_data_filter_builder_impl.h"
 
 #include <algorithm>
@@ -1153,6 +1158,64 @@ TEST(BrowsingDataFilterBuilderImplTest, CopyAndEquality) {
       &browser_context, "domain", "name", /*in_memory=*/false));
 
   EXPECT_EQ(builder, *builder.Copy());
+}
+
+TEST(BrowsingDataFilterBuilderImplTest, DeleteModeDoesntMatchMost) {
+  BrowsingDataFilterBuilderImpl builder(
+      BrowsingDataFilterBuilder::Mode::kDelete);
+
+  EXPECT_FALSE(builder.MatchesAllOriginsAndDomains());
+  EXPECT_FALSE(builder.MatchesMostOriginsAndDomains());
+}
+
+TEST(BrowsingDataFilterBuilderImplTest, PreserveModeMatchesAll) {
+  BrowsingDataFilterBuilderImpl builder(
+      BrowsingDataFilterBuilder::Mode::kPreserve);
+
+  EXPECT_TRUE(builder.MatchesAllOriginsAndDomains());
+  EXPECT_TRUE(builder.MatchesMostOriginsAndDomains());
+}
+
+TEST(BrowsingDataFilterBuilderImplTest,
+     PreserveModeWithOriginsOrDomainsMatchesMost) {
+  BrowsingDataFilterBuilderImpl builder(
+      BrowsingDataFilterBuilder::Mode::kPreserve);
+  builder.AddOrigin(url::Origin::Create(GURL("http://example.test")));
+  builder.AddRegisterableDomain("example.test");
+
+  EXPECT_FALSE(builder.MatchesAllOriginsAndDomains());
+  EXPECT_TRUE(builder.MatchesMostOriginsAndDomains());
+}
+
+TEST(BrowsingDataFilterBuilderImplTest,
+     PreserveModeWithCookiePartitionKeysMatchesMost) {
+  BrowsingDataFilterBuilderImpl builder(
+      BrowsingDataFilterBuilder::Mode::kPreserve);
+  builder.SetCookiePartitionKeyCollection(net::CookiePartitionKeyCollection());
+
+  EXPECT_FALSE(builder.MatchesAllOriginsAndDomains());
+  EXPECT_TRUE(builder.MatchesMostOriginsAndDomains());
+}
+
+TEST(BrowsingDataFilterBuilderImplTest,
+     PreserveModeWithStorageKeyDoesntMatchMost) {
+  BrowsingDataFilterBuilderImpl builder(
+      BrowsingDataFilterBuilder::Mode::kPreserve);
+  builder.SetStorageKey(
+      blink::StorageKey::CreateFromStringForTesting("http://example.test"));
+
+  EXPECT_FALSE(builder.MatchesAllOriginsAndDomains());
+  EXPECT_FALSE(builder.MatchesMostOriginsAndDomains());
+}
+
+TEST(BrowsingDataFilterBuilderImplTest,
+     PreserveModePartitionedCookiesOnlyDoesntMatchMost) {
+  BrowsingDataFilterBuilderImpl builder(
+      BrowsingDataFilterBuilder::Mode::kPreserve);
+  builder.SetPartitionedCookiesOnly(true);
+
+  EXPECT_FALSE(builder.MatchesAllOriginsAndDomains());
+  EXPECT_FALSE(builder.MatchesMostOriginsAndDomains());
 }
 
 }  // namespace content

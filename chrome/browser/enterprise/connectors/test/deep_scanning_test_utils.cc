@@ -55,7 +55,7 @@ void EventReportValidator::ExpectUnscannedFileEvent(
     const std::string& expected_trigger,
     const std::string& expected_reason,
     const std::set<std::string>* expected_mimetypes,
-    int64_t expected_content_size,
+    std::optional<int64_t> expected_content_size,
     const std::string& expected_result,
     const std::string& expected_profile_username,
     const std::string& expected_profile_identifier,
@@ -188,7 +188,8 @@ void EventReportValidator::ExpectSensitiveDataEvent(
     const std::string& expected_profile_username,
     const std::string& expected_profile_identifier,
     const std::string& expected_scan_id,
-    const std::optional<std::string>& expected_content_transfer_method) {
+    const std::optional<std::string>& expected_content_transfer_method,
+    const std::optional<std::u16string>& expected_user_justification) {
   event_key_ = SafeBrowsingPrivateEventRouter::kKeySensitiveDataEvent;
   url_ = expected_url;
   tab_url_ = expected_tab_url;
@@ -204,6 +205,7 @@ void EventReportValidator::ExpectSensitiveDataEvent(
   profile_identifier_ = expected_profile_identifier;
   scan_ids_[expected_filename] = expected_scan_id;
   content_transfer_method_ = expected_content_transfer_method;
+  user_justification_ = expected_user_justification;
   EXPECT_CALL(*client_, UploadSecurityEventReport)
       .WillOnce(
           [this](content::BrowserContext* context, bool include_device_info,
@@ -269,7 +271,8 @@ void EventReportValidator::ExpectSensitiveDataEvents(
     const std::string& expected_profile_username,
     const std::string& expected_profile_identifier,
     const std::vector<std::string>& expected_scan_ids,
-    const std::optional<std::string>& expected_content_transfer_method) {
+    const std::optional<std::string>& expected_content_transfer_method,
+    const std::optional<std::u16string>& expected_user_justification) {
   for (size_t i = 0; i < expected_filenames.size(); ++i) {
     filenames_and_hashes_[expected_filenames[i]] = expected_sha256s[i];
     dlp_verdicts_[expected_filenames[i]] = expected_dlp_verdicts[i];
@@ -288,6 +291,7 @@ void EventReportValidator::ExpectSensitiveDataEvents(
   username_ = expected_profile_username;
   profile_identifier_ = expected_profile_identifier;
   content_transfer_method_ = expected_content_transfer_method;
+  user_justification_ = expected_user_justification;
 
   EXPECT_CALL(*client_, UploadSecurityEventReport)
       .Times(expected_filenames.size())
@@ -552,6 +556,8 @@ void EventReportValidator::ValidateReport(const base::Value::Dict* report) {
   ValidateField(event,
                 SafeBrowsingPrivateEventRouter::kKeyContentTransferMethod,
                 content_transfer_method_);
+  ValidateField(event, SafeBrowsingPrivateEventRouter::kKeyUserJustification,
+                user_justification_);
   ValidateField(event, SafeBrowsingPrivateEventRouter::kKeyProfileUserName,
                 username_);
   ValidateField(event, RealtimeReportingClient::kKeyProfileIdentifier,
@@ -810,6 +816,7 @@ void EventReportValidator::ValidateDataControlsAttributes(
         event->FindList(SafeBrowsingPrivateEventRouter::kKeyTriggeredRuleInfo);
     ASSERT_TRUE(triggered_rules);
     ASSERT_EQ(data_controls_triggered_rules_.size(), triggered_rules->size());
+    size_t i = 0;
     for (const base::Value& rule : *triggered_rules) {
       const std::string* name = rule.GetDict().FindString(
           SafeBrowsingPrivateEventRouter::kKeyTriggeredRuleName);
@@ -819,8 +826,11 @@ void EventReportValidator::ValidateDataControlsAttributes(
           SafeBrowsingPrivateEventRouter::kKeyTriggeredRuleId);
       ASSERT_TRUE(id);
 
-      ASSERT_TRUE(data_controls_triggered_rules_.count(*id));
-      ASSERT_EQ(data_controls_triggered_rules_[*id], *name);
+      ASSERT_TRUE(data_controls_triggered_rules_.count(i));
+      ASSERT_EQ(data_controls_triggered_rules_[i].rule_name, *name);
+      ASSERT_EQ(data_controls_triggered_rules_[i].rule_id, *id);
+
+      ++i;
     }
   }
 }

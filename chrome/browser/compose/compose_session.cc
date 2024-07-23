@@ -201,7 +201,9 @@ ComposeSession::ComposeSession(
     optimization_guide::ModelQualityLogsUploader* model_quality_logs_uploader,
     base::Token session_id,
     InnerTextProvider* inner_text,
-    autofill::FieldRendererId node_id,
+    autofill::FieldGlobalId node_id,
+    bool is_page_language_supported,
+    Observer* observer,
     ComposeCallback callback)
     : executor_(executor),
       handler_receiver_(this),
@@ -214,11 +216,13 @@ ComposeSession::ComposeSession(
       close_reason_(compose::ComposeSessionCloseReason::kEndedImplicitly),
       final_status_(optimization_guide::proto::FinalStatus::STATUS_UNSPECIFIED),
       web_contents_(web_contents),
+      observer_(observer),
       collect_inner_text_(
           base::FeatureList::IsEnabled(compose::features::kComposeInnerText)),
       inner_text_caller_(inner_text),
       ukm_source_id_(web_contents->GetPrimaryMainFrame()->GetPageUkmSourceId()),
       node_id_(node_id),
+      is_page_language_supported_(is_page_language_supported),
       model_quality_logs_uploader_(model_quality_logs_uploader),
       session_id_(session_id),
       weak_ptr_factory_(this) {
@@ -261,29 +265,36 @@ ComposeSession::~ComposeSession() {
   std::optional<compose::EvalLocation> eval_location =
       compose::GetEvalLocationFromEvents(session_events_);
 
-  if (session_events_.fre_dialog_shown_count > 0 &&
+  if (observer_) {
+    observer_->OnSessionComplete(node_id_, close_reason_, session_events_);
+  }
+
+  // TODO(http://b/348656057): Refactor to remove early returns.
+  if (session_events_.fre_view_count > 0 &&
       (!fre_complete_ || session_events_.fre_completed_in_session)) {
     compose::LogComposeFirstRunSessionCloseReason(fre_close_reason_);
     compose::LogComposeFirstRunSessionDialogShownCount(
-        fre_close_reason_, session_events_.fre_dialog_shown_count);
+        fre_close_reason_, session_events_.fre_view_count);
     if (!fre_complete_) {
       compose::LogComposeSessionDuration(session_duration_->Elapsed(), ".FRE");
+      compose::LogComposeSessionEventCounts(std::nullopt, session_events_);
       return;
     }
   }
-  if (session_events_.msbb_dialog_shown_count > 0 &&
+  if (session_events_.msbb_view_count > 0 &&
       (!current_msbb_state_ || session_events_.msbb_enabled_in_session)) {
     compose::LogComposeMSBBSessionDialogShownCount(
-        msbb_close_reason_, session_events_.msbb_dialog_shown_count);
+        msbb_close_reason_, session_events_.msbb_view_count);
     compose::LogComposeMSBBSessionCloseReason(msbb_close_reason_);
     if (!current_msbb_state_) {
       compose::LogComposeSessionDuration(session_duration_->Elapsed(), ".MSBB");
+      compose::LogComposeSessionEventCounts(std::nullopt, session_events_);
       return;
     }
   }
 
-  if (session_events_.dialog_shown_count < 1) {
-    // Do not report any further metrics if the dialog was never shown.
+  if (session_events_.compose_dialog_open_count < 1) {
+    // Do not report any further metrics if the dialog was never opened.
     // This is mostly like because the session was the debug session but
     // could occur if the tab closes while Compose is opening.
     return;
@@ -427,6 +438,10 @@ void ComposeSession::MakeRequest(
   active_mojo_state_->has_pending_request = true;
   active_mojo_state_->feedback =
       compose::mojom::UserFeedback::kUserFeedbackUnspecified;
+
+  // Increase Compose count regardless of status of request.
+  ++session_events_.compose_requests_count;
+
   // TODO(b/300974056): Move this to the overall feature-enabled check.
   if (!session_ ||
       !base::FeatureList::IsEnabled(
@@ -436,9 +451,6 @@ void ComposeSession::MakeRequest(
                  request_reason);
     return;
   }
-
-  // Increase compose count regardless of status of request.
-  session_events_.compose_count += 1;
 
   if (!collect_inner_text_ || got_inner_text_) {
     RequestWithSession(std::move(request), request_reason, is_input_edited);
@@ -487,6 +499,7 @@ void ComposeSession::RequestWithSession(
 void ComposeSession::ComposeRequestTimeout(int id) {
   request_timeouts_.erase(id);
   compose::LogComposeRequestStatus(
+      is_page_language_supported_,
       compose::mojom::ComposeStatus::kRequestTimeout);
 
   active_mojo_state_->has_pending_request = false;
@@ -526,7 +539,8 @@ void ComposeSession::ModelExecutionCallback(
 
     compose::LogComposeRequestReason(eval_location, request_reason);
     compose::LogComposeRequestStatus(
-        eval_location, compose::mojom::ComposeStatus::kRequestTimeout);
+        eval_location, is_page_language_supported_,
+        compose::mojom::ComposeStatus::kRequestTimeout);
     return;
   }
 
@@ -620,7 +634,8 @@ void ComposeSession::ModelExecutionComplete(
     result.log_entry->quality_data<optimization_guide::ComposeFeatureTypeMap>()
         ->set_was_generated_via_edit(was_input_edited);
     result.log_entry->quality_data<optimization_guide::ComposeFeatureTypeMap>()
-        ->set_started_with_proactive_nudge(started_with_proactive_nudge_);
+        ->set_started_with_proactive_nudge(
+            session_events_.started_with_proactive_nudge);
     result.log_entry->quality_data<optimization_guide::ComposeFeatureTypeMap>()
         ->set_request_latency_ms(request_delta.InMilliseconds());
     optimization_guide::proto::Int128* token =
@@ -674,11 +689,13 @@ void ComposeSession::ModelExecutionComplete(
   }
 
   // Log successful response status.
-  compose::LogComposeRequestStatus(compose::mojom::ComposeStatus::kOk);
-  compose::LogComposeRequestStatus(eval_location,
+  compose::LogComposeRequestStatus(is_page_language_supported_,
+                                   compose::mojom::ComposeStatus::kOk);
+  compose::LogComposeRequestStatus(eval_location, is_page_language_supported_,
                                    compose::mojom::ComposeStatus::kOk);
   compose::LogComposeRequestDuration(request_delta, eval_location,
                                      /* is_ok */ true);
+  ++session_events_.successful_requests_count;
 }
 
 void ComposeSession::AddNewResponseToHistory(
@@ -704,8 +721,10 @@ void ComposeSession::ProcessError(
     compose::EvalLocation eval_location,
     compose::mojom::ComposeStatus error,
     compose::ComposeRequestReason request_reason) {
-  compose::LogComposeRequestStatus(error);
-  compose::LogComposeRequestStatus(eval_location, error);
+  compose::LogComposeRequestStatus(is_page_language_supported_, error);
+  compose::LogComposeRequestStatus(eval_location, is_page_language_supported_,
+                                   error);
+  ++session_events_.failed_requests_count;
 
   // Feedback can not be given for a request with an error so report now.
   compose::LogComposeRequestFeedback(
@@ -991,17 +1010,19 @@ void ComposeSession::MaybeRefreshInnerText(bool has_selection) {
   // the dialog is hidden.
   currently_has_selection_ = has_selection;
 
+  ++session_events_.compose_dialog_open_count;
+
   if (!fre_complete_) {
-    session_events_.fre_dialog_shown_count += 1;
+    ++session_events_.fre_view_count;
     return;
   }
   if (!current_msbb_state_) {
-    session_events_.msbb_dialog_shown_count += 1;
+    ++session_events_.msbb_view_count;
     return;
   }
 
   // Session is initialized at the main dialog UI state.
-  session_events_.dialog_shown_count += 1;
+  ++session_events_.compose_prompt_view_count;
 
   RefreshInnerText();
 
@@ -1095,7 +1116,7 @@ void ComposeSession::RefreshInnerText() {
       // This unsafeValue call is acceptable ehre because node_id is a
       // FieldRendererId which while being an U64 type is based one the int
       // DOMid which we are querying here.
-      node_id_.GetUnsafeValue(),
+      node_id_.renderer_id.GetUnsafeValue(),
       base::BindOnce(
           &ComposeSession::UpdateInnerTextAndContinueComposeIfNecessary,
           weak_ptr_factory_.GetWeakPtr(), current_inner_text_request_id_));
@@ -1109,7 +1130,7 @@ void ComposeSession::SetFirstRunCloseReason(
                           kFirstRunDisclaimerAcknowledgedWithoutInsert) {
     if (current_msbb_state_) {
       // The FRE dialog progresses directly to the main dialog.
-      session_events_.dialog_shown_count = 1;
+      session_events_.compose_prompt_view_count = 1;
       base::RecordAction(
           base::UserMetricsAction("Compose.DialogSeen.MainDialog"));
     } else {

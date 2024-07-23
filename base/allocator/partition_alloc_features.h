@@ -124,7 +124,8 @@ enum class BucketDistributionMode : uint8_t {
 // Parameter for 'kPartitionAllocMakeFreeNoOpOnShutdown' feature which
 // controls when free() becomes a no-op during Shutdown()
 enum class WhenFreeBecomesNoOp {
-  // Allocator is inserted either before, in, or after shutdown threads
+  kBeforePreShutdown,
+  kBeforeHaltingStartupTracingController,
   kBeforeShutDownThreads,
   kInShutDownThreads,
   kAfterShutDownThreads,
@@ -216,6 +217,12 @@ BASE_EXPORT BASE_DECLARE_FEATURE(kUsePoolOffsetFreelists);
 // When set, partitions use a larger ring buffer and free memory less
 // aggressively when in the foreground.
 BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocAdjustSizeWhenInForeground);
+
+// When enabled, uses a more nuanced heuristic to determine if slot
+// spans can be treated as "single-slot."
+//
+// See also: https://crbug.com/333443437
+BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocUseSmallSingleSlotSpans);
 
 }  // namespace features
 }  // namespace base

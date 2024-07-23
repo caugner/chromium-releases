@@ -5,6 +5,7 @@
 #include "components/compose/core/browser/compose_manager_impl.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -50,7 +51,9 @@ void FillTextWithAutofill(base::WeakPtr<autofill::AutofillManager> manager,
   static_cast<autofill::BrowserAutofillManager*>(manager.get())
       ->FillOrPreviewField(autofill::mojom::ActionPersistence::kFill,
                            autofill::mojom::FieldActionType::kReplaceSelection,
-                           form, field, trimmed_text, SuggestionType::kCompose);
+                           form, field, trimmed_text,
+                           SuggestionType::kComposeResumeNudge,
+                           /*field_type_used=*/std::nullopt);
 }
 
 }  // namespace
@@ -65,7 +68,7 @@ void ComposeManagerImpl::OpenCompose(AutofillDriver& driver,
                                      FieldGlobalId field_id,
                                      UiEntryPoint entry_point) {
   if (entry_point == UiEntryPoint::kContextMenu) {
-    client_->getPageUkmTracker()->MenuItemClicked();
+    client_->GetPageUkmTracker()->MenuItemClicked();
     LogComposeContextMenuCtr(ComposeContextMenuCtrEvent::kMenuItemClicked);
   }
   driver.ExtractForm(
@@ -82,7 +85,7 @@ void ComposeManagerImpl::OpenComposeWithUpdatedSelection(
   if (!form_data) {
     LogOpenComposeDialogResult(
         OpenComposeDialogResult::kAutofillFormDataNotFound);
-    client_->getPageUkmTracker()->ShowDialogAbortedDueToMissingFormData();
+    client_->GetPageUkmTracker()->ShowDialogAbortedDueToMissingFormData();
     return;
   }
 
@@ -91,7 +94,7 @@ void ComposeManagerImpl::OpenComposeWithUpdatedSelection(
   if (!form_field_data) {
     LogOpenComposeDialogResult(
         OpenComposeDialogResult::kAutofillFormFieldDataNotFound);
-    client_->getPageUkmTracker()->ShowDialogAbortedDueToMissingFormFieldData();
+    client_->GetPageUkmTracker()->ShowDialogAbortedDueToMissingFormFieldData();
     return;
   }
 
@@ -127,7 +130,7 @@ void ComposeManagerImpl::OpenComposeWithFormData(
   if (!form_data) {
     LogOpenComposeDialogResult(
         OpenComposeDialogResult::kAutofillFormDataNotFoundAfterSelectAll);
-    client_->getPageUkmTracker()->ShowDialogAbortedDueToMissingFormData();
+    client_->GetPageUkmTracker()->ShowDialogAbortedDueToMissingFormData();
     return;
   }
 
@@ -136,7 +139,7 @@ void ComposeManagerImpl::OpenComposeWithFormData(
   if (!form_field_data) {
     LogOpenComposeDialogResult(
         OpenComposeDialogResult::kAutofillFormFieldDataNotFound);
-    client_->getPageUkmTracker()->ShowDialogAbortedDueToMissingFormFieldData();
+    client_->GetPageUkmTracker()->ShowDialogAbortedDueToMissingFormFieldData();
     return;
   }
 
@@ -160,14 +163,15 @@ void ComposeManagerImpl::OpenComposeWithFormFieldData(
 }
 
 std::optional<Suggestion> ComposeManagerImpl::GetSuggestion(
+    const autofill::FormData& form,
     const autofill::FormFieldData& field,
     AutofillSuggestionTriggerSource trigger_source) {
-  if (!client_->ShouldTriggerPopup(field, trigger_source)) {
+  if (!client_->ShouldTriggerPopup(form, field, trigger_source)) {
     return std::nullopt;
   }
   std::u16string suggestion_text;
   std::u16string label_text;
-  SuggestionType type = SuggestionType::kCompose;
+  SuggestionType type;
   // State is saved as a `ComposeSession` in the `ComposeClient`. A user can
   // resume where they left off in a field if the `ComposeClient` has a
   // `ComposeSession` for that field.
@@ -178,20 +182,24 @@ std::optional<Suggestion> ComposeManagerImpl::GetSuggestion(
     suggestion_text =
         l10n_util::GetStringUTF16(IDS_COMPOSE_SUGGESTION_SAVED_TEXT);
     label_text = l10n_util::GetStringUTF16(IDS_COMPOSE_SUGGESTION_SAVED_LABEL);
-    if (trigger_source ==
-        AutofillSuggestionTriggerSource::kComposeDialogLostFocus) {
-      type = SuggestionType::kComposeSavedStateNotification;
-    }
+    type = trigger_source ==
+                   AutofillSuggestionTriggerSource::kComposeDialogLostFocus
+               ? SuggestionType::kComposeSavedStateNotification
+               : SuggestionType::kComposeResumeNudge;
   } else {
     // Text for a new Compose session.
     suggestion_text =
         l10n_util::GetStringUTF16(IDS_COMPOSE_SUGGESTION_MAIN_TEXT);
     label_text = l10n_util::GetStringUTF16(IDS_COMPOSE_SUGGESTION_LABEL);
+    type = SuggestionType::kComposeProactiveNudge;
   }
   Suggestion suggestion(std::move(suggestion_text));
-  suggestion.labels = {{Suggestion::Text(std::move(label_text))}};
   suggestion.type = type;
   suggestion.icon = Suggestion::Icon::kPenSpark;
+  // Add footer label if not using compact ui.
+  if (!GetComposeConfig().proactive_nudge_compact_ui) {
+    suggestion.labels = {{Suggestion::Text(std::move(label_text))}};
+  }
 
   if (!has_session &&
       base::FeatureList::IsEnabled(features::kEnableComposeProactiveNudge)) {
@@ -217,20 +225,24 @@ std::optional<Suggestion> ComposeManagerImpl::GetSuggestion(
 
 void ComposeManagerImpl::NeverShowComposeForOrigin(const url::Origin& origin) {
   client_->AddSiteToNeverPromptList(origin);
-  compose::LogComposeProactiveNudgeCtr(
-      compose::ComposeProactiveNudgeCtrEvent::kUserDisabledSite);
+  LogComposeProactiveNudgeCtr(ComposeProactiveNudgeCtrEvent::kUserDisabledSite);
+  client_->GetPageUkmTracker()->ProactiveNudgeDisabledForSite();
 }
 
 void ComposeManagerImpl::DisableCompose() {
   client_->DisableProactiveNudge();
-  compose::LogComposeProactiveNudgeCtr(
-      compose::ComposeProactiveNudgeCtrEvent::kUserDisabledProactiveNudge);
+  LogComposeProactiveNudgeCtr(
+      ComposeProactiveNudgeCtrEvent::kUserDisabledProactiveNudge);
+  client_->GetPageUkmTracker()->ProactiveNudgeDisabledGlobally();
 }
 
 void ComposeManagerImpl::GoToSettings() {
   client_->OpenProactiveNudgeSettings();
-  compose::LogComposeProactiveNudgeCtr(
-      compose::ComposeProactiveNudgeCtrEvent::kOpenSettings);
+  LogComposeProactiveNudgeCtr(ComposeProactiveNudgeCtrEvent::kOpenSettings);
+}
+
+bool ComposeManagerImpl::ShouldAnchorNudgeOnCaret() {
+  return GetComposeConfig().is_nudge_shown_at_cursor;
 }
 
 }  // namespace compose

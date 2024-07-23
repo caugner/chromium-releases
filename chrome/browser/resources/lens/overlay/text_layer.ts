@@ -5,15 +5,23 @@
 import './strings.m.js';
 
 import {assert} from '//resources/js/assert.js';
+import {EventTracker} from '//resources/js/event_tracker.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
 import type {PointF} from '//resources/mojo/ui/gfx/geometry/mojom/geometry.mojom-webui.js';
 import {PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import type {DomRepeat} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {BrowserProxyImpl} from './browser_proxy.js';
+import type {BrowserProxy} from './browser_proxy.js';
+import {type CursorTooltipData, CursorTooltipType} from './cursor_tooltip.js';
+import {findWordsInRegion} from './find_words_in_region.js';
 import {CenterRotatedBox_CoordinateType} from './geometry.mojom-webui.js';
+import type {CenterRotatedBox} from './geometry.mojom-webui.js';
 import {bestHit} from './hit.js';
-import type {CursorData, TextContextMenuData} from './selection_overlay.js';
+import {UserAction} from './lens.mojom-webui.js';
+import {INVOCATION_SOURCE} from './lens_overlay_app.js';
+import {recordLensOverlayInteraction} from './metrics_utils.js';
+import type {CursorData, DetectedTextContextMenuData, SelectedTextContextMenuData} from './selection_overlay.js';
 import {CursorType} from './selection_utils.js';
 import type {GestureEvent} from './selection_utils.js';
 import type {Line, Paragraph, Text, Word} from './text.mojom-webui.js';
@@ -48,7 +56,15 @@ function isWordRenderable(word: Word): boolean {
 
 // Return the text separator if there is one, else returns a space.
 function getTextSeparator(word: Word): string {
-  return word.textSeparator ? word.textSeparator : ' ';
+  return (word.textSeparator !== null && word.textSeparator !== undefined) ?
+      word.textSeparator :
+      ' ';
+}
+
+// Returns true if index is in the range [start, end]. End index may be lesser
+// than start index.
+function isInRange(index: number, start: number, end: number): boolean {
+  return (index >= start && index <= end) || (index >= end && index <= start);
 }
 
 export interface TextLayerElement {
@@ -134,21 +150,34 @@ export class TextLayerElement extends PolymerElement {
   private lines: Line[];
   // The paragraphs received from OnTextReceived.
   private paragraphs: Paragraph[];
+  // The content language received from OnTextReceived.
+  private contentLanguage: string;
+  private eventTracker_: EventTracker = new EventTracker();
   private listenerIds: number[];
+  // IoU threshold for finding words in region.
+  private selectTextTriggerThreshold: number =
+      loadTimeData.getValue('selectTextTriggerThreshold');
+  private browserProxy: BrowserProxy = BrowserProxyImpl.getInstance();
 
   override connectedCallback() {
     super.connectedCallback();
 
+    this.eventTracker_.add(
+        document, 'detect-text-in-region',
+        (e: CustomEvent<CenterRotatedBox>) => {
+          this.detectTextInRegion(e.detail);
+        });
+
     // Set up listener to listen to events from C++.
     this.listenerIds = [
-      BrowserProxyImpl.getInstance().callbackRouter.textReceived.addListener(
+      this.browserProxy.callbackRouter.textReceived.addListener(
           this.onTextReceived.bind(this)),
-      BrowserProxyImpl.getInstance()
-          .callbackRouter.clearAllSelections.addListener(
-              this.unselectWords.bind(this)),
-      BrowserProxyImpl.getInstance()
-          .callbackRouter.setTextSelection.addListener(
-              this.selectWords.bind(this)),
+      this.browserProxy.callbackRouter.clearTextSelection.addListener(
+          this.unselectWords.bind(this)),
+      this.browserProxy.callbackRouter.clearAllSelections.addListener(
+          this.unselectWords.bind(this)),
+      this.browserProxy.callbackRouter.setTextSelection.addListener(
+          this.selectWords.bind(this)),
     ];
   }
 
@@ -156,8 +185,7 @@ export class TextLayerElement extends PolymerElement {
     super.disconnectedCallback();
 
     this.listenerIds.forEach(
-        id => assert(
-            BrowserProxyImpl.getInstance().callbackRouter.removeListener(id)));
+        id => assert(this.browserProxy.callbackRouter.removeListener(id)));
     this.listenerIds = [];
   }
 
@@ -165,12 +193,51 @@ export class TextLayerElement extends PolymerElement {
     this.dispatchEvent(new CustomEvent<CursorData>(
         'set-cursor',
         {bubbles: true, composed: true, detail: {cursor: CursorType.TEXT}}));
+    this.dispatchEvent(
+        new CustomEvent<CursorTooltipData>('set-cursor-tooltip', {
+          bubbles: true,
+          composed: true,
+          detail: {tooltipType: CursorTooltipType.TEXT_HIGHLIGHT},
+        }));
   }
 
   private handlePointerLeave() {
     this.dispatchEvent(new CustomEvent<CursorData>(
         'set-cursor',
         {bubbles: true, composed: true, detail: {cursor: CursorType.DEFAULT}}));
+    this.dispatchEvent(
+        new CustomEvent<CursorTooltipData>('set-cursor-tooltip', {
+          bubbles: true,
+          composed: true,
+          detail: {tooltipType: CursorTooltipType.REGION_SEARCH},
+        }));
+  }
+
+  private detectTextInRegion(box: CenterRotatedBox) {
+    const selection = findWordsInRegion(
+        this.renderedWords, box, this.getBoundingClientRect());
+    if (selection.iou < this.selectTextTriggerThreshold) {
+      this.dispatchEvent(new CustomEvent(
+          'hide-detected-text-context-menu', {bubbles: true, composed: true}));
+      return;
+    }
+    const left = box.box.x - box.box.width / 2;
+    const right = box.box.x + box.box.width / 2;
+    const top = box.box.y - box.box.height / 2;
+    const bottom = box.box.y + box.box.height / 2;
+    this.dispatchEvent(new CustomEvent<DetectedTextContextMenuData>(
+        'show-detected-text-context-menu', {
+          bubbles: true,
+          composed: true,
+          detail: {
+            left,
+            right,
+            top,
+            bottom,
+            selectionStartIndex: selection.startIndex,
+            selectionEndIndex: selection.endIndex,
+          },
+        }));
   }
 
   handleDownGesture(event: GestureEvent): boolean {
@@ -188,6 +255,20 @@ export class TextLayerElement extends PolymerElement {
     return true;
   }
 
+  handleRightClick(event: PointerEvent) {
+    // If the user right-clicks a highlighted word, restore the selected text
+    // context menu.
+    const wordIndex = this.wordIndexFromPoint(event.clientX, event.clientY);
+    if (wordIndex !== null &&
+        isInRange(
+            wordIndex, this.selectionStartIndex, this.selectionEndIndex)) {
+      this.dispatchEvent(new CustomEvent('restore-selected-text-context-menu', {
+        bubbles: true,
+        composed: true,
+      }));
+    }
+  }
+
   handleDragGesture(event: GestureEvent) {
     const imageBounds = this.getBoundingClientRect();
     const normalizedX = (event.clientX - imageBounds.left) / imageBounds.width;
@@ -203,16 +284,21 @@ export class TextLayerElement extends PolymerElement {
   }
 
   handleUpGesture() {
+    this.sendSelectedText();
+  }
+
+  private sendSelectedText() {
     this.isSelectingText = false;
     const highlightedText = this.getHighlightedText();
     const lines = this.getHighlightedLines();
     const containingRect = this.getContainingRect(lines);
-    this.dispatchEvent(
-        new CustomEvent<TextContextMenuData>('show-text-context-menu', {
+    this.dispatchEvent(new CustomEvent<SelectedTextContextMenuData>(
+        'show-selected-text-context-menu', {
           bubbles: true,
           composed: true,
           detail: {
             text: highlightedText,
+            contentLanguage: this.contentLanguage,
             left: containingRect.left,
             right: containingRect.right,
             top: containingRect.top,
@@ -223,8 +309,14 @@ export class TextLayerElement extends PolymerElement {
         }));
 
     // On selection complete, send the selected text to C++.
-    BrowserProxyImpl.getInstance().handler.issueTextSelectionRequest(
+    this.browserProxy.handler.issueTextSelectionRequest(
         highlightedText, this.selectionStartIndex, this.selectionEndIndex);
+    recordLensOverlayInteraction(INVOCATION_SOURCE, UserAction.kTextSelection);
+  }
+
+  selectAndSendWords(selectionStartIndex: number, selectionEndIndex: number) {
+    this.selectWords(selectionStartIndex, selectionEndIndex);
+    this.sendSelectedText();
   }
 
   cancelGesture() {
@@ -235,7 +327,9 @@ export class TextLayerElement extends PolymerElement {
     this.selectionStartIndex = -1;
     this.selectionEndIndex = -1;
     this.dispatchEvent(new CustomEvent(
-        'hide-text-context-menu', {bubbles: true, composed: true}));
+        'hide-selected-text-context-menu', {bubbles: true, composed: true}));
+    this.dispatchEvent(new CustomEvent(
+        'hide-detected-text-context-menu', {bubbles: true, composed: true}));
   }
 
   private selectWords(selectionStartIndex: number, selectionEndIndex: number) {
@@ -250,6 +344,7 @@ export class TextLayerElement extends PolymerElement {
     this.paragraphNumbers = [];
     this.lines = [];
     this.paragraphs = [];
+    this.contentLanguage = text.contentLanguage ?? '';
     let lineNumber = 0;
     let paragraphNumber = 0;
 

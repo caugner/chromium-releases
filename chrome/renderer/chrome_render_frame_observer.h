@@ -101,6 +101,13 @@ class ChromeRenderFrameObserver : public content::RenderFrameObserver,
       RequestImageForContextNodeCallback callback) override;
   void RequestBitmapForContextNode(
       RequestBitmapForContextNodeCallback callback) override;
+  void RequestBitmapForContextNodeWithBoundsDiagnostic(
+      RequestBitmapForContextNodeWithBoundsDiagnosticCallback callback)
+      override;
+  void RequestBoundsForAllImagesDiagnostic(
+      RequestBoundsForAllImagesDiagnosticCallback callback) override;
+  void FindImageElements(blink::WebElement element,
+                         std::vector<blink::WebElement>& images);
   void RequestReloadImageForContextNode() override;
 #if BUILDFLAG(IS_ANDROID)
   void SetCCTClientHeader(const std::string& header) override;
@@ -108,6 +115,7 @@ class ChromeRenderFrameObserver : public content::RenderFrameObserver,
   void GetMediaFeedURL(GetMediaFeedURLCallback callback) override;
   void LoadBlockedPlugins(const std::string& identifier) override;
   void SetSupportsDraggableRegions(bool supports_draggable_regions) override;
+  void SetShouldDeferMediaLoad(bool should_defer) override;
 
   // Initialize a |phishing_classifier_delegate_|.
   void SetClientSidePhishingDetection();

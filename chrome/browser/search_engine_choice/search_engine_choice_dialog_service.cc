@@ -96,9 +96,6 @@ void SearchEngineChoiceDialogService::NotifyChoiceMade(int prepopulate_id,
       "ChoiceService", "choice_country",
       country_codes::CountryIDToCountryString(country_id));
   SCOPED_CRASH_KEY_NUMBER("ChoiceService", "prepopulate_id", prepopulate_id);
-  SCOPED_CRASH_KEY_BOOL(
-      "ChoiceService", "default_added",
-      choice_screen_data_->display_state().list_is_modified_by_current_default);
   SCOPED_CRASH_KEY_NUMBER("ChoiceService", "entry_point",
                           static_cast<int>(entry_point));
 
@@ -403,6 +400,27 @@ void SearchEngineChoiceDialogService::NotifyLearnMoreLinkClicked(
     case EntryPoint::kProfileCreation:
       event = search_engines::SearchEngineChoiceScreenEvents::
           kProfileCreationLearnMoreDisplayed;
+      break;
+  }
+  RecordChoiceScreenEvent(event);
+}
+
+void SearchEngineChoiceDialogService::NotifyMoreButtonClicked(
+    EntryPoint entry_point) {
+  search_engines::SearchEngineChoiceScreenEvents event;
+
+  switch (entry_point) {
+    case EntryPoint::kDialog:
+      event =
+          search_engines::SearchEngineChoiceScreenEvents::kMoreButtonClicked;
+      break;
+    case EntryPoint::kFirstRunExperience:
+      event =
+          search_engines::SearchEngineChoiceScreenEvents::kFreMoreButtonClicked;
+      break;
+    case EntryPoint::kProfileCreation:
+      event = search_engines::SearchEngineChoiceScreenEvents::
+          kProfileCreationMoreButtonClicked;
       break;
   }
   RecordChoiceScreenEvent(event);

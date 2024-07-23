@@ -1,16 +1,11 @@
 <style>
   :host {
     --cr-realbox-icon-border-radius: 8px;
-    --cr-realbox-icon-size-in-searchbox: 20px;
     align-items: center;
     display: flex;
     flex-shrink: 0;
     justify-content: center;
     width: 32px;
-  }
-
-  :host([in-side-panel_]) {
-    --cr-realbox-icon-size-in-searchbox: 34px;
   }
 
   :host([expanded-state-icons-chrome-refresh]:not([in-side-panel_])) {
@@ -30,7 +25,7 @@
 
   /* Entities may feature a dominant color background until image loads. */
   :host-context(cr-realbox-match[has-image]):host(:not([is-weather-answer])) #container {
-    background-color: var(--cr-realbox-icon-container-bg-color,
+    background-color: var(--color-realbox-results-icon-container-background,
         var(--container-bg-color));
   }
 
@@ -114,6 +109,16 @@
 
   :host([has-icon-container-background]:not([in-searchbox])) #icon {
     background-color: var(--color-realbox-answer-icon-foreground);
+  }
+
+  /* TODO(b/343732131): Switch color token once UX direction is set. */
+  :host(:not([in-searchbox])[in-side-panel_]) #container {
+    background-color: #F1F3F4;
+    border-radius: 4000px;
+  }
+
+  :host-context([dark-mode]):host(:not([in-searchbox])[in-side-panel_]) #container {
+    background-color: #303134;
   }
 
 </style>

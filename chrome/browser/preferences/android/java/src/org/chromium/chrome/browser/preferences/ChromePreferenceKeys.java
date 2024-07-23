@@ -105,10 +105,7 @@ public final class ChromePreferenceKeys {
     public static final String BOOKMARKS_SORT_ORDER = "Chrome.Bookmarks.BookmarkRowSortOrder";
     public static final String BOOKMARKS_VISUALS_PREF = "Chrome.Bookmarks.BookmarkRowDisplay";
 
-    /**
-     * Whether Chrome is set as the default browser.
-     * Default value is false.
-     */
+    /** Whether Chrome is set as the default browser. Default value is false. */
     public static final String CHROME_DEFAULT_BROWSER = "applink.chrome_default_browser";
 
     /**
@@ -311,6 +308,10 @@ public final class ChromePreferenceKeys {
      */
     public static final String ISOLATED_SPLITS_DEX_COMPILE_VERSION =
             "Chrome.IsolatedSplits.VersionCode";
+
+    /** Whether Google is set as Chrome's default search engine. Default value is false. */
+    public static final String IS_CHROME_DEFAULT_SEARCH_ENGINE_GOOGLE =
+            "Chrome.GoogleBottomBar.IsDefaultSearchEngineGoogle";
 
     /** Whether the device is from an EEA country. */
     public static final String IS_EEA_CHOICE_COUNTRY = "Chrome.SearchEngine.IsEeaChoiceCountry";
@@ -810,11 +811,19 @@ public final class ChromePreferenceKeys {
     public static final String TAB_ID_MANAGER_NEXT_ID =
             "org.chromium.chrome.browser.tab.TabIdManager.NEXT_ID";
 
+    // Start timestamp of 1-day period for measuring the number of times the max-instance toast is
+    // shown when tab tearing fails.
+    public static final String TAB_TEARING_MAX_INSTANCES_FAILURE_START_TIME_MS =
+            "Chrome.TabTearing.MaxInstancesFailureStartTimeMs";
+    // Number of times in a day the max-instance toast is shown when tab tearing fails.
+    public static final String TAB_TEARING_MAX_INSTANCES_FAILURE_COUNT =
+            "Chrome.TabTearing.MaxInstancesFailureCount";
+
     public static final String TOS_ACKED_ACCOUNTS = "ToS acknowledged accounts";
 
     /**
-     * Keys for deferred recording of the outcomes of showing the clear data dialog after
-     * Trusted Web Activity client apps are uninstalled or have their data cleared.
+     * Keys for deferred recording of the outcomes of showing the clear data dialog after Trusted
+     * Web Activity client apps are uninstalled or have their data cleared.
      */
     public static final String TWA_DIALOG_NUMBER_OF_DISMISSALS_ON_CLEAR_DATA =
             "twa_dialog_number_of_dismissals_on_clear_data";
@@ -959,6 +968,7 @@ public final class ChromePreferenceKeys {
                 INCOGNITO_REAUTH_PROMO_CARD_ENABLED,
                 INCOGNITO_REAUTH_PROMO_SHOW_COUNT,
                 INCOGNITO_TAB_COUNT,
+                IS_CHROME_DEFAULT_SEARCH_ENGINE_GOOGLE,
                 IS_EEA_CHOICE_COUNTRY,
                 IS_LAST_VISITED_TAB_SRP,
                 IS_DSE_GOOGLE,
@@ -1035,6 +1045,8 @@ public final class ChromePreferenceKeys {
                 TAB_DECLUTTER_ARCHIVE_TIME_DELTA_HOURS,
                 TAB_DECLUTTER_AUTO_DELETE_ENABLED,
                 TAB_DECLUTTER_AUTO_DELETE_TIME_DELTA_HOURS,
+                TAB_TEARING_MAX_INSTANCES_FAILURE_START_TIME_MS,
+                TAB_TEARING_MAX_INSTANCES_FAILURE_COUNT,
                 TWA_DISCLOSURE_SEEN_PACKAGES,
                 UMA_ON_POSTCREATE_COUNTER,
                 UMA_ON_RESUME_COUNTER,

@@ -103,7 +103,9 @@ gfx::Rect GetModalDialogBounds(views::Widget* widget,
                                const gfx::Size& size) {
   views::Widget* const host_widget =
       views::Widget::GetWidgetForNativeView(dialog_host->GetHostView());
-  CHECK(host_widget);
+  if (!host_widget) {
+    return gfx::Rect();
+  }
 
   gfx::Point position = dialog_host->GetDialogPosition(size);
   // Align the first row of pixels inside the border. This is the apparent top
@@ -171,6 +173,20 @@ void UpdateModalDialogPosition(views::Widget* widget,
   }
 
   widget->SetBounds(GetModalDialogBounds(widget, dialog_host, size));
+}
+
+void ConfigureDesiredBoundsDelegate(views::WidgetDelegate* dialog_delegate,
+                                    web_modal::ModalDialogHost* dialog_host) {
+  views::Widget* widget = dialog_delegate->GetWidget();
+  CHECK(widget)
+      << "SetDesiredBoundsDelegate() must be called after creating the widget.";
+  dialog_delegate->set_desired_bounds_delegate(base::BindRepeating(
+      [](views::Widget* widget,
+         web_modal::ModalDialogHost* dialog_host) -> gfx::Rect {
+        return GetModalDialogBounds(
+            widget, dialog_host, widget->GetRootView()->GetPreferredSize({}));
+      },
+      widget, dialog_host));
 }
 
 }  // namespace
@@ -250,17 +266,11 @@ views::Widget* CreateWebModalDialogViews(views::WidgetDelegate* dialog,
         << ", scheme=" << url.scheme_piece() << ", host=" << url.host_piece();
   }
 
-  web_modal::ModalDialogHost* dialog_host =
+  web_modal::ModalDialogHost* const dialog_host =
       manager->delegate()->GetWebContentsModalDialogHost();
   views::Widget* widget = views::DialogDelegate::CreateDialogWidget(
       dialog, nullptr, dialog_host->GetHostView());
-  dialog->set_desired_bounds_delegate(base::BindRepeating(
-      [](views::Widget* widget,
-         web_modal::ModalDialogHost* dialog_host) -> gfx::Rect {
-        return GetModalDialogBounds(
-            widget, dialog_host, widget->GetRootView()->GetPreferredSize({}));
-      },
-      widget, manager->delegate()->GetWebContentsModalDialogHost()));
+  ConfigureDesiredBoundsDelegate(dialog, dialog_host);
   widget->SetNativeWindowProperty(
       views::kWidgetIdentifierKey,
       const_cast<void*>(kConstrainedWindowWidgetIdentifier));
@@ -307,7 +317,9 @@ views::Widget* CreateBrowserModalDialogViews(views::DialogDelegate* dialog,
         new WidgetModalDialogHostObserverViews(
             host, widget, kWidgetModalDialogHostObserverViewsKey);
     dialog_host_observer->OnPositionRequiresUpdate();
+    ConfigureDesiredBoundsDelegate(dialog, host);
   }
+
   return widget;
 }
 

@@ -140,9 +140,9 @@ class ClientSideDetectionService
   // Returns true and sets is_phishing if url is in the cache and valid.
   virtual bool GetValidCachedResult(const GURL& url, bool* is_phishing);
 
-  // Returns true if we have sent more than kMaxReportsPerInterval phishing
+  // Returns true if we have sent at least kMaxReportsPerInterval phishing
   // reports in the last kReportsInterval.
-  virtual bool OverPhishingReportLimit();
+  virtual bool AtPhishingReportLimit();
 
   // Sends a model to each renderer.
   virtual void SendModelToRenderers();
@@ -212,6 +212,8 @@ class ClientSideDetectionService
                            ServiceObjectDeletedBeforeCallbackDone);
   FRIEND_TEST_ALL_PREFIXES(ClientSideDetectionServiceTest,
                            SendClientReportPhishingRequest);
+  FRIEND_TEST_ALL_PREFIXES(ClientSideDetectionServiceTest,
+                           GetNumReportTestWhenPrefsPreloaded);
   FRIEND_TEST_ALL_PREFIXES(ClientSideDetectionServiceTest, GetNumReportTest);
   FRIEND_TEST_ALL_PREFIXES(ClientSideDetectionServiceTest, GetNumReportTestESB);
   FRIEND_TEST_ALL_PREFIXES(ClientSideDetectionServiceTest,
@@ -261,18 +263,25 @@ class ClientSideDetectionService
   // Get the number of phishing reports that we have sent over kReportsInterval.
   int GetPhishingNumReports();
 
-  // Adds a phishing report to |phishing_report_times_| and stores the result in
-  // prefs.
-  void AddPhishingReport(base::Time timestamp);
+  // Returns true if we can successfully add a phishing report to
+  // |phishing_report_times_| and stores the result in prefs. Returns false if
+  // we're at the ping limit or prefs is null.
+  bool AddPhishingReport(base::Time timestamp);
 
   // Populates |phishing_report_times_| with the data stored in local prefs.
-  void LoadPhishingReportTimesFromPrefs();
+  // Return bool value represents whether the load was successful or not.
+  bool LoadPhishingReportTimesFromPrefs();
 
   // Returns the URL that will be used for phishing requests.
   static GURL GetClientReportUrl(const std::string& report_url);
 
   // content::RenderProcessHostCreationObserver:
   void OnRenderProcessHostCreated(content::RenderProcessHost* rph) override;
+
+  // If we fail to load the report times, we will not know how many pings the
+  // user has sent already. In this case, we will assume the user has sent
+  // enough pings and skip the phishing URL check.
+  bool skip_phishing_request_check_ = true;
 
   // Whether the service is running or not.  When the service is not running,
   // it won't download the model nor report detected phishing URLs.

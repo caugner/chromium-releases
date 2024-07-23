@@ -36,6 +36,12 @@ class CloudExternalDataPolicyHandler;
 
 namespace ash {
 
+// Feature that removes deprecated ARC kiosk users.
+BASE_DECLARE_FEATURE(kRemoveDeprecatedArcKioskUsersOnStartup);
+
+// Domain that is used for ARC kiosk users.
+extern const char kArcKioskDomain[];
+
 // Chrome specific implementation of the UserManager.
 class ChromeUserManagerImpl
     : public user_manager::UserManagerBase,
@@ -45,28 +51,40 @@ class ChromeUserManagerImpl
       public ProfileObserver,
       public ProfileManagerObserver {
  public:
+  // These enum values represent a deprecated ARC kiosk user's status on the
+  // sign in screen.
+  // TODO(b/355590943): Remove once all ARC kiosk users are deleted in the wild.
+  // ARC Kiosk has been deprecated and removed in m126. However, the accounts
+  // still exist on the devices if configured prior to m126, but hidden. These
+  // values are logged to UMA. Entries should not be renumbered and numeric
+  // values should never be reused. Please keep in sync with
+  // "DeprecatedArcKioskUserStatus" in src/tools/metrics/histograms/enums.xml.
+  enum class DeprecatedArcKioskUserStatus {
+    // ARC kiosk hidden on login screen. Expect this count to decline to zero
+    // over
+    // time.
+    kHidden = 0,
+    // Attempted to delete cryptohome. Expect this count to decline to zero
+    // over time.
+    kDeleted = 1,
+    kMaxValue = kDeleted
+  };
+
   ChromeUserManagerImpl(const ChromeUserManagerImpl&) = delete;
   ChromeUserManagerImpl& operator=(const ChromeUserManagerImpl&) = delete;
 
   ~ChromeUserManagerImpl() override;
+
+  // Histogram for tracking the number of deprecated ARC kiosk user
+  // cryptohomes remaining in the wild.
+  // TODO(b/355590943): clean up once there is no ARC kiosk records.
+  static const char kDeprecatedArcKioskUsersHistogramName[];
 
   // Creates ChromeUserManagerImpl instance.
   static std::unique_ptr<ChromeUserManagerImpl> CreateChromeUserManager();
 
   // UserManager implementation:
   void Shutdown() override;
-  void SaveUserOAuthStatus(
-      const AccountId& account_id,
-      user_manager::User::OAuthTokenStatus oauth_token_status) override;
-  void SaveUserDisplayName(const AccountId& account_id,
-                           const std::u16string& display_name) override;
-  bool IsGuestSessionAllowed() const override;
-  bool IsGaiaUserAllowed(const user_manager::User& user) const override;
-  bool IsUserAllowed(const user_manager::User& user) const override;
-  void AsyncRemoveCryptohome(const AccountId& account_id) const override;
-  bool IsDeprecatedSupervisedAccountId(
-      const AccountId& account_id) const override;
-  bool IsValidDefaultUserImageId(int image_index) const override;
 
   // DeviceSettingsService::Observer:
   void OwnershipStatusChanged() override;
@@ -91,13 +109,7 @@ class ChromeUserManagerImpl
 
  protected:
   void LoadDeviceLocalAccounts(std::set<AccountId>* users_set) override;
-  void NotifyOnLogin() override;
   void RemoveNonCryptohomeData(const AccountId& account_id) override;
-  void RemoveUserInternal(const AccountId& account_id,
-                          user_manager::UserRemovalReason reason) override;
-  bool IsDeviceLocalAccountMarkedForRemoval(
-      const AccountId& account_id) const override;
-  bool IsEphemeralAccountIdByPolicy(const AccountId& account_id) const override;
 
  private:
   friend class UserManagerTest;
@@ -154,6 +166,11 @@ class ChromeUserManagerImpl
   void RemoveNonCryptohomeDataPostExternalDataRemoval(
       const AccountId& account_id);
 
+  // Returns true if |account_id| is a deprecated ARC kiosk account.
+  // TODO(b/355590943): Check if it is not used anymore and remove it.
+  bool IsDeprecatedArcKioskAccountId(const AccountId& account_id) const;
+  void RemoveDeprecatedArcKioskUser(const AccountId& account_id);
+
   // Interface to device-local account definitions and associated policy.
   raw_ptr<policy::DeviceLocalAccountPolicyService>
       device_local_account_policy_service_;
@@ -178,8 +195,6 @@ class ChromeUserManagerImpl
       profile_observations_;
 
   base::RepeatingClosure remove_non_cryptohome_data_barrier_;
-
-  std::unique_ptr<MountPerformer> mount_performer_;
 
   base::WeakPtrFactory<ChromeUserManagerImpl> weak_factory_{this};
 };

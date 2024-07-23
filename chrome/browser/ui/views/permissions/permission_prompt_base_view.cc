@@ -6,9 +6,14 @@
 
 #include "chrome/browser/picture_in_picture/picture_in_picture_occlusion_tracker.h"
 #include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/views/bubble_anchor_util_views.h"
 #include "chrome/browser/ui/views/title_origin_label.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/permissions/features.h"
+#include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/views/window/dialog_client_view.h"
@@ -28,9 +33,14 @@ constexpr UrlIdentity::FormatOptions options = {
 PermissionPromptBaseView::PermissionPromptBaseView(
     Browser* browser,
     base::WeakPtr<permissions::PermissionPrompt::Delegate> delegate)
-    : url_identity_(GetUrlIdentity(browser, *delegate)),
+    : BubbleDialogDelegateView(/*anchor_view=*/nullptr,
+                               views::BubbleBorder::TOP_LEFT,
+                               views::BubbleBorder::DIALOG_SHADOW,
+                               /*autosize=*/true),
+      url_identity_(GetUrlIdentity(browser, *delegate)),
       is_for_picture_in_picture_window_(browser &&
-                                        browser->is_type_picture_in_picture()) {
+                                        browser->is_type_picture_in_picture()),
+      browser_(browser) {
   // To prevent permissions being accepted accidentally, and as a security
   // measure against crbug.com/619429, permission prompts should not be accepted
   // as the default action.
@@ -45,19 +55,27 @@ void PermissionPromptBaseView::AddedToWidget() {
         CreateTitleOriginLabel(GetWindowTitle()));
   }
 
-  // If we're for a picture-in-picture window, then we are in an always-on-top
-  // widget that should be tracked by the PictureInPictureOcclusionTracker.
-  if (is_for_picture_in_picture_window_) {
-    PictureInPictureOcclusionTracker* tracker =
-        PictureInPictureWindowManager::GetInstance()->GetOcclusionTracker();
-    if (tracker) {
-      tracker->OnPictureInPictureWidgetOpened(GetWidget());
-    }
-  }
+  StartTrackingPictureInPictureOcclusion();
+}
 
-  // Either way, we want to know if we're ever occluded by an always-on-top
-  // window.
-  occlusion_observation_.Observe(GetWidget());
+void PermissionPromptBaseView::AnchorToPageInfoOrChip() {
+  bubble_anchor_util::AnchorConfiguration configuration =
+      bubble_anchor_util::GetPermissionPromptBubbleAnchorConfiguration(
+          browser_);
+  SetAnchorView(configuration.anchor_view);
+  // In fullscreen, `anchor_view` may be nullptr because the toolbar is hidden,
+  // therefore anchor to the browser window instead.
+  if (configuration.anchor_view) {
+    set_parent_window(configuration.anchor_view->GetWidget()->GetNativeView());
+  } else {
+    set_parent_window(
+        platform_util::GetViewForWindow(browser_->window()->GetNativeWindow()));
+  }
+  SetHighlightedButton(configuration.highlighted_button);
+  if (!configuration.anchor_view) {
+    SetAnchorRect(bubble_anchor_util::GetPageInfoAnchorRect(browser_));
+  }
+  SetArrow(configuration.bubble_arrow);
 }
 
 bool PermissionPromptBaseView::ShouldIgnoreButtonPressedEventHandling(
@@ -106,6 +124,41 @@ UrlIdentity PermissionPromptBaseView::GetUrlIdentity(
   }
 
   return url_identity;
+}
+
+std::u16string PermissionPromptBaseView::GetAllowAlwaysText(
+    const std::vector<raw_ptr<permissions::PermissionRequest,
+                              VectorExperimental>>& visible_requests) {
+  CHECK_GT(visible_requests.size(), 0u);
+
+  if (visible_requests.size() == 1 &&
+      visible_requests[0]->GetAllowAlwaysText().has_value()) {
+    // A prompt for a single request can use an "allow always" text that is
+    // customized for it.
+    return visible_requests[0]->GetAllowAlwaysText().value();
+  }
+
+  // Use the generic text.
+  return l10n_util::GetStringUTF16(
+      permissions::feature_params::kUseWhileVisitingLanguage.Get()
+          ? IDS_PERMISSION_ALLOW_WHILE_VISITING
+          : IDS_PERMISSION_ALLOW_EVERY_VISIT);
+}
+
+void PermissionPromptBaseView::StartTrackingPictureInPictureOcclusion() {
+  // If we're for a picture-in-picture window, then we are in an always-on-top
+  // widget that should be tracked by the PictureInPictureOcclusionTracker.
+  if (is_for_picture_in_picture_window_) {
+    PictureInPictureOcclusionTracker* tracker =
+        PictureInPictureWindowManager::GetInstance()->GetOcclusionTracker();
+    if (tracker) {
+      tracker->OnPictureInPictureWidgetOpened(GetWidget());
+    }
+  }
+
+  // Either way, we want to know if we're ever occluded by an always-on-top
+  // window.
+  occlusion_observation_.Observe(GetWidget());
 }
 
 BEGIN_METADATA(PermissionPromptBaseView)

@@ -21,6 +21,7 @@ class PageInfoNavigationHandler;
 
 namespace views {
 class ToggleButton;
+class StyledLabel;
 }  // namespace views
 
 namespace test {
@@ -36,6 +37,8 @@ class PermissionToggleRowView : public views::View {
  public:
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kRowSubTitleCameraElementId);
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kRowSubTitleMicrophoneElementId);
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(
+      kPermissionDisabledAtSystemLevelElementId);
   PermissionToggleRowView(ChromePageInfoUiDelegate* delegate,
                           PageInfoNavigationHandler* navigation_handler,
                           const PageInfo::PermissionInfo& permission,
@@ -70,10 +73,12 @@ class PermissionToggleRowView : public views::View {
   void UpdateUiOnPermissionChanged();
 
   PageInfo::PermissionInfo permission_;
-  bool permission_disabled_on_system_level_ = false;
+  bool permission_blocked_on_system_level_ = false;
 
   raw_ptr<RichControlsContainerView, DanglingUntriaged> row_view_ = nullptr;
   raw_ptr<views::Label, DanglingUntriaged> state_label_ = nullptr;
+  raw_ptr<views::StyledLabel, DanglingUntriaged>
+      blocked_on_system_level_label_ = nullptr;
   raw_ptr<views::ToggleButton, DanglingUntriaged> toggle_button_ = nullptr;
   raw_ptr<views::View, DanglingUntriaged> spacer_view_ = nullptr;
 

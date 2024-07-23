@@ -59,6 +59,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/constants/ash_pref_names.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/browser/ash/crostini/crostini_features.h"
@@ -70,6 +71,7 @@
 #include "chrome/browser/ash/policy/enrollment/device_cloud_policy_initializer.h"
 #include "chrome/browser/ash/policy/remote_commands/crd/fake_start_crd_session_job_delegate.h"
 #include "chrome/browser/ash/policy/reporting/metrics_reporting/metric_reporting_prefs.h"
+#include "chrome/browser/ash/policy/skyvault/policy_utils.h"
 #include "chrome/browser/ash/policy/status_collector/device_status_collector.h"
 #include "chrome/browser/ash/policy/status_collector/status_collector.h"
 #include "chrome/browser/ash/policy/uploading/status_uploader.h"
@@ -133,6 +135,7 @@ using testing::AnyNumber;
 using testing::AssertionFailure;
 using testing::AssertionResult;
 using testing::AssertionSuccess;
+using testing::Mock;
 using testing::Return;
 using testing::ReturnRef;
 
@@ -252,7 +255,8 @@ class TestManagementUIHandler : public ManagementUIHandlerBase {
     return GetContextualManagedData(profile);
   }
 
-  base::Value::List GetReportingInfo(bool can_collect_signals = true) {
+  base::Value::List GetReportingInfo(bool can_collect_signals = true,
+                                     bool is_browser = true) {
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
     EXPECT_CALL(mock_user_permission_service_, CanCollectSignals())
         .WillOnce(
@@ -261,7 +265,7 @@ class TestManagementUIHandler : public ManagementUIHandlerBase {
                        : device_signals::UserPermission::kMissingConsent));
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
     base::Value::List report_sources;
-    AddReportingInfo(&report_sources);
+    AddReportingInfo(&report_sources, is_browser);
     return report_sources;
   }
 
@@ -282,6 +286,10 @@ class TestManagementUIHandler : public ManagementUIHandlerBase {
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
+  std::u16string GetFilesUploadToCloudInfo(Profile* profile) {
+    return ManagementUIHandlerBase::GetFilesUploadToCloudInfo(profile);
+  }
+
   MOCK_METHOD(policy::DeviceCloudPolicyManagerAsh*,
               GetDeviceCloudPolicyManager,
               (),
@@ -406,6 +414,7 @@ class ManagementUIHandlerTests : public TestingBaseClass {
     bool printing_send_username_and_filename;
     bool crostini_report_usage;
     bool cloud_reporting_enabled;
+    bool cloud_profile_reporting_enabled;
     std::string profile_name;
     bool override_policy_connector_is_managed;
     bool managed_account;
@@ -439,6 +448,7 @@ class ManagementUIHandlerTests : public TestingBaseClass {
     setup_config_.printing_send_username_and_filename = default_value;
     setup_config_.crostini_report_usage = default_value;
     setup_config_.cloud_reporting_enabled = default_value;
+    setup_config_.cloud_profile_reporting_enabled = default_value;
     setup_config_.profile_name = "";
     setup_config_.override_policy_connector_is_managed = false;
     setup_config_.managed_account = true;
@@ -1594,6 +1604,28 @@ TEST_F(ManagementUIHandlerTests, CloudReportingPolicy) {
                       expected_messages);
 }
 
+TEST_F(ManagementUIHandlerTests, CloudProfileReportingPolicy) {
+  ResetTestConfig(false);
+  SetUpProfileAndHandler();
+  profile_->GetTestingPrefService()->SetManagedPref(
+      enterprise_reporting::kCloudProfileReportingEnabled,
+      std::make_unique<base::Value>(true));
+
+  std::set<std::string> expected_messages = {
+      kProfileReportingOverview, kProfileReportingUsername,
+      kProfileReportingBrowser, kProfileReportingExtension,
+      kProfileReportingPolicy};
+
+  ASSERT_PRED_FORMAT2(MessagesToBeEQ,
+                      handler_.GetReportingInfo(/*can_collect_signals=*/false,
+                                                /*is_browser=*/true),
+                      {});
+  ASSERT_PRED_FORMAT2(MessagesToBeEQ,
+                      handler_.GetReportingInfo(/*can_collect_signals=*/false,
+                                                /*is_browser=*/false),
+                      expected_messages);
+}
+
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 TEST_F(ManagementUIHandlerTests,
        CloudReportingPolicyWithoutDeviceSignalsConsent) {
@@ -1854,3 +1886,17 @@ TEST_F(ManagementUIHandlerTests, ThreatReportingInfo) {
 
   EXPECT_EQ(expected_info, *info.FindList("info"));
 }
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+TEST_F(ManagementUIHandlerTests, GetFilesUploadToCloud) {
+  ResetTestConfig();
+  SetUpProfileAndHandler();
+  EXPECT_TRUE(handler_.GetFilesUploadToCloudInfo(profile_.get()).empty());
+  profile_->GetTestingPrefService()->SetManagedPref(
+      ash::prefs::kCaptureModePolicySavePath,
+      std::make_unique<base::Value>(
+          policy::local_user_files::kOneDrivePolicyVariableName));
+
+  EXPECT_FALSE(handler_.GetFilesUploadToCloudInfo(profile_.get()).empty());
+}
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)

@@ -13,7 +13,7 @@
 #include "ash/shell.h"
 #include "ash/wm/desks/desk_icon_button.h"
 #include "ash/wm/desks/desks_util.h"
-#include "ash/wm/desks/legacy_desk_bar_view.h"
+#include "ash/wm/desks/overview_desk_bar_view.h"
 #include "ash/wm/float/float_controller.h"
 #include "ash/wm/overview/overview_constants.h"
 #include "ash/wm/overview/overview_controller.h"
@@ -32,6 +32,7 @@
 #include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_constants.h"
+#include "base/auto_reset.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/safe_conversions.h"
 #include "chromeos/ui/frame/caption_buttons/snap_controller.h"
@@ -90,6 +91,8 @@ constexpr char kOverviewWindowDragHistogram[] =
 constexpr char kOverviewWindowDragMaxLatencyHistogram[] =
     "Ash.Overview.WindowDrag.PresentationTime.MaxLatency.TabletMode";
 
+bool g_skip_new_desk_button_scale_up_for_test = false;
+
 bool GetVirtualDesksBarEnabled(OverviewItemBase* item) {
   return desks_util::ShouldDesksBarBeCreated() &&
          item->overview_grid()->desks_bar_view();
@@ -103,19 +106,18 @@ bool DraggedItemIsVisibleOnAllDesks(OverviewItemBase* item) {
 }
 
 // Returns the scaled-down size of the dragged item that should be used when
-// it's dragged over the LegacyDeskBarView that belongs to |overview_grid|.
+// it's dragged over the OverviewDeskBarView that belongs to |overview_grid|.
 // |window_original_size| is the size of the item's window before it was scaled
 // up for dragging.
 gfx::SizeF GetItemSizeWhenOnDesksBar(OverviewGrid* overview_grid,
                                      const gfx::SizeF& window_original_size) {
   DCHECK(overview_grid);
-  const LegacyDeskBarView* desks_bar_view = overview_grid->desks_bar_view();
+  const OverviewDeskBarView* desks_bar_view = overview_grid->desks_bar_view();
   DCHECK(desks_bar_view);
 
-  const int expanded_desks_bar_height =
-      LegacyDeskBarView::GetPreferredBarHeight(
-          overview_grid->root_window(), LegacyDeskBarView::Type::kOverview,
-          LegacyDeskBarView::State::kExpanded);
+  const int expanded_desks_bar_height = DeskBarViewBase::GetPreferredBarHeight(
+      overview_grid->root_window(), DeskBarViewBase::Type::kOverview,
+      DeskBarViewBase::State::kExpanded);
 
   // We should always use the expanded desks bar height here even if the desks
   // bar is actually in zero state to calculate `scale_factor`. Because if zero
@@ -168,6 +170,24 @@ void RecordDrag(OverviewDragAction action) {
 // overview.
 bool IsEligibleForDragToSnap(OverviewItemBase* item) {
   return (item->GetWindows().size() == 1u) && ShouldAllowSplitView();
+}
+
+// Restores the new desk button state back to the
+// `DeskIconButton::State::kExpanded` on drag ended on all `OverviewGrid`s.
+void MaybeRestoreNewDeskButtonState() {
+  OverviewSession* overview_session =
+      OverviewController::Get()->overview_session();
+  if (!overview_session || overview_session->is_shutting_down()) {
+    return;
+  }
+
+  for (aura::Window* root : Shell::GetAllRootWindows()) {
+    OverviewGrid* overview_grid = overview_session->GetGridWithRootWindow(root);
+    if (auto* desks_bar_view = overview_grid->desks_bar_view()) {
+      desks_bar_view->UpdateDeskIconButtonState(
+          desks_bar_view->new_desk_button(), DeskIconButton::State::kExpanded);
+    }
+  }
 }
 
 // Helps with handling the workflow where you drag an overview item from one
@@ -254,6 +274,12 @@ OverviewWindowDragController::~OverviewWindowDragController() {
   }
 }
 
+// static
+base::AutoReset<bool>
+OverviewWindowDragController::SkipNewDeskButtonScaleUpDurationForTesting() {
+  return {&g_skip_new_desk_button_scale_up_for_test, true};
+}
+
 void OverviewWindowDragController::InitiateDrag(
     const gfx::PointF& location_in_screen) {
   initial_event_location_ = location_in_screen;
@@ -305,7 +331,7 @@ OverviewWindowDragController::CompleteDrag(
 
   switch (current_drag_behavior_) {
     case DragBehavior::kNoDrag:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       break;
 
     case DragBehavior::kUndefined:
@@ -415,9 +441,9 @@ void OverviewWindowDragController::StartNormalDragMode(
           GetItemSizeWhenOnDesksBar(grid.get(), window_original_size);
       grid_desks_bar_data.desks_bar_bounds = grid_desks_bar_data.shrink_bounds =
           gfx::RectF(grid->desks_bar_view()->GetBoundsInScreen());
-      const int expanded_height = LegacyDeskBarView::GetPreferredBarHeight(
-          grid->root_window(), LegacyDeskBarView::Type::kOverview,
-          LegacyDeskBarView::State::kExpanded);
+      const int expanded_height = DeskBarViewBase::GetPreferredBarHeight(
+          grid->root_window(), DeskBarViewBase::Type::kOverview,
+          DeskBarViewBase::State::kExpanded);
       grid_desks_bar_data.desks_bar_bounds.set_height(expanded_height);
       grid_desks_bar_data.shrink_bounds.set_height(expanded_height);
       grid_desks_bar_data.shrink_bounds.Inset(gfx::InsetsF::VH(
@@ -725,9 +751,13 @@ void OverviewWindowDragController::ContinueNormalDrag(
       new_desk_button_scale_up_timer_.Stop();
     } else if (!new_desk_button_scale_up_timer_.IsRunning() &&
                new_desk_button->state() == DeskIconButton::State::kExpanded) {
-      new_desk_button_scale_up_timer_.Start(
-          FROM_HERE, kScaleUpNewDeskButtonGracePeriod, this,
-          &OverviewWindowDragController::MaybeScaleUpNewDeskButton);
+      if (g_skip_new_desk_button_scale_up_for_test) {
+        MaybeScaleUpNewDeskButton();
+      } else {
+        new_desk_button_scale_up_timer_.Start(
+            FROM_HERE, kScaleUpNewDeskButtonGracePeriod, this,
+            &OverviewWindowDragController::MaybeScaleUpNewDeskButton);
+      }
     }
   }
 
@@ -800,22 +830,12 @@ OverviewWindowDragController::CompleteNormalDrag(
     }
   }
 
-  auto* desks_bar_view = current_grid->desks_bar_view();
   // Snap a window if appropriate.
   if (is_eligible_for_drag_to_snap_ && snap_position_ != SnapPosition::kNone) {
     // Overview grid will be updated after window is snapped in splitview.
     SnapWindow(SplitViewController::Get(target_root), snap_position_);
     RecordNormalDrag(kToSnap, is_dragged_to_other_display);
-    // When there's only one window and it's snapped, overview mode will be
-    // ended. Thus we need to check whether `overview_session_` is being
-    // shutting down or not here before triggering `MaybeShrinkDesksBarView`.
-    if (!overview_session_->is_shutting_down()) {
-      if (desks_bar_view) {
-        desks_bar_view->UpdateDeskIconButtonState(
-            desks_bar_view->new_desk_button(),
-            DeskIconButton::State::kExpanded);
-      }
-    }
+    MaybeRestoreNewDeskButtonState();
     return DragResult::kSnap;
   }
 
@@ -855,10 +875,7 @@ OverviewWindowDragController::CompleteNormalDrag(
   } else {
     item_->set_should_restack_on_animation_end(true);
     overview_session_->PositionWindows(/*animate=*/true);
-    if (desks_bar_view) {
-      desks_bar_view->UpdateDeskIconButtonState(
-          desks_bar_view->new_desk_button(), DeskIconButton::State::kExpanded);
-    }
+    MaybeRestoreNewDeskButtonState();
   }
   RecordNormalDrag(kToGrid, is_dragged_to_other_display);
   return DragResult::kDropIntoOverview;
@@ -1013,15 +1030,28 @@ void OverviewWindowDragController::MaybeScaleUpNewDeskButton() {
     return;
   }
 
-  auto* desks_bar_view = item_->overview_grid()->desks_bar_view();
+  // When there's only one window and it's snapped, overview mode will be
+  // ended. Thus we need to check whether `overview_session_` is being
+  // shutting down or not here before triggering `UpdateDeskIconButtonState`.
+  if (!overview_session_) {
+    return;
+  }
+
+  auto* overview_grid =
+      overview_session_->GetGridWithRootWindow(GetRootWindowBeingDraggedIn());
+  auto* desks_bar_view = overview_grid->desks_bar_view();
   auto* new_desk_button = desks_bar_view->new_desk_button();
 
   if (!new_desk_button->GetEnabled()) {
     return;
   }
 
+  // Do not reposition the windows while changing the desk icon button. This
+  // could cause items to shift around mid drag.
+  overview_session_->SuspendReposition();
   desks_bar_view->UpdateDeskIconButtonState(
       new_desk_button, /*target_state=*/DeskIconButton::State::kActive);
+  overview_session_->ResumeReposition();
 }
 
 }  // namespace ash
