@@ -265,6 +265,9 @@ ConvertExtensionInstallStatusForAPI(ExtensionInstallStatus status) {
           kCustodianApprovalRequiredForInstallation;
     case kForceInstalled:
       return api::webstore_private::ExtensionInstallStatus::kForceInstalled;
+    case kDeprecatedManifestVersion:
+      return api::webstore_private::ExtensionInstallStatus::
+          kDeprecatedManifestVersion;
   }
   return api::webstore_private::ExtensionInstallStatus::kNone;
 }
@@ -1369,6 +1372,9 @@ WebstorePrivateGetMV2DeprecationStatusFunction::Run() {
       break;
     case MV2ExperimentStage::kWarning:
       api_status = api::webstore_private::MV2DeprecationStatus::kWarning;
+      break;
+    case MV2ExperimentStage::kDisableWithReEnable:
+      api_status = api::webstore_private::MV2DeprecationStatus::kSoftDisable;
       break;
   }
 

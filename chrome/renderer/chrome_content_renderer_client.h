@@ -73,7 +73,7 @@ class Extension;
 #endif
 
 namespace subresource_filter {
-class SafeBrowsingUnverifiedRulesetDealer;
+class UnverifiedRulesetDealer;
 }
 
 namespace url {
@@ -108,6 +108,7 @@ class ChromeContentRendererClient
                                  const blink::WebElement& plugin_element,
                                  const GURL& original_url,
                                  const std::string& mime_type) override;
+  bool IsDomStorageDisabled() const override;
   v8::Local<v8::Object> GetScriptableObject(
       const blink::WebElement& plugin_element,
       v8::Isolate* isolate) override;
@@ -149,12 +150,17 @@ class ChromeContentRendererClient
       const url::Origin& origin) override;
   void WillSendRequest(blink::WebLocalFrame* frame,
                        ui::PageTransition transition_type,
-                       const blink::WebURL& url,
+                       const blink::WebURL& upstream_url,
+                       const blink::WebURL& target_url,
                        const net::SiteForCookies& site_for_cookies,
                        const url::Origin* initiator_origin,
                        GURL* new_url) override;
   bool IsPrefetchOnly(content::RenderFrame* render_frame) override;
   uint64_t VisitedLinkHash(std::string_view canonical_url) override;
+  uint64_t PartitionedVisitedLinkFingerprint(
+      std::string_view canonical_link_url,
+      const net::SchemefulSite& top_level_site,
+      const url::Origin& frame_origin) override;
   bool IsLinkVisited(uint64_t link_hash) override;
   void AddOrUpdateVisitedLinkSalt(const url::Origin& origin,
                                   uint64_t salt) override;
@@ -285,7 +291,7 @@ class ChromeContentRendererClient
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   std::unique_ptr<SpellCheck> spellcheck_;
 #endif
-  std::unique_ptr<subresource_filter::SafeBrowsingUnverifiedRulesetDealer>
+  std::unique_ptr<subresource_filter::UnverifiedRulesetDealer>
       subresource_filter_ruleset_dealer_;
 #if BUILDFLAG(ENABLE_PLUGINS)
   std::set<std::string> allowed_camera_device_origins_;

@@ -49,12 +49,8 @@
       "--" + std::string(switches::kSearchEngineChoiceCountry) + "=" +
       switches::kEeaListCountryOverride);
   // Force the dialog to trigger also for existing users.
-  config.additional_args.push_back(
-      std::string("--enable-features=") +
-      switches::kSearchEngineChoiceTrigger.name + ":" +
-      switches::kSearchEngineChoiceTriggerForTaggedProfilesOnly.name +
-      "/"
-      "false");
+  config.additional_args.push_back(std::string("--enable-features=") +
+                                   switches::kSearchEngineChoiceTrigger.name);
   config.additional_args.push_back(
       "--" + std::string(switches::kForceSearchEngineChoiceScreen));
   // Relaunches the app at each test to re-display the choice screen.
@@ -65,7 +61,8 @@
 
 // Tests that the search engine choice dialog is always visible when the app
 // goes to background and foreground.
-- (void)testMoveToBackgroundAndToForeground {
+// TODO(crbug.com/356534232): Re-enable after fixing flakiness.
+- (void)DISABLED_testMoveToBackgroundAndToForeground {
   [SearchEngineChoiceEarlGreyUI verifySearchEngineChoiceScreenIsDisplayed];
   [[AppLaunchManager sharedManager] backgroundAndForegroundApp];
   [SearchEngineChoiceEarlGreyUI verifySearchEngineChoiceScreenIsDisplayed];

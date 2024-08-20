@@ -60,6 +60,10 @@ bool ContentRendererClient::IsPluginHandledExternally(
   return false;
 }
 
+bool ContentRendererClient::IsDomStorageDisabled() const {
+  return false;
+}
+
 v8::Local<v8::Object> ContentRendererClient::GetScriptableObject(
     const blink::WebElement& plugin_element,
     v8::Isolate* isolate) {
@@ -149,7 +153,8 @@ bool ContentRendererClient::HandleNavigation(
 void ContentRendererClient::WillSendRequest(
     blink::WebLocalFrame* frame,
     ui::PageTransition transition_type,
-    const blink::WebURL& url,
+    const blink::WebURL& upstream_url,
+    const blink::WebURL& target_url,
     const net::SiteForCookies& site_for_cookies,
     const url::Origin* initiator_origin,
     GURL* new_url) {}
@@ -160,6 +165,14 @@ bool ContentRendererClient::IsPrefetchOnly(RenderFrame* render_frame) {
 
 uint64_t ContentRendererClient::VisitedLinkHash(
     std::string_view canonical_url) {
+  return 0;
+}
+
+uint64_t ContentRendererClient::PartitionedVisitedLinkFingerprint(
+    std::string_view canonical_link_url,
+    const net::SchemefulSite& top_level_site,
+    const url::Origin& frame_origin) {
+  // Return the null-fingerprint value.
   return 0;
 }
 

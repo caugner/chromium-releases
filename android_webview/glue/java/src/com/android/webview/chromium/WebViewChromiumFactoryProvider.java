@@ -31,8 +31,11 @@ import android.webkit.WebViewProvider;
 
 import androidx.annotation.RequiresApi;
 
+import com.android.webview.chromium.SharedStatics.ApiCall;
+
 import org.chromium.android_webview.ApkType;
 import org.chromium.android_webview.AwBrowserContext;
+import org.chromium.android_webview.AwBrowserMainParts;
 import org.chromium.android_webview.AwBrowserProcess;
 import org.chromium.android_webview.AwContentsStatics;
 import org.chromium.android_webview.AwSettings;
@@ -56,6 +59,7 @@ import org.chromium.base.PackageUtils;
 import org.chromium.base.PathUtils;
 import org.chromium.base.StrictModeContext;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.TraceEvent;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.ScopedSysTraceEvent;
 import org.chromium.base.version_info.VersionConstants;
@@ -367,10 +371,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                 }
             }
             // Use this to report the actual state of the feature at runtime.
-            if (webViewContextWasApplied) {
-                CommandLine.getInstance()
-                        .appendSwitch(AwSwitches.WEBVIEW_CONTEXT_EXPERIMENTATION_METRICS);
-            }
+            AwBrowserMainParts.setUseWebViewContext(webViewContextWasApplied);
 
             // WebView needs to make sure to always use the wrapped application context.
             ctx = ClassLoaderContextWrapperFactory.get(ctx);
@@ -406,9 +407,12 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
             AndroidXProcessGlobalConfig.extractConfigFromApp(application.getClassLoader());
 
+            // Temporarily disable CHIPS until the CookieManager API supports the feature.
+            CommandLine cl = CommandLine.getInstance();
+            cl.appendSwitch("disable-partitioned-cookies");
+
             boolean multiProcess = webViewDelegate.isMultiProcessEnabled();
             if (multiProcess) {
-                CommandLine cl = CommandLine.getInstance();
                 cl.appendSwitch(AwSwitches.WEBVIEW_SANDBOXED_RENDERER);
             }
             Log.i(
@@ -423,14 +427,12 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
             // Enable modern SameSite cookie behavior if the app targets at least S.
             if (ctx.getApplicationInfo().targetSdkVersion >= Build.VERSION_CODES.S) {
-                CommandLine cl = CommandLine.getInstance();
                 cl.appendSwitch(AwSwitches.WEBVIEW_ENABLE_MODERN_COOKIE_SAME_SITE);
             }
 
             // Enable logging JS console messages in system logs only if the app is debuggable or
             // it's a debuggable android build.
             if (BuildInfo.isDebugAndroidOrApp()) {
-                CommandLine cl = CommandLine.getInstance();
                 cl.appendSwitch(AwSwitches.WEBVIEW_LOG_JS_CONSOLE_MESSAGES);
             }
 
@@ -543,6 +545,17 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     }
 
     /* package */ static void checkStorageIsNotDeviceProtected(Context context) {
+        // The PAC processor service uses WebViewFactoryProvider.getPacProcessor() to
+        // get the JS engine it needs to run PAC scripts. It doesn't use the rest of
+        // WebView and this use case does not really store any meaningful data in the
+        // WebView data directory, but the PAC service needs to be able to run before
+        // the device is unlocked so that other apps running in that state can make
+        // proxy lookups. So, we just skip the check for it and don't care whether it
+        // is using DE or CE storage.
+        if ("com.android.pacprocessor".equals(context.getPackageName())) {
+            return;
+        }
+
         if (context.isDeviceProtectedStorage()) {
             throw new IllegalArgumentException(
                     "WebView cannot be used with device protected storage");
@@ -740,7 +753,11 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
     @Override
     public GeolocationPermissions getGeolocationPermissions() {
-        return mAwInit.getDefaultGeolocationPermissions();
+        try (TraceEvent event =
+                TraceEvent.scoped("WebView.APICall.Framework.GET_GEOLOCATION_PERMISSIONS")) {
+            SharedStatics.recordStaticApiCall(ApiCall.GET_GEOLOCATION_PERMISSIONS);
+            return mAwInit.getDefaultGeolocationPermissions();
+        }
     }
 
     @Override

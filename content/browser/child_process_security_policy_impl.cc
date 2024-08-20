@@ -19,6 +19,7 @@
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/not_fatal_until.h"
 #include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -48,6 +49,7 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/filename_util.h"
 #include "net/base/url_util.h"
@@ -76,6 +78,7 @@ BASE_FEATURE(kAdditionalNavigationCommitChecks,
 BASE_FEATURE(kSandboxedFrameEnforcements,
              "SandboxedFrameEnforcements",
              base::FEATURE_ENABLED_BY_DEFAULT);
+
 }  // namespace features
 
 namespace content {
@@ -897,14 +900,15 @@ void ChildProcessSecurityPolicyImpl::AddForTesting(
     int child_id,
     BrowserContext* browser_context) {
   Add(child_id, browser_context);
-  LockProcess(
-      IsolationContext(BrowsingInstanceId(1), browser_context,
-                       /*is_guest=*/false, /*is_fenced=*/false,
-                       OriginAgentClusterIsolationState::CreateNonIsolated()),
-      child_id, /*is_process_used=*/false,
-      ProcessLock::CreateAllowAnySite(
-          StoragePartitionConfig::CreateDefault(browser_context),
-          WebExposedIsolationInfo::CreateNonIsolated()));
+  LockProcess(IsolationContext(
+                  BrowsingInstanceId(1), browser_context,
+                  /*is_guest=*/false, /*is_fenced=*/false,
+                  OriginAgentClusterIsolationState::CreateForDefaultIsolation(
+                      browser_context)),
+              child_id, /*is_process_used=*/false,
+              ProcessLock::CreateAllowAnySite(
+                  StoragePartitionConfig::CreateDefault(browser_context),
+                  WebExposedIsolationInfo::CreateNonIsolated()));
 }
 
 void ChildProcessSecurityPolicyImpl::Remove(int child_id) {
@@ -1858,6 +1862,26 @@ bool ChildProcessSecurityPolicyImpl::IsAccessAllowedForSandboxedProcess(
   }
 }
 
+bool ChildProcessSecurityPolicyImpl::IsAccessAllowedForPdfProcess(
+    AccessType access_type) {
+  if (!base::FeatureList::IsEnabled(features::kPdfEnforcements)) {
+    return true;
+  }
+
+  // PDF processes are allowed to commit normal URLs, and they should be able to
+  // claim that they host a regular origin for things like verifying source
+  // origins for postMessage. However, PDF renderers should never need to access
+  // passwords, storage, or other data for the PDF document's origin or any
+  // other origin.
+  switch (access_type) {
+    case AccessType::kCanCommitNewOrigin:
+    case AccessType::kHostsOrigin:
+      return true;
+    case AccessType::kCanAccessDataForCommittedOrigin:
+      return false;
+  }
+}
+
 bool ChildProcessSecurityPolicyImpl::CanAccessMaybeOpaqueOrigin(
     int child_id,
     const GURL& url,
@@ -1899,6 +1923,9 @@ bool ChildProcessSecurityPolicyImpl::CanAccessMaybeOpaqueOrigin(
                    actual_process_lock, url, url_is_precursor_of_opaque_origin,
                    access_type)) {
       failure_reason = "sandboxing_restrictions";
+    } else if (actual_process_lock.is_pdf() &&
+               !IsAccessAllowedForPdfProcess(access_type)) {
+      failure_reason = "pdf_restrictions";
     } else {
       // Loop over all BrowsingInstanceIDs in the SecurityState, and return true
       // if any of them would return true, otherwise return false. This allows
@@ -2026,7 +2053,12 @@ bool ChildProcessSecurityPolicyImpl::CanAccessMaybeOpaqueOrigin(
                         .WithIsPdf(actual_process_lock.is_pdf())
                         .WithSandbox(actual_process_lock.is_sandboxed())
                         .WithUniqueSandboxId(
-                            actual_process_lock.unique_sandbox_id())));
+                            actual_process_lock.unique_sandbox_id())
+                        .WithCrossOriginIsolationKey(
+                            actual_process_lock.agent_cluster_key()
+                                ? actual_process_lock.agent_cluster_key()
+                                      ->GetCrossOriginIsolationKey()
+                                : std::nullopt)));
 
         if (actual_process_lock.is_locked_to_site()) {
           // Jail-style enforcement - a process with a lock can only access
@@ -2236,7 +2268,7 @@ void ChildProcessSecurityPolicyImpl::LockProcess(
 
   base::AutoLock lock(lock_);
   auto state = security_state_.find(child_id);
-  DCHECK(state != security_state_.end());
+  CHECK(state != security_state_.end(), base::NotFatalUntil::M130);
   state->second->SetProcessLock(process_lock, context, is_process_used);
 }
 

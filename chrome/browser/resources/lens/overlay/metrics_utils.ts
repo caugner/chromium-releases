@@ -12,6 +12,19 @@ export function recordLensOverlayInteraction(
   chrome.metricsPrivate.recordEnumerationValue(
       `Lens.Overlay.Overlay.ByInvocationSource.${invocationSource}.UserAction`,
       interaction, UserAction.MAX_VALUE + 1);
-  BrowserProxyImpl.getInstance().handler.recordUkmLensOverlayInteraction(
-      interaction);
+  BrowserProxyImpl.getInstance()
+      .handler.recordUkmAndTaskCompletionForLensOverlayInteraction(interaction);
+}
+
+/** Records |durationMs| in the |metricName| histogram. */
+export function recordTimeToWebUIReady(durationMs: number) {
+  chrome.metricsPrivate.recordValue(
+      {
+        metricName: 'Lens.Overlay.TimeToWebUIReady',
+        type: chrome.metricsPrivate.MetricTypeType.HISTOGRAM_LOG,
+        min: 1,
+        max: 50000,  // 50 seconds.
+        buckets: 100,
+      },
+      Math.floor(durationMs));
 }

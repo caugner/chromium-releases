@@ -33,8 +33,9 @@
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/service_access_type.h"
-#include "ui/base/l10n/l10n_util.h"
+#include "components/variations/service/variations_service.h"
 #include "url/android/gurl_android.h"
+#include "url/origin.h"
 
 // Must come after all headers that specialize FromJniType() / ToJniType().
 #include "chrome/browser/feed/android/jni_headers/WebFeedBridge_jni.h"
@@ -230,10 +231,7 @@ static jboolean JNI_WebFeedBridge_IsCormorantEnabledForLocale(JNIEnv* env) {
 }
 
 static jboolean JNI_WebFeedBridge_IsWebFeedEnabled(JNIEnv* env) {
-  return l10n_util::GetLanguage(g_browser_process->GetApplicationLocale()) ==
-             "en" &&
-         feed::IsWebFeedEnabledForLocale(
-             country_codes::GetCurrentCountryCode());
+  return feed::IsWebFeedEnabledForLocale(FeedServiceFactory::GetCountry());
 }
 
 static void JNI_WebFeedBridge_FollowWebFeedById(
@@ -374,9 +372,9 @@ static void JNI_WebFeedBridge_GetRecentVisitCountsToHost(
   auto begin_time =
       base::Time::Now() -
       base::Days(GetFeedConfig().webfeed_accelerator_recent_visit_history_days);
-  history_service->GetDailyVisitsToHost(
-      url::GURLAndroid::ToNativeGURL(env, j_url), begin_time, end_time,
-      std::move(callback), &TaskTracker());
+  history_service->GetDailyVisitsToOrigin(
+      url::Origin::Create(url::GURLAndroid::ToNativeGURL(env, j_url)),
+      begin_time, end_time, std::move(callback), &TaskTracker());
 }
 
 static void JNI_WebFeedBridge_IncrementFollowedFromWebPageMenuCount(

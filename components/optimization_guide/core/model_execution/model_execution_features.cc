@@ -25,6 +25,14 @@ BASE_FEATURE(kTabOrganizationSettingsVisibility,
 BASE_FEATURE(kWallpaperSearchSettingsVisibility,
              "WallpaperSearchSettingsVisibility",
              base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kHistorySearchSettingsVisibility,
+             "HistorySearchSettingsVisibility",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+const base::FeatureParam<std::string> kPerformanceClassListForHistorySearch(
+    &kHistorySearchSettingsVisibility,
+    "PerformanceClassListForHistorySearch",
+    "*");
 
 // Graduation features.
 
@@ -73,6 +81,10 @@ bool IsGraduatedFeature(UserVisibleFeatureKey feature) {
     case UserVisibleFeatureKey::kWallpaperSearch:
       is_graduated = base::FeatureList::IsEnabled(kWallpaperSearchGraduated);
       break;
+    case UserVisibleFeatureKey::kHistorySearch:
+      // History search is currently planned to always be opt-in.
+      is_graduated = false;
+      break;
   }
   DCHECK(!is_graduated ||
          !base::FeatureList::IsEnabled(
@@ -91,6 +103,8 @@ const base::Feature* GetFeatureToUseToCheckSettingsVisibility(
       return &kTabOrganizationSettingsVisibility;
     case UserVisibleFeatureKey::kWallpaperSearch:
       return &kWallpaperSearchSettingsVisibility;
+    case UserVisibleFeatureKey::kHistorySearch:
+      return &kHistorySearchSettingsVisibility;
   }
 }
 
@@ -104,6 +118,13 @@ base::flat_set<UserVisibleFeatureKey> GetAllowedFeaturesForUnsignedUser() {
     }
   }
   return allowed_features;
+}
+
+bool ShouldEnableFeatureWhenMainToggleOn(UserVisibleFeatureKey feature) {
+  const auto* visibility_feature =
+      GetFeatureToUseToCheckSettingsVisibility(feature);
+  return (GetFieldTrialParamByFeatureAsBool(
+      *visibility_feature, "enable_feature_when_main_toggle_on", true));
 }
 
 // LINT.IfChange(IsOnDeviceModelEnabled)
@@ -122,6 +143,7 @@ bool IsOnDeviceModelEnabled(ModelBasedCapabilityKey feature) {
     case ModelBasedCapabilityKey::kWallpaperSearch:
     case ModelBasedCapabilityKey::kTextSafety:
       return false;
+    case ModelBasedCapabilityKey::kHistorySearch:
     case ModelBasedCapabilityKey::kPromptApi:
       return true;
   }
@@ -146,6 +168,9 @@ bool IsOnDeviceModelAdaptationEnabled(ModelBasedCapabilityKey feature) {
     case ModelBasedCapabilityKey::kPromptApi:
       return base::GetFieldTrialParamByFeatureAsBool(
           kOnDeviceModelPromptApiFeature, "enable_adaptation", false);
+    case ModelBasedCapabilityKey::kHistorySearch:
+      // TODO(crbug.com/325108985): Update to true once we onboard the model.
+      return false;
     case ModelBasedCapabilityKey::kTabOrganization:
     case ModelBasedCapabilityKey::kWallpaperSearch:
     case ModelBasedCapabilityKey::kTextSafety:
@@ -162,6 +187,10 @@ proto::OptimizationTarget GetOptimizationTargetForModelAdaptation(
       return proto::OPTIMIZATION_TARGET_COMPOSE;
     case ModelBasedCapabilityKey::kTest:
       return proto::OPTIMIZATION_TARGET_MODEL_VALIDATION;
+    // TODO(crbug.com/325108985): Update once we onboard the model.
+    case ModelBasedCapabilityKey::kHistorySearch:
+      NOTREACHED_IN_MIGRATION();
+      break;
     case ModelBasedCapabilityKey::kPromptApi:
     case ModelBasedCapabilityKey::kTabOrganization:
     case ModelBasedCapabilityKey::kWallpaperSearch:

@@ -227,7 +227,7 @@ bool AXRelationCache::IsAriaOwned(const AXObject* child, bool check) const {
       for (AXID id : owner_ids_to_update_) {
         msg << " " << id;
       }
-      NOTREACHED() << msg.str();
+      DUMP_WILL_BE_CHECK(false) << msg.str();
     }
   }
 
@@ -819,7 +819,9 @@ void AXRelationCache::UpdateAriaOwnerToChildrenMappingWithCleanLayout(
       // Mark everything dirty so that the serializer sees all changes.
       ChildrenChangedWithCleanLayout(original_parent);
       ChildrenChangedWithCleanLayout(ax_unparented->ParentObjectIfPresent());
-      object_cache_->MarkAXObjectDirtyWithCleanLayout(ax_unparented);
+      if (!ax_unparented->IsDetached()) {
+        object_cache_->MarkAXObjectDirtyWithCleanLayout(ax_unparented);
+      }
     }
   }
 

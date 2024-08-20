@@ -147,6 +147,7 @@ std::unique_ptr<Label> BubbleFrameView::CreateDefaultTitleLabel(
       title_text, style::CONTEXT_DIALOG_TITLE, style::STYLE_PRIMARY);
   if (base::FeatureList::IsEnabled(features::kBubbleFrameViewTitleIsHeading)) {
     label->GetViewAccessibility().SetRole(ax::mojom::Role::kHeading);
+    label->GetViewAccessibility().SetHierarchicalLevel(1);
   }
   return label;
 }
@@ -157,7 +158,8 @@ std::unique_ptr<Button> BubbleFrameView::CreateCloseButton(
   auto close_button = CreateVectorImageButtonWithNativeTheme(
       std::move(callback), vector_icons::kCloseChromeRefreshIcon);
   close_button->SetTooltipText(l10n_util::GetStringUTF16(IDS_APP_CLOSE));
-  close_button->SetAccessibleName(l10n_util::GetStringUTF16(IDS_APP_CLOSE));
+  close_button->GetViewAccessibility().SetName(
+      l10n_util::GetStringUTF16(IDS_APP_CLOSE));
   close_button->SizeToPreferredSize();
 
   InstallCircleHighlightPathGenerator(close_button.get());
@@ -172,7 +174,7 @@ std::unique_ptr<Button> BubbleFrameView::CreateMinimizeButton(
       std::move(callback), kWindowControlMinimizeIcon);
   minimize_button->SetTooltipText(
       l10n_util::GetStringUTF16(IDS_APP_ACCNAME_MINIMIZE));
-  minimize_button->SetAccessibleName(
+  minimize_button->GetViewAccessibility().SetName(
       l10n_util::GetStringUTF16(IDS_APP_ACCNAME_MINIMIZE));
   minimize_button->SizeToPreferredSize();
 
@@ -1038,8 +1040,8 @@ int BubbleFrameView::GetFrameWidthForClientWidth(int client_width) const {
 
   DialogDelegate* const dialog_delegate =
       GetWidget()->widget_delegate()->AsDialogDelegate();
-  bool snapping = dialog_delegate &&
-                  dialog_delegate->GetDialogButtons() != ui::DIALOG_BUTTON_NONE;
+  bool snapping =
+      dialog_delegate && dialog_delegate->buttons() != ui::DIALOG_BUTTON_NONE;
   return snapping ? LayoutProvider::Get()->GetSnappedDialogWidth(frame_width)
                   : frame_width;
 }

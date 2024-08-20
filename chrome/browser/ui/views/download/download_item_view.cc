@@ -230,10 +230,10 @@ bool has_warning_label(download::DownloadItemMode mode) {
 }
 
 float GetDPIScaleForView(views::View* view) {
-  const display::Screen* const screen = display::Screen::GetScreen();
-  DCHECK(screen);
-  return screen->GetDisplayNearestView(view->GetWidget()->GetNativeView())
-      .device_scale_factor();
+  DCHECK(display::Screen::GetScreen());
+  return display::Screen::GetScreen()
+      ->GetPreferredScaleFactorForView(view->GetWidget()->GetNativeView())
+      .value_or(1.0f);
 }
 }  // namespace
 
@@ -411,8 +411,9 @@ void DownloadItemView::Layout(PassKey) {
     gfx::Rect button_bounds(gfx::Point(label->bounds().right() + kLabelPadding,
                                        CenterY(button_size.height())),
                             button_size);
-    for (auto* button : {save_button_, discard_button_, scan_button_,
-                         open_now_button_, review_button_}) {
+    for (const raw_ptr<views::MdTextButton>& button :
+         {save_button_, discard_button_, scan_button_, open_now_button_,
+          review_button_}) {
       button->SetBoundsRect(button_bounds);
       if (button->GetVisible())
         button_bounds.set_x(button_bounds.right() + kSaveDiscardButtonPadding);

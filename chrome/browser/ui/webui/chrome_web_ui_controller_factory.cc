@@ -124,7 +124,6 @@
 #else  // BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/media/router/discovery/access_code/access_code_cast_feature.h"
 #include "chrome/browser/media/router/media_router_feature.h"
-#include "chrome/browser/ui/views/side_panel/customize_chrome/customize_chrome_utils.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/webui/access_code_cast/access_code_cast_ui.h"
 #include "chrome/browser/ui/webui/app_service_internals/app_service_internals_ui.h"
@@ -148,9 +147,6 @@
 #include "chrome/browser/ui/webui/search_engine_choice/search_engine_choice_ui.h"
 #include "chrome/browser/ui/webui/settings/settings_ui.h"
 #include "chrome/browser/ui/webui/settings/settings_utils.h"
-#include "chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome_ui.h"
-#include "chrome/browser/ui/webui/side_panel/history_clusters/history_clusters_side_panel_ui.h"
-#include "chrome/browser/ui/webui/side_panel/performance_controls/performance_side_panel_ui.h"
 #include "chrome/browser/ui/webui/signin/sync_confirmation_ui.h"
 #include "chrome/browser/ui/webui/support_tool/support_tool_ui.h"
 #include "chrome/browser/ui/webui/sync_file_system_internals/sync_file_system_internals_ui.h"
@@ -173,9 +169,11 @@
 #include "ash/webui/print_preview_cros/url_constants.h"
 #include "ash/webui/recorder_app_ui/url_constants.h"
 #include "ash/webui/vc_background_ui/url_constants.h"
+#include "chrome/browser/ash/app_mode/kiosk_controller.h"
 #include "chrome/browser/ash/extensions/url_constants.h"
 #include "chrome/browser/extensions/extension_keeplist_chromeos.h"
 #include "chrome/browser/ui/webui/ash/cellular_setup/mobile_setup_ui.h"
+#include "chromeos/ash/components/kiosk/vision/internals_page_processor.h"
 #include "chromeos/ash/components/kiosk/vision/webui/constants.h"
 #include "chromeos/ash/components/kiosk/vision/webui/ui_controller.h"
 #include "chromeos/ash/components/scalable_iph/scalable_iph_constants.h"
@@ -326,7 +324,11 @@ template <>
 WebUIController* NewWebUI<ash::kiosk_vision::UIController>(WebUI* web_ui,
                                                            const GURL& url) {
   return new ash::kiosk_vision::UIController(
-      web_ui, base::BindRepeating(webui::SetupWebUIDataSource));
+      web_ui, base::BindRepeating(webui::SetupWebUIDataSource),
+      base::BindRepeating([]() {
+        return ash::KioskController::Get()
+            .GetKioskVisionInternalsPageProcessor();
+      }));
 }
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
@@ -369,14 +371,6 @@ WebUIController* NewWebUI<WelcomeUI>(WebUI* web_ui, const GURL& url) {
   return new WelcomeUI(web_ui, url);
 }
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
-
-#if !BUILDFLAG(IS_ANDROID)
-template <>
-WebUIController* NewWebUI<PerformanceSidePanelUI>(WebUI* web_ui,
-                                                  const GURL& url) {
-  return new PerformanceSidePanelUI(web_ui, url);
-}
-#endif  // !BUILDFLAG(IS_ANDROID)
 
 bool IsAboutUI(const GURL& url) {
   return (url.host_piece() == chrome::kChromeUIChromeURLsHost ||
@@ -431,8 +425,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #endif
   if (url.host_piece() == chrome::kChromeUIDeviceLogHost)
     return &NewWebUI<chromeos::DeviceLogUI>;
-  if (url.host_piece() == chrome::kChromeUIDownloadInternalsHost)
-    return &NewWebUI<DownloadInternalsUI>;
   if (url.host_piece() == chrome::kChromeUIGCMInternalsHost)
     return &NewWebUI<GCMInternalsUI>;
   if (url.host_piece() == chrome::kChromeUIInternalsHost)
@@ -446,8 +438,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   if (url.host_piece() ==
           ash::kiosk_vision::kChromeUIKioskVisionInternalsHost &&
-      base::FeatureList::IsEnabled(
-          ash::kiosk_vision::kEnableKioskVisionInternalsPage)) {
+      ash::kiosk_vision::IsInternalsPageEnabled()) {
     return &NewWebUI<ash::kiosk_vision::UIController>;
   }
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
@@ -545,16 +536,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
       return &NewWebUI<NewTabPageUI>;
     if (url.host_piece() == chrome::kChromeUINewTabPageThirdPartyHost)
       return &NewWebUI<NewTabPageThirdPartyUI>;
-  }
-  if (url.host_piece() == chrome::kChromeUICustomizeChromeSidePanelHost) {
-    return &NewWebUI<CustomizeChromeUI>;
-  }
-  if (base::FeatureList::IsEnabled(history_clusters::kSidePanelJourneys)) {
-    if (url.host_piece() == chrome::kChromeUIHistoryClustersSidePanelHost)
-      return &NewWebUI<HistoryClustersSidePanelUI>;
-  }
-  if (url.host_piece() == chrome::kChromeUIPerformanceSidePanelHost) {
-    return &NewWebUI<PerformanceSidePanelUI>;
   }
   // Settings are implemented with native UI elements on Android.
   if (url.host_piece() == chrome::kChromeUISettingsHost)
@@ -1056,6 +1037,7 @@ ChromeWebUIControllerFactory::GetListOfAcceptableURLs() {
     GURL(chrome::kChromeUIBorealisCreditsURL),
     GURL(chrome::kChromeUIBorealisInstallerUrl),
     GURL(chrome::kChromeUICloudUploadURL),
+    GURL(chrome::kChromeUILocalFilesMigrationURL),
     GURL(chrome::kChromeUIConnectivityDiagnosticsAppURL),
     GURL(chrome::kChromeUICrashesUrl),
     GURL(chrome::kChromeUICrostiniCreditsURL),
@@ -1070,7 +1052,6 @@ ChromeWebUIControllerFactory::GetListOfAcceptableURLs() {
     GURL(chrome::kChromeUIFirmwareUpdaterAppURL),
     GURL(chrome::kChromeUIFocusModeMediaURL),
     GURL(chrome::kChromeUIHealthdInternalsURL),
-    GURL(chrome::kChromeUIHumanPresenceInternalsURL),
     GURL(chrome::kChromeUIInternetConfigDialogURL),
     GURL(chrome::kChromeUIInternetDetailDialogURL),
     GURL(chrome::kChromeUILauncherInternalsURL),

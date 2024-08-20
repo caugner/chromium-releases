@@ -81,7 +81,7 @@ if deps_str != '':
     # Bullseye, the package was renamed to libgcc-s1.  To avoid adding a dep
     # on the newer package, this hack skips the dep.  This is safe because
     # libgcc-s1 is a dependency of libc6.  This hack can be removed once
-    # support for Debian Buster is dropped.
+    # support for Ubuntu Bionic is dropped.
     if interval_set.intervals[0].package == 'libgcc-s1':
       assert len(interval_set.intervals) == 1
       interval = interval_set.intervals[0]

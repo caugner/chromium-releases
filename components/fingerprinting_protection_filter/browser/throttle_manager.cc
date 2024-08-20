@@ -10,17 +10,15 @@
 
 #include "base/check.h"
 #include "base/containers/contains.h"
-#include "base/debug/crash_logging.h"
-#include "base/debug/dump_without_crashing.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "components/fingerprinting_protection_filter/browser/fingerprinting_protection_child_navigation_throttle.h"
-#include "components/fingerprinting_protection_filter/browser/fingerprinting_protection_filter_constants.h"
-#include "components/fingerprinting_protection_filter/browser/fingerprinting_protection_filter_features.h"
 #include "components/fingerprinting_protection_filter/browser/fingerprinting_protection_page_activation_throttle.h"
 #include "components/fingerprinting_protection_filter/browser/fingerprinting_protection_web_contents_helper.h"
+#include "components/fingerprinting_protection_filter/common/fingerprinting_protection_filter_constants.h"
+#include "components/fingerprinting_protection_filter/common/fingerprinting_protection_filter_features.h"
 #include "components/subresource_filter/content/shared/browser/activation_state_computing_navigation_throttle.h"
 #include "components/subresource_filter/content/shared/common/subresource_filter_utils.h"
 #include "components/subresource_filter/core/browser/async_document_subresource_filter.h"
@@ -211,16 +209,6 @@ void ThrottleManager::DidFinishInFrameNavigation(
   if (!navigation_handle->HasCommitted() && !is_initial_navigation) {
     // TODO(https://crbug.com/40280666): Figure out how we can have a
     // navigation that is not the initial with no frame filter.
-    SCOPED_CRASH_KEY_STRING1024(
-        "crbug40280666", "navigation-url",
-        navigation_handle->GetURL().possibly_invalid_spec());
-    SCOPED_CRASH_KEY_STRING256(
-        "crbug40280666", "navigation-error-code",
-        net::ErrorToString(navigation_handle->GetNetErrorCode()));
-    SCOPED_CRASH_KEY_STRING1024(
-        "crbug40280666", "last-committed-url",
-        frame_host->GetLastCommittedURL().possibly_invalid_spec());
-    base::debug::DumpWithoutCrashing();
     return;
   }
 
@@ -474,7 +462,15 @@ void ThrottleManager::RecordUmaHistogramsForRootNavigation(
     content::NavigationHandle* navigation_handle,
     const subresource_filter::mojom::ActivationLevel& activation_level,
     bool did_inherit_opener_activation) {
-  // TODO(https://crbug.com/40280666): Add PageLoad metrics.
+  UMA_HISTOGRAM_ENUMERATION(
+      "FingerprintingProtection.PageLoad.RootNavigation.ActivationState",
+      activation_level);
+  if (did_inherit_opener_activation) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "FingerprintingProtection.PageLoad.RootNavigation.ActivationState."
+        "DidInherit",
+        activation_level);
+  }
 }
 
 }  // namespace fingerprinting_protection_filter

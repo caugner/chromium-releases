@@ -172,8 +172,6 @@ void MahiWebContentsManager::Initialize() {
                              base::BindRepeating(
                                  &MahiWebContentsManager::RequestContent,
                                  weak_pointer_factory_.GetWeakPtr()));
-  content_extraction_delegate_ =
-      std::make_unique<MahiContentExtractionDelegate>();
 
   is_initialized_ = true;
 }
@@ -275,7 +273,7 @@ bool MahiWebContentsManager::GetPrefValue() const {
     return false;
   }
   return session_controller->GetActivePrefService()->GetBoolean(
-      ash::prefs::kMahiEnabled);
+      ash::prefs::kHmrEnabled);
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
@@ -340,6 +338,11 @@ void MahiWebContentsManager::RequestContent(
     return;
   }
 
+  if (!content_extraction_delegate_) {
+    content_extraction_delegate_ =
+        std::make_unique<MahiContentExtractionDelegate>();
+  }
+
   if (IsPDFWebContents(focused_web_contents_)) {
     RequestPDFContent(page_id, std::move(callback));
   } else {
@@ -357,7 +360,8 @@ void MahiWebContentsManager::RequestWebContent(
                      focused_web_content_state_.page_id, focused_web_contents_,
                      start_time, std::move(callback)),
       ui::kAXModeWebContentsOnly,
-      /* max_nodes= */ 5000, /* timeout= */ {});
+      /* max_nodes= */ 5000, /* timeout= */ {},
+      content::WebContents::AXTreeSnapshotPolicy::kAll);
 }
 
 void MahiWebContentsManager::RequestPDFContent(

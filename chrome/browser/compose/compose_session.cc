@@ -23,6 +23,7 @@
 #include "base/timer/elapsed_timer.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
+#include "chrome/browser/compose/compose_ax_serialization_utils.h"
 #include "chrome/browser/content_extraction/inner_text.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
@@ -52,6 +53,8 @@
 #include "content/public/browser/web_contents_user_data.h"
 #include "content/public/common/referrer.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
+#include "ui/accessibility/ax_mode.h"
+#include "ui/accessibility/ax_tree_update.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
@@ -150,13 +153,12 @@ class ComposeState {
     mojo_state_ = std::move(mojo_state);
   }
 
-  void UploadModelQualityLogs(
-      raw_ptr<optimization_guide::ModelQualityLogsUploader> logs_uploader) {
-    if (!logs_uploader || !modeling_log_entry_) {
+  void UploadModelQualityLogs() {
+    if (!modeling_log_entry_) {
       return;
     }
     LogRequestFeedback();
-    logs_uploader->UploadModelQualityLogs(TakeModelingLogEntry());
+    optimization_guide::ModelQualityLogEntry::Upload(TakeModelingLogEntry());
   }
 
   void LogRequestFeedback() {
@@ -198,7 +200,6 @@ class ComposeState {
 ComposeSession::ComposeSession(
     content::WebContents* web_contents,
     optimization_guide::OptimizationGuideModelExecutor* executor,
-    optimization_guide::ModelQualityLogsUploader* model_quality_logs_uploader,
     base::Token session_id,
     InnerTextProvider* inner_text,
     autofill::FieldGlobalId node_id,
@@ -207,23 +208,16 @@ ComposeSession::ComposeSession(
     ComposeCallback callback)
     : executor_(executor),
       handler_receiver_(this),
-      current_msbb_state_(false),
-      msbb_initially_off_(false),
-      msbb_close_reason_(
-          compose::ComposeMSBBSessionCloseReason::kMSBBEndedImplicitly),
-      fre_close_reason_(
-          compose::ComposeFirstRunSessionCloseReason::kEndedImplicitly),
-      close_reason_(compose::ComposeSessionCloseReason::kEndedImplicitly),
-      final_status_(optimization_guide::proto::FinalStatus::STATUS_UNSPECIFIED),
       web_contents_(web_contents),
       observer_(observer),
       collect_inner_text_(
           base::FeatureList::IsEnabled(compose::features::kComposeInnerText)),
+      collect_ax_snapshot_(
+          base::FeatureList::IsEnabled(compose::features::kComposeAXSnapshot)),
       inner_text_caller_(inner_text),
       ukm_source_id_(web_contents->GetPrimaryMainFrame()->GetPageUkmSourceId()),
       node_id_(node_id),
       is_page_language_supported_(is_page_language_supported),
-      model_quality_logs_uploader_(model_quality_logs_uploader),
       session_id_(session_id),
       weak_ptr_factory_(this) {
   session_duration_ = std::make_unique<base::ElapsedTimer>();
@@ -307,7 +301,7 @@ ComposeSession::~ComposeSession() {
     compose::LogComposeSessionDuration(session_duration_->Elapsed(), ".Ignored",
                                        eval_location);
   }
-  if (close_reason_ == compose::ComposeSessionCloseReason::kEndedImplicitly) {
+  if (close_reason_ == compose::ComposeSessionCloseReason::kAbandoned) {
     base::RecordAction(
         base::UserMetricsAction("Compose.EndedSession.EndedImplicitly"));
 
@@ -323,31 +317,26 @@ ComposeSession::~ComposeSession() {
   // a modeling_log_entry. However in order to more easily test the quality
   // uploads we are calling upload directly here.
 
-  if (!model_quality_logs_uploader_) {
-    // Can not upload any logs so exit early.
-    return;
-  }
-
   if (most_recent_error_log_) {
     // First set final status on most_recent_error_log.
     most_recent_error_log_
         ->quality_data<optimization_guide::ComposeFeatureTypeMap>()
         ->set_final_status(final_status_);
-    model_quality_logs_uploader_->UploadModelQualityLogs(
+    optimization_guide::ModelQualityLogEntry::Upload(
         std::move(most_recent_error_log_));
   } else if (auto last_response_state = LastResponseState();
              last_response_state.has_value()) {
     if (auto* log_entry = last_response_state->modeling_log_entry()) {
       log_entry->quality_data<optimization_guide::ComposeFeatureTypeMap>()
           ->set_final_status(final_status_);
-      last_response_state->UploadModelQualityLogs(model_quality_logs_uploader_);
+      last_response_state->UploadModelQualityLogs();
     }
   }
 
   for (auto& state : history_) {
     // Upload all saved states with a valid quality logs member (those tied to
     // a ComposeResponse) and then clear all states.
-    state->UploadModelQualityLogs(model_quality_logs_uploader_);
+    state->UploadModelQualityLogs();
   }
 }
 
@@ -452,26 +441,26 @@ void ComposeSession::MakeRequest(
     return;
   }
 
-  if (!collect_inner_text_ || got_inner_text_) {
-    RequestWithSession(std::move(request), request_reason, is_input_edited);
-  } else {
-    // Prepare the compose call, which will be invoked when inner text
-    // extraction is completed.
-    continue_compose_ = base::BindOnce(
-        &ComposeSession::RequestWithSession, weak_ptr_factory_.GetWeakPtr(),
-        std::move(request), request_reason, is_input_edited);
-  }
+  // Prepare the compose call, which will be invoked when all required page
+  // metadata is collected.
+  continue_compose_ = base::BindOnce(
+      &ComposeSession::RequestWithSession, weak_ptr_factory_.GetWeakPtr(),
+      std::move(request), request_reason, is_input_edited);
+  // In case AX tree or page collection isn't required, we can run the
+  // continuation immediately. Note that going through this call ensures we
+  // populate the context object correctly.
+  TryContinueComposeWithContext();
+}
+
+bool ComposeSession::HasNecessaryPageContext() const {
+  return (!collect_inner_text_ || got_inner_text_) &&
+         (!collect_ax_snapshot_ || got_ax_snapshot_);
 }
 
 void ComposeSession::RequestWithSession(
     const optimization_guide::proto::ComposeRequest& request,
     compose::ComposeRequestReason request_reason,
     bool is_input_edited) {
-  if (!collect_inner_text_) {
-    // Make sure context is added for sessions with no inner text.
-    AddPageContentToSession("", std::nullopt, "");
-  }
-
   // Add timeout for high latency Compose requests.
   const compose::Config& config = compose::GetComposeConfig();
 
@@ -647,8 +636,8 @@ void ComposeSession::ModelExecutionComplete(
     token->set_low(session_id_.low());
     // In the event that we are holding onto an error log upload it before it
     // gets overwritten
-    if (most_recent_error_log_ && model_quality_logs_uploader_) {
-      model_quality_logs_uploader_->UploadModelQualityLogs(
+    if (most_recent_error_log_) {
+      optimization_guide::ModelQualityLogEntry::Upload(
           std::move(most_recent_error_log_));
     }
 
@@ -709,7 +698,7 @@ void ComposeSession::AddNewResponseToHistory(
 
 void ComposeSession::EraseForwardStatesInHistory() {
   for (size_t i = history_current_index_ + 1; i < history_.size(); i++) {
-    history_[i]->UploadModelQualityLogs(model_quality_logs_uploader_);
+    history_[i]->UploadModelQualityLogs();
   }
   if (history_.size() > history_current_index_ + 1) {
     history_.erase(history_.begin() + history_current_index_ + 1,
@@ -1002,10 +991,10 @@ void ComposeSession::InitializeWithText(std::string_view selected_text) {
   initial_input_ = std::string(selected_text);
   session_events_.has_initial_text = !selected_text.empty();
 
-  MaybeRefreshInnerText(!initial_input_.empty());
+  MaybeRefreshPageContext(!initial_input_.empty());
 }
 
-void ComposeSession::MaybeRefreshInnerText(bool has_selection) {
+void ComposeSession::MaybeRefreshPageContext(bool has_selection) {
   // Update dialog state based on the current selection which can change while
   // the dialog is hidden.
   currently_has_selection_ = has_selection;
@@ -1025,6 +1014,7 @@ void ComposeSession::MaybeRefreshInnerText(bool has_selection) {
   ++session_events_.compose_prompt_view_count;
 
   RefreshInnerText();
+  RefreshAXSnapshot();
 
   // We should only autocompose once per session
   if (has_checked_autocompose_) {
@@ -1037,30 +1027,6 @@ void ComposeSession::MaybeRefreshInnerText(bool has_selection) {
     Compose(initial_input_, false);
   }
   has_checked_autocompose_ = true;
-}
-
-void ComposeSession::AddPageContentToSession(
-    std::string inner_text,
-    std::optional<uint64_t> node_offset,
-    std::string trimmed_inner_text) {
-  if (!session_) {
-    return;
-  }
-  optimization_guide::proto::ComposePageMetadata page_metadata;
-  page_metadata.set_page_url(web_contents_->GetLastCommittedURL().spec());
-  page_metadata.set_page_title(base::UTF16ToUTF8(web_contents_->GetTitle()));
-
-  if (node_offset.has_value()) {
-    page_metadata.set_page_inner_text_offset(node_offset.value());
-  }
-  page_metadata.set_trimmed_page_inner_text(trimmed_inner_text);
-
-  page_metadata.set_page_inner_text(std::move(inner_text));
-
-  optimization_guide::proto::ComposeRequest request;
-  *request.mutable_page_metadata() = std::move(page_metadata);
-
-  session_->AddContext(request);
 }
 
 void ComposeSession::UpdateInnerTextAndContinueComposeIfNecessary(
@@ -1096,11 +1062,67 @@ void ComposeSession::UpdateInnerTextAndContinueComposeIfNecessary(
     }
     compose::LogComposeDialogInnerTextOffsetFound(node_offset.has_value());
   }
-  AddPageContentToSession(std::move(inner_text), node_offset,
-                          std::move(trimmed_inner_text));
-  if (!continue_compose_.is_null()) {
-    std::move(continue_compose_).Run();
+
+  if (!session_) {
+    return;
   }
+
+  if (!page_metadata_) {
+    page_metadata_.emplace();
+  }
+
+  if (node_offset.has_value()) {
+    page_metadata_->set_page_inner_text_offset(node_offset.value());
+  }
+  page_metadata_->set_trimmed_page_inner_text(trimmed_inner_text);
+
+  page_metadata_->set_page_inner_text(std::move(inner_text));
+
+  TryContinueComposeWithContext();
+}
+
+void ComposeSession::UpdateAXSnapshotAndContinueComposeIfNecessary(
+    int request_id,
+    const ui::AXTreeUpdate& update) {
+  if (current_ax_snapshot_request_id_ != request_id) {
+    return;
+  }
+
+  got_ax_snapshot_ = true;
+  if (!page_metadata_) {
+    page_metadata_.emplace();
+  }
+
+  ComposeAXSerializationUtils::PopulateAXTreeUpdate(
+      update, page_metadata_->mutable_ax_tree_update());
+
+  TryContinueComposeWithContext();
+}
+
+void ComposeSession::TryContinueComposeWithContext() {
+  if (!HasNecessaryPageContext() || continue_compose_.is_null()) {
+    return;
+  }
+
+  if (!collect_inner_text_ && !collect_ax_snapshot_) {
+    // Make sure we populate the url and title even if we're not collecting
+    // other context information.
+    page_metadata_.emplace();
+  }
+
+  optimization_guide::proto::ComposeRequest request;
+  if (page_metadata_) {
+    page_metadata_->set_page_url(web_contents_->GetLastCommittedURL().spec());
+    page_metadata_->set_page_title(
+        base::UTF16ToUTF8(web_contents_->GetTitle()));
+
+    *request.mutable_page_metadata() = std::move(*page_metadata_);
+    page_metadata_.reset();
+
+    session_->AddContext(request);
+  }
+
+  std::move(continue_compose_).Run();
 }
 
 void ComposeSession::RefreshInnerText() {
@@ -1113,7 +1135,7 @@ void ComposeSession::RefreshInnerText() {
 
   inner_text_caller_->GetInnerText(
       *web_contents_->GetPrimaryMainFrame(),
-      // This unsafeValue call is acceptable ehre because node_id is a
+      // This unsafeValue call is acceptable here because node_id is a
       // FieldRendererId which while being an U64 type is based one the int
       // DOMid which we are querying here.
       node_id_.renderer_id.GetUnsafeValue(),
@@ -1122,12 +1144,30 @@ void ComposeSession::RefreshInnerText() {
           weak_ptr_factory_.GetWeakPtr(), current_inner_text_request_id_));
 }
 
+void ComposeSession::RefreshAXSnapshot() {
+  got_ax_snapshot_ = false;
+  if (!collect_ax_snapshot_) {
+    return;
+  }
+
+  ++current_ax_snapshot_request_id_;
+
+  web_contents_->RequestAXTreeSnapshot(
+      base::BindOnce(
+          &ComposeSession::UpdateAXSnapshotAndContinueComposeIfNecessary,
+          weak_ptr_factory_.GetWeakPtr(), current_ax_snapshot_request_id_),
+      ui::kAXModeWebContentsOnly,
+      compose::GetComposeConfig().max_ax_node_count_for_page_context,
+      /*timeout=*/{},
+      content::WebContents::AXTreeSnapshotPolicy::kSameOriginDirectDescendants);
+}
+
 void ComposeSession::SetFirstRunCloseReason(
-    compose::ComposeFirstRunSessionCloseReason close_reason) {
+    compose::ComposeFreOrMsbbSessionCloseReason close_reason) {
   fre_close_reason_ = close_reason;
 
-  if (close_reason == compose::ComposeFirstRunSessionCloseReason::
-                          kFirstRunDisclaimerAcknowledgedWithoutInsert) {
+  if (close_reason == compose::ComposeFreOrMsbbSessionCloseReason::
+                          kAckedOrAcceptedWithoutInsert) {
     if (current_msbb_state_) {
       // The FRE dialog progresses directly to the main dialog.
       session_events_.compose_prompt_view_count = 1;
@@ -1145,11 +1185,11 @@ void ComposeSession::SetFirstRunCompleted() {
   fre_complete_ = true;
 
   // Start inner text capture which was skipped until FRE was complete.
-  MaybeRefreshInnerText(currently_has_selection_);
+  MaybeRefreshPageContext(currently_has_selection_);
 }
 
 void ComposeSession::SetMSBBCloseReason(
-    compose::ComposeMSBBSessionCloseReason close_reason) {
+    compose::ComposeFreOrMsbbSessionCloseReason close_reason) {
   msbb_close_reason_ = close_reason;
 }
 
@@ -1165,16 +1205,16 @@ void ComposeSession::SetCloseReason(
 
   switch (close_reason) {
     case compose::ComposeSessionCloseReason::kCloseButtonPressed:
-    case compose::ComposeSessionCloseReason::kNewSessionWithSelectedText:
+    case compose::ComposeSessionCloseReason::kReplacedWithNewSession:
     case compose::ComposeSessionCloseReason::kCanceledBeforeResponseReceived:
       final_status_ = optimization_guide::proto::FinalStatus::STATUS_ABANDONED;
       session_events_.close_clicked = true;
       break;
-    case compose::ComposeSessionCloseReason::kEndedImplicitly:
+    case compose::ComposeSessionCloseReason::kAbandoned:
       final_status_ = optimization_guide::proto::FinalStatus::
           STATUS_FINISHED_WITHOUT_INSERT;
       break;
-    case compose::ComposeSessionCloseReason::kAcceptedSuggestion:
+    case compose::ComposeSessionCloseReason::kInsertedResponse:
       final_status_ = optimization_guide::proto::FinalStatus::STATUS_INSERTED;
       session_events_.inserted_results = true;
       if (CurrentState().has_value() && CurrentState()->is_user_edited()) {
@@ -1202,8 +1242,8 @@ void ComposeSession::SetQualityLogEntryUponError(
         ->set_was_generated_via_edit(was_input_edited);
     // In the event that we are holding onto an error log upload it before it
     // gets overwritten
-    if (most_recent_error_log_ && model_quality_logs_uploader_) {
-      model_quality_logs_uploader_->UploadModelQualityLogs(
+    if (most_recent_error_log_) {
+      optimization_guide::ModelQualityLogEntry::Upload(
           std::move(most_recent_error_log_));
     }
 
@@ -1217,8 +1257,8 @@ void ComposeSession::set_current_msbb_state(bool msbb_enabled) {
     msbb_initially_off_ = true;
   } else if (msbb_initially_off_) {
     session_events_.msbb_enabled_in_session = true;
-    SetMSBBCloseReason(
-        compose::ComposeMSBBSessionCloseReason::kMSBBAcceptedWithoutInsert);
+    SetMSBBCloseReason(compose::ComposeFreOrMsbbSessionCloseReason::
+                           kAckedOrAcceptedWithoutInsert);
     base::RecordAction(
         base::UserMetricsAction("Compose.DialogSeen.MainDialog"));
 
