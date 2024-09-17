@@ -14,18 +14,27 @@ void AddProductSpecificationsColorMixer(ui::ColorProvider* provider,
                                         const ui::ColorProviderKey& key) {
   ui::ColorMixer& mixer = provider->AddMixer();
   mixer[kColorProductSpecificationsButtonBackground] = {ui::kColorSysSurface2};
+  mixer[kColorProductSpecificationsCitationBackground] = {
+      ui::kColorSysBaseContainer};
+  mixer[kColorProductSpecificationsDetailChipBackground] = {
+      ui::kColorSysBaseContainer};
   mixer[kColorProductSpecificationsDisclosureBackground] = {
       ui::kColorPrimaryBackground};
   mixer[kColorProductSpecificationsDisclosureForeground] = {
       ui::kColorPrimaryForeground};
   mixer[kColorProductSpecificationsDisclosureGradientEnd] = {
-      ui::kColorSysGradientTertiary};
-  mixer[kColorProductSpecificationsDisclosureGradientStart] = {
       ui::kColorSysGradientPrimary};
+  mixer[kColorProductSpecificationsDisclosureGradientStart] = {
+      ui::kColorSysGradientTertiary};
   mixer[kColorProductSpecificationsDisclosureSummaryBackground] = {
       ui::kColorSysSurface4};
   mixer[kColorProductSpecificationsDivider] = {ui::kColorSysDivider};
+  mixer[kColorProductSpecificationsHorizontalCarouselScrollbarThumb] = {
+      ui::kColorSysTonalOutline};
   mixer[kColorProductSpecificationsIcon] = {ui::kColorIcon};
+  mixer[kColorProductSpecificationsIconButtonBackground] = {
+      ui::kColorSysSurface};
+  mixer[kColorProductSpecificationsLink] = {ui::kColorSysPrimary};
   mixer[kColorProductSpecificationsPageBackground] = {ui::kColorSysSurface2};
   mixer[kColorProductSpecificationsPrimaryTitle] = {
       ui::kColorPrimaryForeground};

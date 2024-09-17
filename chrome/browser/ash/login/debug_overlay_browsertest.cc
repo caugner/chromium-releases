@@ -43,7 +43,8 @@ class DebugOverlayTest : public OobeBaseTest {
     feature_list_.InitWithFeatures(
         {features::kOobeChoobe, features::kOobeTouchpadScroll,
          features::kOobeDisplaySize, features::kOobeGaiaInfoScreen,
-         features::kOobeSoftwareUpdate, features::kOobePersonalizedOnboarding},
+         features::kOobeSoftwareUpdate, features::kOobePersonalizedOnboarding,
+         features::kOobePerksDiscovery},
         {});
   }
 
