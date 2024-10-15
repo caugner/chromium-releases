@@ -33,7 +33,8 @@ constexpr std::string_view
 
 bool IsUrlAllowed(const GURL& url) {
   return url.SchemeIs(url::kHttpsScheme) ||
-         url.spec().starts_with("chrome://os-settings/osLanguages/input");
+         url.spec().starts_with("chrome://os-settings/osLanguages/input") ||
+         url.spec().starts_with("chrome://os-settings/systemPreferences");
 }
 
 EditorTextInsertion::InsertionStrategy GetInsertionStrategy(const GURL& url) {
@@ -74,8 +75,16 @@ void EditorSystemActuator::InsertText(const std::string& text) {
 
 void EditorSystemActuator::ApproveConsent() {
   system_->ProcessConsentAction(ConsentAction::kApprove);
-  system_->HandleTrigger(/*preset_query_id=*/std::nullopt,
-                         /*freeform_text=*/std::nullopt);
+
+  switch (notice_transition_action_) {
+    case EditorNoticeTransitionAction::kShowEditorPanel:
+      system_->HandleTrigger(/*preset_query_id=*/std::nullopt,
+                             /*freeform_text=*/std::nullopt);
+      return;
+    case EditorNoticeTransitionAction::kDoNothing:
+      system_->CloseUI();
+      return;
+  }
 }
 
 void EditorSystemActuator::DeclineConsent() {
@@ -159,6 +168,11 @@ void EditorSystemActuator::QueueTextInsertion(const std::string pending_text) {
 
 void EditorSystemActuator::OnInputContextUpdated(const GURL& url) {
   current_url_ = url;
+}
+
+void EditorSystemActuator::SetNoticeTransitionAction(
+    EditorNoticeTransitionAction transition_action) {
+  notice_transition_action_ = transition_action;
 }
 
 }  // namespace ash::input_method

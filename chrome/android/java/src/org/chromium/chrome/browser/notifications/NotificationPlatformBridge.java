@@ -35,6 +35,7 @@ import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.Promise;
+import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
@@ -131,6 +132,11 @@ public class NotificationPlatformBridge {
     private static Map<String, Map<String, Notification>>
             sOriginsWithProvisionallyRevokedPermissions =
                     new HashMap<String, Map<String, Notification>>();
+
+    // The `realtimeMillis` timestamp corresponding to the last time the pre-native processing for
+    // the `PRE_UNSUBSCRIBE` intent was started. Used to measure the time, as perceived by the user,
+    // that elapses until we see a duplicate intent being dispatched.
+    private static long sLastPreUnsubscribePreNativeTaskStartRealMillis = -1;
 
     private TrustedWebActivityClient mTwaClient;
 
@@ -974,6 +980,9 @@ public class NotificationPlatformBridge {
         Context context = ContextUtils.getApplicationContext();
         Resources res = context.getResources();
 
+        // TODO(crbug.com/41495650): Ideally we would not need native libraries here, find a way to
+        // format the `origin` using means other than the `UrlFormatter`.
+        LibraryLoader.getInstance().ensureInitialized();
         NotificationBuilderBase notificationBuilder =
                 prepareNotificationBuilder(
                         identifyingAttributes,
@@ -1309,6 +1318,11 @@ public class NotificationPlatformBridge {
      */
     private static void onNotificationPreUnsubcribe(
             NotificationIdentifyingAttributes identifyingAttributes) {
+        // Measure both real time, which includes CPU in power-saving modes and/or display going
+        // dark; and uptime, which does not.
+        long taskStartRealtimeMillis = SystemClock.elapsedRealtime();
+        long taskStartUptimeMillis = SystemClock.uptimeMillis();
+
         // The user might tap on the PRE_UNSUBSCRIBE action multiple times if they are fast and/or
         // if the system is under load and it takes some time to dispatch the broadcast intent.
         // Record how often this happens and ignore duplicate unsubscribe actions.
@@ -1318,12 +1332,18 @@ public class NotificationPlatformBridge {
         NotificationUmaTracker.getInstance()
                 .recordIsDuplicatePreUnsubscribe(duplicatePreUnsubscribe);
         if (duplicatePreUnsubscribe) {
+            assert sLastPreUnsubscribePreNativeTaskStartRealMillis >= 0;
+            NotificationUmaTracker.getInstance()
+                    .recordDuplicatePreUnsubscribeRealDelay(
+                            taskStartRealtimeMillis
+                                    - sLastPreUnsubscribePreNativeTaskStartRealMillis);
             return;
         }
 
         var otherNotificationsBackups = new HashMap<String, Notification>();
         sOriginsWithProvisionallyRevokedPermissions.put(
                 identifyingAttributes.origin, otherNotificationsBackups);
+        sLastPreUnsubscribePreNativeTaskStartRealMillis = taskStartRealtimeMillis;
 
         Predicate<NotificationWrapper> isTappedNotification =
                 (nw -> {
@@ -1371,6 +1391,13 @@ public class NotificationPlatformBridge {
                                                     nw -> nw.getNotification())));
                     suspender.cancelNotificationsWithIds(
                             new ArrayList<String>(otherNotificationsBackups.keySet()));
+
+                    NotificationUmaTracker.getInstance()
+                            .recordPreUnsubscribeRealDuration(
+                                    SystemClock.elapsedRealtime() - taskStartRealtimeMillis);
+                    NotificationUmaTracker.getInstance()
+                            .recordPreUnsubscribeDuration(
+                                    SystemClock.uptimeMillis() - taskStartUptimeMillis);
                 });
     }
 

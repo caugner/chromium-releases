@@ -1,7 +1,6 @@
 monorail: {
-  component: "Blink>Canvas"
+  component: "Blink>WebGL"
 }
-team_email: "paint-dev@chromium.org"
 buganizer_public: {
-  component_id: 1456769
+  component_id: 1456284
 }

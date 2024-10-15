@@ -31,6 +31,9 @@ class TaskFetcher;
 struct TaskId {
   bool empty() const { return !pending && (id.empty() || list_id.empty()); }
 
+  // Returns true if the task id is suitable for retrieval from the Tasks API.
+  bool IsValid() const;
+
   std::strong_ordering operator<=>(const TaskId& other) const;
   bool operator==(const TaskId& other) const = default;
   bool operator<(const TaskId& other) const = default;
@@ -128,17 +131,20 @@ class ASH_EXPORT FocusModeTasksProvider {
  private:
   void OnTasksFetched();
   void OnTasksFetchedForTask(
+      const base::Time start_time,
       const std::string& task_list_id,
       const std::string& task_id,
       OnGetTaskCallback callback,
       bool success,
       std::optional<google_apis::ApiErrorCode> http_error,
       const ui::ListModel<api::Task>* api_tasks);
-  void OnTaskAdded(const std::string& title,
+  void OnTaskAdded(const base::Time start_time,
+                   const std::string& title,
                    OnTaskSavedCallback callback,
                    google_apis::ApiErrorCode http_error,
                    const api::Task* api_task);
-  void OnTaskUpdated(const std::string& task_list_id,
+  void OnTaskUpdated(const base::Time start_time,
+                     const std::string& task_list_id,
                      const std::string& task_id,
                      const std::string& title,
                      bool completed,

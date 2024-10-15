@@ -37,6 +37,8 @@
 
 using content::DevToolsAgentHost;
 
+namespace extensions {
+
 namespace {
 
 BASE_FEATURE(kExtensionUpdatesImmediatelyUnregisterWorker,
@@ -44,8 +46,6 @@ BASE_FEATURE(kExtensionUpdatesImmediatelyUnregisterWorker,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 }  // namespace
-
-namespace extensions {
 
 ExtensionRegistrar::ExtensionRegistrar(content::BrowserContext* browser_context,
                                        Delegate* delegate)
@@ -241,7 +241,8 @@ void ExtensionRegistrar::DisableExtension(const ExtensionId& extension_id,
         extensions::disable_reason::DISABLE_BLOCKED_BY_POLICY |
         extensions::disable_reason::DISABLE_CUSTODIAN_APPROVAL_REQUIRED |
         extensions::disable_reason::DISABLE_REINSTALL |
-        extensions::disable_reason::DISABLE_UNSUPPORTED_MANIFEST_VERSION;
+        extensions::disable_reason::DISABLE_UNSUPPORTED_MANIFEST_VERSION |
+        extensions::disable_reason::DISABLE_NOT_VERIFIED;
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     // For controlled extensions, only allow disabling not ash-keeplisted
@@ -534,6 +535,9 @@ void ExtensionRegistrar::UnregisterServiceWorkerWithRootScope(
   content::ServiceWorkerContext* context =
       util::GetServiceWorkerContextForExtensionId(new_extension->id(),
                                                   browser_context_);
+  bool worker_previously_registered =
+      ServiceWorkerTaskQueue::Get(browser_context_)
+          ->IsWorkerRegistered(new_extension->id());
   // Even though the unregistration process for a service worker is
   // asynchronous, we begin the process before the new extension is added, so
   // the old worker will be unregistered before the new one is registered.
@@ -543,25 +547,30 @@ void ExtensionRegistrar::UnregisterServiceWorkerWithRootScope(
         new_extension->url(),
         blink::StorageKey::CreateFirstParty(new_extension->origin()),
         base::BindOnce(&ExtensionRegistrar::NotifyServiceWorkerUnregistered,
-                       weak_factory_.GetWeakPtr(), new_extension->id()));
+                       weak_factory_.GetWeakPtr(), new_extension->id(),
+                       worker_previously_registered));
   } else {
     context->UnregisterServiceWorker(
         new_extension->url(),
         blink::StorageKey::CreateFirstParty(new_extension->origin()),
         base::BindOnce(&ExtensionRegistrar::NotifyServiceWorkerUnregistered,
-                       weak_factory_.GetWeakPtr(), new_extension->id()));
+                       weak_factory_.GetWeakPtr(), new_extension->id(),
+                       worker_previously_registered));
   }
 }
 
 void ExtensionRegistrar::NotifyServiceWorkerUnregistered(
     const ExtensionId& extension_id,
+    bool worker_previously_registered,
     blink::ServiceWorkerStatusCode status) {
-  bool success = status == blink::ServiceWorkerStatusCode::kOk;
+  bool success =
+      ServiceWorkerTaskQueue::Get(browser_context_)
+          ->IsWorkerUnregistrationSuccess(status, worker_previously_registered);
   base::UmaHistogramBoolean(
-      "Extensions.ServiceWorkerBackground.WorkerUnregistrationState2", success);
+      "Extensions.ServiceWorkerBackground.WorkerUnregistrationState", success);
   base::UmaHistogramBoolean(
       "Extensions.ServiceWorkerBackground.WorkerUnregistrationState_"
-      "AddExtension2",
+      "AddExtension",
       success);
 
   if (!success) {
@@ -569,11 +578,11 @@ void ExtensionRegistrar::NotifyServiceWorkerUnregistered(
     LOG(ERROR) << "Failed to unregister service worker for extension "
                << extension_id;
     base::UmaHistogramEnumeration(
-        "Extensions.ServiceWorkerBackground.WorkerUnregistrationFailureStatus3",
+        "Extensions.ServiceWorkerBackground.WorkerUnregistrationFailureStatus",
         status);
     base::UmaHistogramEnumeration(
         "Extensions.ServiceWorkerBackground.WorkerUnregistrationFailureStatus_"
-        "AddExtension3",
+        "AddExtension",
         status);
   }
 }

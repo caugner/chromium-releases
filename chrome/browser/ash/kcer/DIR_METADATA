@@ -1,1 +1,1 @@
-mixins: "//chromeos/components/kcer/COMMON_METADATA"
+mixins: "//ash/components/kcer/COMMON_METADATA"
