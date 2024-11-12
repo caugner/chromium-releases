@@ -20,6 +20,8 @@ import org.chromium.base.CommandLine;
 import org.chromium.base.IntentUtils;
 import org.chromium.base.PackageManagerUtils;
 import org.chromium.base.supplier.OneshotSupplier;
+import org.chromium.base.task.PostTask;
+import org.chromium.base.task.TaskTraits;
 import org.chromium.build.BuildConfig;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.LaunchIntentDispatcher;
@@ -38,12 +40,12 @@ import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.quick_delete.QuickDeleteController;
 import org.chromium.chrome.browser.settings.ChromeManagedPreferenceDelegate;
 import org.chromium.chrome.browser.settings.FaviconLoader;
-import org.chromium.chrome.browser.settings.SettingsLauncherFactory;
+import org.chromium.chrome.browser.settings.SettingsNavigationFactory;
 import org.chromium.chrome.browser.tab.RequestDesktopUtils;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.webapps.WebappRegistry;
 import org.chromium.components.browser_ui.settings.ManagedPreferenceDelegate;
-import org.chromium.components.browser_ui.settings.SettingsLauncher;
+import org.chromium.components.browser_ui.settings.SettingsNavigation;
 import org.chromium.components.browser_ui.site_settings.SiteSettingsCategory;
 import org.chromium.components.browser_ui.site_settings.SiteSettingsDelegate;
 import org.chromium.components.browsing_data.content.BrowsingDataModel;
@@ -326,6 +328,11 @@ public class ChromeSiteSettingsDelegate implements SiteSettingsDelegate {
     }
 
     @Override
+    public boolean shouldShowTrackingProtectionBrandedUI() {
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.TRACKING_PROTECTION_3PCD_UX);
+    }
+
+    @Override
     public boolean shouldShowTrackingProtectionACTFeaturesUI() {
         return shouldDisplayIpProtection() || shouldDisplayFingerprintingProtection();
     }
@@ -367,14 +374,15 @@ public class ChromeSiteSettingsDelegate implements SiteSettingsDelegate {
     @Override
     public void launchClearBrowsingDataDialog(Activity currentActivity) {
         if (QuickDeleteController.isQuickDeleteFollowupEnabled()) {
-            SettingsLauncherFactory.createSettingsLauncher()
-                    .launchSettingsActivity(
+            SettingsNavigationFactory.createSettingsNavigation()
+                    .startSettings(
                             currentActivity,
-                            SettingsLauncher.SettingsFragment.CLEAR_BROWSING_DATA_ADVANCED_PAGE);
+                            SettingsNavigation.SettingsFragment.CLEAR_BROWSING_DATA_ADVANCED_PAGE);
         } else {
-            SettingsLauncherFactory.createSettingsLauncher()
-                    .launchSettingsActivity(
-                            currentActivity, SettingsLauncher.SettingsFragment.CLEAR_BROWSING_DATA);
+            SettingsNavigationFactory.createSettingsNavigation()
+                    .startSettings(
+                            currentActivity,
+                            SettingsNavigation.SettingsFragment.CLEAR_BROWSING_DATA);
         }
     }
 
@@ -397,7 +405,13 @@ public class ChromeSiteSettingsDelegate implements SiteSettingsDelegate {
                 mProfile,
                 model -> {
                     if (mBrowsingDataModel != null) {
-                        mBrowsingDataModel.destroy();
+                        // Posting the task to destroy the model to avoid ANR hangs/crashes caused
+                        // by sometimes slow model building and JNI deadlock.
+                        // The old model reference needs to be captured before posting the destroy
+                        // task to avoid crashing caused by destroying the new model instead of the
+                        // old model.
+                        BrowsingDataModel oldModel = mBrowsingDataModel;
+                        PostTask.postTask(TaskTraits.UI_DEFAULT, oldModel::destroy);
                     }
                     mBrowsingDataModel = model;
                     callback.onResult(mBrowsingDataModel);

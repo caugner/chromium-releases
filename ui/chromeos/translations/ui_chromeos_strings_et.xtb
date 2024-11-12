@@ -19,6 +19,7 @@
 <translation id="115443833402798225">Hanguli ahnmatae</translation>
 <translation id="1155759005174418845">katalaani keel</translation>
 <translation id="1168100932582989117">Google'i nimeserverid</translation>
+<translation id="1170788066030116158">Jäädvustamiskuupäev</translation>
 <translation id="1172970565351728681">Jäänud on ligikaudu <ph name="REMAINING_TIME" /></translation>
 <translation id="1173894706177603556">Muuda nime</translation>
 <translation id="1173916544412572294"><ph name="NETWORK_INDEX" />. võrk <ph name="NETWORK_COUNT" />-st, <ph name="PHONE_NAME" />, <ph name="CONNECTION_STATUS" />, signaalitugevus: <ph name="SIGNAL_STRENGTH" />%, telefoni aku: <ph name="BATTERY_STATUS" />%, üksikasjad</translation>
@@ -662,7 +663,7 @@
 <translation id="6096979789310008754">Otsingutekst on kustutatud, kuvatud on kõik failid ja kaustad.</translation>
 <translation id="610101264611565198">Fail <ph name="FILE_NAME" /> teisaldatakse kausta <ph name="FOLDER_NAME" /></translation>
 <translation id="61118516107968648">CSV-tekstifail</translation>
-<translation id="6129953537138746214">Tühik</translation>
+<translation id="6129953537138746214">Tühikuklahv</translation>
 <translation id="6133173853026656527">Faili <ph name="FILE_NAME" /> teisaldamine ...</translation>
 <translation id="6133877453787250710">Administraator jälgib:</translation>
 <translation id="613750717151263950">jaapani, USA klaviatuuriga</translation>

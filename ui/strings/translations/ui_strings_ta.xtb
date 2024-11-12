@@ -144,7 +144,7 @@
 <translation id="6007284015834422026">நீட்டிப்பு பின் செய்யப்பட்டது</translation>
 <translation id="6040143037577758943">மூடு</translation>
 <translation id="6117103120090651229">மையத்தில் உள்ள பட்டன்</translation>
-<translation id="6129953537138746214">இடைவெளி</translation>
+<translation id="6129953537138746214">ஸ்பேஸ்</translation>
 <translation id="6135826906199951471">Del</translation>
 <translation id="6142413573757616983"><ph name="QUANTITY" /> பை/வி</translation>
 <translation id="6237461503717005873"><ph name="ROW_NAME" /> தேர்ந்தெடுக்கப்பட்டது.</translation>
@@ -224,6 +224,7 @@
 <translation id="9044832324875206639">{SECONDS,plural, =1{1 நொடி}other{# நொடிகள்}}</translation>
 <translation id="9059834730836941392">அறிவிப்பைச் சுருக்கு</translation>
 <translation id="9170848237812810038">&amp;செயல்தவிர்</translation>
+<translation id="9195990613383871904">நாளை</translation>
 <translation id="932327136139879170">முகப்பு</translation>
 <translation id="944069440740578670">படிக்காத அறிவிப்புகள்</translation>
 <translation id="966963601246348639">{SECONDS,plural, =1{1 வினாடிக்கு முன்பு}other{# வினாடிகளுக்கு முன்பு}}</translation>

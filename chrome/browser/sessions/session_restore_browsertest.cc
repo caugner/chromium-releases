@@ -96,9 +96,10 @@
 #include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
 #include "components/memory_pressure/fake_memory_pressure_monitor.h"
-#include "components/saved_tab_groups/features.h"
-#include "components/saved_tab_groups/saved_tab_group.h"
-#include "components/saved_tab_groups/tab_group_sync_service.h"
+#include "components/saved_tab_groups/public/features.h"
+#include "components/saved_tab_groups/public/saved_tab_group.h"
+#include "components/saved_tab_groups/public/tab_group_sync_service.h"
+#include "components/saved_tab_groups/public/types.h"
 #include "components/sessions/content/content_live_tab.h"
 #include "components/sessions/content/content_test_helper.h"
 #include "components/sessions/core/serialized_navigation_entry_test_helper.h"
@@ -144,9 +145,9 @@
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS)
+#include "ash/constants/web_app_id_constants.h"
 #include "base/json/json_reader.h"
 #include "chrome/browser/web_applications/test/web_app_test_observers.h"
-#include "chrome/browser/web_applications/web_app_id_constants.h"
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
 using sessions::ContentTestHelper;
@@ -3567,7 +3568,7 @@ IN_PROC_BROWSER_TEST_F(AppSessionRestoreTest, DontTrackUnclosableApp) {
   // tracking for session restore.
   {
     web_app::WebAppTestInstallObserver observer(profile);
-    observer.BeginListening({web_app::kCalculatorAppId});
+    observer.BeginListening({ash::kCalculatorAppId});
 
     base::Value::List web_app_settings = base::JSONReader::Read(R"([
     {
@@ -3597,7 +3598,7 @@ IN_PROC_BROWSER_TEST_F(AppSessionRestoreTest, DontTrackUnclosableApp) {
 
   // Open a PWA.
   Browser* app_browser =
-      web_app::LaunchWebAppBrowserAndWait(profile, web_app::kCalculatorAppId);
+      web_app::LaunchWebAppBrowserAndWait(profile, ash::kCalculatorAppId);
 
   // Pretend to 'close the browser'.
   // Just shutdown the services as we would if the browser is shutting down for
@@ -3643,7 +3644,7 @@ IN_PROC_BROWSER_TEST_F(AppSessionRestoreTest, DontRestoreUnclosableApp) {
 
   {
     web_app::WebAppTestInstallObserver observer(profile);
-    observer.BeginListening({web_app::kCalculatorAppId});
+    observer.BeginListening({ash::kCalculatorAppId});
 
     base::Value::List web_app_install_list = base::JSONReader::Read(R"([
     {
@@ -3662,7 +3663,7 @@ IN_PROC_BROWSER_TEST_F(AppSessionRestoreTest, DontRestoreUnclosableApp) {
 
   // Open a PWA.
   Browser* app_browser =
-      web_app::LaunchWebAppBrowserAndWait(profile, web_app::kCalculatorAppId);
+      web_app::LaunchWebAppBrowserAndWait(profile, ash::kCalculatorAppId);
 
   // Pretend to 'close the browser'.
   // Just shutdown the services as we would if the browser is shutting down for
@@ -4532,6 +4533,15 @@ class SavedTabGroupSessionRestoreTest
   SavedTabGroupSessionRestoreTest& operator=(
       const SavedTabGroupSessionRestoreTest&) = delete;
 
+  void WaitForPostedTasks() {
+    // Post a dummy task in the current thread and wait for its completion so
+    // that any already posted tasks are completed.
+    base::RunLoop run_loop;
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, run_loop.QuitClosure());
+    run_loop.Run();
+  }
+
  private:
   base::test::ScopedFeatureList feature_list_;
 };
@@ -4553,6 +4563,7 @@ IN_PROC_BROWSER_TEST_P(SavedTabGroupSessionRestoreTest,
   // for now.
   browser()->tab_strip_model()->AddToGroupForRestore(
       {0}, tab_groups::TabGroupId::GenerateNew());
+  WaitForPostedTasks();
 
   // Expect no groups have been saved at this point.
   tab_groups::TabGroupSyncService* service =
@@ -4595,6 +4606,7 @@ IN_PROC_BROWSER_TEST_P(SavedTabGroupSessionRestoreTest,
 
   // Add the tab to a new group.
   browser()->tab_strip_model()->AddToNewGroup({0});
+  WaitForPostedTasks();
 
   // Expect the newly created to be saved at this point.
   EXPECT_EQ(1u, service->GetAllGroups().size());

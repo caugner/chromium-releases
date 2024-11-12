@@ -19,6 +19,7 @@
 <translation id="115443833402798225">હંગુલ અહન્માતાએ</translation>
 <translation id="1155759005174418845">કતલાન</translation>
 <translation id="1168100932582989117">Google નામ સર્વર્સ</translation>
+<translation id="1170788066030116158">લેવાયાની તારીખ</translation>
 <translation id="1172970565351728681">લગભગ <ph name="REMAINING_TIME" /> બાકી</translation>
 <translation id="1173894706177603556">નામ બદલો</translation>
 <translation id="1173916544412572294"><ph name="NETWORK_COUNT" />માંથી નેટવર્ક <ph name="NETWORK_INDEX" />, <ph name="PHONE_NAME" />, <ph name="CONNECTION_STATUS" />, સિગ્નલની સશક્તતા <ph name="SIGNAL_STRENGTH" />%, ફોનની બૅટરી <ph name="BATTERY_STATUS" />%, વિગતો</translation>
@@ -662,7 +663,7 @@
 <translation id="6096979789310008754">શોધ ટેક્સ્ટ સાફ કરી, બધી ફાઇલો અને ફોલ્ડરો બતાવવામાં આવી રહ્યાં છે.</translation>
 <translation id="610101264611565198"><ph name="FILE_NAME" />ને <ph name="FOLDER_NAME" />માં ખસેડાય છે</translation>
 <translation id="61118516107968648">CSV ટેક્સ્ટ</translation>
-<translation id="6129953537138746214">જગ્યા</translation>
+<translation id="6129953537138746214">Space</translation>
 <translation id="6133173853026656527"><ph name="FILE_NAME" /> ખસેડાઈ રહી છે...</translation>
 <translation id="6133877453787250710">ઍડમિનિસ્ટ્રેટર મૉનિટર:</translation>
 <translation id="613750717151263950">જાપાનીઝ, યુએસ કીબોર્ડ સાથે</translation>

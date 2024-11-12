@@ -28,8 +28,8 @@
 
 ☔︎♐︎☺☺︎☃☃︎☯︎☯™™︎00︎
 #text_emoji:
-"Segoe UI Symbol" : 16,
-"Times New Roman" : 3
+"Segoe UI Symbol" : 6,
+"Times New Roman" : 6
 
 𓀀𓀁𓀂𓀃𓀄𓀅𓀆𓀇𓀈𓀉𓀊𓀋𓀌𓀍𓀎𓀏
 #egyptian_hieroglyphs:

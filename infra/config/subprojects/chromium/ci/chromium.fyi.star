@@ -12,6 +12,7 @@ load("//lib/consoles.star", "consoles")
 load("//lib/gn_args.star", "gn_args")
 load("//lib/html.star", "linkify", "linkify_builder")
 load("//lib/structs.star", "structs")
+load("//lib/targets.star", "targets")
 load("//lib/xcode.star", "xcode")
 
 ci.defaults.set(
@@ -27,6 +28,12 @@ ci.defaults.set(
     siso_enabled = True,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
+)
+
+targets.builder_defaults.set(
+    mixins = [
+        "chromium-tester-service-account",
+    ],
 )
 
 consoles.console_view(
@@ -371,6 +378,15 @@ ci.thin_tester(
             target_platform = builder_config.target_platform.MAC,
         ),
     ),
+    targets = targets.bundle(
+        targets = [
+            "fieldtrial_browser_tests",
+        ],
+        mixins = [
+            "finch-chromium-swarming-pool",
+            "mac_default_arm64",
+        ],
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "mac",
     ),
@@ -412,6 +428,7 @@ ci.builder(
         category = "mulitscreen",
     ),
     contact_team_email = "web-windowing-team@google.com",
+    notifies = ["multiscreen-owners"],
 )
 
 ci.builder(
@@ -925,40 +942,6 @@ ci.builder(
     notifies = ["chrometto-sheriff"],
 )
 
-fyi_mac_builder(
-    name = "mac-upload-perfetto",
-    schedule = "with 3h interval",
-    triggered_by = [],
-    builder_spec = builder_config.builder_spec(
-        gclient_config = builder_config.gclient_config(config = "chromium"),
-        chromium_config = builder_config.chromium_config(
-            config = "chromium",
-            apply_configs = ["mb"],
-            build_config = builder_config.build_config.RELEASE,
-            target_bits = 64,
-            target_platform = builder_config.target_platform.MAC,
-        ),
-        build_gs_bucket = "chromium-fyi-archive",
-    ),
-    gn_args = gn_args.config(
-        configs = [
-            "release_builder",
-            "remoteexec",
-            "perfetto_zlib",
-            "mac",
-            "arm64",
-        ],
-    ),
-    builderless = True,
-    cores = None,
-    cpu = cpu.ARM64,
-    console_view_entry = consoles.console_view_entry(
-        category = "perfetto",
-        short_name = "mac",
-    ),
-    notifies = ["chrometto-sheriff"],
-)
-
 ci.builder(
     name = "win-upload-perfetto",
     schedule = "with 3h interval",
@@ -1240,8 +1223,10 @@ fyi_reclient_comparison_builder(
         ),
     },
     builderless = True,
-    cores = 32,
+    cores = "16|32",
     os = os.WINDOWS_DEFAULT,
+    # TODO: crrev.com/i/7808548 - Drop cores=32 and add ssd=True after bot migration.
+    ssd = None,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
         category = "win",
@@ -1514,8 +1499,10 @@ ci.builder(
         ],
     ),
     builderless = True,
-    cores = 32,
+    cores = "16|32",
     os = os.WINDOWS_DEFAULT,
+    # TODO: crrev.com/i/7808548 - Drop cores=32 and add ssd=True after bot migration.
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "win",
         short_name = "re",
@@ -1531,7 +1518,10 @@ ci.builder(
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
-            apply_configs = ["use_clang_coverage", "reclient_test"],
+            apply_configs = [
+                "use_clang_coverage",
+                "reclient_test",
+            ],
         ),
         chromium_config = builder_config.chromium_config(
             config = "chromium",
@@ -1552,8 +1542,10 @@ ci.builder(
         ],
     ),
     builderless = True,
-    cores = 32,
+    cores = "16|32",
     os = os.WINDOWS_DEFAULT,
+    # TODO: crrev.com/i/7808548 - Drop cores=32 and add ssd=True after bot migration.
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "win",
         short_name = "re",
@@ -1630,7 +1622,10 @@ fyi_ios_builder(
         ),
         chromium_config = builder_config.chromium_config(
             config = "chromium",
-            apply_configs = ["mb", "mac_toolchain"],
+            apply_configs = [
+                "mb",
+                "mac_toolchain",
+            ],
             build_config = builder_config.build_config.DEBUG,
             target_bits = 64,
             target_platform = builder_config.target_platform.IOS,
@@ -1691,6 +1686,44 @@ fyi_ios_builder(
     ),
     execution_timeout = 3 * time.hour,
     xcode = xcode.x15betabots,
+)
+
+fyi_ios_builder(
+    name = "ios-vm",
+    description_html = "iOS builder for running testing targets on Mac Virtual Machines",
+    schedule = "0 */4 * * *",  # every 4 hours
+    triggered_by = [],
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "ios"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = [
+                "mb",
+                "mac_toolchain",
+            ],
+            build_config = builder_config.build_config.DEBUG,
+            target_bits = 64,
+            target_platform = builder_config.target_platform.IOS,
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "debug_static_builder",
+            "remoteexec",
+            "ios_simulator",
+            "arm64",
+            "xctest",
+        ],
+    ),
+    builderless = True,
+    os = os.MAC_DEFAULT,
+    cpu = cpu.ARM64,
+    console_view_entry = consoles.console_view_entry(
+        category = "iOS",
+        short_name = "vm",
+    ),
+    contact_team_email = "bling-engprod@google.com",
+    xcode = xcode.xcode_default,
 )
 
 fyi_ios_builder(
@@ -1967,6 +2000,7 @@ fyi_mac_builder(
             "x64",
         ],
     ),
+    builderless = True,
     cores = None,
     console_view_entry = consoles.console_view_entry(
         category = "deterministic|mac",
@@ -1986,6 +2020,7 @@ fyi_mac_builder(
             "x64",
         ],
     ),
+    builderless = True,
     cores = None,
     os = os.MAC_DEFAULT,
     console_view_entry = consoles.console_view_entry(

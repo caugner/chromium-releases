@@ -40,7 +40,6 @@
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
                                    browser:(Browser*)browser
                             screenProvider:(ScreenProvider*)screenProvider {
-  DCHECK(!browser->GetBrowserState()->IsOffTheRecord());
   self = [super initWithBaseViewController:viewController browser:browser];
   if (self) {
     _screenProvider = screenProvider;

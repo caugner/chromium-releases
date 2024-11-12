@@ -105,7 +105,7 @@
 <translation id="4266252015790371705">{MONTHS,plural, =1{१ महिना अघि}other{# महिना अघि}}</translation>
 <translation id="4289300219472526559">बोल्न सुरु गर्नुहोस्</translation>
 <translation id="4289540628985791613">समीक्षा</translation>
-<translation id="4491109536499578614">छवि</translation>
+<translation id="4491109536499578614">फोटो</translation>
 <translation id="4565377596337484307">पासवर्ड लुकाउनुहोस्</translation>
 <translation id="4588090240171750605">दायाँ तिर स्क्रोल गर्नुहोस्</translation>
 <translation id="4689010477870442157">{YEARS,plural, =1{१ वर्षअघि}other{# वर्षअघि}}</translation>
@@ -224,6 +224,7 @@
 <translation id="9044832324875206639">{SECONDS,plural, =1{ १ सेकेन्ड}other{ # सेकेन्ड}}</translation>
 <translation id="9059834730836941392">सूचना संक्षिप्त गर्नुहोस्</translation>
 <translation id="9170848237812810038">&amp;पूर्वस्थितिमा फर्काउनुहोस्</translation>
+<translation id="9195990613383871904">भोलि</translation>
 <translation id="932327136139879170">गृहपृष्ठ</translation>
 <translation id="944069440740578670">नपढिएका सूचनाहरू</translation>
 <translation id="966963601246348639">{SECONDS,plural, =1{१ सेकेन्डअघि}other{# सेकेन्डअघि}}</translation>

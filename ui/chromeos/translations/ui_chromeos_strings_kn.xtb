@@ -19,6 +19,7 @@
 <translation id="115443833402798225">ಹಂಗುಲ್ ಅಹ್ಮಟೆ</translation>
 <translation id="1155759005174418845">ಕೆಟಲಾನ್</translation>
 <translation id="1168100932582989117">Google ಹೆಸರು ಸರ್ವರ್‌ಗಳು</translation>
+<translation id="1170788066030116158">ತೆಗೆದಿರುವ ದಿನಾಂಕ</translation>
 <translation id="1172970565351728681">ಸುಮಾರು <ph name="REMAINING_TIME" /> ಬಾಕಿ ಉಳಿದಿದೆ</translation>
 <translation id="1173894706177603556">ಮರುಹೆಸರಿಸು</translation>
 <translation id="1173916544412572294"><ph name="NETWORK_COUNT" /> ರಲ್ಲಿ <ph name="NETWORK_INDEX" /> ನೆಟ್‌ವರ್ಕ್, <ph name="PHONE_NAME" />, <ph name="CONNECTION_STATUS" />, ಸಿಗ್ನಲ್ ಸಾಮರ್ಥ್ಯ <ph name="SIGNAL_STRENGTH" />%, ಫೋನ್ ಬ್ಯಾಟರಿ <ph name="BATTERY_STATUS" />%, ವಿವರಗಳು</translation>
@@ -174,7 +175,7 @@
 <translation id="2377319039870049694">ಪಟ್ಟಿ ವೀಕ್ಷಣೆಗೆ ಬದಲಾಯಿಸಿ</translation>
 <translation id="2377590462528165447">Linux ನೊಂದಿಗೆ <ph name="NUMBER_OF_ITEMS" /> ಫೋಲ್ಡರ್‌ಗಳನ್ನು ಹಂಚಿಕೊಳ್ಳಲಾಗಿದೆ</translation>
 <translation id="2379576081295865700">ಸಂಗ್ರಹಣೆಯ ಸ್ಥಳವನ್ನು ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ… 1 ಐಟಂ ಪತ್ತೆಯಾಗಿದೆ</translation>
-<translation id="2383454254762599978">ಅನುಪಯುಕ್ತಕ್ಕೆ ಸರಿಸಿ</translation>
+<translation id="2383454254762599978">ಟ್ರ್ಯಾಶ್‌ಗೆ ಸರಿಸಿ</translation>
 <translation id="2387458720915042159">ಪ್ರಾಕ್ಸಿ ಪ್ರಕಾರ ಸಂಪರ್ಕ</translation>
 <translation id="2389832672041313158">ಬರ್ಮೀಸ್/ಮ್ಯಾನ್ಮಾರ್</translation>
 <translation id="2392369802118427583">ಸಕ್ರಿಯಗೊಳಿಸಿ</translation>
@@ -274,7 +275,7 @@
 <translation id="3248185426436836442">ಬಾಕಿ ಉಳಿದಿರುವುದು</translation>
 <translation id="3252266817569339921">ಫ್ರೆಂಚ್</translation>
 <translation id="3253225298092156258">ಲಭ್ಯವಿಲ್ಲ</translation>
-<translation id="3254434849914415189"><ph name="FILE_TYPE" /> ಫೈಲ್‌ಗಳಿಗಾಗಿ ಡಿಫಾಲ್ಟ್ ಅಪ್ಲಿಕೇಶನ್ ಅನ್ನು ಆರಿಸಿ:</translation>
+<translation id="3254434849914415189"><ph name="FILE_TYPE" /> ಫೈಲ್‌ಗಳಿಗಾಗಿ ಡಿಫಾಲ್ಟ್ ಆ್ಯಪ್‌ ಅನ್ನು ಆರಿಸಿ:</translation>
 <translation id="3255159654094949700">ಅರೇಬಿಕ್</translation>
 <translation id="326396468955264502">ಅವುಗಳು ಎನ್‌ಕ್ರಿಪ್ಟ್ ಆಗಿರುವುದರಿಂದ <ph name="NUMBER_OF_FILES" /> ಫೈಲ್‌ಗಳನ್ನು ಸರಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.</translation>
 <translation id="3264582393905923483">ಸಂದರ್ಭ</translation>
