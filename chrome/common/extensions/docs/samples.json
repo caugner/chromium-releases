@@ -51,7 +51,7 @@
     "chrome.experimental.debugger.detach": "experimental.debugger.html#method-detach",
     "chrome.experimental.debugger.onDetach": "experimental.debugger.html#event-onDetach",
     "chrome.experimental.debugger.onEvent": "experimental.debugger.html#event-onEvent",
-    "chrome.experimental.debugger.sendRequest": "experimental.debugger.html#method-sendRequest",
+    "chrome.experimental.debugger.sendCommand": "experimental.debugger.html#method-sendCommand",
     "chrome.experimental.devtools.audits.addCategory": "experimental.devtools.audits.html#method-addCategory",
     "chrome.experimental.devtools.console.addMessage": "experimental.devtools.console.html#method-addMessage",
     "chrome.experimental.devtools.console.getMessages": "experimental.devtools.console.html#method-getMessages",
@@ -67,11 +67,10 @@
     "chrome.experimental.devtools.panels.create": "experimental.devtools.panels.html#method-create",
     "chrome.experimental.devtools.panels.setOpenResourceHandler": "experimental.devtools.panels.html#method-setOpenResourceHandler",
     "chrome.experimental.infobars.show": "experimental.infobars.html#method-show",
-    "chrome.experimental.savePage.saveAsMHTML": "experimental.savePage.html#method-saveAsMHTML",
-    "chrome.experimental.settings.clear": "experimental.settings.html#method-clear",
-    "chrome.experimental.settings.get": "experimental.settings.html#method-get",
-    "chrome.experimental.settings.remove": "experimental.settings.html#method-remove",
-    "chrome.experimental.settings.set": "experimental.settings.html#method-set",
+    "chrome.experimental.socket.connect": "experimental.socket.html#method-connect",
+    "chrome.experimental.socket.create": "experimental.socket.html#method-create",
+    "chrome.experimental.socket.disconnect": "experimental.socket.html#method-disconnect",
+    "chrome.experimental.socket.send": "experimental.socket.html#method-send",
     "chrome.experimental.speechInput.isRecording": "experimental.speechInput.html#method-isRecording",
     "chrome.experimental.speechInput.onError": "experimental.speechInput.html#event-onError",
     "chrome.experimental.speechInput.onResult": "experimental.speechInput.html#event-onResult",
@@ -79,18 +78,7 @@
     "chrome.experimental.speechInput.onSoundStart": "experimental.speechInput.html#event-onSoundStart",
     "chrome.experimental.speechInput.start": "experimental.speechInput.html#method-start",
     "chrome.experimental.speechInput.stop": "experimental.speechInput.html#method-stop",
-    "chrome.experimental.webRequest.addEventListener": "experimental.webRequest.html#method-addEventListener",
-    "chrome.experimental.webRequest.eventHandled": "experimental.webRequest.html#method-eventHandled",
-    "chrome.experimental.webRequest.handlerBehaviorChanged": "experimental.webRequest.html#method-handlerBehaviorChanged",
-    "chrome.experimental.webRequest.onAuthRequired": "experimental.webRequest.html#event-onAuthRequired",
-    "chrome.experimental.webRequest.onBeforeRedirect": "experimental.webRequest.html#event-onBeforeRedirect",
-    "chrome.experimental.webRequest.onBeforeRequest": "experimental.webRequest.html#event-onBeforeRequest",
-    "chrome.experimental.webRequest.onBeforeSendHeaders": "experimental.webRequest.html#event-onBeforeSendHeaders",
-    "chrome.experimental.webRequest.onCompleted": "experimental.webRequest.html#event-onCompleted",
-    "chrome.experimental.webRequest.onErrorOccurred": "experimental.webRequest.html#event-onErrorOccurred",
-    "chrome.experimental.webRequest.onHeadersReceived": "experimental.webRequest.html#event-onHeadersReceived",
-    "chrome.experimental.webRequest.onResponseStarted": "experimental.webRequest.html#event-onResponseStarted",
-    "chrome.experimental.webRequest.onSendHeaders": "experimental.webRequest.html#event-onSendHeaders",
+    "chrome.experimental.storage.onChanged": "experimental.storage.html#event-onChanged",
     "chrome.extension.connect": "extension.html#method-connect",
     "chrome.extension.getBackgroundPage": "extension.html#method-getBackgroundPage",
     "chrome.extension.getExtensionTabs": "extension.html#method-getExtensionTabs",
@@ -140,6 +128,7 @@
     "chrome.pageAction.setPopup": "pageAction.html#method-setPopup",
     "chrome.pageAction.setTitle": "pageAction.html#method-setTitle",
     "chrome.pageAction.show": "pageAction.html#method-show",
+    "chrome.pageCapture.saveAsMHTML": "pageCapture.html#method-saveAsMHTML",
     "chrome.permissions.contains": "permissions.html#method-contains",
     "chrome.permissions.getAll": "permissions.html#method-getAll",
     "chrome.permissions.onAdded": "permissions.html#event-onAdded",
@@ -190,6 +179,18 @@
     "chrome.webNavigation.onDOMContentLoaded": "webNavigation.html#event-onDOMContentLoaded",
     "chrome.webNavigation.onErrorOccurred": "webNavigation.html#event-onErrorOccurred",
     "chrome.webNavigation.onReferenceFragmentUpdated": "webNavigation.html#event-onReferenceFragmentUpdated",
+    "chrome.webRequest.addEventListener": "webRequest.html#method-addEventListener",
+    "chrome.webRequest.eventHandled": "webRequest.html#method-eventHandled",
+    "chrome.webRequest.handlerBehaviorChanged": "webRequest.html#method-handlerBehaviorChanged",
+    "chrome.webRequest.onAuthRequired": "webRequest.html#event-onAuthRequired",
+    "chrome.webRequest.onBeforeRedirect": "webRequest.html#event-onBeforeRedirect",
+    "chrome.webRequest.onBeforeRequest": "webRequest.html#event-onBeforeRequest",
+    "chrome.webRequest.onBeforeSendHeaders": "webRequest.html#event-onBeforeSendHeaders",
+    "chrome.webRequest.onCompleted": "webRequest.html#event-onCompleted",
+    "chrome.webRequest.onErrorOccurred": "webRequest.html#event-onErrorOccurred",
+    "chrome.webRequest.onHeadersReceived": "webRequest.html#event-onHeadersReceived",
+    "chrome.webRequest.onResponseStarted": "webRequest.html#event-onResponseStarted",
+    "chrome.webRequest.onSendHeaders": "webRequest.html#event-onSendHeaders",
     "chrome.windows.create": "windows.html#method-create",
     "chrome.windows.get": "windows.html#method-get",
     "chrome.windows.getAll": "windows.html#method-getAll",
@@ -225,9 +226,10 @@
       "search_string": "A BROWSER ACTION WHICH CHANGES ITS ICON WHEN CLICKED.  BACKGROUND_PAGE BROWSER_ACTION TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETICON",
       "source_files": [
         "background.html",
+        "background.js",
         "manifest.json"
       ],
-      "source_hash": "c5752555642e89340c57657b48440b0dcd74ee99",
+      "source_hash": "ac932922a2fa7769791cf7fabefa95307d45153f",
       "zip_path": "examples\/api\/browserAction\/set_icon_path.zip"
     },
     {
@@ -283,9 +285,10 @@
       "search_string": "A BROWSER ACTION WITH NO ICON THAT MAKES THE PAGE RED  BACKGROUND_PAGE BROWSER_ACTION TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETBADGEBACKGROUNDCOLOR CHROME.BROWSERACTION.SETBADGETEXT CHROME.TABS.EXECUTESCRIPT",
       "source_files": [
         "background.html",
+        "background.js",
         "manifest.json"
       ],
-      "source_hash": "174cf55b15678010dff3a18983b940ef9091b115",
+      "source_hash": "e01ddafb8290fe885fd5df25699909bcf0036c51",
       "zip_path": "examples\/api\/browserAction\/make_page_red.zip"
     },
     {
@@ -375,7 +378,7 @@
         "popup.html",
         "popup.js"
       ],
-      "source_hash": "4cb1348cfca9c990117d52290f93eb5fc5081bc2",
+      "source_hash": "a557cefb7b3f3036cb65ff77b03538b6c6cdedf6",
       "zip_path": "examples\/extensions\/app_launcher.zip"
     },
     {
@@ -407,9 +410,37 @@
       "description": "Sample extension which demonstrates how to access a preference.",
       "features": [
         "browser_action",
-        "contentSettings",
         "experimental",
-        "popup"
+        "popup",
+        "privacy"
+      ],
+      "icon": null,
+      "id": "0bf0930a32829dfb77170535ecb27adc2de3998a",
+      "name": "Block\/allow referrer API example extension",
+      "packaged_app": false,
+      "path": "examples\/api\/preferences\/enableReferrer\/",
+      "protocols": [],
+      "search_string": "BLOCK\/ALLOW REFERRER API EXAMPLE EXTENSION SAMPLE EXTENSION WHICH DEMONSTRATES HOW TO ACCESS A PREFERENCE. BROWSER_ACTION EXPERIMENTAL POPUP PRIVACY CHROME.EXTENSION.ISALLOWEDINCOGNITOACCESS",
+      "source_files": [
+        "manifest.json",
+        "popup.css",
+        "popup.html",
+        "popup.js"
+      ],
+      "source_hash": "c2114f2faf51a5fdc08002cab3a5bdaefb2073cd",
+      "zip_path": "examples\/api\/preferences\/enableReferrer.zip"
+    },
+    {
+      "api_calls": [
+        "chrome.extension.isAllowedIncognitoAccess"
+      ],
+      "crx_path": null,
+      "description": "Sample extension which demonstrates how to access a preference.",
+      "features": [
+        "browser_action",
+        "experimental",
+        "popup",
+        "privacy"
       ],
       "icon": null,
       "id": "7da105f28e200d42510aff3591dfa5aeb0b82605",
@@ -417,12 +448,14 @@
       "packaged_app": false,
       "path": "examples\/api\/preferences\/allowThirdPartyCookies\/",
       "protocols": [],
-      "search_string": "BLOCK\/ALLOW THIRD-PARTY COOKIES API EXAMPLE EXTENSION SAMPLE EXTENSION WHICH DEMONSTRATES HOW TO ACCESS A PREFERENCE. BROWSER_ACTION CONTENTSETTINGS EXPERIMENTAL POPUP CHROME.EXTENSION.ISALLOWEDINCOGNITOACCESS",
+      "search_string": "BLOCK\/ALLOW THIRD-PARTY COOKIES API EXAMPLE EXTENSION SAMPLE EXTENSION WHICH DEMONSTRATES HOW TO ACCESS A PREFERENCE. BROWSER_ACTION EXPERIMENTAL POPUP PRIVACY CHROME.EXTENSION.ISALLOWEDINCOGNITOACCESS",
       "source_files": [
         "manifest.json",
-        "popup.html"
+        "popup.css",
+        "popup.html",
+        "popup.js"
       ],
-      "source_hash": "67648790a6ee68e071627e870868d5582e1ef2b5",
+      "source_hash": "7ccf3f2ab08bbde36f62df34e93fc57eaff2fa3a",
       "zip_path": "examples\/api\/preferences\/allowThirdPartyCookies.zip"
     },
     {
@@ -462,13 +495,14 @@
     },
     {
       "api_calls": [
-        "chrome.experimental.webRequest.onBeforeRequest"
+        "chrome.webRequest.onBeforeRequest"
       ],
       "crx_path": null,
       "description": "I can't has cheezburger!",
       "features": [
         "background_page",
-        "experimental"
+        "webRequest",
+        "webRequestBlocking"
       ],
       "icon": null,
       "id": "7f4d3fac7ae1ad4d514a15cd0b2c48c57a58c55e",
@@ -479,13 +513,13 @@
         "http:\/\/",
         "http:\/\/"
       ],
-      "search_string": "CATBLOCK I CANT HAS CHEEZBURGER! BACKGROUND_PAGE EXPERIMENTAL CHROME.EXPERIMENTAL.WEBREQUEST.ONBEFOREREQUEST",
+      "search_string": "CATBLOCK I CANT HAS CHEEZBURGER! BACKGROUND_PAGE WEBREQUEST WEBREQUESTBLOCKING CHROME.WEBREQUEST.ONBEFOREREQUEST",
       "source_files": [
         "background.html",
         "loldogs.js",
         "manifest.json"
       ],
-      "source_hash": "4070880eb00534fe9a5220293b9c798c0994a196",
+      "source_hash": "0afc8f58830e62802ac52ab275b78fe1ed209616",
       "zip_path": "examples\/extensions\/catblock.zip"
     },
     {
@@ -674,7 +708,7 @@
         "contentscript.js",
         "manifest.json"
       ],
-      "source_hash": "749314ae399dfc5f6759358b384bc55997fed455",
+      "source_hash": "419d1480250cc6fece78798fdfe99e4e1b4e28fd",
       "zip_path": "examples\/howto\/contentscript_xhr.zip"
     },
     {
@@ -699,9 +733,10 @@
       "search_string": "CONTENT SETTINGS SHOWS THE CONTENT SETTINGS FOR THE CURRENT SITE. BROWSER_ACTION CONTENTSETTINGS POPUP TABS CHROME.TABS.GET CHROME.TABS.GETSELECTED",
       "source_files": [
         "manifest.json",
-        "popup.html"
+        "popup.html",
+        "popup.js"
       ],
-      "source_hash": "14d647a5ea1fa8551089fdb8810b6acaf16530cf",
+      "source_hash": "95619d1c264bb65ac6f8ff105d34830ec87af284",
       "zip_path": "examples\/api\/contentSettings.zip"
     },
     {
@@ -726,7 +761,7 @@
         "manifest.json",
         "sample.js"
       ],
-      "source_hash": "0e35ce268b3b2cf3d9830e6411c85c5dfef2ffdf",
+      "source_hash": "a42707be0ca36201f6e903858a8b3cd044c4eb25",
       "zip_path": "examples\/api\/contextMenus\/basic.zip"
     },
     {
@@ -805,32 +840,6 @@
       "zip_path": "examples\/extensions\/email_this_page.zip"
     },
     {
-      "api_calls": [
-        "chrome.extension.isAllowedIncognitoAccess"
-      ],
-      "crx_path": null,
-      "description": "Sample extension which demonstrates how to access a preference.",
-      "features": [
-        "browser_action",
-        "contentSettings",
-        "experimental",
-        "popup"
-      ],
-      "icon": null,
-      "id": "0bf0930a32829dfb77170535ecb27adc2de3998a",
-      "name": "Enable\/disable referrers API example extension",
-      "packaged_app": false,
-      "path": "examples\/api\/preferences\/enableReferrer\/",
-      "protocols": [],
-      "search_string": "ENABLE\/DISABLE REFERRERS API EXAMPLE EXTENSION SAMPLE EXTENSION WHICH DEMONSTRATES HOW TO ACCESS A PREFERENCE. BROWSER_ACTION CONTENTSETTINGS EXPERIMENTAL POPUP CHROME.EXTENSION.ISALLOWEDINCOGNITOACCESS",
-      "source_files": [
-        "manifest.json",
-        "popup.html"
-      ],
-      "source_hash": "e3514a32b04876d79e64f31ffe7beb4bbae98d33",
-      "zip_path": "examples\/api\/preferences\/enableReferrer.zip"
-    },
-    {
       "api_calls": [],
       "crx_path": null,
       "description": "A sample extension which uses Google Analytics to track usage.",
@@ -876,14 +885,15 @@
       "packaged_app": false,
       "path": "examples\/api\/omnibox\/extension-docs\/",
       "protocols": [
-        "http:\/\/"
+        "https:\/\/"
       ],
       "search_string": "EXTENSION DOCS SEARCH SEARCH THE CHROME EXTENSIONS DOCUMENTATION.  TO USE, TYPE CRDOC PLUS A SEARCH TERM INTO THE OMNIBOX. BACKGROUND_PAGE TABS CHROME.OMNIBOX.ONINPUTCHANGED CHROME.OMNIBOX.ONINPUTENTERED CHROME.TABS.CREATE CHROME.TABS.GET CHROME.TABS.ONREMOVED CHROME.TABS.UPDATE",
       "source_files": [
         "background.html",
+        "background.js",
         "manifest.json"
       ],
-      "source_hash": "0aa8ec9a2c091e227661ca5010d08f6823e643a7",
+      "source_hash": "c294cbd813e4a59b3ee8270892f10c68aa3f53b3",
       "zip_path": "examples\/api\/omnibox\/extension-docs.zip"
     },
     {
@@ -914,11 +924,12 @@
       "search_string": "FIREPHP FOR CHROME EXTENDS THE DEVELOPER TOOLS, ADDING SUPPORT FOR PARSING FIREPHP MESSAGES FROM SERVER BACKGROUND_PAGE DEVTOOLS_PAGE EXPERIMENTAL TABS CHROME.EXPERIMENTAL.DEVTOOLS.NETWORK.GETHAR CHROME.EXPERIMENTAL.DEVTOOLS.NETWORK.ONREQUESTFINISHED CHROME.EXTENSION.ONREQUEST CHROME.EXTENSION.SENDREQUEST CHROME.TABS.EXECUTESCRIPT",
       "source_files": [
         "background.html",
+        "background.js",
         "devtools.html",
         "devtools.js",
         "manifest.json"
       ],
-      "source_hash": "b607f6ca8f1ccf4343766b480ae21bb220dd949c",
+      "source_hash": "b967625a22f6c961a8d3296824fc589ca1314d3a",
       "zip_path": "examples\/api\/devtools\/network\/chrome-firephp.zip"
     },
     {
@@ -1300,7 +1311,7 @@
         "chrome.experimental.debugger.detach",
         "chrome.experimental.debugger.onDetach",
         "chrome.experimental.debugger.onEvent",
-        "chrome.experimental.debugger.sendRequest",
+        "chrome.experimental.debugger.sendCommand",
         "chrome.tabs.get",
         "chrome.tabs.getSelected",
         "chrome.windows.get",
@@ -1323,12 +1334,12 @@
       "protocols": [
         "http:\/\/"
       ],
-      "search_string": "JAVASCRIPT PAUSE\/RESUME PAUSES \/ RESUMES JAVASCRIPT EXECUTION BACKGROUND_PAGE BROWSER_ACTION DEBUGGER EXPERIMENTAL TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETICON CHROME.BROWSERACTION.SETTITLE CHROME.EXPERIMENTAL.DEBUGGER.ATTACH CHROME.EXPERIMENTAL.DEBUGGER.DETACH CHROME.EXPERIMENTAL.DEBUGGER.ONDETACH CHROME.EXPERIMENTAL.DEBUGGER.ONEVENT CHROME.EXPERIMENTAL.DEBUGGER.SENDREQUEST CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.WINDOWS.GET CHROME.WINDOWS.GETCURRENT",
+      "search_string": "JAVASCRIPT PAUSE\/RESUME PAUSES \/ RESUMES JAVASCRIPT EXECUTION BACKGROUND_PAGE BROWSER_ACTION DEBUGGER EXPERIMENTAL TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETICON CHROME.BROWSERACTION.SETTITLE CHROME.EXPERIMENTAL.DEBUGGER.ATTACH CHROME.EXPERIMENTAL.DEBUGGER.DETACH CHROME.EXPERIMENTAL.DEBUGGER.ONDETACH CHROME.EXPERIMENTAL.DEBUGGER.ONEVENT CHROME.EXPERIMENTAL.DEBUGGER.SENDCOMMAND CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.WINDOWS.GET CHROME.WINDOWS.GETCURRENT",
       "source_files": [
         "background.html",
         "manifest.json"
       ],
-      "source_hash": "826b57fecf6340bd7bdf2c1bd3ea3923300c4835",
+      "source_hash": "cd60498d3e2f00b369dc88df7d635247bab915e8",
       "zip_path": "examples\/api\/debugger\/pause-resume.zip"
     },
     {
@@ -1366,7 +1377,7 @@
         "chrome.experimental.debugger.attach",
         "chrome.experimental.debugger.detach",
         "chrome.experimental.debugger.onEvent",
-        "chrome.experimental.debugger.sendRequest",
+        "chrome.experimental.debugger.sendCommand",
         "chrome.tabs.get",
         "chrome.tabs.getSelected",
         "chrome.windows.create",
@@ -1390,13 +1401,13 @@
       "protocols": [
         "http:\/\/"
       ],
-      "search_string": "LIVE HTTP HEADERS DISPLAYS THE LIVE LOG WITH THE HTTP REQUESTS HEADERS BACKGROUND_PAGE BROWSER_ACTION DEBUGGER EXPERIMENTAL TABS CHROME.BROWSERACTION.ONCLICKED CHROME.EXPERIMENTAL.DEBUGGER.ATTACH CHROME.EXPERIMENTAL.DEBUGGER.DETACH CHROME.EXPERIMENTAL.DEBUGGER.ONEVENT CHROME.EXPERIMENTAL.DEBUGGER.SENDREQUEST CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.WINDOWS.CREATE CHROME.WINDOWS.GET CHROME.WINDOWS.GETCURRENT",
+      "search_string": "LIVE HTTP HEADERS DISPLAYS THE LIVE LOG WITH THE HTTP REQUESTS HEADERS BACKGROUND_PAGE BROWSER_ACTION DEBUGGER EXPERIMENTAL TABS CHROME.BROWSERACTION.ONCLICKED CHROME.EXPERIMENTAL.DEBUGGER.ATTACH CHROME.EXPERIMENTAL.DEBUGGER.DETACH CHROME.EXPERIMENTAL.DEBUGGER.ONEVENT CHROME.EXPERIMENTAL.DEBUGGER.SENDCOMMAND CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.WINDOWS.CREATE CHROME.WINDOWS.GET CHROME.WINDOWS.GETCURRENT",
       "source_files": [
         "background.html",
         "headers.html",
         "manifest.json"
       ],
-      "source_hash": "e0e33949fca99a6a5c7fdd1cc45c3ac7f1282517",
+      "source_hash": "cb4f53521f2c2be1ede59fae34457c30da87129c",
       "zip_path": "examples\/api\/debugger\/live-headers.zip"
     },
     {
@@ -1426,16 +1437,20 @@
       "packaged_app": false,
       "path": "examples\/extensions\/mappy\/",
       "protocols": [
-        "http:\/\/"
+        "https:\/\/",
+        "https:\/\/"
       ],
       "search_string": "MAPPY FINDS ADDRESSES IN THE WEB PAGE YOURE ON AND POPS UP A MAP WINDOW. BACKGROUND_PAGE PAGE_ACTION POPUP TABS CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.ONREQUEST CHROME.PAGEACTION.HIDE CHROME.PAGEACTION.SETTITLE CHROME.PAGEACTION.SHOW CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.TABS.ONSELECTIONCHANGED CHROME.TABS.ONUPDATED CHROME.TABS.SENDREQUEST",
       "source_files": [
         "background.html",
+        "background.js",
         "manifest.json",
         "mappy_content_script.js",
-        "popup.html"
+        "popup.css",
+        "popup.html",
+        "popup.js"
       ],
-      "source_hash": "81cf2d3975d7df8b58e5226c5b2b6df026446511",
+      "source_hash": "8446b89f4eb2d8cb6b49e306e87845b9dd385af5",
       "zip_path": "examples\/extensions\/mappy.zip"
     },
     {
@@ -1464,9 +1479,10 @@
       "search_string": "MERGE WINDOWS MERGES ALL OF THE BROWSERS WINDOWS INTO THE CURRENT WINDOW BACKGROUND_PAGE BROWSER_ACTION TABS CHROME.BROWSERACTION.ONCLICKED CHROME.TABS.GET CHROME.TABS.GETALLINWINDOW CHROME.TABS.MOVE CHROME.WINDOWS.GET CHROME.WINDOWS.GETALL CHROME.WINDOWS.GETCURRENT",
       "source_files": [
         "background.html",
+        "background.js",
         "manifest.json"
       ],
-      "source_hash": "4b5fe52788e0bef2f3871b36105eb53cc760c454",
+      "source_hash": "0dec37bcc5aa0af5c4e04c305ff90869a9502fa1",
       "zip_path": "examples\/api\/windows\/merge_windows.zip"
     },
     {
@@ -1552,10 +1568,14 @@
       ],
       "search_string": "NEWS READER DISPLAYS THE FIRST 5 ITEMS FROM THE GOOGLE NEWS - TOP NEWS RSS FEED IN A POPUP. BROWSER_ACTION POPUP TABS CHROME.TABS.CREATE",
       "source_files": [
+        "feed.css",
         "feed.html",
+        "feed.js",
+        "feed_iframe.css",
+        "feed_iframe.js",
         "manifest.json"
       ],
-      "source_hash": "af7474bf0d3ef1a407f27ae0900167a1408ead35",
+      "source_hash": "800a1cfe78a6ff8a82c85ef3bc52e71a42e9c664",
       "zip_path": "examples\/extensions\/news_a11y.zip"
     },
     {
@@ -1630,9 +1650,7 @@
       "zip_path": "examples\/extensions\/news.zip"
     },
     {
-      "api_calls": [
-        "chrome.tabs.create"
-      ],
+      "api_calls": [],
       "crx_path": null,
       "description": "Shows off desktop notifications, which are \"toast\" windows that pop up on the desktop.",
       "features": [
@@ -1647,15 +1665,44 @@
       "packaged_app": false,
       "path": "examples\/api\/notifications\/",
       "protocols": [],
-      "search_string": "NOTIFICATION DEMO SHOWS OFF DESKTOP NOTIFICATIONS, WHICH ARE TOAST WINDOWS THAT POP UP ON THE DESKTOP. BACKGROUND_PAGE NOTIFICATIONS OPTIONS_PAGE TABS CHROME.TABS.CREATE",
+      "search_string": "NOTIFICATION DEMO SHOWS OFF DESKTOP NOTIFICATIONS, WHICH ARE TOAST WINDOWS THAT POP UP ON THE DESKTOP. BACKGROUND_PAGE NOTIFICATIONS OPTIONS_PAGE TABS",
       "source_files": [
         "background.html",
-        "error.html",
+        "background.js",
         "manifest.json",
-        "options.html"
+        "options.html",
+        "options.js",
+        "style.css"
       ],
-      "source_hash": "bc2985ef75d717779cb6e1e523a3e063067c3494",
+      "source_hash": "e816c895b8ee88a42187bf0734ef828d0d5f375f",
       "zip_path": "examples\/api\/notifications.zip"
+    },
+    {
+      "api_calls": [],
+      "crx_path": null,
+      "description": "extension to prototype new NTP designs",
+      "features": [
+        "chrome_url_overrides",
+        "experimental"
+      ],
+      "icon": null,
+      "id": "2df34c9db20549bd52f2dec3d59d564853bdefac",
+      "name": "NTP prototyping extension",
+      "packaged_app": false,
+      "path": "examples\/api\/topsites\/magic8ball\/",
+      "protocols": [
+        "chrome:\/\/",
+        "chrome:\/\/"
+      ],
+      "search_string": "NTP PROTOTYPING EXTENSION EXTENSION TO PROTOTYPE NEW NTP DESIGNS CHROME_URL_OVERRIDES EXPERIMENTAL",
+      "source_files": [
+        "manifest.json",
+        "newTab.css",
+        "newTab.html",
+        "newTab.js"
+      ],
+      "source_hash": "fcaa8182e40d3ad7a4ed836e42d533cade008716",
+      "zip_path": "examples\/api\/topsites\/magic8ball.zip"
     },
     {
       "api_calls": [
@@ -1729,9 +1776,10 @@
       "search_string": "PAGE ACTION BY URL SHOWS A PAGE ACTION FOR URLS WHICH HAVE THE LETTER G IN THEM. BACKGROUND_PAGE PAGE_ACTION TABS CHROME.PAGEACTION.SHOW CHROME.TABS.ONUPDATED",
       "source_files": [
         "background.html",
+        "background.js",
         "manifest.json"
       ],
-      "source_hash": "732ef0951e1d6ff4afedb884b0e63cb342bb1499",
+      "source_hash": "e027d9a9748719a4c216fa258a1623910509ac41",
       "zip_path": "examples\/api\/pageAction\/pageaction_by_url.zip"
     },
     {
@@ -1795,6 +1843,54 @@
       ],
       "source_hash": "a3539096027886df533d42d0762990abdcc38840",
       "zip_path": "examples\/extensions\/benchmark.zip"
+    },
+    {
+      "api_calls": [
+        "chrome.i18n.getMessage"
+      ],
+      "crx_path": null,
+      "description": "Customize your content setting for different plug-ins.",
+      "features": [
+        "contentSettings",
+        "options_page"
+      ],
+      "icon": "bunny128.png",
+      "id": "ab4b9e00a673701b355db9eb8f9ebf2c850cd784",
+      "name": "Per-plugin content settings",
+      "packaged_app": false,
+      "path": "examples\/extensions\/plugin_settings\/",
+      "protocols": [],
+      "search_string": "PER-PLUGIN CONTENT SETTINGS CUSTOMIZE YOUR CONTENT SETTING FOR DIFFERENT PLUG-INS. CONTENTSETTINGS OPTIONS_PAGE CHROME.I18N.GETMESSAGE",
+      "source_files": [
+        "_locales\/en\/messages.json",
+        "css\/plugin_list.css",
+        "css\/rule_list.css",
+        "domui\/css\/button.css",
+        "domui\/css\/chrome_shared.css",
+        "domui\/css\/list.css",
+        "domui\/css\/select.css",
+        "domui\/js\/cr.js",
+        "domui\/js\/cr\/event_target.js",
+        "domui\/js\/cr\/ui.js",
+        "domui\/js\/cr\/ui\/array_data_model.js",
+        "domui\/js\/cr\/ui\/list.js",
+        "domui\/js\/cr\/ui\/list_item.js",
+        "domui\/js\/cr\/ui\/list_selection_controller.js",
+        "domui\/js\/cr\/ui\/list_selection_model.js",
+        "domui\/js\/cr\/ui\/list_single_selection_model.js",
+        "domui\/js\/util.js",
+        "js\/main.js",
+        "js\/plugin_list.js",
+        "js\/plugin_settings.js",
+        "js\/rule_list.js",
+        "manifest.json",
+        "options.html",
+        "options\/css\/list.css",
+        "options\/js\/deletable_item_list.js",
+        "options\/js\/inline_editable_list.js"
+      ],
+      "source_hash": "1e2765f821fa09cf0db9cce20ae61d964565986b",
+      "zip_path": "examples\/extensions\/plugin_settings.zip"
     },
     {
       "api_calls": [
@@ -1986,13 +2082,17 @@
       "name": "Show Tabs in Process",
       "packaged_app": false,
       "path": "examples\/api\/processes\/show_tabs\/",
-      "protocols": [],
+      "protocols": [
+        "chrome:\/\/"
+      ],
       "search_string": "SHOW TABS IN PROCESS ADDS A BROWSER ACTION SHOWING WHICH TABS SHARE THE CURRENT TABS PROCESS. BROWSER_ACTION EXPERIMENTAL POPUP TABS CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.TABS.UPDATE CHROME.WINDOWS.GET CHROME.WINDOWS.GETALL CHROME.WINDOWS.GETCURRENT CHROME.WINDOWS.UPDATE",
       "source_files": [
         "manifest.json",
-        "popup.html"
+        "popup.css",
+        "popup.html",
+        "popup.js"
       ],
-      "source_hash": "c9818c3c4c2e4fae0a7cc29588514e050356fd52",
+      "source_hash": "c71a35cc8266d8cbe800e48cf3366c27dbffb3fa",
       "zip_path": "examples\/api\/processes\/show_tabs.zip"
     },
     {
@@ -2040,6 +2140,38 @@
       ],
       "source_hash": "cb605c7bc53d81fe9504c871f475b09e9987df4a",
       "zip_path": "examples\/extensions\/speak_selection.zip"
+    },
+    {
+      "api_calls": [
+        "chrome.browserAction.onClicked",
+        "chrome.browserAction.setIcon",
+        "chrome.experimental.speechInput.isRecording",
+        "chrome.experimental.speechInput.onError",
+        "chrome.experimental.speechInput.onResult",
+        "chrome.experimental.speechInput.start",
+        "chrome.experimental.speechInput.stop"
+      ],
+      "crx_path": null,
+      "description": "Recognizes your speech and tells you the most likely result.",
+      "features": [
+        "background_page",
+        "browser_action",
+        "experimental"
+      ],
+      "icon": null,
+      "id": "a942b7626644674b7a56678930d054497b244ee7",
+      "name": "Speech Recognizer",
+      "packaged_app": false,
+      "path": "examples\/api\/speechInput\/basic\/",
+      "protocols": [],
+      "search_string": "SPEECH RECOGNIZER RECOGNIZES YOUR SPEECH AND TELLS YOU THE MOST LIKELY RESULT. BACKGROUND_PAGE BROWSER_ACTION EXPERIMENTAL CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETICON CHROME.EXPERIMENTAL.SPEECHINPUT.ISRECORDING CHROME.EXPERIMENTAL.SPEECHINPUT.ONERROR CHROME.EXPERIMENTAL.SPEECHINPUT.ONRESULT CHROME.EXPERIMENTAL.SPEECHINPUT.START CHROME.EXPERIMENTAL.SPEECHINPUT.STOP",
+      "source_files": [
+        "background.html",
+        "background.js",
+        "manifest.json"
+      ],
+      "source_hash": "3fa6d5a3a9cba2fbb1b85001aff396ad57ac9107",
+      "zip_path": "examples\/api\/speechInput\/basic.zip"
     },
     {
       "api_calls": [
@@ -2156,11 +2288,12 @@
       "search_string": "TEST SCREENSHOT EXTENSION DEMONSTRATE SCREENSHOT FUNCTIONALITY IN THE CHROME.TABS API. NOTE: ONLY WORKS FOR CODE.GOOGLE.COM BACKGROUND_PAGE BROWSER_ACTION TABS CHROME.BROWSERACTION.ONCLICKED CHROME.EXTENSION.GETURL CHROME.EXTENSION.GETVIEWS CHROME.TABS.CAPTUREVISIBLETAB CHROME.TABS.CREATE CHROME.TABS.ONUPDATED",
       "source_files": [
         "background.html",
+        "background.js",
         "manifest.json",
         "screenshot.html",
         "screenshot.js"
       ],
-      "source_hash": "559684528065aa7782e802bfba6ebf3ec238d7cc",
+      "source_hash": "59a96f4201e09897b65f219cd664119f94f3fdb5",
       "zip_path": "examples\/api\/tabs\/screenshot.zip"
     },
     {
@@ -2216,10 +2349,11 @@
       "search_string": "TTS DEBUG TOOL FOR DEVELOPERS OF CHROME TTS ENGINE EXTENSIONS TO HELP THEM TEST THEIR ENGINES ARE IMPLEMENTING THE API CORRECTLY. TTS CHROME.TTS.GETVOICES CHROME.TTS.SPEAK CHROME.TTS.STOP",
       "source_files": [
         "manifest.json",
+        "ttsdebug.css",
         "ttsdebug.html",
         "ttsdebug.js"
       ],
-      "source_hash": "e81705ac4dd9a820b403e2b77d07e72b5de0198e",
+      "source_hash": "0806af7ee646f2bae8dacd4f9fae16336e3e6807",
       "zip_path": "examples\/extensions\/ttsdebug.zip"
     },
     {
@@ -2308,11 +2442,14 @@
       "source_files": [
         "_locales\/en\/messages.json",
         "background.html",
+        "background.js",
         "manifest.json",
         "navigation_collector.js",
-        "popup.html"
+        "popup.css",
+        "popup.html",
+        "popup.js"
       ],
-      "source_hash": "b6cda534937998343a093fdb74313a85edbc771e",
+      "source_hash": "449424bf09813438d65a988ef3249d59c01462e2",
       "zip_path": "examples\/api\/webNavigation\/basic.zip"
     },
     {
@@ -2321,25 +2458,26 @@
         "chrome.extension.isAllowedIncognitoAccess"
       ],
       "crx_path": null,
-      "description": "Demonstrates the `extension.isAllowed???Access` APIs",
+      "description": "Demonstrates the `extension.isAllowedFileSchemeAccess` and `extesion.isAllowedIncognitoAccess` APIs",
       "features": [
         "browser_action"
       ],
       "icon": "sample-128.png",
       "id": "0fa4abe6545f0316fea7cfa07c53aa48c4f3d018",
-      "name": "`extension.isAllowed???Access` Example",
+      "name": "`extension.isAllowedFileSchemeAccess` and `extension.isAllowedIncognitoAccess` Example",
       "packaged_app": false,
       "path": "examples\/api\/extension\/isAllowedAccess\/",
       "protocols": [
         "file:\/\/"
       ],
-      "search_string": "`EXTENSION.ISALLOWED???ACCESS` EXAMPLE DEMONSTRATES THE `EXTENSION.ISALLOWED???ACCESS` APIS BROWSER_ACTION CHROME.EXTENSION.ISALLOWEDFILESCHEMEACCESS CHROME.EXTENSION.ISALLOWEDINCOGNITOACCESS",
+      "search_string": "`EXTENSION.ISALLOWEDFILESCHEMEACCESS` AND `EXTENSION.ISALLOWEDINCOGNITOACCESS` EXAMPLE DEMONSTRATES THE `EXTENSION.ISALLOWEDFILESCHEMEACCESS` AND `EXTESION.ISALLOWEDINCOGNITOACCESS` APIS BROWSER_ACTION CHROME.EXTENSION.ISALLOWEDFILESCHEMEACCESS CHROME.EXTENSION.ISALLOWEDINCOGNITOACCESS",
       "source_files": [
         "manifest.json",
         "popup.html",
+        "popup.js",
         "sample.css"
       ],
-      "source_hash": "c8bfc2b60f25c24dc3c5aaf75dd635c9419df66d",
+      "source_hash": "62ca453d8d1551ff63dd7c78b49d546bc3af17c6",
       "zip_path": "examples\/api\/extension\/isAllowedAccess.zip"
     }
   ]

@@ -32,7 +32,7 @@
 #include "ui/gfx/point.h"
 
 #if defined(TOOLKIT_VIEWS)
-#include "views/controls/menu/menu_2.h"
+#include "ui/views/controls/menu/menu_2.h"
 #else
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #endif
@@ -303,7 +303,7 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
       parent_window,
       GTK_DIALOG_MODAL,
       GTK_STOCK_CANCEL, GTK_RESPONSE_REJECT,
-      GTK_STOCK_OK, GTK_RESPONSE_ACCEPT,
+      GTK_STOCK_SAVE, GTK_RESPONSE_ACCEPT,
       NULL);
   gtk_dialog_set_has_separator(GTK_DIALOG(dialog_), FALSE);
 

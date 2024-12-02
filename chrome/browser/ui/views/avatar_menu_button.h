@@ -9,13 +9,13 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/ui/views/bubble/bubble.h"
 #include "ui/base/models/simple_menu_model.h"
-#include "views/controls/button/menu_button.h"
-#include "views/controls/menu/view_menu_delegate.h"
+#include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
 
 namespace gfx {
 class Canvas;
+class Image;
 }
 class Browser;
 
@@ -25,8 +25,7 @@ class Browser;
 // The button can optionally have a menu attached to it.
 
 class AvatarMenuButton : public views::MenuButton,
-                         public views::ViewMenuDelegate,
-                         public Bubble::Observer {
+                         public views::ViewMenuDelegate {
  public:
   // Creates a new button. If |has_menu| is true then clicking on the button
   // will cause the profile menu to be displayed.
@@ -38,21 +37,25 @@ class AvatarMenuButton : public views::MenuButton,
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual bool HitTest(const gfx::Point& point) const OVERRIDE;
 
-  // views::TextButton
-  virtual void SetIcon(const SkBitmap& icon) OVERRIDE;
+  virtual void SetAvatarIcon(const gfx::Image& icon,
+                       bool is_gaia_picture);
+
+  void ShowAvatarBubble();
 
  private:
   // views::ViewMenuDelegate
   virtual void RunMenu(views::View* source, const gfx::Point& pt) OVERRIDE;
 
-  // Bubble::Observer implementation.
-  virtual void OnBubbleClosing();
-
   Browser* browser_;
-  Bubble* bubble_;
   bool has_menu_;
   bool set_taskbar_decoration_;
   scoped_ptr<ui::MenuModel> menu_model_;
+
+  // Use a scoped ptr because gfx::Image doesn't have a default constructor.
+  scoped_ptr<gfx::Image> icon_;
+  SkBitmap button_icon_;
+  bool is_gaia_picture_;
+  int old_height_;
 
   DISALLOW_COPY_AND_ASSIGN(AvatarMenuButton);
 };

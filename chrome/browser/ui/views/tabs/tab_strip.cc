@@ -28,13 +28,14 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/size.h"
-#include "views/controls/image_view.h"
-#include "views/widget/default_theme_provider.h"
-#include "views/widget/widget.h"
-#include "views/window/non_client_view.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/widget/default_theme_provider.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/non_client_view.h"
 
 #if defined(OS_WIN)
-#include "views/widget/monitor_win.h"
+#include "ui/base/win/hwnd_util.h"
+#include "ui/views/widget/monitor_win.h"
 #endif
 
 using views::DropTargetEvent;
@@ -100,6 +101,19 @@ class NewTabButton : public views::ImageButton {
     path->lineTo(0, 1);
     path->close();
   }
+
+#if defined(OS_WIN) && !defined(USE_AURA)
+  void OnMouseReleased(const views::MouseEvent& event) OVERRIDE {
+    if (event.IsOnlyRightMouseButton()) {
+      gfx::Point point(event.x(), event.y());
+      views::View::ConvertPointToScreen(this, &point);
+      ui::ShowSystemMenu(GetWidget()->GetNativeView(), point.x(), point.y());
+      SetState(BS_NORMAL);
+      return;
+    }
+    views::ImageButton::OnMouseReleased(event);
+  }
+#endif
 
  private:
   // Tab strip that contains this button.

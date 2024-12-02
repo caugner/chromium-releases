@@ -17,7 +17,7 @@
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
-#include "chrome/renderer/extensions/extension_process_bindings.h"
+#include "chrome/renderer/extensions/schema_generated_bindings.h"
 #include "chrome/renderer/extensions/user_script_slave.h"
 #include "content/public/renderer/render_thread.h"
 #include "googleurl/src/gurl.h"
@@ -25,8 +25,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "v8/include/v8.h"
 
@@ -46,8 +46,8 @@ struct SingletonData {
   std::map<std::string, EventListenerCounts> listener_counts_;
 };
 
-static base::LazyInstance<SingletonData> g_singleton_data(
-    base::LINKER_INITIALIZED);
+static base::LazyInstance<SingletonData> g_singleton_data =
+    LAZY_INSTANCE_INITIALIZER;
 
 static EventListenerCounts& GetListenerCounts(const std::string& extension_id) {
   return g_singleton_data.Get().listener_counts_[extension_id];
@@ -88,7 +88,7 @@ class ExtensionImpl : public ChromeV8Extension {
           GetListenerCounts(context->extension_id());
       std::string event_name(*v8::String::AsciiValue(args[0]));
 
-      if (!v8_extension->CheckPermissionForCurrentRenderView(event_name))
+      if (!v8_extension->CheckCurrentContextAccessToExtensionAPI(event_name))
         return v8::Undefined();
 
       if (++listener_counts[event_name] == 1) {

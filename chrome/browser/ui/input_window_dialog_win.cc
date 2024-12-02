@@ -4,18 +4,22 @@
 
 #include "chrome/browser/ui/input_window_dialog.h"
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
+#include "chrome/browser/ui/webui/input_window_dialog_webui.h"
 #include "grit/generated_resources.h"
-#include "views/controls/label.h"
-#include "views/controls/textfield/textfield.h"
-#include "views/controls/textfield/textfield_controller.h"
-#include "views/layout/grid_layout.h"
-#include "views/layout/layout_constants.h"
-#include "views/widget/widget.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/controls/textfield/textfield_controller.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_delegate.h"
 
 namespace {
 
@@ -25,14 +29,15 @@ const int kTextfieldWidth = 200;
 }  // namespace
 
 // The Windows implementation of the cross platform input dialog interface.
-class WinInputWindowDialog : public InputWindowDialog {
+class InputWindowDialogWin : public InputWindowDialog {
  public:
-  WinInputWindowDialog(gfx::NativeWindow parent,
+  InputWindowDialogWin(gfx::NativeWindow parent,
                        const string16& window_title,
                        const string16& label,
                        const string16& contents,
-                       Delegate* delegate);
-  virtual ~WinInputWindowDialog();
+                       Delegate* delegate,
+                       ButtonType type);
+  virtual ~InputWindowDialogWin();
 
   // Overridden from InputWindowDialog:
   virtual void Show() OVERRIDE;
@@ -42,7 +47,8 @@ class WinInputWindowDialog : public InputWindowDialog {
   const string16& label() const { return label_; }
   const string16& contents() const { return contents_; }
 
-  InputWindowDialog::Delegate* delegate() { return delegate_.get(); }
+  Delegate* delegate() { return delegate_.get(); }
+  ButtonType type() const { return type_; }
 
  private:
   // Our chrome views window.
@@ -55,6 +61,9 @@ class WinInputWindowDialog : public InputWindowDialog {
 
   // Our delegate. Consumes the window's output.
   scoped_ptr<InputWindowDialog::Delegate> delegate_;
+  const ButtonType type_;
+
+  DISALLOW_COPY_AND_ASSIGN(InputWindowDialogWin);
 };
 
 // ContentView, as the name implies, is the content view for the InputWindow.
@@ -62,11 +71,11 @@ class WinInputWindowDialog : public InputWindowDialog {
 class ContentView : public views::DialogDelegateView,
                     public views::TextfieldController {
  public:
-  explicit ContentView(WinInputWindowDialog* delegate);
+  explicit ContentView(InputWindowDialogWin* delegate);
 
   // views::DialogDelegateView:
-  virtual bool IsDialogButtonEnabled(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
+  virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
@@ -98,36 +107,49 @@ class ContentView : public views::DialogDelegateView,
 
   // The delegate that the ContentView uses to communicate changes to the
   // caller.
-  WinInputWindowDialog* delegate_;
+  InputWindowDialogWin* delegate_;
 
   // Helps us set focus to the first Textfield in the window.
-  ScopedRunnableMethodFactory<ContentView> focus_grabber_factory_;
+  base::WeakPtrFactory<ContentView> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentView);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 // ContentView
-ContentView::ContentView(WinInputWindowDialog* delegate)
+ContentView::ContentView(InputWindowDialogWin* delegate)
     : delegate_(delegate),
-      ALLOW_THIS_IN_INITIALIZER_LIST(focus_grabber_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
     DCHECK(delegate_);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // ContentView, views::DialogDelegate implementation:
 
-bool ContentView::IsDialogButtonEnabled(
-    MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK &&
-      !delegate_->delegate()->IsValid(text_field_->text())) {
-    return false;
+string16 ContentView::GetDialogButtonLabel(ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK) {
+    return l10n_util::GetStringUTF16(
+        delegate_->type() == InputWindowDialog::BUTTON_TYPE_ADD ? IDS_ADD
+                                                                : IDS_SAVE);
+  }
+  return string16();
+}
+
+bool ContentView::IsDialogButtonEnabled(ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK) {
+    InputWindowDialog::InputTexts texts;
+    texts.push_back(text_field_->text());
+    if (!delegate_->delegate()->IsValid(texts)) {
+      return false;
+    }
   }
   return true;
 }
 
 bool ContentView::Accept() {
-  delegate_->delegate()->InputAccepted(text_field_->text());
+  InputWindowDialog::InputTexts texts;
+  texts.push_back(text_field_->text());
+  delegate_->delegate()->InputAccepted(texts);
   return true;
 }
 
@@ -180,30 +202,28 @@ void ContentView::ViewHierarchyChanged(bool is_add,
 
 void ContentView::InitControlLayout() {
   text_field_ = new views::Textfield;
-  text_field_->SetText(UTF16ToWideHack(delegate_->contents()));
+  text_field_->SetText(delegate_->contents());
   text_field_->SetController(this);
 
-  using views::GridLayout;
-
   // TODO(sky): Vertical alignment should be baseline.
-  GridLayout* layout = GridLayout::CreatePanel(this);
+  views::GridLayout* layout = views::GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
   views::ColumnSet* c1 = layout->AddColumnSet(0);
-  c1->AddColumn(GridLayout::CENTER, GridLayout::CENTER, 0,
-                GridLayout::USE_PREF, 0, 0);
+  c1->AddColumn(views::GridLayout::CENTER, views::GridLayout::CENTER, 0,
+                views::GridLayout::USE_PREF, 0, 0);
   c1->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
-  c1->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
-                GridLayout::USE_PREF, kTextfieldWidth, kTextfieldWidth);
+  c1->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER, 1,
+                views::GridLayout::USE_PREF, kTextfieldWidth, kTextfieldWidth);
 
   layout->StartRow(0, 0);
   views::Label* label = new views::Label(delegate_->label());
   layout->AddView(label);
   layout->AddView(text_field_);
 
-  MessageLoop::current()->PostTask(FROM_HERE,
-      focus_grabber_factory_.NewRunnableMethod(
-          &ContentView::FocusFirstFocusableControl));
+  MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(&ContentView::FocusFirstFocusableControl,
+                            weak_factory_.GetWeakPtr()));
 }
 
 void ContentView::FocusFirstFocusableControl() {
@@ -211,37 +231,52 @@ void ContentView::FocusFirstFocusableControl() {
   text_field_->RequestFocus();
 }
 
-WinInputWindowDialog::WinInputWindowDialog(gfx::NativeWindow parent,
+InputWindowDialogWin::InputWindowDialogWin(gfx::NativeWindow parent,
                                            const string16& window_title,
                                            const string16& label,
                                            const string16& contents,
-                                           Delegate* delegate)
+                                           Delegate* delegate,
+                                           ButtonType type)
     : window_title_(window_title),
       label_(label),
       contents_(contents),
-      delegate_(delegate) {
+      delegate_(delegate),
+      type_(type) {
   window_ = views::Widget::CreateWindowWithParent(new ContentView(this),
                                                   parent);
   window_->client_view()->AsDialogClientView()->UpdateDialogButtons();
 }
 
-WinInputWindowDialog::~WinInputWindowDialog() {
+InputWindowDialogWin::~InputWindowDialogWin() {
 }
 
-void WinInputWindowDialog::Show() {
+void InputWindowDialogWin::Show() {
   window_->Show();
 }
 
-void WinInputWindowDialog::Close() {
+void InputWindowDialogWin::Close() {
   window_->Close();
 }
 
 // static
-InputWindowDialog* InputWindowDialog::Create(gfx::NativeWindow parent,
-                                             const string16& window_title,
-                                             const string16& label,
-                                             const string16& contents,
-                                             Delegate* delegate) {
-  return new WinInputWindowDialog(
-      parent, window_title, label, contents, delegate);
+InputWindowDialog* InputWindowDialog::Create(
+    gfx::NativeWindow parent,
+    const string16& window_title,
+    const LabelContentsPairs& label_contents_pairs,
+    Delegate* delegate,
+    ButtonType type) {
+  if (ChromeWebUI::IsMoreWebUI()) {
+    return new InputWindowDialogWebUI(window_title,
+                                      label_contents_pairs,
+                                      delegate,
+                                      type);
+  } else {
+    DCHECK_EQ(1U, label_contents_pairs.size());
+    return new InputWindowDialogWin(parent,
+                                    window_title,
+                                    label_contents_pairs[0].first,
+                                    label_contents_pairs[0].second,
+                                    delegate,
+                                    type);
+  }
 }

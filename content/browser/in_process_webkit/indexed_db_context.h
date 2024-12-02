@@ -15,9 +15,10 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "content/browser/browser_thread.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/quota/quota_types.h"
 
 class GURL;
 class FilePath;
@@ -81,10 +82,10 @@ class CONTENT_EXPORT IndexedDBContext
   }
 
  private:
-  FRIEND_TEST(ExtensionServiceTest, ClearExtensionData);
-  FRIEND_TEST(ExtensionServiceTest, ClearAppData);
-  FRIEND_TEST(IndexedDBBrowserTest, ClearLocalState);
-  FRIEND_TEST(IndexedDBBrowserTest, ClearSessionOnlyDatabases);
+  FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest, ClearExtensionData);
+  FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest, ClearAppData);
+  FRIEND_TEST_ALL_PREFIXES(IndexedDBBrowserTest, ClearLocalState);
+  FRIEND_TEST_ALL_PREFIXES(IndexedDBBrowserTest, ClearSessionOnlyDatabases);
   friend class IndexedDBQuotaClientTest;
 
   typedef std::map<GURL, int64> OriginToSizeMap;
@@ -94,6 +95,8 @@ class CONTENT_EXPORT IndexedDBContext
   int64 ReadUsageFromDisk(const GURL& origin_url) const;
   void EnsureDiskUsageCacheInitialized(const GURL& origin_url);
   void QueryDiskAndUpdateQuotaUsage(const GURL& origin_url);
+  void GotUsageAndQuota(const GURL& origin_url, quota::QuotaStatusCode,
+                        int64 usage, int64 quota);
   void GotUpdatedQuota(const GURL& origin_url, int64 usage, int64 quota);
   void QueryAvailableQuota(const GURL& origin_url);
 

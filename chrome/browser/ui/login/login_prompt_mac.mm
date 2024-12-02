@@ -6,6 +6,7 @@
 #import "chrome/browser/ui/login/login_prompt_mac.h"
 
 #include "base/mac/mac_util.h"
+#include "base/string16.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -14,15 +15,16 @@
 #include "chrome/browser/ui/cocoa/constrained_window_mac.h"
 #include "chrome/browser/ui/login/login_model.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "net/url_request/url_request.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/l10n/l10n_util.h"
 
+using content::BrowserThread;
 using webkit_glue::PasswordForm;
 
 // ----------------------------------------------------------------------------
@@ -44,12 +46,12 @@ class LoginHandlerMac : public LoginHandler,
   }
 
   // LoginModelObserver implementation.
-  virtual void OnAutofillDataAvailable(const std::wstring& username,
-                                       const std::wstring& password) {
+  virtual void OnAutofillDataAvailable(const string16& username,
+                                       const string16& password) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-    [sheet_controller_ autofillLogin:base::SysWideToNSString(username)
-                            password:base::SysWideToNSString(password)];
+    [sheet_controller_ autofillLogin:base::SysUTF16ToNSString(username)
+                            password:base::SysUTF16ToNSString(password)];
   }
 
   // LoginHandler:

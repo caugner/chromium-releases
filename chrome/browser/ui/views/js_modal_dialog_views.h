@@ -6,13 +6,11 @@
 #define CHROME_BROWSER_UI_VIEWS_JS_MODAL_DIALOG_VIEWS_H_
 #pragma once
 
-#include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
-
-#include <string>
-
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
-#include "ui/base/message_box_flags.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/window/dialog_delegate.h"
+
+class JavaScriptAppModalDialog;
 
 namespace views {
 class MessageBoxView;
@@ -40,8 +38,7 @@ class JSModalDialogViews : public NativeAppModalDialog,
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
-  virtual string16 GetDialogButtonLabel(
-      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
 
   // Overridden from views::WidgetDelegate:
   virtual bool IsModal() const OVERRIDE;
@@ -53,7 +50,7 @@ class JSModalDialogViews : public NativeAppModalDialog,
 
  private:
   // A pointer to the AppModalDialog that owns us.
-  JavaScriptAppModalDialog* parent_;
+  scoped_ptr<JavaScriptAppModalDialog> parent_;
 
   // The message box view whose commands we handle.
   views::MessageBoxView* message_box_view_;

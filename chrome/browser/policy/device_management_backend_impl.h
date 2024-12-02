@@ -40,6 +40,7 @@ class DeviceManagementBackendImpl : public DeviceManagementBackend {
   // String constants for the device and app type we report to the server.
   static const char kValueAppType[];
   static const char kValueDeviceType[];
+  static const char kValueRequestAutoEnrollment[];
   static const char kValueRequestPolicy[];
   static const char kValueRequestRegister[];
   static const char kValueRequestUnregister[];
@@ -64,18 +65,22 @@ class DeviceManagementBackendImpl : public DeviceManagementBackend {
       const std::string& oauth_token,
       const std::string& device_id,
       const em::DeviceRegisterRequest& request,
-      DeviceRegisterResponseDelegate* response_delegate);
+      DeviceRegisterResponseDelegate* response_delegate) OVERRIDE;
   virtual void ProcessUnregisterRequest(
       const std::string& device_management_token,
       const std::string& device_id,
       const em::DeviceUnregisterRequest& request,
-      DeviceUnregisterResponseDelegate* response_delegate);
+      DeviceUnregisterResponseDelegate* response_delegate) OVERRIDE;
   virtual void ProcessPolicyRequest(
       const std::string& device_management_token,
       const std::string& device_id,
       CloudPolicyDataStore::UserAffiliation affiliation,
       const em::DevicePolicyRequest& request,
-      DevicePolicyResponseDelegate* response_delegate);
+      DevicePolicyResponseDelegate* response_delegate) OVERRIDE;
+  virtual void ProcessAutoEnrollmentRequest(
+      const std::string& device_id,
+      const em::DeviceAutoEnrollmentRequest& request,
+      DeviceAutoEnrollmentResponseDelegate* delegate) OVERRIDE;
 
   // Converts a user affiliation to the appropriate query parameter value.
   static const char* UserAffiliationToString(

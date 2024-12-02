@@ -8,15 +8,17 @@
 #include "base/message_loop.h"
 #include "base/values.h"
 #include "base/version.h"
-#include "chrome/browser/extensions/external_extension_provider_interface.h"
 #include "chrome/browser/extensions/external_extension_provider_impl.h"
+#include "chrome/browser/extensions/external_extension_provider_interface.h"
 #include "chrome/browser/extensions/external_policy_extension_loader.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 class ExternalPolicyExtensionProviderTest : public testing::Test {
  public:
@@ -31,7 +33,7 @@ class ExternalPolicyExtensionProviderTest : public testing::Test {
   // We need these to satisfy BrowserThread::CurrentlyOn(BrowserThread::UI)
   // checks in ExternalExtensionProviderImpl.
   MessageLoop loop_;
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
 };
 
 class MockExternalPolicyExtensionProviderVisitor
@@ -53,7 +55,8 @@ class MockExternalPolicyExtensionProviderVisitor
         this,
         new ExternalPolicyExtensionLoader(profile_.get()),
         Extension::INVALID,
-        Extension::EXTERNAL_POLICY_DOWNLOAD));
+        Extension::EXTERNAL_POLICY_DOWNLOAD,
+        Extension::NO_FLAGS));
 
     // Extensions will be removed from this list as they visited,
     // so it should be emptied by the end.
@@ -65,7 +68,8 @@ class MockExternalPolicyExtensionProviderVisitor
   virtual void OnExternalExtensionFileFound(const std::string& id,
                                             const Version* version,
                                             const FilePath& path,
-                                            Extension::Location unused) {
+                                            Extension::Location unused,
+                                            int unused2) {
     ADD_FAILURE() << "There should be no external extensions from files.";
   }
 
@@ -87,8 +91,10 @@ class MockExternalPolicyExtensionProviderVisitor
     EXPECT_NE(false, remaining_extensions->Remove(ext_str, NULL));
   }
 
-  virtual void OnExternalProviderReady() {
-    EXPECT_TRUE(provider_->IsReady());
+  virtual void OnExternalProviderReady(
+      const ExternalExtensionProviderInterface* provider) {
+    EXPECT_EQ(provider, provider_.get());
+    EXPECT_TRUE(provider->IsReady());
   }
 
  private:

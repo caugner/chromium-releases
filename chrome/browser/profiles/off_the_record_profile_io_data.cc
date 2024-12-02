@@ -17,14 +17,16 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/resource_context.h"
+#include "content/public/browser/browser_thread.h"
 #include "net/base/default_origin_bound_cert_store.h"
 #include "net/base/origin_bound_cert_service.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_server_properties_impl.h"
 #include "webkit/database/database_tracker.h"
+
+using content::BrowserThread;
 
 OffTheRecordProfileIOData::Handle::Handle(Profile* profile)
     : io_data_(new OffTheRecordProfileIOData),
@@ -210,8 +212,9 @@ void OffTheRecordProfileIOData::LazyInitializeInternal(
 
   main_http_factory_.reset(cache);
   main_context->set_http_transaction_factory(cache);
-  main_context->set_ftp_transaction_factory(
+  ftp_factory_.reset(
       new net::FtpNetworkLayer(main_context->host_resolver()));
+  main_context->set_ftp_transaction_factory(ftp_factory_.get());
 
   main_context->set_chrome_url_data_manager_backend(
       chrome_url_data_manager_backend());

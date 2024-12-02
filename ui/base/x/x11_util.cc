@@ -15,11 +15,13 @@
 #include <map>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/threading/thread.h"
 #include "ui/base/x/x11_util_internal.h"
 #include "ui/gfx/rect.h"
@@ -29,6 +31,8 @@
 #include <gdk/gdk.h>
 #include <gdk/gdkx.h>
 #include <gtk/gtk.h>
+#include "ui/base/gtk/gtk_compat.h"
+#include "ui/base/gtk/gdk_x_compat.h"
 #else
 // TODO(sad): Use the new way of handling X errors when
 // http://codereview.chromium.org/7889040/ lands.
@@ -67,7 +71,8 @@ const size_t kMaxCacheSize = 5;
 
 int DefaultX11ErrorHandler(Display* d, XErrorEvent* e) {
   MessageLoop::current()->PostTask(
-       FROM_HERE, NewRunnableFunction(LogErrorEventDescription, d, *e));
+       FROM_HERE,
+       base::Bind(&LogErrorEventDescription, d, *e));
   return 0;
 }
 
@@ -75,15 +80,6 @@ int DefaultX11IOErrorHandler(Display* d) {
   // If there's an IO error it likely means the X server has gone away
   LOG(ERROR) << "X IO Error detected";
   _exit(1);
-}
-
-Atom GetAtom(const char* name) {
-#if defined(TOOLKIT_USES_GTK)
-  return gdk_x11_get_xatom_by_name_for_display(
-      gdk_display_get_default(), name);
-#else
-  return XInternAtom(GetXDisplay(), name, false);
-#endif
 }
 
 // Note: The caller should free the resulting value data.
@@ -111,12 +107,7 @@ class XCursorCache {
  public:
    XCursorCache() {}
   ~XCursorCache() {
-    Display* display = base::MessagePumpForUI::GetDefaultXDisplay();
-    for (std::map<int, Cursor>::iterator it =
-        cache_.begin(); it != cache_.end(); ++it) {
-      XFreeCursor(display, it->second);
-    }
-    cache_.clear();
+    Clear();
   }
 
   Cursor GetCursor(int cursor_shape) {
@@ -129,6 +120,15 @@ class XCursorCache {
       it.first->second = XCreateFontCursor(display, cursor_shape);
     }
     return it.first->second;
+  }
+
+  void Clear() {
+    Display* display = base::MessagePumpForUI::GetDefaultXDisplay();
+    for (std::map<int, Cursor>::iterator it =
+        cache_.begin(); it != cache_.end(); ++it) {
+      XFreeCursor(display, it->second);
+    }
+    cache_.clear();
   }
 
  private:
@@ -214,7 +214,13 @@ int GetDefaultScreen(Display* display) {
 }
 
 Cursor GetXCursor(int cursor_shape) {
-  static XCursorCache cache;
+  CR_DEFINE_STATIC_LOCAL(XCursorCache, cache, ());
+
+  if (cursor_shape == kCursorClearXCursorCache) {
+    cache.Clear();
+    return 0;
+  }
+
   return cache.GetCursor(cursor_shape);
 }
 
@@ -237,7 +243,7 @@ XID GetX11WindowFromGdkWindow(GdkWindow* window) {
 
 GtkWindow* GetGtkWindowFromX11Window(XID xid) {
   GdkWindow* gdk_window =
-      gdk_window_lookup_for_display(gdk_display_get_default(), xid);
+      gdk_x11_window_lookup_for_display(gdk_display_get_default(), xid);
   if (!gdk_window)
     return NULL;
   GtkWindow* gtk_window = NULL;
@@ -416,6 +422,15 @@ bool GetStringProperty(
   return true;
 }
 
+Atom GetAtom(const char* name) {
+#if defined(TOOLKIT_USES_GTK)
+  return gdk_x11_get_xatom_by_name_for_display(
+      gdk_display_get_default(), name);
+#else
+  return XInternAtom(GetXDisplay(), name, false);
+#endif
+}
+
 XID GetParentWindow(XID window) {
   XID root = None;
   XID parent = None;
@@ -569,8 +584,28 @@ XID CreatePictureFromSkiaPixmap(Display* display, XID pixmap) {
   return picture;
 }
 
-void PutARGBImage(Display* display, void* visual, int depth, XID pixmap,
-                  void* pixmap_gc, const uint8* data, int width, int height) {
+void PutARGBImage(Display* display,
+                  void* visual, int depth,
+                  XID pixmap, void* pixmap_gc,
+                  const uint8* data,
+                  int width, int height) {
+  PutARGBImage(display,
+               visual, depth,
+               pixmap, pixmap_gc,
+               data, width, height,
+               0, 0, // src_x, src_y
+               0, 0, // dst_x, dst_y
+               width, height);
+}
+
+void PutARGBImage(Display* display,
+                  void* visual, int depth,
+                  XID pixmap, void* pixmap_gc,
+                  const uint8* data,
+                  int data_width, int data_height,
+                  int src_x, int src_y,
+                  int dst_x, int dst_y,
+                  int copy_width, int copy_height) {
   // TODO(scherkus): potential performance impact... consider passing in as a
   // parameter.
   int pixmap_bpp = BitsPerPixelForPixmapDepth(display, depth);
@@ -578,15 +613,15 @@ void PutARGBImage(Display* display, void* visual, int depth, XID pixmap,
   XImage image;
   memset(&image, 0, sizeof(image));
 
-  image.width = width;
-  image.height = height;
+  image.width = data_width;
+  image.height = data_height;
   image.format = ZPixmap;
   image.byte_order = LSBFirst;
   image.bitmap_unit = 8;
   image.bitmap_bit_order = LSBFirst;
   image.depth = depth;
   image.bits_per_pixel = pixmap_bpp;
-  image.bytes_per_line = width * pixmap_bpp / 8;
+  image.bytes_per_line = data_width * pixmap_bpp / 8;
 
   if (pixmap_bpp == 32) {
     image.red_mask = 0xff0000;
@@ -601,8 +636,8 @@ void PutARGBImage(Display* display, void* visual, int depth, XID pixmap,
         image.blue_mask == vis->blue_mask) {
       image.data = const_cast<char*>(reinterpret_cast<const char*>(data));
       XPutImage(display, pixmap, static_cast<GC>(pixmap_gc), &image,
-                0, 0 /* source x, y */, 0, 0 /* dest x, y */,
-                width, height);
+                src_x, src_y, dst_x, dst_y,
+                copy_width, copy_height);
     } else {
       // Otherwise, we need to shuffle the colors around. Assume red and blue
       // need to be swapped.
@@ -610,13 +645,14 @@ void PutARGBImage(Display* display, void* visual, int depth, XID pixmap,
       // It's possible to use some fancy SSE tricks here, but since this is the
       // slow path anyway, we do it slowly.
 
-      uint8_t* bitmap32 = static_cast<uint8_t*>(malloc(4 * width * height));
+      uint8_t* bitmap32 =
+          static_cast<uint8_t*>(malloc(4 * data_width * data_height));
       if (!bitmap32)
         return;
       uint8_t* const orig_bitmap32 = bitmap32;
       const uint32_t* bitmap_in = reinterpret_cast<const uint32_t*>(data);
-      for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
+      for (int y = 0; y < data_height; ++y) {
+        for (int x = 0; x < data_width; ++x) {
           const uint32_t pixel = *(bitmap_in++);
           bitmap32[0] = (pixel >> 16) & 0xff;  // Red
           bitmap32[1] = (pixel >> 8) & 0xff;   // Green
@@ -627,21 +663,22 @@ void PutARGBImage(Display* display, void* visual, int depth, XID pixmap,
       }
       image.data = reinterpret_cast<char*>(orig_bitmap32);
       XPutImage(display, pixmap, static_cast<GC>(pixmap_gc), &image,
-                0, 0 /* source x, y */, 0, 0 /* dest x, y */,
-                width, height);
+                src_x, src_y, dst_x, dst_y,
+                copy_width, copy_height);
       free(orig_bitmap32);
     }
   } else if (pixmap_bpp == 16) {
     // Some folks have VNC setups which still use 16-bit visuals and VNC
     // doesn't include Xrender.
 
-    uint16_t* bitmap16 = static_cast<uint16_t*>(malloc(2 * width * height));
+    uint16_t* bitmap16 =
+        static_cast<uint16_t*>(malloc(2 * data_width * data_height));
     if (!bitmap16)
       return;
     uint16_t* const orig_bitmap16 = bitmap16;
     const uint32_t* bitmap_in = reinterpret_cast<const uint32_t*>(data);
-    for (int y = 0; y < height; ++y) {
-      for (int x = 0; x < width; ++x) {
+    for (int y = 0; y < data_height; ++y) {
+      for (int x = 0; x < data_width; ++x) {
         const uint32_t pixel = *(bitmap_in++);
         uint16_t out_pixel = ((pixel >> 8) & 0xf800) |
                              ((pixel >> 5) & 0x07e0) |
@@ -656,8 +693,8 @@ void PutARGBImage(Display* display, void* visual, int depth, XID pixmap,
     image.blue_mask = 0x001f;
 
     XPutImage(display, pixmap, static_cast<GC>(pixmap_gc), &image,
-              0, 0 /* source x, y */, 0, 0 /* dest x, y */,
-              width, height);
+              src_x, src_y, dst_x, dst_y,
+              copy_width, copy_height);
     free(orig_bitmap16);
   } else {
     LOG(FATAL) << "Sorry, we don't support your visual depth without "
@@ -707,6 +744,34 @@ bool GetWindowManagerName(std::string* wm_name) {
   gdk_flush();
   got_error = gdk_error_trap_pop();
   return !got_error && result;
+}
+
+WindowManagerName GuessWindowManager() {
+  std::string name;
+  if (GetWindowManagerName(&name)) {
+    // These names are taken from the WMs' source code.
+    if (name == "Compiz" || name == "compiz")
+      return WM_COMPIZ;
+    if (name == "KWin")
+      return WM_KWIN;
+    if (name == "Metacity")
+      return WM_METACITY;
+    if (name == "Mutter")
+      return WM_MUTTER;
+    if (name == "Xfwm4")
+      return WM_XFWM4;
+    if (name == "chromeos-wm")
+      return WM_CHROME_OS;
+    if (name == "Blackbox")
+      return WM_BLACKBOX;
+    if (name == "e16")
+      return WM_ENLIGHTENMENT;
+    if (StartsWithASCII(name, "IceWM", true))
+      return WM_ICE_WM;
+    if (name == "Openbox")
+      return WM_OPENBOX;
+  }
+  return WM_UNKNOWN;
 }
 
 bool ChangeWindowDesktop(XID window, XID destination) {

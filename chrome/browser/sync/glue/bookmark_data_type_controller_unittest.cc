@@ -14,13 +14,13 @@
 #include "chrome/browser/sync/glue/change_processor_mock.h"
 #include "chrome/browser/sync/glue/data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/model_associator_mock.h"
-#include "chrome/browser/sync/profile_sync_factory_mock.h"
+#include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/profile_mock.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using browser_sync::BookmarkDataTypeController;
@@ -28,6 +28,7 @@ using browser_sync::ChangeProcessorMock;
 using browser_sync::DataTypeController;
 using browser_sync::ModelAssociatorMock;
 using browser_sync::StartCallback;
+using content::BrowserThread;
 using testing::_;
 using testing::DoAll;
 using testing::InvokeWithoutArgs;
@@ -49,7 +50,7 @@ class BookmarkDataTypeControllerTest : public testing::Test {
     model_associator_ = new ModelAssociatorMock();
     change_processor_ = new ChangeProcessorMock();
     profile_sync_factory_.reset(
-        new ProfileSyncFactoryMock(model_associator_,
+        new ProfileSyncComponentsFactoryMock(model_associator_,
                                    change_processor_));
     bookmark_dtc_ =
         new BookmarkDataTypeController(profile_sync_factory_.get(),
@@ -81,15 +82,19 @@ class BookmarkDataTypeControllerTest : public testing::Test {
   }
 
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
   scoped_refptr<BookmarkDataTypeController> bookmark_dtc_;
-  scoped_ptr<ProfileSyncFactoryMock> profile_sync_factory_;
+  scoped_ptr<ProfileSyncComponentsFactoryMock> profile_sync_factory_;
   ProfileMock profile_;
   BookmarkModelMock bookmark_model_;
   ProfileSyncServiceMock service_;
   ModelAssociatorMock* model_associator_;
   ChangeProcessorMock* change_processor_;
   StartCallback start_callback_;
+
+  void PumpLoop() {
+    message_loop_.RunAllPending();
+  }
 };
 
 TEST_F(BookmarkDataTypeControllerTest, StartBookmarkModelReady) {
@@ -113,10 +118,10 @@ TEST_F(BookmarkDataTypeControllerTest, StartBookmarkModelNotReady) {
   EXPECT_EQ(DataTypeController::MODEL_STARTING, bookmark_dtc_->state());
 
   // Send the notification that the bookmark model has started.
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED,
-      Source<Profile>(&profile_),
-      NotificationService::NoDetails());
+      content::Source<Profile>(&profile_),
+      content::NotificationService::NoDetails());
   EXPECT_EQ(DataTypeController::RUNNING, bookmark_dtc_->state());
 }
 
@@ -217,4 +222,5 @@ TEST_F(BookmarkDataTypeControllerTest, OnUnrecoverableError) {
   bookmark_dtc_->Start(NewCallback(&start_callback_, &StartCallback::Run));
   // This should cause bookmark_dtc_->Stop() to be called.
   bookmark_dtc_->OnUnrecoverableError(FROM_HERE, "Test");
+  PumpLoop();
 }

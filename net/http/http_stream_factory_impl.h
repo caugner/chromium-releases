@@ -10,35 +10,43 @@
 
 #include "base/memory/ref_counted.h"
 #include "net/base/host_port_pair.h"
-#include "net/http/http_stream_factory.h"
 #include "net/base/net_log.h"
+#include "net/http/http_pipelined_host_pool.h"
+#include "net/http/http_stream_factory.h"
 #include "net/proxy/proxy_server.h"
 
 namespace net {
 
 class HttpNetworkSession;
+class HttpPipelinedHost;
 class SpdySession;
 
-class NET_EXPORT_PRIVATE HttpStreamFactoryImpl : public HttpStreamFactory {
+class NET_EXPORT_PRIVATE HttpStreamFactoryImpl :
+    public HttpStreamFactory,
+    public HttpPipelinedHostPool::Delegate {
  public:
   explicit HttpStreamFactoryImpl(HttpNetworkSession* session);
   virtual ~HttpStreamFactoryImpl();
 
-  // HttpStreamFactory Interface
+  // HttpStreamFactory interface
   virtual HttpStreamRequest* RequestStream(
       const HttpRequestInfo& info,
       const SSLConfig& server_ssl_config,
       const SSLConfig& proxy_ssl_config,
       HttpStreamRequest::Delegate* delegate,
-      const BoundNetLog& net_log);
+      const BoundNetLog& net_log) OVERRIDE;
 
   virtual void PreconnectStreams(int num_streams,
                                  const HttpRequestInfo& info,
                                  const SSLConfig& server_ssl_config,
                                  const SSLConfig& proxy_ssl_config,
-                                 const BoundNetLog& net_log);
-  virtual void AddTLSIntolerantServer(const HostPortPair& server);
-  virtual bool IsTLSIntolerantServer(const HostPortPair& server) const;
+                                 const BoundNetLog& net_log) OVERRIDE;
+  virtual void AddTLSIntolerantServer(const HostPortPair& server) OVERRIDE;
+  virtual bool IsTLSIntolerantServer(const HostPortPair& server) const OVERRIDE;
+
+  // HttpPipelinedHostPool::Delegate interface
+  virtual void OnHttpPipelinedHostHasAdditionalCapacity(
+      const HostPortPair& origin) OVERRIDE;
 
  private:
   class Request;
@@ -46,6 +54,7 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl : public HttpStreamFactory {
 
   typedef std::set<Request*> RequestSet;
   typedef std::map<HostPortProxyPair, RequestSet> SpdySessionRequestMap;
+  typedef std::map<HostPortPair, RequestSet> HttpPipeliningRequestMap;
 
   bool GetAlternateProtocolRequestFor(const GURL& original_url,
                                       GURL* alternate_url) const;
@@ -88,6 +97,9 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl : public HttpStreamFactory {
   std::map<const Job*, Request*> request_map_;
 
   SpdySessionRequestMap spdy_session_request_map_;
+  HttpPipeliningRequestMap http_pipelining_request_map_;
+
+  HttpPipelinedHostPool http_pipelined_host_pool_;
 
   // These jobs correspond to jobs orphaned by Requests and now owned by
   // HttpStreamFactoryImpl. Since they are no longer tied to Requests, they will

@@ -13,11 +13,10 @@
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/time.h"
+#include "ppapi/c/dev/ppb_audio_input_dev.h"
 #include "ppapi/c/dev/ppb_buffer_dev.h"
 #include "ppapi/c/dev/ppb_char_set_dev.h"
 #include "ppapi/c/dev/ppb_console_dev.h"
-#include "ppapi/c/dev/ppb_context_3d_dev.h"
-#include "ppapi/c/dev/ppb_context_3d_trusted_dev.h"
 #include "ppapi/c/dev/ppb_crypto_dev.h"
 #include "ppapi/c/dev/ppb_cursor_control_dev.h"
 #include "ppapi/c/dev/ppb_directory_reader_dev.h"
@@ -28,9 +27,7 @@
 #include "ppapi/c/dev/ppb_gles_chromium_texture_mapping_dev.h"
 #include "ppapi/c/dev/ppb_layer_compositor_dev.h"
 #include "ppapi/c/dev/ppb_memory_dev.h"
-#include "ppapi/c/dev/ppb_query_policy_dev.h"
 #include "ppapi/c/dev/ppb_scrollbar_dev.h"
-#include "ppapi/c/dev/ppb_surface_3d_dev.h"
 #include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/dev/ppb_text_input_dev.h"
 #include "ppapi/c/dev/ppb_transport_dev.h"
@@ -64,17 +61,20 @@
 #include "ppapi/c/ppb_var.h"
 #include "ppapi/c/ppp.h"
 #include "ppapi/c/ppp_instance.h"
+#include "ppapi/c/private/ppb_file_ref_private.h"
 #include "ppapi/c/private/ppb_flash.h"
 #include "ppapi/c/private/ppb_flash_clipboard.h"
 #include "ppapi/c/private/ppb_flash_file.h"
 #include "ppapi/c/private/ppb_flash_fullscreen.h"
 #include "ppapi/c/private/ppb_flash_tcp_socket.h"
-#include "ppapi/c/private/ppb_flash_udp_socket.h"
 #include "ppapi/c/private/ppb_gpu_blacklist_private.h"
 #include "ppapi/c/private/ppb_instance_private.h"
 #include "ppapi/c/private/ppb_pdf.h"
 #include "ppapi/c/private/ppb_proxy_private.h"
+#include "ppapi/c/private/ppb_tcp_socket_private.h"
+#include "ppapi/c/private/ppb_udp_socket_private.h"
 #include "ppapi/c/private/ppb_uma_private.h"
+#include "ppapi/c/trusted/ppb_audio_input_trusted_dev.h"
 #include "ppapi/c/trusted/ppb_audio_trusted.h"
 #include "ppapi/c/trusted/ppb_broker_trusted.h"
 #include "ppapi/c/trusted/ppb_buffer_trusted.h"
@@ -90,6 +90,8 @@
 #include "webkit/plugins/plugin_switches.h"
 #include "webkit/plugins/ppapi/callbacks.h"
 #include "webkit/plugins/ppapi/common.h"
+#include "webkit/plugins/ppapi/host_globals.h"
+#include "webkit/plugins/ppapi/host_resource_tracker.h"
 #include "webkit/plugins/ppapi/ppapi_interface_factory.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_directory_reader_impl.h"
@@ -111,42 +113,52 @@
 #include "webkit/plugins/ppapi/ppb_video_capture_impl.h"
 #include "webkit/plugins/ppapi/ppb_video_decoder_impl.h"
 #include "webkit/plugins/ppapi/ppb_video_layer_impl.h"
-#include "webkit/plugins/ppapi/resource_tracker.h"
 #include "webkit/plugins/ppapi/webkit_forwarding_impl.h"
 
+using ppapi::InputEventData;
+using ppapi::PpapiGlobals;
 using ppapi::TimeTicksToPPTimeTicks;
 using ppapi::TimeToPPTime;
 using ppapi::thunk::EnterResource;
 using ppapi::thunk::PPB_Graphics2D_API;
+using ppapi::thunk::PPB_InputEvent_API;
 
 namespace webkit {
 namespace ppapi {
 
 namespace {
 
+// Global tracking info for PPAPI plugins. This is lazily created before the
+// first plugin is allocated, and leaked on shutdown.
+//
+// Note that we don't want a Singleton here since destroying this object will
+// try to free some stuff that requires WebKit, and Singletons are destroyed
+// after WebKit.
+webkit::ppapi::HostGlobals* host_globals = NULL;
+
 // Maintains all currently loaded plugin libs for validating PP_Module
 // identifiers.
 typedef std::set<PluginModule*> PluginModuleSet;
 
 PluginModuleSet* GetLivePluginSet() {
-  static PluginModuleSet live_plugin_libs;
+  CR_DEFINE_STATIC_LOCAL(PluginModuleSet, live_plugin_libs, ());
   return &live_plugin_libs;
 }
 
 base::MessageLoopProxy* GetMainThreadMessageLoop() {
-  static scoped_refptr<base::MessageLoopProxy> proxy(
-      base::MessageLoopProxy::current());
+  CR_DEFINE_STATIC_LOCAL(scoped_refptr<base::MessageLoopProxy>, proxy,
+                         (base::MessageLoopProxy::current()));
   return proxy.get();
 }
 
 // PPB_Core --------------------------------------------------------------------
 
 void AddRefResource(PP_Resource resource) {
-  ResourceTracker::Get()->AddRefResource(resource);
+  PpapiGlobals::Get()->GetResourceTracker()->AddRefResource(resource);
 }
 
 void ReleaseResource(PP_Resource resource) {
-  ResourceTracker::Get()->ReleaseResource(resource);
+  PpapiGlobals::Get()->GetResourceTracker()->ReleaseResource(resource);
 }
 
 PP_Time GetTime() {
@@ -205,11 +217,25 @@ void QuitMessageLoop(PP_Instance instance) {
 }
 
 uint32_t GetLiveObjectsForInstance(PP_Instance instance_id) {
-  return ResourceTracker::Get()->GetLiveObjectsForInstance(instance_id);
+  return HostGlobals::Get()->host_resource_tracker()->GetLiveObjectsForInstance(
+      instance_id);
 }
 
 PP_Bool IsOutOfProcess() {
   return PP_FALSE;
+}
+
+void SimulateInputEvent(PP_Instance instance, PP_Resource input_event) {
+  PluginInstance* plugin_instance = host_globals->GetInstance(instance);
+  if (!plugin_instance)
+    return;
+
+  EnterResource<PPB_InputEvent_API> enter(input_event, false);
+  if (enter.failed())
+    return;
+
+  const InputEventData& input_event_data = enter.object()->GetInputEventData();
+  plugin_instance->SimulateInputEvent(input_event_data);
 }
 
 const PPB_Testing_Dev testing_interface = {
@@ -217,7 +243,8 @@ const PPB_Testing_Dev testing_interface = {
   &RunMessageLoop,
   &QuitMessageLoop,
   &GetLiveObjectsForInstance,
-  &IsOutOfProcess
+  &IsOutOfProcess,
+  &SimulateInputEvent
 };
 
 // GetInterface ----------------------------------------------------------------
@@ -248,12 +275,12 @@ const void* GetInterface(const char* name) {
 
   // Please keep alphabetized by interface macro name with "special" stuff at
   // the bottom.
+  if (strcmp(name, PPB_AUDIO_INPUT_TRUSTED_DEV_INTERFACE) == 0)
+    return ::ppapi::thunk::GetPPB_AudioInputTrusted_Thunk();
   if (strcmp(name, PPB_AUDIO_TRUSTED_INTERFACE) == 0)
     return ::ppapi::thunk::GetPPB_AudioTrusted_Thunk();
   if (strcmp(name, PPB_BUFFER_TRUSTED_INTERFACE) == 0)
     return ::ppapi::thunk::GetPPB_BufferTrusted_Thunk();
-  if (strcmp(name, PPB_CONTEXT_3D_TRUSTED_DEV_INTERFACE) == 0)
-    return ::ppapi::thunk::GetPPB_Context3DTrusted_Thunk();
   if (strcmp(name, PPB_CORE_INTERFACE) == 0)
     return &core_interface;
   if (strcmp(name, PPB_FILEIOTRUSTED_INTERFACE) == 0)
@@ -263,7 +290,9 @@ const void* GetInterface(const char* name) {
   if (strcmp(name, PPB_FLASH_INTERFACE) == 0)
     return PPB_Flash_Impl::GetInterface();
   if (strcmp(name, PPB_FLASH_CLIPBOARD_INTERFACE) == 0)
-    return PPB_Flash_Clipboard_Impl::GetInterface();
+    return ::ppapi::thunk::GetPPB_Flash_Clipboard_Thunk();
+  if (strcmp(name, PPB_FLASH_CLIPBOARD_INTERFACE_3_LEGACY) == 0)
+    return ::ppapi::thunk::GetPPB_Flash_Clipboard_Thunk();
   if (strcmp(name, PPB_FLASH_FILE_FILEREF_INTERFACE) == 0)
     return PPB_Flash_File_FileRef_Impl::GetInterface();
   if (strcmp(name, PPB_FLASH_FILE_MODULELOCAL_INTERFACE) == 0)
@@ -271,11 +300,7 @@ const void* GetInterface(const char* name) {
   if (strcmp(name, PPB_FLASH_MENU_INTERFACE) == 0)
     return ::ppapi::thunk::GetPPB_Flash_Menu_Thunk();
   if (strcmp(name, PPB_FLASH_TCPSOCKET_INTERFACE) == 0)
-    return ::ppapi::thunk::GetPPB_Flash_TCPSocket_Thunk();
-  if (strcmp(name, PPB_FLASH_UDPSOCKET_INTERFACE) == 0)
-    return ::ppapi::thunk::GetPPB_Flash_UDPSocket_Thunk();
-  if (strcmp(name, PPB_FULLSCREEN_DEV_INTERFACE_0_4) == 0)
-    return ::ppapi::thunk::GetPPB_FlashFullscreen_Thunk();
+    return ::ppapi::thunk::GetPPB_TCPSocket_Private_Thunk();
   if (strcmp(name, PPB_FULLSCREEN_DEV_INTERFACE) == 0)
     return ::ppapi::thunk::GetPPB_Fullscreen_Thunk();
   if (strcmp(name, PPB_GPU_BLACKLIST_INTERFACE) == 0)
@@ -309,10 +334,12 @@ const void* GetInterface(const char* name) {
   // Only support the testing interface when the command line switch is
   // specified. This allows us to prevent people from (ab)using this interface
   // in production code.
-  if (strcmp(name, PPB_TESTING_DEV_INTERFACE) == 0) {
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kEnablePepperTesting))
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnablePepperTesting)) {
+    if (strcmp(name, PPB_TESTING_DEV_INTERFACE) == 0 ||
+        strcmp(name, PPB_TESTING_DEV_INTERFACE_0_7) == 0) {
       return &testing_interface;
+    }
   }
   return NULL;
 }
@@ -371,8 +398,12 @@ PluginModule::PluginModule(const std::string& name,
       name_(name),
       path_(path),
       reserve_instance_id_(NULL) {
+  // Ensure the globals object is created.
+  if (!host_globals)
+    host_globals = new HostGlobals;
+
   memset(&entry_points_, 0, sizeof(entry_points_));
-  pp_module_ = ResourceTracker::Get()->AddModule(this);
+  pp_module_ = HostGlobals::Get()->AddModule(this);
   GetMainThreadMessageLoop();  // Initialize the main thread message loop.
   GetLivePluginSet()->insert(this);
 }
@@ -398,7 +429,7 @@ PluginModule::~PluginModule() {
     base::UnloadNativeLibrary(library_);
 
   // Notifications that we've been deleted should be last.
-  ResourceTracker::Get()->ModuleDeleted(pp_module_);
+  HostGlobals::Get()->ModuleDeleted(pp_module_);
   if (!is_crashed_) {
     // When the plugin crashes, we immediately tell the lifetime delegate that
     // we're gone, so we don't want to tell it again.

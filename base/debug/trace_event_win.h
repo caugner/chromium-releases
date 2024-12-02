@@ -107,7 +107,7 @@ const base::win::EtwEventType kTraceEventTypeEnd = 0x11;
 const base::win::EtwEventType kTraceEventTypeInstant = 0x12;
 
 // If this flag is set in enable flags
-enum TraceEventFlags {
+enum TraceEventETWFlags {
   CAPTURE_STACK_TRACE = 0x0001,
 };
 
@@ -118,10 +118,7 @@ enum TraceEventFlags {
 // Optionally the stack trace, consisting of a DWORD "depth", followed
 //    by an array of void* (machine bitness) of length "depth".
 
-// Forward decl.
-struct TraceLogSingletonTraits;
-
-}  // nemspace debug
+}  // namespace debug
 }  // namespace base
 
 #endif  // BASE_DEBUG_TRACE_EVENT_WIN_H_

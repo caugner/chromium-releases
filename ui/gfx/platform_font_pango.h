@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef UI_GFX_PLATFORM_FONT_GTK_
-#define UI_GFX_PLATFORM_FONT_GTK_
+#ifndef UI_GFX_PLATFORM_FONT_PANGO_H_
+#define UI_GFX_PLATFORM_FONT_PANGO_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/gfx/platform_font.h"
@@ -20,8 +21,7 @@ class UI_EXPORT PlatformFontPango : public PlatformFont {
   PlatformFontPango();
   explicit PlatformFontPango(const Font& other);
   explicit PlatformFontPango(NativeFont native_font);
-  PlatformFontPango(const string16& font_name,
-                  int font_size);
+  PlatformFontPango(const std::string& font_name, int font_size);
 
   // Converts |gfx_font| to a new pango font. Free the returned font with
   // pango_font_description_free().
@@ -40,30 +40,30 @@ class UI_EXPORT PlatformFontPango : public PlatformFont {
   double underline_thickness() const;
 
   // Overridden from PlatformFont:
-  virtual Font DeriveFont(int size_delta, int style) const;
-  virtual int GetHeight() const;
-  virtual int GetBaseline() const;
-  virtual int GetAverageCharacterWidth() const;
-  virtual int GetStringWidth(const string16& text) const;
-  virtual int GetExpectedTextWidth(int length) const;
-  virtual int GetStyle() const;
-  virtual string16 GetFontName() const;
-  virtual int GetFontSize() const;
-  virtual NativeFont GetNativeFont() const;
+  virtual Font DeriveFont(int size_delta, int style) const OVERRIDE;
+  virtual int GetHeight() const OVERRIDE;
+  virtual int GetBaseline() const OVERRIDE;
+  virtual int GetAverageCharacterWidth() const OVERRIDE;
+  virtual int GetStringWidth(const string16& text) const OVERRIDE;
+  virtual int GetExpectedTextWidth(int length) const OVERRIDE;
+  virtual int GetStyle() const OVERRIDE;
+  virtual std::string GetFontName() const OVERRIDE;
+  virtual int GetFontSize() const OVERRIDE;
+  virtual NativeFont GetNativeFont() const OVERRIDE;
 
  private:
   // Create a new instance of this object with the specified properties. Called
   // from DeriveFont.
   PlatformFontPango(SkTypeface* typeface,
-                  const string16& name,
-                  int size,
-                  int style);
+                    const std::string& name,
+                    int size,
+                    int style);
   virtual ~PlatformFontPango();
 
   // Initialize this object.
-  void InitWithNameAndSize(const string16& font_name, int font_size);
+  void InitWithNameAndSize(const std::string& font_name, int font_size);
   void InitWithTypefaceNameSizeAndStyle(SkTypeface* typeface,
-                                        const string16& name,
+                                        const std::string& name,
                                         int size,
                                         int style);
   void InitFromPlatformFont(const PlatformFontPango* other);
@@ -84,11 +84,11 @@ class UI_EXPORT PlatformFontPango : public PlatformFont {
   // handle the reference counting, but without @typeface_ we would have to
   // cast the SkRefCnt from @typeface_helper_ every time.
   scoped_ptr<SkAutoUnref> typeface_helper_;
-  SkTypeface *typeface_;
+  SkTypeface* typeface_;
 
   // Additional information about the face
   // Skia actually expects a family name and not a font name.
-  string16 font_family_;
+  std::string font_family_;
   int font_size_pixels_;
   int style_;
 
@@ -109,4 +109,4 @@ class UI_EXPORT PlatformFontPango : public PlatformFont {
 
 }  // namespace gfx
 
-#endif  // UI_GFX_PLATFORM_FONT_GTK_
+#endif  // UI_GFX_PLATFORM_FONT_PANGO_H_

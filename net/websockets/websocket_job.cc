@@ -53,8 +53,8 @@ class WebSocketJobInitSingleton {
   }
 };
 
-static base::LazyInstance<WebSocketJobInitSingleton> g_websocket_job_init(
-    base::LINKER_INITIALIZED);
+static base::LazyInstance<WebSocketJobInitSingleton> g_websocket_job_init =
+    LAZY_INSTANCE_INITIALIZER;
 
 }  // anonymous namespace
 
@@ -76,7 +76,6 @@ WebSocketJob::WebSocketJob(SocketStream::Delegate* delegate)
     : delegate_(delegate),
       state_(INITIALIZED),
       waiting_(false),
-      callback_(NULL),
       handshake_request_(new WebSocketHandshakeRequestHandler),
       handshake_response_(new WebSocketHandshakeResponseHandler),
       started_to_send_handshake_request_(false),
@@ -84,8 +83,8 @@ WebSocketJob::WebSocketJob(SocketStream::Delegate* delegate)
       response_cookies_save_index_(0),
       send_frame_handler_(new WebSocketFrameHandler),
       receive_frame_handler_(new WebSocketFrameHandler),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
-      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_for_send_pending_(this)) {
 }
 
 WebSocketJob::~WebSocketJob() {
@@ -155,11 +154,9 @@ void WebSocketJob::Close() {
   CloseInternal();
 }
 
-void WebSocketJob::RestartWithAuth(
-    const string16& username,
-    const string16& password) {
+void WebSocketJob::RestartWithAuth(const AuthCredentials& credentials) {
   state_ = CONNECTING;
-  socket_->RestartWithAuth(username, password);
+  socket_->RestartWithAuth(credentials);
 }
 
 void WebSocketJob::DetachDelegate() {
@@ -169,21 +166,22 @@ void WebSocketJob::DetachDelegate() {
 
   scoped_refptr<WebSocketJob> protect(this);
   weak_ptr_factory_.InvalidateWeakPtrs();
+  weak_ptr_factory_for_send_pending_.InvalidateWeakPtrs();
 
   delegate_ = NULL;
   if (socket_)
     socket_->DetachDelegate();
   socket_ = NULL;
-  if (callback_) {
+  if (!callback_.is_null()) {
     waiting_ = false;
-    callback_ = NULL;
+    callback_.Reset();
     Release();  // Balanced with OnStartOpenConnection().
   }
 }
 
 int WebSocketJob::OnStartOpenConnection(
-    SocketStream* socket, OldCompletionCallback* callback) {
-  DCHECK(!callback_);
+    SocketStream* socket, const CompletionCallback& callback) {
+  DCHECK(callback_.is_null());
   state_ = CONNECTING;
   addresses_ = socket->address_list();
   WebSocketThrottle::GetInstance()->PutInQueue(this);
@@ -195,7 +193,7 @@ int WebSocketJob::OnStartOpenConnection(
     // PutInQueue() may set |waiting_| true for throttling. In this case,
     // Wakeup() will be called later.
     callback_ = callback;
-    AddRef();  // Balanced when callback_ becomes NULL.
+    AddRef();  // Balanced when callback_ is cleared.
     return ERR_IO_PENDING;
   }
   return TrySpdyStream();
@@ -235,10 +233,11 @@ void WebSocketJob::OnSentData(SocketStream* socket, int amount_sent) {
     DCHECK_GT(amount_sent, 0);
     current_buffer_ = NULL;
     send_frame_handler_->ReleaseCurrentBuffer();
-    if (method_factory_.empty()) {
+    if (!weak_ptr_factory_for_send_pending_.HasWeakPtrs()) {
       MessageLoopForIO::current()->PostTask(
           FROM_HERE,
-          method_factory_.NewRunnableMethod(&WebSocketJob::SendPending));
+          base::Bind(&WebSocketJob::SendPending,
+                     weak_ptr_factory_for_send_pending_.GetWeakPtr()));
     }
     delegate_->OnSentData(socket, amount_sent);
   }
@@ -280,9 +279,9 @@ void WebSocketJob::OnClose(SocketStream* socket) {
   SocketStream::Delegate* delegate = delegate_;
   delegate_ = NULL;
   socket_ = NULL;
-  if (callback_) {
+  if (!callback_.is_null()) {
     waiting_ = false;
-    callback_ = NULL;
+    callback_.Reset();
     Release();  // Balanced with OnStartOpenConnection().
   }
   if (delegate)
@@ -615,10 +614,11 @@ void WebSocketJob::Wakeup() {
   if (!waiting_)
     return;
   waiting_ = false;
-  DCHECK(callback_);
+  DCHECK(!callback_.is_null());
   MessageLoopForIO::current()->PostTask(
       FROM_HERE,
-      method_factory_.NewRunnableMethod(&WebSocketJob::RetryPendingIO));
+      base::Bind(&WebSocketJob::RetryPendingIO,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void WebSocketJob::RetryPendingIO() {
@@ -631,11 +631,11 @@ void WebSocketJob::RetryPendingIO() {
 }
 
 void WebSocketJob::CompleteIO(int result) {
-  // |callback_| may be NULL if OnClose() or DetachDelegate() was called.
-  if (callback_) {
-    net::OldCompletionCallback* callback = callback_;
-    callback_ = NULL;
-    callback->Run(result);
+  // |callback_| may be null if OnClose() or DetachDelegate() was called.
+  if (!callback_.is_null()) {
+    CompletionCallback callback = callback_;
+    callback_.Reset();
+    callback.Run(result);
     Release();  // Balanced with OnStartOpenConnection().
   }
 }

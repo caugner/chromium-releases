@@ -18,6 +18,7 @@
 #include "base/synchronization/lock.h"
 #include "third_party/npapi/bindings/nphostapi.h"
 #include "webkit/plugins/npapi/plugin_group.h"
+#include "webkit/plugins/webkit_plugins_export.h"
 #include "webkit/plugins/webplugininfo.h"
 
 class GURL;
@@ -32,9 +33,7 @@ struct DefaultLazyInstanceTraits;
 namespace webkit {
 namespace npapi {
 
-extern FilePath::CharType kDefaultPluginLibraryName[];
-
-class PluginInstance;
+WEBKIT_PLUGINS_EXPORT extern FilePath::CharType kDefaultPluginLibraryName[];
 
 // This struct holds entry points into a plugin.  The entry points are
 // slightly different between Win/Mac and Unixes.  Note that the interface for
@@ -56,7 +55,7 @@ struct PluginEntryPoints {
 // the correct types. On Linux, it walks the plugin directories as well
 // (e.g. /usr/lib/browser-plugins/).
 // This object is thread safe.
-class PluginList {
+class WEBKIT_PLUGINS_EXPORT PluginList {
  public:
   // Gets the one instance of the PluginList.
   static PluginList* Singleton();
@@ -85,22 +84,22 @@ class PluginList {
   // be loaded using PluginList::LoadPlugin().
   void RegisterInternalPlugin(const webkit::WebPluginInfo& info);
 
-  // This second version is for "plugins" that have been compiled
-  // directly into the binary -- callers must provide the metadata and
-  // the entry points.
-  // TODO(evan): we use file names here, but they're not really files, they're
-  // actually a string that uniquely identifies the plugin.
-  void RegisterInternalPlugin(const FilePath& filename,
-                              const std::string& name,
-                              const std::string& description,
-                              const std::string& mime_type,
-                              const PluginEntryPoints& entry_points);
+  // This second version is for "plugins" that have been compiled directly into
+  // the binary -- callers must provide the plugin information and the entry
+  // points. If |add_at_beginning| is true the plugin will be added earlier in
+  // the list so that it can override the MIME types of older registrations.
+  void RegisterInternalPlugin(const webkit::WebPluginInfo& info,
+                              const PluginEntryPoints& entry_points,
+                              bool add_at_beginning);
 
   // Removes a specified internal plugin from the list. The search will match
   // on the path from the version info previously registered.
   //
   // This is generally only necessary for tests.
   void UnregisterInternalPlugin(const FilePath& path);
+
+  // Gets a list of all the registered internal plugins.
+  void GetInternalPlugins(std::vector<webkit::WebPluginInfo>* plugins);
 
   // Creates a WebPluginInfo structure given a plugin's path.  On success
   // returns true, with the information being put into "info".  If it's an
@@ -126,7 +125,8 @@ class PluginList {
 
   // Returns true if the list of plugins is cached and is copied into the out
   // pointer; returns false if the plugin list needs to be refreshed.
-  bool GetPluginsIfNoRefreshNeeded(std::vector<webkit::WebPluginInfo>* plugins);
+  virtual bool GetPluginsIfNoRefreshNeeded(
+      std::vector<webkit::WebPluginInfo>* plugins);
 
   // Returns a list in |info| containing plugins that are found for
   // the given url and mime type (including disabled plugins, for
@@ -169,12 +169,8 @@ class PluginList {
   // The following functions are used to support probing for WebPluginInfo
   // using a different instance of this class.
 
-  // Returns the extra plugin paths, extra plugin directories, and internal
-  // plugin paths that should be loaded.
-  void GetPluginPathListsToLoad(
-      std::vector<FilePath>* extra_plugin_paths,
-      std::vector<FilePath>* extra_plugin_dirs,
-      std::vector<webkit::WebPluginInfo>* internal_plugins);
+  // Computes a list of all plugins to potentially load from all sources.
+  void GetPluginPathsToLoad(std::vector<FilePath>* plugin_paths);
 
   // Clears the internal list of PluginGroups and copies them from the vector.
   void SetPlugins(const std::vector<webkit::WebPluginInfo>& plugins);
@@ -220,13 +216,9 @@ class PluginList {
   // Load all plugins from the default plugins directory.
   void LoadPlugins();
 
-  // Load all plugins from a specific directory.
-  // |plugin_groups| is updated with loaded plugin information.
-  // |visited_plugins| is updated with paths to all plugins that were considered
-  // (including those we didn't load).
-  void LoadPluginsFromDir(const FilePath& path,
-                          ScopedVector<PluginGroup>* plugin_groups,
-                          std::set<FilePath>* visited_plugins);
+  // Walks a directory and produces a list of all the plugins to potentially
+  // load in that directory.
+  void GetPluginsInDir(const FilePath& path, std::vector<FilePath>* plugins);
 
   // Returns true if we should load the given plugin, or false otherwise.
   // |plugins| is the list of plugins we have crawled in the current plugin
@@ -263,10 +255,9 @@ class PluginList {
   // true if we shouldn't load the new WMP plugin.
   bool dont_load_new_wmp_;
 
-  // Loads plugins registered under HKCU\Software\MozillaPlugins and
+  // Gets plugin paths registered under HKCU\Software\MozillaPlugins and
   // HKLM\Software\MozillaPlugins.
-  void LoadPluginsFromRegistry(ScopedVector<PluginGroup>* plugins,
-                               std::set<FilePath>* visited_plugins);
+  void GetPluginPathsFromRegistry(std::vector<FilePath>* plugins);
 #endif
 
   //

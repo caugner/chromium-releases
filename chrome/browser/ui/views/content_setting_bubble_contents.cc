@@ -18,21 +18,20 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
-#include "chrome/browser/ui/views/bubble/bubble.h"
+#include "content/browser/plugin_service.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/controls/button/radio_button.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/controls/link.h"
-#include "views/controls/separator.h"
-#include "views/layout/grid_layout.h"
-#include "views/layout/layout_constants.h"
-#include "webkit/plugins/npapi/plugin_list.h"
+#include "ui/views/controls/button/radio_button.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/link.h"
+#include "ui/views/controls/separator.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_constants.h"
 
 #if defined(TOOLKIT_USES_GTK)
 #include "ui/gfx/gtk_util.h"
@@ -107,16 +106,18 @@ gfx::NativeCursor ContentSettingBubbleContents::Favicon::GetCursor(
 ContentSettingBubbleContents::ContentSettingBubbleContents(
     ContentSettingBubbleModel* content_setting_bubble_model,
     Profile* profile,
-    TabContents* tab_contents)
-    : content_setting_bubble_model_(content_setting_bubble_model),
+    TabContents* tab_contents,
+    views::View* anchor_view,
+    views::BubbleBorder::ArrowLocation arrow_location)
+    : BubbleDelegateView(anchor_view, arrow_location),
+      content_setting_bubble_model_(content_setting_bubble_model),
       profile_(profile),
       tab_contents_(tab_contents),
-      bubble_(NULL),
       custom_link_(NULL),
       manage_link_(NULL),
       close_button_(NULL) {
   registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                 Source<TabContents>(tab_contents));
+                 content::Source<TabContents>(tab_contents));
 }
 
 ContentSettingBubbleContents::~ContentSettingBubbleContents() {
@@ -132,61 +133,13 @@ gfx::Size ContentSettingBubbleContents::GetPreferredSize() {
   return preferred_size;
 }
 
-void ContentSettingBubbleContents::ViewHierarchyChanged(bool is_add,
-                                                        View* parent,
-                                                        View* child) {
-  if (is_add && (child == this))
-    InitControlLayout();
+gfx::Rect ContentSettingBubbleContents::GetAnchorRect() {
+  gfx::Rect rect(BubbleDelegateView::GetAnchorRect());
+  rect.Offset(0, -5);
+  return rect;
 }
 
-void ContentSettingBubbleContents::ButtonPressed(views::Button* sender,
-                                                 const views::Event& event) {
-  if (sender == close_button_) {
-    bubble_->set_fade_away_on_close(true);
-    bubble_->Close();  // CAREFUL: This deletes us.
-    return;
-  }
-
-  for (RadioGroup::const_iterator i = radio_group_.begin();
-       i != radio_group_.end(); ++i) {
-    if (sender == *i) {
-      content_setting_bubble_model_->OnRadioClicked(i - radio_group_.begin());
-      return;
-    }
-  }
-  NOTREACHED() << "unknown radio";
-}
-
-void ContentSettingBubbleContents::LinkClicked(views::Link* source,
-                                               int event_flags) {
-  if (source == custom_link_) {
-    content_setting_bubble_model_->OnCustomLinkClicked();
-    bubble_->set_fade_away_on_close(true);
-    bubble_->Close();  // CAREFUL: This deletes us.
-    return;
-  }
-  if (source == manage_link_) {
-    bubble_->set_fade_away_on_close(true);
-    content_setting_bubble_model_->OnManageLinkClicked();
-    // CAREFUL: Showing the settings window activates it, which deactivates the
-    // info bubble, which causes it to close, which deletes us.
-    return;
-  }
-
-  PopupLinks::const_iterator i(popup_links_.find(source));
-  DCHECK(i != popup_links_.end());
-  content_setting_bubble_model_->OnPopupClicked(i->second);
-}
-
-void ContentSettingBubbleContents::Observe(int type,
-                                           const NotificationSource& source,
-                                           const NotificationDetails& details) {
-  DCHECK(type == content::NOTIFICATION_TAB_CONTENTS_DESTROYED);
-  DCHECK(source == Source<TabContents>(tab_contents_));
-  tab_contents_ = NULL;
-}
-
-void ContentSettingBubbleContents::InitControlLayout() {
+void ContentSettingBubbleContents::Init() {
   using views::GridLayout;
 
   GridLayout* layout = new views::GridLayout(this);
@@ -216,7 +169,7 @@ void ContentSettingBubbleContents::InitControlLayout() {
     for (std::set<std::string>::const_iterator it = plugins.begin();
         it != plugins.end(); ++it) {
       string16 name =
-          webkit::npapi::PluginList::Singleton()->GetPluginGroupName(*it);
+          PluginService::GetInstance()->GetPluginGroupName(*it);
       if (name.empty())
         name = UTF8ToUTF16(*it);
       layout->StartRow(0, single_column_set_id);
@@ -335,8 +288,53 @@ void ContentSettingBubbleContents::InitControlLayout() {
   manage_link_->set_listener(this);
   layout->AddView(manage_link_);
 
-  close_button_ =
-      new views::NativeTextButton(this,
-          UTF16ToWide(l10n_util::GetStringUTF16(IDS_DONE)));
+  close_button_ = new views::NativeTextButton(
+      this, l10n_util::GetStringUTF16(IDS_DONE));
   layout->AddView(close_button_);
+}
+
+void ContentSettingBubbleContents::ButtonPressed(views::Button* sender,
+                                                 const views::Event& event) {
+  if (sender == close_button_) {
+    StartFade(false);
+    return;
+  }
+
+  for (RadioGroup::const_iterator i = radio_group_.begin();
+       i != radio_group_.end(); ++i) {
+    if (sender == *i) {
+      content_setting_bubble_model_->OnRadioClicked(i - radio_group_.begin());
+      return;
+    }
+  }
+  NOTREACHED() << "unknown radio";
+}
+
+void ContentSettingBubbleContents::LinkClicked(views::Link* source,
+                                               int event_flags) {
+  if (source == custom_link_) {
+    content_setting_bubble_model_->OnCustomLinkClicked();
+    StartFade(false);
+    return;
+  }
+  if (source == manage_link_) {
+    StartFade(false);
+    content_setting_bubble_model_->OnManageLinkClicked();
+    // CAREFUL: Showing the settings window activates it, which deactivates the
+    // info bubble, which causes it to close, which deletes us.
+    return;
+  }
+
+  PopupLinks::const_iterator i(popup_links_.find(source));
+  DCHECK(i != popup_links_.end());
+  content_setting_bubble_model_->OnPopupClicked(i->second);
+}
+
+void ContentSettingBubbleContents::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  DCHECK(type == content::NOTIFICATION_TAB_CONTENTS_DESTROYED);
+  DCHECK(source == content::Source<TabContents>(tab_contents_));
+  tab_contents_ = NULL;
 }

@@ -20,8 +20,8 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/download/download_file.h"
+#include "content/public/browser/browser_thread.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "base/environment.h"
@@ -30,6 +30,8 @@
 #if defined(OS_WIN)
 #include "ui/gfx/icon_util.h"
 #endif  // defined(OS_WIN)
+
+using content::BrowserThread;
 
 namespace {
 

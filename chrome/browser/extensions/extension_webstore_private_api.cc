@@ -15,6 +15,7 @@
 #include "chrome/browser/extensions/extension_install_dialog.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -26,8 +27,8 @@
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -51,6 +52,8 @@ const char kInvalidManifestError[] = "Invalid manifest";
 const char kNoPreviousBeginInstallWithManifestError[] =
     "* does not match a previous call to beginInstallWithManifest3";
 const char kUserCancelledError[] = "User cancelled install";
+const char kPermissionDeniedError[] =
+    "You do not have permission to use this method.";
 
 ProfileSyncService* test_sync_service = NULL;
 
@@ -70,6 +73,31 @@ bool IsWebStoreURL(Profile* profile, const GURL& url) {
     return false;
   }
   return (service->GetExtensionByWebExtent(url) == store);
+}
+
+// Whitelists extension IDs for use by webstorePrivate.silentlyInstall.
+bool trust_test_ids = false;
+
+bool IsTrustedForSilentInstall(const std::string& id) {
+  // Trust the extensions in api_test/webstore_private/bundle when the flag
+  // is set.
+  if (trust_test_ids &&
+      (id == "begfmnajjkbjdgmffnjaojchoncnmngg" ||
+       id == "bmfoocgfinpmkmlbjhcbofejhkhlbchk" ||
+       id == "mpneghmdnmaolkljkipbhaienajcflfe"))
+    return true;
+
+  return
+      id == "jgoepmocgafhnchmokaimcmlojpnlkhp" ||  // +1 Extension
+      id == "cpembckmhnjipbgbnfiocbgnkpjdokdd" ||  // +1 Extension - dev
+      id == "boemmnepglcoinjcdlfcpcbmhiecichi" ||  // Notifications
+      id == "flibmgiapaohcbondaoopaalfejliklp" ||  // Notifications - dev
+      id == "dlppkpafhbajpcmmoheippocdidnckmm" ||  // Remaining are placeholders
+      id == "hmglfmpefabcafaimbpldpambdfomanl" ||
+      id == "idfijlieiecpfcjckpkliefekpokhhnd" ||
+      id == "jaokjbijaokooelpahnlmbciccldmfla" ||
+      id == "kdjeommiakphmeionoojjljlecmpaldd" ||
+      id == "lpdeojkfhenboeibhkjhiancceeboknd";
 }
 
 // Helper to create a dictionary with login and token properties set from
@@ -106,6 +134,11 @@ void WebstorePrivateApi::SetTestingProfileSyncService(
 void WebstorePrivateApi::SetWebstoreInstallerDelegateForTesting(
     WebstoreInstaller::Delegate* delegate) {
   test_webstore_installer_delegate = delegate;
+}
+
+// static
+void WebstorePrivateApi::SetTrustTestIDsForTesting(bool allow) {
+  trust_test_ids = allow;
 }
 
 BeginInstallWithManifestFunction::BeginInstallWithManifestFunction()
@@ -166,7 +199,7 @@ bool BeginInstallWithManifestFunction::RunImpl() {
     context_getter = profile()->GetRequestContext();
 
   scoped_refptr<WebstoreInstallHelper> helper = new WebstoreInstallHelper(
-      this, manifest_, icon_data_, icon_url, context_getter);
+      this, id_, manifest_, icon_data_, icon_url, context_getter);
 
   // The helper will call us back via OnWebstoreParseSuccess or
   // OnWebstoreParseFailure.
@@ -213,7 +246,10 @@ void BeginInstallWithManifestFunction::SetResult(ResultCode code) {
 }
 
 void BeginInstallWithManifestFunction::OnWebstoreParseSuccess(
-    const SkBitmap& icon, DictionaryValue* parsed_manifest) {
+    const std::string& id,
+    const SkBitmap& icon,
+    DictionaryValue* parsed_manifest) {
+  CHECK_EQ(id_, id);
   CHECK(parsed_manifest);
   icon_ = icon;
   parsed_manifest_.reset(parsed_manifest);
@@ -230,7 +266,7 @@ void BeginInstallWithManifestFunction::OnWebstoreParseSuccess(
       &icon_,
       prompt,
       &dummy_extension_)) {
-    OnWebstoreParseFailure(WebstoreInstallHelper::Delegate::MANIFEST_ERROR,
+    OnWebstoreParseFailure(id_, WebstoreInstallHelper::Delegate::MANIFEST_ERROR,
                            kInvalidManifestError);
     return;
   }
@@ -239,8 +275,11 @@ void BeginInstallWithManifestFunction::OnWebstoreParseSuccess(
 }
 
 void BeginInstallWithManifestFunction::OnWebstoreParseFailure(
+    const std::string& id,
     WebstoreInstallHelper::Delegate::InstallHelperResultCode result_code,
     const std::string& error_message) {
+  CHECK_EQ(id_, id);
+
   // Map from WebstoreInstallHelper's result codes to ours.
   switch (result_code) {
     case WebstoreInstallHelper::Delegate::UNKNOWN_ERROR:
@@ -291,7 +330,7 @@ void BeginInstallWithManifestFunction::InstallUIAbort(bool user_initiated) {
 
   // The web store install histograms are a subset of the install histograms.
   // We need to record both histograms here since CrxInstaller::InstallUIAbort
-  // is never called for web store install cancellations
+  // is never called for web store install cancellations.
   std::string histogram_name = user_initiated ?
       "Extensions.Permissions_WebStoreInstallCancel" :
       "Extensions.Permissions_WebStoreInstallAbort";
@@ -329,12 +368,96 @@ bool CompleteInstallFunction::RunImpl() {
   // The extension will install through the normal extension install flow, but
   // the above call to SetWhitelistedInstallId will bypass the normal
   // permissions install dialog.
-  WebstoreInstaller* installer =
-      profile()->GetExtensionService()->webstore_installer();
-  installer->InstallExtension(
-      id, test_webstore_installer_delegate, WebstoreInstaller::FLAG_NONE);
+  scoped_refptr<WebstoreInstaller> installer = new WebstoreInstaller(
+      profile(), test_webstore_installer_delegate,
+      &(dispatcher()->delegate()->GetAssociatedTabContents()->controller()),
+      id, WebstoreInstaller::FLAG_NONE);
+  installer->Start();
 
   return true;
+}
+
+SilentlyInstallFunction::SilentlyInstallFunction() {}
+SilentlyInstallFunction::~SilentlyInstallFunction() {}
+
+bool SilentlyInstallFunction::RunImpl() {
+  if (!IsWebStoreURL(profile_, source_url())) {
+    error_ = kPermissionDeniedError;
+    return false;
+  }
+
+  DictionaryValue* details = NULL;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &details));
+  CHECK(details);
+
+  EXTENSION_FUNCTION_VALIDATE(details->GetString(kIdKey, &id_));
+  if (!IsTrustedForSilentInstall(id_)) {
+    error_ = kInvalidIdError;
+    return false;
+  }
+
+  EXTENSION_FUNCTION_VALIDATE(details->GetString(kManifestKey, &manifest_));
+
+  // Matched in OnWebstoreParseFailure, OnExtensionInstall{Success,Failure}.
+  AddRef();
+
+  scoped_refptr<WebstoreInstallHelper> helper = new WebstoreInstallHelper(
+      this, id_, manifest_, std::string(), GURL(), NULL);
+  helper->Start();
+
+  return true;
+}
+
+void SilentlyInstallFunction::OnWebstoreParseSuccess(
+    const std::string& id,
+    const SkBitmap& icon,
+    base::DictionaryValue* parsed_manifest) {
+  CHECK_EQ(id_, id);
+
+  // This lets CrxInstaller bypass the permission confirmation UI for the
+  // extension. The whitelist entry gets cleared in
+  // CrxInstaller::ConfirmInstall.
+  CrxInstaller::WhitelistEntry* entry = new CrxInstaller::WhitelistEntry;
+  entry->parsed_manifest.reset(parsed_manifest);
+  entry->use_app_installed_bubble = false;
+  entry->skip_post_install_ui = true;
+  CrxInstaller::SetWhitelistEntry(id_, entry);
+
+  scoped_refptr<WebstoreInstaller> installer = new WebstoreInstaller(
+      profile(), this,
+      &(dispatcher()->delegate()->GetAssociatedTabContents()->controller()),
+      id_, WebstoreInstaller::FLAG_NONE);
+  installer->Start();
+}
+
+void SilentlyInstallFunction::OnWebstoreParseFailure(
+    const std::string& id,
+    InstallHelperResultCode result_code,
+    const std::string& error_message) {
+  CHECK_EQ(id_, id);
+
+  error_ = error_message;
+  SendResponse(false);
+
+  Release();  // Matches the AddRef() in RunImpl().
+}
+
+void SilentlyInstallFunction::OnExtensionInstallSuccess(const std::string& id) {
+  CHECK_EQ(id_, id);
+
+  SendResponse(true);
+
+  Release();  // Matches the AddRef() in RunImpl().
+}
+
+void SilentlyInstallFunction::OnExtensionInstallFailure(
+    const std::string& id, const std::string& error) {
+  CHECK_EQ(id_, id);
+
+  error_ = error;
+  SendResponse(false);
+
+  Release();  // Matches the AddRef() in RunImpl().
 }
 
 bool GetBrowserLoginFunction::RunImpl() {

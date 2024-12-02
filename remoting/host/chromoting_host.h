@@ -2,18 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef REMOTING_CHROMOTING_HOST_H_
-#define REMOTING_CHROMOTING_HOST_H_
+#ifndef REMOTING_HOST_CHROMOTING_HOST_H_
+#define REMOTING_HOST_CHROMOTING_HOST_H_
 
 #include <string>
+#include <vector>
 
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/thread.h"
 #include "remoting/base/encoder.h"
-#include "remoting/host/access_verifier.h"
 #include "remoting/host/capturer.h"
 #include "remoting/host/client_session.h"
 #include "remoting/host/desktop_environment.h"
+#include "remoting/host/host_key_pair.h"
 #include "remoting/host/host_status_observer.h"
 #include "remoting/host/ui_strings.h"
 #include "remoting/jingle_glue/jingle_thread.h"
@@ -21,13 +22,9 @@
 #include "remoting/protocol/session_manager.h"
 #include "remoting/protocol/connection_to_client.h"
 
-class Task;
-
 namespace remoting {
 
 namespace protocol {
-class ConnectionToClient;
-class HostStub;
 class InputStub;
 class SessionConfig;
 class CandidateSessionConfig;
@@ -64,20 +61,17 @@ class ScreenRecorder;
 //    return to the idle state. We then go to step (2) if there a new
 //    incoming connection.
 class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
-                       public protocol::ConnectionToClient::EventHandler,
                        public ClientSession::EventHandler,
                        public SignalStrategy::StatusObserver,
                        public protocol::SessionManager::Listener {
  public:
   // Factory methods that must be used to create ChromotingHost
-  // instances.  Returned instance takes ownership of
-  // |access_verifier|. It does NOT take ownership of |context|,
-  // and |environment|, but they should not be deleted until
-  // returned host is destroyed.
+  // instances. It does NOT take ownership of |context|, and
+  // |environment|, but they should not be deleted until returned host
+  // is destroyed.
   static ChromotingHost* Create(ChromotingHostContext* context,
                                 MutableHostConfig* config,
                                 DesktopEnvironment* environment,
-                                AccessVerifier* access_verifier,
                                 bool allow_nat_traversal);
 
   // Asynchronously start the host process.
@@ -90,7 +84,7 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
 
   // Asynchronously shutdown the host process. |shutdown_task| is
   // called after shutdown is completed.
-  void Shutdown(Task* shutdown_task);
+  void Shutdown(const base::Closure& shutdown_task);
 
   // Adds |observer| to the list of status observers. Doesn't take
   // ownership of |observer|, so |observer| must outlive this
@@ -98,13 +92,10 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // started.
   void AddStatusObserver(HostStatusObserver* observer);
 
-  ////////////////////////////////////////////////////////////////////////////
-  // protocol::ConnectionToClient::EventHandler implementation.
-  virtual void OnConnectionOpened(protocol::ConnectionToClient* client);
-  virtual void OnConnectionClosed(protocol::ConnectionToClient* client);
-  virtual void OnConnectionFailed(protocol::ConnectionToClient* client);
-  virtual void OnSequenceNumberUpdated(protocol::ConnectionToClient* client,
-                                       int64 sequence_number);
+  // Sets shared secret for the host. All incoming connections are
+  // rejected if shared secret isn't set. Must be called on the
+  // network thread after the host is started.
+  void SetSharedSecret(const std::string& shared_secret);
 
   ////////////////////////////////////////////////////////////////////////////
   // SignalStrategy::StatusObserver implementation.
@@ -114,21 +105,17 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
 
   ////////////////////////////////////////////////////////////////////////////
   // ClientSession::EventHandler implementation.
-  virtual void LocalLoginSucceeded(
-      scoped_refptr<protocol::ConnectionToClient> client);
-  virtual void LocalLoginFailed(
-      scoped_refptr<protocol::ConnectionToClient> client);
+  virtual void OnSessionAuthenticated(ClientSession* client) OVERRIDE;
+  virtual void OnSessionAuthenticationFailed(ClientSession* client) OVERRIDE;
+  virtual void OnSessionClosed(ClientSession* session) OVERRIDE;
+  virtual void OnSessionSequenceNumber(ClientSession* session,
+                                       int64 sequence_number) OVERRIDE;
 
   // SessionManager::Listener implementation.
   virtual void OnSessionManagerInitialized() OVERRIDE;
   virtual void OnIncomingSession(
       protocol::Session* session,
       protocol::SessionManager::IncomingSessionResponse* response) OVERRIDE;
-
-  void AddAuthenticatedClient(
-      scoped_refptr<protocol::ConnectionToClient> connection,
-      const protocol::SessionConfig& config,
-      const std::string& jid);
 
   // Sets desired configuration for the protocol. Ownership of the
   // |config| is transferred to the object. Must be called before Start().
@@ -137,9 +124,6 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // TODO(wez): ChromotingHost shouldn't need to know about Me2Mom.
   void set_it2me(bool is_it2me) {
     is_it2me_ = is_it2me;
-  }
-  void set_access_code(const std::string& access_code) {
-    access_code_ = access_code;
   }
 
   // Notify all active client sessions that local input has been detected, and
@@ -160,7 +144,7 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   friend class ChromotingHostTest;
 
   typedef std::vector<HostStatusObserver*> StatusObserverList;
-  typedef std::vector<scoped_refptr<ClientSession> > ClientList;
+  typedef std::vector<ClientSession*> ClientList;
 
   enum State {
     kInitial,
@@ -169,50 +153,55 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
     kStopped,
   };
 
-  // Takes ownership of |access_verifier|, and adds a reference to
-  // |config|. Caller keeps ownership of |context| and |environment|.
+  // Caller keeps ownership of |context| and |environment|.
   ChromotingHost(ChromotingHostContext* context,
                  MutableHostConfig* config,
                  DesktopEnvironment* environment,
-                 AccessVerifier* access_verifier,
                  bool allow_nat_traversal);
   virtual ~ChromotingHost();
-
-  // This method is called if a client is disconnected from the host.
-  void OnClientDisconnected(protocol::ConnectionToClient* client);
 
   // Creates encoder for the specified configuration.
   Encoder* CreateEncoder(const protocol::SessionConfig& config);
 
   std::string GenerateHostAuthToken(const std::string& encoded_client_token);
 
+  void AddAuthenticatedClient(ClientSession* client,
+                              const protocol::SessionConfig& config,
+                              const std::string& jid);
+
   int AuthenticatedClientsCount() const;
-
-  void EnableCurtainMode(bool enable);
-
-  void ProcessPreAuthentication(
-      const scoped_refptr<protocol::ConnectionToClient>& connection);
 
   void StopScreenRecorder();
   void OnScreenRecorderStopped();
 
-  // The following methods are called during shutdown.
-  void ShutdownNetwork();
-  void ShutdownRecorder();
+  // Called from Shutdown() or OnScreenRecorderStopped() to finish shutdown.
   void ShutdownFinish();
+
+  // Unless specified otherwise all members of this class must be
+  // used on the network thread only.
 
   // Parameters specified when the host was created.
   ChromotingHostContext* context_;
   DesktopEnvironment* desktop_environment_;
   scoped_refptr<MutableHostConfig> config_;
-  scoped_ptr<AccessVerifier> access_verifier_;
+  HostKeyPair key_pair_;
   bool allow_nat_traversal_;
+
+  // TODO(lambroslambrou): The following is a temporary fix for Me2Me
+  // (crbug.com/105995), pending the AuthenticatorFactory work.
+  // Cache the shared secret, in case SetSharedSecret() is called before the
+  // session manager has been created.
+  // The |have_shared_secret_| flag is to distinguish SetSharedSecret() not
+  // being called at all, from being called with an empty string.
+  std::string shared_secret_;
+  bool have_shared_secret_;
 
   // Connection objects.
   scoped_ptr<SignalStrategy> signal_strategy_;
   std::string local_jid_;
   scoped_ptr<protocol::SessionManager> session_manager_;
 
+  // StatusObserverList is thread-safe and can be used on any thread.
   StatusObserverList status_observers_;
 
   // The connections to remote clients.
@@ -221,35 +210,26 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // Session manager for the host process.
   scoped_refptr<ScreenRecorder> recorder_;
 
-  // Tracks the internal state of the host.
-  // This variable is written on the main thread of ChromotingHostContext
-  // and read by jingle thread.
-  State state_;
-
   // Number of screen recorders that are currently being
   // stopped. Normally set to 0 or 1, but in some cases it may be
   // greater than 1, particularly if when second client can connect
-  // immidiately after previous one disconnected.
+  // immediately after previous one disconnected.
   int stopping_recorders_;
 
-  // Lock is to lock the access to |state_|.
-  base::Lock lock_;
+  // Tracks the internal state of the host.
+  State state_;
 
   // Configuration of the protocol.
   scoped_ptr<protocol::CandidateSessionConfig> protocol_config_;
 
-  bool is_curtained_;
-
-  // Whether or not the host is running in "IT2Me" mode, in which connections
-  // are pre-authenticated, and hence the local login challenge can be bypassed.
-  bool is_it2me_;
-
-  std::string access_code_;
-
   // Stores list of tasks that should be executed when we finish
   // shutdown. Used only while |state_| is set to kStopping.
-  std::vector<Task*> shutdown_tasks_;
+  std::vector<base::Closure> shutdown_tasks_;
 
+  // TODO(sergeyu): The following members do not belong to
+  // ChromotingHost and should be moved elsewhere.
+  bool is_it2me_;
+  std::string access_code_;
   UiStrings ui_strings_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingHost);

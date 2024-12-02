@@ -10,6 +10,7 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #import "chrome/browser/app_controller_mac.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/accelerators_cocoa.h"
@@ -18,16 +19,15 @@
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/wrench_menu/menu_tracked_root_view.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
-#include "chrome/browser/profiles/profile.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "ui/base/accelerators/accelerator_cocoa.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/models/accelerator_cocoa.h"
 #include "ui/base/models/menu_model.h"
 
 @interface WrenchMenuController (Private)
@@ -60,21 +60,22 @@ class AcceleratorDelegate : public ui::AcceleratorProvider {
   }
 };
 
-class ZoomLevelObserver : public NotificationObserver {
+class ZoomLevelObserver : public content::NotificationObserver {
  public:
   explicit ZoomLevelObserver(WrenchMenuController* controller)
       : controller_(controller) {
-    registrar_.Add(this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
-                   NotificationService::AllBrowserContextsAndSources());
+    registrar_.Add(
+        this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
+        content::NotificationService::AllBrowserContextsAndSources());
   }
 
   void Observe(int type,
-               const NotificationSource& source,
-               const NotificationDetails& details) {
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) {
     DCHECK_EQ(type, content::NOTIFICATION_ZOOM_LEVEL_CHANGED);
     WrenchMenuModel* wrenchMenuModel = [controller_ wrenchMenuModel];
     if (wrenchMenuModel->browser()->profile()->GetHostZoomMap() !=
-        Source<HostZoomMap>(source).ptr()) {
+        content::Source<HostZoomMap>(source).ptr()) {
       return;
     }
 
@@ -85,7 +86,7 @@ class ZoomLevelObserver : public NotificationObserver {
   }
 
  private:
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
   WrenchMenuController* controller_;  // Weak; owns this.
 };
 

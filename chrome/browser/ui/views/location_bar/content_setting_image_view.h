@@ -6,15 +6,15 @@
 #define CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_CONTENT_SETTING_IMAGE_VIEW_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
-#include "chrome/browser/ui/views/bubble/bubble.h"
 #include "chrome/common/content_settings_types.h"
 #include "ui/base/animation/linear_animation.h"
-#include "views/controls/image_view.h"
+#include "ui/views/controls/image_view.h"
 
 class ContentSettingImageModel;
-class Bubble;
+class ContentSettingBubbleContents;
 class LocationBarView;
 class TabContents;
 
@@ -22,8 +22,9 @@ namespace views {
 class MouseEvent;
 }
 
+class ContentSettingsDelegateView;
+
 class ContentSettingImageView : public views::ImageView,
-                                public BubbleDelegate,
                                 public ui::LinearAnimation {
  public:
   ContentSettingImageView(ContentSettingsType content_type,
@@ -35,20 +36,14 @@ class ContentSettingImageView : public views::ImageView,
   void UpdateFromTabContents(TabContents* tab_contents);
 
   // views::View overrides:
-  virtual gfx::Size GetPreferredSize();
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
 
  private:
   // views::ImageView overrides:
   virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE;
-  virtual void VisibilityChanged(View* starting_from, bool is_visible) OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void OnPaintBackground(gfx::Canvas* canvas) OVERRIDE;
-
-  // BubbleDelegate overrides:
-  virtual void BubbleClosing(Bubble* bubble, bool closed_by_escape) OVERRIDE;
-  virtual bool CloseOnEscape() OVERRIDE;
-  virtual bool FadeInOnShow() OVERRIDE;
 
   // ui::LinearAnimation override:
   virtual void AnimateToState(double state) OVERRIDE;
@@ -57,9 +52,6 @@ class ContentSettingImageView : public views::ImageView,
 
   // The owning LocationBarView.
   LocationBarView* parent_;
-
-  // The currently shown info bubble if any.
-  Bubble* bubble_;
 
   string16 animated_text_;
   bool animation_in_progress_;

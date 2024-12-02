@@ -20,8 +20,8 @@
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -99,9 +99,6 @@ class ChooseMobileNetworkHandler
 
 ChooseMobileNetworkHandler::ChooseMobileNetworkHandler()
     : is_page_ready_(false), has_pending_results_(false) {
-  if (!CrosLibrary::Get()->EnsureLoaded())
-    return;
-
   NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
   if (const NetworkDevice* cellular = cros->FindCellularDevice()) {
     device_path_ = cellular->device_path();
@@ -174,9 +171,6 @@ void ChooseMobileNetworkHandler::HandleCancel(const ListValue* args) {
     return;
   }
 
-  if (!CrosLibrary::Get()->EnsureLoaded())
-    return;
-
   // Switch to automatic mode.
   NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
   cros->RequestCellularRegister(std::string());
@@ -190,9 +184,6 @@ void ChooseMobileNetworkHandler::HandleConnect(const ListValue* args) {
     NOTREACHED();
     return;
   }
-
-  if (!CrosLibrary::Get()->EnsureLoaded())
-    return;
 
   NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
   cros->RequestCellularRegister(network_id);

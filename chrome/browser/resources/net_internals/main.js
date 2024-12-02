@@ -48,6 +48,11 @@ var MainView = (function() {
     // observers.
     g_browser = BrowserBridge.getInstance();
 
+    // This must be the first constants observer, so other constants observers
+    // can safely use the globals, rather than depending on walking through
+    // the constants themselves.
+    g_browser.addConstantsObserver(new ConstantsObserver());
+
     // This view is a left (resizable) navigation bar.
     this.categoryTabSwitcher_ = new TabSwitcherView();
     var tabs = this.categoryTabSwitcher_;
@@ -78,6 +83,8 @@ var MainView = (function() {
                 false, true);
     tabs.addTab(EventsView.TAB_HANDLE_ID, EventsView.getInstance(),
                 false, true);
+    tabs.addTab(TimelineView.TAB_HANDLE_ID, TimelineView.getInstance(),
+                false, true);
     tabs.addTab(DnsView.TAB_HANDLE_ID, DnsView.getInstance(),
                 false, true);
     tabs.addTab(SocketsView.TAB_HANDLE_ID, SocketsView.getInstance(),
@@ -95,6 +102,8 @@ var MainView = (function() {
                 false, cr.isChromeOS);
     tabs.addTab(PrerenderView.TAB_HANDLE_ID, PrerenderView.getInstance(),
                 false, true);
+    tabs.addTab(CrosView.TAB_HANDLE_ID, CrosView.getInstance(),
+                false, cr.isChromeOS);
 
     // Build a map from the anchor name of each tab handle to its "tab ID".
     // We will consider navigations to the #hash as a switch tab request.
@@ -123,8 +132,6 @@ var MainView = (function() {
     // Select the initial view based on the current URL.
     window.onhashchange();
 
-    g_browser.addConstantsObserver(new ConstantsObserver());
-
     // Tell the browser that we are ready to start receiving log events.
     g_browser.sendReady();
   }
@@ -138,6 +145,14 @@ var MainView = (function() {
   MainView.STATUS_VIEW_DUMP_FILE_NAME_ID = 'status-view-dump-file-name';
 
   cr.addSingletonGetter(MainView);
+
+  // Tracks if we're viewing a loaded log file, so views can behave
+  // appropriately.  Global so safe to call during construction.
+  var isViewingLoadedLog = false;
+
+  MainView.isViewingLoadedLog = function() {
+    return isViewingLoadedLog;
+  };
 
   MainView.prototype = {
     // Inherit the superclass's methods.
@@ -153,12 +168,15 @@ var MainView = (function() {
      * Prevents receiving/sending events to/from the browser, so loaded data
      * will not be mixed with current Chrome state.  Also hides any interactive
      * HTML elements that send messages to the browser.  Cannot be undone
-     * without reloading the page.
+     * without reloading the page.  Must be called before passing loaded data
+     * to the individual views.
      *
      * @param {String} fileName The name of the log file that has been loaded.
      */
     onLoadLogFile: function(fileName) {
-       // Swap out the status bar to indicate we have loaded from a file.
+      isViewingLoadedLog = true;
+
+      // Swap out the status bar to indicate we have loaded from a file.
       setNodeDisplay($(MainView.STATUS_VIEW_FOR_CAPTURE_ID), false);
       setNodeDisplay($(MainView.STATUS_VIEW_FOR_FILE_ID), true);
 
@@ -169,9 +187,8 @@ var MainView = (function() {
 
       g_browser.sourceTracker.setSecurityStripping(false);
       g_browser.disable();
-    }
+    },
   };
-
 
   /*
    * Takes the current hash in form of "#tab&param1=value1&param2=value2&...".

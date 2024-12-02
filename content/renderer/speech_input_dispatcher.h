@@ -6,12 +6,14 @@
 #define CONTENT_RENDERER_SPEECH_INPUT_DISPATCHER_H_
 
 #include "base/basictypes.h"
-#include "content/common/speech_input_result.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSpeechInputController.h"
 
-class GURL;
 class RenderViewImpl;
+
+namespace content {
+struct SpeechInputResult;
+}
 
 namespace WebKit {
 class WebSpeechInputListener;
@@ -27,7 +29,7 @@ class SpeechInputDispatcher : public content::RenderViewObserver,
 
  private:
   // RenderView::Observer implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // WebKit::WebSpeechInputController.
   virtual bool startRecognition(int request_id,
@@ -40,7 +42,7 @@ class SpeechInputDispatcher : public content::RenderViewObserver,
   virtual void stopRecording(int request_id);
 
   void OnSpeechRecognitionResult(int request_id,
-      const speech_input::SpeechInputResult& result);
+      const content::SpeechInputResult& result);
   void OnSpeechRecordingComplete(int request_id);
   void OnSpeechRecognitionComplete(int request_id);
   void OnSpeechRecognitionToggleSpeechInput();

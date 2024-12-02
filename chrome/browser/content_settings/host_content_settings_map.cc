@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
@@ -26,28 +27,18 @@
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/common/content_switches.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/base/static_cookie_policy.h"
 
-namespace {
+using content::BrowserThread;
 
-// Returns true if we should allow all content types for this URL.  This is
-// true for various internal objects like chrome:// URLs, so UI and other
-// things users think of as "not webpages" don't break.
-bool ShouldAllowAllContent(const GURL& url, ContentSettingsType content_type) {
-  if (content_type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS)
-    return false;
-  return url.SchemeIs(chrome::kChromeDevToolsScheme) ||
-         url.SchemeIs(chrome::kChromeInternalScheme) ||
-         url.SchemeIs(chrome::kChromeUIScheme) ||
-         url.SchemeIs(chrome::kExtensionScheme);
-}
+namespace {
 
 typedef std::vector<content_settings::Rule> Rules;
 
@@ -59,6 +50,16 @@ const char* kProviderNames[] = {
   "preference",
   "default"
 };
+
+content_settings::SettingSource kProviderSourceMap[] = {
+  content_settings::SETTING_SOURCE_POLICY,
+  content_settings::SETTING_SOURCE_EXTENSION,
+  content_settings::SETTING_SOURCE_USER,
+  content_settings::SETTING_SOURCE_USER,
+};
+COMPILE_ASSERT(arraysize(kProviderSourceMap) ==
+                   HostContentSettingsMap::NUM_PROVIDER_TYPES,
+               kProviderSourceMap_has_incorrect_size);
 
 bool ContentTypeHasCompoundValue(ContentSettingsType type) {
   // Values for content type CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE are
@@ -87,10 +88,7 @@ HostContentSettingsMap::HostContentSettingsMap(
     ExtensionService* extension_service,
     bool incognito)
     : prefs_(prefs),
-      is_off_the_record_(incognito),
-      updating_preferences_(false),
-      block_third_party_cookies_(false),
-      is_block_third_party_cookies_managed_(false) {
+      is_off_the_record_(incognito) {
   content_settings::ObservableProvider* policy_provider =
       new content_settings::PolicyProvider(prefs_);
   policy_provider->AddObserver(this);
@@ -115,38 +113,12 @@ HostContentSettingsMap::HostContentSettingsMap(
       new content_settings::DefaultProvider(prefs_, is_off_the_record_);
   default_provider->AddObserver(this);
   content_settings_providers_[DEFAULT_PROVIDER] = default_provider;
-
-  MigrateObsoleteCookiePref();
-
-  // Read misc. global settings.
-  block_third_party_cookies_ =
-      prefs_->GetBoolean(prefs::kBlockThirdPartyCookies);
-  if (block_third_party_cookies_) {
-    UserMetrics::RecordAction(
-        UserMetricsAction("ThirdPartyCookieBlockingEnabled"));
-  } else {
-    UserMetrics::RecordAction(
-        UserMetricsAction("ThirdPartyCookieBlockingDisabled"));
-  }
-  is_block_third_party_cookies_managed_ =
-      prefs_->IsManagedPreference(prefs::kBlockThirdPartyCookies);
-
-  pref_change_registrar_.Init(prefs_);
-  pref_change_registrar_.Add(prefs::kBlockThirdPartyCookies, this);
 }
 
 // static
 void HostContentSettingsMap::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterBooleanPref(prefs::kBlockThirdPartyCookies,
-                             false,
-                             PrefService::SYNCABLE_PREF);
   prefs->RegisterIntegerPref(prefs::kContentSettingsWindowLastTabIndex,
                              0,
-                             PrefService::UNSYNCABLE_PREF);
-
-  // Obsolete prefs, for migration:
-  prefs->RegisterIntegerPref(prefs::kCookieBehavior,
-                             net::StaticCookiePolicy::ALLOW_ALL_COOKIES,
                              PrefService::UNSYNCABLE_PREF);
 
   // Register the prefs for the content settings providers.
@@ -156,93 +128,39 @@ void HostContentSettingsMap::RegisterUserPrefs(PrefService* prefs) {
 }
 
 ContentSetting HostContentSettingsMap::GetDefaultContentSettingFromProvider(
-    ContentSettingsType content_type, ProviderType provider_type) const {
-  ConstProviderIterator it = content_settings_providers_.find(provider_type);
-  if (it == content_settings_providers_.end())
-    return CONTENT_SETTING_DEFAULT;
+    ContentSettingsType content_type,
+    content_settings::ProviderInterface* provider) const {
   scoped_ptr<content_settings::RuleIterator> rule_iterator(
-      it->second->GetRuleIterator(content_type, "", false));
+      provider->GetRuleIterator(content_type, "", false));
   return GetDefaultSetting(rule_iterator.get());
 }
 
 ContentSetting HostContentSettingsMap::GetDefaultContentSetting(
-    ContentSettingsType content_type) const {
-  DCHECK_NE(content_type, CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE);
+    ContentSettingsType content_type,
+    std::string* provider_id) const {
+  DCHECK(!ContentTypeHasCompoundValue(content_type));
 
-  // First check if there is a default setting set by policy.
-  ContentSetting default_setting = GetDefaultContentSettingFromProvider(
-      content_type, POLICY_PROVIDER);
-  if (default_setting != CONTENT_SETTING_DEFAULT)
-    return default_setting;
-
-  // Get the default setting.
-  default_setting = GetDefaultContentSettingFromProvider(
-      content_type, DEFAULT_PROVIDER);
-
-  // The method GetDefaultContentSetting always has to return an explicit
-  // value that is to be used as default. We here rely on the
-  // PrefContentSettingProvider to always provide a value.
-  CHECK_NE(CONTENT_SETTING_DEFAULT, default_setting);
-  return default_setting;
-}
-
-ContentSettings HostContentSettingsMap::GetDefaultContentSettings() const {
-  ContentSettings output(CONTENT_SETTING_DEFAULT);
-  for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
-    if (!ContentTypeHasCompoundValue(ContentSettingsType(i)))
-      output.settings[i] = GetDefaultContentSetting(ContentSettingsType(i));
-  }
-  return output;
-}
-
-ContentSetting HostContentSettingsMap::GetCookieContentSetting(
-    const GURL& url,
-    const GURL& first_party_url,
-    bool setting_cookie) const {
-  if (ShouldAllowAllContent(first_party_url, CONTENT_SETTINGS_TYPE_COOKIES))
-    return CONTENT_SETTING_ALLOW;
-
-  // First get any host-specific settings.
-  ContentSetting setting = CONTENT_SETTING_DEFAULT;
+  // Iterate through the list of providers and return the first non-NULL value
+  // that matches |primary_url| and |secondary_url|.
   for (ConstProviderIterator provider = content_settings_providers_.begin();
        provider != content_settings_providers_.end();
        ++provider) {
-    if (provider->first == DEFAULT_PROVIDER)
+    if (provider->first == PREF_PROVIDER)
       continue;
-
-    setting = content_settings::GetContentSetting(provider->second,
-                                                  url,
-                                                  first_party_url,
-                                                  CONTENT_SETTINGS_TYPE_COOKIES,
-                                                  std::string(),
-                                                  is_off_the_record_);
-    if (setting != CONTENT_SETTING_DEFAULT)
-      break;
+    ContentSetting default_setting =
+        GetDefaultContentSettingFromProvider(content_type, provider->second);
+    if (default_setting != CONTENT_SETTING_DEFAULT) {
+      if (provider_id)
+        *provider_id = kProviderNames[provider->first];
+      return default_setting;
+    }
   }
 
-  // If no explicit exception has been made and third-party cookies are blocked
-  // by default, apply that rule.
-  if (setting == CONTENT_SETTING_DEFAULT && BlockThirdPartyCookies()) {
-    bool strict = CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kBlockReadingThirdPartyCookies);
-    net::StaticCookiePolicy policy(strict ?
-        net::StaticCookiePolicy::BLOCK_ALL_THIRD_PARTY_COOKIES :
-        net::StaticCookiePolicy::BLOCK_SETTING_THIRD_PARTY_COOKIES);
-    int rv;
-    if (setting_cookie)
-      rv = policy.CanSetCookie(url, first_party_url);
-    else
-      rv = policy.CanGetCookies(url, first_party_url);
-    DCHECK_NE(net::ERR_IO_PENDING, rv);
-    if (rv != net::OK)
-      setting = CONTENT_SETTING_BLOCK;
-  }
-
-  // If no other policy has changed the setting, use the default.
-  if (setting == CONTENT_SETTING_DEFAULT)
-    setting = GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES);
-
-  return setting;
+  // The method GetDefaultContentSetting always has to return an explicit
+  // value that is to be used as default. We here rely on the
+  // DefaultProvider to always provide a value.
+  NOTREACHED();
+  return CONTENT_SETTING_DEFAULT;
 }
 
 ContentSetting HostContentSettingsMap::GetContentSetting(
@@ -250,71 +168,15 @@ ContentSetting HostContentSettingsMap::GetContentSetting(
     const GURL& secondary_url,
     ContentSettingsType content_type,
     const std::string& resource_identifier) const {
-  scoped_ptr<base::Value> value(GetContentSettingValue(
-      primary_url, secondary_url, content_type, resource_identifier,
-      NULL, NULL));
+  scoped_ptr<base::Value> value(GetWebsiteSetting(
+      primary_url, secondary_url, content_type, resource_identifier, NULL));
   return content_settings::ValueToContentSetting(value.get());
-}
-
-base::Value* HostContentSettingsMap::GetContentSettingValue(
-    const GURL& primary_url,
-    const GURL& secondary_url,
-    ContentSettingsType content_type,
-    const std::string& resource_identifier,
-    ContentSettingsPattern* primary_pattern,
-    ContentSettingsPattern* secondary_pattern) const {
-  DCHECK_NE(CONTENT_SETTINGS_TYPE_COOKIES, content_type);
-  DCHECK(content_settings::SupportsResourceIdentifier(content_type) ||
-         resource_identifier.empty());
-
-  // Check if the scheme of the requesting url is whitelisted.
-  if (ShouldAllowAllContent(secondary_url, content_type))
-    return Value::CreateIntegerValue(CONTENT_SETTING_ALLOW);
-
-  // The list of |content_settings_providers_| is ordered according to their
-  // precedence.
-  for (ConstProviderIterator provider = content_settings_providers_.begin();
-       provider != content_settings_providers_.end();
-       ++provider) {
-    base::Value* value = content_settings::GetContentSettingValueAndPatterns(
-        provider->second, primary_url, secondary_url, content_type,
-        resource_identifier, is_off_the_record_,
-        primary_pattern, secondary_pattern);
-    if (value)
-      return value;
-  }
-
-  return NULL;
-}
-
-ContentSettings HostContentSettingsMap::GetContentSettings(
-      const GURL& primary_url,
-      const GURL& secondary_url) const {
-  ContentSettings output;
-  // If we require a resource identifier, set the content settings to default,
-  // otherwise make the defaults explicit. Values for content type
-  // CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE can't be mapped to the type
-  // |ContentSetting|. So we ignore them here.
-  for (int j = 0; j < CONTENT_SETTINGS_NUM_TYPES; ++j) {
-    ContentSettingsType type = ContentSettingsType(j);
-    if (type == CONTENT_SETTINGS_TYPE_COOKIES) {
-      output.settings[j] = GetCookieContentSetting(
-          primary_url, secondary_url, false);
-    } else if (!ContentTypeHasCompoundValue(type)) {
-      output.settings[j] = GetContentSetting(
-          primary_url,
-          secondary_url,
-          ContentSettingsType(j),
-          std::string());
-    }
-  }
-  return output;
 }
 
 void HostContentSettingsMap::GetSettingsForOneType(
     ContentSettingsType content_type,
     const std::string& resource_identifier,
-    SettingsForOneType* settings) const {
+    ContentSettingsForOneType* settings) const {
   DCHECK(content_settings::SupportsResourceIdentifier(content_type) ||
          resource_identifier.empty());
   DCHECK(settings);
@@ -348,12 +210,38 @@ void HostContentSettingsMap::SetDefaultContentSetting(
   DCHECK_NE(content_type, CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE);
   DCHECK(IsSettingAllowedForType(setting, content_type));
 
-  content_settings_providers_[DEFAULT_PROVIDER]->SetContentSetting(
+  base::Value* value = NULL;
+  if (setting != CONTENT_SETTING_DEFAULT)
+    value = Value::CreateIntegerValue(setting);
+  SetWebsiteSetting(
       ContentSettingsPattern::Wildcard(),
       ContentSettingsPattern::Wildcard(),
       content_type,
       std::string(),
-      setting);
+      value);
+}
+
+void HostContentSettingsMap::SetWebsiteSetting(
+    const ContentSettingsPattern& primary_pattern,
+    const ContentSettingsPattern& secondary_pattern,
+    ContentSettingsType content_type,
+    const std::string& resource_identifier,
+    base::Value* value) {
+  DCHECK(IsValueAllowedForType(value, content_type));
+  DCHECK(content_settings::SupportsResourceIdentifier(content_type) ||
+         resource_identifier.empty());
+  for (ProviderIterator provider = content_settings_providers_.begin();
+       provider != content_settings_providers_.end();
+       ++provider) {
+    if (provider->second->SetWebsiteSetting(primary_pattern,
+                                            secondary_pattern,
+                                            content_type,
+                                            resource_identifier,
+                                            value)) {
+      return;
+    }
+  }
+  NOTREACHED();
 }
 
 void HostContentSettingsMap::SetContentSetting(
@@ -363,19 +251,14 @@ void HostContentSettingsMap::SetContentSetting(
     const std::string& resource_identifier,
     ContentSetting setting) {
   DCHECK_NE(content_type, CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE);
-  DCHECK(IsSettingAllowedForType(setting, content_type));
-  DCHECK(content_settings::SupportsResourceIdentifier(content_type) ||
-         resource_identifier.empty());
-  for (ProviderIterator provider = content_settings_providers_.begin();
-       provider != content_settings_providers_.end();
-       ++provider) {
-    provider->second->SetContentSetting(
-        primary_pattern,
-        secondary_pattern,
-        content_type,
-        resource_identifier,
-        setting);
-  }
+  base::Value* value = NULL;
+  if (setting != CONTENT_SETTING_DEFAULT)
+    value = Value::CreateIntegerValue(setting);
+  SetWebsiteSetting(primary_pattern,
+                    secondary_pattern,
+                    content_type,
+                    resource_identifier,
+                    value);
 }
 
 void HostContentSettingsMap::AddExceptionForURL(
@@ -412,6 +295,12 @@ void HostContentSettingsMap::ClearSettingsForOneType(
   }
 }
 
+bool HostContentSettingsMap::IsValueAllowedForType(
+    const base::Value* value, ContentSettingsType type) {
+  return IsSettingAllowedForType(
+      content_settings::ValueToContentSetting(value), type);
+}
+
 // static
 bool HostContentSettingsMap::IsSettingAllowedForType(
     ContentSetting setting, ContentSettingsType content_type) {
@@ -421,6 +310,12 @@ bool HostContentSettingsMap::IsSettingAllowedForType(
           switches::kEnableWebIntents))
     return false;
 
+  // BLOCK semantics are not implemented for fullscreen.
+  if (content_type == CONTENT_SETTINGS_TYPE_FULLSCREEN &&
+      setting == CONTENT_SETTING_BLOCK) {
+    return false;
+  }
+
   // DEFAULT, ALLOW and BLOCK are always allowed.
   if (setting == CONTENT_SETTING_DEFAULT ||
       setting == CONTENT_SETTING_ALLOW ||
@@ -429,44 +324,19 @@ bool HostContentSettingsMap::IsSettingAllowedForType(
   }
   switch (content_type) {
     case CONTENT_SETTINGS_TYPE_COOKIES:
-      return (setting == CONTENT_SETTING_SESSION_ONLY);
+      return setting == CONTENT_SETTING_SESSION_ONLY;
     case CONTENT_SETTINGS_TYPE_PLUGINS:
-      return (setting == CONTENT_SETTING_ASK &&
-              CommandLine::ForCurrentProcess()->HasSwitch(
-                  switches::kEnableClickToPlay));
+      return setting == CONTENT_SETTING_ASK &&
+             CommandLine::ForCurrentProcess()->HasSwitch(
+                 switches::kEnableClickToPlay);
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
     case CONTENT_SETTINGS_TYPE_INTENTS:
-      return (setting == CONTENT_SETTING_ASK);
+    case CONTENT_SETTINGS_TYPE_MOUSELOCK:
+      return setting == CONTENT_SETTING_ASK;
     default:
       return false;
   }
-}
-
-void HostContentSettingsMap::SetBlockThirdPartyCookies(bool block) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(prefs_);
-
-  // This setting may not be directly modified for OTR sessions.  Instead, it
-  // is synced to the main profile's setting.
-  if (is_off_the_record_) {
-    NOTREACHED();
-    return;
-  }
-
-  // If the preference block-third-party-cookies is managed then do not allow to
-  // change it.
-  if (prefs_->IsManagedPreference(prefs::kBlockThirdPartyCookies)) {
-    NOTREACHED();
-    return;
-  }
-
-  {
-    base::AutoLock auto_lock(lock_);
-    block_third_party_cookies_ = block;
-  }
-
-  prefs_->SetBoolean(prefs::kBlockThirdPartyCookies, block);
 }
 
 void HostContentSettingsMap::OnContentSettingChanged(
@@ -478,37 +348,10 @@ void HostContentSettingsMap::OnContentSettingChanged(
                                        secondary_pattern,
                                        content_type,
                                        resource_identifier);
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED,
-      Source<HostContentSettingsMap>(this),
-      Details<const ContentSettingsDetails>(&details));
-}
-
-void HostContentSettingsMap::Observe(int type,
-                                     const NotificationSource& source,
-                                     const NotificationDetails& details) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    DCHECK_EQ(prefs_, Source<PrefService>(source).ptr());
-    if (updating_preferences_)
-      return;
-
-    std::string* name = Details<std::string>(details).ptr();
-    if (*name == prefs::kBlockThirdPartyCookies) {
-      base::AutoLock auto_lock(lock_);
-      block_third_party_cookies_ = prefs_->GetBoolean(
-          prefs::kBlockThirdPartyCookies);
-      is_block_third_party_cookies_managed_ =
-          prefs_->IsManagedPreference(
-              prefs::kBlockThirdPartyCookies);
-    } else {
-      NOTREACHED() << "Unexpected preference observed";
-      return;
-    }
-  } else {
-    NOTREACHED() << "Unexpected notification";
-  }
+      content::Source<HostContentSettingsMap>(this),
+      content::Details<const ContentSettingsDetails>(&details));
 }
 
 HostContentSettingsMap::~HostContentSettingsMap() {
@@ -516,17 +359,9 @@ HostContentSettingsMap::~HostContentSettingsMap() {
   STLDeleteValues(&content_settings_providers_);
 }
 
-bool HostContentSettingsMap::IsDefaultContentSettingManaged(
-    ContentSettingsType content_type) const {
-  ContentSetting default_setting =
-      GetDefaultContentSettingFromProvider(content_type, POLICY_PROVIDER);
-  return (default_setting != CONTENT_SETTING_DEFAULT);
-}
-
 void HostContentSettingsMap::ShutdownOnUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(prefs_);
-  pref_change_registrar_.RemoveAll();
   prefs_ = NULL;
   for (ProviderIterator it = content_settings_providers_.begin();
        it != content_settings_providers_.end();
@@ -535,28 +370,12 @@ void HostContentSettingsMap::ShutdownOnUIThread() {
   }
 }
 
-void HostContentSettingsMap::MigrateObsoleteCookiePref() {
-  if (prefs_->HasPrefPath(prefs::kCookieBehavior)) {
-    int cookie_behavior = prefs_->GetInteger(prefs::kCookieBehavior);
-    prefs_->ClearPref(prefs::kCookieBehavior);
-    if (!prefs_->HasPrefPath(prefs::kDefaultContentSettings)) {
-        SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES,
-            (cookie_behavior == net::StaticCookiePolicy::BLOCK_ALL_COOKIES) ?
-                CONTENT_SETTING_BLOCK : CONTENT_SETTING_ALLOW);
-    }
-    if (!prefs_->HasPrefPath(prefs::kBlockThirdPartyCookies)) {
-      SetBlockThirdPartyCookies(cookie_behavior ==
-          net::StaticCookiePolicy::BLOCK_SETTING_THIRD_PARTY_COOKIES);
-    }
-  }
-}
-
 void HostContentSettingsMap::AddSettingsForOneType(
     const content_settings::ProviderInterface* provider,
     ProviderType provider_type,
     ContentSettingsType content_type,
     const std::string& resource_identifier,
-    SettingsForOneType* settings,
+    ContentSettingsForOneType* settings,
     bool incognito) const {
   scoped_ptr<content_settings::RuleIterator> rule_iterator(
       provider->GetRuleIterator(content_type,
@@ -565,17 +384,77 @@ void HostContentSettingsMap::AddSettingsForOneType(
   ContentSettingsPattern wildcard = ContentSettingsPattern::Wildcard();
   while (rule_iterator->HasNext()) {
     const content_settings::Rule& rule = rule_iterator->Next();
-    // Filter out default settings.
-    if (rule.primary_pattern == wildcard &&
-        rule.secondary_pattern == wildcard &&
-        (provider_type == POLICY_PROVIDER ||
-         provider_type == DEFAULT_PROVIDER)) {
-        continue;
-    }
-    settings->push_back(PatternSettingSourceTuple(
+    settings->push_back(ContentSettingPatternSource(
         rule.primary_pattern, rule.secondary_pattern,
         content_settings::ValueToContentSetting(rule.value.get()),
         kProviderNames[provider_type],
         incognito));
   }
+}
+
+bool HostContentSettingsMap::ShouldAllowAllContent(
+    const GURL& primary_url,
+    const GURL& secondary_url,
+    ContentSettingsType content_type) {
+  if (content_type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS ||
+      content_type == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
+    return false;
+  }
+  if (primary_url.SchemeIs(chrome::kExtensionScheme)) {
+    return content_type != CONTENT_SETTINGS_TYPE_COOKIES ||
+        secondary_url.SchemeIs(chrome::kExtensionScheme);
+  }
+  return primary_url.SchemeIs(chrome::kChromeDevToolsScheme) ||
+         primary_url.SchemeIs(chrome::kChromeInternalScheme) ||
+         primary_url.SchemeIs(chrome::kChromeUIScheme);
+}
+
+base::Value* HostContentSettingsMap::GetWebsiteSetting(
+    const GURL& primary_url,
+    const GURL& secondary_url,
+    ContentSettingsType content_type,
+    const std::string& resource_identifier,
+    content_settings::SettingInfo* info) const {
+  DCHECK(content_settings::SupportsResourceIdentifier(content_type) ||
+         resource_identifier.empty());
+
+  // Check if the scheme of the requesting url is whitelisted.
+  if (ShouldAllowAllContent(primary_url, secondary_url, content_type)) {
+    if (info) {
+      info->source = content_settings::SETTING_SOURCE_WHITELIST;
+      info->primary_pattern = ContentSettingsPattern::Wildcard();
+      info->secondary_pattern = ContentSettingsPattern::Wildcard();
+    }
+    return Value::CreateIntegerValue(CONTENT_SETTING_ALLOW);
+  }
+
+  ContentSettingsPattern* primary_pattern = NULL;
+  ContentSettingsPattern* secondary_pattern = NULL;
+  if (info) {
+    primary_pattern = &info->primary_pattern;
+    secondary_pattern = &info->secondary_pattern;
+  }
+
+  // The list of |content_settings_providers_| is ordered according to their
+  // precedence.
+  for (ConstProviderIterator provider = content_settings_providers_.begin();
+       provider != content_settings_providers_.end();
+       ++provider) {
+    base::Value* value = content_settings::GetContentSettingValueAndPatterns(
+        provider->second, primary_url, secondary_url, content_type,
+        resource_identifier, is_off_the_record_,
+        primary_pattern, secondary_pattern);
+    if (value) {
+      if (info)
+        info->source = kProviderSourceMap[provider->first];
+      return value;
+    }
+  }
+
+  if (info) {
+    info->source = content_settings::SETTING_SOURCE_NONE;
+    info->primary_pattern = ContentSettingsPattern();
+    info->secondary_pattern = ContentSettingsPattern();
+  }
+  return NULL;
 }

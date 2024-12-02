@@ -12,11 +12,12 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_view.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/gfx/font.h"
 #include "webkit/glue/window_open_disposition.h"
@@ -27,8 +28,12 @@ class GtkThemeService;
 class OmniboxView;
 class SkBitmap;
 
+namespace gfx {
+class Image;
+}
+
 class OmniboxPopupViewGtk : public AutocompletePopupView,
-                            public NotificationObserver {
+                            public content::NotificationObserver {
  public:
   OmniboxPopupViewGtk(const gfx::Font& font,
                       OmniboxView* omnibox_view,
@@ -37,17 +42,17 @@ class OmniboxPopupViewGtk : public AutocompletePopupView,
   virtual ~OmniboxPopupViewGtk();
 
   // Overridden from AutocompletePopupView:
-  virtual bool IsOpen() const;
-  virtual void InvalidateLine(size_t line);
-  virtual void UpdatePopupAppearance();
-  virtual gfx::Rect GetTargetBounds();
-  virtual void PaintUpdatesNow();
-  virtual void OnDragCanceled();
+  virtual bool IsOpen() const OVERRIDE;
+  virtual void InvalidateLine(size_t line) OVERRIDE;
+  virtual void UpdatePopupAppearance() OVERRIDE;
+  virtual gfx::Rect GetTargetBounds() OVERRIDE;
+  virtual void PaintUpdatesNow() OVERRIDE;
+  virtual void OnDragCanceled() OVERRIDE;
 
-  // Overridden from NotificationObserver:
+  // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // Be friendly for unit tests.
@@ -74,7 +79,7 @@ class OmniboxPopupViewGtk : public AutocompletePopupView,
   // Accept a line of the results, for example, when the user clicks a line.
   void AcceptLine(size_t line, WindowOpenDisposition disposition);
 
-  GdkPixbuf* IconForMatch(const AutocompleteMatch& match, bool selected);
+  const gfx::Image* IconForMatch(const AutocompleteMatch& match, bool selected);
 
   CHROMEGTK_CALLBACK_1(OmniboxPopupViewGtk, gboolean, HandleMotion,
                        GdkEventMotion*);
@@ -99,7 +104,7 @@ class OmniboxPopupViewGtk : public AutocompletePopupView,
   PangoLayout* layout_;
 
   GtkThemeService* theme_service_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Font used for suggestions after being derived from the constructor's
   // |font|.
@@ -107,8 +112,8 @@ class OmniboxPopupViewGtk : public AutocompletePopupView,
 
   // Used to cache GdkPixbufs and map them from the SkBitmaps they were created
   // from.
-  typedef std::map<const SkBitmap*, GdkPixbuf*> PixbufMap;
-  PixbufMap pixbufs_;
+  typedef std::map<const SkBitmap*, gfx::Image*> ImageMap;
+  ImageMap images_;
 
   // A list of colors which we should use for drawing the popup. These change
   // between gtk and normal mode.

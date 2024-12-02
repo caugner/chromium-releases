@@ -12,8 +12,8 @@
 #include "base/compiler_specific.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/web_applications/web_app.h"
-#include "views/controls/button/button.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/window/dialog_delegate.h"
 
 class Extension;
 class Profile;
@@ -43,10 +43,8 @@ class CreateApplicationShortcutView : public views::DialogDelegateView,
   virtual gfx::Size GetPreferredSize() OVERRIDE;
 
   // Overridden from views::DialogDelegate:
-  virtual string16 GetDialogButtonLabel(
-      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
-  virtual bool IsDialogButtonEnabled(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
+  virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
   virtual bool CanResize() const OVERRIDE;
   virtual bool CanMaximize() const OVERRIDE;
   virtual bool IsModal() const OVERRIDE;
@@ -84,7 +82,7 @@ class CreateUrlApplicationShortcutView : public CreateApplicationShortcutView {
   explicit CreateUrlApplicationShortcutView(TabContentsWrapper* tab_contents);
   virtual ~CreateUrlApplicationShortcutView();
 
-  virtual bool Accept();
+  virtual bool Accept() OVERRIDE;
 
  private:
   // Fetch the largest unprocessed icon.
@@ -120,7 +118,7 @@ class CreateChromeApplicationShortcutView
   // it to the "Create Shortcut" dailog box.
   virtual void OnImageLoaded(SkBitmap* image,
                              const ExtensionResource& resource,
-                             int index);
+                             int index) OVERRIDE;
 
  private:
   const Extension* app_;

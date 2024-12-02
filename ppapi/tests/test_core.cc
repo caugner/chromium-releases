@@ -4,27 +4,10 @@
 
 #include "ppapi/tests/test_core.h"
 
-#if defined(_MSC_VER)
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
-
 #include "ppapi/cpp/core.h"
 #include "ppapi/cpp/module.h"
+#include "ppapi/tests/test_utils.h"
 #include "ppapi/tests/testing_instance.h"
-
-namespace {
-
-void PlatformSleep(int duration_ms) {
-#if defined(_MSC_VER)
-  ::Sleep(duration_ms);
-#else
-  usleep(duration_ms * 1000);
-#endif
-}
-
-}  // namespace
 
 REGISTER_TEST_CASE(Core);
 
@@ -32,9 +15,9 @@ bool TestCore::Init() {
   return true;
 }
 
-void TestCore::RunTest() {
-  RUN_TEST(Time);
-  RUN_TEST(TimeTicks);
+void TestCore::RunTests(const std::string& filter) {
+  RUN_TEST(Time, filter);
+  RUN_TEST(TimeTicks, filter);
 }
 
 std::string TestCore::TestTime() {

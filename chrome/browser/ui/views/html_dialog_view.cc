@@ -7,20 +7,21 @@
 #include <vector>
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/window.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "views/events/event.h"
-#include "views/widget/root_view.h"
-#include "views/widget/widget.h"
+#include "ui/views/events/event.h"
+#include "ui/views/widget/root_view.h"
+#include "ui/views/widget/widget.h"
 
 #if defined(TOOLKIT_USES_GTK)
-#include "views/widget/native_widget_gtk.h"
+#include "ui/views/widget/native_widget_gtk.h"
 #endif
 
 class RenderWidgetHost;
@@ -30,9 +31,14 @@ namespace browser {
 // Declared in browser_dialogs.h so that others don't need to depend on our .h.
 gfx::NativeWindow ShowHtmlDialog(gfx::NativeWindow parent,
                                  Profile* profile,
-                                 HtmlDialogUIDelegate* delegate) {
+                                 HtmlDialogUIDelegate* delegate,
+                                 DialogStyle style) {
+  // It's not always safe to display an html dialog with an off the record
+  // profile.  If the last browser with that profile is closed it will go
+  // away.
+  DCHECK(!profile->IsOffTheRecord() || delegate->IsDialogModal());
   HtmlDialogView* html_view = new HtmlDialogView(profile, delegate);
-  browser::CreateViewsWindow(parent, html_view);
+  browser::CreateViewsWindow(parent, html_view, style);
   html_view->InitDialog();
   html_view->GetWidget()->Show();
   return html_view->GetWidget()->GetNativeWindow();
@@ -47,7 +53,7 @@ HtmlDialogView::HtmlDialogView(Profile* profile,
                                HtmlDialogUIDelegate* delegate)
     : DOMView(),
       HtmlDialogTabContentsDelegate(profile),
-      state_(NONE),
+      initialized_(false),
       delegate_(delegate) {
 }
 
@@ -64,7 +70,7 @@ gfx::Size HtmlDialogView::GetPreferredSize() {
   return out;
 }
 
-bool HtmlDialogView::AcceleratorPressed(const views::Accelerator& accelerator) {
+bool HtmlDialogView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   // Pressing ESC closes the dialog.
   DCHECK_EQ(ui::VKEY_ESCAPE, accelerator.key_code());
   OnDialogClosed(std::string());
@@ -74,8 +80,8 @@ bool HtmlDialogView::AcceleratorPressed(const views::Accelerator& accelerator) {
 void HtmlDialogView::ViewHierarchyChanged(
     bool is_add, View* parent, View* child) {
   DOMView::ViewHierarchyChanged(is_add, parent, child);
-  if (is_add && GetWidget() && state_ == NONE) {
-    state_ = INITIALIZED;
+  if (is_add && GetWidget() && !initialized_) {
+    initialized_ = true;
 #if defined(OS_CHROMEOS) && defined(TOOLKIT_USES_GTK)
     CHECK(
         static_cast<views::NativeWidgetGtk*>(
@@ -245,49 +251,27 @@ void HtmlDialogView::InitDialog() {
   // the comment above HtmlDialogUI in its header file for why.
   HtmlDialogUI::GetPropertyAccessor().SetProperty(
       tab_contents->property_bag(), this);
-  notification_registrar_.Add(
-      this,
-      content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
-      Source<TabContents>(tab_contents));
-  notification_registrar_.Add(
-      this,
-      content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-      Source<TabContents>(tab_contents));
+  tab_watcher_.reset(new TabFirstRenderWatcher(tab_contents, this));
 
   DOMView::LoadURL(GetDialogContentURL());
 }
 
-void HtmlDialogView::Observe(int type,
-                             const NotificationSource& source,
-                             const NotificationDetails& details) {
-  switch (type) {
-    case content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB: {
-      RenderWidgetHost* rwh = Details<RenderWidgetHost>(details).ptr();
-      notification_registrar_.Add(
-          this,
-          content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
-          Source<RenderWidgetHost>(rwh));
-      break;
-    }
-    case content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME:
-      if (state_ == INITIALIZED)
-        state_ = LOADED;
-      break;
-    case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT:
-      if (state_ == LOADED) {
-        state_ = PAINTED;
-#if defined(OS_CHROMEOS) && defined(TOOLKIT_USES_GTK)
-        views::NativeWidgetGtk::UpdateFreezeUpdatesProperty(
-            GTK_WINDOW(GetWidget()->GetNativeView()), false);
-#endif
-      }
-      break;
-    default:
-      NOTREACHED() << "unknown type" << type;
-  }
-}
-
 void HtmlDialogView::RegisterDialogAccelerators() {
   // Pressing the ESC key will close the dialog.
-  AddAccelerator(views::Accelerator(ui::VKEY_ESCAPE, false, false, false));
+  AddAccelerator(ui::Accelerator(ui::VKEY_ESCAPE, false, false, false));
+}
+
+void HtmlDialogView::OnRenderHostCreated(RenderViewHost* host) {
+}
+
+void HtmlDialogView::OnTabMainFrameLoaded() {
+}
+
+void HtmlDialogView::OnTabMainFrameFirstRender() {
+#if defined(OS_CHROMEOS) && defined(TOOLKIT_USES_GTK)
+  if (initialized_) {
+    views::NativeWidgetGtk::UpdateFreezeUpdatesProperty(
+        GTK_WINDOW(GetWidget()->GetNativeView()), false);
+  }
+#endif
 }

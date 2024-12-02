@@ -15,7 +15,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "webkit/glue/form_field.h"
@@ -402,6 +402,10 @@ bool PasswordAutofillManager::InputElementClicked(
     bool was_focused,
     bool is_focused) {
   // TODO(jcivelli): http://crbug.com/51644 Implement behavior.
+  return false;
+}
+
+bool PasswordAutofillManager::InputElementLostFocus() {
   return false;
 }
 

@@ -11,6 +11,7 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/webdata/keyword_table.h"
 #include "chrome/browser/webdata/web_database.h"
+#include "sql/statement.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
@@ -149,6 +150,30 @@ TEST_F(KeywordTableTest, KeywordMisc) {
   ASSERT_EQ(0, db.GetKeywordTable()->GetDefaultSearchProviderID());
   ASSERT_EQ(0, db.GetKeywordTable()->GetBuiltinKeywordVersion());
 
+  TemplateURL template_url;
+  template_url.set_short_name(ASCIIToUTF16("short_name"));
+  template_url.set_keyword(ASCIIToUTF16("keyword"));
+  GURL favicon_url("http://favicon.url/");
+  GURL originating_url("http://google.com/");
+  template_url.SetFaviconURL(favicon_url);
+  template_url.SetURL("http://url/", 0, 0);
+  template_url.set_safe_for_autoreplace(true);
+  Time created_time = Time::Now();
+  template_url.set_date_created(created_time);
+  Time last_modified_time = created_time + TimeDelta::FromSeconds(10);
+  template_url.set_last_modified(last_modified_time);
+  template_url.set_show_in_default_list(true);
+  template_url.set_originating_url(originating_url);
+  template_url.set_usage_count(32);
+  template_url.add_input_encoding("UTF-8");
+  template_url.add_input_encoding("UTF-16");
+  set_prepopulate_id(&template_url, 10);
+  set_logo_id(&template_url, 1000);
+  template_url.set_created_by_policy(true);
+  template_url.SetInstantURL("http://instant/", 0, 0);
+  SetID(10, &template_url);
+  ASSERT_TRUE(db.GetKeywordTable()->AddKeyword(template_url));
+
   ASSERT_TRUE(db.GetKeywordTable()->SetDefaultSearchProviderID(10));
   ASSERT_TRUE(db.GetKeywordTable()->SetBuiltinKeywordVersion(11));
 
@@ -163,11 +188,63 @@ TEST_F(KeywordTableTest, DefaultSearchProviderBackup) {
 
   EXPECT_EQ(0, db.GetKeywordTable()->GetDefaultSearchProviderID());
 
-  ASSERT_TRUE(db.GetKeywordTable()->SetDefaultSearchProviderID(10));
-  EXPECT_EQ(10, db.GetKeywordTable()->GetDefaultSearchProviderID());
+  TemplateURL template_url;
+  template_url.set_short_name(ASCIIToUTF16("short_name"));
+  template_url.set_keyword(ASCIIToUTF16("keyword"));
+  GURL favicon_url("http://favicon.url/");
+  GURL originating_url("http://originating.url/");
+  template_url.SetFaviconURL(favicon_url);
+  template_url.SetURL("http://url/", 0, 0);
+  template_url.set_safe_for_autoreplace(true);
+  template_url.set_show_in_default_list(true);
+  template_url.SetSuggestionsURL("url2", 0, 0);
+  SetID(1, &template_url);
 
-  ASSERT_TRUE(db.GetKeywordTable()->SetDefaultSearchProviderBackupID(11));
-  EXPECT_EQ(11, db.GetKeywordTable()->GetDefaultSearchProviderID());
+  EXPECT_TRUE(db.GetKeywordTable()->AddKeyword(template_url));
+
+  ASSERT_TRUE(db.GetKeywordTable()->SetDefaultSearchProviderID(1));
+  EXPECT_TRUE(db.GetKeywordTable()->IsBackupSignatureValid());
+  EXPECT_EQ(1, db.GetKeywordTable()->GetDefaultSearchProviderID());
+  EXPECT_EQ(1, db.GetKeywordTable()->GetDefaultSearchProviderIDBackup());
+  EXPECT_FALSE(db.GetKeywordTable()->DidDefaultSearchProviderChange());
+
+  // Change the actual setting.
+  ASSERT_TRUE(db.GetKeywordTable()->meta_table_->SetValue(
+      "Default Search Provider ID", 2));
+  EXPECT_TRUE(db.GetKeywordTable()->IsBackupSignatureValid());
+  EXPECT_EQ(2, db.GetKeywordTable()->GetDefaultSearchProviderID());
+  EXPECT_EQ(1, db.GetKeywordTable()->GetDefaultSearchProviderIDBackup());
+  EXPECT_TRUE(db.GetKeywordTable()->DidDefaultSearchProviderChange());
+
+  // Change the backup.
+  ASSERT_TRUE(db.GetKeywordTable()->meta_table_->SetValue(
+      "Default Search Provider ID", 1));
+  ASSERT_TRUE(db.GetKeywordTable()->meta_table_->SetValue(
+      "Default Search Provider ID Backup", 2));
+  EXPECT_FALSE(db.GetKeywordTable()->IsBackupSignatureValid());
+  EXPECT_EQ(1, db.GetKeywordTable()->GetDefaultSearchProviderID());
+  EXPECT_EQ(0, db.GetKeywordTable()->GetDefaultSearchProviderIDBackup());
+  EXPECT_TRUE(db.GetKeywordTable()->DidDefaultSearchProviderChange());
+
+  // Change the signature.
+  ASSERT_TRUE(db.GetKeywordTable()->meta_table_->SetValue(
+      "Default Search Provider ID Backup", 1));
+  ASSERT_TRUE(db.GetKeywordTable()->meta_table_->SetValue(
+      "Default Search Provider ID Backup Signature", ""));
+  EXPECT_FALSE(db.GetKeywordTable()->IsBackupSignatureValid());
+  EXPECT_EQ(1, db.GetKeywordTable()->GetDefaultSearchProviderID());
+  EXPECT_EQ(0, db.GetKeywordTable()->GetDefaultSearchProviderIDBackup());
+  EXPECT_TRUE(db.GetKeywordTable()->DidDefaultSearchProviderChange());
+
+  // Change keywords.
+  ASSERT_TRUE(db.GetKeywordTable()->UpdateBackupSignature());
+  sql::Statement remove_keyword(db.GetKeywordTable()->db_->GetUniqueStatement(
+      "DELETE FROM keywords WHERE id=1"));
+  ASSERT_TRUE(remove_keyword.Run());
+  EXPECT_FALSE(db.GetKeywordTable()->IsBackupSignatureValid());
+  EXPECT_EQ(1, db.GetKeywordTable()->GetDefaultSearchProviderID());
+  EXPECT_EQ(0, db.GetKeywordTable()->GetDefaultSearchProviderIDBackup());
+  EXPECT_TRUE(db.GetKeywordTable()->DidDefaultSearchProviderChange());
 }
 
 TEST_F(KeywordTableTest, UpdateKeyword) {
@@ -264,35 +341,5 @@ TEST_F(KeywordTableTest, KeywordWithNoFavicon) {
   EXPECT_TRUE(!restored_url->GetFaviconURL().is_valid());
   EXPECT_TRUE(restored_url->safe_for_autoreplace());
   EXPECT_EQ(GetID(&template_url), GetID(restored_url));
-  delete restored_url;
-}
-
-TEST_F(KeywordTableTest, KeywordWithEmptySyncGUID) {
-  WebDatabase db;
-
-  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
-
-  TemplateURL template_url;
-  template_url.set_short_name(ASCIIToUTF16("short_name"));
-  template_url.set_keyword(ASCIIToUTF16("keyword"));
-  template_url.SetURL("http://url/", 0, 0);
-  template_url.set_safe_for_autoreplace(true);
-  SetID(-100, &template_url);
-
-  // A GUID should be generated when |template_url| was created. Clear it.
-  ASSERT_FALSE(template_url.sync_guid().empty());
-  template_url.set_sync_guid(std::string());
-
-  EXPECT_TRUE(db.GetKeywordTable()->AddKeyword(template_url));
-
-  std::vector<TemplateURL*> template_urls;
-  EXPECT_TRUE(db.GetKeywordTable()->GetKeywords(&template_urls));
-  EXPECT_EQ(1U, template_urls.size());
-  const TemplateURL* restored_url = template_urls.front();
-
-  EXPECT_EQ(template_url.short_name(), restored_url->short_name());
-  EXPECT_EQ(template_url.keyword(), restored_url->keyword());
-  EXPECT_EQ(GetID(&template_url), GetID(restored_url));
-  EXPECT_FALSE(restored_url->sync_guid().empty());
   delete restored_url;
 }

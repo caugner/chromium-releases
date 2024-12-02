@@ -81,6 +81,9 @@ NET_ERROR(FILE_NO_SPACE, -18)
 // The file has a virus.
 NET_ERROR(FILE_VIRUS_INFECTED, -19)
 
+// The client chose to block the request.
+NET_ERROR(BLOCKED_BY_CLIENT, -20)
+
 // A connection was closed (corresponding to a TCP FIN).
 NET_ERROR(CONNECTION_CLOSED, -100)
 
@@ -274,6 +277,13 @@ NET_ERROR(SSL_BAD_PEER_PUBLIC_KEY, -149)
 // The pins are set in net/base/transport_security_state.cc and require that
 // one of a set of public keys exist on the path from the leaf to the root.
 NET_ERROR(SSL_PINNED_KEY_NOT_IN_CERT_CHAIN, -150)
+
+// Server request for client certificate did not contain any types we support.
+NET_ERROR(CLIENT_AUTH_CERT_TYPE_UNSUPPORTED, -151)
+
+// Server requested one type of cert, then requested a different type while the
+// first was still being generated.
+NET_ERROR(ORIGIN_BOUND_CERT_GENERATION_TYPE_MISMATCH, -152)
 
 // Certificate error codes
 //
@@ -637,3 +647,6 @@ NET_ERROR(DNS_TIMED_OUT, -803)
 
 // The entry was not found in cache, for cache-only lookups.
 NET_ERROR(DNS_CACHE_MISS, -804)
+
+// FIXME: Take the next number.
+NET_ERROR(PIPELINE_EVICTION, -900)

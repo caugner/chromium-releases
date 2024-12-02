@@ -14,6 +14,7 @@
 #include <X11/extensions/Xcomposite.h>
 
 #include "base/callback.h"
+#include "base/debug/trace_event.h"
 #include "content/common/gpu/gpu_channel.h"
 #include "content/common/gpu/gpu_channel_manager.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
@@ -61,11 +62,13 @@ class EGLImageTransportSurface : public ImageTransportSurface,
                            int32 renderer_id,
                            int32 command_buffer_id);
 
-  // GLSurface implementation
+  // gfx::GLSurface implementation
   virtual bool Initialize() OVERRIDE;
   virtual void Destroy() OVERRIDE;
   virtual bool IsOffscreen() OVERRIDE;
   virtual bool SwapBuffers() OVERRIDE;
+  virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
+  virtual std::string GetExtensions() OVERRIDE;
   virtual gfx::Size GetSize() OVERRIDE;
   virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
   virtual unsigned int GetBackingFrameBufferObject() OVERRIDE;
@@ -76,6 +79,8 @@ class EGLImageTransportSurface : public ImageTransportSurface,
   virtual void OnNewSurfaceACK(
       uint64 surface_id, TransportDIB::Handle surface_handle) OVERRIDE;
   virtual void OnBuffersSwappedACK() OVERRIDE;
+  virtual void OnPostSubBufferACK() OVERRIDE;
+  virtual void OnResizeViewACK() OVERRIDE;
   virtual void OnResize(gfx::Size size) OVERRIDE;
 
  private:
@@ -109,14 +114,19 @@ class GLXImageTransportSurface : public ImageTransportSurface,
   virtual bool Initialize() OVERRIDE;
   virtual void Destroy() OVERRIDE;
   virtual bool SwapBuffers() OVERRIDE;
+  virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
+  virtual std::string GetExtensions();
   virtual gfx::Size GetSize() OVERRIDE;
   virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
+  virtual void SetVisible(bool visible) OVERRIDE;
 
  protected:
   // ImageTransportSurface implementation:
   virtual void OnNewSurfaceACK(
       uint64 surface_id, TransportDIB::Handle surface_handle) OVERRIDE;
   virtual void OnBuffersSwappedACK() OVERRIDE;
+  virtual void OnPostSubBufferACK() OVERRIDE;
+  virtual void OnResizeViewACK() OVERRIDE;
   virtual void OnResize(gfx::Size size) OVERRIDE;
 
  private:
@@ -130,6 +140,9 @@ class GLXImageTransportSurface : public ImageTransportSurface,
 
   // Whether or not the image has been bound on the browser side.
   bool bound_;
+
+  // Whether or not we need to send a resize on the next swap.
+  bool needs_resize_;
 
   // Whether or not we've successfully made the surface current once.
   bool made_current_;
@@ -155,6 +168,8 @@ class OSMesaImageTransportSurface : public ImageTransportSurface,
   virtual void Destroy() OVERRIDE;
   virtual bool IsOffscreen() OVERRIDE;
   virtual bool SwapBuffers() OVERRIDE;
+  virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
+  virtual std::string GetExtensions() OVERRIDE;
   virtual gfx::Size GetSize() OVERRIDE;
 
  protected:
@@ -162,6 +177,8 @@ class OSMesaImageTransportSurface : public ImageTransportSurface,
   virtual void OnNewSurfaceACK(
       uint64 surface_id, TransportDIB::Handle surface_handle) OVERRIDE;
   virtual void OnBuffersSwappedACK() OVERRIDE;
+  virtual void OnPostSubBufferACK() OVERRIDE;
+  virtual void OnResizeViewACK() OVERRIDE;
   virtual void OnResize(gfx::Size size) OVERRIDE;
 
  private:
@@ -238,7 +255,7 @@ EGLImageTransportSurface::~EGLImageTransportSurface() {
 bool EGLImageTransportSurface::Initialize() {
   if (!helper_->Initialize())
     return false;
-  return PbufferGLSurfaceEGL::Initialize();
+  return gfx::PbufferGLSurfaceEGL::Initialize();
 }
 
 void EGLImageTransportSurface::Destroy() {
@@ -248,7 +265,7 @@ void EGLImageTransportSurface::Destroy() {
     ReleaseSurface(&front_surface_);
 
   helper_->Destroy();
-  PbufferGLSurfaceEGL::Destroy();
+  gfx::PbufferGLSurfaceEGL::Destroy();
 }
 
 // Make sure that buffer swaps occur for the surface, so we can send the data
@@ -263,7 +280,7 @@ bool EGLImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
 
   if (!context->HasExtension("EGL_KHR_image") &&
       !context->HasExtension("EGL_KHR_image_pixmap")) {
-    LOG(ERROR) << "EGLImage from X11 pixmap not supported";
+    DLOG(ERROR) << "EGLImage from X11 pixmap not supported";
     return false;
   }
 
@@ -273,7 +290,7 @@ bool EGLImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
 
   GLenum status = glCheckFramebufferStatusEXT(GL_FRAMEBUFFER);
   if (status != GL_FRAMEBUFFER_COMPLETE) {
-    LOG(ERROR) << "Framebuffer incomplete.";
+    DLOG(ERROR) << "Framebuffer incomplete.";
     return false;
   }
 
@@ -355,6 +372,19 @@ bool EGLImageTransportSurface::SwapBuffers() {
   return true;
 }
 
+bool EGLImageTransportSurface::PostSubBuffer(
+    int x, int y, int width, int height) {
+  NOTREACHED();
+  return false;
+}
+
+std::string EGLImageTransportSurface::GetExtensions() {
+  std::string extensions = gfx::GLSurface::GetExtensions();
+  extensions += extensions.empty() ? "" : " ";
+  extensions += "GL_CHROMIUM_front_buffer_cached";
+  return extensions;
+}
+
 gfx::Size EGLImageTransportSurface::GetSize() {
   return back_surface_->size();
 }
@@ -369,6 +399,14 @@ void EGLImageTransportSurface::OnBuffersSwappedACK() {
   helper_->SetScheduled(true);
 }
 
+void EGLImageTransportSurface::OnPostSubBufferACK() {
+  NOTREACHED();
+}
+
+void EGLImageTransportSurface::OnResizeViewACK() {
+  NOTREACHED();
+}
+
 GLXImageTransportSurface::GLXImageTransportSurface(
     GpuChannelManager* manager,
     int32 render_view_id,
@@ -378,6 +416,7 @@ GLXImageTransportSurface::GLXImageTransportSurface(
         dummy_parent_(0),
         size_(1, 1),
         bound_(false),
+        needs_resize_(false),
         made_current_(false) {
   helper_.reset(new ImageTransportHelper(this,
                                          manager,
@@ -393,7 +432,7 @@ GLXImageTransportSurface::~GLXImageTransportSurface() {
 
 bool GLXImageTransportSurface::Initialize() {
   // Create a dummy window to host the real window.
-  Display* dpy = gfx::GLSurfaceGLX::GetDisplay();
+  Display* dpy = static_cast<Display*>(GetDisplay());
   XSetWindowAttributes swa;
   swa.event_mask = StructureNotifyMask;
   swa.override_redirect = True;
@@ -439,7 +478,7 @@ void GLXImageTransportSurface::Destroy() {
     ReleaseSurface();
 
   if (window_) {
-    Display* dpy = gfx::GLSurfaceGLX::GetDisplay();
+    Display* dpy = static_cast<Display*>(GetDisplay());
     XDestroyWindow(dpy, window_);
     XDestroyWindow(dpy, dummy_parent_);
   }
@@ -453,31 +492,43 @@ void GLXImageTransportSurface::ReleaseSurface() {
   GpuHostMsg_AcceleratedSurfaceRelease_Params params;
   params.identifier = window_;
   helper_->SendAcceleratedSurfaceRelease(params);
+  bound_ = false;
+}
+
+void GLXImageTransportSurface::SetVisible(bool visible) {
+  Display* dpy = static_cast<Display*>(GetDisplay());
+  if (!visible) {
+    XResizeWindow(dpy, window_, 1, 1);
+  } else {
+    XResizeWindow(dpy, window_, size_.width(), size_.height());
+    needs_resize_ = true;
+  }
+  glXWaitX();
 }
 
 void GLXImageTransportSurface::OnResize(gfx::Size size) {
+  TRACE_EVENT0("gpu", "GLXImageTransportSurface::OnResize");
   size_ = size;
-  if (bound_) {
-    ReleaseSurface();
-    bound_ = false;
-  }
 
-  Display* dpy = gfx::GLSurfaceGLX::GetDisplay();
+  Display* dpy = static_cast<Display*>(GetDisplay());
   XResizeWindow(dpy, window_, size_.width(), size_.height());
-  XFlush(dpy);
-
-  GpuHostMsg_AcceleratedSurfaceNew_Params params;
-  params.width = size_.width();
-  params.height = size_.height();
-  params.surface_id = window_;
-  helper_->SendAcceleratedSurfaceNew(params);
-
-  helper_->SetScheduled(false);
+  glXWaitX();
+  needs_resize_ = true;
 }
 
 bool GLXImageTransportSurface::SwapBuffers() {
   gfx::NativeViewGLSurfaceGLX::SwapBuffers();
   glFlush();
+
+  if (needs_resize_) {
+    GpuHostMsg_AcceleratedSurfaceNew_Params params;
+    params.width = size_.width();
+    params.height = size_.height();
+    params.surface_id = window_;
+    helper_->SendAcceleratedSurfaceNew(params);
+    bound_ = true;
+    needs_resize_ = false;
+  }
 
   GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
   params.surface_id = window_;
@@ -485,6 +536,41 @@ bool GLXImageTransportSurface::SwapBuffers() {
 
   helper_->SetScheduled(false);
   return true;
+}
+
+bool GLXImageTransportSurface::PostSubBuffer(
+    int x, int y, int width, int height) {
+  gfx::NativeViewGLSurfaceGLX::PostSubBuffer(x, y, width, height);
+  glFlush();
+
+  if (needs_resize_) {
+    GpuHostMsg_AcceleratedSurfaceNew_Params params;
+    params.width = size_.width();
+    params.height = size_.height();
+    params.surface_id = window_;
+    helper_->SendAcceleratedSurfaceNew(params);
+    bound_ = true;
+    needs_resize_ = false;
+  }
+
+  GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params params;
+  params.surface_id = window_;
+  params.x = x;
+  params.y = y;
+  params.width = width;
+  params.height = height;
+
+  helper_->SendAcceleratedSurfacePostSubBuffer(params);
+
+  helper_->SetScheduled(false);
+  return true;
+}
+
+std::string GLXImageTransportSurface::GetExtensions() {
+  std::string extensions = gfx::NativeViewGLSurfaceGLX::GetExtensions();
+  extensions += extensions.empty() ? "" : " ";
+  extensions += "GL_CHROMIUM_front_buffer_cached";
+  return extensions;
 }
 
 gfx::Size GLXImageTransportSurface::GetSize() {
@@ -496,13 +582,13 @@ bool GLXImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
     return true;
 
   // Check for driver support.
-  Display* dpy = gfx::GLSurfaceGLX::GetDisplay();
+  Display* dpy = static_cast<Display*>(GetDisplay());
   int event_base, error_base;
   if (XCompositeQueryExtension(dpy, &event_base, &error_base)) {
     int major = 0, minor = 2;
     XCompositeQueryVersion(dpy, &major, &minor);
     if (major == 0 && minor < 2) {
-      LOG(ERROR) << "Pixmap from window not supported.";
+      DLOG(ERROR) << "Pixmap from window not supported.";
       return false;
     }
   }
@@ -515,13 +601,18 @@ bool GLXImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
 
 void GLXImageTransportSurface::OnNewSurfaceACK(
     uint64 surface_id, TransportDIB::Handle /*surface_handle*/) {
-  DCHECK(!bound_);
-  bound_ = true;
-  helper_->SetScheduled(true);
 }
 
 void GLXImageTransportSurface::OnBuffersSwappedACK() {
   helper_->SetScheduled(true);
+}
+
+void GLXImageTransportSurface::OnPostSubBufferACK() {
+  helper_->SetScheduled(true);
+}
+
+void GLXImageTransportSurface::OnResizeViewACK() {
+  NOTREACHED();
 }
 
 OSMesaImageTransportSurface::OSMesaImageTransportSurface(
@@ -602,6 +693,10 @@ void OSMesaImageTransportSurface::OnNewSurfaceACK(
   helper_->SetScheduled(true);
 }
 
+void OSMesaImageTransportSurface::OnResizeViewACK() {
+  NOTREACHED();
+}
+
 bool OSMesaImageTransportSurface::SwapBuffers() {
   DCHECK_NE(shared_mem_.get(), static_cast<void*>(NULL));
 
@@ -617,8 +712,25 @@ bool OSMesaImageTransportSurface::SwapBuffers() {
   return true;
 }
 
+bool OSMesaImageTransportSurface::PostSubBuffer(
+    int x, int y, int width, int height) {
+  NOTREACHED();
+  return false;
+}
+
+std::string OSMesaImageTransportSurface::GetExtensions() {
+  std::string extensions = gfx::GLSurface::GetExtensions();
+  extensions += extensions.empty() ? "" : " ";
+  extensions += "GL_CHROMIUM_front_buffer_cached";
+  return extensions;
+}
+
 void OSMesaImageTransportSurface::OnBuffersSwappedACK() {
   helper_->SetScheduled(true);
+}
+
+void OSMesaImageTransportSurface::OnPostSubBufferACK() {
+  NOTREACHED();
 }
 
 gfx::Size OSMesaImageTransportSurface::GetSize() {
@@ -633,8 +745,9 @@ scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateSurface(
     int32 render_view_id,
     int32 renderer_id,
     int32 command_buffer_id,
-    gfx::PluginWindowHandle /* handle */) {
+    gfx::PluginWindowHandle handle) {
   scoped_refptr<gfx::GLSurface> surface;
+#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
   switch (gfx::GetGLImplementation()) {
     case gfx::kGLImplementationDesktopGL:
       surface = new GLXImageTransportSurface(manager,
@@ -658,6 +771,17 @@ scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateSurface(
       NOTREACHED();
       return NULL;
   }
+#else
+  surface = gfx::GLSurface::CreateViewGLSurface(false, handle);
+  if (!surface.get())
+    return NULL;
+
+  surface = new PassThroughImageTransportSurface(manager,
+                                                 render_view_id,
+                                                 renderer_id,
+                                                 command_buffer_id,
+                                                 surface.get());
+#endif
   if (surface->Initialize())
     return surface;
   else

@@ -12,10 +12,10 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
 #if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/wm_ipc.h"
+#include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
 #endif
 
 namespace chromeos {
@@ -25,30 +25,16 @@ namespace chromeos {
 WebUILoginDisplay::~WebUILoginDisplay() {
 }
 
-// WebUILoginDisplay, Singleton implementation: --------------------------------
-
-// static
-WebUILoginDisplay* WebUILoginDisplay::GetInstance() {
-  return Singleton<WebUILoginDisplay>::get();
-}
-
 // LoginDisplay implementation: ------------------------------------------------
 
-// static
-views::Widget* WebUILoginDisplay::GetLoginWindow() {
-  return WebUILoginDisplay::GetInstance()->LoginWindow();
+WebUILoginDisplay::WebUILoginDisplay(LoginDisplay::Delegate* delegate)
+    : LoginDisplay(delegate, gfx::Rect()),
+      show_guest_(false),
+      show_new_user_(false),
+      webui_handler_(NULL) {
 }
 
-views::Widget* WebUILoginDisplay::LoginWindow() {
-  return login_window_;
-}
-
-void WebUILoginDisplay::Destroy() {
-  background_bounds_ = gfx::Rect();
-  delegate_ = NULL;
-}
-
-void WebUILoginDisplay::Init(const std::vector<UserManager::User>& users,
+void WebUILoginDisplay::Init(const UserList& users,
                              bool show_guest,
                              bool show_new_user) {
   // Testing that the delegate has been set.
@@ -60,27 +46,21 @@ void WebUILoginDisplay::Init(const std::vector<UserManager::User>& users,
 }
 
 void WebUILoginDisplay::OnBeforeUserRemoved(const std::string& username) {
-  // TODO(rharrison): Figure out if I need to split anything between this and
-  // OnUserRemoved
-}
-
-void WebUILoginDisplay::OnUserImageChanged(UserManager::User* user) {
-  // TODO(rharrison): Update the user in the user vector
-  // TODO(rharrison): Push the change to WebUI Login screen
-}
-
-void WebUILoginDisplay::OnUserRemoved(const std::string& username) {
-  DCHECK(webui_handler_);
-
-  for (std::vector<UserManager::User>::iterator it = users_.begin();
-       it != users_.end();
-       ++it) {
-    if (it->email() == username) {
+  for (UserList::iterator it = users_.begin(); it != users_.end(); ++it) {
+    if ((*it)->email() == username) {
       users_.erase(it);
       break;
     }
   }
+}
 
+void WebUILoginDisplay::OnUserImageChanged(const User& user) {
+  DCHECK(webui_handler_);
+  webui_handler_->OnUserImageChanged(user);
+}
+
+void WebUILoginDisplay::OnUserRemoved(const std::string& username) {
+  DCHECK(webui_handler_);
   webui_handler_->OnUserRemoved(username);
 }
 
@@ -204,16 +184,21 @@ void WebUILoginDisplay::ShowSigninScreenForCreds(
   webui_handler_->ShowSigninScreenForCreds(username, password);
 }
 
-// WebUILoginDisplay, private: -------------------------------------------------
+const UserList& WebUILoginDisplay::GetUsers() const {
+  return users_;
+}
 
-// Singleton implementation: ---------------------------------------------------
+bool WebUILoginDisplay::IsShowGuest() const {
+  return show_guest_;
+}
 
-WebUILoginDisplay::WebUILoginDisplay()
-    : LoginDisplay(NULL, gfx::Rect()),
-      show_guest_(false),
-      show_new_user_(false),
-      login_window_(NULL),
-      webui_handler_(NULL) {
+bool WebUILoginDisplay::IsShowNewUser() const {
+  return show_new_user_;
+}
+
+void WebUILoginDisplay::SetDisplayEmail(const std::string& email) {
+  if (delegate_)
+    delegate_->SetDisplayEmail(email);
 }
 
 }  // namespace chromeos

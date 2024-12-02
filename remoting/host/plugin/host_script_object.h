@@ -20,20 +20,18 @@
 #include "remoting/base/plugin_message_loop_proxy.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/host_status_observer.h"
+#include "remoting/host/log_to_server.h"
 #include "remoting/host/plugin/host_plugin_utils.h"
 #include "remoting/host/ui_strings.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npfunctions.h"
 #include "third_party/npapi/bindings/npruntime.h"
 
-namespace tracked_objects {
-class Location;
-}  // namespace tracked_objects
-
 namespace remoting {
 
 class ChromotingHost;
 class DesktopEnvironment;
+class It2MeHostUserInterface;
 class MutableHostConfig;
 class RegisterSupportHostRequest;
 class SignalStrategy;
@@ -84,6 +82,8 @@ class HostNPScriptObject : public HostStatusObserver {
   void PostLogDebugInfo(const std::string& message);
 
  private:
+  // These state values are duplicated in the JS code. Remember to update both
+  // copies when making changes.
   enum State {
     kDisconnected,
     kStarting,
@@ -119,8 +119,7 @@ class HostNPScriptObject : public HostStatusObserver {
   void LogDebugInfo(const std::string& message);
 
   // Callbacks invoked during session setup.
-  void OnReceivedSupportID(remoting::SupportAccessVerifier* access_verifier,
-                           bool success,
+  void OnReceivedSupportID(bool success,
                            const std::string& support_id,
                            const base::TimeDelta& lifetime);
   void NotifyAccessCode(bool success);
@@ -179,9 +178,11 @@ class HostNPScriptObject : public HostStatusObserver {
   scoped_refptr<PluginMessageLoopProxy> plugin_message_loop_proxy_;
 
   scoped_ptr<RegisterSupportHostRequest> register_request_;
+  scoped_ptr<LogToServer> log_to_server_;
   scoped_refptr<MutableHostConfig> host_config_;
   ChromotingHostContext host_context_;
   scoped_ptr<DesktopEnvironment> desktop_environment_;
+  scoped_ptr<It2MeHostUserInterface> it2me_host_user_interface_;
 
   scoped_refptr<ChromotingHost> host_;
   int failed_login_attempts_;
@@ -201,10 +202,13 @@ class HostNPScriptObject : public HostStatusObserver {
   // Host the current nat traversal policy setting.
   bool nat_traversal_enabled_;
 
-  // Indiciates whether or not a policy has ever been read. This is to ensure
+  // Indicates whether or not a policy has ever been read. This is to ensure
   // that on startup, we do not accidentally start a connection before we have
   // queried our policy restrictions.
   bool policy_received_;
+
+  // Whether logging to a server is enabled.
+  bool enable_log_to_server_;
 
   // On startup, it is possible to have Connect() called before the policy read
   // is completed.  Rather than just failing, we thunk the connection call so

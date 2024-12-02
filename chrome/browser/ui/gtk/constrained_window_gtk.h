@@ -9,6 +9,7 @@
 #include <gtk/gtk.h>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task.h"
 #include "chrome/browser/ui/constrained_window.h"
@@ -17,12 +18,10 @@
 
 class TabContentsWrapper;
 typedef struct _GdkColor GdkColor;
-#if defined(TOUCH_UI)
-class TabContentsViewViews;
-#elif defined(TOOLKIT_VIEWS)
+#if defined(TOOLKIT_VIEWS)
 class NativeTabContentsViewGtk;
 #else
-class TabContentsViewGtk;
+class ChromeTabContentsViewWrapperGtk;
 #endif
 
 class ConstrainedWindowGtkDelegate {
@@ -51,12 +50,10 @@ class ConstrainedWindowGtkDelegate {
 // centers the dialog. It is thus an order of magnitude simpler.
 class ConstrainedWindowGtk : public ConstrainedWindow {
  public:
-#if defined(TOUCH_UI)
-   typedef TabContentsViewViews TabContentsViewType;
-#elif defined(TOOLKIT_VIEWS)
+#if defined(TOOLKIT_VIEWS)
    typedef NativeTabContentsViewGtk TabContentsViewType;
 #else
-   typedef TabContentsViewGtk TabContentsViewType;
+   typedef ChromeTabContentsViewWrapperGtk TabContentsViewType;
 #endif
 
   ConstrainedWindowGtk(TabContentsWrapper* wrapper,
@@ -64,9 +61,9 @@ class ConstrainedWindowGtk : public ConstrainedWindow {
   virtual ~ConstrainedWindowGtk();
 
   // Overridden from ConstrainedWindow:
-  virtual void ShowConstrainedWindow();
-  virtual void CloseConstrainedWindow();
-  virtual void FocusConstrainedWindow();
+  virtual void ShowConstrainedWindow() OVERRIDE;
+  virtual void CloseConstrainedWindow() OVERRIDE;
+  virtual void FocusConstrainedWindow() OVERRIDE;
 
   // Returns the TabContentsWrapper that constrains this Constrained Window.
   TabContentsWrapper* owner() const { return wrapper_; }

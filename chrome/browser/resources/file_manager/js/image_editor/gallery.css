@@ -24,18 +24,27 @@ body {
   position: absolute;
   right: 5px;
   top: 5px;
-  height: 20px;
-  width: 20px;
-  color: white;
   cursor: pointer;
-  opacity: 0.4;
   z-index: 200;
+}
+
+/* The close icon is in a nested div so that its opacity can be manipulated
+   independently from its parent (which can be dimmed when the crop frame
+   overlaps it) */
+.gallery > .close div {
+  opacity: 0;
+  width: 20px;
+  height: 20px;
   background-image: url(../../images/gallery/close_x.png);
   background-repeat: no-repeat;
   background-position: center center;
 }
 
-.gallery > .close:hover {
+.gallery[tools] > .close div {
+  opacity: 0.5;
+}
+
+.gallery[tools] > .close div:hover {
   opacity: 0.7;
   background-color: rgba(81,81,81,1);
 }
@@ -154,12 +163,7 @@ body {
 }
 
 .gallery .arrow-box .arrow {
-  width: 105px;
-  height: 193px;
-  background-repeat: no-repeat;
-  background-position: center center;
   pointer-events: none;
-  opacity: 0;
 }
 
 .gallery .arrow-box .arrow-spacer {
@@ -170,18 +174,32 @@ body {
 .gallery[tools] .arrow[active] {
   pointer-events: auto;
   cursor: pointer;
-  opacity: 0.17;
 }
 
-.gallery[tools] .arrow[active]:hover {
+/* The arrow icons are in nested divs so that their opacity can be manipulated
+   independently from their parent (which can be dimmed when the crop frame
+   overlaps it) */
+.gallery .arrow div{
+  width: 105px;
+  height: 193px;
+  background-repeat: no-repeat;
+  background-position: center center;
+  opacity: 0;
+}
+
+.gallery[tools] .arrow[active] div{
+  opacity: 0.25;
+}
+
+.gallery[tools] .arrow[active] div:hover{
   opacity: 1;
 }
 
-.gallery .arrow-box .arrow.left {
+.gallery .arrow.left div{
   background-image: url(../../images/gallery/arrow_left.png);
 }
 
-.gallery .arrow-box .arrow.right {
+.gallery .arrow.right div{
   background-image: url(../../images/gallery/arrow_right.png);
 }
 
@@ -199,41 +217,59 @@ body {
 
 /* The editor marks elements with 'dimmed' attribute to get them out of the way
  of the crop frame */
-.gallery[tools][editing] > *[dimmed],
-.gallery[tools][editing] > *[dimmed] * {
+.gallery[tools][editing] *[dimmed],
+.gallery[tools][editing] *[dimmed] * {
   pointer-events: none;
 }
 
-.gallery[tools][editing] > *[dimmed] {
+.gallery[tools][editing] *[dimmed] {
   opacity: 0.2;
+}
+
+/* Filename */
+
+.gallery .filename-spacer {
+  padding: 0 10px;
+  display: -webkit-box;
+  -webkit-box-orient: horizontal;
+  -webkit-box-align: center;
+}
+
+.gallery .filename-spacer > input {
+  background-color: transparent;
+  color: white;
+  width: 200px;
+  border: none;
+  outline: none;
+}
+
+.gallery .filename-spacer > input:focus {
+  background-color: rgba(48, 48, 48, 0.75);
+  border-right: 1px solid white;
+  border-bottom: 1px solid white;
 }
 
 /* Thumbnails */
 
 .gallery .ribbon-spacer {
-  position: relative;
   display: -webkit-box;
   -webkit-box-flex: 1;
   -webkit-box-orient: horizontal;
+  -webkit-box-pack: center;
 }
 
 .gallery .toolbar .ribbon {
-  position: absolute;
-  top: 0px;
-  left: 0px;
   overflow: hidden;
   height: 100%;
+  -webkit-box-flex: 0;
   display: -webkit-box;
   -webkit-box-orient: horizontal;
-  -webkit-box-pack: left;
+  -webkit-box-pack: start;
 
+  width: 280px;
   max-width: 100%;
-  -webkit-transition: max-width 0.5s ease-in-out;
+  -webkit-transition: max-width 500ms ease-in-out;
   z-index: 0;
-}
-
-.gallery .toolbar .ribbon[inactive] {
-  z-index: -1;
 }
 
 .gallery[editing] .toolbar .ribbon {
@@ -251,18 +287,23 @@ body {
   height: 47px;
   margin: 2px;
   border: 2px solid rgba(255,255,255,0); /* transparent white */
-
-  margin-left: 2px;
-  -webkit-transition: opacity 0.2s linear;
-}
-
-.gallery .ribbon-image[inactive] {
-  opacity: 0;
-  pointer-events: none;
+  -webkit-transition: margin-left 180ms linear;
 }
 
 .gallery .ribbon-image[selected] {
   border: 2px solid rgba(255,233,168,1);
+}
+
+.gallery .toolbar .ribbon.fade-left {
+  -webkit-mask-image: -webkit-linear-gradient(left, rgba(0,0,0,0) 0, rgba(0,0,0,1) 40px);
+}
+
+.gallery .toolbar .ribbon.fade-right {
+  -webkit-mask-image: -webkit-linear-gradient(right, rgba(0,0,0,0) 0, rgba(0,0,0,1) 40px);
+}
+
+.gallery .toolbar .ribbon.fade-left.fade-right {
+  -webkit-mask-image: -webkit-linear-gradient(left, rgba(0,0,0,0) 0, rgba(0,0,0,1) 40px, rgba(0,0,0,1) 230px, rgba(0,0,0,0) 100%);
 }
 
 .gallery .image-wrapper {
@@ -271,34 +312,6 @@ body {
   width: 45px;
   height: 45px;
   border: 1px solid rgba(0,0,0,0); /* transparent black */
-}
-
-.gallery .toolbar .fade {
-  background-repeat: no-repeat;
-  background-position: center center;
-  position: absolute;
-  z-index: 10;
-  width: 55px;
-  height: 100%;
-  pointer-events: none;
-  opacity: 0;
-  -webkit-transition: opacity 0.2s linear;
-}
-
-.gallery .toolbar .fade[active] {
-  opacity: 1;
-}
-
-.gallery[editing] .toolbar .fade[active] {
-  opacity: 0;
-}
-
-.gallery .toolbar .fade.left {
-  background-image: url(../../images/gallery/thumb_fade_left.png);
-}
-
-.gallery .toolbar .fade.right {
-  background-image: url(../../images/gallery/thumb_fade_right.png);
 }
 
 /* Editor buttons */
@@ -314,8 +327,8 @@ body {
   display: -webkit-box;
   -webkit-box-orient: horizontal;
   -webkit-box-pack: center;
-  -webkit-transition: width 0.5s ease-in-out;
-}
+  -webkit-transition: width 500ms ease-in-out;
+  }
 
 .gallery[editing] .toolbar .edit-bar {
   width: 100%;
@@ -325,7 +338,7 @@ body {
   display: -webkit-box;
   -webkit-box-orient: horizontal;
   opacity: 0;
-  -webkit-transition: opacity 0.25s ease-in-out;
+  -webkit-transition: opacity 250ms ease-in-out;
 }
 
 .gallery[editing] .edit-main {
@@ -347,6 +360,8 @@ body {
 
   background-repeat: no-repeat;
   background-position: 5px center;
+
+  opacity: 0.99;  /* Workaround for http://crosbug.com/21065 */
 }
 
 .gallery > .toolbar .button {
@@ -502,6 +517,7 @@ body {
 .gallery .edit-modal .range {
   -webkit-appearance: none !important;
   height: 3px;
+  margin-top: 1px;
   margin-right: 10px;
 }
 
@@ -522,7 +538,7 @@ body {
 }
 
 .gallery .crop-overlay .shadow {
-  background-color: rgba(0,0,0,0.4);
+  background-color: rgba(0,0,0,0.65);
 }
 
 .gallery .crop-overlay .middle-box {
@@ -608,6 +624,11 @@ body {
   -webkit-box-pack: center;
 }
 
+.gallery .prompt-wrapper > div.dimmable {
+  opacity: 1;
+  -webkit-transition: opacity 220ms ease;
+}
+
 .gallery .prompt {
   font-size: 120%;
   height: 40px;
@@ -638,15 +659,29 @@ body {
 .gallery .share-menu {
   position: absolute;
   right: 10px;
-  bottom: 80px;
-  background-color: rgba(240,240,240,1);
+  bottom: 60px;
+  background-color: white;
   opacity: 1.0;
-  -webkit-transition: opacity 0.5s ease-in-out;
-  padding: 10px;
+  -webkit-transition: opacity 500ms ease-in-out;
+  padding: 8px;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-box-align: stretch;
   -webkit-box-pack: start;
+  border: 1px solid #7f7f7f;
+  -webkit-border-radius: 1px;
+}
+
+.gallery .share-menu .bubble-point {
+  background-image: url(../../images/gallery/bubble_point.png);
+  background-position: center top;
+  background-repeat: no-repeat;
+  position: absolute;
+  width: 20px;
+  height: 8px;
+  bottom: -8px;
+  right: 20px;
+  padding: 0;
 }
 
 .gallery .share-menu[hidden] {
@@ -665,9 +700,10 @@ body {
 }
 
 .gallery .share-menu > div:hover {
-  background-color: rgba(200,200,200,1);
+  background-color: rgba(240,240,240,1);
 }
 
 .gallery .share-menu > div > img {
   margin-right: 5px;
+  display: block;
 }

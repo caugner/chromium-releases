@@ -7,11 +7,11 @@
 
 #include "base/basictypes.h"
 #include "ppapi/c/pp_resource.h"
-#include "ppapi/proxy/interface_id.h"
+#include "ppapi/shared_impl/api_id.h"
 #include "ppapi/shared_impl/function_group_base.h"
+#include "ppapi/shared_impl/ppapi_globals.h"
 #include "ppapi/shared_impl/proxy_lock.h"
 #include "ppapi/shared_impl/resource.h"
-#include "ppapi/shared_impl/tracker_base.h"
 #include "ppapi/shared_impl/resource_tracker.h"
 #include "ppapi/thunk/ppapi_thunk_export.h"
 #include "ppapi/thunk/ppb_instance_api.h"
@@ -74,8 +74,8 @@ class EnterFunction : subtle::LockOnEntry<lock_on_entry> {
  public:
   EnterFunction(PP_Instance instance, bool report_error)
       : functions_(NULL) {
-    FunctionGroupBase* base = TrackerBase::Get()->GetFunctionAPI(
-        instance, FunctionsT::interface_id);
+    FunctionGroupBase* base = PpapiGlobals::Get()->GetFunctionAPI(
+        instance, FunctionsT::kApiID);
     if (base)
       functions_ = base->GetAs<FunctionsT>();
     // TODO(brettw) check error and if report_error is set, do something.
@@ -116,7 +116,7 @@ class EnterFunctionGivenResource : public EnterFunction<FunctionsT> {
  private:
   static PP_Instance GetInstanceForResource(PP_Resource resource) {
     Resource* object =
-        TrackerBase::Get()->GetResourceTracker()->GetResource(resource);
+        PpapiGlobals::Get()->GetResourceTracker()->GetResource(resource);
     return object ? object->pp_instance() : 0;
   }
 };
@@ -128,7 +128,8 @@ class EnterResource : subtle::LockOnEntry<lock_on_entry> {
  public:
   EnterResource(PP_Resource resource, bool report_error)
       : object_(NULL) {
-    resource_ = TrackerBase::Get()->GetResourceTracker()->GetResource(resource);
+    resource_ =
+        PpapiGlobals::Get()->GetResourceTracker()->GetResource(resource);
     if (resource_)
       object_ = resource_->GetAs<ResourceT>();
     // TODO(brettw) check error and if report_error is set, do something.

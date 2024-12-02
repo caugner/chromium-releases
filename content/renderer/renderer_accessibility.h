@@ -36,9 +36,9 @@ class RendererAccessibility : public content::RenderViewObserver {
   virtual ~RendererAccessibility();
 
   // RenderView::Observer implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message);
-  virtual void FocusedNodeChanged(const WebKit::WebNode& node);
-  virtual void DidFinishLoad(WebKit::WebFrame* frame);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void FocusedNodeChanged(const WebKit::WebNode& node) OVERRIDE;
+  virtual void DidFinishLoad(WebKit::WebFrame* frame) OVERRIDE;
 
   // Called when an accessibility notification occurs in WebKit.
   virtual void PostAccessibilityNotification(
@@ -82,8 +82,11 @@ class RendererAccessibility : public content::RenderViewObserver {
   // Handlers for messages from the browser to the renderer.
   void OnAccessibilityDoDefaultAction(int acc_obj_id);
   void OnAccessibilityNotificationsAck();
+  void OnChangeScrollPosition(int acc_obj_id, int scroll_x, int scroll_y);
   void OnEnableAccessibility();
   void OnSetAccessibilityFocus(int acc_obj_id);
+
+  void OnSetTextSelection(int acc_obj_id, int start_offset, int end_offset);
 
   // Whether or not this notification typically needs to send
   // updates to its children, too.
@@ -105,6 +108,11 @@ class RendererAccessibility : public content::RenderViewObserver {
 
   // A map from IDs to nodes in the browser tree.
   base::hash_map<int32, BrowserTreeNode*> browser_id_map_;
+
+  // The most recently observed scroll offset of the root document element.
+  // TODO(dmazzoni): remove once https://bugs.webkit.org/show_bug.cgi?id=73460
+  // is fixed.
+  gfx::Size last_scroll_offset_;
 
   // Set if we are waiting for an accessibility notification ack.
   bool ack_pending_;

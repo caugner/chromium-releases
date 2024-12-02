@@ -18,11 +18,6 @@
 
 class ExtensionIconSet;
 class Profile;
-class RefCountedMemory;
-
-namespace gfx {
-class Size;
-}
 
 // ExtensionIconSource serves extension icons through network level chrome:
 // requests. Icons can be retrieved for any installed extension or app.
@@ -73,15 +68,18 @@ class ExtensionIconSource : public ChromeURLDataManager::DataSource,
 
   // ChromeURLDataManager::DataSource
 
-  virtual std::string GetMimeType(const std::string&) const;
+  virtual std::string GetMimeType(const std::string&) const OVERRIDE;
 
   virtual void StartDataRequest(const std::string& path,
                                 bool is_incognito,
-                                int request_id);
+                                int request_id) OVERRIDE;
 
  private:
   // Encapsulates the request parameters for |request_id|.
   struct ExtensionIconRequest;
+
+  // Returns the bitmap for the webstore icon.
+  const SkBitmap* GetWebStoreImage();
 
   // Returns the bitmap for the default app image.
   const SkBitmap* GetDefaultAppImage();
@@ -118,7 +116,7 @@ class ExtensionIconSource : public ChromeURLDataManager::DataSource,
   // ImageLoadingTracker::Observer
   virtual void OnImageLoaded(SkBitmap* image,
                              const ExtensionResource& resource,
-                             int id);
+                             int id) OVERRIDE;
 
   // Called when the extension doesn't have an icon. We fall back to multiple
   // sources, using the following order:
@@ -160,6 +158,8 @@ class ExtensionIconSource : public ChromeURLDataManager::DataSource,
   scoped_ptr<ImageLoadingTracker> tracker_;
 
   int next_tracker_id_;
+
+  scoped_ptr<SkBitmap> web_store_icon_data_;
 
   scoped_ptr<SkBitmap> default_app_data_;
 

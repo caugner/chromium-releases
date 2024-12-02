@@ -6,9 +6,11 @@
 
 #include "base/utf_string_conversions.h"
 
+#include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/autocomplete_history_manager.h"
+#include "chrome/browser/autofill/autofill_external_delegate.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/automation/automation_tab_helper.h"
 #include "chrome/browser/browser_process.h"
@@ -30,7 +32,6 @@
 #include "chrome/browser/prerender/prerender_tab_helper.h"
 #include "chrome/browser/printing/print_preview_message_handler.h"
 #include "chrome/browser/printing/print_view_manager.h"
-#include "chrome/browser/remoting/firewall_traversal_observer.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
@@ -46,7 +47,10 @@
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/intents/web_intent_picker_factory_impl.h"
 #include "chrome/browser/ui/intents/web_intent_picker_controller.h"
+#include "chrome/browser/ui/sad_tab_observer.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
+#include "chrome/browser/ui/sync/tab_contents_wrapper_synced_tab_delegate.h"
+#include "chrome/browser/ui/tab_contents/per_tab_prefs_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper_delegate.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -54,7 +58,7 @@
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/platform_locale_settings.h"
@@ -63,8 +67,8 @@
 
 namespace {
 
-static base::LazyInstance<PropertyAccessor<TabContentsWrapper*> >
-    g_tab_contents_wrapper_property_accessor(base::LINKER_INITIALIZED);
+static base::LazyInstance<base::PropertyAccessor<TabContentsWrapper*> >
+    g_tab_contents_wrapper_property_accessor = LAZY_INSTANCE_INITIALIZER;
 
 // The list of prefs we want to observe.
 const char* kPrefsToObserve[] = {
@@ -77,11 +81,13 @@ const char* kPrefsToObserve[] = {
 #endif
   prefs::kWebKitAllowDisplayingInsecureContent,
   prefs::kWebKitAllowRunningInsecureContent,
+  prefs::kWebKitCursiveFontFamily,
   prefs::kWebKitDefaultFixedFontSize,
   prefs::kWebKitDefaultFontSize,
+  prefs::kWebKitFantasyFontFamily,
   prefs::kWebKitFixedFontFamily,
+  prefs::kWebKitGlobalJavascriptEnabled,
   prefs::kWebKitJavaEnabled,
-  prefs::kWebKitJavascriptEnabled,
   prefs::kWebKitLoadsImagesAutomatically,
   prefs::kWebKitMinimumFontSize,
   prefs::kWebKitMinimumLogicalFontSize,
@@ -105,6 +111,17 @@ void RegisterFontFamilyMap(PrefService* prefs, const char* map_name) {
     const char* pref_name = pref_name_str.c_str();
     if (!prefs->FindPreference(pref_name))
       prefs->RegisterStringPref(pref_name, "", PrefService::UNSYNCABLE_PREF);
+  }
+}
+
+// Registers |obs| to observe per-script font prefs under the path |map_name|.
+void RegisterFontFamilyMapObserver(PrefChangeRegistrar* registrar,
+                                   const char* map_name,
+                                   content::NotificationObserver* obs) {
+  for (size_t i = 0; i < prefs::kWebKitScriptsForFontFamilyMapsLength; ++i) {
+    const char* script = prefs::kWebKitScriptsForFontFamilyMaps[i];
+    std::string pref_name = base::StringPrintf("%s.%s", map_name, script);
+    registrar->Add(pref_name.c_str(), obs);
   }
 }
 
@@ -234,8 +251,6 @@ const size_t kPerScriptFontDefaultsLength = arraysize(kPerScriptFontDefaults);
 TabContentsWrapper::TabContentsWrapper(TabContents* contents)
     : TabContentsObserver(contents),
       delegate_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          synced_tab_delegate_(new TabContentsWrapperSyncedTabDelegate(this))),
       in_destructor_(false),
       tab_contents_(contents) {
   DCHECK(contents);
@@ -246,7 +261,15 @@ TabContentsWrapper::TabContentsWrapper(TabContents* contents)
 
   // Create the tab helpers.
   autocomplete_history_manager_.reset(new AutocompleteHistoryManager(contents));
-  autofill_manager_.reset(new AutofillManager(this));
+  autofill_manager_ = new AutofillManager(this);
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kExternalAutofillPopup)) {
+    autofill_external_delegate_.reset(
+        AutofillExternalDelegate::Create(this, autofill_manager_.get()));
+    autofill_manager_->SetExternalDelegate(autofill_external_delegate_.get());
+    autocomplete_history_manager_->SetExternalDelegate(
+        autofill_external_delegate_.get());
+  }
   automation_tab_helper_.reset(new AutomationTabHelper(contents));
   blocked_content_tab_helper_.reset(new BlockedContentTabHelper(this));
   bookmark_tab_helper_.reset(new BookmarkTabHelper(this));
@@ -259,6 +282,7 @@ TabContentsWrapper::TabContentsWrapper(TabContents* contents)
   password_manager_delegate_.reset(new PasswordManagerDelegateImpl(this));
   password_manager_.reset(
       new PasswordManager(contents, password_manager_delegate_.get()));
+  per_tab_prefs_tab_helper_.reset(new PerTabPrefsTabHelper(this));
   prerender_tab_helper_.reset(new prerender::PrerenderTabHelper(this));
   print_view_manager_.reset(new printing::PrintViewManager(this));
   restore_tab_helper_.reset(new RestoreTabHelper(this));
@@ -271,6 +295,7 @@ TabContentsWrapper::TabContentsWrapper(TabContents* contents)
 #endif
   search_engine_tab_helper_.reset(new SearchEngineTabHelper(contents));
   ssl_helper_.reset(new TabContentsSSLHelper(this));
+  synced_tab_delegate_.reset(new TabContentsWrapperSyncedTabDelegate(this));
   content_settings_.reset(new TabSpecificContentSettings(contents));
   translate_tab_helper_.reset(new TranslateTabHelper(contents));
   web_intent_picker_controller_.reset(new WebIntentPickerController(
@@ -282,9 +307,9 @@ TabContentsWrapper::TabContentsWrapper(TabContents* contents)
   webnavigation_observer_.reset(
       new ExtensionWebNavigationTabObserver(contents));
   external_protocol_observer_.reset(new ExternalProtocolObserver(contents));
-  firewall_traversal_observer_.reset(new FirewallTraversalObserver(contents));
   plugin_observer_.reset(new PluginObserver(this));
   print_preview_.reset(new printing::PrintPreviewMessageHandler(contents));
+  sad_tab_observer_.reset(new SadTabObserver(contents));
   // Start the in-browser thumbnailing if the feature is enabled.
   if (switches::IsInBrowserThumbnailingEnabled()) {
     thumbnail_generation_observer_.reset(new ThumbnailGenerator);
@@ -296,12 +321,12 @@ TabContentsWrapper::TabContentsWrapper(TabContents* contents)
     omnibox_search_hint_.reset(new OmniboxSearchHint(this));
 
   registrar_.Add(this, chrome::NOTIFICATION_GOOGLE_URL_UPDATED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_USER_STYLE_SHEET_UPDATED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(
+                 content::Source<ThemeService>(
                      ThemeServiceFactory::GetForProfile(profile())));
 #endif
 
@@ -311,6 +336,19 @@ TabContentsWrapper::TabContentsWrapper(TabContents* contents)
   if (prefs) {
     for (int i = 0; i < kPrefsToObserveLength; ++i)
       pref_change_registrar_.Add(kPrefsToObserve[i], this);
+
+    RegisterFontFamilyMapObserver(&pref_change_registrar_,
+                                  prefs::kWebKitStandardFontFamilyMap, this);
+    RegisterFontFamilyMapObserver(&pref_change_registrar_,
+                                  prefs::kWebKitFixedFontFamilyMap, this);
+    RegisterFontFamilyMapObserver(&pref_change_registrar_,
+                                  prefs::kWebKitSerifFontFamilyMap, this);
+    RegisterFontFamilyMapObserver(&pref_change_registrar_,
+                                  prefs::kWebKitSansSerifFontFamilyMap, this);
+    RegisterFontFamilyMapObserver(&pref_change_registrar_,
+                                  prefs::kWebKitCursiveFontFamilyMap, this);
+    RegisterFontFamilyMapObserver(&pref_change_registrar_,
+                                  prefs::kWebKitFantasyFontFamilyMap, this);
   }
 
   renderer_preferences_util::UpdateFromSystemSettings(
@@ -324,7 +362,8 @@ TabContentsWrapper::~TabContentsWrapper() {
   infobar_tab_helper_.reset();
 }
 
-PropertyAccessor<TabContentsWrapper*>* TabContentsWrapper::property_accessor() {
+base::PropertyAccessor<TabContentsWrapper*>*
+    TabContentsWrapper::property_accessor() {
   return g_tab_contents_wrapper_property_accessor.Pointer();
 }
 
@@ -335,7 +374,7 @@ void TabContentsWrapper::RegisterUserPrefs(PrefService* prefs) {
                              PrefService::SYNCABLE_PREF);
 
   WebPreferences pref_defaults;
-  prefs->RegisterBooleanPref(prefs::kWebKitJavascriptEnabled,
+  prefs->RegisterBooleanPref(prefs::kWebKitGlobalJavascriptEnabled,
                              pref_defaults.javascript_enabled,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kWebKitWebSecurityEnabled,
@@ -473,11 +512,16 @@ string16 TabContentsWrapper::GetStatusText() const {
                                         tab_contents()->load_state().param);
     case net::LOAD_STATE_WAITING_FOR_CACHE:
       return l10n_util::GetStringUTF16(IDS_LOAD_STATE_WAITING_FOR_CACHE);
+    case net::LOAD_STATE_WAITING_FOR_APPCACHE:
+      return l10n_util::GetStringUTF16(IDS_LOAD_STATE_WAITING_FOR_APPCACHE);
     case net::LOAD_STATE_ESTABLISHING_PROXY_TUNNEL:
       return
           l10n_util::GetStringUTF16(IDS_LOAD_STATE_ESTABLISHING_PROXY_TUNNEL);
     case net::LOAD_STATE_RESOLVING_PROXY_FOR_URL:
       return l10n_util::GetStringUTF16(IDS_LOAD_STATE_RESOLVING_PROXY_FOR_URL);
+    case net::LOAD_STATE_RESOLVING_HOST_IN_PROXY_SCRIPT:
+      return l10n_util::GetStringUTF16(
+          IDS_LOAD_STATE_RESOLVING_HOST_IN_PROXY_SCRIPT);
     case net::LOAD_STATE_RESOLVING_HOST:
       return l10n_util::GetStringUTF16(IDS_LOAD_STATE_RESOLVING_HOST);
     case net::LOAD_STATE_CONNECTING:
@@ -548,7 +592,7 @@ void TabContentsWrapper::RenderViewCreated(RenderViewHost* render_view_host) {
 
 void TabContentsWrapper::DidBecomeSelected() {
   WebCacheManager::GetInstance()->ObserveActivity(
-      tab_contents()->GetRenderProcessHost()->id());
+      tab_contents()->GetRenderProcessHost()->GetID());
 }
 
 bool TabContentsWrapper::OnMessageReceived(const IPC::Message& message) {
@@ -570,8 +614,8 @@ void TabContentsWrapper::TabContentsDestroyed(TabContents* tab) {
 }
 
 void TabContentsWrapper::Observe(int type,
-                                 const NotificationSource& source,
-                                 const NotificationDetails& details) {
+                                 const content::NotificationSource& source,
+                                 const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_GOOGLE_URL_UPDATED:
       UpdateAlternateErrorPageURL(render_view_host());
@@ -586,17 +630,18 @@ void TabContentsWrapper::Observe(int type,
     }
 #endif
     case chrome::NOTIFICATION_PREF_CHANGED: {
-      std::string* pref_name_in = Details<std::string>(details).ptr();
-      DCHECK(Source<PrefService>(source).ptr() == profile()->GetPrefs());
+      std::string* pref_name_in = content::Details<std::string>(details).ptr();
+      DCHECK(content::Source<PrefService>(source).ptr() ==
+             profile()->GetPrefs() ||
+             content::Source<PrefService>(source).ptr() ==
+             per_tab_prefs_tab_helper_->prefs());
       if (*pref_name_in == prefs::kAlternateErrorPagesEnabled) {
         UpdateAlternateErrorPageURL(render_view_host());
       } else if ((*pref_name_in == prefs::kDefaultCharset) ||
                  StartsWithASCII(*pref_name_in, "webkit.webprefs.", true)) {
         UpdateWebPreferences();
-      } else if (*pref_name_in == prefs::kDefaultZoomLevel) {
-        tab_contents()->render_view_host()->SetZoomLevel(
-            tab_contents()->GetZoomLevel());
-      } else if (*pref_name_in == prefs::kEnableReferrers) {
+      } else if (*pref_name_in == prefs::kDefaultZoomLevel ||
+                 *pref_name_in == prefs::kEnableReferrers) {
         UpdateRendererPreferences();
       } else if (*pref_name_in == prefs::kSafeBrowsingEnabled) {
         UpdateSafebrowsingDetectionHost();
@@ -614,10 +659,10 @@ void TabContentsWrapper::Observe(int type,
 // Internal helpers
 
 void TabContentsWrapper::OnSnapshot(const SkBitmap& bitmap) {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TAB_SNAPSHOT_TAKEN,
-      Source<TabContentsWrapper>(this),
-      Details<const SkBitmap>(&bitmap));
+      content::Source<TabContentsWrapper>(this),
+      content::Details<const SkBitmap>(&bitmap));
 }
 
 void TabContentsWrapper::OnPDFHasUnsupportedFeature() {
@@ -645,8 +690,9 @@ void TabContentsWrapper::UpdateAlternateErrorPageURL(RenderViewHost* rvh) {
 
 void TabContentsWrapper::UpdateWebPreferences() {
   RenderViewHostDelegate* rvhd = tab_contents();
-  tab_contents()->render_view_host()->UpdateWebkitPreferences(
-      rvhd->GetWebkitPrefs());
+  WebPreferences prefs = rvhd->GetWebkitPrefs();
+  per_tab_prefs_tab_helper_->OverrideWebPreferences(&prefs);
+  tab_contents()->render_view_host()->UpdateWebkitPreferences(prefs);
 }
 
 void TabContentsWrapper::UpdateRendererPreferences() {

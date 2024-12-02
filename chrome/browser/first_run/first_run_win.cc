@@ -37,7 +37,7 @@
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "google_update_idl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -50,7 +50,7 @@ namespace {
 
 // Helper class that performs delayed first-run tasks that need more of the
 // chrome infrastructure to be up and running before they can be attempted.
-class FirstRunDelayedTasks : public NotificationObserver {
+class FirstRunDelayedTasks : public content::NotificationObserver {
  public:
   enum Tasks {
     NO_TASK,
@@ -60,18 +60,20 @@ class FirstRunDelayedTasks : public NotificationObserver {
   explicit FirstRunDelayedTasks(Tasks task) {
     if (task == INSTALL_EXTENSIONS) {
       registrar_.Add(this, chrome::NOTIFICATION_EXTENSIONS_READY,
-                     NotificationService::AllSources());
+                     content::NotificationService::AllSources());
     }
     registrar_.Add(this, chrome::NOTIFICATION_BROWSER_CLOSED,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     // After processing the notification we always delete ourselves.
-    if (type == chrome::NOTIFICATION_EXTENSIONS_READY)
-      DoExtensionWork(Source<Profile>(source).ptr()->GetExtensionService());
+    if (type == chrome::NOTIFICATION_EXTENSIONS_READY) {
+      DoExtensionWork(
+          content::Source<Profile>(source).ptr()->GetExtensionService());
+    }
     delete this;
     return;
   }
@@ -90,7 +92,7 @@ class FirstRunDelayedTasks : public NotificationObserver {
     return;
   }
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 };
 
 // Creates the desktop shortcut to chrome for the current user. Returns
@@ -106,6 +108,10 @@ bool CreateChromeDesktopShortcut() {
       dist,
       chrome_exe.value(),
       dist->GetAppDescription(),
+      L"",
+      L"",
+      chrome_exe.value(),
+      dist->GetIconIndex(),
       ShellUtil::CURRENT_USER,
       false,
       true);  // create if doesn't exist.
@@ -393,7 +399,7 @@ int FirstRun::ImportFromBrowser(Profile* profile,
   scoped_refptr<ImporterHost> importer_host(new ImporterHost);
   FirstRunImportObserver importer_observer;
 
-  scoped_refptr<ImporterList> importer_list(new ImporterList);
+  scoped_refptr<ImporterList> importer_list(new ImporterList(NULL));
   importer_list->DetectSourceProfilesHack();
 
   // If |skip_first_run_ui|, we run in headless mode.  This means that if

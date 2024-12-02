@@ -47,8 +47,9 @@ class NET_EXPORT TransportSecurityState
       //   * We'll request HTTP URLs over HTTPS iff we have SPDY support.
       //   * Certificate issues are fatal.
       MODE_SPDY_ONLY = 2,
-      // None means there is no HSTS for this domain.
-      MODE_NONE = 3,
+      // Pinning means there are no HTTP -> HTTPS redirects, however certificate
+      // issues are still fatal and there may be public key pins.
+      MODE_PINNING_ONLY = 3,
     };
 
     DomainState();
@@ -56,16 +57,45 @@ class NET_EXPORT TransportSecurityState
 
     // IsChainOfPublicKeysPermitted takes a set of public key hashes and
     // returns true if:
-    //   1) |public_key_hashes| is empty, i.e. no public keys have been pinned.
-    //   2) |hashes| and |public_key_hashes| are not disjoint.
+    //   1) None of the hashes are in |bad_public_key_hashes| AND
+    //   2) |public_key_hashes| is empty, i.e. no public keys have been pinned.
+    //      OR
+    //   3) |hashes| and |public_key_hashes| are not disjoint.
+    //
+    // |public_key_hashes| is intended to contain a number of trusted public
+    // keys for the chain in question, any one of which is sufficient. The
+    // public keys could be of a root CA, intermediate CA or leaf certificate,
+    // depending on the security vs disaster recovery tradeoff selected.
+    // (Pinning only to leaf certifiates increases security because you no
+    // longer trust any CAs, but it hampers disaster recovery because you can't
+    // just get a new certificate signed by the CA.)
+    //
+    // |bad_public_key_hashes| is intended to contain unwanted intermediate CA
+    // certifciates that those trusted public keys may have issued but that we
+    // don't want to trust.
     bool IsChainOfPublicKeysPermitted(
         const std::vector<SHA1Fingerprint>& hashes);
+
+    // ShouldCertificateErrorsBeFatal returns true iff, given the |mode| of this
+    // DomainState, certificate errors on this domain should be fatal (i.e. no
+    // user bypass).
+    bool ShouldCertificateErrorsBeFatal() const;
+
+    // ShouldRedirectHTTPToHTTPS returns true iff, given the |mode| of this
+    // DomainState, HTTP requests should be internally redirected to HTTPS.
+    bool ShouldRedirectHTTPToHTTPS() const;
+
+    // ShouldMixedScriptingBeBlocked returns true iff, given the |mode| of this
+    // DomainState, mixed scripting (the loading of Javascript, CSS or plugins
+    // over HTTP for an HTTPS page) should be blocked.
+    bool ShouldMixedScriptingBeBlocked() const;
 
     Mode mode;
     base::Time created;  // when this host entry was first created
     base::Time expiry;  // the absolute time (UTC) when this record expires
     bool include_subdomains;  // subdomains included?
     std::vector<SHA1Fingerprint> public_key_hashes;  // optional; permitted keys
+    std::vector<SHA1Fingerprint> bad_public_key_hashes; // optional;rejectd keys
 
     // The follow members are not valid when stored in |enabled_hosts_|.
     bool preloaded;  // is this a preloaded entry?
@@ -92,11 +122,13 @@ class NET_EXPORT TransportSecurityState
   bool DeleteHost(const std::string& host);
 
   // Returns true if |host| has TransportSecurity enabled, in the context of
-  // |sni_available|. In that case, *result is filled out.
+  // |sni_available|. You should check |result->mode| before acting on this
+  // because the modes can be quite different.
+  //
   // Note that *result is always overwritten on every call.
-  bool IsEnabledForHost(DomainState* result,
-                        const std::string& host,
-                        bool sni_available);
+  bool GetDomainState(DomainState* result,
+                      const std::string& host,
+                      bool sni_available);
 
   // Returns true if |host| has any SSL certificate pinning, in the context of
   // |sni_available|. In that case, *result is filled out.
@@ -127,6 +159,11 @@ class NET_EXPORT TransportSecurityState
   // connect to Google in the first place.
   static bool IsGooglePinnedProperty(const std::string& host,
                                      bool sni_available);
+
+  // Reports UMA statistics upon public key pin failure. Reports only down to
+  // the second-level domain of |host| (e.g. google.com if |host| is
+  // mail.google.com), and only if |host| is a preloaded STS host.
+  static void ReportUMAOnPinFailure(const std::string& host);
 
   // Deletes all records created since a given time.
   void DeleteSince(const base::Time& time);

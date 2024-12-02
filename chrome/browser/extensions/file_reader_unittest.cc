@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
@@ -12,8 +13,10 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/extension_test_util.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -24,7 +27,7 @@ class FileReaderTest : public testing::Test {
   }
  private:
   MessageLoop message_loop_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread file_thread_;
 };
 
 class Receiver {
@@ -32,8 +35,8 @@ class Receiver {
   Receiver() : succeeded_(false) {
   }
 
-  FileReader::Callback* NewCallback() {
-    return ::NewCallback(this, &Receiver::DidReadFile);
+  FileReader::Callback NewCallback() {
+    return base::Bind(&Receiver::DidReadFile, base::Unretained(this));
   }
 
   bool succeeded() const { return succeeded_; }

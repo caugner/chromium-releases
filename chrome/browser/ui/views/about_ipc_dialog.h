@@ -10,17 +10,15 @@
 
 #include <atlbase.h>
 #include <atlapp.h>
-#include <atlwin.h>
 #include <atlctrls.h>
+#include <atlwin.h>
 
 #include "base/memory/singleton.h"
 #include "ipc/ipc_logging.h"
-#include "views/controls/button/button.h"
-#include "views/controls/table/table_view.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/table/table_view.h"
+#include "ui/views/window/dialog_delegate.h"
 
-
-class Profile;
 namespace views {
 class NativeViewHost;
 class TextButton;

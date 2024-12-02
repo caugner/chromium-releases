@@ -11,12 +11,12 @@
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/extension_sidebar_defaults.h"
 #include "chrome/common/extensions/extension_sidebar_utils.h"
-#include "content/browser/renderer_host/browser_render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/public/browser/render_process_host.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
@@ -90,7 +90,8 @@ void SidebarContainer::Navigate(const GURL& url) {
   // TODO(alekseys): add a progress UI.
   navigate_to_default_page_on_expand_ = false;
   sidebar_contents_->controller().LoadURL(
-      url, GURL(), content::PAGE_TRANSITION_START_PAGE, std::string());
+      url, content::Referrer(), content::PAGE_TRANSITION_START_PAGE,
+      std::string());
 }
 
 void SidebarContainer::SetBadgeText(const string16& badge_text) {
@@ -104,10 +105,6 @@ void SidebarContainer::SetIcon(const SkBitmap& bitmap) {
 
 void SidebarContainer::SetTitle(const string16& title) {
   title_ = title;
-}
-
-bool SidebarContainer::IsPopup(const TabContents* source) const {
-  return false;
 }
 
 content::JavaScriptDialogCreator*

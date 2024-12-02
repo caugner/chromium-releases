@@ -41,11 +41,15 @@ enum PanelDragState {
   // so we can animate it with a fade in/fade out effect.
   IBOutlet NSView* settingsButtonWrapper_;
   IBOutlet HoverImageButton* settingsButton_;
+  // Transparent view on top of entire titlebar. It catches mouse events to
+  // prevent window activation by the system on mouseDown.
+  IBOutlet NSView* overlay_;
   NSButton* closeButton_;  // Created explicitly, not from NIB. Weak, destroyed
                            // when view is destroyed, as a subview.
   ScopedCrTrackingArea closeButtonTrackingArea_;
   PanelDragState dragState_;
   BOOL isDrawingAttention_;
+  NSPoint dragStartLocation_;
 }
 
   // Callback from Close button.
@@ -66,14 +70,12 @@ enum PanelDragState {
 - (void)updateCloseButtonLayout;
 - (void)updateIconAndTitleLayout;
 
-// We need to update our look when the Chrome theme changes or window focus
-// changes.
+// Various events that we'll need to redraw our titlebar for.
+- (void)didChangeFrame:(NSNotification*)notification;
 - (void)didChangeTheme:(NSNotification*)notification;
 - (void)didChangeMainWindow:(NSNotification*)notification;
 
 // Helpers to control title drag operation, called from more then one place.
-// TODO(dimich): replace BOOL parameter that we have to explicitly specify at
-// callsites with an enum defined in PanelManager.
 - (void)startDrag;
 - (void)endDrag:(BOOL)cancelled;
 - (void)dragWithDeltaX:(int)deltaX;
@@ -92,6 +94,8 @@ enum PanelDragState {
 @interface PanelTitlebarViewCocoa(TestingAPI)
 
 - (PanelWindowControllerCocoa*)controller;
+
+- (NSTextField*)title;
 
 // Simulates click on a close button. Used to test panel closing.
 - (void)simulateCloseButtonClick;

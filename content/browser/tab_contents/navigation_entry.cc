@@ -6,9 +6,9 @@
 
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/content_browser_client.h"
 #include "content/browser/site_instance.h"
-#include "content/common/content_constants.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/common/content_constants.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/net_util.h"
 #include "ui/base/text/text_elider.h"
@@ -21,7 +21,7 @@ static int GetUniqueID() {
 }
 
 NavigationEntry::SSLStatus::SSLStatus()
-    : security_style_(SECURITY_STYLE_UNKNOWN),
+    : security_style_(content::SECURITY_STYLE_UNKNOWN),
       cert_id_(0),
       cert_status_(0),
       security_bits_(-1),
@@ -37,7 +37,7 @@ NavigationEntry::FaviconStatus::FaviconStatus() : valid_(false) {
 NavigationEntry::NavigationEntry()
     : unique_id_(GetUniqueID()),
       site_instance_(NULL),
-      page_type_(NORMAL_PAGE),
+      page_type_(content::PAGE_TYPE_NORMAL),
       update_virtual_url_with_url_(false),
       page_id_(-1),
       transition_type_(content::PAGE_TRANSITION_LINK),
@@ -49,13 +49,13 @@ NavigationEntry::NavigationEntry()
 NavigationEntry::NavigationEntry(SiteInstance* instance,
                                  int page_id,
                                  const GURL& url,
-                                 const GURL& referrer,
+                                 const content::Referrer& referrer,
                                  const string16& title,
                                  content::PageTransition transition_type,
                                  bool is_renderer_initiated)
     : unique_id_(GetUniqueID()),
       site_instance_(instance),
-      page_type_(NORMAL_PAGE),
+      page_type_(content::PAGE_TYPE_NORMAL),
       url_(url),
       referrer_(referrer),
       update_virtual_url_with_url_(false),

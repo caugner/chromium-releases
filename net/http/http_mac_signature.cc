@@ -132,7 +132,7 @@ bool HttpMacSignature::GenerateHeaderString(const std::string& age,
 std::string HttpMacSignature::GenerateNormalizedRequest(
     const std::string& age,
     const std::string& nonce) {
-  static const std::string kNewLine = "\n";
+  const std::string kNewLine = "\n";
 
   std::string normalized_request = age + ":" + nonce + kNewLine;
   normalized_request += method_ + kNewLine;
@@ -158,9 +158,12 @@ bool HttpMacSignature::GenerateMAC(const std::string& age,
 
   std::string signature;
   size_t length = hmac.DigestLength();
-  char* buffer = WriteInto(&signature, length);
-  if (!hmac.Sign(request, reinterpret_cast<unsigned char*>(buffer),
-                 length)) {
+  DCHECK_GT(length, 0u);
+  if (!hmac.Sign(request,
+          // We need the + 1 here not because the call will write a trailing \0,
+          // but so that signature.length() is correctly set to |length|.
+          reinterpret_cast<unsigned char*>(WriteInto(&signature, length + 1)),
+          length)) {
     NOTREACHED();
     return false;
   }

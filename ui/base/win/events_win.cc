@@ -66,6 +66,11 @@ bool IsNonClientMouseEvent(const base::NativeEvent& native_event) {
          native_event.message <= WM_NCXBUTTONDBLCLK);
 }
 
+bool IsMouseWheelEvent(const base::NativeEvent& native_event) {
+  return native_event.message == WM_MOUSEWHEEL ||
+         native_event.message == WM_MOUSEHWHEEL;
+}
+
 bool IsDoubleClickMouseEvent(const base::NativeEvent& native_event) {
   return native_event.message == WM_NCLBUTTONDBLCLK ||
          native_event.message == WM_NCMBUTTONDBLCLK ||
@@ -178,7 +183,9 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
     case WM_NCMOUSELEAVE:
       return ET_MOUSE_EXITED;
     default:
-      NOTREACHED();
+      // We can't NOTREACHED() here, since this function can be called for any
+      // message.
+      break;
   }
   return ET_UNKNOWN;
 }
@@ -192,10 +199,13 @@ int EventFlagsFromNative(const base::NativeEvent& native_event) {
 }
 
 gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
+  // Note: Wheel events are considered client, but their position is in screen
+  //       coordinates.
   // Client message. The position is contained in the LPARAM.
-  if (IsClientMouseEvent(native_event))
+  if (IsClientMouseEvent(native_event) && !IsMouseWheelEvent(native_event))
     return gfx::Point(native_event.lParam);
-  DCHECK(IsNonClientMouseEvent(native_event));
+  DCHECK(IsNonClientMouseEvent(native_event) ||
+         IsMouseWheelEvent(native_event));
   // Non-client message. The position is contained in a POINTS structure in
   // LPARAM, and is in screen coordinates so we have to convert to client.
   POINT native_point = { GET_X_LPARAM(native_event.lParam),
@@ -241,6 +251,14 @@ float GetTouchAngle(const base::NativeEvent& native_event) {
 float GetTouchForce(const base::NativeEvent& native_event) {
   NOTIMPLEMENTED();
   return 0.0;
+}
+
+base::NativeEvent CreateNoopEvent() {
+  MSG event;
+  event.message = WM_USER;
+  event.wParam = 0;
+  event.lParam = 0;
+  return event;
 }
 
 }  // namespace ui

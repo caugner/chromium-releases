@@ -4,6 +4,7 @@
 
 #include "webkit/plugins/npapi/webplugin_impl.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/linked_ptr.h"
 #include "base/message_loop.h"
@@ -18,25 +19,25 @@
 #include "net/http/http_response_headers.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCookieJar.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCookieJar.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebHTTPBody.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebHTTPHeaderVisitor.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebHTTPBody.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebHTTPHeaderVisitor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitPlatformSupport.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebKitPlatformSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoader.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoader.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoaderClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderOptions.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/gfx/rect.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
@@ -115,7 +116,7 @@ class MultiPartResponseClient : public WebURLLoaderClient {
   // response.
   virtual void didReceiveResponse(
       WebURLLoader*, const WebURLResponse& response) {
-    int instance_size;
+    int64 instance_size;
     if (!MultipartResponseDelegate::ReadContentRanges(
             response,
             &byte_range_lower_bound_,
@@ -153,9 +154,9 @@ class MultiPartResponseClient : public WebURLLoaderClient {
  private:
   WebURLResponse resource_response_;
   // The lower bound of the byte range.
-  int byte_range_lower_bound_;
+  int64 byte_range_lower_bound_;
   // The upper bound of the byte range.
-  int byte_range_upper_bound_;
+  int64 byte_range_upper_bound_;
   // The handler for the data.
   WebPluginResourceClient* resource_client_;
 };
@@ -347,9 +348,9 @@ void WebPluginImpl::updateGeometry(
       // geometry received by a call to setFrameRect in the Webkit
       // layout code path. To workaround this issue we download the
       // plugin source url on a timer.
-      MessageLoop::current()->PostDelayedTask(
-          FROM_HERE, method_factory_.NewRunnableMethod(
-              &WebPluginImpl::OnDownloadPluginSrcUrl), 0);
+      MessageLoop::current()->PostTask(
+          FROM_HERE, base::Bind(&WebPluginImpl::OnDownloadPluginSrcUrl,
+                                weak_factory_.GetWeakPtr()));
     }
   }
 
@@ -474,7 +475,7 @@ WebPluginImpl::WebPluginImpl(
       ignore_response_error_(false),
       file_path_(file_path),
       mime_type_(UTF16ToASCII(params.mimeType)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   DCHECK_EQ(params.attributeNames.size(), params.attributeValues.size());
   StringToLowerASCII(&mime_type_);
 
@@ -488,38 +489,31 @@ WebPluginImpl::~WebPluginImpl() {
 }
 
 void WebPluginImpl::SetWindow(gfx::PluginWindowHandle window) {
-#if defined(OS_MACOSX)
-  // The only time this is called twice, and the second time with a
-  // non-zero PluginWindowHandle, is the case when this WebPluginImpl
-  // is created on behalf of the GPU plugin. This entire code path
-  // will go away soon, as soon as the GPU plugin becomes the GPU
-  // process, so it is being separated out for easy deletion.
-
-  // The logic we want here is: if (window) DCHECK(!window_);
-  DCHECK(!(window_ && window));
-  window_ = window;
-  // Lie to ourselves about being windowless even if we got a fake
-  // plugin window handle, so we continue to get input events.
-  windowless_ = true;
-  accepts_input_events_ = true;
-  // We do not really need to notify the page delegate that a plugin
-  // window was created -- so don't.
-#else
   if (window) {
     DCHECK(!windowless_);
     window_ = window;
+#if defined(OS_MACOSX)
+    // TODO(kbr): remove. http://crbug.com/105344
+
+    // Lie to ourselves about being windowless even if we got a fake
+    // plugin window handle, so we continue to get input events.
+    windowless_ = true;
+    accepts_input_events_ = true;
+    // We do not really need to notify the page delegate that a plugin
+    // window was created -- so don't.
+#else
     accepts_input_events_ = false;
     if (page_delegate_) {
       // Tell the view delegate that the plugin window was created, so that it
       // can create necessary container widgets.
       page_delegate_->CreatedPluginWindow(window);
     }
+#endif
   } else {
     DCHECK(!window_);  // Make sure not called twice.
     windowless_ = true;
     accepts_input_events_ = true;
   }
-#endif
 }
 
 void WebPluginImpl::SetAcceptsInputEvents(bool accepts) {
@@ -752,6 +746,39 @@ void WebPluginImpl::URLRedirectResponse(bool allow, int resource_id) {
     }
   }
 }
+
+#if defined(OS_MACOSX)
+void WebPluginImpl::AcceleratedPluginEnabledRendering() {
+}
+
+void WebPluginImpl::AcceleratedPluginAllocatedIOSurface(int32 width,
+                                                        int32 height,
+                                                        uint32 surface_id) {
+  next_io_surface_allocated_ = true;
+  next_io_surface_width_ = width;
+  next_io_surface_height_ = height;
+  next_io_surface_id_ = surface_id;
+}
+
+void WebPluginImpl::AcceleratedPluginSwappedIOSurface() {
+  if (container_) {
+    // Deferring the call to setBackingIOSurfaceId is an attempt to
+    // work around garbage occasionally showing up in the plugin's
+    // area during live resizing of Core Animation plugins. The
+    // assumption was that by the time this was called, the plugin
+    // process would have populated the newly allocated IOSurface. It
+    // is not 100% clear at this point why any garbage is getting
+    // through. More investigation is needed. http://crbug.com/105346
+    if (next_io_surface_allocated_) {
+      container_->setBackingIOSurfaceId(next_io_surface_width_,
+                                        next_io_surface_height_,
+                                        next_io_surface_id_);
+      next_io_surface_allocated_ = false;
+    }
+    container_->commitBackingTexture();
+  }
+}
+#endif
 
 void WebPluginImpl::Invalidate() {
   if (container_)
@@ -1350,7 +1377,7 @@ void WebPluginImpl::TearDownPluginInstance(
   // This needs to be called now and not in the destructor since the
   // webframe_ might not be valid anymore.
   webframe_ = NULL;
-  method_factory_.RevokeAll();
+  weak_factory_.InvalidateWeakPtrs();
 }
 
 void WebPluginImpl::SetReferrer(WebKit::WebURLRequest* request,

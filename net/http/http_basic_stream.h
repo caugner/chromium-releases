@@ -83,6 +83,8 @@ class HttpBasicStream : public HttpStream {
 
   virtual void LogNumRttVsBytesMetrics() const OVERRIDE;
 
+  virtual void Drain(HttpNetworkSession* session) OVERRIDE;
+
  private:
   scoped_refptr<GrowableIOBuffer> read_buf_;
 

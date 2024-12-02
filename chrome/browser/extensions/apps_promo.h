@@ -11,7 +11,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
 
 class PrefService;
 class Profile;
@@ -100,11 +100,6 @@ class AppsPromo {
   // Called to hide the promo from the apps section.
   void HidePromo();
 
-  // Maximizes the apps section on the NTP if the following conditions are met:
-  //  (a) the existing promo has not already been maximized
-  //  (b) the current user group is targetted by the promo
-  void MaximizeAppsIfNecessary();
-
   // Returns true if the app launcher should be displayed on the NTP.
   bool ShouldShowAppLauncher(const ExtensionIdSet& installed_ids);
 
@@ -148,13 +143,13 @@ class AppsPromo {
 
 // Fetches logos over HTTPS, making sure we don't send cookies and that we
 // cache the image until its source URL changes.
-class AppsPromoLogoFetcher : public URLFetcher::Delegate {
+class AppsPromoLogoFetcher : public content::URLFetcherDelegate {
  public:
   AppsPromoLogoFetcher(Profile* profile,
                        AppsPromo::PromoData promo_data);
   virtual ~AppsPromoLogoFetcher();
 
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
  private:
   // Fetches the logo and stores the result as a data URL.
@@ -172,7 +167,7 @@ class AppsPromoLogoFetcher : public URLFetcher::Delegate {
 
   Profile* profile_;
   AppsPromo::PromoData promo_data_;
-  scoped_ptr<URLFetcher> url_fetcher_;
+  scoped_ptr<content::URLFetcher> url_fetcher_;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_APPS_PROMO_H_

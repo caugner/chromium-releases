@@ -10,9 +10,11 @@
 #include "base/json/json_writer.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/singleton.h"
 #include "base/process_util.h"
 #include "base/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "base/values.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -40,20 +42,33 @@ class TraceEventTestFixture : public testing::Test {
   // up multiple times when testing AtExit. Use ManualTestSetUp for this.
   void ManualTestSetUp();
   void OnTraceDataCollected(
-      scoped_refptr<TraceLog::RefCountedString> json_events_str);
-  bool FindMatchingTraceEntry(const JsonKeyValue* key_values);
-  bool FindNamePhase(const char* name, const char* phase);
+      scoped_refptr<TraceLog::RefCountedString> events_str);
+  DictionaryValue* FindMatchingTraceEntry(const JsonKeyValue* key_values);
+  DictionaryValue* FindNamePhase(const char* name, const char* phase);
+  DictionaryValue* FindNamePhaseKeyValue(const char* name,
+                                         const char* phase,
+                                         const char* key,
+                                         const char* value);
   bool FindMatchingValue(const char* key,
                          const char* value);
   bool FindNonMatchingValue(const char* key,
                             const char* value);
   void Clear() {
-    trace_string_.clear();
     trace_parsed_.Clear();
+    json_output_.json_output.clear();
   }
 
-  std::string trace_string_;
+  virtual void SetUp() {
+    old_thread_name_ = PlatformThread::GetName();
+  }
+  virtual void TearDown() {
+    PlatformThread::SetName(old_thread_name_ ? old_thread_name_  : "");
+  }
+
+  const char* old_thread_name_;
   ListValue trace_parsed_;
+  base::debug::TraceResultBuffer trace_buffer_;
+  base::debug::TraceResultBuffer::SimpleOutput json_output_;
 
  private:
   // We want our singleton torn down after each test.
@@ -70,15 +85,19 @@ void TraceEventTestFixture::ManualTestSetUp() {
   tracelog->SetOutputCallback(
       base::Bind(&TraceEventTestFixture::OnTraceDataCollected,
                  base::Unretained(this)));
+  trace_buffer_.SetOutputCallback(json_output_.GetCallback());
 }
 
 void TraceEventTestFixture::OnTraceDataCollected(
-    scoped_refptr<TraceLog::RefCountedString> json_events_str) {
+    scoped_refptr<TraceLog::RefCountedString> events_str) {
   AutoLock lock(lock_);
-  trace_string_ += json_events_str->data;
+  json_output_.json_output.clear();
+  trace_buffer_.Start();
+  trace_buffer_.AddFragment(events_str->data);
+  trace_buffer_.Finish();
 
   scoped_ptr<Value> root;
-  root.reset(base::JSONReader::Read(json_events_str->data, false));
+  root.reset(base::JSONReader::Read(json_output_.json_output, false));
 
   ListValue* root_list = NULL;
   ASSERT_TRUE(root.get());
@@ -135,7 +154,7 @@ static bool IsAllKeyValueInDict(const JsonKeyValue* key_values,
   return true;
 }
 
-bool TraceEventTestFixture::FindMatchingTraceEntry(
+DictionaryValue* TraceEventTestFixture::FindMatchingTraceEntry(
     const JsonKeyValue* key_values) {
   // Scan all items
   size_t trace_parsed_count = trace_parsed_.GetSize();
@@ -147,15 +166,30 @@ bool TraceEventTestFixture::FindMatchingTraceEntry(
     DictionaryValue* dict = static_cast<DictionaryValue*>(value);
 
     if (IsAllKeyValueInDict(key_values, dict))
-      return true;
+      return dict;
   }
-  return false;
+  return NULL;
 }
 
-bool TraceEventTestFixture::FindNamePhase(const char* name, const char* phase) {
+DictionaryValue* TraceEventTestFixture::FindNamePhase(const char* name,
+                                                      const char* phase) {
   JsonKeyValue key_values[] = {
     {"name", name, IS_EQUAL},
     {"ph", phase, IS_EQUAL},
+    {0, 0, IS_EQUAL}
+  };
+  return FindMatchingTraceEntry(key_values);
+}
+
+DictionaryValue* TraceEventTestFixture::FindNamePhaseKeyValue(
+    const char* name,
+    const char* phase,
+    const char* key,
+    const char* value) {
+  JsonKeyValue key_values[] = {
+    {"name", name, IS_EQUAL},
+    {"ph", phase, IS_EQUAL},
+    {key, value, IS_EQUAL},
     {0, 0, IS_EQUAL}
   };
   return FindMatchingTraceEntry(key_values);
@@ -247,10 +281,10 @@ std::vector<DictionaryValue*> FindTraceEntries(
 
 void TraceWithAllMacroVariants(WaitableEvent* task_complete_event) {
   {
-    TRACE_EVENT_BEGIN_ETW("TRACE_EVENT_BEGIN_ETW call", 1122, "extrastring1");
-    TRACE_EVENT_END_ETW("TRACE_EVENT_END_ETW call", 3344, "extrastring2");
+    TRACE_EVENT_BEGIN_ETW("TRACE_EVENT_BEGIN_ETW call", 0x1122, "extrastring1");
+    TRACE_EVENT_END_ETW("TRACE_EVENT_END_ETW call", 0x3344, "extrastring2");
     TRACE_EVENT_INSTANT_ETW("TRACE_EVENT_INSTANT_ETW call",
-                            5566, "extrastring3");
+                            0x5566, "extrastring3");
 
     TRACE_EVENT0("all", "TRACE_EVENT0 call");
     TRACE_EVENT1("all", "TRACE_EVENT1 call", "name1", "value1");
@@ -275,14 +309,18 @@ void TraceWithAllMacroVariants(WaitableEvent* task_complete_event) {
     TRACE_EVENT_END2("all", "TRACE_EVENT_END2 call",
                      "name1", "value1",
                      "name2", "value2");
+
+    TRACE_COUNTER1("all", "TRACE_COUNTER1 call", 31415);
+    TRACE_COUNTER2("all", "TRACE_COUNTER2 call",
+                   "a", 30000,
+                   "b", 1415);
   } // Scope close causes TRACE_EVENT0 etc to send their END events.
 
   if (task_complete_event)
     task_complete_event->Signal();
 }
 
-void ValidateAllTraceMacrosCreatedData(const ListValue& trace_parsed,
-                                 const std::string& trace_string) {
+void ValidateAllTraceMacrosCreatedData(const ListValue& trace_parsed) {
   DictionaryValue* item = NULL;
 
 #define EXPECT_FIND_(string) \
@@ -296,9 +334,9 @@ void ValidateAllTraceMacrosCreatedData(const ListValue& trace_parsed,
   EXPECT_FIND_("all");
   EXPECT_FIND_("TRACE_EVENT_BEGIN_ETW call");
   {
-    int int_val = 0;
-    EXPECT_TRUE(item && item->GetInteger("args.id", &int_val));
-    EXPECT_EQ(1122, int_val);
+    std::string str_val;
+    EXPECT_TRUE(item && item->GetString("args.id", &str_val));
+    EXPECT_STREQ("1122", str_val.c_str());
   }
   EXPECT_SUB_FIND_("extrastring1");
   EXPECT_FIND_("TRACE_EVENT_END_ETW call");
@@ -342,10 +380,36 @@ void ValidateAllTraceMacrosCreatedData(const ListValue& trace_parsed,
   EXPECT_SUB_FIND_("value1");
   EXPECT_SUB_FIND_("name2");
   EXPECT_SUB_FIND_("value2");
+
+  EXPECT_FIND_("TRACE_COUNTER1 call");
+  {
+    std::string ph;
+    EXPECT_TRUE((item && item->GetString("ph", &ph)));
+    EXPECT_EQ("C", ph);
+
+    int value;
+    EXPECT_TRUE((item && item->GetInteger("args.value", &value)));
+    EXPECT_EQ(31415, value);
+  }
+
+  EXPECT_FIND_("TRACE_COUNTER2 call");
+  {
+    std::string ph;
+    EXPECT_TRUE((item && item->GetString("ph", &ph)));
+    EXPECT_EQ("C", ph);
+
+    int value;
+    EXPECT_TRUE((item && item->GetInteger("args.a", &value)));
+    EXPECT_EQ(30000, value);
+
+    EXPECT_TRUE((item && item->GetInteger("args.b", &value)));
+    EXPECT_EQ(1415, value);
+  }
+
 }
 
 void TraceManyInstantEvents(int thread_id, int num_events,
-                                 WaitableEvent* task_complete_event) {
+                            WaitableEvent* task_complete_event) {
   for (int i = 0; i < num_events; i++) {
     TRACE_EVENT_INSTANT2("all", "multi thread event",
                          "thread", thread_id,
@@ -357,8 +421,8 @@ void TraceManyInstantEvents(int thread_id, int num_events,
 }
 
 void ValidateInstantEventPresentOnEveryThread(const ListValue& trace_parsed,
-                                     const std::string& trace_string,
-                                     int num_threads, int num_events) {
+                                              int num_threads,
+                                              int num_events) {
   std::map<int, std::map<int, bool> > results;
 
   size_t trace_parsed_count = trace_parsed.GetSize();
@@ -406,7 +470,7 @@ TEST_F(TraceEventTestFixture, DataCaptured) {
 
   TraceLog::GetInstance()->SetEnabled(false);
 
-  ValidateAllTraceMacrosCreatedData(trace_parsed_, trace_string_);
+  ValidateAllTraceMacrosCreatedData(trace_parsed_);
 }
 
 // Test that categories work.
@@ -619,6 +683,72 @@ TEST_F(TraceEventTestFixture, DataCapturedThreshold) {
   EXPECT_NOT_FIND_BE_("4thresholdlong2");
 }
 
+// Test Start/Finish events
+TEST_F(TraceEventTestFixture, StartFinishEvents) {
+  ManualTestSetUp();
+  TraceLog::GetInstance()->SetEnabled(true);
+
+  unsigned long long id = 0xfeedbeeffeedbeefull;
+  TRACE_EVENT_START0( "cat", "name1", id);
+  TRACE_EVENT_FINISH0("cat", "name1", id);
+  TRACE_EVENT_BEGIN0( "cat", "name2");
+  TRACE_EVENT_START0( "cat", "name3", 0);
+
+  TraceLog::GetInstance()->SetEnabled(false);
+
+  EXPECT_TRUE(FindNamePhase("name1", "S"));
+  EXPECT_TRUE(FindNamePhase("name1", "F"));
+
+  std::string id_str;
+  StringAppendF(&id_str, "%llx", id);
+
+  EXPECT_TRUE(FindNamePhaseKeyValue("name1", "S", "id", id_str.c_str()));
+  EXPECT_TRUE(FindNamePhaseKeyValue("name1", "F", "id", id_str.c_str()));
+  EXPECT_TRUE(FindNamePhaseKeyValue("name3", "S", "id", "0"));
+
+  // BEGIN events should not have id
+  EXPECT_FALSE(FindNamePhaseKeyValue("name2", "B", "id", "0"));
+}
+
+// Test Start/Finish events
+TEST_F(TraceEventTestFixture, StartFinishPointerMangling) {
+  ManualTestSetUp();
+
+  void* ptr = this;
+
+  TraceLog::GetInstance()->SetProcessID(100);
+  TraceLog::GetInstance()->SetEnabled(true);
+  TRACE_EVENT_START0( "cat", "name1", ptr);
+  TRACE_EVENT_START0( "cat", "name2", ptr);
+  TraceLog::GetInstance()->SetEnabled(false);
+
+  TraceLog::GetInstance()->SetProcessID(200);
+  TraceLog::GetInstance()->SetEnabled(true);
+  TRACE_EVENT_FINISH0( "cat", "name1", ptr);
+  TraceLog::GetInstance()->SetEnabled(false);
+
+  DictionaryValue* start = FindNamePhase("name1", "S");
+  DictionaryValue* start2 = FindNamePhase("name2", "S");
+  DictionaryValue* finish = FindNamePhase("name1", "F");
+  EXPECT_TRUE(start);
+  EXPECT_TRUE(start2);
+  EXPECT_TRUE(finish);
+
+  Value* value = NULL;
+  std::string start_id_str;
+  std::string start2_id_str;
+  std::string finish_id_str;
+  ASSERT_TRUE(start->Get("id", &value));
+  ASSERT_TRUE(value->GetAsString(&start_id_str));
+  ASSERT_TRUE(start2->Get("id", &value));
+  ASSERT_TRUE(value->GetAsString(&start2_id_str));
+  ASSERT_TRUE(finish->Get("id", &value));
+  ASSERT_TRUE(value->GetAsString(&finish_id_str));
+
+  EXPECT_STREQ(start_id_str.c_str(), start2_id_str.c_str());
+  EXPECT_STRNE(start_id_str.c_str(), finish_id_str.c_str());
+}
+
 // Test that static strings are not copied.
 TEST_F(TraceEventTestFixture, StaticStringVsString) {
   ManualTestSetUp();
@@ -687,7 +817,7 @@ TEST_F(TraceEventTestFixture, DataCapturedOnThread) {
   thread.Stop();
 
   TraceLog::GetInstance()->SetEnabled(false);
-  ValidateAllTraceMacrosCreatedData(trace_parsed_, trace_string_);
+  ValidateAllTraceMacrosCreatedData(trace_parsed_);
 }
 
 // Test that data sent from multiple threads is gathered
@@ -720,7 +850,7 @@ TEST_F(TraceEventTestFixture, DataCapturedManyThreads) {
 
   TraceLog::GetInstance()->SetEnabled(false);
 
-  ValidateInstantEventPresentOnEveryThread(trace_parsed_, trace_string_,
+  ValidateInstantEventPresentOnEveryThread(trace_parsed_,
                                            num_threads, num_events);
 }
 
@@ -774,7 +904,7 @@ TEST_F(TraceEventTestFixture, ThreadNames) {
       FindTraceEntries(trace_parsed_, "thread_name");
   for (int i = 0; i < static_cast<int>(items.size()); i++) {
     item = items[i];
-    EXPECT_TRUE(item);
+    ASSERT_TRUE(item);
     EXPECT_TRUE(item->GetInteger("tid", &tmp_int));
 
     // See if this thread name is one of the threads we just created
@@ -792,6 +922,44 @@ TEST_F(TraceEventTestFixture, ThreadNames) {
   }
 }
 
+TEST_F(TraceEventTestFixture, ThreadNameChanges) {
+  ManualTestSetUp();
+
+  TraceLog::GetInstance()->SetEnabled(true);
+
+  PlatformThread::SetName("");
+  TRACE_EVENT_INSTANT0("drink", "water");
+
+  PlatformThread::SetName("cafe");
+  TRACE_EVENT_INSTANT0("drink", "coffee");
+
+  PlatformThread::SetName("shop");
+  // No event here, so won't appear in combined name.
+
+  PlatformThread::SetName("pub");
+  TRACE_EVENT_INSTANT0("drink", "beer");
+  TRACE_EVENT_INSTANT0("drink", "wine");
+
+  PlatformThread::SetName(" bar");
+  TRACE_EVENT_INSTANT0("drink", "whisky");
+
+  TraceLog::GetInstance()->SetEnabled(false);
+
+  std::vector<DictionaryValue*> items =
+      FindTraceEntries(trace_parsed_, "thread_name");
+  EXPECT_EQ(1u, items.size());
+  ASSERT_GT(items.size(), 0u);
+  DictionaryValue* item = items[0];
+  ASSERT_TRUE(item);
+  int tid;
+  EXPECT_TRUE(item->GetInteger("tid", &tid));
+  EXPECT_EQ(PlatformThread::CurrentId(), static_cast<PlatformThreadId>(tid));
+
+  std::string expected_name = "cafe,pub, bar";
+  std::string tmp;
+  EXPECT_TRUE(item->GetString("args.name", &tmp));
+  EXPECT_EQ(expected_name, tmp);
+}
 
 // Test trace calls made after tracing singleton shut down.
 //
@@ -923,6 +1091,28 @@ TEST_F(TraceEventTestFixture, DeepCopy) {
   EXPECT_EQ("val1", s);
   EXPECT_TRUE(entry3->GetString("args.arg2", &s));
   EXPECT_EQ("val2", s);
+}
+
+// Test that TraceResultBuffer outputs the correct result whether it is added
+// in chunks or added all at once.
+TEST_F(TraceEventTestFixture, TraceResultBuffer) {
+  ManualTestSetUp();
+
+  Clear();
+
+  trace_buffer_.Start();
+  trace_buffer_.AddFragment("bla1");
+  trace_buffer_.AddFragment("bla2");
+  trace_buffer_.AddFragment("bla3,bla4");
+  trace_buffer_.Finish();
+  EXPECT_STREQ(json_output_.json_output.c_str(), "[bla1,bla2,bla3,bla4]");
+
+  Clear();
+
+  trace_buffer_.Start();
+  trace_buffer_.AddFragment("bla1,bla2,bla3,bla4");
+  trace_buffer_.Finish();
+  EXPECT_STREQ(json_output_.json_output.c_str(), "[bla1,bla2,bla3,bla4]");
 }
 
 }  // namespace debug

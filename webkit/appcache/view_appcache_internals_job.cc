@@ -8,9 +8,11 @@
 #include "webkit/appcache/view_appcache_internals_job.h"
 
 #include "base/base64.h"
+#include "base/bind.h"
 #include "base/format_macros.h"
 #include "base/i18n/time_formatting.h"
 #include "base/logging.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -185,13 +187,16 @@ std::string FormFlagsString(const AppCacheResourceInfo& info) {
 
 std::string FormViewEntryAnchor(const GURL& base_url,
                                 const GURL& manifest_url, const GURL& entry_url,
-                                int64 response_id) {
+                                int64 response_id,
+                                int64 group_id) {
   std::string manifest_url_base64;
   std::string entry_url_base64;
   std::string response_id_string;
+  std::string group_id_string;
   base::Base64Encode(manifest_url.spec(), &manifest_url_base64);
   base::Base64Encode(entry_url.spec(), &entry_url_base64);
   response_id_string = base::Int64ToString(response_id);
+  group_id_string = base::Int64ToString(group_id);
 
   std::string query(kViewEntryCommand);
   query.push_back('=');
@@ -200,6 +205,8 @@ std::string FormViewEntryAnchor(const GURL& base_url,
   query.append(entry_url_base64);
   query.push_back('|');
   query.append(response_id_string);
+  query.push_back('|');
+  query.append(group_id_string);
 
   GURL::Replacements replacements;
   replacements.SetQuery(query.data(),
@@ -215,6 +222,7 @@ void EmitAppCacheResourceInfoVector(
     const GURL& base_url,
     const GURL& manifest_url,
     const AppCacheResourceInfoVector& resource_infos,
+    int64 group_id,
     std::string* out) {
   out->append("<table border='0'>\n");
   out->append("<tr>");
@@ -228,7 +236,8 @@ void EmitAppCacheResourceInfoVector(
     out->append("<tr>");
     EmitTableData(FormFlagsString(*iter), false, false, out);
     EmitTableData(FormViewEntryAnchor(base_url, manifest_url,
-                                      iter->url, iter->response_id),
+                                      iter->url, iter->response_id,
+                                      group_id),
                   false, false, out);
     EmitTableData(UTF16ToUTF8(FormatBytesUnlocalized(iter->size)),
                   true, false, out);
@@ -309,16 +318,16 @@ class BaseInternalsJob : public net::URLRequestSimpleJob {
 class MainPageJob : public BaseInternalsJob {
  public:
   MainPageJob(net::URLRequest* request, AppCacheService* service)
-      : BaseInternalsJob(request, service) {}
+      : BaseInternalsJob(request, service),
+        ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
+  }
 
   virtual void Start() {
     DCHECK(request_);
     info_collection_ = new AppCacheInfoCollection;
-    gotinfo_complete_callback_ =
-        new net::CancelableOldCompletionCallback<MainPageJob>(
-            this, &MainPageJob::OnGotInfoComplete);
     appcache_service_->GetAllAppCacheInfo(
-        info_collection_, gotinfo_complete_callback_);
+        info_collection_, base::Bind(&MainPageJob::OnGotInfoComplete,
+                                     weak_factory_.GetWeakPtr()));
   }
 
   // Produces a page containing the listing
@@ -353,20 +362,15 @@ class MainPageJob : public BaseInternalsJob {
   }
 
  private:
-  virtual ~MainPageJob() {
-    if (gotinfo_complete_callback_)
-      gotinfo_complete_callback_.release()->Cancel();
-  }
+  virtual ~MainPageJob() {}
 
   void OnGotInfoComplete(int rv) {
-    gotinfo_complete_callback_ = NULL;
     if (rv != net::OK)
       info_collection_ = NULL;
     StartAsync();
   }
 
-  scoped_refptr<net::CancelableOldCompletionCallback<MainPageJob> >
-      gotinfo_complete_callback_;
+  base::WeakPtrFactory<MainPageJob> weak_factory_;
   scoped_refptr<AppCacheInfoCollection> info_collection_;
   DISALLOW_COPY_AND_ASSIGN(MainPageJob);
 };
@@ -397,31 +401,27 @@ class RemoveAppCacheJob : public RedirectToMainPageJob {
       net::URLRequest* request, AppCacheService* service,
       const GURL& manifest_url)
       : RedirectToMainPageJob(request, service),
-        manifest_url_(manifest_url) {}
+        manifest_url_(manifest_url),
+        ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
+  }
 
   virtual void Start() {
     DCHECK(request_);
-    delete_appcache_callback_ =
-        new net::CancelableOldCompletionCallback<RemoveAppCacheJob>(
-            this, &RemoveAppCacheJob::OnDeleteAppCacheComplete);
+
     appcache_service_->DeleteAppCacheGroup(
-        manifest_url_, delete_appcache_callback_);
+        manifest_url_,base::Bind(&RemoveAppCacheJob::OnDeleteAppCacheComplete,
+                                 weak_factory_.GetWeakPtr()));
   }
 
  private:
-  virtual ~RemoveAppCacheJob() {
-    if (delete_appcache_callback_)
-      delete_appcache_callback_.release()->Cancel();
-  }
+  virtual ~RemoveAppCacheJob() {}
 
   void OnDeleteAppCacheComplete(int rv) {
-    delete_appcache_callback_ = NULL;
     StartAsync();  // Causes the base class to redirect.
   }
 
   GURL manifest_url_;
-  scoped_refptr<net::CancelableOldCompletionCallback<RemoveAppCacheJob> >
-      delete_appcache_callback_;
+  base::WeakPtrFactory<RemoveAppCacheJob> weak_factory_;
 };
 
 
@@ -455,7 +455,9 @@ class ViewAppCacheJob : public BaseInternalsJob,
       EmitAppCacheInfo(base_url, appcache_service_, &appcache_info_, out);
       EmitAppCacheResourceInfoVector(base_url,
                                      manifest_url_,
-                                     resource_infos_, out);
+                                     resource_infos_,
+                                     appcache_info_.group_id,
+                                     out);
     }
     EmitPageEnd(out);
     return true;
@@ -472,6 +474,7 @@ class ViewAppCacheJob : public BaseInternalsJob,
     DCHECK_EQ(manifest_url_, manifest_url);
     if (group && group->newest_complete_cache()) {
       appcache_info_.manifest_url = manifest_url;
+      appcache_info_.group_id = group->group_id();
       appcache_info_.size = group->newest_complete_cache()->cache_size();
       appcache_info_.creation_time = group->creation_time();
       appcache_info_.last_update_time =
@@ -497,17 +500,17 @@ class ViewEntryJob : public BaseInternalsJob,
   ViewEntryJob(
       net::URLRequest* request, AppCacheService* service,
       const GURL& manifest_url, const GURL& entry_url,
-      int64 response_id)
+      int64 response_id, int64 group_id)
       : BaseInternalsJob(request, service),
         manifest_url_(manifest_url), entry_url_(entry_url),
-        response_id_(response_id), amount_read_(0),
+        response_id_(response_id), group_id_(group_id), amount_read_(0),
         ALLOW_THIS_IN_INITIALIZER_LIST(read_callback_(
             this, &ViewEntryJob::OnReadComplete)) {}
 
   virtual void Start() {
     DCHECK(request_);
     appcache_service_->storage()->LoadResponseInfo(
-        manifest_url_, response_id_, this);
+        manifest_url_, group_id_, response_id_, this);
   }
 
   // Produces a page containing the response headers and data.
@@ -559,7 +562,7 @@ class ViewEntryJob : public BaseInternalsJob,
     response_data_ = new net::IOBuffer(amount_to_read);
 
     reader_.reset(appcache_service_->storage()->CreateResponseReader(
-        manifest_url_, response_id_));
+        manifest_url_, group_id_, response_id_));
     reader_->ReadData(
         response_data_, amount_to_read, &read_callback_);
   }
@@ -575,6 +578,7 @@ class ViewEntryJob : public BaseInternalsJob,
   GURL manifest_url_;
   GURL entry_url_;
   int64 response_id_;
+  int64 group_id_;
   scoped_refptr<AppCacheResponseInfo> response_info_;
   scoped_refptr<net::IOBuffer> response_data_;
   int amount_read_;
@@ -603,13 +607,14 @@ net::URLRequestJob* ViewAppCacheInternalsJobFactory::CreateJobForRequest(
 
   std::vector<std::string> tokens;
   int64 response_id;
-  if (command == kViewEntryCommand &&
-      Tokenize(param, "|", &tokens) == 3u &&
-      base::StringToInt64(tokens[2], &response_id)) {
+  int64 group_id;
+  if (command == kViewEntryCommand && Tokenize(param, "|", &tokens) == 4u &&
+      base::StringToInt64(tokens[2], &response_id) &&
+      base::StringToInt64(tokens[3], &group_id)) {
     return new ViewEntryJob(request, service,
                             DecodeBase64URL(tokens[0]),  // manifest url
                             DecodeBase64URL(tokens[1]),  // entry url
-                            response_id);
+                            response_id, group_id);
   }
 
   return new RedirectToMainPageJob(request, service);

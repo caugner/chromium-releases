@@ -382,7 +382,8 @@ void AppCacheUpdateJob::StartUpdate(AppCacheHost* host,
 
 AppCacheResponseWriter* AppCacheUpdateJob::CreateResponseWriter() {
   AppCacheResponseWriter* writer =
-      service_->storage()->CreateResponseWriter(manifest_url_);
+      service_->storage()->CreateResponseWriter(manifest_url_,
+                                                group_->group_id());
   stored_response_ids_.push_back(writer->response_id());
   return writer;
 }
@@ -414,7 +415,7 @@ void AppCacheUpdateJob::FetchManifest(bool is_first_fetch) {
         group_->newest_complete_cache()->GetEntry(manifest_url_) : NULL;
     if (entry) {
       // Asynchronously load response info for manifest from newest cache.
-      service_->storage()->LoadResponseInfo(manifest_url_,
+      service_->storage()->LoadResponseInfo(manifest_url_, group_->group_id(),
                                             entry->response_id(), this);
     } else {
       manifest_fetcher_->Start();
@@ -437,17 +438,13 @@ void AppCacheUpdateJob::HandleManifestFetchCompleted(
 
   net::URLRequest* request = fetcher->request();
   int response_code = -1;
-  std::string mime_type;
   bool is_valid_response_code = false;
-  bool is_valid_mime_type = false;
   if (request->status().is_success()) {
     response_code = request->GetResponseCode();
     is_valid_response_code = (response_code / 100 == 2);
-    request->GetMimeType(&mime_type);
-    is_valid_mime_type = (mime_type == kManifestMimeType);
   }
 
-  if (is_valid_response_code && is_valid_mime_type) {
+  if (is_valid_response_code) {
     manifest_data_ = fetcher->manifest_data();
     manifest_response_info_.reset(
         new net::HttpResponseInfo(request->response_info()));
@@ -461,17 +458,9 @@ void AppCacheUpdateJob::HandleManifestFetchCompleted(
              update_type_ == UPGRADE_ATTEMPT) {
     service_->storage()->MakeGroupObsolete(group_, this);  // async
   } else {
-    std::string message;
-    if (!is_valid_response_code) {
-      const char* kFormatString = "Manifest fetch failed (%d) %s";
-      message = base::StringPrintf(kFormatString, response_code,
-                                   manifest_url_.spec().c_str());
-    } else {
-      DCHECK(!is_valid_mime_type);
-      const char* kFormatString = "Invalid manifest mime type (%s) %s";
-      message = base::StringPrintf(kFormatString, mime_type.c_str(),
-                                   manifest_url_.spec().c_str());
-    }
+    const char* kFormatString = "Manifest fetch failed (%d) %s";
+    std::string message = base::StringPrintf(kFormatString, response_code,
+                                             manifest_url_.spec().c_str());
     HandleCacheFailure(message);
   }
 }
@@ -529,7 +518,7 @@ void AppCacheUpdateJob::ContinueHandleManifestFetchCompleted(bool changed) {
     PendingHosts& hosts = it->second;
     for (PendingHosts::iterator host_it = hosts.begin();
          host_it != hosts.end(); ++host_it) {
-      (*host_it)->AssociateCache(inprogress_cache_);
+      (*host_it)->AssociateIncompleteCache(inprogress_cache_, manifest_url_);
     }
   }
 
@@ -560,6 +549,11 @@ void AppCacheUpdateJob::HandleUrlFetchCompleted(URLFetcher* fetcher) {
     entry.set_response_size(fetcher->response_writer()->amount_written());
     if (!inprogress_cache_->AddOrModifyEntry(url, entry))
       duplicate_response_ids_.push_back(entry.response_id());
+
+    // TODO(michaeln): Check for <html manifest=xxx>
+    // See http://code.google.com/p/chromium/issues/detail?id=97930
+    // if (entry.IsMaster() && !entry.IsExplicit())
+    //   if (!manifestAttribute) skip it
 
     // Foreign entries will be detected during cache selection.
     // Note: 6.9.4, step 17.9 possible optimization: if resource is HTML or XML
@@ -644,7 +638,7 @@ void AppCacheUpdateJob::HandleMasterEntryFetchCompleted(
       DCHECK(cache == group_->newest_complete_cache());
       for (PendingHosts::iterator host_it = hosts.begin();
            host_it != hosts.end(); ++host_it) {
-        (*host_it)->AssociateCache(cache);
+        (*host_it)->AssociateCompleteCache(cache);
       }
     }
   } else {
@@ -656,7 +650,7 @@ void AppCacheUpdateJob::HandleMasterEntryFetchCompleted(
 
       // In downloading case, disassociate host from inprogress cache.
       if (inprogress_cache_)
-        host->AssociateCache(NULL);
+        host->AssociateNoCache(GURL());
 
       host->RemoveObserver(this);
     }
@@ -848,6 +842,7 @@ void AppCacheUpdateJob::CheckIfManifestChanged() {
   // Load manifest data from storage to compare against fetched manifest.
   manifest_response_reader_.reset(
       service_->storage()->CreateResponseReader(manifest_url_,
+                                                group_->group_id(),
                                                 entry->response_id()));
   read_manifest_buffer_ = new net::IOBuffer(kBufferSize);
   manifest_response_reader_->ReadData(read_manifest_buffer_, kBufferSize,
@@ -873,6 +868,9 @@ void AppCacheUpdateJob::BuildUrlFileList(const Manifest& manifest) {
        it != manifest.explicit_urls.end(); ++it) {
     AddUrlToFileList(GURL(*it), AppCacheEntry::EXPLICIT);
   }
+
+  // TODO(michaeln): Add resources from intercept namepsaces too.
+  // http://code.google.com/p/chromium/issues/detail?id=101565
 
   const std::vector<FallbackNamespace>& fallbacks =
       manifest.fallback_namespaces;
@@ -995,7 +993,8 @@ void AppCacheUpdateJob::AddMasterEntryToFetchList(AppCacheHost* host,
   if (internal_state_ == DOWNLOADING || internal_state_ == NO_UPDATE) {
     AppCache* cache;
     if (inprogress_cache_) {
-      host->AssociateCache(inprogress_cache_);  // always associate
+      // always associate
+      host->AssociateIncompleteCache(inprogress_cache_, manifest_url_);
       cache = inprogress_cache_.get();
     } else {
       cache = group_->newest_complete_cache();
@@ -1005,8 +1004,10 @@ void AppCacheUpdateJob::AddMasterEntryToFetchList(AppCacheHost* host,
     AppCacheEntry* entry = cache->GetEntry(url);
     if (entry) {
       entry->add_types(AppCacheEntry::MASTER);
-      if (internal_state_ == NO_UPDATE)
-        host->AssociateCache(cache);  // only associate if have entry
+      if (internal_state_ == NO_UPDATE && !inprogress_cache_) {
+        // only associate if have entry
+        host->AssociateCompleteCache(cache);
+      }
       if (is_new)
         ++master_entries_completed_;  // pretend fetching completed
       return;
@@ -1044,7 +1045,7 @@ void AppCacheUpdateJob::FetchMasterEntries() {
         PendingHosts& hosts = found->second;
         for (PendingHosts::iterator host_it = hosts.begin();
              host_it != hosts.end(); ++host_it) {
-          (*host_it)->AssociateCache(cache);
+          (*host_it)->AssociateCompleteCache(cache);
         }
       }
     } else {
@@ -1087,7 +1088,7 @@ void AppCacheUpdateJob::CancelAllMasterEntryFetches(
     for (PendingHosts::iterator host_it = hosts.begin();
          host_it != hosts.end(); ++host_it) {
       AppCacheHost* host = *host_it;
-      host->AssociateCache(NULL);
+      host->AssociateNoCache(GURL());
       host_notifier.AddHost(host);
       host->RemoveObserver(this);
     }
@@ -1111,7 +1112,8 @@ bool AppCacheUpdateJob::MaybeLoadFromNewestCache(const GURL& url,
   // Load HTTP headers for entry from newest cache.
   loading_responses_.insert(
       LoadingResponses::value_type(copy_me->response_id(), url));
-  service_->storage()->LoadResponseInfo(manifest_url_, copy_me->response_id(),
+  service_->storage()->LoadResponseInfo(manifest_url_, group_->group_id(),
+                                        copy_me->response_id(),
                                         this);
   // Async: wait for OnResponseInfoLoaded to complete.
   return true;
@@ -1298,7 +1300,7 @@ void AppCacheUpdateJob::DiscardInprogressCache() {
 
   AppCache::AppCacheHosts& hosts = inprogress_cache_->associated_hosts();
   while (!hosts.empty())
-    (*hosts.begin())->AssociateCache(NULL);
+    (*hosts.begin())->AssociateNoCache(GURL());
 
   inprogress_cache_ = NULL;
 }

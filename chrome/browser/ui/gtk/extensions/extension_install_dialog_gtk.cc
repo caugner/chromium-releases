@@ -52,7 +52,7 @@ class ExtensionInstallDialog {
                          SkBitmap* skia_icon,
                          const ExtensionInstallUI::Prompt& prompt);
  private:
-  virtual ~ExtensionInstallDialog();
+  ~ExtensionInstallDialog();
 
   CHROMEGTK_CALLBACK_1(ExtensionInstallDialog, void, OnResponse, int);
   CHROMEGTK_CALLBACK_0(ExtensionInstallDialog, void, OnStoreLinkClick);
@@ -226,15 +226,15 @@ void ExtensionInstallDialog::OnStoreLinkClick(GtkWidget* sender) {
   GURL store_url(
       extension_urls::GetWebstoreItemDetailURLPrefix() + extension_->id());
   BrowserList::GetLastActive()->OpenURL(OpenURLParams(
-      store_url, GURL(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK,
-      false));
+      store_url, content::Referrer(), NEW_FOREGROUND_TAB,
+      content::PAGE_TRANSITION_LINK, false));
 
   OnResponse(dialog_, GTK_RESPONSE_CLOSE);
 }
 
 }  // namespace
 
-void ShowExtensionInstallDialog(
+void ShowExtensionInstallDialogImpl(
     Profile* profile,
     ExtensionInstallUI::Delegate* delegate,
     const Extension* extension,

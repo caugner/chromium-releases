@@ -10,23 +10,24 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/common/extensions/extension.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "views/border.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/controls/link.h"
-#include "views/controls/link_listener.h"
-#include "views/controls/separator.h"
-#include "views/layout/box_layout.h"
-#include "views/layout/grid_layout.h"
-#include "views/layout/layout_constants.h"
-#include "views/view.h"
-#include "views/widget/widget.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/border.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/link.h"
+#include "ui/views/controls/link_listener.h"
+#include "ui/views/controls/separator.h"
+#include "ui/views/layout/box_layout.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_delegate.h"
 
 namespace {
 
@@ -71,8 +72,7 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
 
  private:
   // views::DialogDelegateView:
-  virtual string16 GetDialogButtonLabel(
-      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual int GetDefaultDialogButton() const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
@@ -137,8 +137,7 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
   // | permission2        |      |
   // +--------------------+------+
 
-  using views::GridLayout;
-  GridLayout* layout = GridLayout::CreatePanel(this);
+  views::GridLayout* layout = views::GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
   int column_set_id = 0;
@@ -146,17 +145,17 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
   int left_column_width = prompt.GetPermissionCount() > 0 ?
       kPermissionsLeftColumnWidth : kNoPermissionsLeftColumnWidth;
 
-  column_set->AddColumn(GridLayout::LEADING,
-                        GridLayout::FILL,
+  column_set->AddColumn(views::GridLayout::LEADING,
+                        views::GridLayout::FILL,
                         0,  // no resizing
-                        GridLayout::USE_PREF,
+                        views::GridLayout::USE_PREF,
                         0,  // no fixed with
                         left_column_width);
   column_set->AddPaddingColumn(0, views::kPanelHorizMargin);
-  column_set->AddColumn(GridLayout::LEADING,
-                        GridLayout::LEADING,
+  column_set->AddColumn(views::GridLayout::LEADING,
+                        views::GridLayout::LEADING,
                         0,  // no resizing
-                        GridLayout::USE_PREF,
+                        views::GridLayout::USE_PREF,
                         0,  // no fixed width
                         kIconSize);
 
@@ -226,8 +225,8 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
 
     if (is_inline_install()) {
       layout->StartRow(0, column_set_id);
-      views::Separator* separator = new views::Separator();
-      layout->AddView(separator, 3, 1, GridLayout::FILL, GridLayout::FILL);
+      layout->AddView(new views::Separator(), 3, 1, views::GridLayout::FILL,
+                      views::GridLayout::FILL);
       layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
     }
 
@@ -256,11 +255,11 @@ ExtensionInstallDialogView::~ExtensionInstallDialogView() {
 }
 
 string16 ExtensionInstallDialogView::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
+    ui::DialogButton button) const {
   switch (button) {
-    case ui::MessageBoxFlags::DIALOGBUTTON_OK:
+    case ui::DIALOG_BUTTON_OK:
       return prompt_.GetAcceptButtonLabel();
-    case MessageBoxFlags::DIALOGBUTTON_CANCEL:
+    case ui::DIALOG_BUTTON_CANCEL:
       return prompt_.HasAbortButtonLabel() ?
           prompt_.GetAbortButtonLabel() :
           l10n_util::GetStringUTF16(IDS_CANCEL);
@@ -271,7 +270,7 @@ string16 ExtensionInstallDialogView::GetDialogButtonLabel(
 }
 
 int ExtensionInstallDialogView::GetDefaultDialogButton() const {
-  return MessageBoxFlags::DIALOGBUTTON_CANCEL;
+  return ui::DIALOG_BUTTON_CANCEL;
 }
 
 bool ExtensionInstallDialogView::Cancel() {
@@ -305,7 +304,7 @@ void ExtensionInstallDialogView::LinkClicked(views::Link* source,
   GetWidget()->Close();
 }
 
-void ShowExtensionInstallDialog(
+void ShowExtensionInstallDialogImpl(
     Profile* profile,
     ExtensionInstallUI::Delegate* delegate,
     const Extension* extension,
@@ -332,7 +331,7 @@ void ShowExtensionInstallDialog(
       delegate, extension, icon, prompt);
 
   views::Widget* window =  browser::CreateViewsWindow(
-      browser_window->GetNativeHandle(), dialog);
+      browser_window->GetNativeHandle(), dialog, STYLE_GENERIC);
 
   window->Show();
 }

@@ -19,7 +19,6 @@ class WebGeolocationController;
 class WebGeolocationPermissionRequest;
 class WebGeolocationPermissionRequestManager;
 class WebGeolocationPosition;
-class WebSecurityOrigin;
 }
 
 // GeolocationDispatcher is a delegate for Geolocation messages used by
@@ -33,7 +32,7 @@ class GeolocationDispatcher : public content::RenderViewObserver,
 
  private:
   // RenderView::Observer implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // WebGeolocationClient
   virtual void geolocationDestroyed();

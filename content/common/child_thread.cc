@@ -4,14 +4,16 @@
 
 #include "content/common/child_thread.h"
 
-#include "base/message_loop.h"
-#include "base/string_util.h"
 #include "base/command_line.h"
+#include "base/message_loop.h"
+#include "base/process.h"
+#include "base/process_util.h"
+#include "base/string_util.h"
+#include "base/tracked_objects.h"
 #include "content/common/child_process.h"
 #include "content/common/child_process_messages.h"
 #include "content/common/child_trace_message_filter.h"
 #include "content/common/file_system/file_system_dispatcher.h"
-#include "content/common/notification_service.h"
 #include "content/common/quota_dispatcher.h"
 #include "content/common/resource_dispatcher.h"
 #include "content/common/socket_stream_dispatcher.h"
@@ -58,11 +60,6 @@ void ChildThread::Init() {
       new IPC::SyncMessageFilter(ChildProcess::current()->GetShutDownEvent());
   channel_->AddFilter(sync_message_filter_.get());
   channel_->AddFilter(new ChildTraceMessageFilter());
-
-  // When running in unit tests, there is already a NotificationService object.
-  // Since only one can exist at a time per thread, check first.
-  if (!NotificationService::current())
-    notification_service_.reset(new NotificationService);
 }
 
 ChildThread::~ChildThread() {
@@ -189,6 +186,10 @@ bool ChildThread::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ChildProcessMsg_SetIPCLoggingEnabled,
                         OnSetIPCLoggingEnabled)
 #endif
+    IPC_MESSAGE_HANDLER(ChildProcessMsg_SetProfilerStatus,
+                        OnSetProfilerStatus)
+    IPC_MESSAGE_HANDLER(ChildProcessMsg_GetChildProfilerData,
+                        OnGetChildProfilerData)
     IPC_MESSAGE_HANDLER(ChildProcessMsg_DumpHandles, OnDumpHandles)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -222,6 +223,22 @@ void ChildThread::OnSetIPCLoggingEnabled(bool enable) {
     IPC::Logging::GetInstance()->Disable();
 }
 #endif  //  IPC_MESSAGE_LOG_ENABLED
+
+void ChildThread::OnSetProfilerStatus(bool enable) {
+  tracked_objects::ThreadData::InitializeAndSetTrackingStatus(enable);
+}
+
+void ChildThread::OnGetChildProfilerData(
+    int sequence_number,
+    const std::string& process_type) {
+  scoped_ptr<base::DictionaryValue> value(
+      tracked_objects::ThreadData::ToValue(false));
+  value->SetString("process_type", process_type);
+  value->SetInteger("process_id", base::GetCurrentProcId());
+
+  Send(new ChildProcessHostMsg_ChildProfilerData(
+      sequence_number, *value.get()));
+}
 
 void ChildThread::OnDumpHandles() {
 #if defined(OS_WIN)

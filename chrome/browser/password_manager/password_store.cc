@@ -9,9 +9,10 @@
 #include "base/stl_util.h"
 #include "base/task.h"
 #include "chrome/browser/password_manager/password_store_consumer.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "webkit/glue/password_form.h"
 
+using content::BrowserThread;
 using std::vector;
 using webkit_glue::PasswordForm;
 

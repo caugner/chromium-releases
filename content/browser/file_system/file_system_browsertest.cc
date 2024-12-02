@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
@@ -14,6 +15,7 @@
 #include "content/public/common/content_switches.h"
 #include "webkit/quota/quota_manager.h"
 
+using content::BrowserThread;
 using quota::QuotaManager;
 
 // This browser test is aimed towards exercising the FileAPI bindings and
@@ -22,10 +24,6 @@ class FileSystemBrowserTest : public InProcessBrowserTest {
  public:
   FileSystemBrowserTest() {
     EnableDOMAutomation();
-  }
-
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    command_line->AppendSwitch(switches::kAllowFileAccessFromFiles);
   }
 
   GURL testUrl(const FilePath& file_path) {
@@ -65,13 +63,14 @@ class FileSystemBrowserTestWithLowQuota : public FileSystemBrowserTest {
 
   static void SetTempQuota(int64 bytes, scoped_refptr<QuotaManager> qm) {
     if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-      BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-          NewRunnableFunction(&FileSystemBrowserTestWithLowQuota::SetTempQuota,
-                              bytes, qm));
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          base::Bind(&FileSystemBrowserTestWithLowQuota::SetTempQuota, bytes,
+                     qm));
       return;
     }
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    qm->SetTemporaryGlobalOverrideQuota(bytes, NULL);
+    qm->SetTemporaryGlobalOverrideQuota(bytes, quota::QuotaCallback());
     // Don't return until the quota has been set.
     scoped_refptr<base::ThreadTestHelper> helper(
         new base::ThreadTestHelper(

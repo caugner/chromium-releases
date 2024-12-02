@@ -40,7 +40,7 @@
             'src/common/mac/SimpleStringDictionary.mm',
             'src/common/string_conversion.cc',
             'src/common/mac/string_utilities.cc',
-            'src/common/md5.c',
+            'src/common/md5.cc',
           ],
         },
         {
@@ -53,6 +53,7 @@
             'breakpad_utilities',
           ],
           'include_dirs': [
+            'src/client/apple/Framework',
             'src/common/mac',
           ],
           'sources': [
@@ -80,7 +81,7 @@
           'sources': [
             'src/common/mac/HTTPMultipartUpload.m',
             'src/client/mac/sender/crash_report_sender.m',
-            'src/client/mac/sender/uploader.m',
+            'src/client/mac/sender/uploader.mm',
             'src/common/mac/GTMLogger.m',
           ],
           'mac_bundle_resources': [
@@ -106,12 +107,6 @@
         {
           'target_name': 'dump_syms',
           'type': 'executable',
-          'variables': {
-            # Turn off PIE because it may interfere with dump_syms' ability to
-            # allocate a contiguous region in memory large enough to mmap the
-            # entire unstripped framework in a 32-bit dump_syms process.
-            'mac_pie': 0,
-          },
           'include_dirs++': [
             # ++ ensures this comes before src brought in from target_defaults.
             'pending/src',
@@ -137,15 +132,24 @@
             'src/common/stabs_reader.cc',
             'src/common/stabs_to_module.cc',
             'src/tools/mac/dump_syms/dump_syms_tool.mm',
-            'src/common/md5.c',
+            'src/common/md5.cc',
           ],
           'defines': [
             # For src/common/stabs_reader.h.
             'HAVE_MACH_O_NLIST_H',
           ],
           'xcode_settings': {
+            # Like ld, dump_syms needs to operate on enough data that it may
+            # actually need to be able to address more than 4GB. Use x86_64.
+            # Don't worry! An x86_64 dump_syms is perfectly able to dump
+            # 32-bit files.
+            'ARCHS': [
+              'x86_64',
+            ],
+
             # The DWARF utilities require -funsigned-char.
             'GCC_CHAR_IS_UNSIGNED_CHAR': 'YES',
+
             # dwarf2reader.cc uses dynamic_cast.
             'GCC_ENABLE_CPP_RTTI': 'YES',
           },
@@ -190,6 +194,14 @@
             'crash_inspector',
             'crash_report_sender',
           ],
+          'include_dirs': [
+            'src/client/apple/Framework',
+          ],
+          'direct_dependent_settings': {
+            'include_dirs': [
+              'src/client/apple/Framework',
+            ],
+          },
           'defines': [
             'USE_PROTECTED_ALLOCATIONS=1',
           ],

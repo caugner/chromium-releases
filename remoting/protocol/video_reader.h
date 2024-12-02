@@ -17,9 +17,6 @@ class MessageLoopProxy;
 }  // namespace base
 
 namespace remoting {
-
-class ChromotocolConnection;
-
 namespace protocol {
 
 class Session;
@@ -41,6 +38,7 @@ class VideoReader {
   virtual void Init(Session* session,
                     VideoStub* video_stub,
                     const InitializedCallback& callback) = 0;
+  virtual bool is_connected() = 0;
 
  protected:
   VideoReader() { }

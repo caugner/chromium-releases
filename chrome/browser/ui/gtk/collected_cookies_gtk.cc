@@ -6,10 +6,11 @@
 
 #include <string>
 
-#include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/cookies_tree_model.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
@@ -17,7 +18,8 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_source.h"
+#include "chrome/common/pref_names.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -85,7 +87,7 @@ CollectedCookiesGtk::CollectedCookiesGtk(GtkWindow* parent,
     : wrapper_(wrapper),
       status_changed_(false) {
   registrar_.Add(this, chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN,
-                 Source<TabSpecificContentSettings>(
+                 content::Source<TabSpecificContentSettings>(
                      wrapper->content_settings()));
 
   Init();
@@ -238,14 +240,13 @@ GtkWidget* CollectedCookiesGtk::CreateAllowedPane() {
 }
 
 GtkWidget* CollectedCookiesGtk::CreateBlockedPane() {
-  HostContentSettingsMap* host_content_settings_map =
-      wrapper_->profile()->GetHostContentSettingsMap();
+  PrefService* prefs = wrapper_->profile()->GetPrefs();
 
   GtkWidget* cookie_list_vbox = gtk_vbox_new(FALSE, ui::kControlSpacing);
 
   GtkWidget* label = gtk_label_new(
       l10n_util::GetStringUTF8(
-          host_content_settings_map->BlockThirdPartyCookies() ?
+          prefs->GetBoolean(prefs::kBlockThirdPartyCookies) ?
               IDS_COLLECTED_COOKIES_BLOCKED_THIRD_PARTY_BLOCKING_ENABLED :
               IDS_COLLECTED_COOKIES_BLOCKED_COOKIES_LABEL).c_str());
   gtk_widget_set_size_request(label, kTreeViewWidth, -1);
@@ -420,8 +421,8 @@ void CollectedCookiesGtk::EnableControls() {
 }
 
 void CollectedCookiesGtk::Observe(int type,
-                                  const NotificationSource& source,
-                                  const NotificationDetails& details) {
+                                  const content::NotificationSource& source,
+                                  const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN);
   window_->CloseConstrainedWindow();
 }
@@ -460,7 +461,7 @@ void CollectedCookiesGtk::AddExceptions(GtkTreeSelection* selection,
       last_domain_name = origin_node->GetTitle();
       Profile* profile = wrapper_->profile();
       origin_node->CreateContentException(
-          profile->GetHostContentSettingsMap(), setting);
+          CookieSettings::GetForProfile(profile), setting);
     }
   }
   g_list_foreach(paths, reinterpret_cast<GFunc>(gtk_tree_path_free), NULL);

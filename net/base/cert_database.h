@@ -99,8 +99,8 @@ class NET_EXPORT CertDatabase {
   int AddUserCert(X509Certificate* cert);
 
 #if defined(USE_NSS) || defined(USE_OPENSSL)
-  // Get a list of unique certificates in the certificate database.  (One
-  // instance of all certificates.)
+  // Get a list of unique certificates in the certificate database (one
+  // instance of all certificates).
   void ListCerts(CertificateList* certs);
 
   // Get the default module for public key data.
@@ -119,11 +119,13 @@ class NET_EXPORT CertDatabase {
   // If |is_extractable| is false, mark the private key as being unextractable
   // from the module.
   // Returns OK or a network error code such as ERR_PKCS12_IMPORT_BAD_PASSWORD
-  // or ERR_PKCS12_IMPORT_ERROR.
+  // or ERR_PKCS12_IMPORT_ERROR. |imported_certs|, if non-NULL, returns a list
+  // of certs that were imported.
   int ImportFromPKCS12(CryptoModule* module,
                        const std::string& data,
                        const string16& password,
-                       bool is_extractable);
+                       bool is_extractable,
+                       CertificateList* imported_certs);
 
   // Export the given certificates and private keys into a PKCS #12 blob,
   // storing into |output|.
@@ -174,8 +176,8 @@ class NET_EXPORT CertDatabase {
                     TrustBits trust_bits);
 
   // Delete certificate and associated private key (if one exists).
-  // Returns true on success or false on failure.
-  // |cert| is still valid when this function returns.
+  // |cert| is still valid when this function returns. Returns true on
+  // success.
   bool DeleteCertAndKey(const X509Certificate* cert);
 
   // Check whether cert is stored in a readonly slot.

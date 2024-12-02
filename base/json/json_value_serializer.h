@@ -39,7 +39,11 @@ class BASE_EXPORT JSONStringValueSerializer : public base::ValueSerializer {
   // Attempt to serialize the data structure represented by Value into
   // JSON.  If the return value is true, the result will have been written
   // into the string passed into the constructor.
-  virtual bool Serialize(const Value& root);
+  virtual bool Serialize(const Value& root) OVERRIDE;
+
+  // Equivalent to Serialize(root) except binary values are omitted from the
+  // output.
+  bool SerializeAndOmitBinaryValues(const Value& root);
 
   // Attempt to deserialize the data structure encoded in the string passed
   // in to the constructor into a structure of Value objects.  If the return
@@ -48,7 +52,8 @@ class BASE_EXPORT JSONStringValueSerializer : public base::ValueSerializer {
   // If |error_message| is non-null, it will be filled in with a formatted
   // error message including the location of the error if appropriate.
   // The caller takes ownership of the returned value.
-  virtual Value* Deserialize(int* error_code, std::string* error_message);
+  virtual Value* Deserialize(int* error_code,
+                             std::string* error_message) OVERRIDE;
 
   void set_pretty_print(bool new_value) { pretty_print_ = new_value; }
   bool pretty_print() { return pretty_print_; }
@@ -58,6 +63,8 @@ class BASE_EXPORT JSONStringValueSerializer : public base::ValueSerializer {
   }
 
  private:
+  bool SerializeInternal(const Value& root, bool omit_binary_values);
+
   std::string* json_string_;
   bool initialized_with_const_string_;
   bool pretty_print_;  // If true, serialization will span multiple lines.
@@ -74,7 +81,8 @@ class BASE_EXPORT JSONFileValueSerializer : public base::ValueSerializer {
   // When deserializing, the file should exist, but when serializing, the
   // serializer will attempt to create the file at the specified location.
   explicit JSONFileValueSerializer(const FilePath& json_file_path)
-    : json_file_path_(json_file_path) {}
+    : json_file_path_(json_file_path),
+      allow_trailing_comma_(false) {}
 
   virtual ~JSONFileValueSerializer() {}
 
@@ -86,7 +94,11 @@ class BASE_EXPORT JSONFileValueSerializer : public base::ValueSerializer {
   // Attempt to serialize the data structure represented by Value into
   // JSON.  If the return value is true, the result will have been written
   // into the file whose name was passed into the constructor.
-  virtual bool Serialize(const Value& root);
+  virtual bool Serialize(const Value& root) OVERRIDE;
+
+  // Equivalent to Serialize(root) except binary values are omitted from the
+  // output.
+  bool SerializeAndOmitBinaryValues(const Value& root);
 
   // Attempt to deserialize the data structure encoded in the file passed
   // in to the constructor into a structure of Value objects.  If the return
@@ -95,7 +107,8 @@ class BASE_EXPORT JSONFileValueSerializer : public base::ValueSerializer {
   // If |error_message| is non-null, it will be filled in with a formatted
   // error message including the location of the error if appropriate.
   // The caller takes ownership of the returned value.
-  virtual Value* Deserialize(int* error_code, std::string* error_message);
+  virtual Value* Deserialize(int* error_code,
+                             std::string* error_message) OVERRIDE;
 
   // This enum is designed to safely overlap with JSONReader::JsonParseError.
   enum JsonFileError {
@@ -116,8 +129,15 @@ class BASE_EXPORT JSONFileValueSerializer : public base::ValueSerializer {
   // be a JsonFileError.
   static const char* GetErrorMessageForCode(int error_code);
 
+  void set_allow_trailing_comma(bool new_value) {
+    allow_trailing_comma_ = new_value;
+  }
+
  private:
+  bool SerializeInternal(const Value& root, bool omit_binary_values);
+
   FilePath json_file_path_;
+  bool allow_trailing_comma_;
 
   // A wrapper for file_util::ReadFileToString which returns a non-zero
   // JsonFileError if there were file errors.

@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/threading/thread.h"
 #include "base/json/json_value_serializer.h"
-#include "base/file_util.h"
 #include "chrome/browser/extensions/extension_service_unittest.h"
+#include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/user_script_listener.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -17,7 +18,7 @@
 #include "content/browser/renderer_host/global_request_id.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/browser/renderer_host/resource_queue.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
@@ -36,9 +37,10 @@ const char kTestData[] = "Hello, World!";
 
 ResourceDispatcherHostRequestInfo* CreateRequestInfo(int request_id) {
   return new ResourceDispatcherHostRequestInfo(
-      new DummyResourceHandler(), ChildProcessInfo::RENDER_PROCESS, 0, 0, 0,
-      request_id, false, -1, ResourceType::MAIN_FRAME,
+      new DummyResourceHandler(), content::PROCESS_TYPE_RENDERER, 0, 0, 0,
+      request_id, false, -1, false, -1, ResourceType::MAIN_FRAME,
       content::PAGE_TRANSITION_LINK, 0, false, false, false,
+      WebKit::WebReferrerPolicyDefault,
       content::MockResourceContext::GetInstance());
 }
 
@@ -132,7 +134,7 @@ class UserScriptListenerTest
         .AppendASCII("Extensions")
         .AppendASCII("behllobkkfkfnphdnhnkndlbkcpglgmj")
         .AppendASCII("1.0.0.0");
-    service_->LoadExtension(extension_path);
+    extensions::UnpackedInstaller::Create(service_)->Load(extension_path);
   }
 
   void UnloadTestExtension() {
@@ -157,10 +159,10 @@ TEST_F(UserScriptListenerTest, DelayAndUpdate) {
   scoped_ptr<TestURLRequest> request(StartTestRequest(&delegate, kMatchingUrl));
   ASSERT_FALSE(request->is_pending());
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_USER_SCRIPTS_UPDATED,
-      Source<Profile>(profile_.get()),
-      NotificationService::NoDetails());
+      content::Source<Profile>(profile_.get()),
+      content::NotificationService::NoDetails());
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(kTestData, delegate.data_received());
 }
@@ -180,10 +182,10 @@ TEST_F(UserScriptListenerTest, DelayAndUnload) {
   // listener that the user scripts have been updated.
   ASSERT_FALSE(request->is_pending());
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_USER_SCRIPTS_UPDATED,
-      Source<Profile>(profile_.get()),
-      NotificationService::NoDetails());
+      content::Source<Profile>(profile_.get()),
+      content::NotificationService::NoDetails());
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(kTestData, delegate.data_received());
 }
@@ -226,10 +228,10 @@ TEST_F(UserScriptListenerTest, MultiProfile) {
       "content_script_yahoo.json", &error);
   ASSERT_TRUE(extension.get());
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_LOADED,
-      Source<Profile>(&profile2),
-      Details<Extension>(extension.get()));
+      content::Source<Profile>(&profile2),
+      content::Details<Extension>(extension.get()));
 
   TestDelegate delegate;
   scoped_ptr<TestURLRequest> request(StartTestRequest(&delegate, kMatchingUrl));
@@ -237,19 +239,19 @@ TEST_F(UserScriptListenerTest, MultiProfile) {
 
   // When the first profile's user scripts are ready, the request should still
   // be blocked waiting for profile2.
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_USER_SCRIPTS_UPDATED,
-      Source<Profile>(profile_.get()),
-      NotificationService::NoDetails());
+      content::Source<Profile>(profile_.get()),
+      content::NotificationService::NoDetails());
   MessageLoop::current()->RunAllPending();
   ASSERT_FALSE(request->is_pending());
   EXPECT_TRUE(delegate.data_received().empty());
 
   // After profile2 is ready, the request should proceed.
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_USER_SCRIPTS_UPDATED,
-      Source<Profile>(&profile2),
-      NotificationService::NoDetails());
+      content::Source<Profile>(&profile2),
+      content::NotificationService::NoDetails());
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(kTestData, delegate.data_received());
 }

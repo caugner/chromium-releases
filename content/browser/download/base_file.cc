@@ -10,9 +10,9 @@
 #include "base/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/content_browser_client.h"
 #include "content/browser/download/download_stats.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/content_browser_client.h"
 #include "crypto/secure_hash.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
@@ -25,6 +25,8 @@
 #elif defined(OS_MACOSX)
 #include "content/browser/file_metadata_mac.h"
 #endif
+
+using content::BrowserThread;
 
 namespace {
 
@@ -184,6 +186,9 @@ net::Error RenameFileAndResetSecurityDescriptor(
 
 }  // namespace
 
+// This will initialize the entire array to zero.
+const unsigned char BaseFile::kEmptySha256Hash[] = { 0 };
+
 BaseFile::BaseFile(const FilePath& full_path,
                    const GURL& source_url,
                    const GURL& referrer_url,
@@ -194,11 +199,12 @@ BaseFile::BaseFile(const FilePath& full_path,
       referrer_url_(referrer_url),
       file_stream_(file_stream),
       bytes_so_far_(received_bytes),
+      start_tick_(base::TimeTicks::Now()),
       power_save_blocker_(PowerSaveBlocker::kPowerSaveBlockPreventSystemSleep),
       calculate_hash_(false),
       detached_(false) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  memset(sha256_hash_, 0, sizeof(sha256_hash_));
+  memcpy(sha256_hash_, kEmptySha256Hash, kSha256HashLen);
   if (file_stream_.get())
     file_stream_->EnableErrorStatistics();
 }
@@ -237,6 +243,12 @@ net::Error BaseFile::Initialize(bool calculate_hash) {
 net::Error BaseFile::AppendDataToFile(const char* data, size_t data_len) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   DCHECK(!detached_);
+
+  // NOTE(benwells): The above DCHECK won't be present in release builds,
+  // so we log any occurences to see how common this error is in the wild.
+  if (detached_)
+    download_stats::RecordDownloadCount(
+        download_stats::APPEND_TO_DETACHED_FILE_COUNT);
 
   if (!file_stream_.get())
     return LOG_ERROR("get", net::ERR_INVALID_HANDLE);
@@ -330,16 +342,19 @@ net::Error BaseFile::Rename(const FilePath& new_path) {
     int stat_error = stat(new_path.value().c_str(), &st);
     bool stat_succeeded = (stat_error == 0);
     if (!stat_succeeded)
-      return LOG_ERROR("stat", net::MapSystemError(errno));
+      LOG_ERROR("stat", net::MapSystemError(errno));
 
     // TODO(estade): Move() falls back to copying and deleting when a simple
     // rename fails. Copying sucks for large downloads. crbug.com/8737
     if (!file_util::Move(full_path_, new_path))
       return LOG_ERROR("Move", net::MapSystemError(errno));
 
-    int chmod_error = chmod(new_path.value().c_str(), st.st_mode);
-    if (chmod_error < 0)
-      return LOG_ERROR("chmod", net::MapSystemError(errno));
+    if (stat_succeeded) {
+      // On Windows file systems (FAT, NTFS), chmod fails.  This is OK.
+      int chmod_error = chmod(new_path.value().c_str(), st.st_mode);
+      if (chmod_error < 0)
+        LOG_ERROR("chmod", net::MapSystemError(errno));
+    }
   }
 #endif
 
@@ -377,11 +392,14 @@ void BaseFile::Finish() {
 
 bool BaseFile::GetSha256Hash(std::string* hash) {
   DCHECK(!detached_);
-  if (!calculate_hash_ || in_progress())
-    return false;
   hash->assign(reinterpret_cast<const char*>(sha256_hash_),
                sizeof(sha256_hash_));
-  return true;
+  return (calculate_hash_ && !in_progress());
+}
+
+bool BaseFile::IsEmptySha256Hash(const std::string& hash) {
+  return (hash.size() == kSha256HashLen &&
+          0 == memcmp(hash.data(), kEmptySha256Hash, sizeof(kSha256HashLen)));
 }
 
 void BaseFile::AnnotateWithSourceInformation() {
@@ -459,4 +477,15 @@ std::string BaseFile::DebugString() const {
                             full_path_.value().c_str(),
                             bytes_so_far_,
                             detached_ ? 'T' : 'F');
+}
+
+int64 BaseFile::CurrentSpeedAtTime(base::TimeTicks current_time) const {
+  base::TimeDelta diff = current_time - start_tick_;
+  int64 diff_ms = diff.InMilliseconds();
+  return diff_ms == 0 ? 0 : bytes_so_far() * 1000 / diff_ms;
+}
+
+int64 BaseFile::CurrentSpeed() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  return CurrentSpeedAtTime(base::TimeTicks::Now());
 }

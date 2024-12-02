@@ -21,6 +21,7 @@
 #include "media/base/filters.h"
 #include "media/base/filter_collection.h"
 #include "media/base/pipeline.h"
+#include "media/base/video_decoder_config.h"
 #include "media/base/video_frame.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -111,6 +112,9 @@ class MockDemuxer : public Demuxer {
   MOCK_METHOD1(SetPreload, void(Preload preload));
   MOCK_METHOD2(Seek, void(base::TimeDelta time, const FilterStatusCB& cb));
   MOCK_METHOD0(OnAudioRendererDisabled, void());
+  MOCK_METHOD0(GetBitrate, int());
+  MOCK_METHOD0(IsLocalSource, bool());
+  MOCK_METHOD0(IsSeekable, bool());
 
   // Demuxer implementation.
   MOCK_METHOD2(Initialize, void(DataSource* data_source,
@@ -161,8 +165,8 @@ class MockDemuxerStream : public DemuxerStream {
   // DemuxerStream implementation.
   MOCK_METHOD0(type, Type());
   MOCK_METHOD1(Read, void(const ReadCallback& read_callback));
-  MOCK_METHOD0(GetAVStream, AVStream*());
   MOCK_METHOD0(audio_decoder_config, const AudioDecoderConfig&());
+  MOCK_METHOD0(video_decoder_config, const VideoDecoderConfig&());
   MOCK_METHOD0(EnableBitstreamConverter, void());
 
  protected:
@@ -186,12 +190,8 @@ class MockVideoDecoder : public VideoDecoder {
   MOCK_METHOD3(Initialize, void(DemuxerStream* stream,
                                 const base::Closure& callback,
                                 const StatisticsCallback& stats_callback));
-  MOCK_METHOD1(ProduceVideoFrame, void(scoped_refptr<VideoFrame>));
-  MOCK_METHOD0(natural_size, gfx::Size());
-
-  void VideoFrameReadyForTest(scoped_refptr<VideoFrame> frame) {
-    VideoDecoder::VideoFrameReady(frame);
-  }
+  MOCK_METHOD1(Read, void(const ReadCB& callback));
+  MOCK_METHOD0(natural_size, const gfx::Size&());
 
  protected:
   virtual ~MockVideoDecoder();
@@ -268,10 +268,13 @@ class MockAudioRenderer : public AudioRenderer {
   MOCK_METHOD0(OnAudioRendererDisabled, void());
 
   // AudioRenderer implementation.
-  MOCK_METHOD2(Initialize, void(AudioDecoder* decoder,
-                                const base::Closure& callback));
+  MOCK_METHOD3(Initialize, void(AudioDecoder* decoder,
+                                const base::Closure& init_callback,
+                                const base::Closure& underflow_callback));
   MOCK_METHOD0(HasEnded, bool());
   MOCK_METHOD1(SetVolume, void(float volume));
+
+  MOCK_METHOD1(ResumeAfterUnderflow, void(bool buffer_more_audio));
 
  protected:
   virtual ~MockAudioRenderer();

@@ -14,7 +14,6 @@
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/default_apps_trial.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/external_extension_provider_interface.h"
 #include "chrome/browser/extensions/external_policy_extension_loader.h"
@@ -23,16 +22,20 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if !defined(OS_CHROMEOS)
+#include "chrome/browser/extensions/default_apps.h"
+#endif
 
 #if defined(OS_WIN)
 #include "chrome/browser/extensions/external_registry_extension_loader_win.h"
 #endif
 
+using content::BrowserThread;
+
 // Constants for keeping track of extension preferences in a dictionary.
-const char ExternalExtensionProviderImpl::kLocation[] = "location";
-const char ExternalExtensionProviderImpl::kState[] = "state";
 const char ExternalExtensionProviderImpl::kExternalCrx[] = "external_crx";
 const char ExternalExtensionProviderImpl::kExternalVersion[] =
     "external_version";
@@ -41,58 +44,19 @@ const char ExternalExtensionProviderImpl::kExternalUpdateUrl[] =
 const char ExternalExtensionProviderImpl::kSupportedLocales[] =
     "supported_locales";
 
-#if !defined(OS_CHROMEOS)
-class DefaultAppsProvider : public ExternalExtensionProviderImpl {
- public:
-  DefaultAppsProvider(VisitorInterface* service, Profile* profile)
-      : ExternalExtensionProviderImpl(service,
-            new ExternalPrefExtensionLoader(chrome::DIR_DEFAULT_APPS,
-                ExternalPrefExtensionLoader::NONE),
-            Extension::EXTERNAL_PREF, Extension::INVALID),
-        profile_(profile) {
-    DCHECK(profile_);
-  }
-
-  // ExternalExtensionProviderImpl overrides:
-  virtual void ServiceShutdown() OVERRIDE;
-  virtual void VisitRegisteredExtension() const OVERRIDE;
-
- private:
-  Profile* profile_;
-
-  DISALLOW_COPY_AND_ASSIGN(DefaultAppsProvider);
-};
-
-void DefaultAppsProvider::ServiceShutdown() {
-  profile_ = NULL;
-  ExternalExtensionProviderImpl::ServiceShutdown();
-}
-
-void DefaultAppsProvider::VisitRegisteredExtension() const {
-  // Don't install default apps if the profile already has apps installed.
-  if (profile_) {
-    ExtensionService* extension_service = profile_->GetExtensionService();
-    if (extension_service && extension_service->HasApps()) {
-      service()->OnExternalProviderReady();
-      return;
-    }
-  }
-
-  ExternalExtensionProviderImpl::VisitRegisteredExtension();
-}
-#endif
-
 ExternalExtensionProviderImpl::ExternalExtensionProviderImpl(
     VisitorInterface* service,
     ExternalExtensionLoader* loader,
     Extension::Location crx_location,
-    Extension::Location download_location)
+    Extension::Location download_location,
+    int creation_flags)
   : crx_location_(crx_location),
     download_location_(download_location),
     service_(service),
     prefs_(NULL),
     ready_(false),
-    loader_(loader) {
+    loader_(loader),
+    creation_flags_(creation_flags) {
   loader_->Init(this);
 }
 
@@ -101,7 +65,7 @@ ExternalExtensionProviderImpl::~ExternalExtensionProviderImpl() {
   loader_->OwnerShutdown();
 }
 
-void ExternalExtensionProviderImpl::VisitRegisteredExtension() const {
+void ExternalExtensionProviderImpl::VisitRegisteredExtension() {
   // The loader will call back to SetPrefs.
   loader_->StartLoading();
 }
@@ -232,7 +196,7 @@ void ExternalExtensionProviderImpl::SetPrefs(DictionaryValue* prefs) {
         continue;
       }
       service_->OnExternalExtensionFileFound(extension_id, version.get(), path,
-                                             crx_location_);
+                                             crx_location_, creation_flags_);
     } else { // if (has_external_update_url)
       CHECK(has_external_update_url);  // Checking of keys above ensures this.
       if (download_location_ == Extension::INVALID) {
@@ -260,14 +224,14 @@ void ExternalExtensionProviderImpl::SetPrefs(DictionaryValue* prefs) {
     prefs_->Remove(*it, NULL);
   }
 
-  service_->OnExternalProviderReady();
+  service_->OnExternalProviderReady(this);
 }
 
 void ExternalExtensionProviderImpl::ServiceShutdown() {
   service_ = NULL;
 }
 
-bool ExternalExtensionProviderImpl::IsReady() {
+bool ExternalExtensionProviderImpl::IsReady() const {
   return ready_;
 }
 
@@ -322,11 +286,12 @@ void ExternalExtensionProviderImpl::CreateExternalProviders(
 
   // On Mac OS, items in /Library/... should be written by the superuser.
   // Check that all components of the path are writable by root only.
-  ExternalPrefExtensionLoader::Options options;
+  ExternalPrefExtensionLoader::Options check_admin_permissions_on_mac;
 #if defined(OS_MACOSX)
-  options = ExternalPrefExtensionLoader::ENSURE_PATH_CONTROLLED_BY_ADMIN;
+  check_admin_permissions_on_mac =
+    ExternalPrefExtensionLoader::ENSURE_PATH_CONTROLLED_BY_ADMIN;
 #else
-  options = ExternalPrefExtensionLoader::NONE;
+  check_admin_permissions_on_mac = ExternalPrefExtensionLoader::NONE;
 #endif
 
   provider_list->push_back(
@@ -334,9 +299,11 @@ void ExternalExtensionProviderImpl::CreateExternalProviders(
           new ExternalExtensionProviderImpl(
               service,
               new ExternalPrefExtensionLoader(
-                  chrome::DIR_EXTERNAL_EXTENSIONS, options),
+                  chrome::DIR_EXTERNAL_EXTENSIONS,
+                  check_admin_permissions_on_mac),
               Extension::EXTERNAL_PREF,
-              Extension::EXTERNAL_PREF_DOWNLOAD)));
+              Extension::EXTERNAL_PREF_DOWNLOAD,
+              Extension::NO_FLAGS)));
 
 #if defined(OS_MACOSX)
   // Support old path to external extensions file as we migrate to the
@@ -349,11 +316,13 @@ void ExternalExtensionProviderImpl::CreateExternalProviders(
                   chrome::DIR_DEPRECATED_EXTERNAL_EXTENSIONS,
                   ExternalPrefExtensionLoader::NONE),
               Extension::EXTERNAL_PREF,
-              Extension::EXTERNAL_PREF_DOWNLOAD)));
+              Extension::EXTERNAL_PREF_DOWNLOAD,
+              Extension::NO_FLAGS)));
 #endif
 
-#if defined(OS_CHROMEOS)
-  // Chrome OS specific source for OEM customization.
+#if defined(OS_CHROMEOS) || defined (OS_MACOSX)
+  // Define a per-user source of external extensions.
+  // On Chrome OS, this serves as a source for OEM customization.
   provider_list->push_back(
       linked_ptr<ExternalExtensionProviderInterface>(
           new ExternalExtensionProviderImpl(
@@ -362,7 +331,8 @@ void ExternalExtensionProviderImpl::CreateExternalProviders(
                   chrome::DIR_USER_EXTERNAL_EXTENSIONS,
                   ExternalPrefExtensionLoader::NONE),
               Extension::EXTERNAL_PREF,
-              Extension::EXTERNAL_PREF_DOWNLOAD)));
+              Extension::EXTERNAL_PREF_DOWNLOAD,
+              Extension::NO_FLAGS)));
 #endif
 #if defined(OS_WIN)
   provider_list->push_back(
@@ -371,7 +341,8 @@ void ExternalExtensionProviderImpl::CreateExternalProviders(
               service,
               new ExternalRegistryExtensionLoader,
               Extension::EXTERNAL_REGISTRY,
-              Extension::INVALID)));
+              Extension::INVALID,
+              Extension::NO_FLAGS)));
 #endif
   provider_list->push_back(
       linked_ptr<ExternalExtensionProviderInterface>(
@@ -379,49 +350,20 @@ void ExternalExtensionProviderImpl::CreateExternalProviders(
               service,
               new ExternalPolicyExtensionLoader(profile),
               Extension::INVALID,
-              Extension::EXTERNAL_POLICY_DOWNLOAD)));
+              Extension::EXTERNAL_POLICY_DOWNLOAD,
+              Extension::NO_FLAGS)));
 
 #if !defined(OS_CHROMEOS)
-  // We decide to install or not install default apps based on the following
-  // criteria, from highest priority to lowest priority:
-  //
-  // - if this instance of chrome is participating in the default apps
-  //   field trial, then install apps based on the group
-  // - the command line option.  Tests use this option to disable installation
-  //   of default apps in some cases
-  // - the preferences value in the profile.  This value is usually set in
-  //   the master_preferences file
-  bool install_apps =
-      profile->GetPrefs()->GetString(prefs::kDefaultApps) == "install";
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableDefaultApps)) {
-    install_apps = false;
-  }
-  if (base::FieldTrialList::TrialExists(kDefaultAppsTrial_Name)) {
-    install_apps = base::FieldTrialList::Find(
-        kDefaultAppsTrial_Name)->group_name() != kDefaultAppsTrial_NoAppsGroup;
-  }
-
-  if (install_apps) {
-    // Don't bother installing default apps in locales where its known that
-    // they don't work.
-    // TODO(rogerta): Do this check dynamically once the webstore can expose
-    // an API.
-    const std::string& locale = g_browser_process->GetApplicationLocale();
-    static const char* unsupported_locales[] = {"CN", "TR", "IR"};
-    bool supported_locale = true;
-    for (size_t i = 0; i < arraysize(unsupported_locales); ++i) {
-      if (EndsWith(locale, unsupported_locales[i], false)) {
-        supported_locale = false;
-        break;
-      }
-    }
-
-    if (supported_locale) {
-      provider_list->push_back(
-          linked_ptr<ExternalExtensionProviderInterface>(
-              new DefaultAppsProvider(service, profile)));
-    }
-  }
+  provider_list->push_back(
+      linked_ptr<ExternalExtensionProviderInterface>(
+          new default_apps::Provider(
+              profile,
+              service,
+              new ExternalPrefExtensionLoader(
+                  chrome::DIR_DEFAULT_APPS,
+                  ExternalPrefExtensionLoader::NONE),
+              Extension::EXTERNAL_PREF,
+              Extension::INVALID,
+              Extension::FROM_BOOKMARK)));
 #endif
 }

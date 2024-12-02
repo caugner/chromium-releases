@@ -7,9 +7,9 @@
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
-#include "base/test/mock_time_provider.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/test/mock_time_provider.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/history/history.h"
@@ -17,21 +17,22 @@
 #include "chrome/browser/search_engines/search_host_to_urls_map.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
-#include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
 using base::TimeDelta;
+using content::BrowserThread;
 using ::testing::Return;
 using ::testing::StrictMock;
 
@@ -149,8 +150,8 @@ class TemplateURLServiceTest : public testing::Test {
   void NotifyManagedPrefsHaveChanged() {
     model()->Observe(
         chrome::NOTIFICATION_PREF_CHANGED,
-        Source<PrefService>(profile()->GetTestingPrefService()),
-        Details<std::string>(NULL));
+        content::Source<PrefService>(profile()->GetTestingPrefService()),
+        content::Details<std::string>(NULL));
   }
 
   // Verifies the two TemplateURLs are equal.
@@ -1246,4 +1247,32 @@ TEST_F(TemplateURLServiceTest, TestManagedDefaultSearch) {
   VerifyLoad();
   EXPECT_TRUE(model()->is_default_search_managed());
   EXPECT_TRUE(model()->GetDefaultSearchProvider() == NULL);
+}
+
+// Test that if we load a TemplateURL with an empty GUID, the load process
+// assigns it a newly generated GUID.
+TEST_F(TemplateURLServiceTest, PatchEmptySyncGUID) {
+  // Add a new TemplateURL.
+  VerifyLoad();
+  const size_t initial_count = model()->GetTemplateURLs().size();
+
+  TemplateURL* t_url = new TemplateURL();
+  t_url->SetURL("http://www.google.com/foo/bar", 0, 0);
+  t_url->set_keyword(ASCIIToUTF16("keyword"));
+  t_url->set_short_name(ASCIIToUTF16("google"));
+  t_url->set_sync_guid("");  // force an empty GUID
+  model()->Add(t_url);
+
+  VerifyObserverCount(1);
+  BlockTillServiceProcessesRequests();
+  ASSERT_EQ(1 + initial_count, model()->GetTemplateURLs().size());
+
+  // Reload the model to verify it was actually saved to the database and
+  // assigned a new GUID when brought back.
+  ResetModel(true);
+  ASSERT_EQ(1 + initial_count, model()->GetTemplateURLs().size());
+  const TemplateURL* loaded_url =
+      model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword"));
+  ASSERT_TRUE(loaded_url != NULL);
+  ASSERT_FALSE(loaded_url->sync_guid().empty());
 }

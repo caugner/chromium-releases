@@ -11,11 +11,12 @@
 #include "chrome/browser/prefs/pref_notifier.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/url_constants.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/pref_names.h"
-#include "content/common/notification_service.h"
+#include "chrome/common/url_constants.h"
+#include "content/public/browser/notification_service.h"
 
 using base::Time;
 
@@ -44,6 +45,12 @@ const char kPrefVersion[] = "manifest.version";
 
 // Indicates whether an extension is blacklisted.
 const char kPrefBlacklist[] = "blacklist";
+
+// The oauth client id used for app notification setup.
+const char kPrefAppNotificationClientId[] = "app_notif_client_id";
+
+// Indicates whether the user has disabled notifications or not.
+const char kPrefAppNotificationDisbaled[] = "app_notif_disabled";
 
 // Indicates whether the user has acknowledged various types of extensions.
 const char kPrefExternalAcknowledged[] = "ack_external";
@@ -367,7 +374,7 @@ bool ExtensionPrefs::ReadBooleanFromPref(
 }
 
 bool ExtensionPrefs::ReadExtensionPrefBoolean(
-    const std::string& extension_id, const std::string& pref_key) {
+    const std::string& extension_id, const std::string& pref_key) const {
   const DictionaryValue* ext = GetExtensionPref(extension_id);
   if (!ext) {
     // No such extension yet.
@@ -586,9 +593,46 @@ bool ExtensionPrefs::SetAlertSystemFirstRun() {
   return false;
 }
 
+std::string ExtensionPrefs::GetAppNotificationClientId(
+    const std::string& extension_id) const {
+  const DictionaryValue* dict = GetExtensionPref(extension_id);
+  if (!dict || !dict->HasKey(kPrefAppNotificationClientId))
+    return std::string();
+
+  std::string tmp;
+  dict->GetString(kPrefAppNotificationClientId, &tmp);
+  return tmp;
+}
+
+void ExtensionPrefs::SetAppNotificationClientId(
+    const std::string& extension_id,
+    const std::string& oauth_client_id) {
+  DCHECK(Extension::IdIsValid(extension_id));
+  UpdateExtensionPref(extension_id, kPrefAppNotificationClientId,
+                      Value::CreateStringValue(oauth_client_id));
+}
+
+bool ExtensionPrefs::IsAppNotificationDisabled(
+    const std::string& extension_id) const {
+  return ReadExtensionPrefBoolean(extension_id, kPrefAppNotificationDisbaled);
+}
+
+void ExtensionPrefs::SetAppNotificationDisabled(
+   const std::string& extension_id, bool value) {
+  DCHECK(Extension::IdIsValid(extension_id));
+  UpdateExtensionPref(extension_id, kPrefAppNotificationDisbaled,
+                      Value::CreateBooleanValue(value));
+}
+
 bool ExtensionPrefs::IsExtensionAllowedByPolicy(
-    const std::string& extension_id) {
+    const std::string& extension_id,
+    Extension::Location location) {
   std::string string_value;
+
+  if (location == Extension::COMPONENT ||
+      location == Extension::EXTERNAL_POLICY_DOWNLOAD) {
+    return true;
+  }
 
   const ListValue* blacklist =
       prefs_->GetList(prefs::kExtensionInstallDenyList);
@@ -935,10 +979,11 @@ extension_misc::LaunchContainer ExtensionPrefs::GetLaunchContainer(
 
   extension_misc::LaunchContainer result = kInvalidLaunchContainer;
 
-  if (manifest_launch_container == extension_misc::LAUNCH_PANEL) {
-    // Apps with app.launch.container = 'panel' should always
-    // open in a panel.
-    result = extension_misc::LAUNCH_PANEL;
+  if (manifest_launch_container == extension_misc::LAUNCH_PANEL ||
+      manifest_launch_container == extension_misc::LAUNCH_SHELL) {
+    // Apps with app.launch.container = 'panel' or 'shell' should always respect
+    // the manifest setting.
+    result = manifest_launch_container;
 
   } else if (manifest_launch_container == extension_misc::LAUNCH_TAB) {
     // Look for prefs that indicate the user's choice of launch
@@ -1062,7 +1107,7 @@ void ExtensionPrefs::OnExtensionInstalled(
   // since it may change on disk.
   if (extension->location() != Extension::LOAD) {
     extension_dict->Set(kPrefManifest,
-                        extension->manifest_value()->DeepCopy());
+                        extension->manifest()->value()->DeepCopy());
   }
 
   if (extension->is_app()) {
@@ -1124,10 +1169,10 @@ void ExtensionPrefs::SetBrowserActionVisibility(const Extension* extension,
 
   UpdateExtensionPref(extension->id(), kBrowserActionVisible,
                       Value::CreateBooleanValue(visible));
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
-      Source<ExtensionPrefs>(this),
-      Details<const Extension>(extension));
+      content::Source<ExtensionPrefs>(this),
+      content::Details<const Extension>(extension));
 }
 
 std::string ExtensionPrefs::GetVersionString(const std::string& extension_id) {
@@ -1152,10 +1197,10 @@ void ExtensionPrefs::UpdateManifest(const Extension* extension) {
     DictionaryValue* old_manifest = NULL;
     bool update_required =
         !extension_dict->GetDictionary(kPrefManifest, &old_manifest) ||
-        !extension->manifest_value()->Equals(old_manifest);
+        !extension->manifest()->value()->Equals(old_manifest);
     if (update_required) {
       UpdateExtensionPref(extension->id(), kPrefManifest,
-                          extension->manifest_value()->DeepCopy());
+                          extension->manifest()->value()->DeepCopy());
     }
   }
 }
@@ -1458,10 +1503,10 @@ void ExtensionPrefs::SetAppLauncherOrder(
   for (size_t i = 0; i < extension_ids.size(); ++i)
     SetAppLaunchIndex(extension_ids.at(i), i);
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_LAUNCHER_REORDERED,
-      Source<ExtensionPrefs>(this),
-      NotificationService::NoDetails());
+      content::Source<ExtensionPrefs>(this),
+      content::NotificationService::NoDetails());
 }
 
 int ExtensionPrefs::GetPageIndex(const std::string& extension_id) {
@@ -1641,25 +1686,17 @@ void ExtensionPrefs::InitPrefStore(bool extensions_disabled) {
 
     // Set regular extension controlled prefs.
     const DictionaryValue* prefs = GetExtensionControlledPrefs(*ext_id, false);
-    for (DictionaryValue::key_iterator i = prefs->begin_keys();
-         i != prefs->end_keys(); ++i) {
-      Value* value;
-      if (!prefs->GetWithoutPathExpansion(*i, &value))
-        continue;
+    for (DictionaryValue::Iterator i(*prefs); i.HasNext(); i.Advance()) {
       extension_pref_value_map_->SetExtensionPref(
-          *ext_id, *i, kExtensionPrefsScopeRegular, value->DeepCopy());
+          *ext_id, i.key(), kExtensionPrefsScopeRegular, i.value().DeepCopy());
     }
 
     // Set incognito extension controlled prefs.
     prefs = GetExtensionControlledPrefs(*ext_id, true);
-    for (DictionaryValue::key_iterator i = prefs->begin_keys();
-         i != prefs->end_keys(); ++i) {
-      Value* value;
-      if (!prefs->GetWithoutPathExpansion(*i, &value))
-        continue;
+    for (DictionaryValue::Iterator i(*prefs); i.HasNext(); i.Advance()) {
       extension_pref_value_map_->SetExtensionPref(
-          *ext_id, *i, kExtensionPrefsScopeIncognitoPersistent,
-          value->DeepCopy());
+          *ext_id, i.key(), kExtensionPrefsScopeIncognitoPersistent,
+          i.value().DeepCopy());
     }
 
     // Set content settings.

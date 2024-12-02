@@ -4,11 +4,12 @@
 
 #include "webkit/glue/resource_fetcher.h"
 
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/message_loop.h"
 #include "base/timer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/unittest_test_server.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
@@ -42,8 +43,9 @@ class FetcherDelegate {
 
   virtual ~FetcherDelegate() {}
 
-  ResourceFetcher::Callback* NewCallback() {
-    return ::NewCallback(this, &FetcherDelegate::OnURLFetchComplete);
+  ResourceFetcher::Callback NewCallback() {
+    return base::Bind(&FetcherDelegate::OnURLFetchComplete,
+                      base::Unretained(this));
   }
 
   virtual void OnURLFetchComplete(const WebURLResponse& response,

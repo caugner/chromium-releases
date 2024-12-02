@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback_forward.h"
 #include "content/common/content_export.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/surface/transport_dib.h"
@@ -18,6 +19,10 @@ class RenderWidgetHost;
 
 namespace gfx {
 class Rect;
+}
+
+namespace content {
+class RenderProcessHost;
 }
 
 namespace skia {
@@ -41,11 +46,17 @@ class CONTENT_EXPORT BackingStore {
   // Paints the bitmap from the renderer onto the backing store.  bitmap_rect
   // gives the location of bitmap, and copy_rects specifies the subregion(s) of
   // the backingstore to be painted from the bitmap.
+  //
+  // PaintToBackingStore does not need to guarantee that this has happened by
+  // the time it returns, in which case it will set |scheduled_callback| to
+  // true and will call |callback| when completed.
   virtual void PaintToBackingStore(
-      RenderProcessHost* process,
+      content::RenderProcessHost* process,
       TransportDIB::Id bitmap,
       const gfx::Rect& bitmap_rect,
-      const std::vector<gfx::Rect>& copy_rects) = 0;
+      const std::vector<gfx::Rect>& copy_rects,
+      const base::Closure& completion_callback,
+      bool* scheduled_completion_callback) = 0;
 
   // Extracts the gives subset of the backing store and copies it to the given
   // PlatformCanvas. The PlatformCanvas should not be initialized. This function

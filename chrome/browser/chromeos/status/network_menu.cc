@@ -6,8 +6,8 @@
 
 #include <algorithm>
 
-#include "base/logging.h"
 #include "base/command_line.h"
+#include "base/logging.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/choose_mobile_network_dialog.h"
@@ -16,16 +16,15 @@
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/sim_dialog_delegate.h"
 #include "chrome/browser/chromeos/status/network_menu_icon.h"
+#include "chrome/browser/chromeos/status/status_area_view_chromeos.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/window.h"
-#include "chrome/common/url_constants.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
+#include "chrome/common/url_constants.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/escape.h"
@@ -35,11 +34,13 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/skbitmap_operations.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/menu_model_adapter.h"
-#include "views/controls/menu/menu_runner.h"
-#include "views/controls/menu/submenu_view.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/menu_model_adapter.h"
+#include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/widget/widget.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -135,8 +136,7 @@ class NetworkMenuModel : public ui::MenuModel {
                           int remember) const;
 
   // Called by NetworkMenu::RunMenu to initialize list of menu items.
-  virtual void InitMenuItems(bool is_browser_mode,
-                             bool should_open_button_options) = 0;
+  virtual void InitMenuItems(bool should_open_button_options) = 0;
 
   // Menu item field accessors.
   const MenuItemVector& menu_items() const { return menu_items_; }
@@ -215,8 +215,7 @@ class MoreMenuModel : public NetworkMenuModel {
   virtual ~MoreMenuModel() {}
 
   // NetworkMenuModel implementation.
-  virtual void InitMenuItems(bool is_browser_mode,
-                             bool should_open_button_options) OVERRIDE;
+  virtual void InitMenuItems(bool should_open_button_options) OVERRIDE;
 
   // ui::MenuModel implementation
   virtual int GetCommandIdAt(int index) const OVERRIDE;
@@ -231,8 +230,7 @@ class VPNMenuModel : public NetworkMenuModel {
   virtual ~VPNMenuModel() {}
 
   // NetworkMenuModel implementation.
-  virtual void InitMenuItems(bool is_browser_mode,
-                             bool should_open_button_options) OVERRIDE;
+  virtual void InitMenuItems(bool should_open_button_options) OVERRIDE;
 
   // ui::MenuModel implementation
   virtual int GetCommandIdAt(int index) const OVERRIDE;
@@ -251,8 +249,7 @@ class MainMenuModel : public NetworkMenuModel {
   virtual ~MainMenuModel() {}
 
   // NetworkMenuModel implementation.
-  virtual void InitMenuItems(bool is_browser_mode,
-                             bool should_open_button_options) OVERRIDE;
+  virtual void InitMenuItems(bool should_open_button_options) OVERRIDE;
 
   // ui::MenuModel implementation
   virtual int GetCommandIdAt(int index) const OVERRIDE;
@@ -482,7 +479,7 @@ void NetworkMenuModel::SetMenuModelDelegate(ui::MenuModelDelegate* delegate) {
 
 void NetworkMenuModel::ShowNetworkConfigView(NetworkConfigView* view) const {
   views::Widget* window = browser::CreateViewsWindow(
-      owner_->delegate()->GetNativeWindow(), view);
+      owner_->delegate()->GetNativeWindow(), view, STYLE_GENERIC);
   window->SetAlwaysOnTop(true);
   window->Show();
 }
@@ -507,8 +504,7 @@ void NetworkMenuModel::ShowOther(ConnectionType type) const {
 ////////////////////////////////////////////////////////////////////////////////
 // MainMenuModel
 
-void MainMenuModel::InitMenuItems(bool is_browser_mode,
-                                  bool should_open_button_options) {
+void MainMenuModel::InitMenuItems(bool should_open_button_options) {
   // This gets called on initialization, so any changes should be reflected
   // in CrosMock::SetNetworkLibraryStatusAreaExpectations().
 
@@ -621,7 +617,8 @@ void MainMenuModel::InitMenuItems(bool is_browser_mode,
           cell_networks[i]->activation_state();
 
       // If we are on the OOBE/login screen, do not show activating 3G option.
-      if (!is_browser_mode && activation_state != ACTIVATION_STATE_ACTIVATED)
+      if (!StatusAreaViewChromeos::IsBrowserMode() &&
+          activation_state != ACTIVATION_STATE_ACTIVATED)
         continue;
 
       // Ampersand is a valid character in a network name, but menu2 uses it
@@ -688,7 +685,7 @@ void MainMenuModel::InitMenuItems(bool is_browser_mode,
     if (cellular_device) {
       // Add "View Account" with top up URL if we know that.
       MobileConfig* config = MobileConfig::GetInstance();
-      if (is_browser_mode && config->IsReady()) {
+      if (StatusAreaViewChromeos::IsBrowserMode() && config->IsReady()) {
         std::string carrier_id = cros->GetCellularHomeCarrierId();
         // If we don't have top up URL cached.
         if (carrier_id != carrier_id_) {
@@ -733,7 +730,7 @@ void MainMenuModel::InitMenuItems(bool is_browser_mode,
 
   // If we are logged in and there is a connected network or a connected VPN,
   // add submenu for Private Networks.
-  if (is_browser_mode) {
+  if (StatusAreaViewChromeos::IsBrowserMode()) {
     if (cros->connected_network() || cros->virtual_network_connected()) {
       menu_items_.push_back(MenuItem());  // Separator
       const SkBitmap icon = NetworkMenuIcon::GetVpnBitmap();
@@ -741,23 +738,29 @@ void MainMenuModel::InitMenuItems(bool is_browser_mode,
           ui::MenuModel::TYPE_SUBMENU,
           l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_PRIVATE_NETWORKS),
           icon, vpn_menu_model_.get(), FLAG_NONE));
-      vpn_menu_model_->InitMenuItems(
-          is_browser_mode, should_open_button_options);
+      vpn_menu_model_->InitMenuItems(should_open_button_options);
     }
   }
 
-  // Enable / disable wireless.
-  if (wifi_available || cellular_available) {
+  bool show_wifi_scanning = wifi_available && cros->wifi_scanning();
+  // Do not show disable wifi during oobe
+  bool show_toggle_wifi = wifi_available &&
+      (should_open_button_options || !wifi_enabled);
+  // Do not show disable cellular during oobe
+  bool show_toggle_cellular = cellular_available &&
+      (should_open_button_options || !cellular_enabled);
+
+  if (show_wifi_scanning || show_toggle_wifi || show_toggle_cellular) {
     menu_items_.push_back(MenuItem());  // Separator
 
-    if (wifi_available) {
+    if (show_wifi_scanning) {
       // Add 'Scanning...'
-      if (cros->wifi_scanning()) {
-        label = l10n_util::GetStringUTF16(IDS_STATUSBAR_WIFI_SCANNING_MESSAGE);
-        menu_items_.push_back(MenuItem(ui::MenuModel::TYPE_COMMAND, label,
-            SkBitmap(), std::string(), FLAG_DISABLED));
-      }
+      label = l10n_util::GetStringUTF16(IDS_STATUSBAR_WIFI_SCANNING_MESSAGE);
+      menu_items_.push_back(MenuItem(ui::MenuModel::TYPE_COMMAND, label,
+          SkBitmap(), std::string(), FLAG_DISABLED));
+    }
 
+    if (show_toggle_wifi) {
       int id = wifi_enabled ? IDS_STATUSBAR_NETWORK_DEVICE_DISABLE :
                               IDS_STATUSBAR_NETWORK_DEVICE_ENABLE;
       label = l10n_util::GetStringFUTF16(id,
@@ -769,7 +772,7 @@ void MainMenuModel::InitMenuItems(bool is_browser_mode,
           SkBitmap(), std::string(), flag));
     }
 
-    if (cellular_available) {
+    if (show_toggle_cellular) {
       const NetworkDevice* cellular = cros->FindCellularDevice();
       bool is_locked = false;
       if (!cellular) {
@@ -809,16 +812,16 @@ void MainMenuModel::InitMenuItems(bool is_browser_mode,
   // * Network settings;
   // * IP Address on active interface;
   // * Hardware addresses for wifi and ethernet.
-  menu_items_.push_back(MenuItem());  // Separator
-  more_menu_model_->InitMenuItems(is_browser_mode, should_open_button_options);
-  if (is_browser_mode) {
-    // In browser mode we do not want separate submenu, inline items.
-    menu_items_.insert(
-        menu_items_.end(),
-        more_menu_model_->menu_items().begin(),
-        more_menu_model_->menu_items().end());
-  } else {
-    if (!more_menu_model_->menu_items().empty()) {
+  more_menu_model_->InitMenuItems(should_open_button_options);
+  if (!more_menu_model_->menu_items().empty()) {
+    menu_items_.push_back(MenuItem());  // Separator
+    if (StatusAreaViewChromeos::IsBrowserMode()) {
+      // In browser mode we do not want separate submenu, inline items.
+      menu_items_.insert(
+          menu_items_.end(),
+          more_menu_model_->menu_items().begin(),
+          more_menu_model_->menu_items().end());
+    } else {
       menu_items_.push_back(MenuItem(
           ui::MenuModel::TYPE_SUBMENU,
           l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_MORE),
@@ -834,8 +837,7 @@ int MainMenuModel::GetCommandIdAt(int index) const {
 ////////////////////////////////////////////////////////////////////////////////
 // VPNMenuModel
 
-void VPNMenuModel::InitMenuItems(bool is_browser_mode,
-                                 bool should_open_button_options) {
+void VPNMenuModel::InitMenuItems(bool should_open_button_options) {
   // This gets called on initialization, so any changes should be reflected
   // in CrosMock::SetNetworkLibraryStatusAreaExpectations().
 
@@ -897,8 +899,7 @@ int VPNMenuModel::GetCommandIdAt(int index) const {
 ////////////////////////////////////////////////////////////////////////////////
 // MoreMenuModel
 
-void MoreMenuModel::InitMenuItems(
-    bool is_browser_mode, bool should_open_button_options) {
+void MoreMenuModel::InitMenuItems(bool should_open_button_options) {
   // This gets called on initialization, so any changes should be reflected
   // in CrosMock::SetNetworkLibraryStatusAreaExpectations().
 
@@ -907,39 +908,17 @@ void MoreMenuModel::InitMenuItems(
   MenuItemVector address_items;
 
   NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
-  bool oobe = !should_open_button_options;  // we don't show options for OOBE.
   bool connected = cros->Connected();  // always call for test expectations.
-  if (!oobe) {
-    int flags = FLAG_OPTIONS;
-    int message_id = -1;
-    if (is_browser_mode) {
-      message_id = IDS_STATUSBAR_NETWORK_OPEN_OPTIONS_DIALOG;
-    } else if (connected) {
-      const PrefService::Preference* proxy_pref =
-          ProfileManager::GetDefaultProfile()->GetPrefs()->FindPreference(
-              prefs::kProxy);
-      if (proxy_pref && (!proxy_pref->IsUserModifiable() ||
-                         proxy_pref->HasUserSetting())) {
-        flags |= FLAG_DISABLED;
-        if (proxy_pref->IsManaged()) {
-          message_id =
-              IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_POLICY_MANAGED_PROXY_TEXT;
-        } else if (proxy_pref->IsExtensionControlled()) {
-          message_id =
-             IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_EXTENSION_MANAGED_PROXY_TEXT;
-        } else {
-          message_id =
-             IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_UNMODIFIABLE_PROXY_TEXT;
-        }
-      } else {
-        message_id = IDS_STATUSBAR_NETWORK_OPEN_PROXY_SETTINGS_DIALOG;
-      }
-    }
-    if (message_id != -1) {
-      link_items.push_back(MenuItem(ui::MenuModel::TYPE_COMMAND,
-                                    l10n_util::GetStringUTF16(message_id),
-                                    SkBitmap(), std::string(), flags));
-    }
+
+  int message_id = -1;
+  if (StatusAreaViewChromeos::IsBrowserMode())
+    message_id = IDS_STATUSBAR_NETWORK_OPEN_OPTIONS_DIALOG;
+  else if (connected)
+    message_id = IDS_STATUSBAR_NETWORK_OPEN_PROXY_SETTINGS_DIALOG;
+  if (message_id != -1) {
+    link_items.push_back(MenuItem(ui::MenuModel::TYPE_COMMAND,
+                                  l10n_util::GetStringUTF16(message_id),
+                                  SkBitmap(), std::string(), FLAG_OPTIONS));
   }
 
   if (connected) {
@@ -951,7 +930,7 @@ void MoreMenuModel::InitMenuItems(
     }
   }
 
-  if (!is_browser_mode) {
+  if (!StatusAreaViewChromeos::IsBrowserMode()) {
     const NetworkDevice* ether = cros->FindEthernetDevice();
     if (ether) {
       std::string hardware_address;
@@ -995,9 +974,8 @@ int MoreMenuModel::GetCommandIdAt(int index) const {
 ////////////////////////////////////////////////////////////////////////////////
 // NetworkMenu
 
-NetworkMenu::NetworkMenu(Delegate* delegate, bool is_browser_mode)
+NetworkMenu::NetworkMenu(Delegate* delegate)
     : delegate_(delegate),
-      is_browser_mode_(is_browser_mode),
       refreshing_menu_(false),
       menu_item_view_(NULL),
       min_width_(kDefaultMinimumWidth) {
@@ -1006,8 +984,10 @@ NetworkMenu::NetworkMenu(Delegate* delegate, bool is_browser_mode)
       new views::MenuModelAdapter(main_menu_model_.get()));
   menu_item_view_ = new views::MenuItemView(menu_model_adapter_.get());
   menu_item_view_->set_has_icons(true);
+#if !defined(USE_AURA)
   menu_item_view_->set_menu_position(
       views::MenuItemView::POSITION_BELOW_BOUNDS);
+#endif
   menu_runner_.reset(new views::MenuRunner(menu_item_view_));
 }
 
@@ -1026,8 +1006,7 @@ void NetworkMenu::UpdateMenu() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   refreshing_menu_ = true;
-  main_menu_model_->InitMenuItems(
-      is_browser_mode(), delegate_->ShouldOpenButtonOptions());
+  main_menu_model_->InitMenuItems(delegate_->ShouldOpenButtonOptions());
 
   menu_model_adapter_->BuildMenu(menu_item_view_);
   SetMenuMargins(menu_item_view_, kTopMargin, kBottomMargin);
@@ -1065,9 +1044,9 @@ void NetworkMenu::ShowTabbedNetworkSettings(const Network* network) const {
   std::string page = StringPrintf(
       "%s?servicePath=%s&networkType=%d&networkName=%s",
       chrome::kInternetOptionsSubPage,
-      EscapeUrlEncodedData(network->service_path(), true).c_str(),
+      net::EscapeUrlEncodedData(network->service_path(), true).c_str(),
       network->type(),
-      EscapeUrlEncodedData(network_name, false).c_str());
+      net::EscapeUrlEncodedData(network_name, false).c_str());
   browser->ShowOptionsTab(page);
 }
 

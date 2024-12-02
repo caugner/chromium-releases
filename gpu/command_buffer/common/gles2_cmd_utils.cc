@@ -127,6 +127,8 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
       return 1;
     case GL_PACK_ALIGNMENT:
       return 1;
+    case GL_PACK_REVERSE_ROW_ORDER_ANGLE:
+      return 1;
     case GL_POLYGON_OFFSET_FACTOR:
       return 1;
     case GL_POLYGON_OFFSET_FILL:
@@ -194,6 +196,8 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
     case GL_TEXTURE_BINDING_CUBE_MAP:
       return 1;
     case GL_TEXTURE_BINDING_EXTERNAL_OES:
+      return 1;
+    case GL_TEXTURE_BINDING_RECTANGLE_ARB:
       return 1;
     case GL_UNPACK_ALIGNMENT:
       return 1;

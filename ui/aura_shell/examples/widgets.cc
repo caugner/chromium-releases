@@ -6,11 +6,11 @@
 #include "ui/aura/window.h"
 #include "ui/aura_shell/toplevel_frame_view.h"
 #include "ui/gfx/canvas.h"
-#include "views/controls/button/checkbox.h"
-#include "views/controls/button/radio_button.h"
-#include "views/controls/button/text_button.h"
-#include "views/widget/widget.h"
-#include "views/widget/widget_delegate.h"
+#include "ui/views/controls/button/checkbox.h"
+#include "ui/views/controls/button/radio_button.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace {
 
@@ -52,8 +52,9 @@ class WidgetsWindow : public views::WidgetDelegateView {
 };
 
 WidgetsWindow::WidgetsWindow()
-    : button_(new views::NativeTextButton(NULL, L"Button")),
-      disabled_button_(new views::NativeTextButton(NULL, L"Disabled button")),
+    : button_(new views::NativeTextButton(NULL, ASCIIToUTF16("Button"))),
+      disabled_button_(
+          new views::NativeTextButton(NULL, ASCIIToUTF16("Disabled button"))),
       checkbox_(new views::Checkbox(ASCIIToUTF16("Checkbox"))),
       checkbox_disabled_(new views::Checkbox(
           ASCIIToUTF16("Checkbox disabled"))),
@@ -92,7 +93,7 @@ WidgetsWindow::~WidgetsWindow() {
 }
 
 void WidgetsWindow::OnPaint(gfx::Canvas* canvas) {
-  canvas->FillRectInt(SK_ColorWHITE, 0, 0, width(), height());
+  canvas->FillRect(SK_ColorWHITE, GetLocalBounds());
 }
 
 void WidgetsWindow::Layout() {
@@ -134,7 +135,7 @@ void CreateWidgetsWindow() {
   gfx::Rect bounds(kWindowLeft, kWindowTop, kWindowWidth, kWindowHeight);
   views::Widget* widget =
       views::Widget::CreateWindowWithBounds(new WidgetsWindow, bounds);
-  widget->GetNativeView()->set_name("WidgetsWindow");
+  widget->GetNativeView()->SetName("WidgetsWindow");
   widget->Show();
 }
 

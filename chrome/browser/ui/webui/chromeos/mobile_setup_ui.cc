@@ -15,10 +15,10 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
+#include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
-#include "base/threading/thread_restrictions.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -31,9 +31,11 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_view_host_observer.h"
 #include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -42,14 +44,22 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
+using content::BrowserThread;
+
 namespace {
 
 // Host page JS API function names.
 const char kJsApiStartActivation[] = "startActivation";
 const char kJsApiSetTransactionStatus[] = "setTransactionStatus";
+const char kJsApiPaymentPortalLoad[] = "paymentPortalLoad";
+const char kJsApiResultOK[] = "ok";
 
-const char kJsDeviceStatusChangedHandler[] =
+const char kJsDeviceStatusChangedCallback[] =
     "mobile.MobileSetup.deviceStateChanged";
+const char kJsPortalFrameLoadFailedCallback[] =
+    "mobile.MobileSetup.portalFrameLoadError";
+const char kJsPortalFrameLoadCompletedCallback[] =
+    "mobile.MobileSetup.portalFrameLoadCompleted";
 
 // Error codes matching codes defined in the cellular config file.
 const char kErrorDefault[] = "default";
@@ -79,6 +89,8 @@ const char kErrorsField[] = "errors";
 const int kMaxActivationAttempt = 3;
 // Number of times we will retry to reconnect if connection fails.
 const int kMaxConnectionRetry = 10;
+// Number of times we will retry to reconnect and reload payment portal page.
+const int kMaxPortalReconnectCount = 5;
 // Number of times we will retry to reconnect if connection fails.
 const int kMaxConnectionRetryOTASP = 30;
 // Number of times we will retry to reconnect after payment is processed.
@@ -113,24 +125,68 @@ chromeos::CellularNetwork* GetCellularNetwork(
 
 }  // namespace
 
-class CellularConfigDocument {
+// Observes IPC messages from the rederer and notifies JS if frame loading error
+// appears.
+class PortalFrameLoadObserver : public content::RenderViewHostObserver {
+ public:
+  PortalFrameLoadObserver(RenderViewHost* host, WebUI* webui)
+      : content::RenderViewHostObserver(host), webui_(webui) {
+    DCHECK(webui_);
+    Send(new ChromeViewMsg_StartFrameSniffer(routing_id(),
+                                             UTF8ToUTF16("paymentForm")));
+  }
+
+  virtual ~PortalFrameLoadObserver() {}
+
+  // IPC::Channel::Listener implementation.
+  virtual bool OnMessageReceived(const IPC::Message& message) {
+    bool handled = true;
+    IPC_BEGIN_MESSAGE_MAP(PortalFrameLoadObserver, message)
+      IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FrameLoadingError, OnFrameLoadError)
+      IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FrameLoadingCompleted,
+                          OnFrameLoadCompleted)
+      IPC_MESSAGE_UNHANDLED(handled = false)
+    IPC_END_MESSAGE_MAP()
+    return handled;
+  }
+
+ private:
+  void OnFrameLoadError(int error) {
+    base::FundamentalValue result_value(error);
+    webui_->CallJavascriptFunction(
+        kJsPortalFrameLoadFailedCallback, result_value);
+  }
+
+  void OnFrameLoadCompleted() {
+    webui_->CallJavascriptFunction(kJsPortalFrameLoadCompletedCallback);
+  }
+
+  WebUI* webui_;
+  DISALLOW_COPY_AND_ASSIGN(PortalFrameLoadObserver);
+};
+
+class CellularConfigDocument
+    : public base::RefCountedThreadSafe<CellularConfigDocument> {
  public:
   CellularConfigDocument() {}
 
   // Return error message for a given code.
   std::string GetErrorMessage(const std::string& code);
+  void LoadCellularConfigFile();
   const std::string& version() { return version_; }
 
+ private:
+  typedef std::map<std::string, std::string> ErrorMap;
+
+  void SetErrorMap(const ErrorMap& map);
   bool LoadFromFile(const FilePath& config_path);
 
- private:
   std::string version_;
-  std::map<std::string, std::string> error_map_;
+  ErrorMap error_map_;
+  base::Lock config_lock_;
 
   DISALLOW_COPY_AND_ASSIGN(CellularConfigDocument);
 };
-
-static std::map<std::string, std::string> error_messages_;
 
 class MobileSetupUIHTMLSource : public ChromeURLDataManager::DataSource {
  public:
@@ -164,6 +220,7 @@ class MobileSetupHandler
 
   // Init work after Attach.
   void Init(TabContents* contents);
+  void StartActivationOnUIThread();
 
   // WebUIMessageHandler implementation.
   virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
@@ -183,53 +240,22 @@ class MobileSetupHandler
     PLAN_ACTIVATION_RECONNECTING_OTASP_TRY  = 2,
     PLAN_ACTIVATION_INITIATING_ACTIVATION   = 3,
     PLAN_ACTIVATION_RECONNECTING            = 4,
-    PLAN_ACTIVATION_SHOWING_PAYMENT         = 5,
-    PLAN_ACTIVATION_DELAY_OTASP             = 6,
-    PLAN_ACTIVATION_START_OTASP             = 7,
-    PLAN_ACTIVATION_OTASP                   = 8,
-    PLAN_ACTIVATION_RECONNECTING_OTASP      = 9,
-    PLAN_ACTIVATION_DONE                    = 10,
+    PLAN_ACTIVATION_PAYMENT_PORTAL_LOADING  = 5,
+    PLAN_ACTIVATION_SHOWING_PAYMENT         = 6,
+    PLAN_ACTIVATION_RECONNECTING_PAYMENT    = 7,
+    PLAN_ACTIVATION_DELAY_OTASP             = 8,
+    PLAN_ACTIVATION_START_OTASP             = 9,
+    PLAN_ACTIVATION_OTASP                   = 10,
+    PLAN_ACTIVATION_RECONNECTING_OTASP      = 11,
+    PLAN_ACTIVATION_DONE                    = 12,
     PLAN_ACTIVATION_ERROR                   = 0xFF,
   } PlanActivationState;
-
-  class TaskProxy : public base::RefCountedThreadSafe<TaskProxy> {
-   public:
-    TaskProxy(const base::WeakPtr<MobileSetupHandler>& handler, int delay)
-        : handler_(handler), delay_(delay) {
-    }
-    TaskProxy(const base::WeakPtr<MobileSetupHandler>& handler,
-              const std::string& status)
-        : handler_(handler), status_(status) {
-    }
-    void HandleStartActivation() {
-      if (handler_)
-        handler_->StartActivation();
-    }
-    void HandleSetTransactionStatus() {
-      if (handler_)
-        handler_->SetTransactionStatus(status_);
-    }
-    void ContinueConnecting() {
-      if (handler_)
-        handler_->ContinueConnecting(delay_);
-    }
-    void RetryOTASP() {
-      if (handler_)
-        handler_->RetryOTASP();
-    }
-   private:
-    base::WeakPtr<MobileSetupHandler> handler_;
-    std::string status_;
-    int delay_;
-    DISALLOW_COPY_AND_ASSIGN(TaskProxy);
-  };
 
   // Handlers for JS WebUI messages.
   void HandleSetTransactionStatus(const ListValue* args);
   void HandleStartActivation(const ListValue* args);
+  void HandlePaymentPortalLoad(const ListValue* args);
   void SetTransactionStatus(const std::string& status);
-  // Schedules activation process via task proxy.
-  void InitiateActivation();
   // Starts activation.
   void StartActivation();
   // Retried OTASP.
@@ -271,15 +297,17 @@ class MobileSetupHandler
                    const std::string& error_description);
   // Prepares network devices for cellular activation process.
   void SetupActivationProcess(chromeos::CellularNetwork* network);
-  // Disables ethernet and wifi newtorks since they interefere with
-  // detection of restricted pool on cellular side.
-  void DisableOtherNetworks();
   // Resets network devices after cellular activation process.
   // |network| should be NULL if the activation process failed.
   void CompleteActivation(chromeos::CellularNetwork* network);
-  // Control routines for handling other types of connections during
-  // cellular activation.
-  void ReEnableOtherConnections();
+  // Disables SSL certificate revocation checking mechanism. In the case
+  // where captive portal connection is the only one present, such revocation
+  // checks could prevent payment portal page from loading.
+  void DisableCertRevocationChecking();
+  // Reenables SSL certificate revocation checking mechanism.
+  void ReEnableCertRevocationChecking();
+  // Return error message for a given code.
+  std::string GetErrorMessage(const std::string& code);
 
   // Converts the currently active CellularNetwork device into a JS object.
   static void GetDeviceInfo(chromeos::CellularNetwork* network,
@@ -293,24 +321,17 @@ class MobileSetupHandler
                                           std::string* state,
                                           std::string* error);
 
-  // Return error message for a given code.
-  static std::string GetErrorMessage(const std::string& code);
-  static void LoadCellularConfig();
-
   // Returns next reconnection state based on the current activation phase.
   static PlanActivationState GetNextReconnectState(PlanActivationState state);
   static const char* GetStateDescription(PlanActivationState state);
 
-  static scoped_ptr<CellularConfigDocument> cellular_config_;
-
+  scoped_refptr<CellularConfigDocument> cellular_config_;
   TabContents* tab_contents_;
   // Internal handler state.
   PlanActivationState state_;
   std::string service_path_;
-  // Flags that control if wifi and ethernet connection needs to be restored
+  // Flags that controls if cert_checks needs to be restored
   // after the activation of cellular network.
-  bool reenable_wifi_;
-  bool reenable_ethernet_;
   bool reenable_cert_check_;
   bool evaluating_;
   // True if we think that another tab is already running activation.
@@ -319,6 +340,8 @@ class MobileSetupHandler
   int connection_retry_count_;
   // Post payment reconnect wait counters.
   int reconnect_wait_count_;
+  // Payment portal reload/reconnect attempt count.
+  int payment_reconnect_count_;
   // Activation retry attempt count;
   int activation_attempt_;
   // Connection start time.
@@ -329,8 +352,6 @@ class MobileSetupHandler
   DISALLOW_COPY_AND_ASSIGN(MobileSetupHandler);
 };
 
-scoped_ptr<CellularConfigDocument> MobileSetupHandler::cellular_config_;
-
 ////////////////////////////////////////////////////////////////////////////////
 //
 // CellularConfigDocument
@@ -338,23 +359,32 @@ scoped_ptr<CellularConfigDocument> MobileSetupHandler::cellular_config_;
 ////////////////////////////////////////////////////////////////////////////////
 
 std::string CellularConfigDocument::GetErrorMessage(const std::string& code) {
-  std::map<std::string, std::string>::iterator iter = error_map_.find(code);
+  base::AutoLock create(config_lock_);
+  ErrorMap::iterator iter = error_map_.find(code);
   if (iter == error_map_.end())
     return code;
   return iter->second;
 }
 
-bool CellularConfigDocument::LoadFromFile(const FilePath& config_path) {
-  error_map_.clear();
+void CellularConfigDocument::LoadCellularConfigFile() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  // Load partner customization startup manifest if it is available.
+  FilePath config_path(kCellularConfigPath);
+  if (!file_util::PathExists(config_path))
+    return;
 
-  std::string config;
-  {
-    // Reading config file causes us to do blocking IO on UI thread.
-    // Temporarily allow it until we fix http://crosbug.com/11535
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
-    if (!file_util::ReadFileToString(config_path, &config))
-      return false;
+  if (LoadFromFile(config_path)) {
+    DVLOG(1) << "Cellular config file loaded: " << kCellularConfigPath;
+  } else {
+    LOG(ERROR) << "Error loading cellular config file: " <<
+        kCellularConfigPath;
   }
+}
+
+bool CellularConfigDocument::LoadFromFile(const FilePath& config_path) {
+  std::string config;
+  if (!file_util::ReadFileToString(config_path, &config))
+    return false;
 
   scoped_ptr<Value> root(base::JSONReader::Read(config, true));
   DCHECK(root.get() != NULL);
@@ -368,6 +398,7 @@ bool CellularConfigDocument::LoadFromFile(const FilePath& config_path) {
     LOG(WARNING) << "Cellular config file missing version";
     return false;
   }
+  ErrorMap error_map;
   DictionaryValue* errors = NULL;
   if (!root_dict->GetDictionary(kErrorsField, &errors))
     return false;
@@ -377,13 +408,19 @@ bool CellularConfigDocument::LoadFromFile(const FilePath& config_path) {
     std::string value;
     if (!errors->GetString(*keys, &value)) {
       LOG(WARNING) << "Bad cellular config error value";
-      error_map_.clear();
       return false;
     }
-
-    error_map_.insert(std::pair<std::string, std::string>(*keys, value));
+    error_map.insert(ErrorMap::value_type(*keys, value));
   }
+  SetErrorMap(error_map);
   return true;
+}
+
+void CellularConfigDocument::SetErrorMap(
+    const ErrorMap& map) {
+  base::AutoLock create(config_lock_);
+  error_map_.clear();
+  error_map_.insert(map.begin(), map.end());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -426,6 +463,12 @@ void MobileSetupUIHTMLSource::StartDataRequest(const std::string& path,
                     l10n_util::GetStringUTF16(IDS_MOBILE_COMPLETED_TEXT));
   strings.SetString("close_button",
                     l10n_util::GetStringUTF16(IDS_CLOSE));
+  strings.SetString("cancel_button",
+                    l10n_util::GetStringUTF16(IDS_CANCEL));
+  strings.SetString("ok_button",
+                    l10n_util::GetStringUTF16(IDS_OK));
+  strings.SetString("cancel_question",
+                    l10n_util::GetStringUTF16(IDS_MOBILE_CANCEL_ACTIVATION));
   SetFontAndTextDirection(&strings);
 
   static const base::StringPiece html(
@@ -444,16 +487,16 @@ void MobileSetupUIHTMLSource::StartDataRequest(const std::string& path,
 //
 ////////////////////////////////////////////////////////////////////////////////
 MobileSetupHandler::MobileSetupHandler(const std::string& service_path)
-    : tab_contents_(NULL),
+    : cellular_config_(new CellularConfigDocument()),
+      tab_contents_(NULL),
       state_(PLAN_ACTIVATION_PAGE_LOADING),
       service_path_(service_path),
-      reenable_wifi_(false),
-      reenable_ethernet_(false),
       reenable_cert_check_(false),
       evaluating_(false),
       already_running_(false),
       connection_retry_count_(0),
       reconnect_wait_count_(0),
+      payment_reconnect_count_(0),
       activation_attempt_(0) {
 }
 
@@ -465,7 +508,7 @@ MobileSetupHandler::~MobileSetupHandler() {
   lib->RemoveObserverForAllNetworks(this);
   if (lib->IsLocked())
     lib->Unlock();
-  ReEnableOtherConnections();
+  ReEnableCertRevocationChecking();
 }
 
 WebUIMessageHandler* MobileSetupHandler::Attach(WebUI* web_ui) {
@@ -474,14 +517,6 @@ WebUIMessageHandler* MobileSetupHandler::Attach(WebUI* web_ui) {
 
 void MobileSetupHandler::Init(TabContents* contents) {
   tab_contents_ = contents;
-  chromeos::CellularNetwork* network = GetCellularNetwork(service_path_);
-  if (!network || !network->SupportsActivation())
-    return;
-  LoadCellularConfig();
-  if (!chromeos::CrosLibrary::Get()->GetNetworkLibrary()->IsLocked())
-    SetupActivationProcess(network);
-  else
-    already_running_ = true;
 }
 
 void MobileSetupHandler::RegisterMessages() {
@@ -490,6 +525,9 @@ void MobileSetupHandler::RegisterMessages() {
                  base::Unretained(this)));
   web_ui_->RegisterMessageCallback(kJsApiSetTransactionStatus,
       base::Bind(&MobileSetupHandler::HandleSetTransactionStatus,
+                 base::Unretained(this)));
+  web_ui_->RegisterMessageCallback(kJsApiPaymentPortalLoad,
+      base::Bind(&MobileSetupHandler::HandlePaymentPortalLoad,
                  base::Unretained(this)));
 }
 
@@ -513,8 +551,10 @@ void MobileSetupHandler::OnNetworkChanged(chromeos::NetworkLibrary* cros,
 }
 
 void MobileSetupHandler::HandleStartActivation(const ListValue* args) {
-  InitiateActivation();
-  UMA_HISTOGRAM_COUNTS("Cellular.MobileSetupStart", 1);
+  BrowserThread::PostTaskAndReply(BrowserThread::FILE, FROM_HERE,
+      base::Bind(&CellularConfigDocument::LoadCellularConfigFile,
+                 cellular_config_.get()),
+      base::Bind(&MobileSetupHandler::StartActivationOnUIThread, AsWeakPtr()));
 }
 
 void MobileSetupHandler::HandleSetTransactionStatus(const ListValue* args) {
@@ -525,19 +565,50 @@ void MobileSetupHandler::HandleSetTransactionStatus(const ListValue* args) {
   std::string status;
   if (!args->GetString(0, &status))
     return;
-  scoped_refptr<TaskProxy> task = new TaskProxy(AsWeakPtr(), status);
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      base::Bind(&TaskProxy::HandleSetTransactionStatus, task.get()));
+      base::Bind(&MobileSetupHandler::SetTransactionStatus, AsWeakPtr(),
+                 status));
 }
 
-void MobileSetupHandler::InitiateActivation() {
-  scoped_refptr<TaskProxy> task = new TaskProxy(AsWeakPtr(), 0);
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      base::Bind(&TaskProxy::HandleStartActivation, task.get()));
+void MobileSetupHandler::HandlePaymentPortalLoad(const ListValue* args) {
+  const size_t kPaymentPortalLoadParamCount = 1;
+  if (args->GetSize() != kPaymentPortalLoadParamCount)
+    return;
+  // Get change callback function name.
+  std::string result;
+  if (!args->GetString(0, &result))
+    return;
+  chromeos::CellularNetwork* network = GetCellularNetwork(service_path_);
+  if (!network) {
+    ChangeState(NULL, PLAN_ACTIVATION_ERROR,
+                GetErrorMessage(kErrorNoService));
+    return;
+  }
+  if (state_ == PLAN_ACTIVATION_PAYMENT_PORTAL_LOADING ||
+      state_ == PLAN_ACTIVATION_SHOWING_PAYMENT) {
+    if (LowerCaseEqualsASCII(result, kJsApiResultOK)) {
+      payment_reconnect_count_ = 0;
+      ChangeState(network, PLAN_ACTIVATION_SHOWING_PAYMENT, std::string());
+    } else {
+      payment_reconnect_count_++;
+      if (payment_reconnect_count_ > kMaxPortalReconnectCount) {
+        ChangeState(NULL, PLAN_ACTIVATION_ERROR,
+                    GetErrorMessage(kErrorNoService));
+        return;
+      }
+      // Disconnect now, this should force reconnection and we will retry to
+      // load the frame containing payment portal again.
+      DisconnectFromNetwork(network);
+    }
+  } else {
+    NOTREACHED() << "Called paymentPortalLoad while in unexpected state: "
+                 << GetStateDescription(state_);
+  }
 }
 
 void MobileSetupHandler::StartActivation() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  UMA_HISTOGRAM_COUNTS("Cellular.MobileSetupStart", 1);
   chromeos::NetworkLibrary* lib =
       chromeos::CrosLibrary::Get()->GetNetworkLibrary();
   chromeos::CellularNetwork* network = GetCellularNetwork(service_path_);
@@ -587,7 +658,7 @@ void MobileSetupHandler::SetTransactionStatus(const std::string& status) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // The payment is received, try to reconnect and check the status all over
   // again.
-  if (LowerCaseEqualsASCII(status, "ok") &&
+  if (LowerCaseEqualsASCII(status, kJsApiResultOK) &&
       state_ == PLAN_ACTIVATION_SHOWING_PAYMENT) {
     chromeos::NetworkLibrary* lib =
         chromeos::CrosLibrary::Get()->GetNetworkLibrary();
@@ -617,6 +688,7 @@ void MobileSetupHandler::ReconnectTimerFired() {
   // Permit network connection changes only in reconnecting states.
   if (state_ != PLAN_ACTIVATION_RECONNECTING_OTASP_TRY &&
       state_ != PLAN_ACTIVATION_RECONNECTING &&
+      state_ != PLAN_ACTIVATION_RECONNECTING_PAYMENT &&
       state_ != PLAN_ACTIVATION_RECONNECTING_OTASP)
     return;
   chromeos::CellularNetwork* network = GetCellularNetwork(service_path_);
@@ -670,6 +742,7 @@ bool MobileSetupHandler::ConnectToNetwork(
   // Permit network connection changes only in reconnecting states.
   if (state_ != PLAN_ACTIVATION_RECONNECTING_OTASP_TRY &&
       state_ != PLAN_ACTIVATION_RECONNECTING &&
+      state_ != PLAN_ACTIVATION_RECONNECTING_PAYMENT &&
       state_ != PLAN_ACTIVATION_RECONNECTING_OTASP)
     return false;
   if (network)
@@ -681,10 +754,9 @@ bool MobileSetupHandler::ConnectToNetwork(
                  << (network ? network->service_path().c_str() : "no service");
     // If we coudn't connect during reconnection phase, try to reconnect
     // with a delay (and try to reconnect if needed).
-    scoped_refptr<TaskProxy> task = new TaskProxy(AsWeakPtr(),
-                                                  delay);
     BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
-        base::Bind(&TaskProxy::ContinueConnecting, task.get()), delay);
+        base::Bind(&MobileSetupHandler::ContinueConnecting, AsWeakPtr(), delay),
+        delay);
     return false;
   }
   chromeos::CrosLibrary::Get()->GetNetworkLibrary()->
@@ -705,10 +777,9 @@ void MobileSetupHandler::ForceReconnect(
   chromeos::CrosLibrary::Get()->GetNetworkLibrary()->
       DisconnectFromNetwork(network);
   // Check the network state 3s after we disconnect to make sure.
-  scoped_refptr<TaskProxy> task = new TaskProxy(AsWeakPtr(),
-                                                delay);
   BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
-      base::Bind(&TaskProxy::ContinueConnecting, task.get()), delay);
+      base::Bind(&MobileSetupHandler::ContinueConnecting, AsWeakPtr(), delay),
+      delay);
 }
 
 bool MobileSetupHandler::ConnectionTimeout() {
@@ -726,6 +797,7 @@ void MobileSetupHandler::EvaluateCellularNetwork(
     LOG(WARNING) << "Cellular service lost";
     if (state_ == PLAN_ACTIVATION_RECONNECTING_OTASP_TRY ||
         state_ == PLAN_ACTIVATION_RECONNECTING ||
+        state_ == PLAN_ACTIVATION_RECONNECTING_PAYMENT ||
         state_ == PLAN_ACTIVATION_RECONNECTING_OTASP) {
       // This might be the legit case when service is lost after activation.
       // We need to make sure we force reconnection as soon as it shows up.
@@ -755,7 +827,7 @@ void MobileSetupHandler::EvaluateCellularNetwork(
             new_state = PLAN_ACTIVATION_RECONNECTING;
           } else if (network->connected()) {
             if (network->restricted_pool()) {
-              new_state = PLAN_ACTIVATION_SHOWING_PAYMENT;
+              new_state = PLAN_ACTIVATION_PAYMENT_PORTAL_LOADING;
             } else {
               new_state = PLAN_ACTIVATION_DONE;
             }
@@ -813,7 +885,7 @@ void MobileSetupHandler::EvaluateCellularNetwork(
             new_state = GetNextReconnectState(state_);
           } else if (network->connected()) {
             if (network->restricted_pool()) {
-              new_state = PLAN_ACTIVATION_SHOWING_PAYMENT;
+              new_state = PLAN_ACTIVATION_PAYMENT_PORTAL_LOADING;
             } else {
               new_state = PLAN_ACTIVATION_DONE;
             }
@@ -822,7 +894,7 @@ void MobileSetupHandler::EvaluateCellularNetwork(
         case chromeos::ACTIVATION_STATE_PARTIALLY_ACTIVATED:
           if (network->connected()) {
             if (network->restricted_pool())
-              new_state = PLAN_ACTIVATION_SHOWING_PAYMENT;
+              new_state = PLAN_ACTIVATION_PAYMENT_PORTAL_LOADING;
           } else {
             new_state = GetNextReconnectState(state_);
           }
@@ -837,11 +909,9 @@ void MobileSetupHandler::EvaluateCellularNetwork(
       break;
     }
     case PLAN_ACTIVATION_RECONNECTING_OTASP_TRY:
+    case PLAN_ACTIVATION_RECONNECTING_PAYMENT:
     case PLAN_ACTIVATION_RECONNECTING: {
       if (network->connected()) {
-        // Make sure other networks are not interfering with our detection of
-        // restricted pool.
-        DisableOtherNetworks();
         // Wait until the service shows up and gets activated.
         switch (network->activation_state()) {
           case chromeos::ACTIVATION_STATE_PARTIALLY_ACTIVATED:
@@ -868,7 +938,7 @@ void MobileSetupHandler::EvaluateCellularNetwork(
                 // If we have already received payment, don't show the payment
                 // page again. We should try to reconnect after some
                 // time instead.
-                new_state = PLAN_ACTIVATION_SHOWING_PAYMENT;
+                new_state = PLAN_ACTIVATION_PAYMENT_PORTAL_LOADING;
               }
             } else if (network->activation_state() ==
                            chromeos::ACTIVATION_STATE_ACTIVATED) {
@@ -886,9 +956,6 @@ void MobileSetupHandler::EvaluateCellularNetwork(
     }
     case PLAN_ACTIVATION_RECONNECTING_OTASP: {
       if (network->connected()) {
-        // Make sure other networks are not interfering with our detection of
-        // restricted pool.
-        DisableOtherNetworks();
         // Wait until the service shows up and gets activated.
         switch (network->activation_state()) {
           case chromeos::ACTIVATION_STATE_PARTIALLY_ACTIVATED:
@@ -926,7 +993,12 @@ void MobileSetupHandler::EvaluateCellularNetwork(
     case PLAN_ACTIVATION_PAGE_LOADING:
       break;
     // Just ignore all signals until the site confirms payment.
-    case PLAN_ACTIVATION_SHOWING_PAYMENT:
+    case PLAN_ACTIVATION_PAYMENT_PORTAL_LOADING:
+    case PLAN_ACTIVATION_SHOWING_PAYMENT: {
+      if (network->disconnected())
+        new_state = PLAN_ACTIVATION_RECONNECTING_PAYMENT;
+      break;
+    }
       // Activation completed/failed, ignore network changes.
     case PLAN_ACTIVATION_DONE:
     case PLAN_ACTIVATION_ERROR:
@@ -1016,8 +1088,12 @@ const char* MobileSetupHandler::GetStateDescription(
       return "INITIATING_ACTIVATION";
     case PLAN_ACTIVATION_RECONNECTING:
       return "RECONNECTING";
+    case PLAN_ACTIVATION_PAYMENT_PORTAL_LOADING:
+      return "PAYMENT_PORTAL_LOADING";
     case PLAN_ACTIVATION_SHOWING_PAYMENT:
       return "SHOWING_PAYMENT";
+    case PLAN_ACTIVATION_RECONNECTING_PAYMENT:
+      return "RECONNECTING_PAYMENT";
     case PLAN_ACTIVATION_START_OTASP:
       return "START_OTASP";
     case PLAN_ACTIVATION_DELAY_OTASP:
@@ -1049,7 +1125,7 @@ void MobileSetupHandler::CompleteActivation(
     network->SetAutoConnect(true);
   // Reactivate other types of connections if we have
   // shut them down previously.
-  ReEnableOtherConnections();
+  ReEnableCertRevocationChecking();
 }
 
 void MobileSetupHandler::UpdatePage(
@@ -1062,7 +1138,7 @@ void MobileSetupHandler::UpdatePage(
   if (error_description.length())
     device_dict.SetString("error", error_description);
   web_ui_->CallJavascriptFunction(
-      kJsDeviceStatusChangedHandler, device_dict);
+      kJsDeviceStatusChangedCallback, device_dict);
 }
 
 
@@ -1100,9 +1176,9 @@ void MobileSetupHandler::ChangeState(chromeos::CellularNetwork* network,
       break;
     case PLAN_ACTIVATION_DELAY_OTASP: {
       UMA_HISTOGRAM_COUNTS("Cellular.RetryOTASP", 1);
-      scoped_refptr<TaskProxy> task = new TaskProxy(AsWeakPtr(), 0);
       BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
-          base::Bind(&TaskProxy::RetryOTASP, task.get()), kOTASPRetryDelay);
+          base::Bind(&MobileSetupHandler::RetryOTASP, AsWeakPtr()),
+          kOTASPRetryDelay);
       break;
     }
     case PLAN_ACTIVATION_INITIATING_ACTIVATION:
@@ -1123,6 +1199,7 @@ void MobileSetupHandler::ChangeState(chromeos::CellularNetwork* network,
       break;
     case PLAN_ACTIVATION_RECONNECTING_OTASP_TRY:
     case PLAN_ACTIVATION_RECONNECTING:
+    case PLAN_ACTIVATION_RECONNECTING_PAYMENT:
     case PLAN_ACTIVATION_RECONNECTING_OTASP: {
       // Start reconnect timer. This will ensure that we are not left in
       // limbo by the network library.
@@ -1141,6 +1218,7 @@ void MobileSetupHandler::ChangeState(chromeos::CellularNetwork* network,
     }
     case PLAN_ACTIVATION_PAGE_LOADING:
       return;
+    case PLAN_ACTIVATION_PAYMENT_PORTAL_LOADING:
     case PLAN_ACTIVATION_SHOWING_PAYMENT:
       // Fix for fix SSL for the walled gardens where cert chain verification
       // might not work.
@@ -1159,18 +1237,7 @@ void MobileSetupHandler::ChangeState(chromeos::CellularNetwork* network,
   }
 }
 
-void MobileSetupHandler::ReEnableOtherConnections() {
-  chromeos::NetworkLibrary* lib = chromeos::CrosLibrary::Get()->
-      GetNetworkLibrary();
-  if (reenable_ethernet_) {
-    reenable_ethernet_ = false;
-    lib->EnableEthernetNetworkDevice(true);
-  }
-  if (reenable_wifi_) {
-    reenable_wifi_ = false;
-    lib->EnableWifiNetworkDevice(true);
-  }
-
+void MobileSetupHandler::ReEnableCertRevocationChecking() {
   PrefService* prefs = g_browser_process->local_state();
   if (reenable_cert_check_) {
     prefs->SetBoolean(prefs::kCertRevocationCheckingEnabled,
@@ -1179,12 +1246,8 @@ void MobileSetupHandler::ReEnableOtherConnections() {
   }
 }
 
-void MobileSetupHandler::SetupActivationProcess(
-    chromeos::CellularNetwork* network) {
-  if (!network)
-    return;
-
-  // Disable SSL cert checks since we will be doing this in
+void MobileSetupHandler::DisableCertRevocationChecking() {
+  // Disable SSL cert checks since we might be performin activation in the
   // restricted pool.
   PrefService* prefs = g_browser_process->local_state();
   if (!reenable_cert_check_ &&
@@ -1193,29 +1256,20 @@ void MobileSetupHandler::SetupActivationProcess(
     reenable_cert_check_ = true;
     prefs->SetBoolean(prefs::kCertRevocationCheckingEnabled, false);
   }
+}
 
+void MobileSetupHandler::SetupActivationProcess(
+    chromeos::CellularNetwork* network) {
+  if (!network)
+    return;
+
+  DisableCertRevocationChecking();
   chromeos::NetworkLibrary* lib = chromeos::CrosLibrary::Get()->
       GetNetworkLibrary();
   // Disable autoconnect to cellular network.
   network->SetAutoConnect(false);
 
-  // Prevent any other network interference.
-  DisableOtherNetworks();
   lib->Lock();
-}
-
-void MobileSetupHandler::DisableOtherNetworks() {
-  chromeos::NetworkLibrary* lib = chromeos::CrosLibrary::Get()->
-      GetNetworkLibrary();
-  // Disable ethernet and wifi.
-  if (lib->ethernet_enabled()) {
-    reenable_ethernet_ = true;
-    lib->EnableEthernetNetworkDevice(false);
-  }
-  if (lib->wifi_enabled()) {
-    reenable_wifi_ = true;
-    lib->EnableWifiNetworkDevice(false);
-  }
 }
 
 bool MobileSetupHandler::GotActivationError(
@@ -1284,39 +1338,22 @@ void MobileSetupHandler::GetDeviceInfo(chromeos::CellularNetwork* network,
 }
 
 std::string MobileSetupHandler::GetErrorMessage(const std::string& code) {
-  if (!cellular_config_.get())
-    return "";
   return cellular_config_->GetErrorMessage(code);
 }
 
-void MobileSetupHandler::LoadCellularConfig() {
-  static bool config_loaded = false;
-  if (config_loaded)
+void MobileSetupHandler::StartActivationOnUIThread() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  chromeos::CellularNetwork* network = GetCellularNetwork(service_path_);
+  if (!network || !network->SupportsActivation())
     return;
-  config_loaded = true;
-  // Load partner customization startup manifest if it is available.
-  FilePath config_path(kCellularConfigPath);
-  bool config_exists = false;
-  {
-    // Reading config file causes us to do blocking IO on UI thread.
-    // Temporarily allow it until we fix http://crosbug.com/11535
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
-    config_exists = file_util::PathExists(config_path);
-  }
-  if (config_exists) {
-    scoped_ptr<CellularConfigDocument> config(new CellularConfigDocument());
-    bool config_loaded = config->LoadFromFile(config_path);
-    if (config_loaded) {
-      LOG(INFO) << "Cellular config file loaded: " << kCellularConfigPath;
-      // lock
-      cellular_config_.reset(config.release());
-    } else {
-      LOG(ERROR) << "Error loading cellular config file: " <<
-          kCellularConfigPath;
-    }
-  }
-}
 
+  if (!chromeos::CrosLibrary::Get()->GetNetworkLibrary()->IsLocked())
+    SetupActivationProcess(network);
+  else
+    already_running_ = true;
+
+  StartActivation();
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -1336,4 +1373,10 @@ MobileSetupUI::MobileSetupUI(TabContents* contents) : ChromeWebUI(contents) {
   // Set up the chrome://mobilesetup/ source.
   Profile* profile = Profile::FromBrowserContext(contents->browser_context());
   profile->GetChromeURLDataManager()->AddDataSource(html_source);
+}
+
+void MobileSetupUI::RenderViewCreated(RenderViewHost* host) {
+  ChromeWebUI::RenderViewCreated(host);
+  // Destroyed by the corresponding RenderViewHost.
+  new PortalFrameLoadObserver(host, tab_contents()->web_ui());
 }

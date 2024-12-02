@@ -10,7 +10,7 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
-#include "views/controls/scrollbar/native_scroll_bar.h"
+#include "ui/views/controls/scrollbar/native_scroll_bar.h"
 
 NativeWebKeyboardEvent DropdownBarHost::GetKeyboardEvent(
      const TabContents* contents,
@@ -18,7 +18,8 @@ NativeWebKeyboardEvent DropdownBarHost::GetKeyboardEvent(
   HWND hwnd = contents->GetContentNativeView();
   WORD key = WindowsKeyCodeForKeyboardCode(key_event.key_code());
 
-  return NativeWebKeyboardEvent(hwnd, key_event.native_event().message, key, 0);
+  MSG msg = { hwnd, key_event.native_event().message, key, 0 };
+  return NativeWebKeyboardEvent(msg);
 }
 
 void DropdownBarHost::SetWidgetPositionNative(const gfx::Rect& new_pos,

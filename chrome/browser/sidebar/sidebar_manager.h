@@ -11,12 +11,10 @@
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
 #include "chrome/browser/sidebar/sidebar_container.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class GURL;
-class PrefService;
-class Profile;
 class SidebarContainer;
 class SkBitmap;
 class TabContents;
@@ -27,7 +25,7 @@ class TabContents;
 //  This class is a singleton that manages SidebarContainer instances and
 //  maintains a connection between tabs and sidebars.
 //
-class SidebarManager : public NotificationObserver,
+class SidebarManager : public content::NotificationObserver,
                        public base::RefCounted<SidebarManager>,
                        private SidebarContainer::Delegate {
  public:
@@ -98,13 +96,13 @@ class SidebarManager : public NotificationObserver,
 
   virtual ~SidebarManager();
 
-  // Overridden from NotificationObserver.
+  // Overridden from content::NotificationObserver.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Overridden from SidebarContainer::Delegate.
-  virtual void UpdateSidebar(SidebarContainer* host);
+  virtual void UpdateSidebar(SidebarContainer* host) OVERRIDE;
 
   // Hides all sidebars registered for |tab|.
   void HideAllSidebars(TabContents* tab);
@@ -127,7 +125,7 @@ class SidebarManager : public NotificationObserver,
   // Forgets the link between |tab| and |sidebar_host|.
   void UnbindSidebarHost(TabContents* tab, SidebarContainer* sidebar_host);
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // This map stores sidebars linked to a particular tab. Sidebars are
   // identified by their unique content id (string).
@@ -149,4 +147,3 @@ class SidebarManager : public NotificationObserver,
 };
 
 #endif  // CHROME_BROWSER_SIDEBAR_SIDEBAR_MANAGER_H_
-

@@ -5,10 +5,15 @@
 #include "chrome/browser/chromeos/cros/burn_library.h"
 
 #include <cstring>
+
+#include "base/bind.h"
 #include "base/memory/linked_ptr.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/disks/disk_mount_manager.h"
 #include "chrome/common/zip.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace chromeos {
 
@@ -145,13 +150,14 @@ void BurnLibraryImpl::DoBurn(const FilePath& source_path,
   scoped_refptr<BurnLibraryTaskProxy> task =
       new BurnLibraryTaskProxy(AsWeakPtr());
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(task.get(), &BurnLibraryTaskProxy::UnzipImage));
+                          base::Bind(&BurnLibraryTaskProxy::UnzipImage,
+                                     task));
 }
 
 void BurnLibraryImpl::UnzipImage() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
-  if (Unzip(source_zip_file_, source_zip_file_.DirName())) {
+  if (zip::Unzip(source_zip_file_, source_zip_file_.DirName())) {
     source_image_file_ =
         source_zip_file_.DirName().Append(source_image_name_).value();
   }
@@ -159,7 +165,8 @@ void BurnLibraryImpl::UnzipImage() {
   scoped_refptr<BurnLibraryTaskProxy> task =
       new BurnLibraryTaskProxy(AsWeakPtr());
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(task.get(), &BurnLibraryTaskProxy::ImageUnzipped));
+                          base::Bind(&BurnLibraryTaskProxy::ImageUnzipped,
+                                     task));
 }
 
 void BurnLibraryImpl::OnImageUnzipped() {
@@ -179,9 +186,10 @@ void BurnLibraryImpl::OnImageUnzipped() {
 
   burning_ = true;
 
-  chromeos::CrosLibrary::Get()->GetMountLibrary()->UnmountDeviceRecursive(
-      target_device_path_.c_str(), &BurnLibraryImpl::DevicesUnmountedCallback,
-      this);
+  chromeos::disks::DiskMountManager::GetInstance()->
+      UnmountDeviceRecursive(target_device_path_,
+                             &BurnLibraryImpl::DevicesUnmountedCallback,
+                             this);
 }
 
 void BurnLibraryImpl::DevicesUnmountedCallback(void* object, bool success) {
@@ -276,7 +284,3 @@ BurnLibrary* BurnLibrary::GetImpl(bool stub) {
 }
 
 }  // namespace chromeos
-
-// Allows InvokeLater without adding refcounting. This class is a Singleton and
-// won't be deleted until it's last InvokeLater is run.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(chromeos::BurnLibraryImpl);

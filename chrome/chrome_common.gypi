@@ -9,6 +9,9 @@
       'type': 'static_library',
       'variables': {
         'chrome_common_target': 1,
+        # TODO(thakis): Turn this on. Blocked on g_log_function_mapping in
+        # ipc_message_macros.h. http://crbug.com/101600
+        #'enable_wexit_time_destructors': 1,
       },
       'include_dirs': [
           '..',
@@ -22,31 +25,31 @@
         # TODO(gregoryd): chrome_resources and chrome_strings could be
         #  shared with the 64-bit target, but it does not work due to a gyp
         # issue.
-        'app/policy/cloud_policy_codegen.gyp:policy',
-        'chrome_resources',
-        'chrome_strings',
         'common_constants',
         'common_net',
-        'default_plugin/default_plugin.gyp:default_plugin',
-        'theme_resources',
-        '../base/base.gyp:base',
-        '../base/base.gyp:base_i18n',
-        '../base/base.gyp:base_static',
-        '../build/temp_gyp/googleurl.gyp:googleurl',
-        '../content/content.gyp:content_common',
-        '../ipc/ipc.gyp:ipc',
-        '../net/net.gyp:net',
-        '../printing/printing.gyp:printing',
-        '../skia/skia.gyp:skia',
-        '../third_party/bzip2/bzip2.gyp:bzip2',
-        '../third_party/icu/icu.gyp:icui18n',
-        '../third_party/icu/icu.gyp:icuuc',
-        '../third_party/libxml/libxml.gyp:libxml',
-        '../third_party/sqlite/sqlite.gyp:sqlite',
-        '../third_party/zlib/zlib.gyp:zlib',
-        '../ui/ui.gyp:ui_resources',
-        '../ui/ui.gyp:ui_resources_standard',
-        '../webkit/support/webkit_support.gyp:glue',
+        'common_version',
+        '<(DEPTH)/base/base.gyp:base',
+        '<(DEPTH)/base/base.gyp:base_i18n',
+        '<(DEPTH)/base/base.gyp:base_static',
+        '<(DEPTH)/build/temp_gyp/googleurl.gyp:googleurl',
+        '<(DEPTH)/chrome/app/policy/cloud_policy_codegen.gyp:policy',
+        '<(DEPTH)/chrome/chrome_resources.gyp:chrome_resources',
+        '<(DEPTH)/chrome/chrome_resources.gyp:chrome_strings',
+        '<(DEPTH)/chrome/chrome_resources.gyp:theme_resources',
+        '<(DEPTH)/content/content.gyp:content_common',
+        '<(DEPTH)/ipc/ipc.gyp:ipc',
+        '<(DEPTH)/net/net.gyp:net',
+        '<(DEPTH)/printing/printing.gyp:printing',
+        '<(DEPTH)/skia/skia.gyp:skia',
+        '<(DEPTH)/third_party/bzip2/bzip2.gyp:bzip2',
+        '<(DEPTH)/third_party/icu/icu.gyp:icui18n',
+        '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
+        '<(DEPTH)/third_party/libxml/libxml.gyp:libxml',
+        '<(DEPTH)/third_party/sqlite/sqlite.gyp:sqlite',
+        '<(DEPTH)/third_party/zlib/zlib.gyp:zlib',
+        '<(DEPTH)/ui/ui.gyp:ui_resources',
+        '<(DEPTH)/ui/ui.gyp:ui_resources_standard',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
       ],
       'sources': [
         'common/about_handler.cc',
@@ -58,6 +61,8 @@
         'common/autofill_messages.h',
         'common/automation_constants.cc',
         'common/automation_constants.h',
+        'common/automation_id.cc',
+        'common/automation_id.h',
         'common/automation_messages.cc',
         'common/automation_messages.h',
         'common/automation_messages_internal.h',
@@ -72,11 +77,16 @@
         'common/chrome_content_client.h',
         'common/chrome_notification_types.h',
         'common/chrome_plugin_messages.h',
+        'common/chrome_result_codes.h',
+        'common/chrome_sandbox_type_mac.h',
+        'common/chrome_utility_messages.h',
         'common/chrome_version_info.cc',
         'common/chrome_version_info_linux.cc',
         'common/chrome_version_info_mac.mm',
         'common/chrome_version_info_win.cc',
         'common/chrome_version_info.h',
+        'common/cloud_print/cloud_print_class_mac.h',
+        'common/cloud_print/cloud_print_class_mac.mm',
         'common/cloud_print/cloud_print_proxy_info.cc',
         'common/cloud_print/cloud_print_proxy_info.h',
         'common/common_api.h',
@@ -95,8 +105,8 @@
         'common/content_settings_types.h',
         'common/custom_handlers/protocol_handler.cc',
         'common/custom_handlers/protocol_handler.h',
-        'common/default_plugin.cc',
-        'common/default_plugin.h',
+        'common/extensions/csp_validator.cc',
+        'common/extensions/csp_validator.h',
         'common/extensions/extension.cc',
         'common/extensions/extension.h',
         'common/extensions/extension_action.cc',
@@ -130,6 +140,8 @@
         'common/extensions/extension_unpacker.h',
         'common/extensions/file_browser_handler.cc',
         'common/extensions/file_browser_handler.h',
+        'common/extensions/manifest.cc',
+        'common/extensions/manifest.h',
         'common/extensions/update_manifest.cc',
         'common/extensions/update_manifest.h',
         'common/extensions/url_pattern.cc',
@@ -138,6 +150,8 @@
         'common/extensions/url_pattern_set.h',
         'common/extensions/user_script.cc',
         'common/extensions/user_script.h',
+        'common/extensions/api/extension_api.cc',
+        'common/extensions/api/extension_api.h',
         'common/external_ipc_fuzzer.h',
         'common/external_ipc_fuzzer.cc',
         'common/favicon_url.cc',
@@ -183,7 +197,6 @@
         'common/nacl_types.h',
         'common/libxml_utils.cc',
         'common/libxml_utils.h',
-        'common/native_window_notification_source.h',
         'common/persistent_pref_store.h',
         'common/pref_store.cc',
         'common/pref_store.h',
@@ -197,7 +210,6 @@
         'common/render_messages.cc',
         'common/render_messages.h',
         'common/safe_browsing/safebrowsing_messages.h',
-        'common/scoped_co_mem.h',
         'common/search_provider.h',
         'common/service_messages.h',
         'common/service_process_util.cc',
@@ -210,6 +222,8 @@
         'common/spellcheck_common.cc',
         'common/spellcheck_common.h',
         'common/spellcheck_messages.h',
+        'common/string_ordinal.cc',
+        'common/string_ordinal.h',
         'common/switch_utils.cc',
         'common/switch_utils.h',
         'common/thumbnail_score.cc',
@@ -218,8 +232,8 @@
         'common/time_format.h',
         'common/url_constants.cc',
         'common/url_constants.h',
-        'common/chrome_view_types.cc',
-        'common/chrome_view_types.h',
+        'common/chrome_view_type.cc',
+        'common/chrome_view_type.h',
         'common/visitedlink_common.cc',
         'common/visitedlink_common.h',
         'common/web_apps.cc',
@@ -230,12 +244,21 @@
         'common/worker_thread_ticker.h',
         'common/zip.cc',  # Requires zlib directly.
         'common/zip.h',
+        'common/zip_internal.cc',
+        'common/zip_internal.h',
+        'common/zip_reader.cc',
+        'common/zip_reader.h',
       ],
       'conditions': [
         ['OS=="win"', {
           'include_dirs': [
             '<(DEPTH)/third_party/wtl/include',
-          ],
+          ]
+        }],
+        ['OS=="win" and use_aura==0', {
+          'dependencies': [
+            '<(DEPTH)/chrome/default_plugin/default_plugin.gyp:default_plugin',
+          ]
         }],
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
@@ -252,25 +275,40 @@
               '-lXext',
             ],
           },
-        },],
-        ['toolkit_views==1', {
-          'sources': [
-            'common/native_web_keyboard_event_views.cc',
-            'common/native_web_keyboard_event_views.h',
-          ],
-        }],  
-        ['use_aura==1', {
-          'sources': [
-            'common/native_web_keyboard_event_aura.cc',
-          ],
-          'dependencies!': [
-           'default_plugin/default_plugin.gyp:default_plugin',
+        }],
+        ['OS=="linux" and selinux==1', {
+          'dependencies': [
+            '../build/linux/system.gyp:selinux',
           ],
         }],
-        ['os_posix == 1 and OS != "mac"', {
-          'include_dirs': [
-            '<(SHARED_INTERMEDIATE_DIR)',
+        ['OS=="mac"', {
+          'dependencies': [
+            '../third_party/mach_override/mach_override.gyp:mach_override',
           ],
+          'include_dirs': [
+            '../third_party/GTM',
+          ],
+        }],
+        ['remoting==1', {
+          'dependencies': [
+            '../remoting/remoting.gyp:remoting_client_plugin',
+          ],
+        }],
+      ],
+      'export_dependent_settings': [
+        '../base/base.gyp:base',
+      ],
+    },
+    {
+      'target_name': 'common_version',
+      'type': 'none',
+      'conditions': [
+        ['os_posix == 1 and OS != "mac"', {
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '<(SHARED_INTERMEDIATE_DIR)',
+            ],
+          },
           # Because posix_version generates a header, we must set the
           # hard_dependency flag.
           'hard_dependency': 1,
@@ -319,27 +357,6 @@
             },
           ],
         }],
-        ['OS=="linux" and selinux==1', {
-          'dependencies': [
-            '../build/linux/system.gyp:selinux',
-          ],
-        }],
-        ['OS=="mac"', {
-          'dependencies': [
-            '../third_party/mach_override/mach_override.gyp:mach_override',
-          ],
-          'include_dirs': [
-            '../third_party/GTM',
-          ],
-        }],
-        ['remoting==1', {
-          'dependencies': [
-            '../remoting/remoting.gyp:remoting_client_plugin',
-          ],
-        }],
-      ],
-      'export_dependent_settings': [
-        '../base/base.gyp:base',
       ],
     },
     {
@@ -364,21 +381,27 @@
         'common/net/gaia/google_service_auth_error.h',
         'common/net/gaia/oauth_request_signer.cc',
         'common/net/gaia/oauth_request_signer.h',
+        'common/net/gaia/oauth2_access_token_consumer.h',
+        'common/net/gaia/oauth2_access_token_fetcher.cc',
+        'common/net/gaia/oauth2_access_token_fetcher.h',
+        'common/net/gaia/oauth2_revocation_consumer.h',
+        'common/net/gaia/oauth2_revocation_fetcher.cc',
+        'common/net/gaia/oauth2_revocation_fetcher.h',
         'common/net/x509_certificate_model.cc',
         'common/net/x509_certificate_model_nss.cc',
         'common/net/x509_certificate_model_openssl.cc',
         'common/net/x509_certificate_model.h',
       ],
       'dependencies': [
-        'chrome_resources',
-        'chrome_strings',
-        '../base/base.gyp:base',
-        '../crypto/crypto.gyp:crypto',
-        '../gpu/gpu.gyp:gpu_ipc',
-        '../net/net.gyp:net_resources',
-        '../net/net.gyp:net',
-        '../third_party/icu/icu.gyp:icui18n',
-        '../third_party/icu/icu.gyp:icuuc',
+        '<(DEPTH)/base/base.gyp:base',
+        '<(DEPTH)/chrome/chrome_resources.gyp:chrome_resources',
+        '<(DEPTH)/chrome/chrome_resources.gyp:chrome_strings',
+        '<(DEPTH)/crypto/crypto.gyp:crypto',
+        '<(DEPTH)/gpu/gpu.gyp:gpu_ipc',
+        '<(DEPTH)/net/net.gyp:net_resources',
+        '<(DEPTH)/net/net.gyp:net',
+        '<(DEPTH)/third_party/icu/icu.gyp:icui18n',
+        '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
       ],
       'conditions': [
         ['os_posix == 1 and OS != "mac"', {

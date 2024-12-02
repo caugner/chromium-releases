@@ -8,9 +8,10 @@
 
 #import "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/cocoa/constrained_window_mac.h"
 #import "chrome/browser/ui/cocoa/content_settings/cookie_details_view_controller.h"
@@ -18,15 +19,16 @@
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
-#include "third_party/apple/ImageAndTextCell.h"
+#include "third_party/apple_sample_code/ImageAndTextCell.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -85,7 +87,7 @@ CollectedCookiesMac::CollectedCookiesMac(NSWindow* parent,
         @selector(sheetDidEnd:returnCode:contextInfo:)) {
   TabSpecificContentSettings* content_settings = wrapper->content_settings();
   registrar_.Add(this, chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN,
-                 Source<TabSpecificContentSettings>(content_settings));
+                 content::Source<TabSpecificContentSettings>(content_settings));
 
   sheet_controller_ = [[CollectedCookiesWindowController alloc]
       initWithTabContentsWrapper:wrapper];
@@ -108,8 +110,8 @@ void CollectedCookiesMac::DeleteDelegate() {
 }
 
 void CollectedCookiesMac::Observe(int type,
-                                  const NotificationSource& source,
-                                  const NotificationDetails& details) {
+                                  const content::NotificationSource& source,
+                                  const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN);
   window_->CloseConstrainedWindow();
 }
@@ -184,7 +186,7 @@ void CollectedCookiesMac::OnSheetDidEnd(NSWindow* sheet) {
 
   // Change the label of the blocked cookies part if necessary.
   Profile* profile = wrapper_->profile();
-  if (profile->GetHostContentSettingsMap()->BlockThirdPartyCookies()) {
+  if (profile->GetPrefs()->GetBoolean(prefs::kBlockThirdPartyCookies)) {
     [blockedCookiesText_ setStringValue:l10n_util::GetNSString(
         IDS_COLLECTED_COOKIES_BLOCKED_THIRD_PARTY_BLOCKING_ENABLED)];
     CGFloat textDeltaY = [GTMUILocalizerAndLayoutTweaker
@@ -244,7 +246,7 @@ void CollectedCookiesMac::OnSheetDidEnd(NSWindow* sheet) {
     Profile* profile = wrapper_->profile();
     CookieTreeOriginNode* origin_node =
         static_cast<CookieTreeOriginNode*>(cookie);
-    origin_node->CreateContentException(profile->GetHostContentSettingsMap(),
+    origin_node->CreateContentException(CookieSettings::GetForProfile(profile),
                                         setting);
     if (!lastDomain.empty())
       multipleDomainsChanged = YES;

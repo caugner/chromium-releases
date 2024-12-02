@@ -14,7 +14,7 @@
 #include "base/memory/singleton.h"
 #include "base/string16.h"
 #include "base/timer.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 
 class EnumerateModulesModel;
@@ -212,7 +212,7 @@ class ModuleEnumerator : public base::RefCountedThreadSafe<ModuleEnumerator> {
   bool limited_mode_;
 
   // The thread that we need to call back on to report that we are done.
-  BrowserThread::ID callback_thread_id_;
+  content::BrowserThread::ID callback_thread_id_;
 
   DISALLOW_COPY_AND_ASSIGN(ModuleEnumerator);
 };

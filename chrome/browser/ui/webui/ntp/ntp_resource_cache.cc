@@ -25,7 +25,7 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
-#include "chrome/browser/ui/webui/ntp/shown_sections_handler.h"
+#include "chrome/browser/ui/webui/ntp/ntp_login_handler.h"
 #include "chrome/browser/ui/webui/sync_promo_ui.h"
 #include "chrome/browser/ui/webui/sync_setup_handler.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
@@ -36,9 +36,8 @@
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -59,6 +58,7 @@
 #endif
 
 using base::Time;
+using content::BrowserThread;
 
 namespace {
 
@@ -169,19 +169,19 @@ bool InDateRange(double begin, double end) {
 
 NTPResourceCache::NTPResourceCache(Profile* profile) : profile_(profile) {
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(
+                 content::Source<ThemeService>(
                      ThemeServiceFactory::GetForProfile(profile)));
   registrar_.Add(this, chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
+  registrar_.Add(this, chrome::NTP4_INTRO_PREF_CHANGED,
+                 content::NotificationService::AllSources());
 
   // Watch for pref changes that cause us to need to invalidate the HTML cache.
   pref_change_registrar_.Init(profile_->GetPrefs());
   pref_change_registrar_.Add(prefs::kSyncAcknowledgedSyncTypes, this);
   pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
-  pref_change_registrar_.Add(prefs::kHomePageIsNewTabPage, this);
-  pref_change_registrar_.Add(prefs::kNTPShownSections, this);
   pref_change_registrar_.Add(prefs::kNTPShownPage, this);
-  pref_change_registrar_.Add(prefs::kNTP4IntroDisplayCount, this);
+  pref_change_registrar_.Add(prefs::kSyncPromoShowNTPBubble, this);
 }
 
 NTPResourceCache::~NTPResourceCache() {}
@@ -213,7 +213,8 @@ RefCountedMemory* NTPResourceCache::GetNewTabCSS(bool is_incognito) {
 }
 
 void NTPResourceCache::Observe(int type,
-    const NotificationSource& source, const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   // Invalidate the cache.
   if (chrome::NOTIFICATION_BROWSER_THEME_CHANGED == type ||
       chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED == type) {
@@ -221,7 +222,8 @@ void NTPResourceCache::Observe(int type,
     new_tab_html_ = NULL;
     new_tab_incognito_css_ = NULL;
     new_tab_css_ = NULL;
-  } else if (chrome::NOTIFICATION_PREF_CHANGED == type) {
+  } else if (chrome::NOTIFICATION_PREF_CHANGED == type ||
+              chrome::NTP4_INTRO_PREF_CHANGED) {
     // A change occurred to one of the preferences we care about, so flush the
     // cache.
     new_tab_incognito_html_ = NULL;
@@ -279,7 +281,6 @@ void NTPResourceCache::CreateNewTabHTML() {
   // profile is not the default.
   string16 apps = l10n_util::GetStringUTF16(IDS_NEW_TAB_APPS);
   string16 title = l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE);
-  string16 most_visited = l10n_util::GetStringUTF16(IDS_NEW_TAB_MOST_VISITED);
   DictionaryValue localized_strings;
   localized_strings.SetString("bookmarkbarattached",
       profile_->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar) ?
@@ -290,21 +291,14 @@ void NTPResourceCache::CreateNewTabHTML() {
       "true" : "false");
   localized_strings.SetString("apps", apps);
   localized_strings.SetString("title", title);
-  localized_strings.SetString("mostvisited", most_visited);
-  localized_strings.SetString("bookmarksPage",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_BOOKMARKS_PAGE_TITLE));
-  localized_strings.SetString("restorethumbnails",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_RESTORE_THUMBNAILS_LINK));
+  localized_strings.SetString("mostvisited",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_MOST_VISITED));
   localized_strings.SetString("restoreThumbnailsShort",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RESTORE_THUMBNAILS_SHORT_LINK));
   localized_strings.SetString("recentlyclosed",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED));
   localized_strings.SetString("closedwindowsingle",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_SINGLE));
-  localized_strings.SetString("searchengines",
-      l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_SEARCH_ENGINES));
-  localized_strings.SetString("foreignsessions",
-      l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_TABS));
   localized_strings.SetString("closedwindowmultiple",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_MULTIPLE));
   localized_strings.SetString("attributionintro",
@@ -315,33 +309,14 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_NEW_TAB_UNDO_THUMBNAIL_REMOVE));
   localized_strings.SetString("removethumbnailtooltip",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_REMOVE_THUMBNAIL_TOOLTIP));
-  localized_strings.SetString("pinthumbnailtooltip",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_PIN_THUMBNAIL_TOOLTIP));
-  localized_strings.SetString("unpinthumbnailtooltip",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_UNPIN_THUMBNAIL_TOOLTIP));
-  localized_strings.SetString("showhidethumbnailtooltip",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_SHOW_HIDE_THUMBNAIL_TOOLTIP));
-  localized_strings.SetString("showhidelisttooltip",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_SHOW_HIDE_LIST_TOOLTIP));
-  localized_strings.SetString("pagedisplaytooltip",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_PAGE_DISPLAY_TOOLTIP));
-  localized_strings.SetString("close", l10n_util::GetStringUTF16(IDS_CLOSE));
-  localized_strings.SetString("history",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_HISTORY));
-  localized_strings.SetString("downloads",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_DOWNLOADS));
-  localized_strings.SetString("help",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_HELP));
-  localized_strings.SetString("helpurl",
-      GetUrlWithLang(GURL(kHelpContentUrl)));
-  localized_strings.SetString("appsettings",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_SETTINGS));
   localized_strings.SetString("appuninstall",
       l10n_util::GetStringFUTF16(
           IDS_NEW_TAB_APP_UNINSTALL,
           l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
   localized_strings.SetString("appoptions",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_OPTIONS));
+  localized_strings.SetString("appdisablenotifications",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_DISABLE_NOTIFICATIONS));
   localized_strings.SetString("appcreateshortcut",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_CREATE_SHORTCUT));
   localized_strings.SetString("appDefaultPageName",
@@ -354,28 +329,17 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_APP_CONTEXT_MENU_OPEN_WINDOW));
   localized_strings.SetString("applaunchtypefullscreen",
       l10n_util::GetStringUTF16(IDS_APP_CONTEXT_MENU_OPEN_FULLSCREEN));
-  localized_strings.SetString("web_store_title",
-      l10n_util::GetStringUTF16(IDS_EXTENSION_WEB_STORE_TITLE));
-  localized_strings.SetString("web_store_url",
-      GetUrlWithLang(GURL(extension_urls::GetWebstoreLaunchURL())));
   localized_strings.SetString("syncpromotext",
       l10n_util::GetStringUTF16(IDS_SYNC_START_SYNC_BUTTON_LABEL));
   localized_strings.SetString("syncLinkText",
       l10n_util::GetStringUTF16(IDS_SYNC_ADVANCED_OPTIONS));
-  localized_strings.SetString("bookmarksManagerLinkTitle",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_BOOKMARKS_MANAGER_LINK_TITLE));
-  localized_strings.SetString("bookmarksShowAllLinkTitle",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_BOOKMARKS_SHOW_ALL_LINK_TITLE));
-  localized_strings.SetString("importDataLinkTitle",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_BOOKMARKS_IMPORT_LINK_TITLE));
 #if defined(OS_CHROMEOS)
   localized_strings.SetString("expandMenu",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_CLOSE_MENU_EXPAND));
 #endif
 
   NewTabPageHandler::GetLocalizedValues(profile_, &localized_strings);
-
-  SyncSetupHandler::GetStaticLocalizedValues(&localized_strings);
+  NTPLoginHandler::GetLocalizedValues(profile_, &localized_strings);
 
   // Don't initiate the sync related message passing with the page if the sync
   // code is not present.
@@ -397,11 +361,6 @@ void NTPResourceCache::CreateNewTabHTML() {
   localized_strings.SetString("themegravity",
       (alignment & ThemeService::ALIGN_RIGHT) ? "right" : "");
 
-  // Pass the shown_sections pref early so that we can prevent flicker.
-  const int shown_sections = ShownSectionsHandler::GetShownSections(
-      profile_->GetPrefs());
-  localized_strings.SetInteger("shown_sections", shown_sections);
-
   // If the user has preferences for a start and end time for a custom logo,
   // and the time now is between these two times, show the custom logo.
   if (profile_->GetPrefs()->FindPreference(prefs::kNTPCustomLogoStart) &&
@@ -419,49 +378,14 @@ void NTPResourceCache::CreateNewTabHTML() {
   if (PromoResourceService::CanShowNotificationPromo(profile_)) {
     localized_strings.SetString("serverpromo",
         profile_->GetPrefs()->GetString(prefs::kNTPPromoLine));
-    UserMetrics::RecordAction(UserMetricsAction("NTPPromoShown"));
   }
-
-  // Enable or disable bookmark features based on an about flag.
-  localized_strings.SetString("bookmark_features",
-      NewTabUI::NTP4BookmarkFeaturesEnabled() ? "true" : "false");
 
   // Load the new tab page appropriate for this build
-  // Note that some builds (eg. TOUCHUI) don't make use of everything we
-  // do here (all of the template data, etc.), but we keep the back end
-  // consistent across builds, supporting the union of all NTP front-ends
-  // for simplicity.
   std::string full_html;
-  if (NewTabUI::NTP4Enabled()) {
-    base::StringPiece new_tab_html(ResourceBundle::GetSharedInstance().
-        GetRawDataResource(IDR_NEW_TAB_4_HTML));
-    full_html = jstemplate_builder::GetI18nTemplateHtml(new_tab_html,
-                                                        &localized_strings);
-  } else {
-    base::StringPiece new_tab_html(ResourceBundle::GetSharedInstance().
-        GetRawDataResource(IDR_NEW_TAB_HTML));
-
-    // Inject the template data into the HTML so that it is available before any
-    // layout is needed.
-    std::string json_html;
-    jstemplate_builder::AppendJsonHtml(&localized_strings, &json_html);
-
-    static const base::StringPiece template_data_placeholder(
-        "<!-- template data placeholder -->");
-    size_t pos = new_tab_html.find(template_data_placeholder);
-
-    if (pos != base::StringPiece::npos) {
-      full_html.assign(new_tab_html.data(), pos);
-      full_html.append(json_html);
-      size_t after_offset = pos + template_data_placeholder.size();
-      full_html.append(new_tab_html.data() + after_offset,
-                       new_tab_html.size() - after_offset);
-    } else {
-      NOTREACHED();
-      full_html.assign(new_tab_html.data(), new_tab_html.size());
-    }
-  }
-
+  base::StringPiece new_tab_html(ResourceBundle::GetSharedInstance().
+      GetRawDataResource(IDR_NEW_TAB_4_HTML));
+  full_html = jstemplate_builder::GetI18nTemplateHtml(new_tab_html,
+                                                      &localized_strings);
   new_tab_html_ = base::RefCountedString::TakeString(&full_html);
 }
 
@@ -582,11 +506,9 @@ void NTPResourceCache::CreateNewTabCSS() {
   subst.push_back(SkColorToRGBComponents(color_text));  // $23
 
   // Get our template.
-  int ntp_css_resource_id = NewTabUI::NTP4Enabled() ?
-      IDR_NEW_TAB_4_THEME_CSS : IDR_NEW_TAB_THEME_CSS;
   static const base::StringPiece new_tab_theme_css(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          ntp_css_resource_id));
+          IDR_NEW_TAB_4_THEME_CSS));
 
   // Create the string from our template and the replacements.
   std::string css_string;

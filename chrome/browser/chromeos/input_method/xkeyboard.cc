@@ -9,9 +9,6 @@
 #include <string>
 #include <utility>
 
-#include <X11/XKBlib.h>
-#include <X11/Xlib.h>
-#include <glib.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -22,8 +19,15 @@
 #include "base/stringprintf.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/system/runtime_environment.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "ui/base/x/x11_util.h"
+
+// These includes conflict with base/tracked_objects.h so must come last.
+#include <X11/XKBlib.h>
+#include <X11/Xlib.h>
+#include <glib.h>
+
+using content::BrowserThread;
 
 namespace chromeos {
 namespace input_method {
@@ -94,28 +98,46 @@ const char* kCapsLockRemapped[] = {
   "xkb:us:colemak:eng",
 };
 
+// A string for obtaining a mask value for Num Lock.
+const char kNumLockVirtualModifierString[] = "NumLock";
+
 }  // namespace
 
 XKeyboard::XKeyboard(const InputMethodUtil& util)
     : is_running_on_chrome_os_(
         system::runtime_environment::IsRunningOnChromeOS()) {
+  num_lock_mask_ = GetNumLockMask();
+
+#if defined(USE_AURA)
+  // web_input_event_aurax11.cc seems to assume that Mod2Mask is always assigned
+  // to Num Lock.
+  // TODO(yusukes): Check the assumption is really okay. If not, modify the Aura
+  // code, and then remove the CHECK below.
+  CHECK(!is_running_on_chrome_os_ || (num_lock_mask_ == Mod2Mask));
+#endif
+
+  GetLockedModifiers(
+      num_lock_mask_, &current_caps_lock_status_, &current_num_lock_status_);
+
   for (size_t i = 0; i < arraysize(kCustomizableKeys); ++i) {
     ModifierKey key = kCustomizableKeys[i];
     current_modifier_map_.push_back(ModifierKeyPair(key, key));
   }
+
   std::string layout;
   for (size_t i = 0; i < arraysize(kKeepRightAltInputMethods); ++i) {
     layout = util.GetKeyboardLayoutName(kKeepRightAltInputMethods[i]);
-    // The empty check is necessary since TOUCH_UI build does not support some
-    // of the kKeepRightAltInputMethods elements. For example, when TOUCH_UI is
-    // defined, util.GetKeyboardLayoutName("xkb:us:intl:eng") would return "".
+    // The empty check is necessary since USE_VIRTUAL_KEYBOARD build does not
+    // support some of the kKeepRightAltInputMethods elements. For example,
+    // when USE_VIRTUAL_KEYBOARD is defined,
+    // util.GetKeyboardLayoutName("xkb:us:intl:eng") would return "".
     if (!layout.empty()) {
       keep_right_alt_xkb_layout_names_.insert(layout);
     }
   }
   for (size_t i = 0; i < arraysize(kCapsLockRemapped); ++i) {
     layout = util.GetKeyboardLayoutName(kCapsLockRemapped[i]);
-    // The empty check is for TOUCH_UI build. See above.
+    // The empty check is for USE_VIRTUAL_KEYBOARD build. See above.
     if (!layout.empty()) {
       caps_lock_remapped_xkb_layout_names_.insert(layout);
     }
@@ -123,6 +145,41 @@ XKeyboard::XKeyboard(const InputMethodUtil& util)
 }
 
 XKeyboard::~XKeyboard() {
+}
+
+// static
+unsigned int XKeyboard::GetNumLockMask() {
+  static const unsigned int kBadMask = 0;
+
+  unsigned int real_mask = kBadMask;
+  XkbDescPtr xkb_desc =
+      XkbGetKeyboard(ui::GetXDisplay(), XkbAllComponentsMask, XkbUseCoreKbd);
+  if (!xkb_desc) {
+    return kBadMask;
+  }
+
+  if (xkb_desc->dpy && xkb_desc->names && xkb_desc->names->vmods) {
+    const std::string string_to_find(kNumLockVirtualModifierString);
+    for (size_t i = 0; i < XkbNumVirtualMods; ++i) {
+      const unsigned int virtual_mod_mask = 1U << i;
+      char* virtual_mod_str =
+          XGetAtomName(xkb_desc->dpy, xkb_desc->names->vmods[i]);
+      if (!virtual_mod_str) {
+        continue;
+      }
+      if (string_to_find == virtual_mod_str) {
+        if (!XkbVirtualModsToReal(xkb_desc, virtual_mod_mask, &real_mask)) {
+          LOG(ERROR) << "XkbVirtualModsToReal failed";
+          real_mask = kBadMask;  // reset the return value, just in case.
+        }
+        XFree(virtual_mod_str);
+        break;
+      }
+      XFree(virtual_mod_str);
+    }
+  }
+  XkbFreeKeyboard(xkb_desc, 0, True /* free all components */);
+  return real_mask;
 }
 
 bool XKeyboard::SetLayoutInternal(const std::string& layout_name,
@@ -303,7 +360,6 @@ bool XKeyboard::SetAutoRepeatEnabled(bool enabled) {
 
 // static
 bool XKeyboard::SetAutoRepeatRate(const AutoRepeatRate& rate) {
-  // TODO(yusukes): write auto tests for the function.
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DLOG(INFO) << "Set auto-repeat rate to: "
              << rate.initial_delay_in_ms << " ms delay, "
@@ -318,20 +374,98 @@ bool XKeyboard::SetAutoRepeatRate(const AutoRepeatRate& rate) {
 }
 
 // static
-bool XKeyboard::CapsLockIsEnabled() {
-  // Do not call CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI)); to make
-  // unit_tests happy.
-  XkbStateRec status;
-  XkbGetState(ui::GetXDisplay(), XkbUseCoreKbd, &status);
-  return status.locked_mods & LockMask;
+bool XKeyboard::GetAutoRepeatEnabled() {
+  XKeyboardState state = {};
+  XGetKeyboardControl(ui::GetXDisplay(), &state);
+  return state.global_auto_repeat != AutoRepeatModeOff;
 }
 
 // static
+bool XKeyboard::GetAutoRepeatRate(AutoRepeatRate* out_rate) {
+  return XkbGetAutoRepeatRate(ui::GetXDisplay(), XkbUseCoreKbd,
+                              &(out_rate->initial_delay_in_ms),
+                              &(out_rate->repeat_interval_in_ms)) == True;
+}
+
+void XKeyboard::SetLockedModifiers(ModifierLockStatus new_caps_lock_status,
+                                   ModifierLockStatus new_num_lock_status) {
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (!num_lock_mask_) {
+    LOG(ERROR) << "Cannot set locked modifiers. Num Lock mask unknown.";
+    return;
+  }
+
+  unsigned int affect_mask = 0;
+  unsigned int value_mask = 0;
+  if (new_caps_lock_status != kDontChange) {
+    affect_mask |= LockMask;
+    value_mask |= ((new_caps_lock_status == kEnableLock) ? LockMask : 0);
+    current_caps_lock_status_ = (new_caps_lock_status == kEnableLock);
+  }
+  if (new_num_lock_status != kDontChange) {
+    affect_mask |= num_lock_mask_;
+    value_mask |= ((new_num_lock_status == kEnableLock) ? num_lock_mask_ : 0);
+    current_num_lock_status_ = (new_num_lock_status == kEnableLock);
+  }
+
+  if (affect_mask) {
+    XkbLockModifiers(ui::GetXDisplay(), XkbUseCoreKbd, affect_mask, value_mask);
+  }
+}
+
+void XKeyboard::SetNumLockEnabled(bool enable_num_lock) {
+  SetLockedModifiers(
+      kDontChange, enable_num_lock ? kEnableLock : kDisableLock);
+}
+
 void XKeyboard::SetCapsLockEnabled(bool enable_caps_lock) {
-  // Do not call CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI)); to make
-  // unit_tests happy.
-  XkbLockModifiers(ui::GetXDisplay(), XkbUseCoreKbd, LockMask,
-                   enable_caps_lock ? LockMask : 0);
+  SetLockedModifiers(
+      enable_caps_lock ? kEnableLock : kDisableLock, kDontChange);
+}
+
+// static
+void XKeyboard::GetLockedModifiers(unsigned int num_lock_mask,
+                                   bool* out_caps_lock_enabled,
+                                   bool* out_num_lock_enabled) {
+  // For now, don't call CHECK() here to make
+  // TabRestoreServiceTest.DontRestorePrintPreviewTab test happy.
+  // TODO(yusukes): Fix the test, then fix the if(!BrowserThread...) line below.
+  // CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (!BrowserThread::CurrentlyOn(BrowserThread::UI) ||
+      (out_num_lock_enabled && !num_lock_mask)) {
+    LOG(ERROR) << "Cannot get locked modifiers.";
+    if (out_caps_lock_enabled) {
+      *out_caps_lock_enabled = false;
+    }
+    if (out_num_lock_enabled) {
+      *out_num_lock_enabled = false;
+    }
+    return;
+  }
+
+  XkbStateRec status;
+  XkbGetState(ui::GetXDisplay(), XkbUseCoreKbd, &status);
+  if (out_caps_lock_enabled) {
+    *out_caps_lock_enabled = status.locked_mods & LockMask;
+  }
+  if (out_num_lock_enabled) {
+    *out_num_lock_enabled = status.locked_mods & num_lock_mask;
+  }
+}
+
+// static
+bool XKeyboard::NumLockIsEnabled(unsigned int num_lock_mask) {
+  bool num_lock_enabled = false;
+  GetLockedModifiers(num_lock_mask, NULL /* Caps Lock */, &num_lock_enabled);
+  return num_lock_enabled;
+}
+
+// static
+bool XKeyboard::CapsLockIsEnabled() {
+  bool caps_lock_enabled = false;
+  GetLockedModifiers(0, &caps_lock_enabled, NULL /* Num Lock */);
+  return caps_lock_enabled;
 }
 
 // static
@@ -360,6 +494,11 @@ bool XKeyboard::ReapplyCurrentKeyboardLayout() {
   }
   return SetLayoutInternal(
       current_layout_name_, current_modifier_map_, true /* force */);
+}
+
+void XKeyboard::ReapplyCurrentModifierLockStatus() {
+  SetLockedModifiers(current_caps_lock_status_ ? kEnableLock : kDisableLock,
+                     current_num_lock_status_ ? kEnableLock : kDisableLock);
 }
 
 bool XKeyboard::RemapModifierKeys(const ModifierMap& modifier_map) {

@@ -16,6 +16,8 @@
 #include "net/base/single_request_host_resolver.h"
 #include "net/base/sys_addrinfo.h"
 
+using content::BrowserThread;
+
 namespace content {
 
 class P2PSocketDispatcherHost::DnsRequest {
@@ -26,9 +28,7 @@ class P2PSocketDispatcherHost::DnsRequest {
              net::HostResolver* host_resolver)
       : routing_id_(routing_id),
         request_id_(request_id),
-        resolver_(host_resolver),
-        ALLOW_THIS_IN_INITIALIZER_LIST(completion_callback_(
-            this, &P2PSocketDispatcherHost::DnsRequest::OnDone)) {
+        resolver_(host_resolver) {
   }
 
   void Resolve(const std::string& host_name,
@@ -50,8 +50,11 @@ class P2PSocketDispatcherHost::DnsRequest {
       host_name_ = host_name_ + '.';
 
     net::HostResolver::RequestInfo info(net::HostPortPair(host_name_, 0));
-    int result = resolver_.Resolve(info, &addresses_, &completion_callback_,
-                                   net::BoundNetLog());
+    int result = resolver_.Resolve(
+        info, &addresses_,
+        base::Bind(&P2PSocketDispatcherHost::DnsRequest::OnDone,
+                   base::Unretained(this)),
+        net::BoundNetLog());
     if (result != net::ERR_IO_PENDING)
       OnDone(result);
   }
@@ -94,8 +97,6 @@ class P2PSocketDispatcherHost::DnsRequest {
   net::SingleRequestHostResolver resolver_;
 
   DoneCallback done_callback_;
-
-  net::OldCompletionCallbackImpl<DnsRequest> completion_callback_;
 };
 
 P2PSocketDispatcherHost::P2PSocketDispatcherHost(
@@ -166,8 +167,8 @@ void P2PSocketDispatcherHost::OnStartNetworkNotifications(
   notifications_routing_ids_.insert(msg.routing_id());
 
   BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE, NewRunnableMethod(
-          this, &P2PSocketDispatcherHost::DoGetNetworkList));
+      BrowserThread::FILE, FROM_HERE, base::Bind(
+          &P2PSocketDispatcherHost::DoGetNetworkList, this));
 }
 
 void P2PSocketDispatcherHost::OnStopNetworkNotifications(
@@ -178,16 +179,16 @@ void P2PSocketDispatcherHost::OnStopNetworkNotifications(
 void P2PSocketDispatcherHost::OnIPAddressChanged() {
   // Notify the renderer about changes to list of network interfaces.
   BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE, NewRunnableMethod(
-          this, &P2PSocketDispatcherHost::DoGetNetworkList));
+      BrowserThread::FILE, FROM_HERE, base::Bind(
+          &P2PSocketDispatcherHost::DoGetNetworkList, this));
 }
 
 void P2PSocketDispatcherHost::DoGetNetworkList() {
   net::NetworkInterfaceList list;
   net::GetNetworkList(&list);
   BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE, NewRunnableMethod(
-          this, &P2PSocketDispatcherHost::SendNetworkList, list));
+      BrowserThread::IO, FROM_HERE, base::Bind(
+          &P2PSocketDispatcherHost::SendNetworkList, this, list));
 }
 
 void P2PSocketDispatcherHost::SendNetworkList(

@@ -7,6 +7,7 @@
 
 #include "ui/gfx/gl/gl_surface.h"
 
+#include "base/compiler_specific.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/gl/gl_export.h"
 #include "ui/gfx/native_widget_types.h"
@@ -21,7 +22,6 @@ class GL_EXPORT GLSurfaceGLX : public GLSurface {
   virtual ~GLSurfaceGLX();
 
   static bool InitializeOneOff();
-  static Display* GetDisplay();
 
   // These aren't particularly tied to surfaces, but since we already
   // have the static InitializeOneOff here, it's easiest to reuse its
@@ -29,6 +29,8 @@ class GL_EXPORT GLSurfaceGLX : public GLSurface {
   static const char* GetGLXExtensions();
   static bool HasGLXExtension(const char* name);
   static bool IsCreateContextRobustnessSupported();
+
+  virtual void* GetDisplay() OVERRIDE;
 
   // Get the FB config that the surface was created with or NULL if it is not
   // a GLX drawable.
@@ -45,13 +47,15 @@ class GL_EXPORT NativeViewGLSurfaceGLX : public GLSurfaceGLX {
   virtual ~NativeViewGLSurfaceGLX();
 
   // Implement GLSurfaceGLX.
-  virtual bool Initialize();
-  virtual void Destroy();
-  virtual bool IsOffscreen();
-  virtual bool SwapBuffers();
-  virtual gfx::Size GetSize();
-  virtual void* GetHandle();
-  virtual void* GetConfig();
+  virtual bool Initialize() OVERRIDE;
+  virtual void Destroy() OVERRIDE;
+  virtual bool IsOffscreen() OVERRIDE;
+  virtual bool SwapBuffers() OVERRIDE;
+  virtual gfx::Size GetSize() OVERRIDE;
+  virtual void* GetHandle() OVERRIDE;
+  virtual std::string GetExtensions() OVERRIDE;
+  virtual void* GetConfig() OVERRIDE;
+  virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
 
  protected:
   NativeViewGLSurfaceGLX();
@@ -70,13 +74,13 @@ class GL_EXPORT PbufferGLSurfaceGLX : public GLSurfaceGLX {
   virtual ~PbufferGLSurfaceGLX();
 
   // Implement GLSurfaceGLX.
-  virtual bool Initialize();
-  virtual void Destroy();
-  virtual bool IsOffscreen();
-  virtual bool SwapBuffers();
-  virtual gfx::Size GetSize();
-  virtual void* GetHandle();
-  virtual void* GetConfig();
+  virtual bool Initialize() OVERRIDE;
+  virtual void Destroy() OVERRIDE;
+  virtual bool IsOffscreen() OVERRIDE;
+  virtual bool SwapBuffers() OVERRIDE;
+  virtual gfx::Size GetSize() OVERRIDE;
+  virtual void* GetHandle() OVERRIDE;
+  virtual void* GetConfig() OVERRIDE;
 
  private:
   gfx::Size size_;

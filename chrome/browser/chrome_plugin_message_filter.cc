@@ -4,24 +4,30 @@
 
 #include "chrome/browser/chrome_plugin_message_filter.h"
 
+#include "base/bind.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
-#include "chrome/browser/plugin_download_helper.h"
 #include "chrome/browser/plugin_installer_infobar_delegate.h"
 #include "chrome/browser/plugin_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_plugin_messages.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/plugin_process_host.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_process_host.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "webkit/plugins/npapi/default_plugin_shared.h"
 
+#if defined(OS_WIN)
+#include "chrome/browser/plugin_download_helper.h"
+#endif
+
+using content::BrowserThread;
+
 static const char kDefaultPluginFinderURL[] =
-    "https://dl-ssl.google.com/edgedl/chrome/plugins/plugins2.xml";
+    "https://ssl.gstatic.com/chrome/config/plugins2.xml";
 
 ChromePluginMessageFilter::ChromePluginMessageFilter(PluginProcessHost* process)
     : process_(process) {
@@ -33,7 +39,7 @@ ChromePluginMessageFilter::~ChromePluginMessageFilter() {
 bool ChromePluginMessageFilter::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ChromePluginMessageFilter, message)
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
     IPC_MESSAGE_HANDLER(ChromePluginProcessHostMsg_DownloadUrl, OnDownloadUrl)
 #endif
     IPC_MESSAGE_HANDLER(ChromePluginProcessHostMsg_GetPluginFinderUrl,
@@ -50,28 +56,31 @@ bool ChromePluginMessageFilter::Send(IPC::Message* message) {
   return process_->Send(message);
 }
 
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
 void ChromePluginMessageFilter::OnDownloadUrl(const std::string& url,
                                               gfx::NativeWindow caller_window,
                                               int render_process_id) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableFunction(OnDownloadUrlOnUIThread, url, caller_window,
-                          render_process_id));
+      base::Bind(&ChromePluginMessageFilter::OnDownloadUrlOnUIThread,
+                 url, caller_window,
+                 render_process_id));
 }
 
 void ChromePluginMessageFilter::OnDownloadUrlOnUIThread(
     const std::string& url,
     gfx::NativeWindow caller_window,
     int render_process_id) {
-  RenderProcessHost* host = RenderProcessHost::FromID(render_process_id);
+  content::RenderProcessHost* host =
+      content::RenderProcessHost::FromID(render_process_id);
   if (!host) {
     return;
   }
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableFunction(OnDownloadUrlOnFileThread, url, caller_window,
-                          host->browser_context()->GetRequestContext()));
+      base::Bind(&ChromePluginMessageFilter::OnDownloadUrlOnFileThread,
+                 url, caller_window,
+                 host->GetBrowserContext()->GetRequestContext()));
 }
 
 void ChromePluginMessageFilter::OnDownloadUrlOnFileThread(
@@ -84,7 +93,6 @@ void ChromePluginMessageFilter::OnDownloadUrlOnFileThread(
       context,
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
 }
-
 #endif
 
 void ChromePluginMessageFilter::OnGetPluginFinderUrl(
@@ -105,7 +113,7 @@ void ChromePluginMessageFilter::OnMissingPluginStatus(
   BrowserThread::PostTask(
       BrowserThread::UI,
       FROM_HERE,
-      NewRunnableFunction(
+      base::Bind(
           &ChromePluginMessageFilter::HandleMissingPluginStatus,
           status, render_process_id, render_view_id, window));
 }
@@ -127,8 +135,10 @@ void ChromePluginMessageFilter::HandleMissingPluginStatus(
   InfoBarTabHelper* infobar_helper = tcw->infobar_tab_helper();
 
   if (status == webkit::npapi::default_plugin::MISSING_PLUGIN_AVAILABLE) {
-    infobar_helper->AddInfoBar(
-        new PluginInstallerInfoBarDelegate(infobar_helper, window));
+    infobar_helper->AddInfoBar(new PluginInstallerInfoBarDelegate(
+        infobar_helper, string16(), GURL(),
+        base::Bind(&ChromePluginMessageFilter::InstallMissingPlugin,
+                   base::Unretained(window))));
     return;
   }
 
@@ -145,6 +155,18 @@ void ChromePluginMessageFilter::HandleMissingPluginStatus(
   // TODO(port): Implement the infobar that accompanies the default plugin.
   // Linux: http://crbug.com/10952
   // Mac: http://crbug.com/17392
+  NOTIMPLEMENTED();
+#endif  // OS_WIN
+}
+
+// static
+void ChromePluginMessageFilter::InstallMissingPlugin(gfx::NativeWindow window) {
+#if defined(OS_WIN)
+  ::PostMessage(window,
+                webkit::npapi::default_plugin::kInstallMissingPluginMessage,
+                0,
+                0);
+#else
   NOTIMPLEMENTED();
 #endif  // OS_WIN
 }

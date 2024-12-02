@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/format_macros.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_vector.h"
@@ -37,7 +38,6 @@ class ProfileSyncService;
 namespace sync_api {
 class BaseTransaction;
 class ReadNode;
-class WriteNode;
 class WriteTransaction;
 }  // namespace sync_api
 
@@ -125,7 +125,7 @@ class SessionModelAssociator
   // with local client data. Processes/reuses any sync nodes owned by this
   // client and creates any further sync nodes needed to store local header and
   // tab info.
-  virtual bool AssociateModels(SyncError* error);
+  virtual bool AssociateModels(SyncError* error) OVERRIDE;
 
   // Initializes the given sync node from the given chrome node id.
   // Returns false if no sync node was found for the given chrome node id or
@@ -135,7 +135,7 @@ class SessionModelAssociator
 
   // Clear local sync data buffers. Does not delete sync nodes to avoid
   // tombstones. TODO(zea): way to eventually delete orphaned nodes.
-  virtual bool DisassociateModels(SyncError* error);
+  virtual bool DisassociateModels(SyncError* error) OVERRIDE;
 
   // Returns the tag used to uniquely identify this machine's session in the
   // sync model.
@@ -203,19 +203,6 @@ class SessionModelAssociator
   // Callback for when the session name has been computed.
   void OnSessionNameInitialized(const std::string name);
 
-#if defined(OS_WIN)
-  // Returns the computer name or the empty string an error occurred.
-  static std::string GetComputerName();
-#endif
-
-#if defined(OS_MACOSX)
-  // Returns the Hardware model name, without trailing numbers, if possible.
-  // See http://www.cocoadev.com/index.pl?MacintoshModels for an example list of
-  // models. If an error occurs trying to read the model, this simply returns
-  // "Unknown".
-  static std::string GetHardwareModelName();
-#endif
-
  private:
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, WriteSessionToNode);
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest,
@@ -258,6 +245,7 @@ class SessionModelAssociator
     int64 sync_id() const { return sync_id_; }
     const SessionTab* session_tab() const { return session_tab_; }
     const SyncedTabDelegate* tab() const { return tab_; }
+
    private:
     int64 sync_id_;
     SessionTab* session_tab_;
@@ -321,6 +309,7 @@ class SessionModelAssociator
     void set_machine_tag(const std::string& machine_tag) {
       machine_tag_ = machine_tag;
     }
+
    private:
     // Pool of all available syncid's for tab's we have created.
     std::vector<int64> tab_syncid_pool_;

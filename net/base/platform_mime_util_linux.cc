@@ -12,7 +12,7 @@
 #if defined(OS_ANDROID)
 #include "net/android/network_library.h"
 #else
-#include "base/mime_util.h"
+#include "base/nix/mime_util_xdg.h"
 #endif
 
 namespace net {
@@ -20,18 +20,18 @@ namespace net {
 #if defined(OS_ANDROID)
 bool PlatformMimeUtil::GetPlatformMimeTypeFromExtension(
     const FilePath::StringType& ext, std::string* result) const {
+  // TODO(jingzhao): Recover the original implementation once we support JNI.
+#if 0
   return android::GetMimeTypeFromExtension(ext, result);
-}
-#elif defined(USE_AURA)
-bool PlatformMimeUtil::GetPlatformMimeTypeFromExtension(
-    const FilePath::StringType& ext, std::string* result) const {
+#else
   NOTIMPLEMENTED();
   return false;
+#endif
 }
 #else
 bool PlatformMimeUtil::GetPlatformMimeTypeFromExtension(
     const FilePath::StringType& ext, std::string* result) const {
-  // TODO(thestig) This is a temporary hack until we can fix this
+  // TODO(thestig): This is a temporary hack until we can fix this
   // properly in test shell / webkit.
   // We have to play dumb and not return application/x-perl here
   // to make the reload-subframe-object layout test happy.
@@ -39,7 +39,7 @@ bool PlatformMimeUtil::GetPlatformMimeTypeFromExtension(
     return false;
 
   FilePath dummy_path("foo." + ext);
-  std::string out = mime_util::GetFileMimeType(dummy_path);
+  std::string out = base::nix::GetFileMimeType(dummy_path);
 
   // GetFileMimeType likes to return application/octet-stream
   // for everything it doesn't know - ignore that.

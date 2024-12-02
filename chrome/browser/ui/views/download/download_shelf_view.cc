@@ -16,8 +16,8 @@
 #include "chrome/browser/ui/views/download/download_item_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "content/browser/download/download_item.h"
-#include "content/browser/download/download_stats.h"
 #include "content/browser/download/download_manager.h"
+#include "content/browser/download/download_stats.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -26,10 +26,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "views/background.h"
-#include "views/controls/button/image_button.h"
-#include "views/controls/image_view.h"
-#include "views/controls/link.h"
+#include "ui/views/background.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/link.h"
 
 // Max number of download views we'll contain. Any time a view is added and
 // we already have this many download views, one is removed.
@@ -127,11 +127,15 @@ void DownloadShelfView::MouseMovedOutOfView() {
   Close();
 }
 
-void DownloadShelfView::FocusWillChange(views::View* focused_before,
-                                        views::View* focused_now) {
+void DownloadShelfView::OnWillChangeFocus(views::View* focused_before,
+                                          views::View* focused_now) {
   SchedulePaintForDownloadItem(focused_before);
   SchedulePaintForDownloadItem(focused_now);
-  AccessiblePaneView::FocusWillChange(focused_before, focused_now);
+}
+
+void DownloadShelfView::OnDidChangeFocus(views::View* focused_before,
+                                         views::View* focused_now) {
+  AccessiblePaneView::OnDidChangeFocus(focused_before, focused_now);
 }
 
 void DownloadShelfView::RemoveDownloadView(View* view) {
@@ -163,14 +167,15 @@ void DownloadShelfView::OnPaint(gfx::Canvas* canvas) {
   for (size_t i = 0; i < download_views_.size(); ++i) {
     if (download_views_[i]->HasFocus()) {
       gfx::Rect r = GetFocusRectBounds(download_views_[i]);
-      canvas->DrawFocusRect(r.x(), r.y(), r.width(), r.height() - 1);
+      r.Inset(0, 0, 0, 1);
+      canvas->DrawFocusRect(r);
       break;
     }
   }
 }
 
 void DownloadShelfView::OnPaintBorder(gfx::Canvas* canvas) {
-  canvas->FillRectInt(kBorderColor, 0, 0, width(), 1);
+  canvas->FillRect(kBorderColor, gfx::Rect(0, 0, width(), 1));
 }
 
 void DownloadShelfView::OpenedDownload(DownloadItemView* view) {
@@ -415,12 +420,12 @@ void DownloadShelfView::Closed() {
                             download->IsCancelled() ||
                             download->IsInterrupted();
     if (is_transfer_done &&
-        download->safety_state() != DownloadItem::DANGEROUS) {
+        download->GetSafetyState() != DownloadItem::DANGEROUS) {
       RemoveDownloadView(download_views_[i]);
     } else {
       // Treat the item as opened when we close. This way if we get shown again
       // the user need not open this item for the shelf to auto-close.
-      download->set_opened(true);
+      download->SetOpened(true);
       ++i;
     }
   }
@@ -428,7 +433,7 @@ void DownloadShelfView::Closed() {
 
 bool DownloadShelfView::CanAutoClose() {
   for (size_t i = 0; i < download_views_.size(); ++i) {
-    if (!download_views_[i]->download()->opened())
+    if (!download_views_[i]->download()->GetOpened())
       return false;
   }
   return true;

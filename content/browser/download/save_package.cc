@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/i18n/file_util_icu.h"
@@ -15,25 +16,25 @@
 #include "base/string_piece.h"
 #include "base/string_split.h"
 #include "base/sys_string_conversions.h"
-#include "base/task.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/browser_context.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/content_browser_client.h"
 #include "content/browser/download/download_file_manager.h"
-#include "content/browser/download/download_item.h"
+#include "content/browser/download/download_item_impl.h"
 #include "content/browser/download/download_manager.h"
-#include "content/browser/download/download_manager_delegate.h"
 #include "content/browser/download/save_file.h"
 #include "content/browser/download/save_file_manager.h"
 #include "content/browser/download/save_item.h"
-#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/browser/resource_context.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/download_manager_delegate.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_util.h"
@@ -42,6 +43,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageSerializerClient.h"
 
 using base::Time;
+using content::BrowserThread;
 using WebKit::WebPageSerializerClient;
 
 namespace {
@@ -121,13 +123,14 @@ SavePackage::SavePackage(TabContents* tab_contents,
       saved_main_file_path_(file_full_path),
       saved_main_directory_path_(directory_full_path),
       title_(tab_contents->GetTitle()),
+      start_tick_(base::TimeTicks::Now()),
       finished_(false),
       user_canceled_(false),
       disk_error_occurred_(false),
       save_type_(save_type),
       all_save_items_count_(0),
       wait_state_(INITIALIZE),
-      tab_id_(tab_contents->GetRenderProcessHost()->id()),
+      tab_id_(tab_contents->GetRenderProcessHost()->GetID()),
       unique_id_(g_save_package_id++),
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
   DCHECK(page_url_.is_valid());
@@ -147,13 +150,14 @@ SavePackage::SavePackage(TabContents* tab_contents)
       download_(NULL),
       page_url_(GetUrlToBeSaved()),
       title_(tab_contents->GetTitle()),
+      start_tick_(base::TimeTicks::Now()),
       finished_(false),
       user_canceled_(false),
       disk_error_occurred_(false),
       save_type_(SAVE_TYPE_UNKNOWN),
       all_save_items_count_(0),
       wait_state_(INITIALIZE),
-      tab_id_(tab_contents->GetRenderProcessHost()->id()),
+      tab_id_(tab_contents->GetRenderProcessHost()->GetID()),
       unique_id_(g_save_package_id++),
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
   DCHECK(page_url_.is_valid());
@@ -172,6 +176,7 @@ SavePackage::SavePackage(TabContents* tab_contents,
       download_(NULL),
       saved_main_file_path_(file_full_path),
       saved_main_directory_path_(directory_full_path),
+      start_tick_(base::TimeTicks::Now()),
       finished_(true),
       user_canceled_(false),
       disk_error_occurred_(false),
@@ -264,11 +269,11 @@ bool SavePackage::Init() {
   }
 
   // Create the download item, and add ourself as an observer.
-  download_ = new DownloadItem(download_manager_,
-                               saved_main_file_path_,
-                               page_url_,
-                               browser_context->IsOffTheRecord(),
-                               download_manager_->GetNextId());
+  download_ = new DownloadItemImpl(download_manager_,
+                                   saved_main_file_path_,
+                                   page_url_,
+                                   browser_context->IsOffTheRecord(),
+                                   download_manager_->GetNextId());
   download_->AddObserver(this);
 
   // Transfer ownership to the download manager.
@@ -291,7 +296,7 @@ bool SavePackage::Init() {
     // Add this item to waiting list.
     waiting_item_queue_.push(save_item);
     all_save_items_count_ = 1;
-    download_->set_total_bytes(1);
+    download_->SetTotalBytes(1);
 
     DoSavingProcess();
   }
@@ -364,7 +369,7 @@ bool SavePackage::GenerateFileName(const std::string& disposition,
   // TODO(jungshik): Figure out the referrer charset when having one
   // makes sense and pass it to GenerateFileName.
   FilePath file_path = net::GenerateFileName(url, disposition, "", "", "",
-                                             ASCIIToUTF16(kDefaultSaveName));
+                                             kDefaultSaveName);
 
   DCHECK(!file_path.empty());
   FilePath::StringType pure_file_name =
@@ -509,11 +514,11 @@ void SavePackage::StartSave(const SaveFileCreateInfo* info) {
   if (info->save_source == SaveFileCreateInfo::SAVE_FILE_FROM_FILE) {
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(file_manager_,
-                          &SaveFileManager::SaveLocalFile,
-                          save_item->url(),
-                          save_item->save_id(),
-                          tab_id()));
+        base::Bind(&SaveFileManager::SaveLocalFile,
+                   file_manager_,
+                   save_item->url(),
+                   save_item->save_id(),
+                   tab_id()));
     return;
   }
 
@@ -614,9 +619,9 @@ void SavePackage::Stop() {
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(file_manager_,
-                        &SaveFileManager::RemoveSavedFileFromFileMap,
-                        save_ids));
+      base::Bind(&SaveFileManager::RemoveSavedFileFromFileMap,
+                 file_manager_,
+                 save_ids));
 
   finished_ = true;
   wait_state_ = FAILED;
@@ -647,13 +652,13 @@ void SavePackage::CheckFinish() {
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(file_manager_,
-                        &SaveFileManager::RenameAllFiles,
-                        final_names,
-                        dir,
-                        tab_contents()->GetRenderProcessHost()->id(),
-                        tab_contents()->render_view_host()->routing_id(),
-                        id()));
+      base::Bind(&SaveFileManager::RenameAllFiles,
+                 file_manager_,
+                 final_names,
+                 dir,
+                 tab_contents()->GetRenderProcessHost()->GetID(),
+                 tab_contents()->render_view_host()->routing_id(),
+                 id()));
 }
 
 // Successfully finished all items of this SavePackage.
@@ -674,12 +679,13 @@ void SavePackage::Finish() {
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(file_manager_,
-                        &SaveFileManager::RemoveSavedFileFromFileMap,
-                        save_ids));
+      base::Bind(&SaveFileManager::RemoveSavedFileFromFileMap,
+                 file_manager_,
+                 save_ids));
 
   if (download_) {
-    download_->OnAllDataSaved(all_save_items_count_);
+    download_->OnAllDataSaved(all_save_items_count_,
+                              DownloadItem::kEmptyFileHash);
     download_->MarkAsComplete();
     FinalizeDownloadEntry();
   }
@@ -703,7 +709,7 @@ void SavePackage::SaveFinished(int32 save_id, int64 size, bool is_success) {
   // Inform the DownloadItem to update UI.
   // We use the received bytes as number of saved files.
   if (download_)
-    download_->Update(completed_count());
+    download_->UpdateProgress(completed_count(), CurrentSpeed());
 
   if (save_item->save_source() == SaveFileCreateInfo::SAVE_FILE_FROM_DOM &&
       save_item->url() == page_url_ && !save_item->received_bytes()) {
@@ -745,7 +751,7 @@ void SavePackage::SaveFailed(const GURL& save_url) {
   // Inform the DownloadItem to update UI.
   // We use the received bytes as number of saved files.
   if (download_)
-    download_->Update(completed_count());
+    download_->UpdateProgress(completed_count(), CurrentSpeed());
 
   if (save_type_ == SAVE_AS_ONLY_HTML ||
       save_item->save_source() == SaveFileCreateInfo::SAVE_FILE_FROM_DOM) {
@@ -772,9 +778,9 @@ void SavePackage::SaveCanceled(SaveItem* save_item) {
   if (save_item->save_id() != -1)
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(file_manager_,
-                          &SaveFileManager::CancelSave,
-                          save_item->save_id()));
+        base::Bind(&SaveFileManager::CancelSave,
+                   file_manager_,
+                   save_item->save_id()));
 }
 
 // Initiate a saving job of a specific URL. We send the request to
@@ -798,7 +804,7 @@ void SavePackage::SaveNextFile(bool process_all_remaining_items) {
     save_item->Start();
     file_manager_->SaveURL(save_item->url(),
                            save_item->referrer(),
-                           tab_contents()->GetRenderProcessHost()->id(),
+                           tab_contents()->GetRenderProcessHost()->GetID(),
                            routing_id(),
                            save_item->save_source(),
                            save_item->full_path(),
@@ -816,6 +822,12 @@ int SavePackage::PercentComplete() {
     return 100;
   else
     return completed_count() / all_save_items_count_;
+}
+
+int64 SavePackage::CurrentSpeed() const {
+  base::TimeDelta diff = base::TimeTicks::Now() - start_tick_;
+  int64 diff_ms = diff.InMilliseconds();
+  return diff_ms == 0 ? 0 : completed_count() * 1000 / diff_ms;
 }
 
 // Continue processing the save page job after one SaveItem has been
@@ -937,12 +949,12 @@ void SavePackage::OnReceivedSerializedHtmlData(const GURL& frame_url,
                << " url = \"" << it->second->url().spec() << "\"";
       BrowserThread::PostTask(
           BrowserThread::FILE, FROM_HERE,
-          NewRunnableMethod(file_manager_,
-                            &SaveFileManager::SaveFinished,
-                            it->second->save_id(),
-                            it->second->url(),
-                            id,
-                            true));
+          base::Bind(&SaveFileManager::SaveFinished,
+                     file_manager_,
+                     it->second->save_id(),
+                     it->second->url(),
+                     id,
+                     true));
     }
     return;
   }
@@ -961,11 +973,11 @@ void SavePackage::OnReceivedSerializedHtmlData(const GURL& frame_url,
     // Call write file functionality in file thread.
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(file_manager_,
-                          &SaveFileManager::UpdateSaveProgress,
-                          save_item->save_id(),
-                          new_data,
-                          static_cast<int>(data.size())));
+        base::Bind(&SaveFileManager::UpdateSaveProgress,
+                   file_manager_,
+                   save_item->save_id(),
+                   new_data,
+                   static_cast<int>(data.size())));
   }
 
   // Current frame is completed saving, call finish in file thread.
@@ -975,12 +987,12 @@ void SavePackage::OnReceivedSerializedHtmlData(const GURL& frame_url,
              << " url = \"" << save_item->url().spec() << "\"";
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(file_manager_,
-                          &SaveFileManager::SaveFinished,
-                          save_item->save_id(),
-                          save_item->url(),
-                          id,
-                          true));
+        base::Bind(&SaveFileManager::SaveFinished,
+                   file_manager_,
+                   save_item->save_id(),
+                   save_item->url(),
+                   id,
+                   true));
   }
 }
 
@@ -1011,7 +1023,7 @@ void SavePackage::OnReceivedSavableResourceLinksForCurrentPage(
 
   // We use total bytes as the total number of files we want to save.
   if (download_)
-    download_->set_total_bytes(all_save_items_count_);
+    download_->SetTotalBytes(all_save_items_count_);
 
   if (all_save_items_count_) {
     // Put all sub-resources to wait list.
@@ -1151,11 +1163,12 @@ void SavePackage::GetSaveInfo() {
       tab_contents(), &website_save_dir, &download_save_dir);
   std::string mime_type = tab_contents()->contents_mime_type();
   std::string accept_languages =
-      content::GetContentClient()->browser()->GetAcceptLangs(tab_contents());
+      content::GetContentClient()->browser()->GetAcceptLangs(
+          tab_contents()->browser_context());
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this, &SavePackage::CreateDirectoryOnFileThread,
+      base::Bind(&SavePackage::CreateDirectoryOnFileThread, this,
           website_save_dir, download_save_dir, mime_type, accept_languages));
 }
 
@@ -1198,8 +1211,8 @@ void SavePackage::CreateDirectoryOnFileThread(
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &SavePackage::ContinueGetSaveInfo, save_dir,
-                        can_save_as_complete));
+      base::Bind(&SavePackage::ContinueGetSaveInfo, this, save_dir,
+                 can_save_as_complete));
 }
 
 void SavePackage::ContinueGetSaveInfo(const FilePath& suggested_path,
@@ -1273,7 +1286,7 @@ void SavePackage::OnDownloadUpdated(DownloadItem* download) {
   DCHECK(download_manager_);
 
   // Check for removal.
-  if (download->state() == DownloadItem::REMOVING)
+  if (download->GetState() == DownloadItem::REMOVING)
     StopObservation();
 }
 

@@ -7,7 +7,7 @@
 #include "base/path_service.h"
 
 void BaseTest::SetUp() {
-  PathService::Get(base::DIR_SOURCE_ROOT, &test_dir_);
+  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &test_dir_));
   test_dir_ = test_dir_.AppendASCII("courgette");
   test_dir_ = test_dir_.AppendASCII("testdata");
 }
@@ -24,4 +24,18 @@ std::string BaseTest::FileContents(const char* file_name) const {
   EXPECT_TRUE(file_util::ReadFileToString(file_path, &file_bytes));
 
   return file_bytes;
+}
+
+std::string BaseTest::FilesContents(std::list<std::string> file_names) const {
+
+  std::string result;
+
+  std::list<std::string>::iterator file_name = file_names.begin();
+
+  while (file_name != file_names.end()) {
+    result += FileContents(file_name->c_str());
+    file_name++;
+  }
+
+  return result;
 }

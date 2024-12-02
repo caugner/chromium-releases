@@ -71,7 +71,9 @@ enum NotificationType {
   // traversal. The source is the browser, there are no details.
   NOTIFICATION_FOCUS_RETURNED_TO_BROWSER,
 
-  // Sent after an HtmlDialog dialog has been shown. The source is the dialog.
+  // Sent after an HtmlDialog dialog has been shown. The source is the
+  // dialog. The details is a Details<RenderViewHost> with a pointer to the RVH
+  // for the shown dialog.
   NOTIFICATION_HTML_DIALOG_SHOWN,
 
   // Application-modal dialogs -----------------------------------------------
@@ -308,6 +310,10 @@ enum NotificationType {
   // details are NoDetails.
   NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
 
+  // The number of times that NTP4 bubble is shown has been changed. The NTP
+  // resource cache has to be refreshed to remove the NTP4 bubble.
+  NTP4_INTRO_PREF_CHANGED,
+
   // Autocomplete ------------------------------------------------------------
 
   // Sent by the autocomplete controller when done.  The source is the
@@ -379,11 +385,6 @@ enum NotificationType {
   // UpdatedExtensionPermissionsInfo, and the source is a Profile.
   NOTIFICATION_EXTENSION_PERMISSIONS_UPDATED,
 
-  // Sent when an extension is about to be installed so we can (in the case of
-  // themes) alert the user with a loading dialog. The source is a Profile
-  // and the details are the download url.
-  NOTIFICATION_EXTENSION_READY_FOR_INSTALL,
-
   // Sent when an extension install turns out to not be a theme.
   NOTIFICATION_NO_THEME_DETECTED,
 
@@ -418,7 +419,7 @@ enum NotificationType {
   NOTIFICATION_EXTENSION_UNLOADED,
 
   // Sent after a new ExtensionHost is created. The details are
-  // an ExtensionHost* and the source is an ExtensionProcessManager*.
+  // an ExtensionHost* and the source is a Profile*.
   NOTIFICATION_EXTENSION_HOST_CREATED,
 
   // Sent before an ExtensionHost is destroyed. The details are
@@ -433,10 +434,6 @@ enum NotificationType {
   // window.close(). The details are an ExtensionHost* and the source is a
   // Profile*.
   NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
-
-  // Sent after an extension render process is created and fully functional.
-  // The details are an ExtensionHost*.
-  NOTIFICATION_EXTENSION_PROCESS_CREATED,
 
   // Sent when extension render process ends (whether it crashes or closes).
   // The details are an ExtensionHost* and the source is a Profile*. Not sent
@@ -537,6 +534,10 @@ enum NotificationType {
   // notifications). The source is a Profile, and the details are a string
   // with the extension id of the app.
   NOTIFICATION_APP_NOTIFICATION_STATE_CHANGED,
+
+  // Finished loading app notification manager.
+  // The source is AppNotificationManager, and the details are NoDetails.
+  NOTIFICATION_APP_NOTIFICATION_MANAGER_LOADED,
 
   // Component Updater -------------------------------------------------------
 
@@ -659,6 +660,16 @@ enum NotificationType {
   // Details will be an AccessibilityVolumeInfo.
   NOTIFICATION_ACCESSIBILITY_VOLUME_CHANGED,
 
+  // Notification that the screen is unlocked, for propagating to an
+  // accessibility extension.
+  // Details will be an AccessibilityEmptyEventInfo.
+  NOTIFICATION_ACCESSIBILITY_SCREEN_UNLOCKED,
+
+  // Notification that the system woke up from sleep, for propagating to an
+  // accessibility extension.
+  // Details will be an AccessibilityEmptyEventInfo.
+  NOTIFICATION_ACCESSIBILITY_WOKE_UP,
+
   // Content Settings --------------------------------------------------------
 
   // Sent when content settings change. The source is a HostContentSettings
@@ -775,9 +786,12 @@ enum NotificationType {
   // Sent when user image is updated.
   NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
 
-  // Sent by UserManager when current user image is profile image and
-  // it has been updated.
+  // Sent by UserManager when a profile image download has been completed.
   NOTIFICATION_PROFILE_IMAGE_UPDATED,
+
+  // Sent by UserManager when profile image download has failed or user has the
+  // default profile image or no profile image at all. No details are expected.
+  NOTIFICATION_PROFILE_IMAGE_UPDATE_FAILED,
 
   // Sent when a chromium os user attempts to log in.  The source is
   // all and the details are AuthenticationNotificationDetails.
@@ -917,6 +931,10 @@ enum NotificationType {
   // Sent when the cached profile info has changed.
   NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
 
+  // Sent when the cached profile has finished writing a profile picture to
+  // disk.
+  NOTIFICATION_PROFILE_CACHE_PICTURE_SAVED,
+
   // Sent when the browser enters or exits fullscreen mode.
   NOTIFICATION_FULLSCREEN_CHANGED,
 
@@ -935,10 +953,30 @@ enum NotificationType {
   // Used only in unit testing.
   NOTIFICATION_PANEL_CHANGED_ACTIVE_STATUS,
 
+  // Sent when panel is minimized/restored/shows title only etc.
+  // The source is the Panel, no details.
+  // Used only in unit testing.
+  NOTIFICATION_PANEL_CHANGED_EXPANSION_STATE,
+
   // Sent when panel window size is known. This is for platforms where the
   // window creation is async and size of the window only becomes known later.
   // Used only in unit testing.
   NOTIFICATION_PANEL_WINDOW_SIZE_KNOWN,
+
+  // Sent when panel's bounds get changed.
+  // The source is the Panel, no details.
+  // Used only in coordination with notification balloons.
+  NOTIFICATION_PANEL_CHANGED_BOUNDS,
+
+  // Sent when panel is added into the panel manager.
+  // The source is the Panel, no details.
+  // Used only in coordination with notification balloons.
+  NOTIFICATION_PANEL_ADDED,
+
+  // Sent when panel is removed from the panel manager.
+  // The source is the Panel, no details.
+  // Used only in coordination with notification balloons.
+  NOTIFICATION_PANEL_REMOVED,
 
   // Sent when a global error has changed and the error UI should update it
   // self. The source is a Source<Profile> containing the profile for the

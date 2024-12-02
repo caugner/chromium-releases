@@ -15,7 +15,7 @@
 #include "content/public/renderer/render_view_observer_tracker.h"
 #include "printing/metafile.h"
 #include "printing/metafile_impl.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCanvas.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCanvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebViewClient.h"
@@ -31,11 +31,6 @@ class DictionaryValue;
 namespace printing {
 struct PageSizeMargins;
 }
-#if defined(USE_SKIA)
-namespace skia {
-class VectorCanvas;
-}
-#endif
 
 // Class that calls the Begin and End print functions on the frame and changes
 // the size of the view temporarily to support full page printing..
@@ -111,8 +106,8 @@ class PrintWebViewHelper
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
   // RenderViewObserver implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message);
-  virtual void PrintPage(WebKit::WebFrame* frame);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void PrintPage(WebKit::WebFrame* frame) OVERRIDE;
 
   // Message handlers ---------------------------------------------------------
 
@@ -196,8 +191,7 @@ class PrintWebViewHelper
   // It will implicitly revert the document to display CSS media type.
   bool PrintPages(const PrintMsg_PrintPages_Params& params,
                   WebKit::WebFrame* frame,
-                  const WebKit::WebNode& node,
-                  PrepareFrameAndViewForPrint* prepare);
+                  const WebKit::WebNode& node);
 
   // Prints the page listed in |params|.
 #if defined(USE_X11)
@@ -212,8 +206,8 @@ class PrintWebViewHelper
 #endif
 
   // Render the frame for printing.
-  bool RenderPagesForPrint(WebKit::WebFrame* frame, const WebKit::WebNode& node,
-                           PrepareFrameAndViewForPrint* prepare);
+  bool RenderPagesForPrint(WebKit::WebFrame* frame,
+                           const WebKit::WebNode& node);
 
   // Platform specific helper function for rendering page(s) to |metafile|.
 #if defined(OS_WIN)

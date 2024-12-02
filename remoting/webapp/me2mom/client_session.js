@@ -4,7 +4,7 @@
 
 /**
  * @fileoverview
- * Session class that handles creation and teardown of a remoting session.
+ * Class handling creation and teardown of a remoting client session.
  *
  * This abstracts a <embed> element and controls the plugin which does the
  * actual remoting work.  There should be no UI code inside this class.  It
@@ -16,17 +16,15 @@
 /** @suppress {duplicate} */
 var remoting = remoting || {};
 
-(function() {
 /**
  * @param {string} hostJid The jid of the host to connect to.
  * @param {string} hostPublicKey The base64 encoded version of the host's
  *     public key.
  * @param {string} accessCode The access code for the IT2Me connection.
  * @param {string} email The username for the talk network.
- * @param {function(remoting.ClientSession.State):void} onStateChange
- *     The callback to invoke when the session changes state. This callback
- *     occurs after the state changes and is passed the previous state; the
- *     new state is accessible via ClientSession's |state| property.
+ * @param {function(remoting.ClientSession.State,
+                    remoting.ClientSession.State):void} onStateChange
+ *     The callback to invoke when the session changes state.
  * @constructor
  */
 remoting.ClientSession = function(hostJid, hostPublicKey, accessCode, email,
@@ -38,20 +36,27 @@ remoting.ClientSession = function(hostJid, hostPublicKey, accessCode, email,
   this.accessCode = accessCode;
   this.email = email;
   this.clientJid = '';
+  this.sessionId = '';
+  /** @type {remoting.ViewerPlugin} */ this.plugin = null;
+  this.logToServer = new remoting.LogToServer();
   this.onStateChange = onStateChange;
 };
 
+// Note that the positive values in both of these enums are copied directly
+// from chromoting_scriptable_object.h and must be kept in sync. The negative
+// values represent states transitions that occur within the web-app that have
+// no corresponding plugin state transition.
 /** @enum {number} */
 remoting.ClientSession.State = {
+  CREATED: -3,
+  BAD_PLUGIN_VERSION: -2,
+  UNKNOWN_PLUGIN_ERROR: -1,
   UNKNOWN: 0,
-  CREATED: 1,
-  BAD_PLUGIN_VERSION: 2,
-  UNKNOWN_PLUGIN_ERROR: 3,
-  CONNECTING: 4,
-  INITIALIZING: 5,
-  CONNECTED: 6,
-  CLOSED: 7,
-  CONNECTION_FAILED: 8
+  CONNECTING: 1,
+  INITIALIZING: 2,
+  CONNECTED: 3,
+  CLOSED: 4,
+  CONNECTION_FAILED: 5
 };
 
 /** @enum {number} */
@@ -60,8 +65,7 @@ remoting.ClientSession.ConnectionError = {
   HOST_IS_OFFLINE: 1,
   SESSION_REJECTED: 2,
   INCOMPATIBLE_PROTOCOL: 3,
-  NETWORK_FAILURE: 4,
-  OTHER: 5
+  NETWORK_FAILURE: 4
 };
 
 /**
@@ -117,9 +121,11 @@ remoting.ClientSession.prototype.PLUGIN_ID = 'session-client-plugin';
 /**
  * Callback to invoke when the state is changed.
  *
- * @type {function(remoting.ClientSession.State):void}
+ * @param {remoting.ClientSession.State} oldState The previous state.
+ * @param {remoting.ClientSession.State} newState The current state.
  */
-remoting.ClientSession.prototype.onStateChange = function(state) { };
+remoting.ClientSession.prototype.onStateChange =
+    function(oldState, newState) { };
 
 /**
  * Adds <embed> element to |container| and readies the sesion object.
@@ -146,8 +152,10 @@ remoting.ClientSession.prototype.createPluginAndConnect =
     return;
   }
 
-  var that = this;
+  /** @type {remoting.ClientSession} */ var that = this;
+  /** @param {string} msg The IQ stanza to send. */
   this.plugin.sendIq = function(msg) { that.sendIq_(msg); };
+  /** @param {string} msg The message to log. */
   this.plugin.debugInfo = function(msg) {
     remoting.debug.log('plugin: ' + msg);
   };
@@ -155,13 +163,14 @@ remoting.ClientSession.prototype.createPluginAndConnect =
   // TODO(ajwong): Is it even worth having this class handle these events?
   // Or would it be better to just allow users to pass in their own handlers
   // and leave these blank by default?
-  this.plugin.connectionInfoUpdate = function() {
-    that.connectionInfoUpdateCallback();
+  /**
+   * @param {number} status The plugin status.
+   * @param {number} error The plugin error status, if any.
+   */
+  this.plugin.connectionInfoUpdate = function(status, error) {
+    that.connectionInfoUpdateCallback(status, error);
   };
   this.plugin.desktopSizeUpdate = function() { that.onDesktopSizeChanged_(); };
-
-  // For IT2Me, we are pre-authorized so there is no login challenge.
-  this.plugin.loginChallenge = function() {};
 
   // TODO(garykac): Clean exit if |connect| isn't a function.
   if (typeof this.plugin.connect === 'function') {
@@ -180,13 +189,12 @@ remoting.ClientSession.prototype.createPluginAndConnect =
  * @return {void} Nothing.
  */
 remoting.ClientSession.prototype.removePlugin = function() {
-  var plugin = document.getElementById(this.PLUGIN_ID);
-  if (plugin) {
+  if (this.plugin) {
     var parentNode = this.plugin.parentNode;
-    parentNode.removeChild(plugin);
-    plugin = null;
+    parentNode.removeChild(this.plugin);
+    this.plugin = null;
   }
-}
+};
 
 /**
  * Deletes the <embed> element from the container and disconnects.
@@ -194,24 +202,29 @@ remoting.ClientSession.prototype.removePlugin = function() {
  * @return {void} Nothing.
  */
 remoting.ClientSession.prototype.disconnect = function() {
+  // The plugin won't send a state change notification, so we explicitly log
+  // the fact that the connection has closed.
+  this.logToServer.logClientSessionStateChange(
+      remoting.ClientSession.State.CLOSED,
+      remoting.ClientSession.ConnectionError.NONE);
   if (remoting.wcs) {
     remoting.wcs.setOnIq(function(stanza) {});
+    this.sendIq_(
+        '<cli:iq ' +
+            'to="' + this.hostJid + '" ' +
+            'type="set" ' +
+            'id="session-terminate" ' +
+            'xmlns:cli="jabber:client">' +
+          '<jingle ' +
+              'xmlns="urn:xmpp:jingle:1" ' +
+              'action="session-terminate" ' +
+              'initiator="' + this.clientJid + '" ' +
+              'sid="' + this.sessionId + '">' +
+            '<reason><success/></reason>' +
+          '</jingle>' +
+        '</cli:iq>');
   }
   this.removePlugin();
-  this.sendIq_(
-      '<cli:iq ' +
-          'to="' + this.hostJid + '" ' +
-          'type="set" ' +
-          'id="session-terminate" ' +
-          'xmlns:cli="jabber:client">' +
-        '<jingle ' +
-            'xmlns="urn:xmpp:jingle:1" ' +
-            'action="session-terminate" ' +
-            'initiator="' + this.clientJid + '" ' +
-            'sid="' + this.sessionId + '">' +
-          '<reason><success/></reason>' +
-        '</jingle>' +
-      '</cli:iq>');
 };
 
 /**
@@ -222,7 +235,7 @@ remoting.ClientSession.prototype.disconnect = function() {
  * @return {void} Nothing.
  */
 remoting.ClientSession.prototype.sendIq_ = function(msg) {
-  remoting.debug.log('Sending Iq: ' + msg);
+  remoting.debug.logIq(true, msg);
   // Extract the session id, so we can close the session later.
   var parser = new DOMParser();
   var iqNode = parser.parseFromString(msg, 'text/xml').firstChild;
@@ -266,11 +279,23 @@ remoting.ClientSession.prototype.connectPluginToWcs_ =
   if (this.clientJid == '') {
     remoting.debug.log('Tried to connect without a full JID.');
   }
+  remoting.debug.setJids(this.clientJid, this.hostJid);
+  /** @type {remoting.ClientSession} */
   var that = this;
-  remoting.wcs.setOnIq(function(stanza) {
-      remoting.debug.log('Receiving Iq: ' + stanza);
+  /** @param {string} stanza The IQ stanza received. */
+  var onIq = function(stanza) {
+    remoting.debug.logIq(false, stanza);
+    if (that.plugin.onIq) {
       that.plugin.onIq(stanza);
-  });
+    } else {
+      // plugin.onIq may not be set after the plugin has been shut
+      // down. Particularly this happens when we receive response to
+      // session-terminate stanza.
+      remoting.debug.log(
+          'plugin.onIq is not set so dropping incoming message.');
+    }
+  }
+  remoting.wcs.setOnIq(onIq);
   that.plugin.connect(this.hostJid, this.hostPublicKey, this.clientJid,
                       this.accessCode);
 };
@@ -278,62 +303,49 @@ remoting.ClientSession.prototype.connectPluginToWcs_ =
 /**
  * Callback that the plugin invokes to indicate that the connection
  * status has changed.
+ *
+ * @param {number} status The plugin's status.
+ * @param {number} error The plugin's error state, if any.
  */
-remoting.ClientSession.prototype.connectionInfoUpdateCallback = function() {
-  var state = this.plugin.status;
-
-  // TODO(ajwong): We're doing silly type translation here. Any way to avoid?
-  if (state == this.plugin.STATUS_UNKNOWN) {
-    this.setState_(remoting.ClientSession.State.UNKNOWN);
-  } else if (state == this.plugin.STATUS_CONNECTING) {
-    this.setState_(remoting.ClientSession.State.CONNECTING);
-  } else if (state == this.plugin.STATUS_INITIALIZING) {
-    this.setState_(remoting.ClientSession.State.INITIALIZING);
-  } else if (state == this.plugin.STATUS_CONNECTED) {
-    this.onDesktopSizeChanged_();
-    this.setState_(remoting.ClientSession.State.CONNECTED);
-  } else if (state == this.plugin.STATUS_CLOSED) {
-    this.setState_(remoting.ClientSession.State.CLOSED);
-  } else if (state == this.plugin.STATUS_FAILED) {
-    var error = this.plugin.error;
-    if (error == this.plugin.ERROR_HOST_IS_OFFLINE) {
-      this.error = remoting.ClientSession.ConnectionError.HOST_IS_OFFLINE;
-    } else if (error == this.plugin.ERROR_SESSION_REJECTED) {
-      this.error = remoting.ClientSession.ConnectionError.SESSION_REJECTED;
-    } else if (error == this.plugin.ERROR_INCOMPATIBLE_PROTOCOL) {
-      this.error = remoting.ClientSession.ConnectionError.INCOMPATIBLE_PROTOCOL;
-    } else if (error == this.plugin.NETWORK_FAILURE) {
-      this.error = remoting.ClientSession.ConnectionError.NETWORK_FAILURE;
-    } else {
-      this.error = remoting.ClientSession.ConnectionError.OTHER;
-    }
-    this.setState_(remoting.ClientSession.State.CONNECTION_FAILED);
+remoting.ClientSession.prototype.connectionInfoUpdateCallback =
+    function(status, error) {
+  // Old plugins didn't pass the status and error values, so get them directly.
+  // Note that there is a race condition inherent in this approach.
+  if (typeof(status) == 'undefined') {
+    status = this.plugin.status;
   }
+  if (typeof(error) == 'undefined') {
+    error = this.plugin.error;
+  }
+
+  if (status == this.plugin.STATUS_CONNECTED) {
+    this.onDesktopSizeChanged_();
+  } else if (status == this.plugin.STATUS_FAILED) {
+    this.error = /** @type {remoting.ClientSession.ConnectionError} */ (error);
+  }
+  this.setState_(/** @type {remoting.ClientSession.State} */ (status));
 };
 
 /**
  * @private
- * @param {remoting.ClientSession.State} state The new state for the session.
+ * @param {remoting.ClientSession.State} newState The new state for the session.
  * @return {void} Nothing.
  */
-remoting.ClientSession.prototype.setState_ = function(state) {
+remoting.ClientSession.prototype.setState_ = function(newState) {
   var oldState = this.state;
-  this.state = state;
+  this.state = newState;
   if (this.onStateChange) {
-    this.onStateChange(oldState);
+    this.onStateChange(oldState, newState);
   }
+  this.logToServer.logClientSessionStateChange(this.state, this.error);
 };
 
 /**
  * This is a callback that gets called when the window is resized.
  *
- * @private
  * @return {void} Nothing.
  */
 remoting.ClientSession.prototype.onWindowSizeChanged = function() {
-  remoting.debug.log('window size changed: ' +
-                     window.innerWidth + 'x' +
-                     window.innerHeight);
   this.updateDimensions();
 };
 
@@ -382,11 +394,11 @@ remoting.ClientSession.prototype.updateDimensions = function() {
   if (this.plugin.width < windowWidth)
     parentNode.style.left = (windowWidth - this.plugin.width) / 2 + 'px';
   else
-    parentNode.style.left = 0;
+    parentNode.style.left = '0';
   if (this.plugin.height < windowHeight)
     parentNode.style.top = (windowHeight - this.plugin.height) / 2 + 'px';
   else
-    parentNode.style.top = 0;
+    parentNode.style.top = '0';
 
   remoting.debug.log('plugin dimensions: ' +
                      parentNode.style.left + ',' +
@@ -398,11 +410,12 @@ remoting.ClientSession.prototype.updateDimensions = function() {
 /**
  * Returns an associative array with a set of stats for this connection.
  *
- * @return {Object} The connection statistics.
+ * @return {Object.<string, number>} The connection statistics.
  */
 remoting.ClientSession.prototype.stats = function() {
   return {
     'video_bandwidth': this.plugin.videoBandwidth,
+    'video_frame_rate': this.plugin.videoFrameRate,
     'capture_latency': this.plugin.videoCaptureLatency,
     'encode_latency': this.plugin.videoEncodeLatency,
     'decode_latency': this.plugin.videoDecodeLatency,
@@ -410,5 +423,3 @@ remoting.ClientSession.prototype.stats = function() {
     'roundtrip_latency': this.plugin.roundTripLatency
   };
 };
-
-}());

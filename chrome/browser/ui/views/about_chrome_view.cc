@@ -20,6 +20,7 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_version_info.h"
@@ -34,13 +35,13 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/link.h"
-#include "views/controls/textfield/textfield.h"
-#include "views/controls/throbber.h"
-#include "views/layout/layout_constants.h"
-#include "views/view_text_utils.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/link.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/controls/throbber.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/view_text_utils.h"
+#include "ui/views/widget/widget.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_WIN)
@@ -50,15 +51,31 @@
 #include "chrome/installer/util/install_util.h"
 #endif  // defined(OS_WIN)
 
+// The amount of vertical space separating the error label at the bottom from
+// the rest of the text.
+static const int kErrorLabelVerticalSpacing = 15;  // Pixels.
+
 namespace {
 // These are used as placeholder text around the links in the text in the about
 // dialog.
-const string16 kBeginLink(ASCIIToUTF16("BEGIN_LINK"));
-const string16 kEndLink(ASCIIToUTF16("END_LINK"));
-const string16 kBeginLinkChr(ASCIIToUTF16("BEGIN_LINK_CHR"));
-const string16 kBeginLinkOss(ASCIIToUTF16("BEGIN_LINK_OSS"));
-const string16 kEndLinkChr(ASCIIToUTF16("END_LINK_CHR"));
-const string16 kEndLinkOss(ASCIIToUTF16("END_LINK_OSS"));
+string16 kBeginLink() {
+  return ASCIIToUTF16("BEGIN_LINK");
+}
+string16 kEndLink() {
+  return ASCIIToUTF16("END_LINK");
+}
+string16 kBeginLinkChr() {
+  return ASCIIToUTF16("BEGIN_LINK_CHR");
+}
+string16 kBeginLinkOss() {
+  return ASCIIToUTF16("BEGIN_LINK_OSS");
+}
+string16 kEndLinkChr() {
+  return ASCIIToUTF16("END_LINK_CHR");
+}
+string16 kEndLinkOss() {
+  return ASCIIToUTF16("END_LINK_OSS");
+}
 
 // Returns a substring from |text| between start and end.
 string16 StringSubRange(const string16& text, size_t start, size_t end) {
@@ -74,7 +91,9 @@ namespace browser {
 // need to depend on our .h.
 views::Widget* ShowAboutChromeView(gfx::NativeWindow parent, Profile* profile) {
   views::Widget* about_chrome_window =
-      browser::CreateViewsWindow(parent, new AboutChromeView(profile));
+      browser::CreateViewsWindow(parent,
+                                 new AboutChromeView(profile),
+                                 STYLE_GENERIC);
       about_chrome_window->Show();
   return about_chrome_window;
 }
@@ -95,6 +114,7 @@ AboutChromeView::AboutChromeView(Profile* profile)
       chromium_url_(NULL),
       open_source_url_(NULL),
       terms_of_service_url_(NULL),
+      error_label_(NULL),
       restart_button_visible_(false),
       chromium_url_appears_first_(true),
       text_direction_is_rtl_(false) {
@@ -165,7 +185,12 @@ void AboutChromeView::Init() {
   // This is a text field so people can copy the version number from the dialog.
   version_label_ = new views::Textfield();
   chrome::VersionInfo version_info;
-  version_label_->SetText(UTF8ToUTF16(version_info.CreateVersionString()));
+  {
+    // TODO(finnur): Need to evaluate whether we should be doing IO here.
+    //               See issue: http://crbug.com/101699.
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    version_label_->SetText(UTF8ToUTF16(version_info.CreateVersionString()));
+  }
   version_label_->SetReadOnly(true);
   version_label_->RemoveBorder();
   version_label_->SetTextColor(SK_ColorBLACK);
@@ -186,33 +211,33 @@ void AboutChromeView::Init() {
   string16 text = l10n_util::GetStringUTF16(IDS_ABOUT_VERSION_LICENSE);
 
   chromium_url_appears_first_ =
-      text.find(kBeginLinkChr) < text.find(kBeginLinkOss);
+      text.find(kBeginLinkChr()) < text.find(kBeginLinkOss());
 
-  size_t link1 = text.find(kBeginLink);
-  DCHECK(link1 != std::wstring::npos);
-  size_t link1_end = text.find(kEndLink, link1);
-  DCHECK(link1_end != std::wstring::npos);
-  size_t link2 = text.find(kBeginLink, link1_end);
-  DCHECK(link2 != std::wstring::npos);
-  size_t link2_end = text.find(kEndLink, link2);
-  DCHECK(link1_end != std::wstring::npos);
+  size_t link1 = text.find(kBeginLink());
+  DCHECK(link1 != string16::npos);
+  size_t link1_end = text.find(kEndLink(), link1);
+  DCHECK(link1_end != string16::npos);
+  size_t link2 = text.find(kBeginLink(), link1_end);
+  DCHECK(link2 != string16::npos);
+  size_t link2_end = text.find(kEndLink(), link2);
+  DCHECK(link1_end != string16::npos);
 
   main_label_chunk1_ = text.substr(0, link1);
-  main_label_chunk2_ = StringSubRange(text, link1_end + kEndLinkOss.size(),
+  main_label_chunk2_ = StringSubRange(text, link1_end + kEndLinkOss().size(),
                                       link2);
-  main_label_chunk3_ = text.substr(link2_end + kEndLinkOss.size());
+  main_label_chunk3_ = text.substr(link2_end + kEndLinkOss().size());
 
   // The Chromium link within the main text of the dialog.
   chromium_url_ = new views::Link(
-      StringSubRange(text, text.find(kBeginLinkChr) + kBeginLinkChr.size(),
-                     text.find(kEndLinkChr)));
+      StringSubRange(text, text.find(kBeginLinkChr()) + kBeginLinkChr().size(),
+                     text.find(kEndLinkChr())));
   AddChildView(chromium_url_);
   chromium_url_->set_listener(this);
 
   // The Open Source link within the main text of the dialog.
   open_source_url_ = new views::Link(
-      StringSubRange(text, text.find(kBeginLinkOss) + kBeginLinkOss.size(),
-                     text.find(kEndLinkOss)));
+      StringSubRange(text, text.find(kBeginLinkOss()) + kBeginLinkOss().size(),
+                     text.find(kEndLinkOss())));
   AddChildView(open_source_url_);
   open_source_url_->set_listener(this);
 
@@ -266,6 +291,11 @@ void AboutChromeView::Init() {
       l10n_util::GetStringUTF16(IDS_TERMS_OF_SERVICE));
   AddChildView(terms_of_service_url_);
   terms_of_service_url_->set_listener(this);
+
+  error_label_ = new views::Label();
+  error_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  error_label_->SetMultiLine(true);
+  AddChildView(error_label_);
 
   // Add the Terms of Service line and some whitespace.
   height += font.GetHeight() + views::kRelatedControlVerticalSpacing;
@@ -326,6 +356,18 @@ void AboutChromeView::Layout() {
                                   copyright_label_->height(),
                               sz.width(),
                               main_text_label_height_);
+
+  // And the error label at the bottom of the main content. This does not fit on
+  // screen until EnlargeWindowSizeIfNeeded has been called (which happens when
+  // an error is returned from Google Update).
+  if (error_label_) {
+    sz.set_height(error_label_->GetHeightForWidth(sz.width()));
+    error_label_->SetBounds(main_text_label_->bounds().x(),
+                            main_text_label_->bounds().y() +
+                            main_text_label_->height() +
+                            kErrorLabelVerticalSpacing,
+                            sz.width(), sz.height());
+  }
 
   // Get the y-coordinate of our parent so we can position the text left of the
   // buttons at the bottom.
@@ -407,15 +449,15 @@ void AboutChromeView::OnPaint(gfx::Canvas* canvas) {
   gfx::Size position;
   // Draw the first text chunk and position the Chromium url.
   view_text_utils::DrawTextAndPositionUrl(canvas, main_text_label_,
-      UTF16ToWideHack(main_label_chunk1_), link1, rect1, &position,
+      main_label_chunk1_, link1, rect1, &position,
       text_direction_is_rtl_, label_bounds, font);
   // Draw the second text chunk and position the Open Source url.
   view_text_utils::DrawTextAndPositionUrl(canvas, main_text_label_,
-      UTF16ToWideHack(main_label_chunk2_), link2, rect2, &position,
+      main_label_chunk2_, link2, rect2, &position,
       text_direction_is_rtl_, label_bounds, font);
   // Draw the third text chunk (which has no URL associated with it).
   view_text_utils::DrawTextAndPositionUrl(canvas, main_text_label_,
-      UTF16ToWideHack(main_label_chunk3_), NULL, NULL, &position,
+      main_label_chunk3_, NULL, NULL, &position,
       text_direction_is_rtl_, label_bounds, font);
 
 #if defined(GOOGLE_CHROME_BUILD)
@@ -425,12 +467,12 @@ void AboutChromeView::OnPaint(gfx::Canvas* canvas) {
 
   // And now the Terms of Service and position the TOS url.
   view_text_utils::DrawTextAndPositionUrl(canvas, main_text_label_,
-      UTF16ToWideHack(main_label_chunk4_), terms_of_service_url_,
+      main_label_chunk4_, terms_of_service_url_,
       &terms_of_service_url_rect_, &position, text_direction_is_rtl_,
       label_bounds, font);
   // The last text chunk doesn't have a URL associated with it.
   view_text_utils::DrawTextAndPositionUrl(canvas, main_text_label_,
-       UTF16ToWideHack(main_label_chunk5_), NULL, NULL, &position,
+       main_label_chunk5_, NULL, NULL, &position,
        text_direction_is_rtl_, label_bounds, font);
 
   // Position the TOS URL within the main label.
@@ -484,7 +526,7 @@ void AboutChromeView::ViewHierarchyChanged(bool is_add,
       if (!(base::win::GetVersion() == base::win::VERSION_VISTA &&
             (base::win::OSInfo::GetInstance()->service_pack().major == 0) &&
             !base::win::UserAccountControlIsEnabled())) {
-        UpdateStatus(UPGRADE_CHECK_STARTED, GOOGLE_UPDATE_NO_ERROR);
+        UpdateStatus(UPGRADE_CHECK_STARTED, GOOGLE_UPDATE_NO_ERROR, string16());
         // CheckForUpdate(false, ...) means don't upgrade yet.
         google_updater_->CheckForUpdate(false, GetWidget());
       }
@@ -502,11 +544,10 @@ void AboutChromeView::ViewHierarchyChanged(bool is_add,
 ////////////////////////////////////////////////////////////////////////////////
 // AboutChromeView, views::DialogDelegate implementation:
 
-string16 AboutChromeView::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
-  if (button == ui::MessageBoxFlags::DIALOGBUTTON_OK) {
+string16 AboutChromeView::GetDialogButtonLabel(ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK) {
     return l10n_util::GetStringUTF16(IDS_RELAUNCH_AND_UPDATE);
-  } else if (button == ui::MessageBoxFlags::DIALOGBUTTON_CANCEL) {
+  } else if (button == ui::DIALOG_BUTTON_CANCEL) {
     if (restart_button_visible_)
       return l10n_util::GetStringUTF16(IDS_NOT_NOW);
     // The OK button (which is the default button) has been re-purposed to be
@@ -523,17 +564,15 @@ string16 AboutChromeView::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(IDS_ABOUT_CHROME_TITLE);
 }
 
-bool AboutChromeView::IsDialogButtonEnabled(
-    MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK && !restart_button_visible_)
+bool AboutChromeView::IsDialogButtonEnabled(ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK && !restart_button_visible_)
     return false;
 
   return true;
 }
 
-bool AboutChromeView::IsDialogButtonVisible(
-    MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK && !restart_button_visible_)
+bool AboutChromeView::IsDialogButtonVisible(ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK && !restart_button_visible_)
     return false;
 
   return true;
@@ -544,7 +583,7 @@ bool AboutChromeView::IsDialogButtonVisible(
 // OK button (which is the dialog cancel button, see GetDialogButtonLabel
 // above).
 int AboutChromeView::GetDefaultDialogButton() const {
-  return MessageBoxFlags::DIALOGBUTTON_CANCEL;
+  return ui::DIALOG_BUTTON_CANCEL;
 }
 
 bool AboutChromeView::CanResize() const {
@@ -593,6 +632,7 @@ void AboutChromeView::LinkClicked(views::Link* source, int event_flags) {
 
 void AboutChromeView::OnReportResults(GoogleUpdateUpgradeResult result,
                                       GoogleUpdateErrorCode error_code,
+                                      const string16& error_message,
                                       const string16& version) {
   // Drop the last reference to the object so that it gets cleaned up here.
   google_updater_ = NULL;
@@ -600,13 +640,15 @@ void AboutChromeView::OnReportResults(GoogleUpdateUpgradeResult result,
   // Make a note of which version Google Update is reporting is the latest
   // version.
   new_version_available_ = version;
-  UpdateStatus(result, error_code);
+  UpdateStatus(result, error_code, error_message);
 }
+
 ////////////////////////////////////////////////////////////////////////////////
 // AboutChromeView, private:
 
 void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
-                                   GoogleUpdateErrorCode error_code) {
+                                   GoogleUpdateErrorCode error_code,
+                                   const string16& error_message) {
 #if !defined(GOOGLE_CHROME_BUILD)
   // For Chromium builds it would show an error message.
   // But it looks weird because in fact there is no error,
@@ -638,7 +680,7 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
       DCHECK(!google_updater_);  // Should have been nulled out already.
       google_updater_ = new GoogleUpdate();
       google_updater_->set_status_listener(this);
-      UpdateStatus(UPGRADE_STARTED, GOOGLE_UPDATE_NO_ERROR);
+      UpdateStatus(UPGRADE_STARTED, GOOGLE_UPDATE_NO_ERROR, string16());
       // CheckForUpdate(true,...) means perform upgrade if new version found.
       google_updater_->CheckForUpdate(true, GetWidget());
       // TODO(seanparent): Need to see if this code needs to change to
@@ -668,7 +710,7 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
           (installed_version->CompareTo(*running_version) <= 0)) {
         UserMetrics::RecordAction(
             UserMetricsAction("UpgradeCheck_AlreadyUpToDate"));
-        std::wstring update_label_text = l10n_util::GetStringFUTF16(
+        string16 update_label_text = l10n_util::GetStringFUTF16(
             IDS_UPGRADE_ALREADY_UP_TO_DATE,
             l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
             ASCIIToUTF16(version_info.Version()));
@@ -689,7 +731,7 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
       else
         UserMetrics::RecordAction(UserMetricsAction("UpgradeCheck_Upgraded"));
       restart_button_visible_ = true;
-      const std::wstring& update_string =
+      const string16& update_string =
           UTF16ToWide(l10n_util::GetStringFUTF16(
               IDS_UPGRADE_SUCCESSFUL_RELAUNCH,
               l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
@@ -697,8 +739,16 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
       show_success_indicator = true;
       break;
     }
-    case UPGRADE_ERROR:
+    case UPGRADE_ERROR: {
       UserMetrics::RecordAction(UserMetricsAction("UpgradeCheck_Error"));
+      if (!error_message.empty() && error_label_) {
+        error_label_->SetText(
+            l10n_util::GetStringFUTF16(IDS_ABOUT_BOX_ERROR_DURING_UPDATE_CHECK,
+                error_message));
+        int added_height = EnlargeWindowSizeIfNeeded();
+        dialog_dimensions_.set_height(dialog_dimensions_.height() +
+                                      added_height);
+      }
       restart_button_visible_ = false;
       if (error_code != GOOGLE_UPDATE_DISABLED_BY_POLICY) {
         update_label_.SetText(
@@ -709,6 +759,7 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
       }
       show_timeout_indicator = true;
       break;
+    }
     default:
       NOTREACHED();
   }
@@ -730,6 +781,22 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
   // ViewHierarchyChanged because the view hasn't been added to a Widget yet.
   if (GetWidget())
     GetDialogClientView()->UpdateDialogButtons();
+}
+
+int AboutChromeView::EnlargeWindowSizeIfNeeded() {
+  if (!error_label_ || error_label_->GetText().empty())
+    return 0;
+
+  // This will enlarge the window each time the function is called, which is
+  // fine since we only receive status once from Google Update.
+  gfx::Rect window_rect = GetWidget()->GetWindowScreenBounds();
+  int height = error_label_->GetHeightForWidth(
+      dialog_dimensions_.width() - (2 * views::kPanelHorizMargin)) +
+          views::kRelatedControlVerticalSpacing;
+  window_rect.set_height(window_rect.height() + height);
+  GetWidget()->SetBounds(window_rect);
+
+  return height;
 }
 
 #endif

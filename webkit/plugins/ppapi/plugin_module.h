@@ -21,30 +21,15 @@
 #include "ppapi/c/pp_module.h"
 #include "ppapi/c/ppb.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
+#include "webkit/plugins/webkit_plugins_export.h"
 
 class FilePath;
-class MessageLoop;
 struct PPB_Core;
-struct PPB_Memory_Dev;
 typedef void* NPIdentifier;
-
-namespace base {
-class WaitableEvent;
-}
 
 namespace ppapi {
 class WebKitForwarding;
 }  // namespace ppapi
-
-namespace pp {
-namespace proxy {
-class HostDispatcher;
-}  // namespace proxy
-}  // namespace pp
-
-namespace IPC {
-struct ChannelHandle;
-}
 
 namespace webkit {
 namespace ppapi {
@@ -58,8 +43,9 @@ class PluginInstance;
 //
 // Note: to get from a PP_Instance to a PluginInstance*, use the
 // ResourceTracker.
-class PluginModule : public base::RefCounted<PluginModule>,
-                     public base::SupportsWeakPtr<PluginModule> {
+class WEBKIT_PLUGINS_EXPORT PluginModule :
+    public base::RefCounted<PluginModule>,
+    public base::SupportsWeakPtr<PluginModule> {
  public:
   typedef const void* (*GetInterfaceFunc)(const char*);
   typedef int (*PPP_InitializeModuleFunc)(PP_Module, PPB_GetInterface);
@@ -67,7 +53,7 @@ class PluginModule : public base::RefCounted<PluginModule>,
 
   struct EntryPoints {
     // This structure is POD, with the constructor initializing to NULL.
-    EntryPoints();
+    WEBKIT_PLUGINS_EXPORT EntryPoints();
 
     GetInterfaceFunc get_interface;
     PPP_InitializeModuleFunc initialize_module;

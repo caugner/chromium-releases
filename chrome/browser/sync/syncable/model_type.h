@@ -74,7 +74,9 @@ enum ModelType {
   SESSIONS,
   // An app folder or an app object.
   APPS,
-  // A setting from the extension settings API.
+  // An app setting from the extension settings API.
+  APP_SETTINGS,
+  // An extension setting from the extension settings API.
   EXTENSION_SETTINGS,
   // App notifications.
   APP_NOTIFICATIONS,
@@ -119,8 +121,9 @@ int GetExtensionFieldNumberFromModelType(ModelType model_type);
 
 // TODO(sync): The functions below badly need some cleanup.
 
-// Returns a string that represents the name of |model_type|.
-std::string ModelTypeToString(ModelType model_type);
+// Returns a pointer to a string with application lifetime that represents
+// the name of |model_type|.
+const char* ModelTypeToString(ModelType model_type);
 
 // Handles all model types, and not just real ones.
 //
@@ -139,6 +142,9 @@ std::string ModelTypeBitSetToString(const ModelTypeBitSet& model_types);
 
 // Convert a ModelTypeSet to a ModelTypeBitSet.
 ModelTypeBitSet ModelTypeBitSetFromSet(const ModelTypeSet& set);
+
+// Convert a ModelTypeBitSet to a ModelTypeSet.
+ModelTypeSet ModelTypeBitSetToSet(const ModelTypeBitSet& bit_set);
 
 // Caller takes ownership of returned list.
 base::ListValue* ModelTypeBitSetToValue(const ModelTypeBitSet& model_types);

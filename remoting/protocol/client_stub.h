@@ -11,21 +11,17 @@
 #define REMOTING_PROTOCOL_CLIENT_STUB_H_
 
 #include "base/basictypes.h"
-#include "base/callback.h"
 
 namespace remoting {
 namespace protocol {
-
-class LocalLoginStatus;
-class NotifyResolutionRequest;
 
 class ClientStub {
  public:
   ClientStub() {}
   virtual ~ClientStub() {}
 
-  virtual void BeginSessionResponse(const LocalLoginStatus* msg,
-                                    const base::Closure& done) = 0;
+  // Currently we don't use the control channel for anything. Add new
+  // message handlers here when necessary.
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ClientStub);

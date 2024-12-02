@@ -4,7 +4,8 @@
 
 // Implements the Demuxer interface. DummyDemuxer returns corresponding
 // DummyDemuxerStream as signal for media pipeline to construct correct
-// playback channels.
+// playback channels. Used in WebRTC local video capture pipeline, where
+// demuxing is not needed.
 
 #ifndef MEDIA_FILTERS_DUMMY_DEMUXER_H_
 #define MEDIA_FILTERS_DUMMY_DEMUXER_H_
@@ -13,6 +14,7 @@
 
 #include "media/base/audio_decoder_config.h"
 #include "media/base/demuxer.h"
+#include "media/base/video_decoder_config.h"
 
 namespace media {
 
@@ -24,6 +26,7 @@ class DummyDemuxerStream : public DemuxerStream {
   virtual void Read(const ReadCallback& read_callback) OVERRIDE;
   virtual Type type() OVERRIDE;
   virtual const AudioDecoderConfig& audio_decoder_config() OVERRIDE;
+  virtual const VideoDecoderConfig& video_decoder_config() OVERRIDE;
   virtual void EnableBitstreamConverter() OVERRIDE;
 
  private:
@@ -31,13 +34,14 @@ class DummyDemuxerStream : public DemuxerStream {
 
   Type type_;
   AudioDecoderConfig audio_config_;
+  VideoDecoderConfig video_config_;
 
   DISALLOW_COPY_AND_ASSIGN(DummyDemuxerStream);
 };
 
 class DummyDemuxer : public Demuxer {
  public:
-  DummyDemuxer(bool has_video, bool has_audio);
+  DummyDemuxer(bool has_video, bool has_audio, bool local_source);
   virtual ~DummyDemuxer();
 
   // Demuxer implementation.
@@ -45,10 +49,14 @@ class DummyDemuxer : public Demuxer {
       DemuxerStream::Type type) OVERRIDE;
   virtual void SetPreload(Preload preload) OVERRIDE;
   virtual base::TimeDelta GetStartTime() const OVERRIDE;
+  virtual int GetBitrate() OVERRIDE;
+  virtual bool IsLocalSource() OVERRIDE;
+  virtual bool IsSeekable() OVERRIDE;
 
  private:
   bool has_video_;
   bool has_audio_;
+  bool local_source_;
   std::vector< scoped_refptr<DummyDemuxerStream> > streams_;
 
   DISALLOW_COPY_AND_ASSIGN(DummyDemuxer);

@@ -32,10 +32,6 @@
           'defines': [
             'HAVE_CONFIG_H',
           ],
-          'include_dirs': [
-            '.',   # libevent includes some of its own headers with
-                   # #include <...> instead of #include "..."
-          ],
           'conditions': [
             # libevent has platform-specific implementation files.  Since its
             # native build uses autoconf, platform-specific config.h files are
@@ -58,7 +54,7 @@
               'sources': [ 'epoll.c' ],
               'include_dirs': [ 'android' ],
             }],
-            [ 'OS == "mac" or OS == "freebsd" or OS == "openbsd"', {
+            [ 'OS == "mac" or os_bsd==1', {
               'sources': [ 'kqueue.c' ],
               'include_dirs': [ 'mac' ]
             }],
@@ -73,7 +69,7 @@
       'targets': [
         {
           'target_name': 'libevent',
-          'type': 'settings',
+          'type': 'none',
           'toolsets': ['host', 'target'],
           'direct_dependent_settings': {
             'defines': [

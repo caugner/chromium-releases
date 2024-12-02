@@ -41,7 +41,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -49,6 +49,7 @@
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/x/active_window_watcher_x.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/skbitmap_operations.h"
@@ -336,7 +337,7 @@ void BrowserTitlebar::Init() {
   avatar_button_.reset(new AvatarMenuButtonGtk(browser_window_->browser()));
 
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 
 #if defined(USE_GCONF)
   // Either read the gconf database and register for updates (on GNOME), or use
@@ -401,15 +402,14 @@ void BrowserTitlebar::Init() {
     gtk_box_pack_start(GTK_BOX(app_mode_hbox), app_mode_title_, TRUE, TRUE,
                        0);
 
-    // Register with the theme provider to set the |app_mode_title_| label
-    // color.
-    theme_service_ = GtkThemeService::GetFrom(
-        browser_window_->browser()->profile());
-    registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                   Source<ThemeService>(theme_service_));
-    theme_service_->InitThemesFor(this);
     UpdateTitleAndIcon();
   }
+
+  theme_service_ = GtkThemeService::GetFrom(
+      browser_window_->browser()->profile());
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 content::Source<ThemeService>(theme_service_));
+  theme_service_->InitThemesFor(this);
 
   gtk_widget_show_all(container_);
 
@@ -550,6 +550,26 @@ CustomDrawButton* BrowserTitlebar::BuildTitlebarButton(int image,
   return button;
 }
 
+void BrowserTitlebar::UpdateButtonBackground(CustomDrawButton* button) {
+  SkColor color = theme_service_->GetColor(
+      ThemeService::COLOR_BUTTON_BACKGROUND);
+  SkBitmap* background =
+      theme_service_->GetBitmapNamed(IDR_THEME_WINDOW_CONTROL_BACKGROUND);
+
+  // TODO(erg): For now, we just use a completely black mask and we can get
+  // away with this in the short term because our buttons are rectangles. We
+  // should get Glen to make properly hinted masks that match our min/max/close
+  // buttons (which have some odd alpha blending around the
+  // edges). http://crbug.com/103661
+  SkBitmap mask;
+  mask.setConfig(SkBitmap::kARGB_8888_Config,
+                 button->SurfaceWidth(), button->SurfaceHeight(), 0);
+  mask.allocPixels();
+  mask.eraseColor(SK_ColorBLACK);
+
+  button->SetBackground(color, background, &mask);
+}
+
 void BrowserTitlebar::UpdateCustomFrame(bool use_custom_frame) {
   using_custom_frame_ = use_custom_frame;
   if (!use_custom_frame ||
@@ -602,6 +622,10 @@ void BrowserTitlebar::UpdateTitleAndIcon() {
       }
       case Browser::TYPE_TABBED: {
         NOTREACHED() << "We should never have a tabbed app window.";
+        break;
+      }
+      case Browser::TYPE_SHELL: {
+        // Shell windows don't show titles and icons for now.
         break;
       }
       case Browser::TYPE_PANEL: {
@@ -789,7 +813,11 @@ void BrowserTitlebar::UpdateAvatar() {
   Profile* profile = browser_window_->browser()->profile();
   size_t index = cache.GetIndexOfProfileWithPath(profile->GetPath());
   if (index != std::string::npos) {
-    avatar_button_->SetIcon(cache.GetAvatarIconOfProfileAtIndex(index));
+    bool is_gaia_picture =
+        cache.IsUsingGAIAPictureOfProfileAtIndex(index) &&
+        cache.GetGAIAPictureOfProfileAtIndex(index);
+    avatar_button_->SetIcon(
+        cache.GetAvatarIconOfProfileAtIndex(index), is_gaia_picture);
 
     BubbleGtk::ArrowLocationGtk arrow_location =
         display_avatar_on_left_ ^ base::i18n::IsRTL() ?
@@ -817,14 +845,18 @@ void BrowserTitlebar::MaximizeButtonClicked() {
   } else {
     GtkWidget* widget = GTK_WIDGET(window_);
     GdkScreen* screen = gtk_widget_get_screen(widget);
-    gint monitor = gdk_screen_get_monitor_at_window(screen, widget->window);
+    gint monitor = gdk_screen_get_monitor_at_window(
+        screen, gtk_widget_get_window(widget));
     GdkRectangle screen_rect;
     gdk_screen_get_monitor_geometry(screen, monitor, &screen_rect);
 
     gint x, y;
     gtk_window_get_position(window_, &x, &y);
-    gint width = widget->allocation.width;
-    gint height = widget->allocation.height;
+
+    GtkAllocation allocation;
+    gtk_widget_get_allocation(widget, &allocation);
+    gint width = allocation.width;
+    gint height = allocation.height;
 
     if (event->button.button == 3) {
       x = 0;
@@ -991,15 +1023,26 @@ bool BrowserTitlebar::GetAcceleratorForCommandId(
 }
 
 void BrowserTitlebar::Observe(int type,
-                              const NotificationSource& source,
-                              const NotificationDetails& details) {
+                              const content::NotificationSource& source,
+                              const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_BROWSER_THEME_CHANGED:
+    case chrome::NOTIFICATION_BROWSER_THEME_CHANGED: {
       UpdateTextColor();
+
+      if (minimize_button_.get())
+        UpdateButtonBackground(minimize_button_.get());
+      if (maximize_button_.get())
+        UpdateButtonBackground(maximize_button_.get());
+      if (restore_button_.get())
+        UpdateButtonBackground(restore_button_.get());
+      if (close_button_.get())
+        UpdateButtonBackground(close_button_.get());
       break;
+    }
 
     case chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED:
-      UpdateAvatar();
+      if (!IsOffTheRecord())
+        UpdateAvatar();
       break;
 
     default:
@@ -1013,7 +1056,8 @@ void BrowserTitlebar::ActiveWindowChanged(GdkWindow* active_window) {
   if (!window_)
     return;
 
-  window_has_focus_ = GTK_WIDGET(window_)->window == active_window;
+  window_has_focus_ =
+      gtk_widget_get_window(GTK_WIDGET(window_)) == active_window;
   if (IsTypePanel()) {
     if (window_has_focus_ || window_has_mouse_)
       gtk_widget_show(panel_wrench_button_->widget());

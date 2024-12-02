@@ -8,6 +8,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/first_run.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -16,7 +17,6 @@
 #include "chrome/browser/ui/webui/options/core_options_handler.h"
 #include "chrome/browser/ui/webui/sync_promo_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
-#include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -32,27 +32,48 @@ namespace {
 const char kStringsJsFile[] = "strings.js";
 const char kSyncPromoJsFile[]  = "sync_promo.js";
 
-const char kSyncPromoQueryKeyShowTitle[]  = "show_title";
+const char kSyncPromoQueryKeyIsLaunchPage[] = "is_launch_page";
 const char kSyncPromoQueryKeyNextPage[]  = "next_page";
 
 // The maximum number of times we want to show the sync promo at startup.
-const int kSyncPromoShowAtStartupMaxiumum = 10;
+const int kSyncPromoShowAtStartupMaximum = 10;
+
+// Checks we want to show the sync promo for the given brand.
+bool AllowPromoAtStartupForCurrentBrand() {
+  std::string brand;
+  google_util::GetBrand(&brand);
+
+  if (brand.empty())
+    return true;
+
+  if (google_util::IsInternetCafeBrandCode(brand))
+    return false;
+
+  if (google_util::IsOrganic(brand))
+    return true;
+
+  if (StartsWithASCII(brand, "CH", true))
+    return true;
+
+  // Default to disallow for all other brand codes.
+  return false;
+}
 
 // The Web UI data source for the sync promo page.
 class SyncPromoUIHTMLSource : public ChromeWebUIDataSource {
  public:
-  SyncPromoUIHTMLSource();
+  explicit SyncPromoUIHTMLSource(WebUI* web_ui);
 
  private:
   ~SyncPromoUIHTMLSource() {}
   DISALLOW_COPY_AND_ASSIGN(SyncPromoUIHTMLSource);
 };
 
-SyncPromoUIHTMLSource::SyncPromoUIHTMLSource()
+SyncPromoUIHTMLSource::SyncPromoUIHTMLSource(WebUI* web_ui)
     : ChromeWebUIDataSource(chrome::kChromeUISyncPromoHost) {
   DictionaryValue localized_strings;
   CoreOptionsHandler::GetStaticLocalizedValues(&localized_strings);
-  SyncSetupHandler::GetStaticLocalizedValues(&localized_strings);
+  SyncSetupHandler::GetStaticLocalizedValues(&localized_strings, web_ui);
   AddLocalizedStrings(localized_strings);
 }
 
@@ -95,13 +116,14 @@ SyncPromoUI::SyncPromoUI(TabContents* contents) : ChromeWebUI(contents) {
   profile->GetChromeURLDataManager()->AddDataSource(theme);
 
   // Set up the sync promo source.
-  SyncPromoUIHTMLSource* html_source = new SyncPromoUIHTMLSource();
+  SyncPromoUIHTMLSource* html_source = new SyncPromoUIHTMLSource(this);
   html_source->set_json_path(kStringsJsFile);
   html_source->add_resource_path(kSyncPromoJsFile, IDR_SYNC_PROMO_JS);
   html_source->set_default_resource(IDR_SYNC_PROMO_HTML);
   profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }
 
+// static
 bool SyncPromoUI::ShouldShowSyncPromo(Profile* profile) {
 #if defined(OS_CHROMEOS)
   // There's no need to show the sync promo on cros since cros users are logged
@@ -119,9 +141,8 @@ bool SyncPromoUI::ShouldShowSyncPromo(Profile* profile) {
   if (!service || service->HasSyncSetupCompleted())
     return false;
 
-  // If we're not excluded from showing sync, let's check to see if the remote
-  // data from the promo server says we should show a promo now.
-  return PromoResourceService::CanShowSyncPromo(profile);
+  // Default to allow the promo.
+  return true;
 }
 
 // static
@@ -141,17 +162,11 @@ bool SyncPromoUI::ShouldShowSyncPromoAtStartup(Profile* profile,
   if (!ShouldShowSyncPromo(profile))
     return false;
 
-  // This pref can be set in the master preferences file to disallow showing
-  // the sync promo at startup.
-  PrefService *prefs = profile->GetPrefs();
-  if (!prefs->GetBoolean(prefs::kSyncPromoShowOnFirstRunAllowed)) {
-    return false;
-  }
-
   const CommandLine& command_line  = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kNoFirstRun))
     is_new_profile = false;
 
+  PrefService *prefs = profile->GetPrefs();
   if (!is_new_profile) {
     if (!prefs->HasPrefPath(prefs::kSyncPromoStartupCount))
       return false;
@@ -165,7 +180,20 @@ bool SyncPromoUI::ShouldShowSyncPromoAtStartup(Profile* profile,
     return false;
 
   int show_count = prefs->GetInteger(prefs::kSyncPromoStartupCount);
-  return show_count < kSyncPromoShowAtStartupMaxiumum;
+  if (show_count >= kSyncPromoShowAtStartupMaximum)
+    return false;
+
+  // This pref can be set in the master preferences file to allow or disallow
+  // showing the sync promo at startup.
+  if (prefs->HasPrefPath(prefs::kSyncPromoShowOnFirstRunAllowed))
+    return prefs->GetBoolean(prefs::kSyncPromoShowOnFirstRunAllowed);
+
+  // For now don't show the promo for some brands.
+  if (!AllowPromoAtStartupForCurrentBrand())
+    return false;
+
+  // Default to show the promo.
+  return true;
 }
 
 void SyncPromoUI::DidShowSyncPromoAtStartup(Profile* profile) {
@@ -186,8 +214,9 @@ void SyncPromoUI::SetUserSkippedSyncPromo(Profile* profile) {
 // static
 GURL SyncPromoUI::GetSyncPromoURL(const GURL& next_page, bool show_title) {
   std::stringstream stream;
-  stream << chrome::kChromeUISyncPromoURL << "?" << kSyncPromoQueryKeyShowTitle
-         << "=" << (show_title ? "true" : "false");
+  stream << chrome::kChromeUISyncPromoURL << "?"
+         << kSyncPromoQueryKeyIsLaunchPage << "="
+         << (show_title ? "true" : "false");
 
   if (!next_page.spec().empty()) {
     url_canon::RawCanonOutputT<char> output;
@@ -201,9 +230,11 @@ GURL SyncPromoUI::GetSyncPromoURL(const GURL& next_page, bool show_title) {
 }
 
 // static
-bool SyncPromoUI::GetShowTitleForSyncPromoURL(const GURL& url) {
+bool SyncPromoUI::GetIsLaunchPageForSyncPromoURL(const GURL& url) {
   std::string value;
-  if (GetValueForKeyInQuery(url, kSyncPromoQueryKeyShowTitle, &value))
+  // Show the title if the promo is currently the Chrome launch page (and not
+  // the page accessed through the NTP).
+  if (GetValueForKeyInQuery(url, kSyncPromoQueryKeyIsLaunchPage, &value))
     return value == "true";
   return false;
 }
@@ -219,4 +250,9 @@ GURL SyncPromoUI::GetNextPageURLForSyncPromoURL(const GURL& url) {
     return GURL(url);
   }
   return GURL();
+}
+
+// static
+bool SyncPromoUI::UserHasSeenSyncPromoAtStartup(Profile* profile) {
+  return profile->GetPrefs()->GetInteger(prefs::kSyncPromoStartupCount) > 0;
 }

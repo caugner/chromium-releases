@@ -4,7 +4,6 @@
 
 #include "chrome/browser/chromeos/xinput_hierarchy_changed_event_listener.h"
 
-#include <gdk/gdkx.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/XInput2.h>
 
@@ -45,13 +44,18 @@ void SelectXInputEvents() {
 
 // Checks the |event| and asynchronously sets the XKB layout when necessary.
 void HandleHierarchyChangedEvent(XIHierarchyEvent* event) {
+  if (!(event->flags & XISlaveAdded)) {
+    return;
+  }
   for (int i = 0; i < event->num_info; ++i) {
     XIHierarchyInfo* info = &event->info[i];
-    if ((event->flags & XISlaveAdded) &&
-        (info->use == XIFloatingSlave) &&
-        (info->flags & XISlaveAdded)) {
-      chromeos::input_method::InputMethodManager::GetInstance()->
-          GetXKeyboard()->ReapplyCurrentKeyboardLayout();
+    if ((info->flags & XISlaveAdded) && (info->use == XIFloatingSlave)) {
+      chromeos::input_method::InputMethodManager* input_method_manager =
+          chromeos::input_method::InputMethodManager::GetInstance();
+      chromeos::input_method::XKeyboard* xkeyboard =
+          input_method_manager->GetXKeyboard();
+      xkeyboard->ReapplyCurrentModifierLockStatus();
+      xkeyboard->ReapplyCurrentKeyboardLayout();
       break;
     }
   }
@@ -71,12 +75,7 @@ XInputHierarchyChangedEventListener::XInputHierarchyChangedEventListener()
     : stopped_(false),
       xiopcode_(GetXInputOpCode()) {
   SelectXInputEvents();
-
-#if defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
-  MessageLoopForUI::current()->AddObserver(this);
-#else
-  gdk_window_add_filter(NULL, GdkEventFilter, this);
-#endif
+  Init();
 }
 
 XInputHierarchyChangedEventListener::~XInputHierarchyChangedEventListener() {
@@ -87,53 +86,20 @@ void XInputHierarchyChangedEventListener::Stop() {
   if (stopped_)
     return;
 
-#if defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
-  MessageLoopForUI::current()->RemoveObserver(this);
-#else
-  gdk_window_remove_filter(NULL, GdkEventFilter, this);
-#endif
+  StopImpl();
   stopped_ = true;
   xiopcode_ = -1;
 }
-
-#if defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
-base::EventStatus XInputHierarchyChangedEventListener::WillProcessEvent(
-    const base::NativeEvent& event) {
-  return ProcessedXEvent(event) ? base::EVENT_HANDLED : base::EVENT_CONTINUE;
-}
-
-void XInputHierarchyChangedEventListener::DidProcessEvent(
-    const base::NativeEvent& event) {
-}
-#else  // defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
-// static
-GdkFilterReturn XInputHierarchyChangedEventListener::GdkEventFilter(
-    GdkXEvent* gxevent, GdkEvent* gevent, gpointer data) {
-  XInputHierarchyChangedEventListener* listener =
-      static_cast<XInputHierarchyChangedEventListener*>(data);
-  XEvent* xevent = static_cast<XEvent*>(gxevent);
-
-  return listener->ProcessedXEvent(xevent) ? GDK_FILTER_REMOVE
-                                           : GDK_FILTER_CONTINUE;
-}
-#endif  // defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
 
 bool XInputHierarchyChangedEventListener::ProcessedXEvent(XEvent* xevent) {
   if ((xevent->xcookie.type != GenericEvent) ||
       (xevent->xcookie.extension != xiopcode_)) {
     return false;
   }
-  if (!XGetEventData(xevent->xgeneric.display, &xevent->xcookie)) {
-    VLOG(1) << "XGetEventData failed";
-    return false;
-  }
-
   XGenericEventCookie* cookie = &(xevent->xcookie);
   const bool should_consume = (cookie->evtype == XI_HierarchyChanged);
-  if (should_consume) {
+  if (should_consume)
     HandleHierarchyChangedEvent(static_cast<XIHierarchyEvent*>(cookie->data));
-  }
-  XFreeEventData(xevent->xgeneric.display, cookie);
 
   return should_consume;
 }

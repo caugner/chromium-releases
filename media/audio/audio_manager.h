@@ -93,7 +93,7 @@ class MEDIA_EXPORT AudioManager {
   // Do not free the returned AudioInputStream. It is owned by AudioManager.
   // When you are done with it, call |Stop()| and |Close()| to release it.
   virtual AudioInputStream* MakeAudioInputStream(
-      const AudioParameters& params) = 0;
+      const AudioParameters& params, const std::string& device_id) = 0;
 
   // Muting continues playback but effectively the volume is set to zero.
   // Un-muting returns the volume to the previous level.
@@ -120,7 +120,11 @@ class MEDIA_EXPORT AudioManager {
   virtual void Cleanup() = 0;
 
  private:
+  // Allow unit tests to delete and recreate the singleton.
+  friend class AutoAudioManagerCleanup;
   static void Destroy(void*);
+  static bool SingletonExists();
+  static void Resurrect();
 
   // Called by GetAudioManager() to create platform-specific audio manager.
   static AudioManager* CreateAudioManager();

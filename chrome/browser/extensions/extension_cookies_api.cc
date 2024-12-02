@@ -18,11 +18,13 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_error_utils.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "net/base/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+
+using content::BrowserThread;
 
 namespace keys = extension_cookies_api_constants;
 
@@ -35,13 +37,14 @@ void ExtensionCookiesEventRouter::Init() {
   CHECK(registrar_.IsEmpty());
   registrar_.Add(this,
                  chrome::NOTIFICATION_COOKIE_CHANGED,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::NotificationService::AllBrowserContextsAndSources());
 }
 
-void ExtensionCookiesEventRouter::Observe(int type,
-                                          const NotificationSource& source,
-                                          const NotificationDetails& details) {
-  Profile* profile = Source<Profile>(source).ptr();
+void ExtensionCookiesEventRouter::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  Profile* profile = content::Source<Profile>(source).ptr();
   if (!profile_->IsSameProfile(profile)) {
     return;
   }
@@ -49,7 +52,7 @@ void ExtensionCookiesEventRouter::Observe(int type,
     case chrome::NOTIFICATION_COOKIE_CHANGED:
       CookieChanged(
           profile,
-          Details<ChromeCookieDetails>(details).ptr());
+          content::Details<ChromeCookieDetails>(details).ptr());
       break;
 
     default:
@@ -203,7 +206,7 @@ bool GetCookieFunction::RunImpl() {
 
   bool rv = BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this, &GetCookieFunction::GetCookieOnIOThread));
+      base::Bind(&GetCookieFunction::GetCookieOnIOThread, this));
   DCHECK(rv);
 
   // Will finish asynchronously.
@@ -238,7 +241,7 @@ void GetCookieFunction::GetCookieCallback(const net::CookieList& cookie_list) {
 
   bool rv = BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &GetCookieFunction::RespondOnUIThread));
+      base::Bind(&GetCookieFunction::RespondOnUIThread, this));
   DCHECK(rv);
 }
 
@@ -268,7 +271,7 @@ bool GetAllCookiesFunction::RunImpl() {
 
   bool rv = BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this, &GetAllCookiesFunction::GetAllCookiesOnIOThread));
+      base::Bind(&GetAllCookiesFunction::GetAllCookiesOnIOThread, this));
   DCHECK(rv);
 
   // Will finish asynchronously.
@@ -296,7 +299,7 @@ void GetAllCookiesFunction::GetAllCookiesCallback(
   }
   bool rv = BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &GetAllCookiesFunction::RespondOnUIThread));
+      base::Bind(&GetAllCookiesFunction::RespondOnUIThread, this));
   DCHECK(rv);
 }
 
@@ -369,7 +372,7 @@ bool SetCookieFunction::RunImpl() {
 
   bool rv = BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this, &SetCookieFunction::SetCookieOnIOThread));
+      base::Bind(&SetCookieFunction::SetCookieOnIOThread, this));
   DCHECK(rv);
 
   // Will finish asynchronously.
@@ -412,7 +415,7 @@ void SetCookieFunction::PullCookieCallback(const net::CookieList& cookie_list) {
 
   bool rv = BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &SetCookieFunction::RespondOnUIThread));
+      base::Bind(&SetCookieFunction::RespondOnUIThread, this));
   DCHECK(rv);
 }
 
@@ -453,7 +456,7 @@ bool RemoveCookieFunction::RunImpl() {
   // Pass the work off to the IO thread.
   bool rv = BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this, &RemoveCookieFunction::RemoveCookieOnIOThread));
+      base::Bind(&RemoveCookieFunction::RemoveCookieOnIOThread, this));
   DCHECK(rv);
 
   // Will return asynchronously.
@@ -482,7 +485,7 @@ void RemoveCookieFunction::RemoveCookieCallback() {
   // Return to UI thread
   bool rv = BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &RemoveCookieFunction::RespondOnUIThread));
+      base::Bind(&RemoveCookieFunction::RespondOnUIThread, this));
   DCHECK(rv);
 }
 

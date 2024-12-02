@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_PUBLIC_BROWSER_NOTIFICATION_TYPE_H_
-#define CONTENT_PUBLIC_BROWSER_NOTIFICATION_TYPE_H_
+#ifndef CONTENT_PUBLIC_BROWSER_NOTIFICATION_TYPES_H_
+#define CONTENT_PUBLIC_BROWSER_NOTIFICATION_TYPES_H_
 #pragma once
 
 // This file describes various types used to describe and filter notifications
@@ -356,14 +356,9 @@ enum NotificationType {
   // the new state is "visible."
   NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
 
-  // Sent from ~SiteInstance.  The source is the SiteInstance, and the details
-  // are unused.
-  NOTIFICATION_SITE_INSTANCE_DELETED,
-
   // The focused element inside a page has changed.  The source is the
-  // TabContents containing the render view host for the page. The details is
-  // a Details<const bool> that indicates whether or not an editable node was
-  // focused.
+  // RenderViewHost. The details is a Details<const bool> that indicates whether
+  // or not an editable node was focused.
   NOTIFICATION_FOCUS_CHANGED_IN_PAGE,
 
   // Notification posted from ExecuteJavascriptInWebFrameNotifyResult. The
@@ -379,28 +374,21 @@ enum NotificationType {
   // This notification is sent when a child process host has connected to a
   // child process.  There is no usable source, since it is sent from an
   // ephemeral task; register for AllSources() to receive this notification.
-  // The details are in a Details<ChildProcessInfo>.
+  // The details are in a Details<content::ChildProcessData>.
   NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED,
 
   // This message is sent after a ChildProcessHost is disconnected from the
   // child process.  There is no usable source, since it is sent from an
   // ephemeral task; register for AllSources() to receive this notification.
-  // The details are in a Details<ChildProcessInfo>.
+  // The details are in a Details<content::ChildProcessData>.
   NOTIFICATION_CHILD_PROCESS_HOST_DISCONNECTED,
 
   // This message is sent when a child process disappears
   // unexpectedly as a result of a crash.  There is no usable
   // source, since it is sent from an ephemeral task; register for
   // AllSources() to receive this notification.  The details are in
-  // a Details<ChildProcessInfo>.
+  // a Details<content::ChildProcessData>.
   NOTIFICATION_CHILD_PROCESS_CRASHED,
-
-  // This message is sent when a child process disappears
-  // unexpectedly as a result of a termination signal.  There is no
-  // usable source, since it is sent from an ephemeral task;
-  // register for AllSources() to receive this notification.  The
-  // details are in a Details<ChildProcessInfo>.
-  NOTIFICATION_CHILD_PROCESS_WAS_KILLED,
 
   // This message indicates that an instance of a particular child was
   // created in a page.  (If one page contains several regions rendered by
@@ -409,15 +397,8 @@ enum NotificationType {
   //
   // There is no usable source, since it is sent from an ephemeral task;
   // register for AllSources() to receive this notification.  The details are
-  // in a Details<ChildProcessInfo>.
+  // in a Details<content::ChildProcessData>.
   NOTIFICATION_CHILD_INSTANCE_CREATED,
-
-  // Download Notifications --------------------------------------------------
-
-  // Sent when a page generation to MHTML has finished.
-  // The source is the corresponding RenderViewHost. The details is a
-  // MHTMLGenerationManager::NotificationDetails.
-  NOTIFICATION_MHTML_GENERATED,
 
   // Saved Pages -------------------------------------------------------------
 
@@ -447,4 +428,4 @@ enum NotificationType {
 
 }  // namespace content
 
-#endif  // CONTENT_PUBLIC_BROWSER_NOTIFICATION_TYPE_H_
+#endif  // CONTENT_PUBLIC_BROWSER_NOTIFICATION_TYPES_H_

@@ -63,9 +63,13 @@ cr.define('ntp4', function() {
 
       menu.appendChild(cr.ui.MenuItem.createSeparator());
       this.options_ = this.appendMenuItem_('appoptions');
+      this.disableNotifications_ =
+          this.appendMenuItem_('appdisablenotifications');
       this.uninstall_ = this.appendMenuItem_('appuninstall');
       this.options_.addEventListener('activate',
                                      this.onShowOptions_.bind(this));
+      this.disableNotifications_.addEventListener(
+          'activate', this.onDisableNotifications_.bind(this));
       this.uninstall_.addEventListener('activate',
                                        this.onUninstall_.bind(this));
 
@@ -115,7 +119,7 @@ cr.define('ntp4', function() {
     },
 
     /**
-     * Does all the necessary setup to show the menu for the give app.
+     * Does all the necessary setup to show the menu for the given app.
      * @param {App} app The App object that will be showing a context menu.
      */
     setupForApp: function(app) {
@@ -130,6 +134,13 @@ cr.define('ntp4', function() {
 
       this.options_.disabled = !app.appData.options_url || !app.appData.enabled;
       this.uninstall_.disabled = !app.appData.can_uninstall;
+
+      this.disableNotifications_.hidden = true;
+      var notificationsDisabled = app.appData.notifications_disabled;
+      if (typeof notificationsDisabled != 'undefined') {
+        this.disableNotifications_.hidden = false;
+        this.disableNotifications_.checked = notificationsDisabled;
+      }
     },
 
     /**
@@ -154,6 +165,14 @@ cr.define('ntp4', function() {
     },
     onShowOptions_: function(e) {
       window.location = this.app_.appData.options_url;
+    },
+    onDisableNotifications_: function(e) {
+      var app = this.app_;
+      app.removeBubble();
+      // Toggle the current disable setting.
+      var newSetting = !this.disableNotifications_.checked;
+      app.appData.notifications_disabled = newSetting;
+      chrome.send('setNotificationsDisabled', [app.appData.id, newSetting]);
     },
     onUninstall_: function(e) {
       chrome.send('uninstallApp', [this.app_.appData.id]);
@@ -222,7 +241,8 @@ cr.define('ntp4', function() {
       var notification = this.appData_.notification;
       var hasNotification = typeof notification != 'undefined' &&
                             typeof notification['title'] != 'undefined' &&
-                            typeof notification['body'] != 'undefined';
+                            typeof notification['body'] != 'undefined' &&
+                            !this.appData_.notifications_disabled;
       if (hasNotification)
         this.setupNotification_(notification);
 
@@ -238,8 +258,7 @@ cr.define('ntp4', function() {
       this.appContents_.addEventListener('contextmenu',
                                          cr.ui.contextMenuHandler);
 
-      this.isStore_ = this.appData_.is_webstore;
-      if (this.isStore_)
+      if (this.appData_.is_webstore)
         this.createAppsPromoExtras_();
 
       this.addEventListener('mousedown', this.onMousedown_, true);
@@ -296,30 +315,73 @@ cr.define('ntp4', function() {
       this.classList.remove('icon-loading');
     },
 
-    // Shows a notification text below the app icon and stuffs the attributes
-    // necessary to show the bubble when the user clicks on the notification
-    // text.
-    setupNotification_: function(notification) {
-      // Remove the old notification from this node (if any).
-      if (this.appNotification_)
-        this.appNotification_.parentNode.removeChild(this.appNotification_);
+    /**
+     * Creates a bubble node.
+     * @param {Object} notification The notification to show in the bubble.
+     * @param {boolean} full Whether we want the headline or just the content.
+     * @private
+     */
+    createBubbleNode_: function(notification, full) {
+      if (!full) {
+        var titleItem = this.ownerDocument.createElement('span');
+        titleItem.textContent = notification['title'];
+        return titleItem;
+      } else {
+        var container = this.ownerDocument.createElement('div');
 
-      if (notification) {
-        // Add a new notification to this node.
-        var appNotification = this.ownerDocument.createElement('span');
-        appNotification.className = 'app-notification';
-        appNotification.textContent = notification['title'];
-        appNotification.addEventListener('click',
-                                         this.onNotificationClick_.bind(this));
-        appNotification.notificationTitle = notification['title'];
-        appNotification.notificationMessage = notification['body'];
-        if (typeof notification['linkUrl'] != 'undefined' &&
-            typeof notification['linkText'] != 'undefined') {
-          appNotification.notificationLink = notification['linkUrl'];
-          appNotification.notificationLinkText = notification['linkText'];
+        var messageItem = this.ownerDocument.createElement('div');
+        messageItem.textContent = notification['body'];
+        container.appendChild(messageItem);
+
+        if (notification['linkUrl'] && notification['linkText']) {
+          var anchor = this.ownerDocument.createElement('a');
+          anchor.href = notification['linkUrl'];
+          anchor.textContent = notification['linkText'];
+          container.appendChild(anchor);
         }
-        this.appNotification_ = appNotification;
-        this.appendChild(appNotification);
+
+        return container;
+      }
+    },
+
+    /**
+     * Sets up a notification for the app icon.
+     * @param {Object} notification The notification to show in the bubble.
+     * @private
+     */
+    setupNotification_: function(notification) {
+      if (notification) {
+        var infoBubble;
+        if (!this.currentBubbleShowing_) {
+          // Create a new bubble.
+          infoBubble = new cr.ui.ExpandableBubble;
+          infoBubble.anchorNode = this;
+          infoBubble.appId = this.appData_.id;
+          infoBubble.handleCloseEvent = function() {
+            chrome.send('closeNotification', [this.appId]);
+            infoBubble.hide();
+          };
+        } else {
+          // Reuse the old bubble instead of popping up a new bubble over
+          // the old one.
+          infoBubble = this.currentBubbleShowing_;
+          infoBubble.collapseBubble_();
+        }
+        infoBubble.contentTitle = this.createBubbleNode_(notification, false);
+        infoBubble.content = this.createBubbleNode_(notification, true);
+        infoBubble.show();
+
+        this.currentBubbleShowing_ = infoBubble;
+      }
+    },
+
+    /**
+     *  Removes the info bubble if there is one.
+     */
+    removeBubble: function() {
+      if (this.currentBubbleShowing_) {
+        this.currentBubbleShowing_.hide();
+        this.currentBubbleShowing_ = null;
       }
     },
 
@@ -337,6 +399,7 @@ cr.define('ntp4', function() {
           this.appsPromoExtras_.querySelector('.apps-promo-heading');
       this.appsPromoLink_ =
           this.appsPromoExtras_.querySelector('.apps-promo-link');
+      this.appsPromoLink_.addEventListener('click', this.onClick_.bind(this));
 
       this.appsPromoLogo_ = this.ownerDocument.createElement('img');
       this.appsPromoLogo_.className = 'apps-promo-logo';
@@ -402,9 +465,17 @@ cr.define('ntp4', function() {
      * @private
      */
     onClick_: function(e) {
+      var is_promo = this.appsPromoExtras_ &&
+          window.getComputedStyle(this.appsPromoExtras_).display != 'none';
+      var url = !this.appData_.is_webstore ? '' :
+          is_promo ? this.appsPromoLink_.href :
+                     appendParam(this.appData_.url,
+                                 'utm_source',
+                                 'chrome-ntp-icon');
+
       chrome.send('launchApp',
-                  [this.appId, APP_LAUNCH.NTP_APPS_MAXIMIZED,
-                   e.altKey, e.ctrlKey, e.metaKey, e.shiftKey, e.button]);
+                  [this.appId, APP_LAUNCH.NTP_APPS_MAXIMIZED, url,
+                   e.button, e.altKey, e.ctrlKey, e.metaKey, e.shiftKey]);
 
       // Don't allow the click to trigger a link or anything
       e.preventDefault();
@@ -418,46 +489,11 @@ cr.define('ntp4', function() {
     onKeydown_: function(e) {
       if (e.keyIdentifier == 'Enter') {
         chrome.send('launchApp',
-                    [this.appId, APP_LAUNCH.NTP_APPS_MAXIMIZED,
-                     e.altKey, e.ctrlKey, e.metaKey, e.shiftKey, 0]);
+                    [this.appId, APP_LAUNCH.NTP_APPS_MAXIMIZED, '',
+                     0, e.altKey, e.ctrlKey, e.metaKey, e.shiftKey]);
         e.preventDefault();
         e.stopPropagation();
       }
-    },
-
-    /**
-     * Invoked when an app notification is clicked. This will show the
-     * notification bubble, containing the details of the notification.
-     * @param {Event} e The click event.
-     * @private
-     */
-    onNotificationClick_: function(e) {
-      var title = this.appNotification_.notificationTitle;
-      var message = this.appNotification_.notificationMessage;
-      var link = this.appNotification_.notificationLink;
-      var linkMessage = this.appNotification_.notificationLinkText;
-
-      if (!title || !message)
-        return;
-
-      var container = this.ownerDocument.createElement('div');
-      var titleItem = this.ownerDocument.createElement('strong');
-      titleItem.textContent = title;
-      container.appendChild(titleItem);
-      var messageDiv = this.ownerDocument.createElement('div');
-      messageDiv.textContent = message;
-      container.appendChild(messageDiv);
-      if (link && linkMessage) {
-        var anchor = this.ownerDocument.createElement('a');
-        anchor.href = link;
-        anchor.textContent = linkMessage;
-        container.appendChild(anchor);
-      }
-
-      var infoBubble = new cr.ui.Bubble;
-      infoBubble.anchorNode = e.target;
-      infoBubble.content = container;
-      infoBubble.show();
     },
 
     /**
@@ -552,9 +588,10 @@ cr.define('ntp4', function() {
      */
     removeFromChrome: function() {
       chrome.send('uninstallApp', [this.appData_.id, true]);
+      this.tile.tilePage.removeTile(this.tile, true);
 
-      this.tile.tilePage.cleanupDrag();
-      this.tile.parentNode.removeChild(this.tile);
+      if (this.currentBubbleShowing_)
+        currentBubbleShowing_.hide();
     },
 
     /**
@@ -654,11 +691,7 @@ cr.define('ntp4', function() {
 
     /** @inheritDoc */
     shouldAcceptDrag: function(e) {
-      var tile = ntp4.getCurrentlyDraggingTile();
-      if (tile && tile.querySelector('.bookmark'))
-        return !!tile.firstChild.data.url;
-
-      return tile ||
+      return !!ntp4.getCurrentlyDraggingTile() ||
           (e.dataTransfer && e.dataTransfer.types.indexOf('url') != -1);
     },
 
@@ -678,9 +711,6 @@ cr.define('ntp4', function() {
         } else if (currentlyDraggingTile.querySelector('.most-visited')) {
           this.generateAppForLink(tileContents.data);
           sourceId = DRAG_SOURCE.MOST_VISITED_PANE;
-        } else if (currentlyDraggingTile.querySelector('.bookmark')) {
-          this.generateAppForLink(tileContents.data);
-          sourceId = DRAG_SOURCE.BOOKMARK_PANE;
         }
       } else {
         this.addOutsideData_(dataTransfer, index);
@@ -783,7 +813,10 @@ cr.define('ntp4', function() {
   };
 
   function appNotificationChanged(id, notification) {
-    $(id).setupNotification_(notification);
+    var app = $(id);
+    // The app might have been uninstalled, or notifications might be disabled.
+    if (app && !app.appData.notifications_disabled)
+      app.setupNotification_(notification);
   };
 
   return {

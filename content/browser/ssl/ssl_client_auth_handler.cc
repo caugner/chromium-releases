@@ -5,20 +5,27 @@
 #include "content/browser/ssl/ssl_client_auth_handler.h"
 
 #include "base/bind.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/content_browser_client.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/browser/ssl/ssl_client_auth_notification_details.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/notification_service.h"
 #include "net/base/x509_certificate.h"
+#include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
+
+using content::BrowserThread;
 
 SSLClientAuthHandler::SSLClientAuthHandler(
     net::URLRequest* request,
     net::SSLCertRequestInfo* cert_request_info)
     : request_(request),
+      http_network_session_(
+          request_->context()->http_transaction_factory()->GetSession()),
       cert_request_info_(cert_request_info) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 }
 
 SSLClientAuthHandler::~SSLClientAuthHandler() {
@@ -57,11 +64,13 @@ void SSLClientAuthHandler::CertificateSelected(net::X509Certificate* cert) {
   VLOG(1) << this << " CertificateSelected " << cert;
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  SSLClientAuthNotificationDetails details(cert_request_info_, cert);
-  NotificationService* service = NotificationService::current();
+  SSLClientAuthNotificationDetails details(cert_request_info_, this, cert);
+  content::NotificationService* service =
+      content::NotificationService::current();
   service->Notify(content::NOTIFICATION_SSL_CLIENT_AUTH_CERT_SELECTED,
-                  Source<SSLClientAuthHandler>(this),
-                  Details<SSLClientAuthNotificationDetails>(&details));
+                  content::Source<net::HttpNetworkSession>(
+                      http_network_session()),
+                  content::Details<SSLClientAuthNotificationDetails>(&details));
 
   CertificateSelectedNoNotify(cert);
 }
@@ -113,19 +122,20 @@ SSLClientAuthObserver::~SSLClientAuthObserver() {
 
 void SSLClientAuthObserver::Observe(
     int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   VLOG(1) << "SSLClientAuthObserver::Observe " << this << " " << handler_.get();
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(type == content::NOTIFICATION_SSL_CLIENT_AUTH_CERT_SELECTED);
 
-  if (Source<SSLClientAuthHandler>(source).ptr() == handler_.get()) {
+  SSLClientAuthNotificationDetails* auth_details =
+      content::Details<SSLClientAuthNotificationDetails>(details).ptr();
+
+  if (auth_details->IsSameHandler(handler_.get())) {
     VLOG(1) << "got notification from ourself " << handler_.get();
     return;
   }
 
-  SSLClientAuthNotificationDetails* auth_details =
-      Details<SSLClientAuthNotificationDetails>(details).ptr();
   if (!auth_details->IsSameHost(cert_request_info_))
     return;
 
@@ -141,7 +151,8 @@ void SSLClientAuthObserver::StartObserving() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   notification_registrar_.Add(
       this, content::NOTIFICATION_SSL_CLIENT_AUTH_CERT_SELECTED,
-      NotificationService::AllSources());
+      content::Source<net::HttpNetworkSession>(
+          handler_->http_network_session()));
 }
 
 void SSLClientAuthObserver::StopObserving() {

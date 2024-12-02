@@ -258,18 +258,6 @@ struct CompileAssert {
 //   causes ((0.0) ? 1 : -1) to incorrectly evaluate to 1.
 
 
-// MetatagId refers to metatag-id that we assign to
-// each metatag <name, value> pair..
-typedef uint32 MetatagId;
-
-// Argument type used in interfaces that can optionally take ownership
-// of a passed in argument.  If TAKE_OWNERSHIP is passed, the called
-// object takes ownership of the argument.  Otherwise it does not.
-enum Ownership {
-  DO_NOT_TAKE_OWNERSHIP,
-  TAKE_OWNERSHIP
-};
-
 // bit_cast<Dest,Source> is a template function that implements the
 // equivalent of "*reinterpret_cast<Dest*>(&source)".  We need this in
 // very low-level functions like the protobuf library and fast math
@@ -362,6 +350,13 @@ inline void ignore_result(const T&) {
 //       static MyClass my_variable_name(base::LINKER_INITIALIZED);
 namespace base {
 enum LinkerInitialized { LINKER_INITIALIZED };
+
+// Use these to declare and define a static local variable (static T;) so that
+// it is leaked so that its destructors are not called at exit. If you need
+// thread-safe initialization, use base/lazy_instance.h instead.
+#define CR_DEFINE_STATIC_LOCAL(type, name, arguments) \
+  static type& name = *new type arguments
+
 }  // base
 
 #endif  // BASE_BASICTYPES_H_

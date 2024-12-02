@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 <include src="util.js"/>
+<include src="table_printer.js"/>
 <include src="view.js"/>
 <include src="tab_switcher_view.js"/>
 <include src="import_view.js"/>
@@ -22,8 +23,11 @@
 <include src="events_view.js"/>
 <include src="details_view.js"/>
 <include src="source_entry.js"/>
+<include src="horizontal_scrollbar_view.js"/>
 <include src="top_mid_bottom_view.js"/>
-<include src="timeline_view_painter.js"/>
+<include src="timeline_data_series.js"/>
+<include src="timeline_graph_view.js"/>
+<include src="timeline_view.js"/>
 <include src="log_view_painter.js"/>
 <include src="log_grouper.js"/>
 <include src="proxy_view.js"/>
@@ -34,7 +38,8 @@
 <include src="http_throttling_view.js"/>
 <include src="logs_view.js"/>
 <include src="prerender_view.js"/>
+<include src="chromeos_view.js"/>
 
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', function() {
   MainView.getInstance();  // from main.js
 });

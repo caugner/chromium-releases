@@ -6,15 +6,18 @@
 #define CHROME_BROWSER_UI_WEBUI_WORKERS_UI_H_
 #pragma once
 
+#include "base/memory/ref_counted.h"
 #include "chrome/browser/ui/webui/chrome_web_ui.h"
-
-class RefCountedMemory;
 
 class WorkersUI : public ChromeWebUI {
  public:
   explicit WorkersUI(TabContents* contents);
+  virtual ~WorkersUI();
 
  private:
+  class WorkerCreationDestructionListener;
+  scoped_refptr<WorkerCreationDestructionListener> observer_;
+
   DISALLOW_COPY_AND_ASSIGN(WorkersUI);
 };
 

@@ -28,14 +28,32 @@ class GURL;
 class TabContents;
 
 #if defined(TOOLKIT_VIEWS)
+
+// TODO(beng): Move all views-related code to a views-specific sub-interface.
+
+class AutocompleteEditController;
+class LocationBarView;
+class Profile;
+class ToolbarModel;
+
 namespace views {
 class DropTargetEvent;
 class View;
 }  // namespace views
+
 #endif
 
 class OmniboxView {
  public:
+#if defined(TOOLKIT_VIEWS)
+  static OmniboxView* CreateOmniboxView(AutocompleteEditController* controller,
+                                        ToolbarModel* toolbar_model,
+                                        Profile* profile,
+                                        CommandUpdater* command_updater,
+                                        bool popup_window_mode,
+                                        LocationBarView* location_bar);
+#endif
+
   // Used by the automation system for getting at the model from the view.
   virtual AutocompleteEditModel* model() = 0;
   virtual const AutocompleteEditModel* model() const = 0;
@@ -109,7 +127,7 @@ class OmniboxView {
   // It is not guaranteed that |*start < *end|, as the selection can be
   // directed.  If there is no selection, |start| and |end| will both be equal
   // to the current cursor position.
-  virtual void GetSelectionBounds(size_t* start, size_t* end) = 0;
+  virtual void GetSelectionBounds(size_t* start, size_t* end) const = 0;
 
   // Selects all the text in the edit.  Use this in place of SetSelAll() to
   // avoid selecting the "phantom newline" at the end of the edit.
@@ -183,6 +201,8 @@ class OmniboxView {
   virtual bool IsImeComposing() const = 0;
 
 #if defined(TOOLKIT_VIEWS)
+  virtual int GetMaxEditWidth(int entry_width) const = 0;
+
   // Adds the autocomplete edit view to view hierarchy and
   // returns the views::View of the edit view.
   virtual views::View* AddToView(views::View* parent) = 0;

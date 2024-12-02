@@ -104,6 +104,9 @@ class UI_EXPORT ResourceBundle {
   // Delete the ResourceBundle for this process if it exists.
   static void CleanupSharedInstance();
 
+  // Returns true after the global resource loader instance has been created.
+  static bool HasSharedInstance();
+
   // Return the global resource loader instance.
   static ResourceBundle& GetSharedInstance();
 
@@ -186,6 +189,8 @@ class UI_EXPORT ResourceBundle {
   //    ResourceBundle).
   static const SkColor frame_color;
   static const SkColor frame_color_inactive;
+
+  // TODO(beng): These browser-specific concepts should move to ThemeProvider.
   static const SkColor frame_color_app_panel;
   static const SkColor frame_color_app_panel_inactive;
   static const SkColor frame_color_incognito;

@@ -6,7 +6,11 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/callback.h"
 #include "base/message_loop.h"
+#include "base/task.h"
 #include "base/threading/thread.h"
 #include "base/synchronization/waitable_event.h"
 #include "net/base/net_errors.h"
@@ -204,8 +208,10 @@ class AppCacheRequestHandlerTest : public testing::Test {
     // We unwind the stack prior to finishing up to let stack
     // based objects get deleted.
     DCHECK(MessageLoop::current() == io_thread_->message_loop());
-    MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &AppCacheRequestHandlerTest::TestFinishedUnwound));
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&AppCacheRequestHandlerTest::TestFinishedUnwound,
+                   base::Unretained(this)));
   }
 
   void TestFinishedUnwound() {
@@ -213,7 +219,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
     test_finished_event_->Signal();
   }
 
-  void PushNextTask(Task* task) {
+  void PushNextTask(const base::Closure& task) {
     task_stack_.push(task);
   }
 
@@ -230,8 +236,9 @@ class AppCacheRequestHandlerTest : public testing::Test {
   // MainResource_Miss --------------------------------------------------
 
   void MainResource_Miss() {
-    PushNextTask(NewRunnableMethod(
-        this, &AppCacheRequestHandlerTest::Verify_MainResource_Miss));
+    PushNextTask(
+        base::Bind(&AppCacheRequestHandlerTest::Verify_MainResource_Miss,
+                   base::Unretained(this)));
 
     request_.reset(new MockURLRequest(GURL("http://blah/")));
     handler_.reset(host_->CreateRequestHandler(request_.get(),
@@ -255,6 +262,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
     handler_->GetExtraResponseInfo(&cache_id, &manifest_url);
     EXPECT_EQ(kNoCacheId, cache_id);
     EXPECT_EQ(GURL(), manifest_url);
+    EXPECT_EQ(0, handler_->found_group_id_);
 
     AppCacheURLRequestJob* fallback_job;
     fallback_job = handler_->MaybeLoadFallbackForRedirect(
@@ -271,8 +279,9 @@ class AppCacheRequestHandlerTest : public testing::Test {
   // MainResource_Hit --------------------------------------------------
 
   void MainResource_Hit() {
-    PushNextTask(NewRunnableMethod(
-       this, &AppCacheRequestHandlerTest::Verify_MainResource_Hit));
+    PushNextTask(
+        base::Bind(&AppCacheRequestHandlerTest::Verify_MainResource_Hit,
+                   base::Unretained(this)));
 
     request_.reset(new MockURLRequest(GURL("http://blah/")));
     handler_.reset(host_->CreateRequestHandler(request_.get(),
@@ -282,7 +291,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
     mock_storage()->SimulateFindMainResource(
         AppCacheEntry(AppCacheEntry::EXPLICIT, 1),
         GURL(), AppCacheEntry(),
-        1, GURL("http://blah/manifest/"));
+        1, 2, GURL("http://blah/manifest/"));
 
     job_ = handler_->MaybeLoadResource(request_.get());
     EXPECT_TRUE(job_.get());
@@ -301,6 +310,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
     handler_->GetExtraResponseInfo(&cache_id, &manifest_url);
     EXPECT_EQ(1, cache_id);
     EXPECT_EQ(GURL("http://blah/manifest/"), manifest_url);
+    EXPECT_EQ(2, handler_->found_group_id_);
 
     AppCacheURLRequestJob* fallback_job;
     fallback_job = handler_->MaybeLoadFallbackForResponse(request_.get());
@@ -315,8 +325,9 @@ class AppCacheRequestHandlerTest : public testing::Test {
   // MainResource_Fallback --------------------------------------------------
 
   void MainResource_Fallback() {
-    PushNextTask(NewRunnableMethod(
-       this, &AppCacheRequestHandlerTest::Verify_MainResource_Fallback));
+    PushNextTask(
+        base::Bind(&AppCacheRequestHandlerTest::Verify_MainResource_Fallback,
+                   base::Unretained(this)));
 
     request_.reset(new MockURLRequest(GURL("http://blah/")));
     handler_.reset(host_->CreateRequestHandler(request_.get(),
@@ -327,7 +338,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
         AppCacheEntry(),
         GURL("http://blah/fallbackurl"),
         AppCacheEntry(AppCacheEntry::EXPLICIT, 1),
-        1, GURL("http://blah/manifest/"));
+        1, 2, GURL("http://blah/manifest/"));
 
     job_ = handler_->MaybeLoadResource(request_.get());
     EXPECT_TRUE(job_.get());
@@ -371,9 +382,9 @@ class AppCacheRequestHandlerTest : public testing::Test {
   // MainResource_FallbackOverride --------------------------------------------
 
   void MainResource_FallbackOverride() {
-    PushNextTask(NewRunnableMethod(
-       this,
-       &AppCacheRequestHandlerTest::Verify_MainResource_FallbackOverride));
+    PushNextTask(base::Bind(
+        &AppCacheRequestHandlerTest::Verify_MainResource_FallbackOverride,
+        base::Unretained(this)));
 
     request_.reset(new MockURLRequest(GURL("http://blah/fallback-override")));
     handler_.reset(host_->CreateRequestHandler(request_.get(),
@@ -384,7 +395,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
         AppCacheEntry(),
         GURL("http://blah/fallbackurl"),
         AppCacheEntry(AppCacheEntry::EXPLICIT, 1),
-        1, GURL("http://blah/manifest/"));
+        1, 2, GURL("http://blah/manifest/"));
 
     job_ = handler_->MaybeLoadResource(request_.get());
     EXPECT_TRUE(job_.get());
@@ -440,7 +451,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
   void SubResource_Miss_WithCacheSelected() {
     // A sub-resource load where the resource is not in an appcache, or
     // in a network or fallback namespace, should result in a failed request.
-    host_->AssociateCache(MakeNewCache());
+    host_->AssociateCompleteCache(MakeNewCache());
 
     request_.reset(new MockURLRequest(GURL("http://blah/")));
     handler_.reset(host_->CreateRequestHandler(request_.get(),
@@ -494,7 +505,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
   // SubResource_Hit -----------------------------
 
   void SubResource_Hit() {
-    host_->AssociateCache(MakeNewCache());
+    host_->AssociateCompleteCache(MakeNewCache());
 
     mock_storage()->SimulateFindSubResource(
         AppCacheEntry(AppCacheEntry::EXPLICIT, 1), AppCacheEntry(), false);
@@ -522,7 +533,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
   void SubResource_RedirectFallback() {
     // Redirects to resources in the a different origin are subject to
     // fallback namespaces.
-    host_->AssociateCache(MakeNewCache());
+    host_->AssociateCompleteCache(MakeNewCache());
 
     mock_storage()->SimulateFindSubResource(
         AppCacheEntry(), AppCacheEntry(AppCacheEntry::EXPLICIT, 1), false);
@@ -551,7 +562,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
   void SubResource_NoRedirectFallback() {
     // Redirects to resources in the same-origin are not subject to
     // fallback namespaces.
-    host_->AssociateCache(MakeNewCache());
+    host_->AssociateCompleteCache(MakeNewCache());
 
     mock_storage()->SimulateFindSubResource(
         AppCacheEntry(), AppCacheEntry(AppCacheEntry::EXPLICIT, 1), false);
@@ -581,7 +592,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
     // A sub-resource load where the resource is in a network namespace,
     // should result in the system using a 'real' job to do the network
     // retrieval.
-    host_->AssociateCache(MakeNewCache());
+    host_->AssociateCompleteCache(MakeNewCache());
 
     mock_storage()->SimulateFindSubResource(
         AppCacheEntry(), AppCacheEntry(), true);
@@ -606,7 +617,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
   // DestroyedHost -----------------------------
 
   void DestroyedHost() {
-    host_->AssociateCache(MakeNewCache());
+    host_->AssociateCompleteCache(MakeNewCache());
 
     mock_storage()->SimulateFindSubResource(
         AppCacheEntry(AppCacheEntry::EXPLICIT, 1), AppCacheEntry(), false);
@@ -743,8 +754,9 @@ class AppCacheRequestHandlerTest : public testing::Test {
   // MainResource_Blocked --------------------------------------------------
 
   void MainResource_Blocked() {
-    PushNextTask(NewRunnableMethod(
-       this, &AppCacheRequestHandlerTest::Verify_MainResource_Blocked));
+    PushNextTask(
+        base::Bind(&AppCacheRequestHandlerTest::Verify_MainResource_Blocked,
+                   base::Unretained(this)));
 
     request_.reset(new MockURLRequest(GURL("http://blah/")));
     handler_.reset(host_->CreateRequestHandler(request_.get(),
@@ -755,7 +767,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
     mock_storage()->SimulateFindMainResource(
         AppCacheEntry(AppCacheEntry::EXPLICIT, 1),
         GURL(), AppCacheEntry(),
-        1, GURL("http://blah/manifest/"));
+        1, 2, GURL("http://blah/manifest/"));
 
     job_ = handler_->MaybeLoadResource(request_.get());
     EXPECT_TRUE(job_.get());
@@ -770,6 +782,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
     EXPECT_FALSE(job_->is_delivering_appcache_response());
 
     EXPECT_EQ(0, handler_->found_cache_id_);
+    EXPECT_EQ(0, handler_->found_group_id_);
     EXPECT_TRUE(handler_->found_manifest_url_.is_empty());
     EXPECT_TRUE(host_->preferred_manifest_url().is_empty());
     EXPECT_TRUE(host_->main_resource_blocked_);
@@ -798,7 +811,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
   // Data members --------------------------------------------------
 
   scoped_ptr<base::WaitableEvent> test_finished_event_;
-  std::stack<Task*> task_stack_;
+  std::stack<base::Closure> task_stack_;
   scoped_ptr<MockAppCacheService> mock_service_;
   scoped_ptr<AppCacheBackendImpl> backend_impl_;
   scoped_ptr<MockFrontend> mock_frontend_;
@@ -892,7 +905,3 @@ TEST_F(AppCacheRequestHandlerTest, MainResource_Blocked) {
 }
 
 }  // namespace appcache
-
-// AppCacheRequestHandlerTest is expected to always live longer than the
-// runnable methods.  This lets us call NewRunnableMethod on its instances.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(appcache::AppCacheRequestHandlerTest);

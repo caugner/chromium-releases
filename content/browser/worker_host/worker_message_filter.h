@@ -5,34 +5,33 @@
 #ifndef CONTENT_BROWSER_WORKER_HOST_WORKER_MESSAGE_FILTER_H_
 #define CONTENT_BROWSER_WORKER_HOST_WORKER_MESSAGE_FILTER_H_
 
-#include "base/callback_old.h"
+#include "base/callback.h"
 #include "content/browser/browser_message_filter.h"
 
 class ResourceDispatcherHost;
+struct ViewHostMsg_CreateWorker_Params;
+
 namespace content {
 class ResourceContext;
 }  // namespace content
-namespace net {
-class URLRequestContextGetter;
-}  // namespace net
 
-
-struct ViewHostMsg_CreateWorker_Params;
 
 class WorkerMessageFilter : public BrowserMessageFilter {
  public:
+  typedef base::Callback<int(void)> NextRoutingIDCallback;
+
   // |next_routing_id| is owned by this object.  It can be used up until
   // OnChannelClosing.
   WorkerMessageFilter(
       int render_process_id,
       const content::ResourceContext* resource_context,
       ResourceDispatcherHost* resource_dispatcher_host,
-      CallbackWithReturnValue<int>::Type* next_routing_id);
+      const NextRoutingIDCallback& callback);
 
   // BrowserMessageFilter implementation.
-  virtual void OnChannelClosing();
+  virtual void OnChannelClosing() OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
+                                 bool* message_was_ok) OVERRIDE;
 
   int GetNextRoutingID();
   int render_process_id() const { return render_process_id_; }
@@ -50,7 +49,6 @@ class WorkerMessageFilter : public BrowserMessageFilter {
                            bool* exists,
                            int* route_id,
                            bool* url_error);
-  void OnCancelCreateDedicatedWorker(int route_id);
   void OnForwardToWorker(const IPC::Message& message);
   void OnDocumentDetached(unsigned long long document_id);
   void OnCreateMessagePort(int* route_id, int* message_port_id);
@@ -61,7 +59,7 @@ class WorkerMessageFilter : public BrowserMessageFilter {
 
   // This is guaranteed to be valid until OnChannelClosing is closed, and it's
   // not used after.
-  scoped_ptr<CallbackWithReturnValue<int>::Type> next_routing_id_;
+  NextRoutingIDCallback next_routing_id_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(WorkerMessageFilter);
 };

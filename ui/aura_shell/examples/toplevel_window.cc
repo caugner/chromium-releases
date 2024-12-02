@@ -8,7 +8,7 @@
 #include "ui/aura/window.h"
 #include "ui/aura_shell/toplevel_frame_view.h"
 #include "ui/gfx/canvas.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
 namespace aura_shell {
 namespace examples {
@@ -23,7 +23,7 @@ void ToplevelWindow::CreateToplevelWindow(const CreateParams& params) {
   views::Widget* widget =
       views::Widget::CreateWindowWithBounds(new ToplevelWindow(params),
                                             gfx::Rect(120, 150, 400, 300));
-  widget->GetNativeView()->set_name("Examples:ToplevelWindow");
+  widget->GetNativeView()->SetName("Examples:ToplevelWindow");
   widget->Show();
 }
 
@@ -34,7 +34,7 @@ ToplevelWindow::~ToplevelWindow() {
 }
 
 void ToplevelWindow::OnPaint(gfx::Canvas* canvas) {
-  canvas->FillRectInt(SK_ColorDKGRAY, 0, 0, width(), height());
+  canvas->FillRect(SK_ColorDKGRAY, GetLocalBounds());
 }
 
 string16 ToplevelWindow::GetWindowTitle() const {

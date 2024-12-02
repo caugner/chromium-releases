@@ -17,39 +17,39 @@
 namespace base {
 namespace internal {
 
-// InvokerStorageBase is used to provide an opaque handle that the Callback
+// BindStateBase is used to provide an opaque handle that the Callback
 // class can use to represent a function object with bound arguments.  It
 // behaves as an existential type that is used by a corresponding
 // DoInvoke function to perform the function execution.  This allows
 // us to shield the Callback class from the types of the bound argument via
 // "type erasure."
-class InvokerStorageBase : public RefCountedThreadSafe<InvokerStorageBase> {
+class BindStateBase : public RefCountedThreadSafe<BindStateBase> {
  protected:
-  friend class RefCountedThreadSafe<InvokerStorageBase>;
-  virtual ~InvokerStorageBase() {}
+  friend class RefCountedThreadSafe<BindStateBase>;
+  virtual ~BindStateBase() {}
 };
 
-// This structure exists purely to pass the returned |invoker_storage_| from
+// This structure exists purely to pass the returned |bind_state_| from
 // Bind() to Callback while avoiding an extra AddRef/Release() pair.
 //
 // To do this, the constructor of Callback<> must take a const-ref.  The
 // reference must be to a const object otherwise the compiler will emit a
 // warning about taking a reference to a temporary.
 //
-// Unfortunately, this means that the internal |invoker_storage_| field must
+// Unfortunately, this means that the internal |bind_state_| field must
 // be made mutable.
 template <typename T>
-struct InvokerStorageHolder {
-  explicit InvokerStorageHolder(T* invoker_storage)
-      : invoker_storage_(invoker_storage) {
+struct BindStateHolder {
+  explicit BindStateHolder(T* bind_state)
+      : bind_state_(bind_state) {
   }
 
-  mutable scoped_refptr<InvokerStorageBase> invoker_storage_;
+  mutable scoped_refptr<BindStateBase> bind_state_;
 };
 
 template <typename T>
-InvokerStorageHolder<T> MakeInvokerStorageHolder(T* o) {
-  return InvokerStorageHolder<T>(o);
+BindStateHolder<T> MakeBindStateHolder(T* o) {
+  return BindStateHolder<T>(o);
 }
 
 // Holds the Callback methods that don't require specialization to reduce
@@ -59,27 +59,28 @@ class BASE_EXPORT CallbackBase {
   // Returns true if Callback is null (doesn't refer to anything).
   bool is_null() const;
 
-  // Returns the Callback into an uninitalized state.
+  // Returns the Callback into an uninitialized state.
   void Reset();
 
  protected:
-  bool Equals(const CallbackBase& other) const;
-
   // In C++, it is safe to cast function pointers to function pointers of
   // another type. It is not okay to use void*. We create a InvokeFuncStorage
   // that that can store our function pointer, and then cast it back to
   // the original type on usage.
   typedef void(*InvokeFuncStorage)(void);
 
-  CallbackBase(InvokeFuncStorage polymorphic_invoke,
-               scoped_refptr<InvokerStorageBase>* invoker_storage);
+  // Returns true if this callback equals |other|. |other| may be null.
+  bool Equals(const CallbackBase& other) const;
 
-  // Force the destructor to be instaniated inside this translation unit so
+  CallbackBase(InvokeFuncStorage polymorphic_invoke,
+               scoped_refptr<BindStateBase>* bind_state);
+
+  // Force the destructor to be instantiated inside this translation unit so
   // that our subclasses will not get inlined versions.  Avoids more template
   // bloat.
   ~CallbackBase();
 
-  scoped_refptr<InvokerStorageBase> invoker_storage_;
+  scoped_refptr<BindStateBase> bind_state_;
   InvokeFuncStorage polymorphic_invoke_;
 };
 
@@ -95,7 +96,7 @@ class BASE_EXPORT CallbackBase {
 // array type in the initializer list which C++ does not allow.  This will
 // break passing of C-string literals.
 template <typename T>
-struct ParamTraits {
+struct CallbackParamTraits {
   typedef const T& ForwardType;
   typedef T StorageType;
 };
@@ -106,7 +107,7 @@ struct ParamTraits {
 //
 // The ForwardType should only be used for unbound arguments.
 template <typename T>
-struct ParamTraits<T&> {
+struct CallbackParamTraits<T&> {
   typedef T& ForwardType;
   typedef T StorageType;
 };
@@ -117,14 +118,14 @@ struct ParamTraits<T&> {
 // T[n]" does not seem to match correctly, so we are stuck with this
 // restriction.
 template <typename T, size_t n>
-struct ParamTraits<T[n]> {
+struct CallbackParamTraits<T[n]> {
   typedef const T* ForwardType;
   typedef const T* StorageType;
 };
 
-// See comment for ParamTraits<T[n]>.
+// See comment for CallbackParamTraits<T[n]>.
 template <typename T>
-struct ParamTraits<T[]> {
+struct CallbackParamTraits<T[]> {
   typedef const T* ForwardType;
   typedef const T* StorageType;
 };

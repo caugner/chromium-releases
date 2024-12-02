@@ -43,7 +43,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -56,13 +56,15 @@
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/skia_util.h"
-#include "views/bubble/bubble_border.h"
-#include "views/controls/label.h"
-#include "views/controls/textfield/native_textfield_views.h"
-#include "views/drag_utils.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/textfield/native_textfield_views.h"
+#include "ui/views/drag_utils.h"
 
-#if defined(OS_WIN)
+#if !defined(OS_CHROMEOS)
 #include "chrome/browser/ui/views/first_run_bubble.h"
+#endif
+
+#if defined(OS_WIN) || defined(USE_AURA)
 #include "chrome/browser/ui/views/location_bar/suggested_text_view.h"
 #endif
 
@@ -80,11 +82,7 @@ TabContents* GetTabContentsFromDelegate(LocationBarView::Delegate* delegate) {
 // static
 const int LocationBarView::kNormalHorizontalEdgeThickness = 1;
 const int LocationBarView::kVerticalEdgeThickness = 2;
-#if defined(TOUCH_UI)
-const int LocationBarView::kItemPadding = 10;
-#else
 const int LocationBarView::kItemPadding = 3;
-#endif
 const int LocationBarView::kIconInternalPadding = 2;
 const int LocationBarView::kEdgeItemPadding = kItemPadding;
 const int LocationBarView::kBubbleHorizontalPadding = 1;
@@ -125,7 +123,7 @@ LocationBarView::LocationBarView(Browser* browser,
       ev_bubble_view_(NULL),
       location_entry_view_(NULL),
       selected_keyword_view_(NULL),
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(USE_AURA)
       suggested_text_view_(NULL),
 #endif
       keyword_hint_view_(NULL),
@@ -188,26 +186,13 @@ void LocationBarView::Init() {
   // URL edit field.
   // View container for URL edit field.
   Profile* profile = browser_->profile();
-#if defined(USE_AURA)
-  OmniboxViewViews* omnibox_view = new OmniboxViewViews(this, model_, profile,
-      browser_->command_updater(), mode_ == POPUP, this);
-  omnibox_view->Init();
-  location_entry_.reset(omnibox_view);
-#elif defined(OS_WIN)
-  if (views::Widget::IsPureViews()) {
-    OmniboxViewViews* omnibox_view = new OmniboxViewViews(this, model_, profile,
-        browser_->command_updater(), mode_ == POPUP, this);
-    omnibox_view->Init();
-    location_entry_.reset(omnibox_view);
-  } else {
-    location_entry_.reset(new OmniboxViewWin(font_, this, model_, this,
-        GetWidget()->GetNativeView(), browser_->command_updater(),
-        mode_ == POPUP, this));
-  }
-#else
-  location_entry_.reset(OmniboxViewGtk::Create(this, model_, profile,
-      browser_->command_updater(), mode_ == POPUP, this));
-#endif
+  location_entry_.reset(OmniboxView::CreateOmniboxView(
+      this,
+      model_,
+      profile,
+      browser_->command_updater(),
+      mode_ == POPUP,
+      this));
 
   location_entry_view_ = location_entry_->AddToView(this);
   location_entry_view_->set_id(VIEW_ID_AUTOCOMPLETE);
@@ -335,10 +320,10 @@ void LocationBarView::UpdatePageActions() {
   size_t count_before = page_action_views_.size();
   RefreshPageActionViews();
   if (page_action_views_.size() != count_before) {
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_COUNT_CHANGED,
-        Source<LocationBar>(this),
-        NotificationService::NoDetails());
+        content::Source<LocationBar>(this),
+        content::NotificationService::NoDetails());
   }
 
   Layout();
@@ -349,17 +334,17 @@ void LocationBarView::InvalidatePageActions() {
   size_t count_before = page_action_views_.size();
   DeletePageActionViews();
   if (page_action_views_.size() != count_before) {
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_COUNT_CHANGED,
-        Source<LocationBar>(this),
-        NotificationService::NoDetails());
+        content::Source<LocationBar>(this),
+        content::NotificationService::NoDetails());
   }
 }
 
 void LocationBarView::OnFocus() {
   // Focus the view widget first which implements accessibility for Chrome OS.
   GetWidget()->NotifyAccessibilityEvent(
-      this, ui::AccessibilityTypes::EVENT_FOCUS, true);
+      this, ui::AccessibilityTypes::EVENT_FOCUS, false);
 
   // Then focus the native location view which implements accessibility for
   // Windows.
@@ -405,14 +390,8 @@ void LocationBarView::SetStarToggled(bool on) {
 }
 
 void LocationBarView::ShowStarBubble(const GURL& url, bool newly_bookmarked) {
-  gfx::Rect screen_bounds(star_view_->GetImageBounds());
-  // Compensate for some built-in padding in the Star image.
-  screen_bounds.Inset(1, 1, 1, 2);
-  gfx::Point origin(screen_bounds.origin());
-  views::View::ConvertPointToScreen(star_view_, &origin);
-  screen_bounds.set_origin(origin);
-  browser::ShowBookmarkBubbleView(GetWidget(), screen_bounds, star_view_,
-                                  browser_->profile(), url, newly_bookmarked);
+  browser::ShowBookmarkBubbleView(star_view_, browser_->profile(), url,
+                                  newly_bookmarked);
 }
 
 gfx::Point LocationBarView::GetLocationEntryOrigin() const {
@@ -426,7 +405,7 @@ gfx::Point LocationBarView::GetLocationEntryOrigin() const {
   return origin;
 }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(USE_AURA)
 void LocationBarView::SetInstantSuggestion(const string16& text,
                                            bool animate_to_complete) {
   // Don't show the suggested text if inline autocomplete is prevented.
@@ -470,6 +449,9 @@ gfx::Size LocationBarView::GetPreferredSize() {
 void LocationBarView::Layout() {
   if (!location_entry_.get())
     return;
+
+  // TODO(jhawkins): Remove once crbug.com/101994 is fixed.
+  CHECK(location_icon_view_);
 
   // TODO(sky): baseline layout.
   int location_y = kVerticalEdgeThickness;
@@ -550,24 +532,7 @@ void LocationBarView::Layout() {
     entry_width -= (total_padding + ev_bubble_width);
   }
 
-#if defined(OS_WIN)
-  int max_edit_width = entry_width;
-  if (views::Widget::IsPureViews()) {
-    NOTIMPLEMENTED();
-  } else {
-#if !defined(USE_AURA)
-    RECT formatting_rect;
-    GetOmniboxViewWin()->GetRect(&formatting_rect);
-    RECT edit_bounds;
-    GetOmniboxViewWin()->GetClientRect(&edit_bounds);
-    max_edit_width = entry_width - formatting_rect.left -
-                     (edit_bounds.right - formatting_rect.right);
-#endif
-  }
-#else
-  int max_edit_width = entry_width;
-#endif
-
+  int max_edit_width = location_entry_->GetMaxEditWidth(entry_width);
   if (max_edit_width < 0)
     return;
   const int available_width = AvailableWidth(max_edit_width);
@@ -748,17 +713,17 @@ void LocationBarView::OnPaint(gfx::Canvas* canvas) {
     canvas->GetSkCanvas()->drawRoundRect(gfx::RectToSkRect(bounds), radius,
                                          radius, paint);
   } else {
-    canvas->FillRectInt(color, bounds.x(), bounds.y(), bounds.width(),
-                        bounds.height());
+    canvas->FillRect(color, bounds);
   }
 
   if (show_focus_rect_ && HasFocus()) {
     gfx::Rect r = location_entry_view_->bounds();
 #if defined(OS_WIN)
-    canvas->DrawFocusRect(r.x() - 1, r.y() - 1, r.width() + 2, r.height() + 2);
+    r.Inset(-1,  -1);
 #else
-    canvas->DrawFocusRect(r.x() - 1, r.y(), r.width() + 2, r.height());
+    r.Inset(-1, 0);
 #endif
+    canvas->DrawFocusRect(r);
   }
 }
 
@@ -995,10 +960,10 @@ void LocationBarView::RefreshPageActionViews() {
       ExtensionAction* action = (*i)->image_view()->page_action();
       if (old_visibility.find(action) == old_visibility.end() ||
           old_visibility[action] != (*i)->IsVisible()) {
-        NotificationService::current()->Notify(
+        content::NotificationService::current()->Notify(
             chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED,
-            Source<ExtensionAction>(action),
-            Details<TabContents>(contents));
+            content::Source<ExtensionAction>(action),
+            content::Details<TabContents>(contents));
       }
     }
   }
@@ -1018,23 +983,12 @@ void LocationBarView::OnMouseEvent(const views::MouseEvent& event, UINT msg) {
 
 void LocationBarView::ShowFirstRunBubbleInternal(
     FirstRun::BubbleType bubble_type) {
-#if defined(OS_WIN)  // First run bubble doesn't make sense for Chrome OS.
-  // Point at the start of the edit control; adjust to look as good as possible.
-  const int kXOffset = kNormalHorizontalEdgeThickness + kEdgeItemPadding +
-      ResourceBundle::GetSharedInstance().GetBitmapNamed(
-      IDR_OMNIBOX_HTTP)->width() + kItemPadding;
-  const int kYOffset = -(kVerticalEdgeThickness + 2);
-  gfx::Point origin(location_entry_view_->bounds().x() + kXOffset,
-                    y() + height() + kYOffset);
-  // If the UI layout is RTL, the coordinate system is not transformed and
-  // therefore we need to adjust the X coordinate so that bubble appears on the
-  // right hand side of the location bar.
-  if (base::i18n::IsRTL())
-    origin.set_x(width() - origin.x());
-  views::View::ConvertPointToScreen(this, &origin);
-  FirstRunBubble::Show(browser_->profile(), GetWidget(),
-                       gfx::Rect(origin, gfx::Size()),
-                       views::BubbleBorder::TOP_LEFT, bubble_type);
+#if !defined(OS_CHROMEOS)
+  // First run bubble doesn't make sense for Chrome OS.
+  FirstRunBubble::ShowBubble(browser_->profile(),
+                             location_icon_view_,
+                             views::BubbleBorder::TOP_LEFT,
+                             bubble_type);
 #endif
 }
 
@@ -1077,7 +1031,7 @@ bool LocationBarView::SkipDefaultKeyEventProcessing(
   return false;
 #else
   // This method is not used for Linux ports. See FocusManager::OnKeyEvent() in
-  // src/views/focus/focus_manager.cc for details.
+  // src/ui/views/focus/focus_manager.cc for details.
   return false;
 #endif
 }
@@ -1104,7 +1058,7 @@ void LocationBarView::WriteDragDataForView(views::View* sender,
   DCHECK(tab_contents);
   drag_utils::SetURLAndDragImage(
       tab_contents->tab_contents()->GetURL(),
-      UTF16ToWideHack(tab_contents->tab_contents()->GetTitle()),
+      tab_contents->tab_contents()->GetTitle(),
       tab_contents->favicon_tab_helper()->GetFavicon(),
       data);
 }
@@ -1257,16 +1211,16 @@ void LocationBarView::OnTemplateURLServiceChanged() {
 }
 
 void LocationBarView::Observe(int type,
-                              const NotificationSource& source,
-                              const NotificationDetails& details) {
+                              const content::NotificationSource& source,
+                              const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    std::string* name = Details<std::string>(details).ptr();
+    std::string* name = content::Details<std::string>(details).ptr();
     if (*name == prefs::kEditBookmarksEnabled)
       Update(NULL);
   }
 }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(USE_AURA)
 bool LocationBarView::HasValidSuggestText() const {
   return suggested_text_view_ && !suggested_text_view_->size().IsEmpty() &&
       !suggested_text_view_->GetText().empty();

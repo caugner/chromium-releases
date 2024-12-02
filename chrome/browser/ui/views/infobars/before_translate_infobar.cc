@@ -8,9 +8,9 @@
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/controls/button/menu_button.h"
-#include "views/controls/label.h"
-#include "views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/menu/menu_item_view.h"
 
 BeforeTranslateInfoBar::BeforeTranslateInfoBar(
     InfoBarTabHelper* owner,

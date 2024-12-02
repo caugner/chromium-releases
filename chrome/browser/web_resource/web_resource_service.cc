@@ -20,15 +20,18 @@
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/web_resource/web_resource_unpacker.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/net/url_fetcher.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/common/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_status.h"
 
+using content::BrowserThread;
+
 class WebResourceService::WebResourceFetcher
-    : public URLFetcher::Delegate {
+    : public content::URLFetcherDelegate {
  public:
   explicit WebResourceFetcher(WebResourceService* web_resource_service) :
       ALLOW_THIS_IN_INITIALIZER_LIST(fetcher_factory_(this)),
@@ -65,34 +68,30 @@ class WebResourceService::WebResourceFetcher
       web_resource_server.append(locale);
     }
 
-    url_fetcher_.reset(new URLFetcher(GURL(
-        web_resource_server),
-        URLFetcher::GET, this));
+    url_fetcher_.reset(content::URLFetcher::Create(
+        GURL(web_resource_server), content::URLFetcher::GET, this));
     // Do not let url fetcher affect existing state in system context (by
     // setting cookies, for example).
-    url_fetcher_->set_load_flags(net::LOAD_DISABLE_CACHE |
+    url_fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE |
         net::LOAD_DO_NOT_SAVE_COOKIES);
     net::URLRequestContextGetter* url_request_context_getter =
         g_browser_process->system_request_context();
-    url_fetcher_->set_request_context(url_request_context_getter);
+    url_fetcher_->SetRequestContext(url_request_context_getter);
     url_fetcher_->Start();
   }
 
-  // From URLFetcher::Delegate.
-  void OnURLFetchComplete(const URLFetcher* source,
-                          const GURL& url,
-                          const net::URLRequestStatus& status,
-                          int response_code,
-                          const net::ResponseCookies& cookies,
-                          const std::string& data) {
+  // From content::URLFetcherDelegate.
+  void OnURLFetchComplete(const content::URLFetcher* source) {
     // Delete the URLFetcher when this function exits.
-    scoped_ptr<URLFetcher> clean_up_fetcher(url_fetcher_.release());
+    scoped_ptr<content::URLFetcher> clean_up_fetcher(url_fetcher_.release());
 
     // Don't parse data if attempt to download was unsuccessful.
     // Stop loading new web resource data, and silently exit.
-    if (!status.is_success() || (response_code != 200))
+    if (!source->GetStatus().is_success() || (source->GetResponseCode() != 200))
       return;
 
+    std::string data;
+    source->GetResponseAsString(&data);
     web_resource_service_->UpdateResourceCache(data);
     web_resource_service_->Release();
   }
@@ -103,7 +102,7 @@ class WebResourceService::WebResourceFetcher
   ScopedRunnableMethodFactory<WebResourceFetcher> fetcher_factory_;
 
   // The tool that fetches the url data from the server.
-  scoped_ptr<URLFetcher> url_fetcher_;
+  scoped_ptr<content::URLFetcher> url_fetcher_;
 
   // Our owner and creator. Ref counted.
   WebResourceService* web_resource_service_;
@@ -148,7 +147,7 @@ class WebResourceService::UnpackerClient : public UtilityProcessHost::Client {
   }
 
  private:
-  ~UnpackerClient() {}
+  virtual ~UnpackerClient() {}
 
   // UtilityProcessHost::Client
   virtual bool OnMessageReceived(const IPC::Message& message) {
@@ -203,7 +202,7 @@ class WebResourceService::UnpackerClient : public UtilityProcessHost::Client {
   scoped_refptr<WebResourceService> web_resource_service_;
 
   // Holds raw JSON string.
-  const std::string& json_data_;
+  std::string json_data_;
 
   // True if we got a response from the utility process and have cleaned up
   // already.
@@ -265,10 +264,11 @@ void WebResourceService::WebResourceStateChange() {
   web_resource_update_scheduled_ = false;
   if (notification_type_ == chrome::NOTIFICATION_CHROME_END)
     return;
-  NotificationService* service = NotificationService::current();
+  content::NotificationService* service =
+      content::NotificationService::current();
   service->Notify(notification_type_,
-                  Source<WebResourceService>(this),
-                  NotificationService::NoDetails());
+                  content::Source<WebResourceService>(this),
+                  content::NotificationService::NoDetails());
 }
 
 void WebResourceService::StartAfterDelay() {

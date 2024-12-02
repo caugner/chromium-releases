@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/extensions/extension_bookmark_manager_api.h"
+#include "chrome/browser/bookmarks/bookmark_manager_extension_api.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "chrome/common/extensions/extension.h"
@@ -17,7 +17,6 @@
 class GURL;
 class PrefService;
 class Profile;
-class RenderViewHost;
 class TabContents;
 
 namespace base {
@@ -37,8 +36,8 @@ class ExtensionWebUI : public ChromeWebUI {
 
   virtual ~ExtensionWebUI();
 
-  virtual ExtensionBookmarkManagerEventRouter*
-      extension_bookmark_manager_event_router();
+  virtual BookmarkManagerExtensionEventRouter*
+      bookmark_manager_extension_event_router();
 
   // BrowserURLHandler
   static bool HandleChromeURLOverride(GURL* url,
@@ -75,8 +74,8 @@ class ExtensionWebUI : public ChromeWebUI {
 
   // TODO(aa): This seems out of place. Why is it not with the event routers for
   // the other extension APIs?
-  scoped_ptr<ExtensionBookmarkManagerEventRouter>
-      extension_bookmark_manager_event_router_;
+  scoped_ptr<BookmarkManagerExtensionEventRouter>
+      bookmark_manager_extension_event_router_;
 
   // The URL this WebUI was created for.
   GURL url_;

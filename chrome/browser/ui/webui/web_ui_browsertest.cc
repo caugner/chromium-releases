@@ -12,6 +12,7 @@
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/webui/chrome_web_ui.h"
@@ -31,8 +32,8 @@ namespace {
 const FilePath::CharType kMockJS[] = FILE_PATH_LITERAL("mock4js.js");
 const FilePath::CharType kWebUILibraryJS[] = FILE_PATH_LITERAL("test_api.js");
 const FilePath::CharType kWebUITestFolder[] = FILE_PATH_LITERAL("webui");
-base::LazyInstance<std::vector<std::string> > error_messages_(
-    base::LINKER_INITIALIZED);
+base::LazyInstance<std::vector<std::string> > error_messages_ =
+    LAZY_INSTANCE_INITIALIZER;
 
 // Intercepts all log messages.
 bool LogHandler(int severity,
@@ -174,15 +175,9 @@ void WebUIBrowserTest::PreLoadJavascriptLibraries(
   libraries_preloaded_ = true;
 }
 
-void WebUIBrowserTest::BrowsePreload(const GURL& browse_to,
-                                     const std::string& preload_test_fixture,
-                                     const std::string& preload_test_name) {
-  // Remember for callback OnJsInjectionReady().
-  preload_test_fixture_ = preload_test_fixture;
-  preload_test_name_ = preload_test_name;
-
+void WebUIBrowserTest::BrowsePreload(const GURL& browse_to) {
   TestNavigationObserver navigation_observer(
-      Source<NavigationController>(
+      content::Source<NavigationController>(
           &browser()->GetSelectedTabContentsWrapper()->controller()),
       this, 1);
   browser::NavigateParams params(
@@ -192,20 +187,20 @@ void WebUIBrowserTest::BrowsePreload(const GURL& browse_to,
   navigation_observer.WaitForObservation();
 }
 
-void WebUIBrowserTest::BrowsePrintPreload(
-    const GURL& browse_to,
-    const std::string& preload_test_fixture,
-    const std::string& preload_test_name) {
-  // Remember for callback OnJsInjectionReady().
-  preload_test_fixture_ = preload_test_fixture;
-  preload_test_name_ = preload_test_name;
-
+void WebUIBrowserTest::BrowsePrintPreload(const GURL& browse_to) {
   ui_test_utils::NavigateToURL(browser(), browse_to);
 
   TestTabStripModelObserver tabstrip_observer(
       browser()->tabstrip_model(), this);
   browser()->Print();
   tabstrip_observer.WaitForObservation();
+  printing::PrintPreviewTabController* tab_controller =
+      printing::PrintPreviewTabController::GetInstance();
+  ASSERT_TRUE(tab_controller);
+  TabContentsWrapper* preview_tab = tab_controller->GetPrintPreviewForTab(
+      browser()->GetSelectedTabContentsWrapper());
+  ASSERT_TRUE(preview_tab);
+  SetWebUIInstance(preview_tab->web_ui());
 }
 
 const char WebUIBrowserTest::kDummyURL[] = "chrome://DummyURL";
@@ -214,6 +209,16 @@ WebUIBrowserTest::WebUIBrowserTest()
     : test_handler_(new WebUITestHandler()),
       libraries_preloaded_(false),
       override_selected_web_ui_(NULL) {}
+
+void WebUIBrowserTest::set_preload_test_fixture(
+    const std::string& preload_test_fixture) {
+  preload_test_fixture_ = preload_test_fixture;
+}
+
+void WebUIBrowserTest::set_preload_test_name(
+    const std::string& preload_test_name) {
+  preload_test_name_ = preload_test_name;
+}
 
 namespace {
 
@@ -227,10 +232,22 @@ class MockWebUIProvider : public TestChromeWebUIFactory::WebUIProvider {
   }
 };
 
-base::LazyInstance<MockWebUIProvider> mock_provider_(
-    base::LINKER_INITIALIZED);
+base::LazyInstance<MockWebUIProvider> mock_provider_ =
+    LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
+
+void WebUIBrowserTest::SetUpOnMainThread() {
+  InProcessBrowserTest::SetUpOnMainThread();
+
+  logging::SetLogMessageHandler(&LogHandler);
+}
+
+void WebUIBrowserTest::CleanUpOnMainThread() {
+  InProcessBrowserTest::CleanUpOnMainThread();
+
+  logging::SetLogMessageHandler(NULL);
+}
 
 void WebUIBrowserTest::SetUpInProcessBrowserTestFixture() {
   InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
@@ -239,6 +256,8 @@ void WebUIBrowserTest::SetUpInProcessBrowserTestFixture() {
 
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_directory_));
   test_data_directory_ = test_data_directory_.Append(kWebUITestFolder);
+  ASSERT_TRUE(PathService::Get(chrome::DIR_GEN_TEST_DATA,
+                               &gen_test_data_directory_));
 
   // TODO(dtseng): should this be part of every BrowserTest or just WebUI test.
   FilePath resources_pack_path;
@@ -295,9 +314,15 @@ void WebUIBrowserTest::BuildJavascriptLibraries(string16* content) {
                                               &library_content))
           << user_libraries_iterator->value();
     } else {
-      ASSERT_TRUE(file_util::ReadFileToString(
-          test_data_directory_.Append(*user_libraries_iterator),
-          &library_content)) << user_libraries_iterator->value();
+      bool ok = file_util::ReadFileToString(
+          gen_test_data_directory_.Append(*user_libraries_iterator),
+          &library_content);
+      if (!ok) {
+        ok = file_util::ReadFileToString(
+            test_data_directory_.Append(*user_libraries_iterator),
+            &library_content);
+      }
+      ASSERT_TRUE(ok) << user_libraries_iterator->value();
     }
     utf8_content.append(library_content);
     utf8_content.append(";\n");
@@ -351,7 +376,6 @@ bool WebUIBrowserTest::RunJavascriptUsingHandler(
   if (!preload_host)
     SetupHandlers();
 
-  logging::SetLogMessageHandler(&LogHandler);
   bool result = true;
 
   if (is_test)
@@ -360,8 +384,6 @@ bool WebUIBrowserTest::RunJavascriptUsingHandler(
     test_handler_->PreloadJavaScript(content, preload_host);
   else
     test_handler_->RunJavaScript(content);
-
-  logging::SetLogMessageHandler(NULL);
 
   if (error_messages_.Get().size() > 0) {
     LOG(ERROR) << "Encountered javascript console error(s)";
@@ -422,6 +444,14 @@ IN_PROC_BROWSER_TEST_F(WebUIBrowserExpectFailTest, TestFailsFast) {
   AddLibrary(FilePath(FILE_PATH_LITERAL("sample_downloads.js")));
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIDownloadsURL));
   EXPECT_FATAL_FAILURE(RunJavascriptTestNoReturn("FAILS_BogusFunctionName"),
+                       "WebUITestHandler::Observe");
+}
+
+// Test that bogus javascript fails fast - no timeout waiting for result.
+IN_PROC_BROWSER_TEST_F(WebUIBrowserExpectFailTest, TestRuntimeErrorFailsFast) {
+  AddLibrary(FilePath(FILE_PATH_LITERAL("runtime_error.js")));
+  ui_test_utils::NavigateToURL(browser(), GURL(kDummyURL));
+  EXPECT_FATAL_FAILURE(RunJavascriptTestNoReturn("TestRuntimeErrorFailsFast"),
                        "WebUITestHandler::Observe");
 }
 

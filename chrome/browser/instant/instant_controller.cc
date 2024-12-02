@@ -4,6 +4,7 @@
 
 #include "chrome/browser/instant/instant_controller.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
@@ -27,12 +28,12 @@
 #include "chrome/common/pref_names.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 
 #if defined(TOOLKIT_VIEWS)
-#include "views/focus/focus_manager.h"
-#include "views/view.h"
-#include "views/widget/widget.h"
+#include "ui/views/focus/focus_manager.h"
+#include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
 #endif
 
 InstantController::InstantController(Profile* profile,
@@ -43,9 +44,9 @@ InstantController::InstantController(Profile* profile,
       is_out_of_date_(true),
       commit_on_mouse_up_(false),
       last_transition_type_(content::PAGE_TRANSITION_LINK),
-      ALLOW_THIS_IN_INITIALIZER_LIST(destroy_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   PrefService* service = profile->GetPrefs();
-  if (service && !InstantFieldTrial::IsExperimentGroup(profile)) {
+  if (service && !InstantFieldTrial::IsInstantExperiment(profile)) {
     // kInstantEnabledOnce was added after instant, set it now to make sure it
     // is correctly set.
     service->SetBoolean(prefs::kInstantEnabledOnce, true);
@@ -97,7 +98,7 @@ void InstantController::RecordMetrics(Profile* profile) {
 bool InstantController::IsEnabled(Profile* profile) {
   PrefService* prefs = profile->GetPrefs();
   return prefs->GetBoolean(prefs::kInstantEnabled) ||
-         InstantFieldTrial::IsExperimentGroup(profile);
+         InstantFieldTrial::IsInstantExperiment(profile);
 }
 
 // static
@@ -175,8 +176,8 @@ bool InstantController::Update(TabContentsWrapper* tab_contents,
   // trial to normal mode, with no intervening call to DestroyPreviewContents().
   // This would leave the loader in a weird state, which would manifest if the
   // user pressed <Enter> without calling Update(). TODO(sreeram): Handle it.
-  if (InstantFieldTrial::IsHiddenExperiment(tab_contents->profile())) {
-    // For the HIDDEN field trial we process |user_text| at commit time, which
+  if (InstantFieldTrial::IsSilentExperiment(tab_contents->profile())) {
+    // For the SILENT field trial we process |user_text| at commit time, which
     // means we're never really out of date.
     is_out_of_date_ = false;
     loader_->MaybeLoadInstantURL(tab_contents, template_url);
@@ -186,10 +187,10 @@ bool InstantController::Update(TabContentsWrapper* tab_contents,
   UpdateLoader(template_url, match.destination_url, match.transition, user_text,
                verbatim, suggested_text);
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_INSTANT_CONTROLLER_UPDATED,
-      Source<InstantController>(this),
-      NotificationService::NoDetails());
+      content::Source<InstantController>(this),
+      content::NotificationService::NoDetails());
   return true;
 }
 
@@ -200,8 +201,11 @@ void InstantController::SetOmniboxBounds(const gfx::Rect& bounds) {
   // Always track the omnibox bounds. That way if Update is later invoked the
   // bounds are in sync.
   omnibox_bounds_ = bounds;
-  if (loader_.get())
+
+  if (loader_.get() && !is_out_of_date_ &&
+      !InstantFieldTrial::IsHiddenExperiment(tab_contents_->profile())) {
     loader_->SetOmniboxBounds(bounds);
+  }
 }
 
 void InstantController::DestroyPreviewContents() {
@@ -223,7 +227,7 @@ void InstantController::Hide() {
   }
 }
 
-bool InstantController::IsCurrent() {
+bool InstantController::IsCurrent() const {
   // TODO(mmenke):  See if we can do something more intelligent in the
   //                navigation pending case.
   return is_displayable_ && !loader_->IsNavigationPending() &&
@@ -236,7 +240,8 @@ bool InstantController::PrepareForCommit() {
   if (is_out_of_date_ || !loader_.get())
     return false;
 
-  // If we are not in the HIDDEN field trial, return the status of the preview.
+  // If we are not in the HIDDEN or SILENT field trials, return the status of
+  // the preview.
   if (!InstantFieldTrial::IsHiddenExperiment(tab_contents_->profile()))
     return IsCurrent();
 
@@ -367,7 +372,7 @@ void InstantController::OnAutocompleteGotFocus(
     TabContentsWrapper* tab_contents) {
   CommandLine* cl = CommandLine::ForCurrentProcess();
   if (!cl->HasSwitch(switches::kPreloadInstantSearch) &&
-      !InstantFieldTrial::IsExperimentGroup(tab_contents->profile())) {
+      !InstantFieldTrial::IsInstantExperiment(tab_contents->profile())) {
     return;
   }
 
@@ -406,7 +411,7 @@ void InstantController::CompleteRelease(TabContentsWrapper* tab) {
   tab->blocked_content_tab_helper()->SetAllContentsBlocked(false);
 }
 
-TabContentsWrapper* InstantController::GetPreviewContents() {
+TabContentsWrapper* InstantController::GetPreviewContents() const {
   return loader_.get() ? loader_->preview_contents() : NULL;
 }
 
@@ -419,7 +424,10 @@ void InstantController::SetSuggestedTextFor(
     InstantLoader* loader,
     const string16& text,
     InstantCompleteBehavior behavior) {
-  delegate_->SetSuggestedText(text, behavior);
+  if (!is_out_of_date_ &&
+      InstantFieldTrial::ShouldSetSuggestedText(tab_contents_->profile())) {
+    delegate_->SetSuggestedText(text, behavior);
+  }
 }
 
 gfx::Rect InstantController::GetInstantBounds() {
@@ -460,6 +468,11 @@ void InstantController::SwappedTabContents(InstantLoader* loader) {
 }
 
 void InstantController::UpdateIsDisplayable() {
+  if (!is_out_of_date_ &&
+      InstantFieldTrial::IsHiddenExperiment(tab_contents_->profile())) {
+    return;
+  }
+
   bool displayable =
       (!is_out_of_date_ && loader_.get() && loader_->ready() &&
        loader_->http_status_ok());
@@ -471,10 +484,10 @@ void InstantController::UpdateIsDisplayable() {
     delegate_->HideInstant();
   } else {
     delegate_->ShowInstant(loader_->preview_contents());
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_INSTANT_CONTROLLER_SHOWN,
-        Source<InstantController>(this),
-        NotificationService::NoDetails());
+        content::Source<InstantController>(this),
+        content::NotificationService::NoDetails());
   }
 }
 
@@ -485,10 +498,14 @@ void InstantController::UpdateLoader(const TemplateURL* template_url,
                                      bool verbatim,
                                      string16* suggested_text) {
   is_out_of_date_ = false;
-  loader_->SetOmniboxBounds(omnibox_bounds_);
+  if (!InstantFieldTrial::IsHiddenExperiment(tab_contents_->profile()))
+    loader_->SetOmniboxBounds(omnibox_bounds_);
   loader_->Update(tab_contents_, template_url, url, transition_type, user_text,
                   verbatim, suggested_text);
   UpdateIsDisplayable();
+  // For the HIDDEN and SILENT field trials, don't send back suggestions.
+  if (!InstantFieldTrial::ShouldSetSuggestedText(tab_contents_->profile()))
+    suggested_text->clear();
 }
 
 bool InstantController::ShouldUseInstant(const AutocompleteMatch& match) {
@@ -534,10 +551,10 @@ void InstantController::ClearBlacklist() {
 
 void InstantController::ScheduleDestroy(InstantLoader* loader) {
   loaders_to_destroy_.push_back(loader);
-  if (destroy_factory_.empty()) {
+  if (!weak_factory_.HasWeakPtrs()) {
     MessageLoop::current()->PostTask(
-        FROM_HERE, destroy_factory_.NewRunnableMethod(
-            &InstantController::DestroyLoaders));
+        FROM_HERE, base::Bind(&InstantController::DestroyLoaders,
+                              weak_factory_.GetWeakPtr()));
   }
 }
 

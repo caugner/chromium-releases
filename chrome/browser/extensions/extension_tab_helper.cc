@@ -22,10 +22,11 @@
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 
 ExtensionTabHelper::ExtensionTabHelper(TabContentsWrapper* wrapper)
     : TabContentsObserver(wrapper->tab_contents()),
+      delegate_(NULL),
       extension_app_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           extension_function_dispatcher_(wrapper->profile(), this)),
@@ -55,10 +56,10 @@ void ExtensionTabHelper::SetExtensionApp(const Extension* extension) {
 
   UpdateExtensionAppIcon(extension_app_);
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED,
-      Source<ExtensionTabHelper>(this),
-      NotificationService::NoDetails());
+      content::Source<ExtensionTabHelper>(this),
+      content::NotificationService::NoDetails());
 }
 
 void ExtensionTabHelper::SetExtensionAppById(
@@ -85,9 +86,9 @@ SkBitmap* ExtensionTabHelper::GetExtensionAppIcon() {
   return &extension_app_icon_;
 }
 
-void ExtensionTabHelper::DidNavigateMainFramePostCommit(
+void ExtensionTabHelper::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
-    const ViewHostMsg_FrameNavigate_Params& params) {
+    const content::FrameNavigateParams& params) {
   if (details.is_in_page)
     return;
 
@@ -103,10 +104,10 @@ void ExtensionTabHelper::DidNavigateMainFramePostCommit(
     if (browser_action) {
       browser_action->ClearAllValuesForTab(
           wrapper_->restore_tab_helper()->session_id().id());
-      NotificationService::current()->Notify(
+      content::NotificationService::current()->Notify(
           chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
-          Source<ExtensionAction>(browser_action),
-          NotificationService::NoDetails());
+          content::Source<ExtensionAction>(browser_action),
+          content::NotificationService::NoDetails());
     }
 
     ExtensionAction* page_action =
@@ -140,13 +141,13 @@ void ExtensionTabHelper::OnDidGetApplicationInfo(
     int32 page_id, const WebApplicationInfo& info) {
   web_app_info_ = info;
 
-  if (wrapper_->delegate())
-    wrapper_->delegate()->OnDidGetApplicationInfo(wrapper_, page_id);
+  if (delegate_)
+    delegate_->OnDidGetApplicationInfo(wrapper_, page_id);
 }
 
 void ExtensionTabHelper::OnInstallApplication(const WebApplicationInfo& info) {
-  if (wrapper_->delegate())
-    wrapper_->delegate()->OnInstallApplication(wrapper_, info);
+  if (delegate_)
+    delegate_->OnInstallApplication(wrapper_, info);
 }
 
 void ExtensionTabHelper::OnInlineWebstoreInstall(
@@ -168,40 +169,56 @@ void ExtensionTabHelper::OnGetAppNotifyChannel(
   Profile* profile =
       Profile::FromBrowserContext(tab_contents()->browser_context());
   ExtensionService* extension_service = profile->GetExtensionService();
-  ExtensionProcessManager* process_manager =
-      profile->GetExtensionProcessManager();
-  RenderProcessHost* process =
+  extensions::ProcessMap* process_map = extension_service->process_map();
+  content::RenderProcessHost* process =
       tab_contents_wrapper()->render_view_host()->process();
   const Extension* extension =
       extension_service->GetInstalledApp(requestor_url);
   bool allowed =
       extension &&
-      extension->is_app() &&
       extension->HasAPIPermission(
-          ExtensionAPIPermission::kExperimental) &&
-      (extension->is_hosted_app() ||
-       process_manager->GetExtensionProcess(requestor_url) == process);
+          ExtensionAPIPermission::kAppNotifications) &&
+      process_map->Contains(extension->id(), process->GetID());
   if (!allowed) {
-    AppNotifyChannelSetupComplete("", "permission_error", return_route_id,
-                                  callback_id);
+    Send(new ExtensionMsg_GetAppNotifyChannelResponse(
+        return_route_id, "", "permission_error", callback_id));
     return;
   }
 
+  AppNotifyChannelUI* ui = new AppNotifyChannelUIImpl(
+      GetBrowser(), tab_contents_wrapper(), extension->name());
+
   scoped_refptr<AppNotifyChannelSetup> channel_setup(
-      new AppNotifyChannelSetup(client_id,
+      new AppNotifyChannelSetup(profile,
+                                extension->id(),
+                                client_id,
                                 requestor_url,
                                 return_route_id,
                                 callback_id,
+                                ui,
                                 this->AsWeakPtr()));
   channel_setup->Start();
   // We'll get called back in AppNotifyChannelSetupComplete.
 }
 
 void ExtensionTabHelper::AppNotifyChannelSetupComplete(
-    const std::string& client_id, const std::string& error, int return_route_id,
-    int callback_id) {
+    const std::string& channel_id,
+    const std::string& error,
+    const AppNotifyChannelSetup* setup) {
+  CHECK(setup);
+
+  // If the setup was successful, record that fact in ExtensionService.
+  if (!channel_id.empty() && error.empty()) {
+    Profile* profile =
+        Profile::FromBrowserContext(tab_contents()->browser_context());
+    ExtensionService* service = profile->GetExtensionService();
+    if (service->GetExtensionById(setup->extension_id(), true))
+      service->SetAppNotificationSetupDone(setup->extension_id(),
+                                           setup->client_id());
+  }
+
   Send(new ExtensionMsg_GetAppNotifyChannelResponse(
-      return_route_id, client_id, error, callback_id));
+      setup->return_route_id(), channel_id, error, setup->callback_id()));
 }
 
 void ExtensionTabHelper::OnRequest(

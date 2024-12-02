@@ -7,7 +7,7 @@
 #include "base/platform_file.h"
 #include "content/common/view_messages.h"
 #include "content/renderer/render_view_impl.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageSerializer.h"
 
 MHTMLGenerator::MHTMLGenerator(RenderViewImpl* render_view)
@@ -34,6 +34,7 @@ void MHTMLGenerator::OnSavePageAsMHTML(
       IPC::PlatformFileForTransitToPlatformFile(file_for_transit);
   file_ = file;
   int64 size = GenerateMHTML();
+  base::ClosePlatformFile(file);
   NotifyBrowser(job_id, size);
 }
 

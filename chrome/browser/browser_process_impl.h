@@ -21,17 +21,16 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ipc/ipc_message.h"
 
 class BrowserOnlineStateObserver;
 class ChromeNetLog;
 class ChromeResourceDispatcherHostDelegate;
 class CommandLine;
-class DevToolsProtocolHandler;
-class FilePath;
-class PluginDataRemover;
+class ChromeFrameFriendOfBrowserProcessImpl;  // TODO(joi): Remove
 class RemoteDebuggingServer;
 class TabCloseableStateWatcher;
 
@@ -42,12 +41,28 @@ class BrowserPolicyConnector;
 // Real implementation of BrowserProcess that creates and returns the services.
 class BrowserProcessImpl : public BrowserProcess,
                            public base::NonThreadSafe,
-                           public NotificationObserver {
+                           public content::NotificationObserver {
  public:
   explicit BrowserProcessImpl(const CommandLine& command_line);
   virtual ~BrowserProcessImpl();
 
-  base::Thread* process_launcher_thread();
+  // Some of our startup is interleaved with thread creation, driven
+  // by these functions.
+  void PreStartThread(content::BrowserThread::ID identifier);
+  void PostStartThread(content::BrowserThread::ID identifier);
+
+  // Called after the threads have been created but before the message loops
+  // starts running. Allows the browser process to do any initialization that
+  // requires all threads running.
+  void PreMainMessageLoopRun();
+
+  // Most cleanup is done by these functions, driven from
+  // ChromeBrowserMain based on notifications from the content
+  // framework, rather than in the destructor, so that we can
+  // interleave cleanup with threads being stopped.
+  void StartTearDown();
+  void PreStopThread(content::BrowserThread::ID identifier);
+  void PostStopThread(content::BrowserThread::ID identifier);
 
   // BrowserProcess methods
   virtual void EndSession() OVERRIDE;
@@ -56,20 +71,16 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual IOThread* io_thread() OVERRIDE;
   virtual base::Thread* file_thread() OVERRIDE;
   virtual base::Thread* db_thread() OVERRIDE;
-  virtual base::Thread* cache_thread() OVERRIDE;
   virtual WatchDogThread* watchdog_thread() OVERRIDE;
 #if defined(OS_CHROMEOS)
   virtual base::Thread* web_socket_proxy_thread() OVERRIDE;
 #endif
   virtual ProfileManager* profile_manager() OVERRIDE;
   virtual PrefService* local_state() OVERRIDE;
-  virtual DevToolsManager* devtools_manager() OVERRIDE;
   virtual SidebarManager* sidebar_manager() OVERRIDE;
   virtual ui::Clipboard* clipboard() OVERRIDE;
   virtual net::URLRequestContextGetter* system_request_context() OVERRIDE;
 #if defined(OS_CHROMEOS)
-  virtual chromeos::ProxyConfigServiceImpl*
-      chromeos_proxy_config_service_impl() OVERRIDE;
   virtual browser::OomPriorityManager* oom_priority_manager() OVERRIDE;
 #endif  // defined(OS_CHROMEOS)
   virtual ExtensionEventRouterForwarder*
@@ -84,7 +95,6 @@ class BrowserProcessImpl : public BrowserProcess,
       const std::string& ip,
       int port,
       const std::string& frontend_url) OVERRIDE;
-  virtual void InitDevToolsLegacyProtocolHandler(int port) OVERRIDE;
   virtual unsigned int AddRefModule() OVERRIDE;
   virtual unsigned int ReleaseModule() OVERRIDE;
   virtual bool IsShuttingDown() OVERRIDE;
@@ -107,46 +117,34 @@ class BrowserProcessImpl : public BrowserProcess,
       safe_browsing_detection_service() OVERRIDE;
   virtual bool plugin_finder_disabled() const OVERRIDE;
 
-  // NotificationObserver methods
+  // content::NotificationObserver methods
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   virtual void StartAutoupdateTimer() OVERRIDE;
 #endif
 
   virtual ChromeNetLog* net_log() OVERRIDE;
-
   virtual prerender::PrerenderTracker* prerender_tracker() OVERRIDE;
-
-#if defined(IPC_MESSAGE_LOG_ENABLED)
-  virtual void SetIPCLoggingEnabled(bool enable) OVERRIDE;
-#endif
-
   virtual MHTMLGenerationManager* mhtml_generation_manager() OVERRIDE;
-
-  virtual GpuBlacklistUpdater* gpu_blacklist_updater() OVERRIDE;
-
   virtual ComponentUpdateService* component_updater() OVERRIDE;
-
-  virtual CRLSetFetcher* crl_set_fetcher();
+  virtual CRLSetFetcher* crl_set_fetcher() OVERRIDE;
 
  private:
+  // TODO(joi): Remove. Temporary hack to get at CreateIOThreadState.
+  friend class ChromeFrameFriendOfBrowserProcessImpl;
+
+  // Must be called right before the IO thread is started.
+  void CreateIOThreadState();
+
   void CreateResourceDispatcherHost();
   void CreateMetricsService();
 
-  void CreateIOThread();
-  static void CleanupOnIOThread();
-
-  void CreateFileThread();
-  void CreateDBThread();
-  void CreateProcessLauncherThread();
-  void CreateCacheThread();
-  void CreateGpuThread();
   void CreateWatchdogThread();
 #if defined(OS_CHROMEOS)
-  void CreateWebSocketProxyThread();
+  void InitializeWebSocketProxyThread();
 #endif
   void CreateTemplateURLService();
   void CreateProfileManager();
@@ -154,7 +152,6 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreateLocalState();
   void CreateViewedPageTracker();
   void CreateIconManager();
-  void CreateDevToolsManager();
   void CreateSidebarManager();
   void CreateGoogleURLTracker();
   void CreateIntranetRedirectDetector();
@@ -170,10 +167,7 @@ class BrowserProcessImpl : public BrowserProcess,
 
   void ApplyDisabledSchemesPolicy();
   void ApplyAllowCrossOriginAuthPromptPolicy();
-
-#if defined(IPC_MESSAGE_LOG_ENABLED)
-  void SetIPCLoggingEnabledForChildProcesses(bool enabled);
-#endif
+  void ApplyDefaultBrowserPolicy();
 
   bool created_resource_dispatcher_host_;
   scoped_ptr<ResourceDispatcherHost> resource_dispatcher_host_;
@@ -181,28 +175,10 @@ class BrowserProcessImpl : public BrowserProcess,
   bool created_metrics_service_;
   scoped_ptr<MetricsService> metrics_service_;
 
-  bool created_io_thread_;
   scoped_ptr<IOThread> io_thread_;
-
-  bool created_file_thread_;
-  scoped_ptr<base::Thread> file_thread_;
-
-  bool created_db_thread_;
-  scoped_ptr<base::Thread> db_thread_;
-
-  bool created_process_launcher_thread_;
-  scoped_ptr<base::Thread> process_launcher_thread_;
-
-  bool created_cache_thread_;
-  scoped_ptr<base::Thread> cache_thread_;
 
   bool created_watchdog_thread_;
   scoped_ptr<WatchDogThread> watchdog_thread_;
-
-#if defined(OS_CHROMEOS)
-  bool created_web_socket_proxy_thread_;
-  scoped_ptr<base::Thread> web_socket_proxy_thread_;
-#endif
 
   bool created_profile_manager_;
   scoped_ptr<ProfileManager> profile_manager_;
@@ -217,11 +193,6 @@ class BrowserProcessImpl : public BrowserProcess,
       extension_event_router_forwarder_;
 
   scoped_ptr<RemoteDebuggingServer> remote_debugging_server_;
-
-  scoped_refptr<DevToolsProtocolHandler> devtools_legacy_handler_;
-
-  bool created_devtools_manager_;
-  scoped_ptr<DevToolsManager> devtools_manager_;
 
   bool created_sidebar_manager_;
   scoped_refptr<SidebarManager> sidebar_manager_;
@@ -247,9 +218,9 @@ class BrowserProcessImpl : public BrowserProcess,
 
   scoped_ptr<TabCloseableStateWatcher> tab_closeable_state_watcher_;
 
-  scoped_ptr<BackgroundModeManager> background_mode_manager_;
-
   scoped_ptr<StatusTray> status_tray_;
+
+  scoped_ptr<BackgroundModeManager> background_mode_manager_;
 
   bool created_safe_browsing_service_;
   scoped_refptr<SafeBrowsingService> safe_browsing_service_;
@@ -290,12 +261,12 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_ptr<ChromeResourceDispatcherHostDelegate>
       resource_dispatcher_host_delegate_;
 
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 
   scoped_refptr<MHTMLGenerationManager> mhtml_generation_manager_;
 
   // Monitors the state of the 'DisablePluginFinder' policy.
-  BooleanPrefMember plugin_finder_disabled_pref_;
+  scoped_ptr<BooleanPrefMember> plugin_finder_disabled_pref_;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   base::RepeatingTimer<BrowserProcessImpl> autoupdate_timer_;
@@ -304,19 +275,15 @@ class BrowserProcessImpl : public BrowserProcess,
   // restarted, and if that's the case, restarts the browser.
   void OnAutoupdateTimer();
   bool CanAutorestartForUpdate() const;
-  void RestartPersistentInstance();
+  void RestartBackgroundInstance();
 #endif  // defined(OS_WIN) || defined(OS_LINUX)
 
 #if defined(OS_CHROMEOS)
-  scoped_refptr<chromeos::ProxyConfigServiceImpl>
-      chromeos_proxy_config_service_impl_;
   scoped_ptr<browser::OomPriorityManager> oom_priority_manager_;
 #endif
 
   // Per-process listener for online state changes.
   scoped_ptr<BrowserOnlineStateObserver> online_state_observer_;
-
-  scoped_refptr<GpuBlacklistUpdater> gpu_blacklist_updater_;
 
 #if !defined(OS_CHROMEOS)
   scoped_ptr<ComponentUpdateService> component_updater_;

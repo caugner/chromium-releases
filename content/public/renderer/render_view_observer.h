@@ -11,8 +11,6 @@
 #include "ipc/ipc_channel.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIconURL.h"
 
-class RenderView;
-
 namespace WebKit {
 class WebDataSource;
 class WebFrame;
@@ -20,7 +18,6 @@ class WebFormElement;
 class WebMediaPlayerClient;
 class WebMouseEvent;
 class WebNode;
-class WebString;
 class WebTouchEvent;
 class WebURL;
 struct WebURLError;
@@ -82,7 +79,7 @@ class CONTENT_EXPORT RenderViewObserver : public IPC::Channel::Listener,
   virtual void ClosePage() {}
 
   // IPC::Channel::Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // This is called by the RenderView when it's going away so that this object
   // can null out its pointer.
@@ -93,13 +90,12 @@ class CONTENT_EXPORT RenderViewObserver : public IPC::Channel::Listener,
   virtual ~RenderViewObserver();
 
   // IPC::Message::Sender implementation.
-  virtual bool Send(IPC::Message* message);
+  virtual bool Send(IPC::Message* message) OVERRIDE;
 
   RenderView* render_view();
   int routing_id() { return routing_id_; }
 
  private:
-
   RenderView* render_view_;
   // The routing ID of the associated RenderView.
   int routing_id_;

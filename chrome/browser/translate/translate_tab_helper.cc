@@ -8,7 +8,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 
 TranslateTabHelper::TranslateTabHelper(TabContents* tab_contents)
     : TabContentsObserver(tab_contents),
@@ -30,9 +30,9 @@ bool TranslateTabHelper::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void TranslateTabHelper::DidNavigateAnyFramePostCommit(
+void TranslateTabHelper::DidNavigateAnyFrame(
     const content::LoadCommittedDetails& details,
-    const ViewHostMsg_FrameNavigate_Params& params) {
+    const content::FrameNavigateParams& params) {
   // Let the LanguageState clear its state.
   language_state_.DidNavigate(details);
 }
@@ -42,10 +42,10 @@ void TranslateTabHelper::OnLanguageDetermined(const std::string& language,
   language_state_.LanguageDetermined(language, page_translatable);
 
   std::string lang = language;
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED,
-      Source<TabContents>(tab_contents()),
-      Details<std::string>(&lang));
+      content::Source<TabContents>(tab_contents()),
+      content::Details<std::string>(&lang));
 }
 
 void TranslateTabHelper::OnPageTranslated(int32 page_id,
@@ -55,8 +55,8 @@ void TranslateTabHelper::OnPageTranslated(int32 page_id,
   language_state_.set_current_language(translated_lang);
   language_state_.set_translation_pending(false);
   PageTranslatedDetails details(original_lang, translated_lang, error_type);
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PAGE_TRANSLATED,
-      Source<TabContents>(tab_contents()),
-      Details<PageTranslatedDetails>(&details));
+      content::Source<TabContents>(tab_contents()),
+      content::Details<PageTranslatedDetails>(&details));
 }

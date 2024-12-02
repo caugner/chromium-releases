@@ -64,7 +64,6 @@ cr.define('tracing', function() {
     },
 
     set traceEvents(traceEvents) {
-      console.log('TimelineView.refresh');
       this.timelineModel_ = new tracing.TimelineModel(traceEvents);
 
       // remove old timeline
@@ -72,10 +71,12 @@ cr.define('tracing', function() {
 
       // create new timeline if needed
       if (traceEvents.length) {
+        if (this.timeline_)
+          this.timeline_.detach();
         this.timeline_ = new tracing.Timeline();
         this.timeline_.model = this.timelineModel_;
+        this.timeline_.focusElement = this.parentElement;
         this.timelineContainer_.appendChild(this.timeline_);
-        this.timeline_.onResize();
         this.timeline_.addEventListener('selectionChange',
                                         this.onSelectionChangedBoundToThis_);
         this.onSelectionChanged_();
@@ -85,7 +86,6 @@ cr.define('tracing', function() {
     },
 
     onSelectionChanged_: function(e) {
-      console.log('selection changed');
       var timeline = this.timeline_;
       var selection = timeline.selection;
       if (!selection.length) {
@@ -97,7 +97,7 @@ cr.define('tracing', function() {
 
       var text = '';
       if (selection.length == 1) {
-        var c0Width = 10;
+        var c0Width = 14;
         var slice = selection[0].slice;
         text = 'Selected item:\n';
         text += leftAlign('Title', c0Width) + ': ' + slice.title + '\n';
@@ -105,6 +105,9 @@ cr.define('tracing', function() {
             tsRound(slice.start) + ' ms\n';
         text += leftAlign('Duration', c0Width) + ': ' +
             tsRound(slice.duration) + ' ms\n';
+        if (slice.durationInUserTime)
+          text += leftAlign('Duration (U)', c0Width) + ': ' +
+              tsRound(slice.durationInUserTime) + ' ms\n';
 
         var n = 0;
         for (var argName in slice.args) {

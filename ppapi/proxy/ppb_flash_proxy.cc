@@ -14,11 +14,12 @@
 #include "ppapi/c/private/ppb_flash.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/proxy_module.h"
 #include "ppapi/proxy/serialized_var.h"
+#include "ppapi/shared_impl/ppapi_globals.h"
 #include "ppapi/shared_impl/resource.h"
+#include "ppapi/shared_impl/resource_tracker.h"
 #include "ppapi/shared_impl/scoped_pp_resource.h"
 #include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
@@ -34,7 +35,7 @@ void SetInstanceAlwaysOnTop(PP_Instance pp_instance, PP_Bool on_top) {
   PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(pp_instance);
   if (dispatcher) {
     dispatcher->Send(new PpapiHostMsg_PPBFlash_SetInstanceAlwaysOnTop(
-        INTERFACE_ID_PPB_FLASH, pp_instance, on_top));
+        API_ID_PPB_FLASH, pp_instance, on_top));
   }
 }
 
@@ -48,8 +49,8 @@ PP_Bool DrawGlyphs(PP_Instance instance,
                    uint32_t glyph_count,
                    const uint16_t glyph_indices[],
                    const PP_Point glyph_advances[]) {
-  Resource* image_data = PluginResourceTracker::GetInstance()->GetResource(
-      pp_image_data);
+  Resource* image_data =
+      PpapiGlobals::Get()->GetResourceTracker()->GetResource(pp_image_data);
   if (!image_data)
     return PP_FALSE;
   // The instance parameter isn't strictly necessary but we check that it
@@ -82,7 +83,7 @@ PP_Bool DrawGlyphs(PP_Instance instance,
 
   PP_Bool result = PP_FALSE;
   dispatcher->Send(new PpapiHostMsg_PPBFlash_DrawGlyphs(
-      INTERFACE_ID_PPB_FLASH, params, &result));
+      API_ID_PPB_FLASH, params, &result));
   return result;
 }
 
@@ -93,7 +94,7 @@ PP_Var GetProxyForURL(PP_Instance instance, const char* url) {
 
   ReceiveSerializedVarReturnValue result;
   dispatcher->Send(new PpapiHostMsg_PPBFlash_GetProxyForURL(
-      INTERFACE_ID_PPB_FLASH, instance, url, &result));
+      API_ID_PPB_FLASH, instance, url, &result));
   return result.Return(dispatcher);
 }
 
@@ -111,7 +112,7 @@ int32_t Navigate(PP_Resource request_id,
 
   int32_t result = PP_ERROR_FAILED;
   dispatcher->Send(new PpapiHostMsg_PPBFlash_Navigate(
-      INTERFACE_ID_PPB_FLASH,
+      API_ID_PPB_FLASH,
       instance, enter.object()->GetData(), target, from_user_action,
       &result));
   return result;
@@ -122,7 +123,7 @@ void RunMessageLoop(PP_Instance instance) {
   if (!dispatcher)
     return;
   IPC::SyncMessage* msg = new PpapiHostMsg_PPBFlash_RunMessageLoop(
-      INTERFACE_ID_PPB_FLASH, instance);
+      API_ID_PPB_FLASH, instance);
   msg->EnableMessagePumping();
   dispatcher->Send(msg);
 }
@@ -132,7 +133,7 @@ void QuitMessageLoop(PP_Instance instance) {
   if (!dispatcher)
     return;
   dispatcher->Send(new PpapiHostMsg_PPBFlash_QuitMessageLoop(
-      INTERFACE_ID_PPB_FLASH, instance));
+      API_ID_PPB_FLASH, instance));
 }
 
 double GetLocalTimeZoneOffset(PP_Instance instance, PP_Time t) {
@@ -148,7 +149,7 @@ double GetLocalTimeZoneOffset(PP_Instance instance, PP_Time t) {
   // this message rather than proxy it through some instance in a renderer.
   double result = 0;
   dispatcher->Send(new PpapiHostMsg_PPBFlash_GetLocalTimeZoneOffset(
-      INTERFACE_ID_PPB_FLASH, instance, t, &result));
+      API_ID_PPB_FLASH, instance, t, &result));
   return result;
 }
 
@@ -186,15 +187,8 @@ PPB_Flash_Proxy::~PPB_Flash_Proxy() {
 }
 
 // static
-const InterfaceProxy::Info* PPB_Flash_Proxy::GetInfo() {
-  static const Info info = {
-    &flash_interface,
-    PPB_FLASH_INTERFACE,
-    INTERFACE_ID_PPB_FLASH,
-    true,
-    &CreateFlashProxy,
-  };
-  return &info;
+const PPB_Flash* PPB_Flash_Proxy::GetInterface() {
+  return &flash_interface;
 }
 
 bool PPB_Flash_Proxy::OnMessageReceived(const IPC::Message& msg) {

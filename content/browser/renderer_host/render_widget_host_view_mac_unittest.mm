@@ -5,12 +5,16 @@
 #include "content/browser/renderer_host/render_widget_host_view_mac.h"
 
 #include "base/mac/scoped_nsautorelease_pool.h"
-#include "content/browser/browser_thread.h"
+#include "content/browser/browser_thread_impl.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
+#include "content/common/gpu/gpu_messages.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/test/cocoa_test_event_utils.h"
 #import "ui/base/test/ui_cocoa_test_helper.h"
 #include "webkit/plugins/npapi/webplugin.h"
+
+using content::BrowserThread;
+using content::BrowserThreadImpl;
 
 class RenderWidgetHostViewMacTest : public RenderViewHostTestHarness {
  public:
@@ -54,8 +58,9 @@ class RenderWidgetHostViewMacTest : public RenderViewHostTestHarness {
 
     // The accelerated view isn't shown until it has a valid rect and has been
     // painted to.
-    rwhv_mac_->AcceleratedSurfaceBuffersSwapped(accelerated_handle,
-                                                0, 0, 0, 0);
+    GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
+    params.window = accelerated_handle;
+    rwhv_mac_->AcceleratedSurfaceBuffersSwapped(params, 0);
     webkit::npapi::WebPluginGeometry geom;
     gfx::Rect rect(0, 0, w, h);
     geom.window = accelerated_handle;
@@ -88,8 +93,9 @@ TEST_F(RenderWidgetHostViewMacTest, Basic) {
 // Regression test for http://crbug.com/60318
 TEST_F(RenderWidgetHostViewMacTest, FocusAcceleratedView) {
   // The accelerated view methods want to be called on the UI thread.
-  scoped_ptr<BrowserThread> ui_thread_(
-      new BrowserThread(BrowserThread::UI, MessageLoop::current()));
+  scoped_ptr<BrowserThreadImpl> ui_thread_(
+      new BrowserThreadImpl(BrowserThread::UI,
+                            MessageLoop::current()));
 
   int w = 400, h = 300;
   gfx::PluginWindowHandle accelerated_handle = AddAcceleratedPluginView(w, h);
@@ -160,8 +166,9 @@ TEST_F(RenderWidgetHostViewMacTest, TakesFocusOnMouseDown) {
 // Regression test for http://crbug.com/64256
 TEST_F(RenderWidgetHostViewMacTest, TakesFocusOnMouseDownWithAcceleratedView) {
   // The accelerated view methods want to be called on the UI thread.
-  scoped_ptr<BrowserThread> ui_thread_(
-      new BrowserThread(BrowserThread::UI, MessageLoop::current()));
+  scoped_ptr<BrowserThreadImpl> ui_thread_(
+      new BrowserThreadImpl(BrowserThread::UI,
+                            MessageLoop::current()));
 
   int w = 400, h = 300;
   gfx::PluginWindowHandle accelerated_handle = AddAcceleratedPluginView(w, h);

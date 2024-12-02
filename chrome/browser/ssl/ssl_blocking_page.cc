@@ -14,13 +14,12 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "content/browser/cert_store.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/ssl/ssl_cert_error_handler.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
@@ -109,16 +108,17 @@ std::string SSLBlockingPage::GetHTMLContents() {
 void SSLBlockingPage::UpdateEntry(NavigationEntry* entry) {
   const net::SSLInfo& ssl_info = handler_->ssl_info();
   int cert_id = CertStore::GetInstance()->StoreCert(
-      ssl_info.cert, tab()->render_view_host()->process()->id());
+      ssl_info.cert, tab()->render_view_host()->process()->GetID());
 
-  entry->ssl().set_security_style(SECURITY_STYLE_AUTHENTICATION_BROKEN);
+  entry->ssl().set_security_style(
+      content::SECURITY_STYLE_AUTHENTICATION_BROKEN);
   entry->ssl().set_cert_id(cert_id);
   entry->ssl().set_cert_status(ssl_info.cert_status);
   entry->ssl().set_security_bits(ssl_info.security_bits);
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       content::NOTIFICATION_SSL_VISIBLE_STATE_CHANGED,
-      Source<NavigationController>(&tab()->controller()),
-      NotificationService::NoDetails());
+      content::Source<NavigationController>(&tab()->controller()),
+      content::NotificationService::NoDetails());
 }
 
 void SSLBlockingPage::CommandReceived(const std::string& command) {

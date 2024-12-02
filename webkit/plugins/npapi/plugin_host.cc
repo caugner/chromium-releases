@@ -4,6 +4,7 @@
 
 #include "webkit/plugins/npapi/plugin_host.h"
 
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -16,6 +17,7 @@
 #include "third_party/npapi/bindings/npruntime.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/gfx/gl/gl_implementation.h"
 #include "ui/gfx/gl/gl_surface.h"
 #include "webkit/glue/webkit_glue.h"
@@ -71,9 +73,12 @@ static bool SupportsSharingAcceleratedSurfaces() {
   }
   return (implementation == gfx::kGLImplementationDesktopGL);
 }
-#endif
 
-scoped_refptr<PluginHost> PluginHost::singleton_;
+static bool UsingCompositedCoreAnimationPlugins() {
+  return !CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableCompositedCoreAnimationPlugins);
+}
+#endif
 
 PluginHost::PluginHost() {
   InitializeHostFuncs();
@@ -83,12 +88,13 @@ PluginHost::~PluginHost() {
 }
 
 PluginHost *PluginHost::Singleton() {
-  if (singleton_.get() == NULL) {
-    singleton_ = new PluginHost();
+  CR_DEFINE_STATIC_LOCAL(scoped_refptr<PluginHost>, singleton, ());
+  if (singleton.get() == NULL) {
+    singleton = new PluginHost();
   }
 
-  DCHECK(singleton_.get() != NULL);
-  return singleton_;
+  DCHECK(singleton.get() != NULL);
+  return singleton;
 }
 
 void PluginHost::InitializeHostFuncs() {
@@ -827,8 +833,12 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
       break;
     }
     case NPNVsupportsInvalidatingCoreAnimationBool: {
+      // The composited code path for this model only works on 10.6 and higher.
+      // The old direct-to-screen code path supports 10.5.
       NPBool* supports_model = reinterpret_cast<NPBool*>(value);
-      *supports_model = true;
+      bool composited = webkit::npapi::UsingCompositedCoreAnimationPlugins();
+      *supports_model = composited ?
+          webkit::npapi::SupportsSharingAcceleratedSurfaces() : true;
       rv = NPERR_NO_ERROR;
       break;
     }
@@ -902,7 +912,9 @@ NPError NPN_SetValue(NPP id, NPPVariable variable, void* value) {
     case NPPVpluginDrawingModel: {
       int model = reinterpret_cast<int>(value);
       if (model == NPDrawingModelCoreGraphics ||
-          model == NPDrawingModelInvalidatingCoreAnimation ||
+          (model == NPDrawingModelInvalidatingCoreAnimation &&
+           (webkit::npapi::SupportsSharingAcceleratedSurfaces() ||
+            !webkit::npapi::UsingCompositedCoreAnimationPlugins())) ||
           (model == NPDrawingModelCoreAnimation &&
            webkit::npapi::SupportsSharingAcceleratedSurfaces())) {
         plugin->set_drawing_model(static_cast<NPDrawingModel>(model));

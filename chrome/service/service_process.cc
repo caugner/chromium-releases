@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/environment.h"
 #include "base/i18n/rtl.h"
@@ -25,7 +26,7 @@
 #include "chrome/service/net/service_url_request_context.h"
 #include "chrome/service/service_ipc_server.h"
 #include "chrome/service/service_process_prefs.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/url_fetcher.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/network_change_notifier.h"
@@ -62,13 +63,11 @@ class ServiceIOThread : public base::Thread {
 
 ServiceIOThread::ServiceIOThread(const char* name) : base::Thread(name) {}
 ServiceIOThread::~ServiceIOThread() {
-  // We cannot rely on our base class to stop the thread since we want our
-  // CleanUp function to run.
   Stop();
 }
 
 void ServiceIOThread::CleanUp() {
-  URLFetcher::CancelAll();
+  content::URLFetcher::CancelAll();
 }
 
 // Prepares the localized strings that are going to be displayed to
@@ -212,7 +211,7 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
   // ready.
   if (!service_process_state_->SignalReady(
       io_thread_->message_loop_proxy(),
-      NewRunnableMethod(this, &ServiceProcess::Terminate))) {
+      base::Bind(&ServiceProcess::Terminate, base::Unretained(this)))) {
     return false;
   }
 
@@ -347,7 +346,7 @@ void ServiceProcess::OnServiceDisabled() {
 void ServiceProcess::ScheduleShutdownCheck() {
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      NewRunnableMethod(this, &ServiceProcess::ShutdownIfNeeded),
+      base::Bind(&ServiceProcess::ShutdownIfNeeded, base::Unretained(this)),
       kShutdownDelay);
 }
 

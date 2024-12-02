@@ -31,16 +31,16 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/time_format.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/download/download_create_info.h"
 #include "content/browser/download/download_file.h"
 #include "content/browser/download/download_item.h"
 #include "content/browser/download/download_manager.h"
+#include "content/browser/download/download_state_info.h"
 #include "content/browser/download/download_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
@@ -58,13 +58,13 @@
 
 #if defined(TOOLKIT_VIEWS)
 #include "ui/base/dragdrop/os_exchange_data.h"
-#include "views/drag_utils.h"
+#include "ui/views/drag_utils.h"
 #endif
 
 #if defined(TOOLKIT_USES_GTK)
 #if defined(TOOLKIT_VIEWS)
 #include "ui/base/dragdrop/drag_drop_types.h"
-#include "views/widget/native_widget_gtk.h"
+#include "ui/views/widget/native_widget_gtk.h"
 #elif defined(TOOLKIT_GTK)
 #include "chrome/browser/ui/gtk/custom_drag.h"
 #include "chrome/browser/ui/gtk/unity_service.h"
@@ -83,29 +83,35 @@
 // the same value on all platforms.
 static const double PI = 3.141592653589793;
 
+namespace {
+
+// Returns a string constant to be used as the |danger_type| value in
+// CreateDownloadItemValue().  We only return strings for DANGEROUS_FILE,
+// DANGEROUS_URL and DANGEROUS_CONTENT because the |danger_type| value is only
+// defined if the value of |state| is |DANGEROUS|.
+const char* GetDangerTypeString(DownloadStateInfo::DangerType danger_type) {
+  switch (danger_type) {
+    case DownloadStateInfo::DANGEROUS_FILE:
+      return "DANGEROUS_FILE";
+    case DownloadStateInfo::DANGEROUS_URL:
+      return "DANGEROUS_URL";
+    case DownloadStateInfo::DANGEROUS_CONTENT:
+      return "DANGEROUS_CONTENT";
+    default:
+      // We shouldn't be returning a danger type string if it is
+      // NOT_DANGEROUS or MAYBE_DANGEROUS_CONTENT.
+      NOTREACHED();
+      return "";
+  }
+}
+
+}  // namespace
+
 namespace download_util {
 
 // How many times to cycle the complete animation. This should be an odd number
 // so that the animation ends faded out.
 static const int kCompleteAnimationCycles = 5;
-
-namespace {
-
-void GenerateFileNameInternal(const GURL& url,
-                              const std::string& content_disposition,
-                              const std::string& referrer_charset,
-                              const std::string& suggested_name,
-                              const std::string& mime_type,
-                              FilePath* generated_name) {
-  string16 default_file_name(
-      l10n_util::GetStringUTF16(IDS_DEFAULT_DOWNLOAD_FILENAME));
-
-  *generated_name = net::GenerateFileName(url, content_disposition,
-                                          referrer_charset, suggested_name,
-                                          mime_type, default_file_name);
-}
-
-}  // namespace
 
 // Download temporary file creation --------------------------------------------
 
@@ -128,7 +134,7 @@ class DefaultDownloadDirectory {
 };
 
 static base::LazyInstance<DefaultDownloadDirectory>
-    g_default_download_directory(base::LINKER_INITIALIZED);
+    g_default_download_directory = LAZY_INSTANCE_INITIALIZER;
 
 const FilePath& GetDefaultDownloadDirectory() {
   return g_default_download_directory.Get().path();
@@ -145,21 +151,15 @@ bool DownloadPathIsDangerous(const FilePath& download_path) {
 
 void GenerateFileNameFromRequest(const DownloadItem& download_item,
                                  FilePath* generated_name) {
-  GenerateFileNameInternal(download_item.GetURL(),
-                           download_item.content_disposition(),
-                           download_item.referrer_charset(),
-                           download_item.suggested_filename(),
-                           download_item.mime_type(),
-                           generated_name);
-}
+  std::string default_file_name(
+      l10n_util::GetStringUTF8(IDS_DEFAULT_DOWNLOAD_FILENAME));
 
-void GenerateFileNameFromSuggestedName(const GURL& url,
-                                       const std::string& suggested_name,
-                                       const std::string& mime_type,
-                                       FilePath* generated_name) {
-  // TODO(asanka): We should pass in a valid referrer_charset here.
-  GenerateFileNameInternal(url, std::string(), std::string(),
-                           suggested_name, mime_type, generated_name);
+  *generated_name = net::GenerateFileName(download_item.GetURL(),
+                                          download_item.GetContentDisposition(),
+                                          download_item.GetReferrerCharset(),
+                                          download_item.GetSuggestedFilename(),
+                                          download_item.GetMimeType(),
+                                          default_file_name);
 }
 
 // Download progress painting --------------------------------------------------
@@ -378,10 +378,10 @@ void DragDownload(const DownloadItem* download,
         download->GetFileNameToReportUser(), *icon, &data);
   }
 
-  const FilePath full_path = download->full_path();
+  const FilePath full_path = download->GetFullPath();
   data.SetFilename(full_path);
 
-  std::string mime_type = download->mime_type();
+  std::string mime_type = download->GetMimeType();
   if (mime_type.empty())
     net::GetMimeTypeFromFile(full_path, &mime_type);
 
@@ -427,11 +427,11 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
   DictionaryValue* file_value = new DictionaryValue();
 
   file_value->SetInteger("started",
-      static_cast<int>(download->start_time().ToTimeT()));
+      static_cast<int>(download->GetStartTime().ToTimeT()));
   file_value->SetString("since_string",
-      TimeFormat::RelativeDate(download->start_time(), NULL));
+      TimeFormat::RelativeDate(download->GetStartTime(), NULL));
   file_value->SetString("date_string",
-      base::TimeFormatShortDate(download->start_time()));
+      base::TimeFormatShortDate(download->GetStartTime()));
   file_value->SetInteger("id", id);
 
   FilePath download_path(download->GetTargetFilePath());
@@ -444,21 +444,23 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
   file_name = base::i18n::GetDisplayStringInLTRDirectionality(file_name);
   file_value->SetString("file_name", file_name);
   file_value->SetString("url", download->GetURL().spec());
-  file_value->SetBoolean("otr", download->is_otr());
-  file_value->SetInteger("total", static_cast<int>(download->total_bytes()));
+  file_value->SetBoolean("otr", download->IsOtr());
+  file_value->SetInteger("total", static_cast<int>(download->GetTotalBytes()));
   file_value->SetBoolean("file_externally_removed",
-                         download->file_externally_removed());
+                         download->GetFileExternallyRemoved());
 
   if (download->IsInProgress()) {
-    if (download->safety_state() == DownloadItem::DANGEROUS) {
+    if (download->GetSafetyState() == DownloadItem::DANGEROUS) {
       file_value->SetString("state", "DANGEROUS");
-      DCHECK(download->GetDangerType() == DownloadItem::DANGEROUS_FILE ||
-             download->GetDangerType() == DownloadItem::DANGEROUS_URL);
+      // These are the only danger states we expect to see (and the UI is
+      // equipped to handle):
+      DCHECK(download->GetDangerType() == DownloadStateInfo::DANGEROUS_FILE ||
+             download->GetDangerType() == DownloadStateInfo::DANGEROUS_URL ||
+             download->GetDangerType() == DownloadStateInfo::DANGEROUS_CONTENT);
       const char* danger_type_value =
-          download->GetDangerType() == DownloadItem::DANGEROUS_FILE ?
-          "DANGEROUS_FILE" : "DANGEROUS_URL";
+          GetDangerTypeString(download->GetDangerType());
       file_value->SetString("danger_type", danger_type_value);
-    } else if (download->is_paused()) {
+    } else if (download->IsPaused()) {
       file_value->SetString("state", "PAUSED");
     } else {
       file_value->SetString("state", "IN_PROGRESS");
@@ -470,7 +472,7 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
     file_value->SetInteger("percent",
         static_cast<int>(download->PercentComplete()));
     file_value->SetInteger("received",
-        static_cast<int>(download->received_bytes()));
+        static_cast<int>(download->GetReceivedBytes()));
   } else if (download->IsInterrupted()) {
     file_value->SetString("state", "INTERRUPTED");
 
@@ -480,15 +482,15 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
     file_value->SetInteger("percent",
         static_cast<int>(download->PercentComplete()));
     file_value->SetInteger("received",
-        static_cast<int>(download->received_bytes()));
+        static_cast<int>(download->GetReceivedBytes()));
   } else if (download->IsCancelled()) {
     file_value->SetString("state", "CANCELLED");
   } else if (download->IsComplete()) {
-    if (download->safety_state() == DownloadItem::DANGEROUS)
+    if (download->GetSafetyState() == DownloadItem::DANGEROUS)
       file_value->SetString("state", "DANGEROUS");
     else
       file_value->SetString("state", "COMPLETE");
-  } else if (download->state() == DownloadItem::REMOVING) {
+  } else if (download->GetState() == DownloadItem::REMOVING) {
     file_value->SetString("state", "REMOVING");
   } else {
     NOTREACHED() << "state undefined";
@@ -498,8 +500,8 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
 }
 
 string16 GetProgressStatusText(DownloadItem* download) {
-  int64 total = download->total_bytes();
-  int64 size = download->received_bytes();
+  int64 total = download->GetTotalBytes();
+  int64 size = download->GetReceivedBytes();
   string16 received_size = ui::FormatBytes(size);
   string16 amount = received_size;
 
@@ -524,7 +526,7 @@ string16 GetProgressStatusText(DownloadItem* download) {
 
   base::TimeDelta remaining;
   string16 time_remaining;
-  if (download->is_paused())
+  if (download->IsPaused())
     time_remaining = l10n_util::GetStringUTF16(IDS_DOWNLOAD_PROGRESS_PAUSED);
   else if (download->TimeRemaining(&remaining))
     time_remaining = TimeFormat::TimeRemaining(remaining);
@@ -543,8 +545,7 @@ void UpdateAppIconDownloadProgress(int download_count,
                                    bool progress_known,
                                    float progress) {
 #if defined(USE_AURA)
-  // TODO(beng):
-  NOTIMPLEMENTED();
+  // TODO(davemoore) Implement once UX for download is decided <104742>
 #elif defined(OS_WIN)
   // Taskbar progress bar is only supported on Win7.
   if (base::win::GetVersion() < base::win::VERSION_WIN7)

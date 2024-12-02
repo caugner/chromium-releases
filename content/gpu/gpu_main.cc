@@ -15,8 +15,8 @@
 #include "base/win/scoped_com_initializer.h"
 #include "build/build_config.h"
 #include "content/common/gpu/gpu_config.h"
-#include "content/common/main_function_params.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/main_function_params.h"
 #include "content/gpu/gpu_child_thread.h"
 #include "content/gpu/gpu_process.h"
 #include "ui/gfx/gl/gl_surface.h"
@@ -33,10 +33,10 @@
 #endif
 
 // Main function for starting the Gpu process.
-int GpuMain(const MainFunctionParams& parameters) {
+int GpuMain(const content::MainFunctionParams& parameters) {
   base::Time start_time = base::Time::Now();
 
-  const CommandLine& command_line = parameters.command_line_;
+  const CommandLine& command_line = parameters.command_line;
   if (command_line.HasSwitch(switches::kGpuStartupDialog)) {
     ChildProcess::WaitForDebugger("Gpu");
   }
@@ -69,7 +69,7 @@ int GpuMain(const MainFunctionParams& parameters) {
   // watchdog because this can take a lot of time and the GPU watchdog might
   // terminate the GPU process.
   if (!gfx::GLSurface::InitializeOneOff()) {
-    LOG(INFO) << "GLContext::InitializeOneOff failed";
+    LOG(INFO) << "gfx::GLSurface::InitializeOneOff failed";
     dead_on_arrival = true;
   }
 
@@ -77,7 +77,7 @@ int GpuMain(const MainFunctionParams& parameters) {
 
 #if defined(OS_WIN)
   sandbox::TargetServices* target_services =
-      parameters.sandbox_info_.TargetServices();
+      parameters.sandbox_info->target_services;
   // For windows, if the target_services interface is not zero, the process
   // is sandboxed and we must call LowerToken() before rendering untrusted
   // content.

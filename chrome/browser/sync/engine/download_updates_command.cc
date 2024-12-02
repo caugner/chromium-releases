@@ -38,7 +38,7 @@ void DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
   GetUpdatesMessage* get_updates =
       client_to_server_message.mutable_get_updates();
   if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableSyncedBookmarksFolder)) {
+          switches::kCreateMobileBookmarksFolder)) {
     get_updates->set_include_syncable_bookmarks(true);
   }
 
@@ -69,7 +69,7 @@ void DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
     }
   }
 
-  VLOG(1) << "Getting updates for types " << enabled_types.to_string();
+  DVLOG(1) << "Getting updates for types " << enabled_types.to_string();
   DCHECK(enabled_types.any());
 
   // We want folders for our associated types, always.  If we were to set
@@ -94,10 +94,10 @@ void DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
       &update_response,
       session);
 
-  VLOG(2) << SyncerProtoUtil::ClientToServerResponseDebugString(
+  DVLOG(2) << SyncerProtoUtil::ClientToServerResponseDebugString(
       update_response);
 
-  StatusController* status = session->status_controller();
+  StatusController* status = session->mutable_status_controller();
   status->set_updates_request_types(enabled_types);
   if (!ok) {
     status->increment_num_consecutive_errors();
@@ -108,28 +108,11 @@ void DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
 
   status->mutable_updates_response()->CopyFrom(update_response);
 
-  VLOG(1) << "GetUpdates "
-          << " returned " << update_response.get_updates().entries_size()
-          << " updates and indicated "
-          << update_response.get_updates().changes_remaining()
-          << " updates left on server.";
-}
-
-void DownloadUpdatesCommand::SetRequestedTypes(
-    const syncable::ModelTypeBitSet& target_datatypes,
-    sync_pb::EntitySpecifics* filter_protobuf) {
-  // The datatypes which should be synced are dictated by the value of the
-  // ModelSafeRoutingInfo.  If a datatype is in the routing info map, it
-  // should be synced (even if it's GROUP_PASSIVE).
-  int requested_type_count = 0;
-  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
-    if (target_datatypes[i]) {
-      requested_type_count++;
-      syncable::AddDefaultExtensionValue(syncable::ModelTypeFromInt(i),
-                                         filter_protobuf);
-    }
-  }
-  DCHECK_LT(0, requested_type_count) << "Doing GetUpdates with empty filter.";
+  DVLOG(1) << "GetUpdates "
+           << " returned " << update_response.get_updates().entries_size()
+           << " updates and indicated "
+           << update_response.get_updates().changes_remaining()
+           << " updates left on server.";
 }
 
 void DownloadUpdatesCommand::AppendClientDebugInfoIfNeeded(
@@ -137,14 +120,14 @@ void DownloadUpdatesCommand::AppendClientDebugInfoIfNeeded(
     DebugInfo* debug_info) {
   // We want to send the debug info only once per sync cycle. Check if it has
   // already been sent.
-  if (!session->status_controller()->debug_info_sent()) {
-    VLOG(1) << "Sending client debug info ...";
+  if (!session->status_controller().debug_info_sent()) {
+    DVLOG(1) << "Sending client debug info ...";
     // could be null in some unit tests.
     if (session->context()->debug_info_getter()) {
       session->context()->debug_info_getter()->GetAndClearDebugInfo(
           debug_info);
     }
-    session->status_controller()->set_debug_info_sent();
+    session->mutable_status_controller()->set_debug_info_sent();
   }
 }
 

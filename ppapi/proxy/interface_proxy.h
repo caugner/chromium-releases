@@ -11,7 +11,7 @@
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
-#include "ppapi/proxy/interface_id.h"
+#include "ppapi/shared_impl/api_id.h"
 #include "ppapi/shared_impl/function_group_base.h"
 
 namespace ppapi {
@@ -38,7 +38,7 @@ class InterfaceProxy : public IPC::Channel::Listener,
     const void* interface_ptr;
 
     const char* name;
-    InterfaceID id;
+    ApiID id;
 
     bool is_trusted;
 
@@ -59,9 +59,6 @@ class InterfaceProxy : public IPC::Channel::Listener,
   // Creates the given interface associated with the given dispatcher. The
   // dispatcher manages our lifetime.
   InterfaceProxy(Dispatcher* dispatcher);
-
-  uint32 SendCallback(PP_CompletionCallback callback);
-  PP_CompletionCallback ReceiveCallback(uint32 serialized_callback);
 
  private:
   Dispatcher* dispatcher_;

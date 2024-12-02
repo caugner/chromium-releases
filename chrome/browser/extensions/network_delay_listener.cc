@@ -10,12 +10,14 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_view_types.h"
+#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "net/url_request/url_request.h"
+
+using content::BrowserThread;
 
 NetworkDelayListener::NetworkDelayListener()
     : resource_queue_(NULL),
@@ -24,11 +26,11 @@ NetworkDelayListener::NetworkDelayListener()
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   AddRef();  // Will be balanced in Cleanup().
 }
 
@@ -111,16 +113,18 @@ void NetworkDelayListener::Cleanup() {
   Release();
 }
 
-void NetworkDelayListener::Observe(int type,
-                                   const NotificationSource& source,
-                                   const NotificationDetails& details) {
+void NetworkDelayListener::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   switch (type) {
     case chrome::NOTIFICATION_EXTENSION_LOADED: {
-      const Extension* extension = Details<const Extension>(details).ptr();
+      const Extension* extension =
+          content::Details<const Extension>(details).ptr();
       ExtensionService* service =
-          Source<Profile>(source).ptr()->GetExtensionService();
+          content::Source<Profile>(source).ptr()->GetExtensionService();
       // We only wait for background pages to load. If the extension has no
       // background page, ignore it.
       if (service->extension_prefs()->DelaysNetworkRequests(extension->id()) &&
@@ -134,9 +138,9 @@ void NetworkDelayListener::Observe(int type,
     }
     case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
       const Extension* extension =
-          Details<UnloadedExtensionInfo>(details)->extension;
+          content::Details<UnloadedExtensionInfo>(details)->extension;
       ExtensionService* service =
-          Source<Profile>(source).ptr()->GetExtensionService();
+          content::Source<Profile>(source).ptr()->GetExtensionService();
       if (service->extension_prefs()->DelaysNetworkRequests(extension->id())) {
         BrowserThread::PostTask(
             BrowserThread::IO, FROM_HERE,
@@ -146,14 +150,14 @@ void NetworkDelayListener::Observe(int type,
       break;
     }
     case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING: {
-      const ExtensionHost* eh = Details<ExtensionHost>(details).ptr();
+      const ExtensionHost* eh = content::Details<ExtensionHost>(details).ptr();
       if (eh->extension_host_type() !=
           chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE)
         return;
 
       const Extension* extension = eh->extension();
       ExtensionService* service =
-          Source<Profile>(source).ptr()->GetExtensionService();
+          content::Source<Profile>(source).ptr()->GetExtensionService();
       if (service->extension_prefs()->DelaysNetworkRequests(extension->id())) {
         BrowserThread::PostTask(
             BrowserThread::IO, FROM_HERE,

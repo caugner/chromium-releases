@@ -9,11 +9,10 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/string16.h"
 #include "chrome/browser/webdata/web_database_table.h"
 #include "webkit/glue/web_intent_service_data.h"
-
-class GURL;
 
 namespace sql {
 class Connection;
@@ -31,26 +30,34 @@ class MetaTable;
 // Intents are uniquely identified by the <service_url,action,type> tuple.
 class WebIntentsTable : public WebDatabaseTable {
  public:
-   WebIntentsTable(sql::Connection* db, sql::MetaTable* meta_table);
-   virtual ~WebIntentsTable();
+  WebIntentsTable(sql::Connection* db, sql::MetaTable* meta_table);
+  virtual ~WebIntentsTable();
 
   // WebDatabaseTable implementation.
-  virtual bool Init();
-  virtual bool IsSyncable();
+  virtual bool Init() OVERRIDE;
+  virtual bool IsSyncable() OVERRIDE;
 
-  // Adds a web intent to the WebIntents table. If intent already exists,
-  // replaces it.
-  bool SetWebIntent(const WebIntentServiceData& intent);
+  // Adds a web intent service to the WebIntents table.
+  // If |service| already exists, replaces it.
+  bool SetWebIntentService(const webkit_glue::WebIntentServiceData& service);
 
-  // Retrieve all intents from WebIntents table that match |action|.
-  bool GetWebIntents(const string16& action,
-                     std::vector<WebIntentServiceData>* intents);
+  // Retrieve all |services| from WebIntents table that match |action|.
+  bool GetWebIntentServices(
+      const string16& action,
+      std::vector<webkit_glue::WebIntentServiceData>* services);
 
-  // Retrieve all intents from WebIntents table.
-  bool GetAllWebIntents(std::vector<WebIntentServiceData>* intents);
+  // Retrieves all |services| from WebIntents table that match |service_url|.
+  bool GetWebIntentServicesForURL(
+      const string16& service_url,
+      std::vector<webkit_glue::WebIntentServiceData>* services);
 
-  // Removes intent from WebIntents table - must match all parameters exactly.
-  bool RemoveWebIntent(const WebIntentServiceData& intent);
+  // Retrieve all |services| from WebIntents table.
+  bool GetAllWebIntentServices(
+      std::vector<webkit_glue::WebIntentServiceData>* services);
+
+  // Removes |service| from WebIntents table - must match all parameters
+  // exactly.
+  bool RemoveWebIntentService(const webkit_glue::WebIntentServiceData& service);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebIntentsTable);

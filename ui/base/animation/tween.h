@@ -8,10 +8,8 @@
 
 #include "base/basictypes.h"
 #include "ui/base/ui_export.h"
-
-namespace gfx {
-class Rect;
-}
+#include "ui/gfx/rect.h"
+#include "ui/gfx/transform.h"
 
 namespace ui {
 
@@ -36,6 +34,9 @@ class UI_EXPORT Tween {
   static gfx::Rect ValueBetween(double value,
                                 const gfx::Rect& start_bounds,
                                 const gfx::Rect& target_bounds);
+  static Transform ValueBetween(double value,
+                                const Transform& start_transform,
+                                const Transform& target_transform);
 
  private:
   Tween();

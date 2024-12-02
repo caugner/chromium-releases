@@ -33,19 +33,15 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/mac/nsimage_cache.h"
 
 const int kMinimumWindowSize = 1;
-const double kBoundsChangeAnimationDuration = 0.25;
-
-// Delay before click on a titlebar is allowed to minimize the panel
-// after the 'draw attention' mode has been cleared.
-const base::TimeDelta kSuspendMinimizeOnClickIntervalMs =
-    base::TimeDelta::FromMilliseconds(500);
+const double kBoundsAnimationSpeedPixelsPerSecond = 1000;
+const double kBoundsAnimationMaxDurationSeconds = 0.18;
 
 // Replicate specific 10.6 SDK declarations for building with prior SDKs.
 #if !defined(MAC_OS_X_VERSION_10_6) || \
@@ -61,6 +57,12 @@ enum {
 - (NSRect)constrainFrameRect:(NSRect)frameRect toScreen:(NSScreen *)screen {
   return frameRect;
 }
+
+- (BOOL)canBecomeKeyWindow {
+  PanelWindowControllerCocoa* controller =
+      static_cast<PanelWindowControllerCocoa*>([self delegate]);
+  return [controller canBecomeKeyWindow];
+}
 @end
 
 
@@ -73,6 +75,9 @@ enum {
     windowShim_.reset(window);
     animateOnBoundsChange_ = YES;
   }
+  contentsController_.reset(
+      [[TabContentsController alloc] initWithContents:nil
+                                             delegate:nil]);
   return self;
 }
 
@@ -107,12 +112,8 @@ enum {
   DCHECK(titlebar_view_);
   DCHECK_EQ(self, [window delegate]);
 
-  // Using NSModalPanelWindowLevel (8) rather then NSStatusWindowLevel (25)
-  // ensures notification balloons on top of regular windows, but below
-  // popup menus which are at NSPopUpMenuWindowLevel (101) and Spotlight
-  // drop-out, which is at NSStatusWindowLevel-2 (23) for OSX 10.6/7.
-  // See http://crbug.com/59878.
-  [window setLevel:NSModalPanelWindowLevel];
+  if (!windowShim_->panel()->manager()->is_full_screen())
+    [window setLevel:NSStatusWindowLevel];
 
   if (base::mac::IsOSSnowLeopardOrLater()) {
     [window setCollectionBehavior:
@@ -120,9 +121,6 @@ enum {
   }
 
   [titlebar_view_ attach];
-
-  throbberShouldSpin_ =
-      windowShim_->browser()->GetSelectedTabContents()->IsLoading();
 
   // Set initial size of the window to match the size of the panel to give
   // the renderer the proper size to work with earlier, avoiding a resize
@@ -133,11 +131,7 @@ enum {
   frame.size.height = panelBounds.height();
   [window setFrame:frame display:NO];
 
-  // Attach the RenderWigetHostView to the view hierarchy, it will render
-  // HTML content.
-  NSView* tabContentsView = [self tabContentsView];
-  DCHECK(tabContentsView);
-  [[window contentView] addSubview:tabContentsView];
+  [[window contentView] addSubview:[contentsController_ view]];
   [self enableTabContentsViewAutosizing];
 }
 
@@ -150,26 +144,21 @@ enum {
 }
 
 - (void)disableTabContentsViewAutosizing {
-  NSView* tabContentView = [self tabContentsView];
-  if (!tabContentView)
-    return;
-
-  DCHECK([tabContentView superview] == [[self window] contentView]);
-  [tabContentView setAutoresizingMask:NSViewNotSizable];
+  [[[self window] contentView] setAutoresizesSubviews:NO];
 }
 
 - (void)enableTabContentsViewAutosizing {
-  NSView* tabContentView = [self tabContentsView];
-  if (!tabContentView)
-    return;
+  NSView* contentView = [[self window] contentView];
+  NSView* controllerView = [contentsController_ view];
 
-  DCHECK([tabContentView superview] == [[self window] contentView]);
+  DCHECK([controllerView superview] == contentView);
+  DCHECK([controllerView autoresizingMask] & NSViewHeightSizable);
+  DCHECK([controllerView autoresizingMask] & NSViewWidthSizable);
 
   // Parent's bounds is child's frame.
-  NSRect frame = [[[self window] contentView] bounds];
-  [tabContentView setFrame:frame];
-  [tabContentView
-      setAutoresizingMask:(NSViewWidthSizable | NSViewHeightSizable)];
+  [controllerView setFrame:[contentView bounds]];
+  [contentView setAutoresizesSubviews:YES];
+  [contentsController_ ensureContentsVisible];
 }
 
 - (void)revealAnimatedWithFrame:(const NSRect&)frame {
@@ -177,8 +166,7 @@ enum {
 
   // Disable subview resizing while resizing the window to avoid renderer
   // resizes during intermediate stages of animation.
-  NSView* contentView = [window contentView];
-  [contentView setAutoresizesSubviews:NO];
+  [self disableTabContentsViewAutosizing];
 
   // We grow the window from the bottom up to produce a 'reveal' animation.
   NSRect startFrame = NSMakeRect(NSMinX(frame), NSMinY(frame),
@@ -187,9 +175,19 @@ enum {
   // Shows the window without making it key, on top of its layer, even if
   // Chromium is not an active app.
   [window orderFrontRegardless];
+  // TODO(dcheng): Temporary hack to work around the fact that
+  // orderFrontRegardless causes us to become the first responder. The usual
+  // Chrome assumption is that becoming the first responder = you have focus, so
+  // we always deactivate the controls here. If we're created as an active
+  // panel, we'll get a NSWindowDidBecomeKeyNotification and reactivate the web
+  // view properly. See crbug.com/97831 for more details.
+  TabContents* tab_contents = [contentsController_ tabContents];
+  // RWHV may be NULL in unit tests.
+  if (tab_contents && tab_contents->GetRenderWidgetHostView())
+    tab_contents->GetRenderWidgetHostView()->SetActive(false);
   [window setFrame:frame display:YES animate:YES];
 
-  [contentView setAutoresizesSubviews:YES];
+  [self enableTabContentsViewAutosizing];
 }
 
 - (void)updateTitleBar {
@@ -250,11 +248,15 @@ enum {
   [findBarCocoaController positionFindBarViewAtMaxY:maxY maxWidth:maxWidth];
 }
 
-- (NSView*)tabContentsView {
-  TabContents* contents = windowShim_->browser()->GetSelectedTabContents();
-  if (contents)
-    return contents->GetNativeView();
-  return NULL;
+- (void)tabInserted:(TabContents*)contents {
+  [contentsController_ changeTabContents:contents];
+  DCHECK(![[contentsController_ view] isHidden]);
+}
+
+- (void)tabDetached:(TabContents*)contents {
+  DCHECK(contents == [contentsController_ tabContents]);
+  [contentsController_ changeTabContents:NULL];
+  [[contentsController_ view] setHidden:YES];
 }
 
 - (PanelTitlebarViewCocoa*)titlebarView {
@@ -365,8 +367,14 @@ enum {
   DCHECK(windowShim_->browser()->tabstrip_model()->empty());
   // Avoid callbacks from a nonblocking animation in progress, if any.
   [self terminateBoundsAnimation];
-  windowShim_->didCloseNativeWindow();
-  [self autorelease];
+  windowShim_->DidCloseNativeWindow();
+  // Call |-autorelease| after a zero-length delay to avoid deadlock from
+  // code in the current run loop that waits on BROWSER_CLOSED notification.
+  // The notification is sent when this object is freed, but this object
+  // cannot be freed until the current run loop completes.
+  [self performSelector:@selector(autorelease)
+             withObject:nil
+             afterDelay:0];
 }
 
 - (void)runSettingsMenu:(NSView*)button {
@@ -398,7 +406,8 @@ enum {
   windowShim_->panel()->manager()->Drag(deltaX);
 }
 
-- (void)setPanelFrame:(NSRect)frame {
+- (void)setPanelFrame:(NSRect)frame
+              animate:(BOOL)animate {
   // Setup the whole window as the tracking area so that we can get notified
   // when the mouse enters or leaves the window. This will make us be able to
   // show or hide settings button accordingly.
@@ -414,12 +423,15 @@ enum {
   [[[[self window] contentView] superview]
       addTrackingArea:windowTrackingArea_.get()];
 
-  if (!animateOnBoundsChange_) {
+  if (!animateOnBoundsChange_ || !animate) {
     [[self window] setFrame:frame display:YES animate:NO];
     return;
   }
   // Will be enabled back in animationDidEnd callback.
   [self disableTabContentsViewAutosizing];
+
+  // Terminate previous animation, if it is still playing.
+  [self terminateBoundsAnimation];
 
   NSDictionary *windowResize = [NSDictionary dictionaryWithObjectsAndKeys:
       [self window], NSViewAnimationTargetKey,
@@ -427,25 +439,78 @@ enum {
 
   NSArray *animations = [NSArray arrayWithObjects:windowResize, nil];
 
-  // Terminate previous animation, if it is still playing.
-  [self terminateBoundsAnimation];
   boundsAnimation_ =
       [[NSViewAnimation alloc] initWithViewAnimations:animations];
   [boundsAnimation_ setDelegate:self];
 
+  NSRect currentFrame = [[self window] frame];
+  // Compute duration. We use constant speed of animation, however if the change
+  // is too large, we clip the duration (effectively increasing speed) to
+  // limit total duration of animation. This makes 'small' transitions fast.
+  // 'distance' is the max travel between 4 potentially traveling corners.
+  double distanceX = std::max(abs(NSMinX(currentFrame) - NSMinX(frame)),
+                              abs(NSMaxX(currentFrame) - NSMaxX(frame)));
+  double distanceY = std::max(abs(NSMinY(currentFrame) - NSMinY(frame)),
+                              abs(NSMaxY(currentFrame) - NSMaxY(frame)));
+  double distance = std::max(distanceX, distanceY);
+  double duration = std::min(distance / kBoundsAnimationSpeedPixelsPerSecond,
+                             kBoundsAnimationMaxDurationSeconds);
+  // Detect animation that happens when expansion state is set to MINIMIZED
+  // and there is relatively big portion of the panel to hide from view.
+  // Initialize animation differently in this case, using fast-pause-slow
+  // method, see below for more details.
+  if (windowShim_->panel()->expansion_state() == Panel::MINIMIZED) {
+    animationStopToShowTitlebarOnly_ =
+        1.0 - (windowShim_->TitleOnlyHeight() - NSHeight(frame)) / distanceY;
+    if (animationStopToShowTitlebarOnly_ > 0.7) {  // Relatively big movement.
+      playingMinimizeAnimation_ = YES;
+      duration = 1.5;
+    }
+  }
+  [boundsAnimation_ setDuration: duration];
+  [boundsAnimation_ setFrameRate:0.0];
   [boundsAnimation_ setAnimationBlockingMode: NSAnimationNonblocking];
-  [boundsAnimation_ setDuration: kBoundsChangeAnimationDuration];
   [boundsAnimation_ startAnimation];
 }
 
+- (float)animation:(NSAnimation*)animation
+  valueForProgress:(NSAnimationProgress)progress {
+  if (!playingMinimizeAnimation_) {
+    // Cubic easing out.
+    float value = 1.0 - progress;
+    return 1.0 - value * value * value;
+  }
+
+  // Minimize animation:
+  // 1. Quickly (0 -> 0.15) make only titlebar visible.
+  // 2. Stay a little bit (0.15->0.6) in place, just showing titlebar.
+  // 3. Slowly minimize to thin strip (0.6->1.0)
+  const float kAnimationStopAfterQuickDecrease = 0.15;
+  const float kAnimationStopAfterShowingTitlebar = 0.6;
+  float value;
+  if (progress <= kAnimationStopAfterQuickDecrease) {
+      value = progress * animationStopToShowTitlebarOnly_ /
+              kAnimationStopAfterQuickDecrease;
+  } else if (progress <= kAnimationStopAfterShowingTitlebar) {
+      value = animationStopToShowTitlebarOnly_;
+  } else {
+      value = animationStopToShowTitlebarOnly_ +
+          (progress - kAnimationStopAfterShowingTitlebar) *
+          (1.0 - animationStopToShowTitlebarOnly_) /
+          (1.0 - kAnimationStopAfterShowingTitlebar);
+  }
+  return value;
+}
+
 - (void)animationDidEnd:(NSAnimation*)animation {
+  playingMinimizeAnimation_ = NO;
   if (windowShim_->panel()->expansion_state() == Panel::EXPANDED)
     [self enableTabContentsViewAutosizing];
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
-      Source<Panel>(windowShim_->panel()),
-      NotificationService::NoDetails());
+      content::Source<Panel>(windowShim_->panel()),
+      content::NotificationService::NoDetails());
 }
 
 - (void)terminateBoundsAnimation {
@@ -461,18 +526,23 @@ enum {
   return boundsAnimation_ && [boundsAnimation_ isAnimating];
 }
 
-- (void)tryFlipExpansionState {
-    Panel* panel = windowShim_->panel();
-    Panel::ExpansionState oldExpansionState = panel->expansion_state();
-    if (oldExpansionState == Panel::EXPANDED &&
-        base::Time::Now() < disableMinimizeUntilTime_) {
+- (void)onTitlebarMouseClicked {
+  Panel* panel = windowShim_->panel();
+  Panel::ExpansionState oldExpansionState = panel->expansion_state();
+
+  if (oldExpansionState == Panel::EXPANDED) {
+    if ([[self titlebarView] isDrawingAttention]) {
+      // Do not minimize if the Panel is drawing attention since user
+      // most likely simply wants to reset the 'draw attention' status.
+      panel->Activate();
       return;
     }
-
-    Panel::ExpansionState newExpansionState =
-        (oldExpansionState != Panel::EXPANDED) ? Panel::EXPANDED
-                                               : Panel::MINIMIZED;
-    panel->SetExpansionState(newExpansionState);
+    panel->SetExpansionState(Panel::MINIMIZED);
+    // The Panel class ensures deactivaiton when it is minimized.
+  } else {
+    panel->SetExpansionState(Panel::EXPANDED);
+    panel->Activate();
+  }
 }
 
 - (int)titlebarHeightInScreenCoordinates {
@@ -489,8 +559,7 @@ enum {
 
   // We need to activate the controls (in the "WebView"). To do this, get the
   // selected TabContents's RenderWidgetHostViewMac and tell it to activate.
-  if (TabContents* contents =
-          windowShim_->browser()->GetSelectedTabContents()) {
+  if (TabContents* contents = [contentsController_ tabContents]) {
     if (RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView())
       rwhv->SetActive(true);
   }
@@ -498,24 +567,14 @@ enum {
   // If the window becomes key, lets make sure it is expanded and stop
   // drawing attention - since it is ready to accept input, it already has
   // user's attention.
-  windowShim_->panel()->SetExpansionState(Panel::EXPANDED);
   if ([[self titlebarView] isDrawingAttention]) {
-    // Disable ExpansionState changes on mouse click for a short duration.
-    // This is needed in case the window became key as result of mouseDown while
-    // being already expanded and drawing attention - in this case, we don't
-    // want to minimize it on subsequent mouseUp.
-    // We use time interval because the window may become key in various ways
-    // (via keyboard for example) which are not distinguishable at this point.
-    // Apparently this interval is not affecting the user in other cases.
-    disableMinimizeUntilTime_ =
-      base::Time::Now() + kSuspendMinimizeOnClickIntervalMs;
     [[self titlebarView] stopDrawingAttention];
   }
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PANEL_CHANGED_ACTIVE_STATUS,
-      Source<Panel>(windowShim_->panel()),
-      NotificationService::NoDetails());
+      content::Source<Panel>(windowShim_->panel()),
+      content::NotificationService::NoDetails());
 }
 
 - (void)windowDidResignKey:(NSNotification*)notification {
@@ -528,16 +587,42 @@ enum {
 
   // We need to deactivate the controls (in the "WebView"). To do this, get the
   // selected TabContents's RenderWidgetHostView and tell it to deactivate.
-  if (TabContents* contents =
-          windowShim_->browser()->GetSelectedTabContents()) {
+  if (TabContents* contents = [contentsController_ tabContents]) {
     if (RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView())
       rwhv->SetActive(false);
   }
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PANEL_CHANGED_ACTIVE_STATUS,
-      Source<Panel>(windowShim_->panel()),
-      NotificationService::NoDetails());
+      content::Source<Panel>(windowShim_->panel()),
+      content::NotificationService::NoDetails());
+}
+
+- (void)deactivate {
+  if (![[self window] isMainWindow])
+    return;
+  BrowserWindow* browser_window =
+      windowShim_->panel()->manager()->GetNextBrowserWindowToActivate(
+          windowShim_->panel());
+
+  if (browser_window)
+    browser_window->Activate();
+  else
+    [NSApp deactivate];
+}
+
+- (void)fullScreenModeChanged:(bool)isFullScreen {
+  NSWindow* window = [self window];
+  [window setLevel:(isFullScreen ? NSNormalWindowLevel : NSStatusWindowLevel)];
+}
+
+- (BOOL)canBecomeKeyWindow {
+  // Panel can only gain focus if it is expanded. Minimized panels do not
+  // participate in Cmd-~ rotation.
+  // TODO(dimich): If it will be ever desired to expand/focus the Panel on
+  // keyboard navigation or via main menu, the care should be taken to avoid
+  // cases when minimized Panel is getting keyboard input, invisibly.
+  return windowShim_->panel()->expansion_state() == Panel::EXPANDED;
 }
 
 @end

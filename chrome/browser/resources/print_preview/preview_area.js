@@ -14,6 +14,20 @@ cr.define('print_preview', function() {
     // The embedded pdf plugin object.
     this.pdfPlugin_ = null;
 
+    // @type {HTMLDivElement} A layer on top of |this.pdfPlugin_| used for
+    // displaying messages to the user.
+    this.overlayLayer = $('overlay-layer');
+    // @type {HTMLDivElement} Contains text displayed to the user followed by
+    // three animated dots.
+    this.customMessageWithDots_ = $('custom-message-with-dots');
+    // @type {HTMLDivElement} Contains text displayed to the user.
+    this.customMessage_ = $('custom-message');
+    // @type {HTMLInputElement} Button associated with a displayed error
+    // message.
+    this.errorButton = $('error-button');
+    // @type {HTMLDivElement} Contains three animated (dancing) dots.
+    this.dancingDotsText = $('dancing-dots-text');
+
     // True if the pdf document is loaded in the preview area.
     this.pdfLoaded_ = false;
 
@@ -24,6 +38,14 @@ cr.define('print_preview', function() {
     //     before a new preview is requested so that the scroll amount can be
     //     restored later.
     this.pageOffset_ = null;
+    // @type {print_preview.Rect} A rectangle describing the postion of the
+    // most visible page normalized with respect to the total height and width
+    // of the plugin.
+    this.pageLocationNormalized = null;
+
+    // @type {EventTracker} Used to keep track of certain event listeners.
+    this.eventTracker = new EventTracker();
+
     this.addEventListeners_();
   }
 
@@ -69,6 +91,10 @@ cr.define('print_preview', function() {
       return (height - scrollbarHeight) / height;
     },
 
+    get pdfPlugin() {
+      return this.pdfPlugin_;
+    },
+
     get pdfLoaded() {
       return this.pdfLoaded_;
     },
@@ -78,17 +104,19 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * @return {print_preview.Rect} A rectangle describing the postion of the
-     *   most visible page normalized with respect to the total height and width
-     *   of the plugin.
+     * Queries the plugin for the location of the most visible page and updates
+     * |this.pageLocationNormalized|.
      */
-    getPageLocationNormalized: function() {
+    update: function() {
+      if (!this.pdfLoaded_)
+        return;
       var pluginLocation =
           this.pdfPlugin_.getPageLocationNormalized().split(';');
-      return new print_preview.Rect(parseFloat(pluginLocation[0]),
-                                    parseFloat(pluginLocation[1]),
-                                    parseFloat(pluginLocation[2]),
-                                    parseFloat(pluginLocation[3]));
+      this.pageLocationNormalized = new print_preview.Rect(
+          parseFloat(pluginLocation[0]),
+          parseFloat(pluginLocation[1]),
+          parseFloat(pluginLocation[2]),
+          parseFloat(pluginLocation[3]));
     },
 
     /**
@@ -110,12 +138,12 @@ cr.define('print_preview', function() {
      * @private
      */
     addEventListeners_: function() {
-      document.addEventListener('PDFLoaded',
+      document.addEventListener(customEvents.PDF_LOADED,
                                 this.onPDFLoaded_.bind(this));
     },
 
     /**
-     * Listener executing when a PDFLoaded event occurs.
+     * Listener executing when a |customEvents.PDF_LOADED| event occurs.
      * @private
      */
     onPDFLoaded_: function() {
@@ -128,6 +156,92 @@ cr.define('print_preview', function() {
       } else {
         this.pdfPlugin_.fitToHeight();
       }
+    },
+
+    /**
+     * Hides the |this.overlayLayer| and any messages currently displayed.
+     */
+    hideOverlayLayer: function() {
+      this.eventTracker.add(this.overlayLayer, 'webkitTransitionEnd',
+          this.hideOverlayLayerCleanup_.bind(this), false);
+      if (this.pdfPlugin_)
+        this.pdfPlugin_.classList.remove('invisible');
+      this.overlayLayer.classList.add('invisible');
+    },
+
+    /**
+     * Displays the "Preview loading..." animation.
+     */
+    showLoadingAnimation: function() {
+      this.showCustomMessage(localStrings.getString('loading'));
+    },
+
+    /**
+     * Necessary cleanup so that the dancing dots animation is not being
+     * rendered in the background when not displayed.
+     */
+    hideOverlayLayerCleanup_: function() {
+      this.customMessageWithDots_.hidden = true;
+      this.eventTracker.remove(this.overlayLayer, 'webkitTransitionEnd');
+    },
+
+    /**
+     * Displays |message| followed by three dancing dots animation.
+     * @param {string} message The message to be displayed.
+     */
+    showCustomMessage: function(message) {
+      this.customMessageWithDots_.innerHTML = message +
+          this.dancingDotsText.innerHTML;
+      this.customMessageWithDots_.hidden = false;
+      if (this.pdfPlugin_)
+        this.pdfPlugin_.classList.add('invisible');
+      this.overlayLayer.classList.remove('invisible');
+    },
+
+    /**
+     * Clears the custom message with dots animation.
+     */
+    clearCustomMessageWithDots: function() {
+      this.customMessageWithDots_.innerHTML = '';
+      this.customMessageWithDots_.hidden = true;
+    },
+
+    /**
+     * Display an error message in the center of the preview area.
+     * @param {string} errorMessage The error message to be displayed.
+     */
+    displayErrorMessageAndNotify: function(errorMessage) {
+      this.overlayLayer.classList.remove('invisible');
+      this.customMessage_.textContent = errorMessage;
+      this.customMessage_.hidden = false;
+      this.customMessageWithDots_.innerHTML = '';
+      this.customMessageWithDots_.hidden = true;
+      if (this.pdfPlugin_) {
+        $('mainview').removeChild(this.pdfPlugin_);
+        this.pdfPlugin_ = null;
+      }
+      cr.dispatchSimpleEvent(document, customEvents.PDF_GENERATION_ERROR);
+    },
+
+    /**
+     * Display an error message in the center of the preview area followed by a
+     * button.
+     * @param {string} errorMessage The error message to be displayed.
+     * @param {string} buttonText The text to be displayed within the button.
+     * @param {string} buttonListener The listener to be executed when the
+     *     button is clicked.
+     */
+    displayErrorMessageWithButtonAndNotify: function(
+        errorMessage, buttonText, buttonListener) {
+      this.errorButton.disabled = false;
+      this.errorButton.textContent = buttonText;
+      this.errorButton.onclick = buttonListener;
+      this.errorButton.hidden = false;
+      $('system-dialog-throbber').hidden = true;
+      $('native-print-dialog-throbber').hidden = true;
+      if (cr.isMac)
+        $('open-preview-app-throbber').hidden = true;
+      this.displayErrorMessageAndNotify(errorMessage);
     }
   };
 

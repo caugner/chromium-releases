@@ -13,11 +13,12 @@
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
 
 using base::JSONReader;
 using base::JSONWriter;
+using content::BrowserThread;
 
 // A concrete implementation of the AppNotificationStorage interface, using
 // LevelDb for backing storage.

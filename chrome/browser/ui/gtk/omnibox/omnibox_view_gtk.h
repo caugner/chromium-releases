@@ -17,8 +17,8 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
@@ -49,7 +49,7 @@ class GtkThemeService;
 #endif
 
 class OmniboxViewGtk : public OmniboxView,
-                       public NotificationObserver,
+                       public content::NotificationObserver,
                        public ui::AnimationDelegate {
  public:
   // Modeled like the Windows CHARRANGE.  Represent a pair of cursor position
@@ -120,7 +120,7 @@ class OmniboxViewGtk : public OmniboxView,
   virtual bool IsSelectAll() OVERRIDE;
   virtual bool DeleteAtEndPressed() OVERRIDE;
   virtual void GetSelectionBounds(string16::size_type* start,
-                                  string16::size_type* end) OVERRIDE;
+                                  string16::size_type* end) const OVERRIDE;
   virtual void SelectAll(bool reversed) OVERRIDE;
   virtual void RevertAll() OVERRIDE;
 
@@ -147,25 +147,15 @@ class OmniboxViewGtk : public OmniboxView,
   virtual bool IsImeComposing() const OVERRIDE;
 
 #if defined(TOOLKIT_VIEWS)
+  virtual int GetMaxEditWidth(int entry_width) const OVERRIDE;
   virtual views::View* AddToView(views::View* parent) OVERRIDE;
   virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE;
-
-  // A factory method to create an OmniboxView instance initialized for
-  // linux_views.  This currently returns an instance of OmniboxViewGtk only,
-  // but OmniboxViewViews will be added as an option when TextfieldViews is
-  // enabled.
-  static OmniboxView* Create(AutocompleteEditController* controller,
-                             ToolbarModel* toolbar_model,
-                             Profile* profile,
-                             CommandUpdater* command_updater,
-                             bool popup_window_mode,
-                             views::View* location_bar);
 #endif
 
-  // Overridden from NotificationObserver:
+  // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Overridden from ui::AnimationDelegate.
   virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
@@ -469,7 +459,7 @@ class OmniboxViewGtk : public OmniboxView,
   // Supplies colors, et cetera.
   GtkThemeService* theme_service_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 #endif
 
   // Indicates if Enter key was pressed.

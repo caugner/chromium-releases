@@ -19,16 +19,19 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/net/x509_certificate_model.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/ssl/ssl_client_auth_handler.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "net/base/x509_certificate.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/native_widget_types.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -347,14 +350,11 @@ void SSLClientCertificateSelector::OnComboBoxChanged(GtkWidget* combo_box) {
 }
 
 void SSLClientCertificateSelector::OnViewClicked(GtkWidget* button) {
-#if !defined(USE_AURA)
-  // TODO(saintlou): need to port to Views.
   net::X509Certificate* cert = GetSelectedCert();
   if (cert) {
     GtkWidget* toplevel = gtk_widget_get_toplevel(root_widget_.get());
     ShowCertificateViewer(GTK_WINDOW(toplevel), cert);
   }
-#endif
 }
 
 void SSLClientCertificateSelector::OnCancelClicked(GtkWidget* button) {
@@ -384,7 +384,7 @@ void SSLClientCertificateSelector::OnOkClicked(GtkWidget* button) {
 void SSLClientCertificateSelector::OnPromptShown(GtkWidget* widget,
                                                  GtkWidget* previous_toplevel) {
   if (!root_widget_.get() ||
-      !GTK_WIDGET_TOPLEVEL(gtk_widget_get_toplevel(root_widget_.get())))
+      !gtk_widget_is_toplevel(gtk_widget_get_toplevel(root_widget_.get())))
     return;
   gtk_widget_set_can_default(select_button_, TRUE);
   gtk_widget_grab_default(select_button_);
@@ -397,7 +397,7 @@ void SSLClientCertificateSelector::OnPromptShown(GtkWidget* widget,
 
 namespace browser {
 
-void ShowSSLClientCertificateSelector(
+void ShowNativeSSLClientCertificateSelector(
     TabContentsWrapper* wrapper,
     net::SSLCertRequestInfo* cert_request_info,
     SSLClientAuthHandler* delegate) {

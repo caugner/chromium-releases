@@ -29,10 +29,10 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -335,11 +335,12 @@ void BrowserOptionsHandler::OnItemsRemoved(int start, int length) {
   OnModelChanged();
 }
 
-void BrowserOptionsHandler::Observe(int type,
-                                    const NotificationSource& source,
-                                    const NotificationDetails& details) {
+void BrowserOptionsHandler::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    std::string* pref = Details<std::string>(details).ptr();
+    std::string* pref = content::Details<std::string>(details).ptr();
     if (*pref == prefs::kDefaultBrowserSettingEnabled) {
       UpdateDefaultBrowserState();
     } else if (*pref == prefs::kURLsToRestoreOnStartup) {
@@ -382,6 +383,8 @@ void BrowserOptionsHandler::AddStartupPage(const ListValue* args) {
   CHECK(args->GetString(0, &url_string));
 
   GURL url = URLFixerUpper::FixupURL(url_string, std::string());
+  if (!url.is_valid())
+    return;
   int index = startup_custom_pages_table_model_->RowCount();
   startup_custom_pages_table_model_->Add(index, url);
   SaveStartupPagesPref();
@@ -404,6 +407,7 @@ void BrowserOptionsHandler::EditStartupPage(const ListValue* args) {
   std::vector<GURL> urls = startup_custom_pages_table_model_->GetURLs();
   urls[index] = URLFixerUpper::FixupURL(url_string, std::string());
   startup_custom_pages_table_model_->SetURLs(urls);
+  SaveStartupPagesPref();
 }
 
 void BrowserOptionsHandler::DragDropStartupPage(const ListValue* args) {
@@ -458,8 +462,10 @@ void BrowserOptionsHandler::DisableInstant(const ListValue* args) {
 }
 
 void BrowserOptionsHandler::GetInstantFieldTrialStatus(const ListValue* args) {
+  Profile* profile = Profile::FromWebUI(web_ui_);
   base::FundamentalValue enabled(
-      InstantFieldTrial::IsExperimentGroup(Profile::FromWebUI(web_ui_)));
+      InstantFieldTrial::IsInstantExperiment(profile) &&
+      !InstantFieldTrial::IsHiddenExperiment(profile));
   web_ui_->CallJavascriptFunction("BrowserOptions.setInstantFieldTrialStatus",
                                   enabled);
 }

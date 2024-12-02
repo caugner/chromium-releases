@@ -19,6 +19,12 @@ bool starts_with(const std::string& one, const std::string& two) {
   return one.compare(0, two.size(), two) == 0;
 }
 
+std::string lstrip(const std::string& one, const std::string& two) {
+  if (starts_with(one, two))
+    return one.substr(two.size());
+  return one;
+}
+
 bool ends_with(const std::string& one, const std::string& two) {
   if (two.size() > one.size())
     return false;
@@ -37,11 +43,13 @@ ChromeClassTester::ChromeClassTester(CompilerInstance& instance)
 void ChromeClassTester::BuildBannedLists() {
   banned_namespaces_.push_back("std");
   banned_namespaces_.push_back("__gnu_cxx");
+  banned_namespaces_.push_back("WebKit");
 
   banned_directories_.push_back("third_party/");
   banned_directories_.push_back("native_client/");
   banned_directories_.push_back("breakpad/");
   banned_directories_.push_back("courgette/");
+  banned_directories_.push_back("pdf/");
   banned_directories_.push_back("ppapi/");
   banned_directories_.push_back("usr/");
   banned_directories_.push_back("testing/");
@@ -146,11 +154,11 @@ void ChromeClassTester::emitWarning(SourceLocation loc, const char* raw_error) {
   DiagnosticBuilder B = diagnostic().Report(full, id);
 }
 
-bool ChromeClassTester::InTestingNamespace(Decl* record) {
+bool ChromeClassTester::InTestingNamespace(const Decl* record) {
   return GetNamespace(record).find("testing") != std::string::npos;
 }
 
-bool ChromeClassTester::InBannedNamespace(Decl* record) {
+bool ChromeClassTester::InBannedNamespace(const Decl* record) {
   std::string n = GetNamespace(record);
   if (n != "") {
     return std::find(banned_namespaces_.begin(), banned_namespaces_.end(), n)
@@ -160,7 +168,7 @@ bool ChromeClassTester::InBannedNamespace(Decl* record) {
   return false;
 }
 
-std::string ChromeClassTester::GetNamespace(Decl* record) {
+std::string ChromeClassTester::GetNamespace(const Decl* record) {
   return GetNamespaceImpl(record->getDeclContext(), "");
 }
 
@@ -223,6 +231,11 @@ bool ChromeClassTester::InBannedDirectory(SourceLocation loc) {
     if (realpath(b.c_str(), resolvedPath)) {
       b = resolvedPath;
     }
+
+    // On linux, chrome is often checked out to /usr/local/google. Due to the
+    // "usr" rule in banned_directories_, all diagnostics would be suppressed
+    // in that case. As a workaround, strip that prefix.
+    b = lstrip(b, "/usr/local/google");
 
     for (std::vector<std::string>::const_iterator it =
              banned_directories_.begin();

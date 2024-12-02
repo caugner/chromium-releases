@@ -18,7 +18,7 @@ namespace browser_sync {
 class NewNonFrontendDataTypeController : public NonFrontendDataTypeController {
  public:
   NewNonFrontendDataTypeController(
-      ProfileSyncFactory* profile_sync_factory,
+      ProfileSyncComponentsFactory* profile_sync_factory,
       Profile* profile);
   virtual ~NewNonFrontendDataTypeController();
 
@@ -33,6 +33,9 @@ class NewNonFrontendDataTypeController : public NonFrontendDataTypeController {
   virtual void StartDone(DataTypeController::StartResult result,
                          DataTypeController::State new_state,
                          const SyncError& error) OVERRIDE;
+  virtual void StartDoneImpl(DataTypeController::StartResult result,
+                             DataTypeController::State new_state,
+                             const SyncError& error) OVERRIDE;
 
   // Calls local_service_->StopSyncing() and releases our references to it and
   // |shared_change_processor_|.

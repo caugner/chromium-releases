@@ -4,31 +4,49 @@
 
 #include "chrome/browser/profiles/profile_info_cache.h"
 
+#include "base/bind.h"
+#include "base/file_util.h"
 #include "base/format_macros.h"
+#include "base/i18n/case_conversion.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/rand_util.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_util.h"
+
+using content::BrowserThread;
 
 namespace {
 
 const char kNameKey[] = "name";
+const char kGAIANameKey[] = "gaia_name";
+const char kUseGAIANameKey[] = "use_gaia_name";
 const char kUserNameKey[] = "user_name";
 const char kAvatarIconKey[] = "avatar_icon";
+const char kUseGAIAPictureKey[] = "use_gaia_picture";
 const char kBackgroundAppsKey[] = "background_apps";
+const char kHasMigratedToGAIAInfoKey[] = "has_migrated_to_gaia_info";
+const char kGAIAPictureFileNameKey[] = "gaia_picture_file_name";
+
 const char kDefaultUrlPrefix[] = "chrome://theme/IDR_PROFILE_AVATAR_";
+const char kGAIAPictureFileName[] = "Google Profile Picture.png";
 
 const int kDefaultAvatarIconResources[] = {
   IDR_PROFILE_AVATAR_0,
@@ -86,7 +104,65 @@ const int kDefaultNames[] = {
   IDS_DEFAULT_AVATAR_NAME_25
 };
 
-} // namespace
+typedef std::vector<unsigned char> ImageData;
+
+// Writes |data| to disk and takes ownership of the pointer. On completion
+// |success| is set to true on success and false on failure.
+void SaveBitmap(ImageData* data,
+                const FilePath& image_path,
+                bool* success) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  scoped_ptr<ImageData> data_owner(data);
+  *success = false;
+
+  // Make sure the destination directory exists.
+  FilePath dir = image_path.DirName();
+  if (!file_util::DirectoryExists(dir) && !file_util::CreateDirectory(dir)) {
+    LOG(ERROR) << "Failed to create parent directory.";
+    return;
+  }
+
+  if (file_util::WriteFile(image_path,
+                           reinterpret_cast<char*>(&(*data)[0]),
+                           data->size()) == -1) {
+    LOG(ERROR) << "Failed to save image to file.";
+    return;
+  }
+
+  *success = true;
+}
+
+// Reads a PNG from disk and decodes it. If the bitmap was successfully read
+// from disk the then |out_image| will contain the bitmap image, otherwise it
+// will be NULL.
+void ReadBitmap(const FilePath& image_path,
+                gfx::Image** out_image) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  *out_image = NULL;
+
+  std::string image_data;
+  if (!file_util::ReadFileToString(image_path, &image_data)) {
+    LOG(ERROR) << "Failed to read PNG file from disk.";
+    return;
+  }
+
+  const unsigned char* data =
+      reinterpret_cast<const unsigned char*>(image_data.data());
+  gfx::Image* image = gfx::ImageFromPNGEncodedData(data, image_data.length());
+  if (image == NULL) {
+    LOG(ERROR) << "Failed to decode PNG file.";
+    return;
+  }
+
+  *out_image = image;
+}
+
+void DeleteBitmap(const FilePath& image_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  file_util::Delete(image_path, false);
+}
+
+}  // namespace
 
 ProfileInfoCache::ProfileInfoCache(PrefService* prefs,
                                    const FilePath& user_data_dir)
@@ -107,6 +183,8 @@ ProfileInfoCache::ProfileInfoCache(PrefService* prefs,
 }
 
 ProfileInfoCache::~ProfileInfoCache() {
+  STLDeleteContainerPairSecondPointers(
+      gaia_pictures_.begin(), gaia_pictures_.end());
 }
 
 void ProfileInfoCache::AddProfileToCache(const FilePath& profile_path,
@@ -127,24 +205,47 @@ void ProfileInfoCache::AddProfileToCache(const FilePath& profile_path,
 
   sorted_keys_.insert(FindPositionForProfile(key, name), key);
 
-  NotificationService::current()->Notify(
-    chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-    NotificationService::AllSources(),
-    NotificationService::NoDetails());
+  gfx::Image& avatar_img =
+      ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+          GetDefaultAvatarIconResourceIDAtIndex(icon_index));
+
+  FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
+                    observer_list_,
+                    OnProfileAdded(name, UTF8ToUTF16(key),
+                                   profile_path, &avatar_img));
+
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
+}
+
+void ProfileInfoCache::AddObserver(ProfileInfoCacheObserver* obs) {
+  observer_list_.AddObserver(obs);
+}
+
+void ProfileInfoCache::RemoveObserver(ProfileInfoCacheObserver* obs) {
+  observer_list_.RemoveObserver(obs);
 }
 
 void ProfileInfoCache::DeleteProfileFromCache(const FilePath& profile_path) {
+  string16 name = GetNameOfProfileAtIndex(
+      GetIndexOfProfileWithPath(profile_path));
+
+  FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
+                    observer_list_,
+                    OnProfileRemoved(name));
+
   DictionaryPrefUpdate update(prefs_, prefs::kProfileInfoCache);
   DictionaryValue* cache = update.Get();
-
   std::string key = CacheKeyFromProfilePath(profile_path);
   cache->Remove(key, NULL);
   sorted_keys_.erase(std::find(sorted_keys_.begin(), sorted_keys_.end(), key));
 
-  NotificationService::current()->Notify(
-    chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-    NotificationService::AllSources(),
-    NotificationService::NoDetails());
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
 }
 
 size_t ProfileInfoCache::GetNumberOfProfiles() const {
@@ -165,18 +266,15 @@ size_t ProfileInfoCache::GetIndexOfProfileWithPath(
 
 string16 ProfileInfoCache::GetNameOfProfileAtIndex(size_t index) const {
   string16 name;
-  GetInfoForProfileAtIndex(index)->GetString(kNameKey, &name);
+  if (IsUsingGAIANameOfProfileAtIndex(index))
+    name = GetGAIANameOfProfileAtIndex(index);
+  if (name.empty())
+    GetInfoForProfileAtIndex(index)->GetString(kNameKey, &name);
   return name;
 }
 
 FilePath ProfileInfoCache::GetPathOfProfileAtIndex(size_t index) const {
-  FilePath::StringType base_name;
-#if defined(OS_POSIX)
-  base_name = sorted_keys_[index];
-#elif defined(OS_WIN)
-  base_name = ASCIIToWide(sorted_keys_[index]);
-#endif
-  return user_data_dir_.Append(base_name);
+  return user_data_dir_.AppendASCII(sorted_keys_[index]);
 }
 
 string16 ProfileInfoCache::GetUserNameOfProfileAtIndex(size_t index) const {
@@ -187,9 +285,15 @@ string16 ProfileInfoCache::GetUserNameOfProfileAtIndex(size_t index) const {
 
 const gfx::Image& ProfileInfoCache::GetAvatarIconOfProfileAtIndex(
     size_t index) const {
+  if (IsUsingGAIAPictureOfProfileAtIndex(index)) {
+    const gfx::Image* image = GetGAIAPictureOfProfileAtIndex(index);
+    if (image)
+      return *image;
+  }
+
   int resource_id = GetDefaultAvatarIconResourceIDAtIndex(
       GetAvatarIconIndexOfProfileAtIndex(index));
-  return ResourceBundle::GetSharedInstance().GetImageNamed(resource_id);
+  return ResourceBundle::GetSharedInstance().GetNativeImageNamed(resource_id);
 }
 
 bool ProfileInfoCache::GetBackgroundStatusOfProfileAtIndex(
@@ -198,6 +302,85 @@ bool ProfileInfoCache::GetBackgroundStatusOfProfileAtIndex(
   GetInfoForProfileAtIndex(index)->GetBoolean(kBackgroundAppsKey,
                                               &background_app_status);
   return background_app_status;
+}
+
+string16 ProfileInfoCache::GetGAIANameOfProfileAtIndex(size_t index) const {
+  string16 name;
+  GetInfoForProfileAtIndex(index)->GetString(kGAIANameKey, &name);
+  return name;
+}
+
+bool ProfileInfoCache::IsUsingGAIANameOfProfileAtIndex(size_t index) const {
+  bool value = false;
+  GetInfoForProfileAtIndex(index)->GetBoolean(kUseGAIANameKey, &value);
+  return value;
+}
+
+const gfx::Image* ProfileInfoCache::GetGAIAPictureOfProfileAtIndex(
+    size_t index) const {
+  FilePath path = GetPathOfProfileAtIndex(index);
+  std::string key = CacheKeyFromProfilePath(path);
+
+  // If the picture is already loaded then use it.
+  if (gaia_pictures_.count(key))
+    return gaia_pictures_[key];
+
+  std::string file_name;
+  GetInfoForProfileAtIndex(index)->GetString(
+      kGAIAPictureFileNameKey, &file_name);
+
+  // If the picture is not on disk or it is already being loaded then return
+  // NULL.
+  if (file_name.empty() || gaia_pictures_loading_[key])
+    return NULL;
+
+  gaia_pictures_loading_[key] = true;
+  FilePath image_path = path.AppendASCII(file_name);
+  gfx::Image** image = new gfx::Image*;
+  BrowserThread::PostTaskAndReply(BrowserThread::FILE, FROM_HERE,
+      base::Bind(&ReadBitmap, image_path, image),
+      base::Bind(&ProfileInfoCache::OnGAIAPictureLoaded,
+          const_cast<ProfileInfoCache*>(this)->AsWeakPtr(), path, image));
+
+  return NULL;
+}
+
+void ProfileInfoCache::OnGAIAPictureLoaded(FilePath path,
+                                           gfx::Image** image) const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  std::string key = CacheKeyFromProfilePath(path);
+  gaia_pictures_loading_[key] = false;
+
+  if (*image) {
+    delete gaia_pictures_[key];
+    gaia_pictures_[key] = *image;
+  }
+  delete image;
+
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
+}
+
+void ProfileInfoCache::OnGAIAPictureSaved(FilePath path, bool* success) const  {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (*success) {
+    content::NotificationService::current()->Notify(
+        chrome::NOTIFICATION_PROFILE_CACHE_PICTURE_SAVED,
+        content::NotificationService::AllSources(),
+        content::NotificationService::NoDetails());
+  }
+  delete success;
+}
+
+bool ProfileInfoCache::IsUsingGAIAPictureOfProfileAtIndex(
+    size_t index) const {
+  bool value = false;
+  GetInfoForProfileAtIndex(index)->GetBoolean(kUseGAIAPictureKey, &value);
+  return value;
 }
 
 size_t ProfileInfoCache::GetAvatarIconIndexOfProfileAtIndex(size_t index)
@@ -214,27 +397,26 @@ size_t ProfileInfoCache::GetAvatarIconIndexOfProfileAtIndex(size_t index)
 
 void ProfileInfoCache::SetNameOfProfileAtIndex(size_t index,
                                                const string16& name) {
+  if (name == GetNameOfProfileAtIndex(index))
+    return;
+
   scoped_ptr<DictionaryValue> info(GetInfoForProfileAtIndex(index)->DeepCopy());
+  string16 old_name = GetNameOfProfileAtIndex(index);
   info->SetString(kNameKey, name);
   // This takes ownership of |info|.
   SetInfoForProfileAtIndex(index, info.release());
+  UpdateSortForProfileIndex(index);
 
-  // Remove and reinsert key in |sorted_keys_| to alphasort.
-  std::string key = CacheKeyFromProfilePath(GetPathOfProfileAtIndex(index));
-  std::vector<std::string>::iterator key_it =
-      std::find(sorted_keys_.begin(), sorted_keys_.end(), key);
-  DCHECK(key_it != sorted_keys_.end());
-  sorted_keys_.erase(key_it);
-  sorted_keys_.insert(FindPositionForProfile(key, name), key);
-
-  NotificationService::current()->Notify(
-    chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-    NotificationService::AllSources(),
-    NotificationService::NoDetails());
+  FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
+                    observer_list_,
+                    OnProfileNameChanged(old_name, name));
 }
 
 void ProfileInfoCache::SetUserNameOfProfileAtIndex(size_t index,
                                                    const string16& user_name) {
+  if (user_name == GetUserNameOfProfileAtIndex(index))
+    return;
+
   scoped_ptr<DictionaryValue> info(GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetString(kUserNameKey, user_name);
   // This takes ownership of |info|.
@@ -247,6 +429,18 @@ void ProfileInfoCache::SetAvatarIconOfProfileAtIndex(size_t index,
   info->SetString(kAvatarIconKey, GetDefaultAvatarIconUrl(icon_index));
   // This takes ownership of |info|.
   SetInfoForProfileAtIndex(index, info.release());
+
+  string16 name = GetNameOfProfileAtIndex(index);
+  FilePath profile_path = GetPathOfProfileAtIndex(index);
+  std::string key = CacheKeyFromProfilePath(profile_path);
+  gfx::Image& avatar_img =
+      ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+          GetDefaultAvatarIconResourceIDAtIndex(icon_index));
+
+  FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
+                    observer_list_,
+                    OnProfileAvatarChanged(name, UTF8ToUTF16(key),
+                                           profile_path, &avatar_img));
 }
 
 void ProfileInfoCache::SetBackgroundStatusOfProfileAtIndex(
@@ -258,6 +452,109 @@ void ProfileInfoCache::SetBackgroundStatusOfProfileAtIndex(
   info->SetBoolean(kBackgroundAppsKey, running_background_apps);
   // This takes ownership of |info|.
   SetInfoForProfileAtIndex(index, info.release());
+}
+
+void ProfileInfoCache::SetGAIANameOfProfileAtIndex(size_t index,
+                                                   const string16& name) {
+  if (name == GetGAIANameOfProfileAtIndex(index))
+    return;
+
+  scoped_ptr<DictionaryValue> info(GetInfoForProfileAtIndex(index)->DeepCopy());
+  info->SetString(kGAIANameKey, name);
+  // This takes ownership of |info|.
+  SetInfoForProfileAtIndex(index, info.release());
+  UpdateSortForProfileIndex(index);
+}
+
+void ProfileInfoCache::SetIsUsingGAIANameOfProfileAtIndex(size_t index,
+                                                          bool value) {
+  if (value == IsUsingGAIANameOfProfileAtIndex(index))
+    return;
+
+  scoped_ptr<DictionaryValue> info(GetInfoForProfileAtIndex(index)->DeepCopy());
+  string16 old_name;
+  info->GetString(kNameKey, &old_name);
+  info->SetBoolean(kUseGAIANameKey, value);
+  // This takes ownership of |info|.
+  SetInfoForProfileAtIndex(index, info.release());
+  string16 new_name = GetGAIANameOfProfileAtIndex(index);
+  UpdateSortForProfileIndex(index);
+
+  if (value) {
+    FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
+                      observer_list_,
+                      OnProfileNameChanged(old_name, new_name));
+  }
+}
+
+void ProfileInfoCache::SetGAIAPictureOfProfileAtIndex(size_t index,
+                                                      const gfx::Image* image) {
+  FilePath path = GetPathOfProfileAtIndex(index);
+  std::string key = CacheKeyFromProfilePath(path);
+
+  // Delete the old bitmap from cache.
+  std::map<std::string, gfx::Image*>::iterator it = gaia_pictures_.find(key);
+  if (it != gaia_pictures_.end()) {
+    delete it->second;
+    gaia_pictures_.erase(it);
+  }
+
+  std::string old_file_name;
+  GetInfoForProfileAtIndex(index)->GetString(
+      kGAIAPictureFileNameKey, &old_file_name);
+  std::string new_file_name;
+
+  if (!image) {
+    // Delete the old bitmap from disk.
+    if (!old_file_name.empty()) {
+      FilePath image_path = path.AppendASCII(old_file_name);
+      BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                              base::Bind(&DeleteBitmap, image_path));
+    }
+  } else {
+    // Save the new bitmap to disk.
+    gaia_pictures_[key] = new gfx::Image(*image);
+    scoped_ptr<ImageData> data(new ImageData);
+    if (!gfx::PNGEncodedDataFromImage(*image, data.get())) {
+      LOG(ERROR) << "Failed to PNG encode the image.";
+    } else {
+      new_file_name =
+          old_file_name.empty() ? kGAIAPictureFileName : old_file_name;
+      FilePath image_path = path.AppendASCII(new_file_name);
+      bool* success = new bool;
+      BrowserThread::PostTaskAndReply(BrowserThread::FILE, FROM_HERE,
+          base::Bind(&SaveBitmap, data.release(), image_path, success),
+          base::Bind(&ProfileInfoCache::OnGAIAPictureSaved, AsWeakPtr(),
+                     path, success));
+    }
+  }
+
+  scoped_ptr<DictionaryValue> info(GetInfoForProfileAtIndex(index)->DeepCopy());
+  info->SetString(kGAIAPictureFileNameKey, new_file_name);
+  // This takes ownership of |info|.
+  SetInfoForProfileAtIndex(index, info.release());
+}
+
+void ProfileInfoCache::SetIsUsingGAIAPictureOfProfileAtIndex(size_t index,
+                                                             bool value) {
+  scoped_ptr<DictionaryValue> info(GetInfoForProfileAtIndex(index)->DeepCopy());
+  string16 name = GetNameOfProfileAtIndex(index);
+  info->SetBoolean(kUseGAIAPictureKey, value);
+  // This takes ownership of |info|.
+  SetInfoForProfileAtIndex(index, info.release());
+
+  // Retrieve some info to update observers who care about avatar changes.
+  if (value) {
+    FilePath profile_path = GetPathOfProfileAtIndex(index);
+    std::string key = CacheKeyFromProfilePath(profile_path);
+    if (gaia_pictures_.find(key) != gaia_pictures_.end()) {
+      FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
+                        observer_list_,
+                        OnProfileAvatarChanged(name, UTF8ToUTF16(key),
+                                               profile_path,
+                                               gaia_pictures_[key]));
+    }
+  }
 }
 
 string16 ProfileInfoCache::ChooseNameForNewProfile(size_t icon_index) {
@@ -284,6 +581,22 @@ string16 ProfileInfoCache::ChooseNameForNewProfile(size_t icon_index) {
     if (!name_found)
       return name;
   }
+}
+
+bool ProfileInfoCache::GetHasMigratedToGAIAInfoOfProfileAtIndex(
+      size_t index) const {
+  bool value = false;
+  GetInfoForProfileAtIndex(index)->GetBoolean(
+      kHasMigratedToGAIAInfoKey, &value);
+  return value;
+}
+
+void ProfileInfoCache::SetHasMigratedToGAIAInfoOfProfileAtIndex(
+    size_t index, bool value) {
+  scoped_ptr<DictionaryValue> info(GetInfoForProfileAtIndex(index)->DeepCopy());
+  info->SetBoolean(kHasMigratedToGAIAInfoKey, value);
+  // This takes ownership of |info|.
+  SetInfoForProfileAtIndex(index, info.release());
 }
 
 bool ProfileInfoCache::IconIndexIsUnique(size_t icon_index) const {
@@ -388,10 +701,10 @@ void ProfileInfoCache::SetInfoForProfileAtIndex(size_t index,
   DictionaryValue* cache = update.Get();
   cache->Set(sorted_keys_[index], info);
 
-  NotificationService::current()->Notify(
-    chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-    NotificationService::AllSources(),
-    NotificationService::NoDetails());
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
 }
 
 std::string ProfileInfoCache::CacheKeyFromProfilePath(
@@ -404,8 +717,10 @@ std::string ProfileInfoCache::CacheKeyFromProfilePath(
 std::vector<std::string>::iterator ProfileInfoCache::FindPositionForProfile(
     std::string search_key,
     const string16& search_name) {
+  string16 search_name_l = base::i18n::ToLower(search_name);
   for (size_t i = 0; i < GetNumberOfProfiles(); ++i) {
-    int name_compare = search_name.compare(GetNameOfProfileAtIndex(i));
+    string16 name_l = base::i18n::ToLower(GetNameOfProfileAtIndex(i));
+    int name_compare = search_name_l.compare(name_l);
     if (name_compare < 0)
       return sorted_keys_.begin() + i;
     if (name_compare == 0) {
@@ -417,6 +732,42 @@ std::vector<std::string>::iterator ProfileInfoCache::FindPositionForProfile(
   return sorted_keys_.end();
 }
 
+void ProfileInfoCache::UpdateSortForProfileIndex(size_t index) {
+  string16 name = GetNameOfProfileAtIndex(index);
+
+  // Remove and reinsert key in |sorted_keys_| to alphasort.
+  std::string key = CacheKeyFromProfilePath(GetPathOfProfileAtIndex(index));
+  std::vector<std::string>::iterator key_it =
+      std::find(sorted_keys_.begin(), sorted_keys_.end(), key);
+  DCHECK(key_it != sorted_keys_.end());
+  sorted_keys_.erase(key_it);
+  sorted_keys_.insert(FindPositionForProfile(key, name), key);
+
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
+}
+
+// static
+std::vector<string16> ProfileInfoCache::GetProfileNames() {
+  std::vector<string16> names;
+  PrefService* local_state = g_browser_process->local_state();
+  const DictionaryValue* cache = local_state->GetDictionary(
+      prefs::kProfileInfoCache);
+  string16 name;
+  for (base::DictionaryValue::key_iterator it = cache->begin_keys();
+       it != cache->end_keys();
+       ++it) {
+    base::DictionaryValue* info = NULL;
+    cache->GetDictionary(*it, &info);
+    info->GetString(kNameKey, &name);
+    names.push_back(name);
+  }
+  return names;
+}
+
+// static
 void ProfileInfoCache::RegisterPrefs(PrefService* prefs) {
   prefs->RegisterDictionaryPref(prefs::kProfileInfoCache);
 }

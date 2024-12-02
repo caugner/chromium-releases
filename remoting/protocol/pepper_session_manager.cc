@@ -5,8 +5,10 @@
 #include "remoting/protocol/pepper_session_manager.h"
 
 #include "base/bind.h"
+#include "remoting/jingle_glue/iq_sender.h"
 #include "remoting/jingle_glue/jingle_info_request.h"
 #include "remoting/jingle_glue/signal_strategy.h"
+#include "remoting/protocol/authenticator.h"
 #include "remoting/protocol/jingle_messages.h"
 #include "remoting/protocol/pepper_session.h"
 #include "third_party/libjingle/source/talk/base/socketaddress.h"
@@ -32,24 +34,20 @@ void PepperSessionManager::Init(
     const std::string& local_jid,
     SignalStrategy* signal_strategy,
     SessionManager::Listener* listener,
-    crypto::RSAPrivateKey* private_key,
-    const std::string& certificate,
     bool allow_nat_traversal) {
   listener_ = listener;
   local_jid_ = local_jid;
   signal_strategy_ = signal_strategy;
-  private_key_.reset(private_key);
-  certificate_ = certificate;
+  iq_sender_.reset(new IqSender(signal_strategy_));
   allow_nat_traversal_ = allow_nat_traversal;
 
-  signal_strategy_->SetListener(this);
+  signal_strategy_->AddListener(this);
 
   // If NAT traversal is enabled then we need to request STUN/Relay info.
   if (allow_nat_traversal) {
-    jingle_info_request_.reset(
-        new JingleInfoRequest(signal_strategy_->CreateIqRequest()));
-    jingle_info_request_->Send(base::Bind(
-        &PepperSessionManager::OnJingleInfo, base::Unretained(this)));
+    jingle_info_request_.reset(new JingleInfoRequest(signal_strategy_));
+    jingle_info_request_->Send(base::Bind(&PepperSessionManager::OnJingleInfo,
+                                          base::Unretained(this)));
   } else {
     listener_->OnSessionManagerInitialized();
   }
@@ -75,13 +73,12 @@ void PepperSessionManager::OnJingleInfo(
 
 Session* PepperSessionManager::Connect(
     const std::string& host_jid,
-    const std::string& host_public_key,
-    const std::string& client_token,
+    Authenticator* authenticator,
     CandidateSessionConfig* config,
     const Session::StateChangeCallback& state_change_callback) {
   PepperSession* session = new PepperSession(this);
-  session->StartConnection(host_jid, host_public_key, client_token,
-                           config, state_change_callback);
+  session->StartConnection(host_jid, authenticator, config,
+                           state_change_callback);
   sessions_[session->session_id_] = session;
   return session;
 }
@@ -95,7 +92,13 @@ void PepperSessionManager::Close() {
   listener_ = NULL;
   jingle_info_request_.reset();
 
-  signal_strategy_->SetListener(NULL);
+  signal_strategy_->RemoveListener(this);
+}
+
+void PepperSessionManager::set_authenticator_factory(
+    AuthenticatorFactory* authenticator_factory) {
+  DCHECK(CalledOnValidThread());
+  authenticator_factory_.reset(authenticator_factory);
 }
 
 bool PepperSessionManager::OnIncomingStanza(const buzz::XmlElement* stanza) {
@@ -126,10 +129,6 @@ bool PepperSessionManager::OnIncomingStanza(const buzz::XmlElement* stanza) {
   it->second->OnIncomingMessage(message, &reply);
   SendReply(stanza, reply);
   return true;
-}
-
-IqRequest* PepperSessionManager::CreateIqRequest() {
-  return signal_strategy_->CreateIqRequest();
 }
 
 void PepperSessionManager::SendReply(const buzz::XmlElement* original_stanza,

@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_UI_WEBUI_NTP_APP_LAUNCHER_HANDLER_H_
 #pragma once
 
+#include <string>
+
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
@@ -15,26 +17,19 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/browser/cancelable_request.h"
 #include "content/browser/webui/web_ui.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class AppNotification;
-class ExtensionPrefs;
 class ExtensionService;
 class PrefChangeRegistrar;
-class PrefsService;
 class Profile;
-struct WebApplicationInfo;
-
-namespace gfx {
-class Rect;
-}
 
 // The handler for Javascript messages related to the "apps" view.
 class AppLauncherHandler : public WebUIMessageHandler,
                            public ExtensionUninstallDialog::Delegate,
                            public ExtensionInstallUI::Delegate,
-                           public NotificationObserver {
+                           public content::NotificationObserver {
  public:
   explicit AppLauncherHandler(ExtensionService* extension_service);
   virtual ~AppLauncherHandler();
@@ -50,17 +45,14 @@ class AppLauncherHandler : public WebUIMessageHandler,
       ExtensionService* service,
       base::DictionaryValue* value);
 
-  // Callback for pings related to launching apps on the NTP.
-  static bool HandlePing(Profile* profile, const std::string& path);
-
   // WebUIMessageHandler implementation.
   virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
   virtual void RegisterMessages() OVERRIDE;
 
-  // NotificationObserver
+  // content::NotificationObserver
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Populate the given dictionary with all installed app info.
   void FillAppDictionary(base::DictionaryValue* value);
@@ -111,6 +103,12 @@ class AppLauncherHandler : public WebUIMessageHandler,
   // action for UMA.
   void HandleRecordAppLaunchByURL(const base::ListValue* args);
 
+  // Callback for "closeNotification" message.
+  void HandleNotificationClose(const base::ListValue* args);
+
+  // Callback for "setNotificationsDisabled" message.
+  void HandleSetNotificationsDisabled(const base::ListValue* args);
+
   // Register app launcher preferences.
   static void RegisterUserPrefs(PrefService* pref_service);
 
@@ -128,8 +126,7 @@ class AppLauncherHandler : public WebUIMessageHandler,
 
   // Records an app launch in the corresponding |bucket| of the app launch
   // histogram. |promo_active| specifies if the web store promotion was active.
-  static void RecordAppLaunchByID(bool promo_active,
-                                  extension_misc::AppLaunchBucket bucket);
+  static void RecordAppLaunchByID(extension_misc::AppLaunchBucket bucket);
 
   // Records an app launch in the corresponding |bucket| of the app launch
   // histogram if the |escaped_url| corresponds to an installed app.
@@ -172,7 +169,7 @@ class AppLauncherHandler : public WebUIMessageHandler,
 
   // We monitor changes to the extension system so that we can reload the apps
   // when necessary.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Monitor extension preference changes so that the Web UI can be notified.
   PrefChangeRegistrar pref_change_registrar_;
@@ -185,9 +182,6 @@ class AppLauncherHandler : public WebUIMessageHandler,
 
   // The id of the extension we are prompting the user about.
   std::string extension_id_prompting_;
-
-  // Whether the promo is currently being shown.
-  bool promo_active_;
 
   // When true, we ignore changes to the underlying data rather than immediately
   // refreshing. This is useful when making many batch updates to avoid flicker.

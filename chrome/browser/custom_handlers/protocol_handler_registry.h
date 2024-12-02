@@ -16,8 +16,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
 
@@ -28,8 +28,8 @@
 // instances of this class.
 
 class ProtocolHandlerRegistry
-    : public base::RefCountedThreadSafe<ProtocolHandlerRegistry,
-                                        BrowserThread::DeleteOnIOThread> {
+    : public base::RefCountedThreadSafe<
+          ProtocolHandlerRegistry, content::BrowserThread::DeleteOnIOThread> {
  public:
   class DefaultClientObserver
       : public ShellIntegration::DefaultWebClientObserver {
@@ -40,7 +40,7 @@ class ProtocolHandlerRegistry
     // Get response from the worker regarding whether Chrome is the default
     // handler for the protocol.
     virtual void SetDefaultWebClientUIState(
-        ShellIntegration::DefaultWebClientUIState state);
+        ShellIntegration::DefaultWebClientUIState state) OVERRIDE;
 
     // Give the observer a handle to the worker, so we can find out the protocol
     // when we're called and also tell the worker if we get deleted.
@@ -50,7 +50,7 @@ class ProtocolHandlerRegistry
     ShellIntegration::DefaultProtocolClientWorker* worker_;
 
    private:
-    virtual bool IsOwnedByWorker() { return true; }
+    virtual bool IsOwnedByWorker() OVERRIDE { return true; }
     // This is a raw pointer, not reference counted, intentionally. In general
     // subclasses of DefaultWebClientObserver are not able to be refcounted
     // e.g. the browser options page
@@ -85,6 +85,12 @@ class ProtocolHandlerRegistry
 
   ProtocolHandlerRegistry(Profile* profile, Delegate* delegate);
   ~ProtocolHandlerRegistry();
+
+  // Called when a site tries to register as a protocol handler. If the request
+  // can be handled silently by the registry - either to ignore the request
+  // or to update an existing handler - the request will succeed. If this
+  // function returns false the user needs to be prompted for confirmation.
+  bool SilentlyHandleRegisterHandlerRequest(const ProtocolHandler& handler);
 
   // Called when the user accepts the registration of a given protocol handler.
   void OnAcceptRegisterProtocolHandler(const ProtocolHandler& handler);

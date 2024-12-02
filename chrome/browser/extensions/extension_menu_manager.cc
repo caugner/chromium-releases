@@ -17,7 +17,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/favicon_size.h"
 #include "webkit/glue/context_menu.h"
@@ -94,7 +95,7 @@ void ExtensionMenuItem::AddChild(ExtensionMenuItem* item) {
 
 ExtensionMenuManager::ExtensionMenuManager(Profile* profile) {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
 }
 
 ExtensionMenuManager::~ExtensionMenuManager() {
@@ -446,14 +447,15 @@ void ExtensionMenuManager::ExecuteCommand(
       item->extension_id(), event_name, json_args, profile, GURL());
 }
 
-void ExtensionMenuManager::Observe(int type,
-                                   const NotificationSource& source,
-                                   const NotificationDetails& details) {
+void ExtensionMenuManager::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_EXTENSION_UNLOADED);
 
   // Remove menu items for disabled/uninstalled extensions.
   const Extension* extension =
-      Details<UnloadedExtensionInfo>(details)->extension;
+      content::Details<UnloadedExtensionInfo>(details)->extension;
   if (ContainsKey(context_items_, extension->id())) {
     RemoveAllContextItems(extension->id());
   }

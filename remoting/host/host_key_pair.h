@@ -30,6 +30,8 @@ class HostKeyPair {
   bool Load(HostConfig* host_config);
   void Save(MutableHostConfig* host_config);
 
+  crypto::RSAPrivateKey* private_key() { return key_.get(); }
+
   std::string GetPublicKey() const;
   std::string GetSignature(const std::string& message) const;
 
@@ -42,7 +44,5 @@ class HostKeyPair {
 };
 
 }  // namespace remoting
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(remoting::HostKeyPair);
 
 #endif  // REMOTING_HOST_HOST_KEY_PAIR_H_

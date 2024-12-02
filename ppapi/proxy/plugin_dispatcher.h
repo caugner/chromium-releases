@@ -5,6 +5,7 @@
 #ifndef PPAPI_PROXY_PLUGIN_DISPATCHER_H_
 #define PPAPI_PROXY_PLUGIN_DISPATCHER_H_
 
+#include <set>
 #include <string>
 
 #include "base/basictypes.h"
@@ -18,25 +19,25 @@
 #include "ppapi/shared_impl/function_group_base.h"
 #include "ppapi/shared_impl/ppapi_preferences.h"
 
-class MessageLoop;
-
-namespace base {
-class WaitableEvent;
-}
-
 namespace ppapi {
 
 struct Preferences;
 class Resource;
+class WebKitForwarding;
 
 namespace proxy {
 
 // Used to keep track of per-instance data.
 struct InstanceData {
   InstanceData();
+  ~InstanceData();
+
   PP_Rect position;
   PP_Bool fullscreen;  // Used for PPB_Fullscreen.
   PP_Bool flash_fullscreen;  // Used for PPB_FlashFullscreen.
+
+  // When non-0, indicates the callback to execute when mouse lock is lost.
+  PP_CompletionCallback mouse_lock_callback;
 };
 
 class PPAPI_PROXY_EXPORT PluginDispatcher : public Dispatcher {
@@ -136,7 +137,7 @@ class PPAPI_PROXY_EXPORT PluginDispatcher : public Dispatcher {
   // it if necessary.
   // TODO(brettw) this is in progress. It should be merged with the target
   // proxies so there is one list to consult.
-  FunctionGroupBase* GetFunctionAPI(InterfaceID id);
+  FunctionGroupBase* GetFunctionAPI(ApiID id);
 
   uint32 plugin_dispatcher_id() const { return plugin_dispatcher_id_; }
 

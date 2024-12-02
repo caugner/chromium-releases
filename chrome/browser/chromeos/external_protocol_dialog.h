@@ -10,7 +10,7 @@
 
 #include "base/string16.h"
 #include "base/time.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/window/dialog_delegate.h"
 
 class GURL;
 class TabContents;
@@ -31,8 +31,7 @@ class ExternalProtocolDialog : public views::DialogDelegate {
 
   // views::DialogDelegate Methods:
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual string16 GetDialogButtonLabel(
-      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool Accept() OVERRIDE;

@@ -4,20 +4,23 @@
 
 #include "content/shell/shell_browser_context.h"
 
+#include "base/bind.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/threading/thread.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/chrome_blob_storage_context.h"
-#include "content/browser/download/download_manager.h"
+#include "content/browser/download/download_id_factory.h"
+#include "content/browser/download/download_manager_impl.h"
 #include "content/browser/download/download_status_updater.h"
 #include "content/browser/file_system/browser_file_system_helper.h"
 #include "content/browser/geolocation/geolocation_permission_context.h"
 #include "content/browser/host_zoom_map.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
-#include "content/browser/ssl/ssl_host_state.h"
 #include "content/browser/speech/speech_input_preferences.h"
+#include "content/browser/ssl/ssl_host_state.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/shell/shell_browser_main.h"
 #include "content/shell/shell_download_manager_delegate.h"
 #include "content/shell/shell_resource_context.h"
@@ -28,6 +31,8 @@
 #if defined(OS_WIN)
 #include "base/base_paths_win.h"
 #endif
+
+using content::BrowserThread;
 
 namespace {
 
@@ -41,7 +46,8 @@ class ShellGeolocationPermissionContext : public GeolocationPermissionContext {
       int render_process_id,
       int render_view_id,
       int bridge_id,
-      const GURL& requesting_frame) OVERRIDE {
+      const GURL& requesting_frame,
+      base::Callback<void(bool)> callback) OVERRIDE {
     NOTIMPLEMENTED();
   }
 
@@ -80,7 +86,8 @@ namespace content {
 
 ShellBrowserContext::ShellBrowserContext(
     ShellBrowserMainParts* shell_main_parts)
-    : shell_main_parts_(shell_main_parts) {
+    : download_id_factory_(new DownloadIdFactory(this)),
+      shell_main_parts_(shell_main_parts) {
 }
 
 ShellBrowserContext::~ShellBrowserContext() {
@@ -122,8 +129,9 @@ DownloadManager* ShellBrowserContext::GetDownloadManager()  {
     download_status_updater_.reset(new DownloadStatusUpdater());
 
     download_manager_delegate_ = new ShellDownloadManagerDelegate();
-    download_manager_ = new DownloadManager(download_manager_delegate_,
-                                            download_status_updater_.get());
+    download_manager_ = new DownloadManagerImpl(download_manager_delegate_,
+                                                download_id_factory_,
+                                                download_status_updater_.get());
     download_manager_delegate_->SetDownloadManager(download_manager_.get());
     download_manager_->Init(this);
   }
@@ -134,8 +142,10 @@ net::URLRequestContextGetter* ShellBrowserContext::GetRequestContext()  {
   if (!url_request_getter_) {
     url_request_getter_ = new ShellURLRequestContextGetter(
         GetPath(),
-        shell_main_parts_->io_thread()->message_loop(),
-        shell_main_parts_->file_thread()->message_loop());
+        BrowserThread::UnsafeGetBrowserThread(
+            BrowserThread::IO)->message_loop(),
+        BrowserThread::UnsafeGetBrowserThread(
+            BrowserThread::FILE)->message_loop());
   }
   return url_request_getter_;
 }
@@ -156,7 +166,7 @@ const ResourceContext& ShellBrowserContext::GetResourceContext()  {
     resource_context_.reset(new ShellResourceContext(
         static_cast<ShellURLRequestContextGetter*>(GetRequestContext()),
         GetBlobStorageContext(),
-        GetDownloadManager()->GetNextIdThunk()));
+        download_id_factory_));
   }
   return *resource_context_.get();
 }
@@ -206,9 +216,9 @@ ChromeBlobStorageContext* ShellBrowserContext::GetBlobStorageContext()  {
     blob_storage_context_ = new ChromeBlobStorageContext();
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(
-            blob_storage_context_.get(),
-            &ChromeBlobStorageContext::InitializeOnIOThread));
+        base::Bind(
+            &ChromeBlobStorageContext::InitializeOnIOThread,
+            blob_storage_context_.get()));
   }
   return blob_storage_context_;
 }
@@ -245,9 +255,9 @@ void ShellBrowserContext::CreateQuotaManagerAndClients() {
   scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy;
   BrowserThread::PostTask(
     BrowserThread::IO, FROM_HERE,
-    NewRunnableMethod(
-        appcache_service_.get(),
+    base::Bind(
         &ChromeAppCacheService::InitializeOnIOThread,
+        appcache_service_.get(),
         IsOffTheRecord()
             ? FilePath() : GetPath().Append(FILE_PATH_LITERAL("AppCache")),
         &GetResourceContext(),

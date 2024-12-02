@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "ui/base/gtk/gtk_integers.h"
+#include "ui/base/glib/glib_integers.h"
 #include "ui/base/gtk/gtk_signal.h"
 
 typedef struct _GtkWidget GtkWidget;
@@ -19,7 +19,7 @@ class UpdateRecommendedDialog {
 
  private:
   explicit UpdateRecommendedDialog(GtkWindow* parent);
-  virtual ~UpdateRecommendedDialog();
+  ~UpdateRecommendedDialog();
 
   CHROMEGTK_CALLBACK_1(UpdateRecommendedDialog, void, OnResponse, int);
 

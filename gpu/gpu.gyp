@@ -30,11 +30,11 @@
       'target_name': 'command_buffer_common',
       'type': 'static_library',
       'include_dirs': [
-        '.',
+        '<(DEPTH)/third_party/khronos',
       ],
       'all_dependent_settings': {
         'include_dirs': [
-          '.',
+          '<(DEPTH)/third_party/khronos',
         ],
       },
       'dependencies': [
@@ -90,7 +90,7 @@
       'all_dependent_settings': {
         'include_dirs': [
           # For GLES2/gl2.h
-          '.',
+          '<(DEPTH)/third_party/khronos',
         ],
       },
       'sources': [
@@ -112,7 +112,7 @@
       'all_dependent_settings': {
         'include_dirs': [
           # For GLES2/gl2.h
-          '.',
+          '<(DEPTH)/third_party/khronos',
         ],
       },
       'sources': [
@@ -152,10 +152,12 @@
       'type': 'static_library',
       'include_dirs': [
         '..',
+        '<(DEPTH)/third_party/khronos',
       ],
       'all_dependent_settings': {
         'include_dirs': [
           '..',
+          '<(DEPTH)/third_party/khronos',
         ],
       },
       'dependencies': [
@@ -177,10 +179,12 @@
       'type': 'static_library',
       'include_dirs': [
         '..',
+        '<(DEPTH)/third_party/khronos',
       ],
       'all_dependent_settings': {
         'include_dirs': [
           '..',
+          '<(DEPTH)/third_party/khronos',
         ],
       },
       'dependencies': [
@@ -242,7 +246,7 @@
             '../build/linux/system.gyp:gtk',
           ],
         }],
-        ['touchui==1', {
+        ['ui_compositor_image_transport==1', {
           'include_dirs': [
             '<(DEPTH)/third_party/angle/include',
           ],
@@ -327,6 +331,7 @@
       ],
       'include_dirs': [
         '..',
+        '<(DEPTH)/third_party/khronos',
       ],
       'sources': [
         'command_buffer/common/gl_mock.h',
@@ -345,6 +350,7 @@
       ],
       'include_dirs': [
         '..',
+        '<(DEPTH)/third_party/khronos',
       ],
       'sources': [
         'ipc/gpu_command_buffer_traits.cc',

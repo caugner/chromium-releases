@@ -18,15 +18,12 @@ class BrowserWindowTesting;
 class DownloadShelf;
 class FindBar;
 class GURL;
-class HtmlDialogUIDelegate;
 class LocationBar;
-class Panel;
 class Profile;
 class StatusBubble;
 class TabContents;
 class TabContentsWrapper;
 class TemplateURL;
-class TemplateURLService;
 #if !defined(OS_MACOSX)
 class ToolbarView;
 #endif
@@ -136,6 +133,11 @@ class BrowserWindow {
   // Returns true if the frame is minimized.
   virtual bool IsMinimized() const = 0;
 
+  // Maximizes/minimizes/restores the window.
+  virtual void Maximize() = 0;
+  virtual void Minimize() = 0;
+  virtual void Restore() = 0;
+
   // Accessors for fullscreen mode state.
   virtual void EnterFullscreen(const GURL& url,
                                FullscreenExitBubbleType bubble_type) = 0;
@@ -243,9 +245,6 @@ class BrowserWindow {
   // Shows the collected cookies dialog box.
   virtual void ShowCollectedCookiesDialog(TabContentsWrapper* tab_contents) = 0;
 
-  // Show the bubble that indicates to the user that a theme is being installed.
-  virtual void ShowThemeInstallBubble() = 0;
-
   // Shows the confirmation dialog box warning that the browser is closing with
   // in-progress downloads.
   // This method should call Browser::InProgressDownloadResponse once the user
@@ -335,6 +334,9 @@ class BrowserWindow {
   virtual FindBar* CreateFindBar() = 0;
 
 #if defined(OS_CHROMEOS)
+  // Shows the mobile setup dialog.
+  virtual void ShowMobileSetup() = 0;
+
   // Shows the keyboard overlay dialog box.
   virtual void ShowKeyboardOverlay(gfx::NativeWindow owning_window) = 0;
 #endif
@@ -354,6 +356,9 @@ class BrowserWindow {
   // system.
   virtual void ShowAvatarBubble(TabContents* tab_contents,
                                 const gfx::Rect& rect) = 0;
+
+  // Shows the avatar bubble on the window frame off of the avatar button.
+  virtual void ShowAvatarBubbleFromAvatarButton() = 0;
 
  protected:
   friend class BrowserList;

@@ -6,17 +6,26 @@
 
 #include <stddef.h>
 
+#include "base/command_line.h"
 #include "base/file_path.h"
+#include "base/memory/scoped_vector.h"
 #include "content/common/child_process.h"
+#include "content/common/child_process_messages.h"
 #include "content/common/indexed_db_key.h"
 #include "content/common/utility_messages.h"
+#include "content/common/webkitplatformsupport_impl.h"
 #include "content/public/utility/content_utility_client.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKey.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSerializedScriptValue.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSerializedScriptValue.h"
 #include "webkit/glue/idb_bindings.h"
-#include "webkit/glue/webkitplatformsupport_impl.h"
 #include "webkit/plugins/npapi/plugin_list.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include <gtk/gtk.h>
+
+#include "ui/gfx/gtk_util.h"
+#endif
 
 namespace {
 
@@ -32,9 +41,16 @@ void ConvertVector(const SRC& src, DEST* dest) {
 UtilityThreadImpl::UtilityThreadImpl()
     : batch_mode_(false) {
   ChildProcess::current()->AddRefProcess();
-  webkit_platform_support_.reset(new webkit_glue::WebKitPlatformSupportImpl);
+  webkit_platform_support_.reset(new content::WebKitPlatformSupportImpl);
   WebKit::initialize(webkit_platform_support_.get());
   content::GetContentClient()->utility()->UtilityThreadStarted();
+
+  // On Linux, some plugins expect the browser to have loaded glib/gtk. Do that
+  // before attempting to call into the plugin.
+#if defined(TOOLKIT_USES_GTK)
+  g_thread_init(NULL);
+  gfx::GtkInitFromCommandLine(*CommandLine::ForCurrentProcess());
+#endif
 }
 
 UtilityThreadImpl::~UtilityThreadImpl() {
@@ -49,6 +65,19 @@ void UtilityThreadImpl::ReleaseProcessIfNeeded() {
   if (!batch_mode_)
     ChildProcess::current()->ReleaseProcess();
 }
+
+#if defined(OS_WIN)
+
+void UtilityThreadImpl::PreCacheFont(const LOGFONT& log_font) {
+  Send(new ChildProcessHostMsg_PreCacheFont(log_font));
+}
+
+void UtilityThreadImpl::ReleaseCachedFonts() {
+  Send(new ChildProcessHostMsg_ReleaseCachedFonts());
+}
+
+#endif  // OS_WIN
+
 
 bool UtilityThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
   if (content::GetContentClient()->utility()->OnMessageReceived(msg))
@@ -71,7 +100,7 @@ bool UtilityThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
 
 void UtilityThreadImpl::OnIDBKeysFromValuesAndKeyPath(
     int id,
-    const std::vector<SerializedScriptValue>& serialized_script_values,
+    const std::vector<content::SerializedScriptValue>& serialized_script_values,
     const string16& idb_key_path) {
   std::vector<WebKit::WebSerializedScriptValue> web_values;
   ConvertVector(serialized_script_values, &web_values);
@@ -88,11 +117,12 @@ void UtilityThreadImpl::OnIDBKeysFromValuesAndKeyPath(
   ReleaseProcessIfNeeded();
 }
 
-void UtilityThreadImpl::OnInjectIDBKey(const IndexedDBKey& key,
-                                   const SerializedScriptValue& value,
-                                   const string16& key_path) {
-  SerializedScriptValue new_value(webkit_glue::InjectIDBKey(key, value,
-                                                              key_path));
+void UtilityThreadImpl::OnInjectIDBKey(
+    const IndexedDBKey& key,
+    const content::SerializedScriptValue& value,
+    const string16& key_path) {
+  content::SerializedScriptValue new_value(
+      webkit_glue::InjectIDBKey(key, value, key_path));
   Send(new UtilityHostMsg_InjectIDBKey_Finished(new_value));
   ReleaseProcessIfNeeded();
 }
@@ -107,34 +137,25 @@ void UtilityThreadImpl::OnBatchModeFinished() {
 
 #if defined(OS_POSIX)
 void UtilityThreadImpl::OnLoadPlugins(
-    const std::vector<FilePath>& extra_plugin_paths,
-    const std::vector<FilePath>& extra_plugin_dirs,
-    const std::vector<webkit::WebPluginInfo>& internal_plugins) {
+    const std::vector<FilePath>& plugin_paths) {
   webkit::npapi::PluginList* plugin_list =
       webkit::npapi::PluginList::Singleton();
 
-  // Create the PluginList and set the paths from which to load plugins. Iterate
-  // in reverse to preserve the order when pushing back.
-  std::vector<FilePath>::const_reverse_iterator it;
-  for (it = extra_plugin_paths.rbegin();
-       it != extra_plugin_paths.rend();
-       ++it) {
-    plugin_list->AddExtraPluginPath(*it);
-  }
-  for (it = extra_plugin_dirs.rbegin(); it != extra_plugin_dirs.rend(); ++it) {
-    plugin_list->AddExtraPluginDir(*it);
-  }
-  for (std::vector<webkit::WebPluginInfo>::const_reverse_iterator it =
-           internal_plugins.rbegin();
-       it != internal_plugins.rend();
-       ++it) {
-    plugin_list->RegisterInternalPlugin(*it);
+  for (size_t i = 0; i < plugin_paths.size(); ++i) {
+    ScopedVector<webkit::npapi::PluginGroup> plugin_groups;
+    plugin_list->LoadPlugin(plugin_paths[i], &plugin_groups);
+
+    if (plugin_groups.empty()) {
+      Send(new UtilityHostMsg_LoadPluginFailed(i, plugin_paths[i]));
+      continue;
+    }
+
+    const webkit::npapi::PluginGroup* group = plugin_groups[0];
+    DCHECK_EQ(group->web_plugin_infos().size(), 1u);
+
+    Send(new UtilityHostMsg_LoadedPlugin(i, group->web_plugin_infos().front()));
   }
 
-  std::vector<webkit::WebPluginInfo> plugins;
-  plugin_list->GetPlugins(&plugins);
-
-  Send(new UtilityHostMsg_LoadedPlugins(plugins));
   ReleaseProcessIfNeeded();
 }
 #endif

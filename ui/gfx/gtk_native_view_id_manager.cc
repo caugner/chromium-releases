@@ -9,6 +9,8 @@
 
 #include "base/logging.h"
 #include "base/rand_util.h"
+#include "ui/base/gtk/gtk_compat.h"
+#include "ui/base/gtk/gdk_x_compat.h"
 #include "ui/gfx/gtk_preserve_window.h"
 
 // -----------------------------------------------------------------------------
@@ -66,7 +68,7 @@ gfx::NativeViewId GtkNativeViewManager::GetIdForWidget(gfx::NativeView widget) {
 
   NativeViewInfo info;
   info.widget = widget;
-  if (GTK_WIDGET_REALIZED(widget)) {
+  if (gtk_widget_get_realized(widget)) {
     GdkWindow *gdk_window = widget->window;
     DCHECK(gdk_window);
     info.x_window_id = GDK_WINDOW_XID(gdk_window);
@@ -173,7 +175,7 @@ void GtkNativeViewManager::ReleasePermanentXID(XID xid) {
       gtk_preserve_window_set_preserve(i->second.widget, FALSE);
     } else {
       GdkWindow* window = reinterpret_cast<GdkWindow*>(
-          gdk_xid_table_lookup(xid));
+          gdk_x11_window_lookup_for_display(gdk_display_get_default(), xid));
       DCHECK(window);
       gdk_window_destroy(window);
     }

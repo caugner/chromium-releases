@@ -4,25 +4,30 @@
 
 #include "chrome/browser/ui/browser_list.h"
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/download/download_service.h"
 #include "chrome/browser/metrics/thread_watcher.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/background_printing_manager.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/tab_contents/navigation_details.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
-#include "content/common/result_codes.h"
+#include "content/public/browser/browser_shutdown.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/common/result_codes.h"
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/chrome_browser_application_mac.h"
@@ -30,11 +35,12 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/boot_times_loader.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/login_library.h"
-#include "chrome/browser/chromeos/cros/update_library.h"
+#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chrome/browser/chromeos/dbus/session_manager_client.h"
+#include "chrome/browser/chromeos/dbus/update_engine_client.h"
+#include "chrome/browser/chromeos/system/runtime_environment.h"
 #if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/wm_ipc.h"
+#include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
 #endif
 #endif
 
@@ -43,22 +49,22 @@ namespace {
 // This object is instantiated when the first Browser object is added to the
 // list and delete when the last one is removed. It watches for loads and
 // creates histograms of some global object counts.
-class BrowserActivityObserver : public NotificationObserver {
+class BrowserActivityObserver : public content::NotificationObserver {
  public:
   BrowserActivityObserver() {
     registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
   ~BrowserActivityObserver() {}
 
  private:
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     DCHECK(type == content::NOTIFICATION_NAV_ENTRY_COMMITTED);
     const content::LoadCommittedDetails& load =
-        *Details<content::LoadCommittedDetails>(details).ptr();
+        *content::Details<content::LoadCommittedDetails>(details).ptr();
     if (!load.is_navigation_to_different_page())
       return;  // Don't log for subframes or other trivial types.
 
@@ -69,7 +75,8 @@ class BrowserActivityObserver : public NotificationObserver {
   // Counts the number of active RenderProcessHosts and logs them.
   void LogRenderProcessHostCount() const {
     int hosts_count = 0;
-    for (RenderProcessHost::iterator i(RenderProcessHost::AllHostsIterator());
+    for (content::RenderProcessHost::iterator i(
+            content::RenderProcessHost::AllHostsIterator());
          !i.IsAtEnd(); i.Advance())
       ++hosts_count;
     UMA_HISTOGRAM_CUSTOM_COUNTS("MPArch.RPHCountPerLoad", hosts_count,
@@ -100,7 +107,7 @@ class BrowserActivityObserver : public NotificationObserver {
     }
   }
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserActivityObserver);
 };
@@ -114,6 +121,22 @@ const int kMatchAny                     = 0;
 const int kMatchOriginalProfile         = 1 << 0;
 const int kMatchCanSupportWindowFeature = 1 << 1;
 const int kMatchTabbed                  = 1 << 2;
+
+static BrowserList::BrowserVector& browsers() {
+  CR_DEFINE_STATIC_LOCAL(BrowserList::BrowserVector, browser_vector, ());
+  return browser_vector;
+}
+
+static BrowserList::BrowserVector& last_active_browsers() {
+  CR_DEFINE_STATIC_LOCAL(BrowserList::BrowserVector, last_active_vector, ());
+  return last_active_vector;
+}
+
+static ObserverList<BrowserList::Observer>& observers() {
+  CR_DEFINE_STATIC_LOCAL(
+      ObserverList<BrowserList::Observer>, observer_vector, ());
+  return observer_vector;
+}
 
 // Returns true if the specified |browser| matches the specified arguments.
 // |match_types| is a bitmask dictating what parameters to match:
@@ -187,30 +210,45 @@ printing::BackgroundPrintingManager* GetBackgroundPrintingManager() {
 // This currently checks if there is pending download, or if it needs to
 // handle unload handler.
 bool AreAllBrowsersCloseable() {
-  for (BrowserList::const_iterator i = BrowserList::begin();
-       i != BrowserList::end(); ++i) {
-    bool normal_downloads_are_present = false;
-    bool incognito_downloads_are_present = false;
-    (*i)->CheckDownloadsInProgress(&normal_downloads_are_present,
-                                   &incognito_downloads_are_present);
-    if (normal_downloads_are_present ||
-        incognito_downloads_are_present ||
-        (*i)->TabsNeedBeforeUnloadFired())
+  BrowserList::const_iterator browser_it = BrowserList::begin();
+  if (browser_it == BrowserList::end())
+    return true;
+
+  // If there are any downloads active, all browsers are not closeable.
+  if (DownloadService::DownloadCountAllProfiles() > 0)
+    return false;
+
+  // Check TabsNeedBeforeUnloadFired().
+  for (; browser_it != BrowserList::end(); ++browser_it) {
+    if ((*browser_it)->TabsNeedBeforeUnloadFired())
       return false;
   }
   return true;
 }
 
+// Emits APP_TERMINATING notification. It is guaranteed that the
+// notification is sent only once.
+void NotifyAppTerminating() {
+  static bool notified = false;
+  if (notified)
+    return;
+  notified = true;
+  content::NotificationService::current()->Notify(
+      content::NOTIFICATION_APP_TERMINATING,
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
+}
+
 #if defined(OS_CHROMEOS)
 
-bool signout = false;
+// Whether a session manager requested to shutdown.
+bool g_session_manager_requested_shutdown = true;
 
 // Fast shutdown for ChromeOS. It tells session manager to start
 // shutdown process when closing browser windows won't be canceled.
 // Returns true if fast shutdown is successfully started.
 bool FastShutdown() {
-  signout = true;
-  if (chromeos::CrosLibrary::Get()->EnsureLoaded()
+  if (chromeos::system::runtime_environment::IsRunningOnChromeOS()
       && AreAllBrowsersCloseable()) {
     BrowserList::NotifyAndTerminate(true);
     return true;
@@ -234,29 +272,26 @@ void NotifyWindowManagerAboutSignout() {
 
 }  // namespace
 
-BrowserList::BrowserVector BrowserList::browsers_;
-ObserverList<BrowserList::Observer> BrowserList::observers_;
-
 // static
 void BrowserList::AddBrowser(Browser* browser) {
   DCHECK(browser);
-  browsers_.push_back(browser);
+  browsers().push_back(browser);
 
   g_browser_process->AddRefModule();
 
   if (!activity_observer)
     activity_observer = new BrowserActivityObserver;
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_BROWSER_OPENED,
-      Source<Browser>(browser),
-      NotificationService::NoDetails());
+      content::Source<Browser>(browser),
+      content::NotificationService::NoDetails());
 
   // Send out notifications after add has occurred. Do some basic checking to
   // try to catch evil observers that change the list from under us.
-  size_t original_count = observers_.size();
-  FOR_EACH_OBSERVER(Observer, observers_, OnBrowserAdded(browser));
-  DCHECK_EQ(original_count, observers_.size())
+  size_t original_count = observers().size();
+  FOR_EACH_OBSERVER(Observer, observers(), OnBrowserAdded(browser));
+  DCHECK_EQ(original_count, observers().size())
       << "observer list modified during notification";
 }
 
@@ -268,10 +303,10 @@ void BrowserList::MarkAsCleanShutdown() {
 }
 
 void BrowserList::AttemptExitInternal() {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       content::NOTIFICATION_APP_EXITING,
-      NotificationService::AllSources(),
-      NotificationService::NoDetails());
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
 
 #if !defined(OS_MACOSX)
   // On most platforms, closing all windows causes the application to exit.
@@ -287,27 +322,30 @@ void BrowserList::AttemptExitInternal() {
 // static
 void BrowserList::NotifyAndTerminate(bool fast_path) {
 #if defined(OS_CHROMEOS)
-  if (!signout)
+  static bool notified = false;
+  // Don't ask SessionManager to shutdown if
+  // a) a shutdown request has already been sent.
+  // b) shutdown request comes from session manager.
+  if (notified || g_session_manager_requested_shutdown)
     return;
+  notified = true;
 #endif
 
-  if (fast_path) {
-    NotificationService::current()->Notify(
-        content::NOTIFICATION_APP_TERMINATING,
-        NotificationService::AllSources(),
-        NotificationService::NoDetails());
-  }
+  if (fast_path)
+    NotifyAppTerminating();
 
 #if defined(OS_CHROMEOS)
   NotifyWindowManagerAboutSignout();
-  chromeos::CrosLibrary* cros_library = chromeos::CrosLibrary::Get();
-  if (cros_library->EnsureLoaded()) {
+  if (chromeos::system::runtime_environment::IsRunningOnChromeOS()) {
+    chromeos::UpdateEngineClient* update_engine_client
+        = chromeos::DBusThreadManager::Get()->GetUpdateEngineClient();
     // If update has been installed, reboot, otherwise, sign out.
-    if (cros_library->GetUpdateLibrary()->status().status ==
-          chromeos::UPDATE_STATUS_UPDATED_NEED_REBOOT) {
-      cros_library->GetUpdateLibrary()->RebootAfterUpdate();
+    if (update_engine_client->GetLastStatus().status ==
+        chromeos::UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT) {
+      update_engine_client->RebootAfterUpdate();
     } else {
-      cros_library->GetLoginLibrary()->StopSession("");
+      chromeos::DBusThreadManager::Get()->GetSessionManagerClient()
+          ->StopSession();
     }
     return;
   }
@@ -318,29 +356,30 @@ void BrowserList::NotifyAndTerminate(bool fast_path) {
 
 // static
 void BrowserList::RemoveBrowser(Browser* browser) {
-  RemoveBrowserFrom(browser, &last_active_browsers_);
+  RemoveBrowserFrom(browser, &last_active_browsers());
 
   // Closing all windows does not indicate quitting the application on the Mac,
   // however, many UI tests rely on this behavior so leave it be for now and
   // simply ignore the behavior on the Mac outside of unit tests.
   // TODO(andybons): Fix the UI tests to Do The Right Thing.
-  bool closing_last_browser = (browsers_.size() == 1);
-  NotificationService::current()->Notify(
+  bool closing_last_browser = (browsers().size() == 1);
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_BROWSER_CLOSED,
-      Source<Browser>(browser), Details<bool>(&closing_last_browser));
+      content::Source<Browser>(browser),
+      content::Details<bool>(&closing_last_browser));
 
-  RemoveBrowserFrom(browser, &browsers_);
+  RemoveBrowserFrom(browser, &browsers());
 
   // Do some basic checking to try to catch evil observers
   // that change the list from under us.
-  size_t original_count = observers_.size();
-  FOR_EACH_OBSERVER(Observer, observers_, OnBrowserRemoved(browser));
-  DCHECK_EQ(original_count, observers_.size())
+  size_t original_count = observers().size();
+  FOR_EACH_OBSERVER(Observer, observers(), OnBrowserRemoved(browser));
+  DCHECK_EQ(original_count, observers().size())
       << "observer list modified during notification";
 
   // If the last Browser object was destroyed, make sure we try to close any
   // remaining dependent windows too.
-  if (browsers_.empty()) {
+  if (browsers().empty()) {
     delete activity_observer;
     activity_observer = NULL;
   }
@@ -349,7 +388,7 @@ void BrowserList::RemoveBrowser(Browser* browser) {
 
   // If we're exiting, send out the APP_TERMINATING notification to allow other
   // modules to shut themselves down.
-  if (browsers_.empty() &&
+  if (browsers().empty() &&
       (browser_shutdown::IsTryingToQuit() ||
        g_browser_process->IsShuttingDown())) {
     // Last browser has just closed, and this is a user-initiated quit or there
@@ -357,33 +396,25 @@ void BrowserList::RemoveBrowser(Browser* browser) {
     // to call ProfileManager::ShutdownSessionServices() as part of the
     // shutdown, because Browser::WindowClosing() already makes sure that the
     // SessionService is created and notified.
-    NotificationService::current()->Notify(
-        content::NOTIFICATION_APP_TERMINATING,
-        NotificationService::AllSources(),
-        NotificationService::NoDetails());
+    NotifyAppTerminating();
     AllBrowsersClosedAndAppExiting();
   }
 }
 
 // static
 void BrowserList::AddObserver(BrowserList::Observer* observer) {
-  observers_.AddObserver(observer);
+  observers().AddObserver(observer);
 }
 
 // static
 void BrowserList::RemoveObserver(BrowserList::Observer* observer) {
-  observers_.RemoveObserver(observer);
+  observers().RemoveObserver(observer);
 }
 
 // static
 void BrowserList::CloseAllBrowsers() {
   bool session_ending =
       browser_shutdown::GetShutdownType() == browser_shutdown::END_SESSION;
-  bool force_exit = false;
-#if defined(USE_X11)
-  if (session_ending)
-    force_exit = true;
-#endif
   // Tell everyone that we are shutting down.
   browser_shutdown::SetTryingToQuit(true);
 
@@ -393,10 +424,12 @@ void BrowserList::CloseAllBrowsers() {
 
   // If there are no browsers, send the APP_TERMINATING action here. Otherwise,
   // it will be sent by RemoveBrowser() when the last browser has closed.
-  if (force_exit || browsers_.empty()) {
+  if (browser_shutdown::ShuttingDownWithoutClosingBrowsers() ||
+      browsers().empty()) {
     NotifyAndTerminate(true);
     return;
   }
+
 #if defined(OS_CHROMEOS)
   chromeos::BootTimesLoader::Get()->AddLogoutTimeMarker(
       "StartedClosingWindows", false);
@@ -464,6 +497,7 @@ void BrowserList::AttemptUserExit() {
       state->SavePersistentPrefs();
     }
   }
+  g_session_manager_requested_shutdown = false;
   if (FastShutdown())
     return;
 #else
@@ -477,6 +511,17 @@ void BrowserList::AttemptUserExit() {
 
 // static
 void BrowserList::AttemptRestart() {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableRestoreSessionState)) {
+    BrowserVector::const_iterator it;
+    for (it = begin(); it != end(); ++it)
+      (*it)->profile()->SaveSessionState();
+  }
+
+  PrefService* pref_service = g_browser_process->local_state();
+  pref_service->SetBoolean(prefs::kWasRestarted, true);
+  pref_service->ScheduleSavePersistentPrefs();
+
 #if defined(OS_CHROMEOS)
   // For CrOS instead of browser restart (which is not supported) perform a full
   // sign out. Session will be only restored if user has that setting set.
@@ -484,7 +529,6 @@ void BrowserList::AttemptRestart() {
   AttemptUserExit();
 #else
   // Set the flag to restore state after the restart.
-  PrefService* pref_service = g_browser_process->local_state();
   pref_service->SetBoolean(prefs::kRestartLastSessionOnShutdown, true);
   AttemptExit();
 #endif
@@ -502,15 +546,28 @@ void BrowserList::AttemptExit() {
 }
 
 #if defined(OS_CHROMEOS)
+// A function called when SIGTERM is received.
 // static
 void BrowserList::ExitCleanly() {
-  // We always mark exit cleanly.
+  // We always mark exit cleanly because SessionManager may kill
+  // chrome in 3 seconds after SIGTERM.
   g_browser_process->EndSession();
+
+  // Don't block when SIGTERM is received. AreaAllBrowsersCloseable()
+  // can be false in following cases. a) power-off b) signout from
+  // screen locker.
+  if (!AreAllBrowsersCloseable())
+    browser_shutdown::OnShutdownStarting(browser_shutdown::END_SESSION);
   AttemptExitInternal();
 }
 #endif
 
-static void TimeLimitedSessionEnding() {
+// static
+void BrowserList::SessionEnding() {
+  // This is a time-limited shutdown where we need to write as much to
+  // disk as we can as soon as we can, and where we must kill the
+  // process within a hang timeout to avoid user prompts.
+
   // Start watching for hang during shutdown, and crash it if takes too long.
   // We disarm when |shutdown_watcher| object is destroyed, which is when we
   // exit this function.
@@ -521,16 +578,16 @@ static void TimeLimitedSessionEnding() {
   static bool already_ended = false;
   // We may get called in the middle of shutdown, e.g. http://crbug.com/70852
   // In this case, do nothing.
-  if (already_ended || !NotificationService::current())
+  if (already_ended || !content::NotificationService::current())
     return;
   already_ended = true;
 
   browser_shutdown::OnShutdownStarting(browser_shutdown::END_SESSION);
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       content::NOTIFICATION_APP_EXITING,
-      NotificationService::AllSources(),
-      NotificationService::NoDetails());
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
 
   // Write important data first.
   g_browser_process->EndSession();
@@ -539,28 +596,13 @@ static void TimeLimitedSessionEnding() {
 
   // Send out notification. This is used during testing so that the test harness
   // can properly shutdown before we exit.
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_SESSION_END,
-      NotificationService::AllSources(),
-      NotificationService::NoDetails());
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
 
-  // And shutdown.
-  browser_shutdown::Shutdown();
-}
-
-// static
-void BrowserList::SessionEnding() {
-  TimeLimitedSessionEnding();
-
-#if defined(OS_WIN)
-  // At this point the message loop is still running yet we've shut everything
-  // down. If any messages are processed we'll likely crash. Exit now.
-  ExitProcess(content::RESULT_CODE_NORMAL_EXIT);
-#elif defined(OS_POSIX) && !defined(OS_MACOSX)
-  _exit(content::RESULT_CODE_NORMAL_EXIT);
-#else
-  NOTIMPLEMENTED();
-#endif
+  // This will end by terminating the process.
+  content::ImmediateShutdownAndExitProcess();
 }
 
 // static
@@ -600,7 +642,7 @@ void BrowserList::EndKeepAlive() {
     // If there are no browsers open and we aren't already shutting down,
     // initiate a shutdown. Also skips shutdown if this is a unit test
     // (MessageLoop::current() == null).
-    if (browsers_.empty() && !browser_shutdown::IsTryingToQuit() &&
+    if (browsers().empty() && !browser_shutdown::IsTryingToQuit() &&
         MessageLoop::current())
       CloseAllBrowsers();
   }
@@ -612,20 +654,42 @@ bool BrowserList::WillKeepAlive() {
 }
 
 // static
-BrowserList::BrowserVector BrowserList::last_active_browsers_;
+BrowserList::const_iterator BrowserList::begin() {
+  return browsers().begin();
+}
+
+// static
+BrowserList::const_iterator BrowserList::end() {
+  return browsers().end();
+}
+
+// static
+bool BrowserList::empty() {
+  return browsers().empty();
+}
+
+// static
+size_t BrowserList::size() {
+  return browsers().size();
+}
 
 // static
 void BrowserList::SetLastActive(Browser* browser) {
-  RemoveBrowserFrom(browser, &last_active_browsers_);
-  last_active_browsers_.push_back(browser);
+  // If the browser is currently trying to quit, we don't want to set the last
+  // active browser because that can alter the last active browser that the user
+  // intended depending on the order in which the windows close.
+  if (browser_shutdown::IsTryingToQuit())
+    return;
+  RemoveBrowserFrom(browser, &last_active_browsers());
+  last_active_browsers().push_back(browser);
 
-  FOR_EACH_OBSERVER(Observer, observers_, OnBrowserSetLastActive(browser));
+  FOR_EACH_OBSERVER(Observer, observers(), OnBrowserSetLastActive(browser));
 }
 
 // static
 Browser* BrowserList::GetLastActive() {
-  if (!last_active_browsers_.empty())
-    return *(last_active_browsers_.rbegin());
+  if (!last_active_browsers().empty())
+    return *(last_active_browsers().rbegin());
 
   return NULL;
 }
@@ -700,16 +764,13 @@ Browser* BrowserList::FindBrowserWithTabContents(TabContents* tab_contents) {
 }
 
 // static
-size_t BrowserList::GetBrowserCountForType(Profile* profile,
-                                           bool match_tabbed) {
-  size_t result = 0;
-  for (BrowserList::const_iterator i = BrowserList::begin();
-       i != BrowserList::end(); ++i) {
-    if (BrowserMatches(*i, profile, Browser::FEATURE_NONE,
-                       match_tabbed ? kMatchTabbed : kMatchAny))
-      ++result;
-  }
-  return result;
+BrowserList::const_reverse_iterator BrowserList::begin_last_active() {
+  return last_active_browsers().rbegin();
+}
+
+// static
+BrowserList::const_reverse_iterator BrowserList::end_last_active() {
+  return last_active_browsers().rend();
 }
 
 // static
@@ -718,8 +779,21 @@ size_t BrowserList::GetBrowserCount(Profile* profile) {
   for (BrowserList::const_iterator i = BrowserList::begin();
        i != BrowserList::end(); ++i) {
     if (BrowserMatches(*i, profile, Browser::FEATURE_NONE, kMatchAny)) {
-      result++;
+      ++result;
     }
+  }
+  return result;
+}
+
+// static
+size_t BrowserList::GetBrowserCountForType(Profile* profile,
+                                           bool match_tabbed) {
+  size_t result = 0;
+  for (BrowserList::const_iterator i = BrowserList::begin();
+       i != BrowserList::end(); ++i) {
+    if (BrowserMatches(*i, profile, Browser::FEATURE_NONE,
+                       match_tabbed ? kMatchTabbed : kMatchAny))
+      ++result;
   }
   return result;
 }

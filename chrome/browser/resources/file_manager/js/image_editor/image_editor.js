@@ -17,9 +17,10 @@ function ImageEditor(
     modes, displayStringFunction) {
   this.rootContainer_ = rootContainer;
   this.container_ = galleryContainer;
+  this.modes_ = modes;
   this.displayStringFunction_ = displayStringFunction;
 
-  this.container_.innerHTML = '';
+  ImageUtil.removeChildren(this.container_);
 
   var document = this.container_.ownerDocument;
 
@@ -30,6 +31,7 @@ function ImageEditor(
   this.viewport_.addRepaintCallback(this.buffer_.draw.bind(this.buffer_));
 
   this.imageView_ = new ImageView(this.container_, this.viewport_);
+  this.imageView_.addContentCallback(this.onContentUpdate_.bind(this));
   this.buffer_.addOverlay(this.imageView_);
 
   this.panControl_ = new ImageEditor.MouseControl(
@@ -45,7 +47,7 @@ function ImageEditor(
   this.prompt_ = new ImageEditor.Prompt(
       this.rootContainer_, displayStringFunction);
 
-  this.createToolButtons(modes);
+  this.createToolButtons();
 
   this.commandQueue_ = null;
 }
@@ -67,22 +69,38 @@ ImageEditor.prototype.lockUI = function(on) {
   ImageUtil.setAttribute(this.rootContainer_, 'locked', on);
 };
 
+ImageEditor.prototype.recordToolUse = function(name) {
+  ImageUtil.metrics.recordEnum(
+      ImageUtil.getMetricName('Tool'), name, this.actionNames_);
+};
+
+ImageEditor.prototype.onContentUpdate_ = function() {
+  for (var i = 0; i != this.modes_.length; i++) {
+    var mode = this.modes_[i];
+    ImageUtil.setAttribute(mode.button_, 'disabled', !mode.isApplicable());
+  }
+};
+
+ImageEditor.prototype.prefetchImage = function(id, source, metadata) {
+  this.imageView_.prefetch(id, source, metadata);
+};
+
 ImageEditor.prototype.openSession = function(
-    source, metadata, slide, opt_callback) {
+    id, source, metadata, slide, opt_callback) {
   if (this.commandQueue_)
     throw new Error('Session not closed');
 
   this.lockUI(true);
 
   var self = this;
-  this.imageView_.load(source, metadata, slide, function() {
+  this.imageView_.load(id, source, metadata, slide, function() {
     self.lockUI(false);
     self.commandQueue_ = new CommandQueue(
         self.container_.ownerDocument, self.imageView_.getCanvas());
     self.commandQueue_.attachUI(
         self.getImageView(), self.getPrompt(), self.lockUI.bind(self));
     self.updateUndoRedo();
-    if (opt_callback) opt_callback();
+    if (opt_callback) opt_callback(arguments);
   });
 };
 
@@ -91,13 +109,14 @@ ImageEditor.prototype.openSession = function(
  *    image and the modified flag.
  */
 ImageEditor.prototype.closeSession = function(callback) {
+  this.getPrompt().hide();
   if (this.imageView_.isLoading()) {
     this.imageView_.cancelLoad();
     this.lockUI(false);
     return;
   }
   if (!this.commandQueue_)
-    throw new Error('Session not open');
+    return;
 
   this.commandQueue_.detachUI();
   this.requestImage(callback);
@@ -126,6 +145,14 @@ ImageEditor.prototype.requestImage = function(callback) {
 
 ImageEditor.prototype.undo = function() {
   if (this.isLocked()) return;
+  this.recordToolUse('undo');
+
+  // First undo click should dismiss the uncommitted modifications.
+  if (this.currentMode_ && this.currentMode_.isUpdated()) {
+    this.currentMode_.reset();
+    return;
+  }
+
   this.getPrompt().hide();
   this.leaveMode(false);
   this.commandQueue_.undo();
@@ -134,6 +161,7 @@ ImageEditor.prototype.undo = function() {
 
 ImageEditor.prototype.redo = function() {
   if (this.isLocked()) return;
+  this.recordToolUse('redo');
   this.getPrompt().hide();
   this.leaveMode(false);
   this.commandQueue_.redo();
@@ -206,15 +234,24 @@ ImageEditor.Mode.prototype.getImageView = function() { return this.imageView_ };
 
 ImageEditor.Mode.prototype.getMessage = function() { return this.message_ };
 
+ImageEditor.Mode.prototype.isApplicable = function() { return true };
+
+/**
+ * Called once after creating the mode button.
+ */
+ImageEditor.Mode.prototype.bind = function(editor, button) {
+  this.editor_ = editor;
+  this.editor_.registerAction_(this.name);
+  this.button_ = button;
+  this.viewport_ = editor.getViewport();
+  this.imageView_ = editor.getImageView();
+};
+
 /**
  * Called before entering the mode.
  */
-ImageEditor.Mode.prototype.setUp = function(editor) {
-  this.editor_ = editor;
-  this.viewport_ = editor.getViewport();
-  this.imageView_ = editor.getImageView();
+ImageEditor.Mode.prototype.setUp = function() {
   this.editor_.getBuffer().addOverlay(this);
-
   this.updated_ = false;
 };
 
@@ -243,8 +280,17 @@ ImageEditor.Mode.prototype.update = function(options) {
 };
 
 ImageEditor.Mode.prototype.markUpdated = function() {
-  this.editor_.getPrompt().hide();
   this.updated_ = true;
+};
+
+ImageEditor.Mode.prototype.isUpdated= function() { return this.updated_ };
+
+/**
+ * Resets the mode to a clean state.
+ */
+ImageEditor.Mode.prototype.reset = function() {
+  this.editor_.modeToolbar_.reset();
+  this.updated_ = false;
 };
 
 /**
@@ -265,18 +311,28 @@ ImageEditor.Mode.OneClick.prototype.getCommand = function() {
   return this.command_;
 };
 
+ImageEditor.prototype.registerAction_ = function(name) {
+  this.actionNames_.push(name);
+};
 
-ImageEditor.prototype.createToolButtons = function(modes) {
+ImageEditor.prototype.createToolButtons = function() {
   this.mainToolbar_.clear();
-  for (var i = 0; i != modes.length; i++) {
-    var mode = modes[i];
-    this.mainToolbar_.
-        addButton(mode.name, this.enterMode.bind(this, mode), mode.name);
+  this.actionNames_ = [];
+
+  var self = this;
+  function createButton(name, handler) {
+    return self.mainToolbar_.addButton(name, handler, name);
   }
-  this.undoButton_ = this.mainToolbar_.
-      addButton('undo', this.undo.bind(this), 'undo');
-  this.redoButton_ = this.mainToolbar_.
-      addButton('redo', this.redo.bind(this), 'redo');
+
+  for (var i = 0; i != this.modes_.length; i++) {
+    var mode = this.modes_[i];
+    mode.bind(this, createButton(mode.name, this.enterMode.bind(this, mode)));
+  }
+  this.undoButton_ = createButton('undo', this.undo.bind(this));
+  this.registerAction_('undo');
+
+  this.redoButton_ = createButton('redo', this.redo.bind(this));
+  this.registerAction_('redo');
 };
 
 ImageEditor.prototype.getMode = function() { return this.currentMode_ };
@@ -293,14 +349,23 @@ ImageEditor.prototype.enterMode = function(mode, event) {
     return;
   }
 
-  this.leaveModeGently();
+  this.recordToolUse(mode.name);
 
+  this.leaveModeGently();
+  // The above call could have caused a commit which might have initiated
+  // an asynchronous command execution. Wait for it to complete, then proceed
+  // with the mode set up.
+  this.commandQueue_.requestCurrentImage(
+      this.setUpMode_.bind(this, mode, event));
+};
+
+ImageEditor.prototype.setUpMode_ = function(mode, event) {
   this.currentTool_ = event.target;
 
   ImageUtil.setAttribute(this.currentTool_, 'pressed', true);
 
   this.currentMode_ = mode;
-  this.currentMode_.setUp(this);
+  this.currentMode_.setUp();
 
   if (this.currentMode_.instant) {  // Instant tool.
     this.leaveMode(true);
@@ -329,8 +394,11 @@ ImageEditor.prototype.leaveMode = function(commit) {
   this.currentMode_.cleanUpUI();
   if (commit) {
     var self = this;
-    this.commandQueue_.execute(this.currentMode_.getCommand());
-    this.updateUndoRedo();
+    var command = this.currentMode_.getCommand();
+    if (command) {  // Could be null if the user did not do anything.
+      this.commandQueue_.execute(command);
+      this.updateUndoRedo();
+    }
   }
   this.currentMode_.cleanUpCaches();
   this.currentMode_ = null;
@@ -374,14 +442,21 @@ ImageEditor.prototype.onKeyDown = function(event) {
   return false;
 };
 
-ImageEditor.prototype.hideOverlappingTools = function(rect) {
-  for (var element = this.rootContainer_.firstElementChild;
-       element;
-       element = element.nextElementSibling) {
-    if (element != this.container_) {
-      ImageUtil.setAttribute(element, 'dimmed',
-          rect && rect.intersects(element.getBoundingClientRect()));
-    }
+/**
+ * Hide the tools that overlap the given rectangular frame.
+ *
+ * @param {Rect} frame Hide the tool that overlaps this rect.
+ * @param {Rect} transparent But do not hide the tool that is completely inside
+ *                           this rect.
+ */
+ImageEditor.prototype.hideOverlappingTools = function(frame, transparent) {
+  var tools = this.rootContainer_.ownerDocument.querySelectorAll('.dimmable');
+  for (var i = 0; i != tools.length; i++) {
+    var tool = tools[i];
+    var toolRect = tool.getBoundingClientRect();
+    ImageUtil.setAttribute(tool, 'dimmed',
+        (frame && frame.intersects(toolRect)) &&
+        !(transparent && transparent.contains(toolRect)));
   }
 };
 
@@ -613,7 +688,7 @@ ImageEditor.Toolbar = function(parent, displayStringFunction, updateCallback) {
 };
 
 ImageEditor.Toolbar.prototype.clear = function() {
-  this.wrapper_.innerHTML = '';
+  ImageUtil.removeChildren(this.wrapper_);
 };
 
 ImageEditor.Toolbar.prototype.create_ = function(tagName) {
@@ -769,7 +844,12 @@ ImageEditor.Prompt.prototype.show = function(text, timeout) {
 
   this.prompt_ = document.createElement('div');
   this.prompt_.className = 'prompt';
-  this.wrapper_.appendChild(this.prompt_);
+
+  // Create an extra wrapper which opacity can be manipulated separately.
+  var tool = document.createElement('div');
+  tool.className = 'dimmable';
+  this.wrapper_.appendChild(tool);
+  tool.appendChild(this.prompt_);
 
   this.prompt_.textContent = this.displayStringFunction_(text);
 

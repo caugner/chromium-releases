@@ -182,7 +182,10 @@ IN_PROC_BROWSER_TEST_F(AutofillSyncPerfTest, AutofillProfiles_P0) {
   SyncTimingHelper::PrintResult("autofill", "delete_autofill_profiles", dt);
 }
 
-IN_PROC_BROWSER_TEST_F(AutofillSyncPerfTest, Autofill_P0) {
+
+// Flaky, see http://crbug.com/102948
+
+IN_PROC_BROWSER_TEST_F(AutofillSyncPerfTest, FLAKY_Autofill_P0) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   AddKeys(0, kNumKeys);

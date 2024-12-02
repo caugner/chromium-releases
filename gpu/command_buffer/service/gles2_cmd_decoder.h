@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/callback_old.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/service/common_decoder.h"
 #include "ui/gfx/size.h"
@@ -23,7 +22,6 @@ class GLSurface;
 namespace gpu {
 
 class StreamTextureManager;
-class SurfaceManager;
 
 namespace gles2 {
 
@@ -90,6 +88,9 @@ class GLES2Decoder : public CommonDecoder {
   // Make this decoder's GL context current.
   virtual bool MakeCurrent() = 0;
 
+  // Have the decoder release the context.
+  virtual void ReleaseCurrent() = 0;
+
   // Gets the GLES2 Util which holds info.
   virtual GLES2Util* GetGLES2Util() = 0;
 
@@ -105,12 +106,10 @@ class GLES2Decoder : public CommonDecoder {
   // Sets a callback which is called when a glResizeCHROMIUM command
   // is processed.
   virtual void SetResizeCallback(
-      Callback1<gfx::Size>::Type* callback) = 0;
+      const base::Callback<void(gfx::Size)>& callback) = 0;
 
-#if defined(OS_MACOSX)
   // Sets a callback which is called when a SwapBuffers command is processed.
-  virtual void SetSwapBuffersCallback(Callback0::Type* callback) = 0;
-#endif
+  virtual void SetSwapBuffersCallback(const base::Closure& callback) = 0;
 
   virtual void SetStreamTextureManager(StreamTextureManager* manager) = 0;
 
@@ -121,6 +120,18 @@ class GLES2Decoder : public CommonDecoder {
 
   // Provides detail about a lost context if one occurred.
   virtual error::ContextLostReason GetContextLostReason() = 0;
+
+  // Clears a level of a texture
+  // Returns false if a GL error should be generated.
+  virtual bool ClearLevel(
+      unsigned service_id,
+      unsigned bind_target,
+      unsigned target,
+      int level,
+      unsigned format,
+      unsigned type,
+      int width,
+      int height) = 0;
 
  protected:
   GLES2Decoder();

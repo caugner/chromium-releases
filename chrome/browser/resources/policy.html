@@ -5,7 +5,6 @@
 <title i18n-content="policyTitle"></title>
 <link rel="stylesheet" href="chrome://resources/css/button.css">
 <link rel="stylesheet" href="policy.css">
-<link rel="stylesheet" href="webui.css">
 <script src="chrome://policy/strings.js"></script>
 <script src="chrome://resources/js/cr.js"></script>
 <script src="chrome://resources/js/cr/ui.js"></script>
@@ -16,9 +15,7 @@
 <script src="policy.js"></script>
 </head>
 <body i18n-values=".style.fontFamily:fontfamily; .style.fontSize:fontsize">
-  <div class="header">
-    <h1 id="about-policy-title" i18n-content="policyTitle"></h1>
-  </div>
+  <h1 id="about-policy-title" i18n-content="policyTitle"></h1>
   <div id="main-content">
     <div id="data-template">
       <section id="status-section" jsselect="status" hidden
@@ -106,45 +103,51 @@
               '': 'none'">
             <table id="policy-table">
               <tr>
-              <th i18n-content="appliesToTableHeader"></th>
-              <th i18n-content="policyLevelTableHeader"></th>
-              <th i18n-content="policyNameTableHeader"></th>
-              <th i18n-content="policyValueTableHeader"></th>
-              <th i18n-content="policyStatusTableHeader"></th>
+                <!-- TODO(joaodasilva): http://crbug.com/102114
+                <th i18n-content="appliesToTableHeader"></th>
+                -->
+                <th i18n-content="policyLevelTableHeader"></th>
+                <th i18n-content="policyNameTableHeader"></th>
+                <th i18n-content="policyValueTableHeader"></th>
+                <th i18n-content="policyStatusTableHeader"></th>
               </tr>
               <tr jsselect="policies"
                   jsvalues=".className: $this.set ?
                   'policy-set': 'policy-unset';
                   .hidden: !Policy.shouldDisplayPolicy($this)">
-              <td>
-                <span class="policy-type" jscontent="sourceType"></span>
-              </td>
-              <td>
-                <span class="policy-level" jscontent="level"></span>
-              </td>
-              <td class="collapsed">
-                <span class="policy-name" jscontent="name"></span>
-              </td>
-              <td>
-                <div class="text-container collapsed">
-                  <span class="cell-text" jscontent="value"></span>
-                </div>
-                <a class="toggler expand" style="display: none"
-                    jsdisplay="Policy.shouldShowExpand(this)"
-                    i18n-content="showMoreText"></a>
-                <a class="toggler collapse" style="display: none"
-                    i18n-content="hideText"></a>
-              </td>
-              <td>
-                <div class="text-container collapsed">
-                  <span class="cell-text" jscontent="status"></span>
-                </div>
-                <a class="toggler expand" style="display: none"
-                  jsdisplay="Policy.shouldShowExpand(this)"
-                  i18n-content="showMoreText"></a>
-                <a class="toggler collapse" style="display: none"
-                  i18n-content="hideText"></a>
-              </td>
+                <!-- TODO(joaodasilva): http://crbug.com/102114
+                <td>
+                  <span class="policy-type" jscontent="sourceType"></span>
+                </td>
+                -->
+                <td>
+                  <span class="policy-level" jscontent="level"></span>
+                </td>
+                <td class="collapsed">
+                  <span class="policy-name" jscontent="name"></span>
+                </td>
+                <td>
+                  <div class="text-collapsed text-container">
+                    <button class="link-button toggler expand"
+                        i18n-content="showMoreText" hidden></button>
+                    <div class="text-cell">
+                      <span class="text-value" jscontent="value"></span>
+                    </div>
+                    <button class="link-button toggler collapse"
+                        i18n-content="hideText" hidden></button>
+                  </div>
+                </td>
+                <td>
+                  <div class="text-collapsed text-container">
+                    <button class="link-button toggler expand"
+                        i18n-content="showMoreText" hidden></button>
+                    <div class="text-cell">
+                      <span class="text-value" jscontent="status"></span>
+                    </div>
+                    <button class="link-button toggler collapse"
+                        i18n-content="hideText" hidden></button>
+                  </div>
+                </td>
               </tr>
             </table>
           </div>

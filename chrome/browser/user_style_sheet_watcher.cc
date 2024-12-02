@@ -5,14 +5,16 @@
 #include "chrome/browser/user_style_sheet_watcher.h"
 
 #include "base/base64.h"
+#include "base/bind.h"
 #include "base/file_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 
 using ::base::files::FilePathWatcher;
+using content::BrowserThread;
 
 namespace {
 
@@ -79,10 +81,10 @@ UserStyleSheetLoader::UserStyleSheetLoader()
 
 void UserStyleSheetLoader::NotifyLoaded() {
   if (has_loaded_) {
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_USER_STYLE_SHEET_UPDATED,
-        Source<UserStyleSheetLoader>(this),
-        NotificationService::NoDetails());
+        content::Source<UserStyleSheetLoader>(this),
+        content::NotificationService::NoDetails());
   }
 }
 
@@ -116,8 +118,8 @@ void UserStyleSheetLoader::LoadStyleSheet(const FilePath& style_sheet_file) {
     }
   }
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &UserStyleSheetLoader::SetStyleSheet,
-                        style_sheet_url));
+                          base::Bind(&UserStyleSheetLoader::SetStyleSheet, this,
+                                     style_sheet_url));
 }
 
 void UserStyleSheetLoader::SetStyleSheet(const GURL& url) {
@@ -137,7 +139,7 @@ UserStyleSheetWatcher::UserStyleSheetWatcher(Profile* profile,
   // too fast, the first tab won't hear the notification and won't get
   // the user style sheet.
   registrar_.Add(this, content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::NotificationService::AllBrowserContextsAndSources());
 }
 
 UserStyleSheetWatcher::~UserStyleSheetWatcher() {
@@ -147,7 +149,7 @@ void UserStyleSheetWatcher::Init() {
   // Make sure we run on the file thread.
   if (!BrowserThread::CurrentlyOn(BrowserThread::FILE)) {
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(this, &UserStyleSheetWatcher::Init));
+                            base::Bind(&UserStyleSheetWatcher::Init, this));
     return;
   }
 
@@ -169,11 +171,12 @@ GURL UserStyleSheetWatcher::user_style_sheet() const {
 }
 
 void UserStyleSheetWatcher::Observe(int type,
-    const NotificationSource& source, const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(type == content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB);
   if (profile_->IsSameProfile(Profile::FromBrowserContext(
-          Source<TabContents>(source)->browser_context()))) {
+          content::Source<TabContents>(source)->browser_context()))) {
     loader_->NotifyLoaded();
     registrar_.RemoveAll();
   }

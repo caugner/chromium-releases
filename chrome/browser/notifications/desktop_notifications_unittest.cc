@@ -9,7 +9,13 @@
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
-#include "content/common/desktop_notification_messages.h"
+#include "content/public/common/show_desktop_notification_params.h"
+
+#if defined(USE_AURA)
+#include "ui/aura/desktop.h"
+#endif
+
+using content::BrowserThread;
 
 // static
 const int MockBalloonCollection::kMockBalloonSpace = 5;
@@ -82,6 +88,12 @@ DesktopNotificationsTest::~DesktopNotificationsTest() {
 }
 
 void DesktopNotificationsTest::SetUp() {
+#if defined(USE_AURA)
+  // MockBalloonCollection retrieves information about the screen on creation.
+  // So it is necessary to make sure the desktop gets created first.
+  aura::Desktop::GetInstance();
+#endif
+
   browser::RegisterLocalState(&local_state_);
   profile_.reset(new TestingProfile());
   balloon_collection_ = new MockBalloonCollection();
@@ -97,9 +109,9 @@ void DesktopNotificationsTest::TearDown() {
   profile_.reset(NULL);
 }
 
-DesktopNotificationHostMsg_Show_Params
+content::ShowDesktopNotificationHostMsgParams
 DesktopNotificationsTest::StandardTestNotification() {
-  DesktopNotificationHostMsg_Show_Params params;
+  content::ShowDesktopNotificationHostMsgParams params;
   params.notification_id = 0;
   params.origin = GURL("http://www.google.com");
   params.is_html = false;
@@ -111,7 +123,8 @@ DesktopNotificationsTest::StandardTestNotification() {
 }
 
 TEST_F(DesktopNotificationsTest, TestShow) {
-  DesktopNotificationHostMsg_Show_Params params = StandardTestNotification();
+  content::ShowDesktopNotificationHostMsgParams params =
+      StandardTestNotification();
   params.notification_id = 1;
 
   EXPECT_TRUE(service_->ShowDesktopNotification(
@@ -119,7 +132,7 @@ TEST_F(DesktopNotificationsTest, TestShow) {
   MessageLoopForUI::current()->RunAllPending();
   EXPECT_EQ(1, balloon_collection_->count());
 
-  DesktopNotificationHostMsg_Show_Params params2;
+  content::ShowDesktopNotificationHostMsgParams params2;
   params2.origin = GURL("http://www.google.com");
   params2.is_html = true;
   params2.contents_url = GURL("http://www.google.com/notification.html");
@@ -136,7 +149,8 @@ TEST_F(DesktopNotificationsTest, TestShow) {
 }
 
 TEST_F(DesktopNotificationsTest, TestClose) {
-  DesktopNotificationHostMsg_Show_Params params = StandardTestNotification();
+  content::ShowDesktopNotificationHostMsgParams params =
+      StandardTestNotification();
   params.notification_id = 1;
 
   // Request a notification; should open a balloon.
@@ -160,7 +174,8 @@ TEST_F(DesktopNotificationsTest, TestCancel) {
   int route_id = 0;
   int notification_id = 1;
 
-  DesktopNotificationHostMsg_Show_Params params = StandardTestNotification();
+  content::ShowDesktopNotificationHostMsgParams params =
+      StandardTestNotification();
   params.notification_id = notification_id;
 
   // Request a notification; should open a balloon.
@@ -185,7 +200,8 @@ TEST_F(DesktopNotificationsTest, TestCancel) {
 
 #if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
 TEST_F(DesktopNotificationsTest, TestPositioning) {
-  DesktopNotificationHostMsg_Show_Params params = StandardTestNotification();
+  content::ShowDesktopNotificationHostMsgParams params =
+      StandardTestNotification();
   std::string expected_log;
   // Create some toasts.  After each but the first, make sure there
   // is a minimum separation between the toasts.
@@ -205,7 +221,7 @@ TEST_F(DesktopNotificationsTest, TestPositioning) {
 }
 
 TEST_F(DesktopNotificationsTest, TestVariableSize) {
-  DesktopNotificationHostMsg_Show_Params params;
+  content::ShowDesktopNotificationHostMsgParams params;
   params.origin = GURL("http://long.google.com");
   params.is_html = false;
   params.icon_url = GURL("/icon.png");
@@ -252,7 +268,8 @@ TEST_F(DesktopNotificationsTest, TestQueueing) {
   int route_id = 0;
 
   // Request lots of identical notifications.
-  DesktopNotificationHostMsg_Show_Params params = StandardTestNotification();
+  content::ShowDesktopNotificationHostMsgParams params =
+      StandardTestNotification();
   const int kLotsOfToasts = 20;
   for (int id = 1; id <= kLotsOfToasts; ++id) {
     params.notification_id = id;
@@ -306,7 +323,8 @@ TEST_F(DesktopNotificationsTest, TestQueueing) {
 TEST_F(DesktopNotificationsTest, TestEarlyDestruction) {
   // Create some toasts and then prematurely delete the notification service,
   // just to make sure nothing crashes/leaks.
-  DesktopNotificationHostMsg_Show_Params params = StandardTestNotification();
+  content::ShowDesktopNotificationHostMsgParams params =
+      StandardTestNotification();
   for (int id = 0; id <= 3; ++id) {
     params.notification_id = id;
     EXPECT_TRUE(service_->ShowDesktopNotification(
@@ -318,7 +336,8 @@ TEST_F(DesktopNotificationsTest, TestEarlyDestruction) {
 TEST_F(DesktopNotificationsTest, TestUserInputEscaping) {
   // Create a test script with some HTML; assert that it doesn't get into the
   // data:// URL that's produced for the balloon.
-  DesktopNotificationHostMsg_Show_Params params = StandardTestNotification();
+  content::ShowDesktopNotificationHostMsgParams params =
+      StandardTestNotification();
   params.title = ASCIIToUTF16("<script>window.alert('uh oh');</script>");
   params.body = ASCIIToUTF16("<i>this text is in italics</i>");
   params.notification_id = 1;
@@ -338,7 +357,8 @@ TEST_F(DesktopNotificationsTest, TestUserInputEscaping) {
 
 TEST_F(DesktopNotificationsTest, TestBoundingBox) {
   // Create some notifications.
-  DesktopNotificationHostMsg_Show_Params params = StandardTestNotification();
+  content::ShowDesktopNotificationHostMsgParams params =
+      StandardTestNotification();
   for (int id = 0; id <= 3; ++id) {
     params.notification_id = id;
     EXPECT_TRUE(service_->ShowDesktopNotification(
@@ -375,7 +395,8 @@ TEST_F(DesktopNotificationsTest, TestPositionPreference) {
                           BalloonCollection::LOWER_RIGHT);
 
   // Create some notifications.
-  DesktopNotificationHostMsg_Show_Params params = StandardTestNotification();
+  content::ShowDesktopNotificationHostMsgParams params =
+      StandardTestNotification();
   for (int id = 0; id <= 3; ++id) {
     params.notification_id = id;
     EXPECT_TRUE(service_->ShowDesktopNotification(

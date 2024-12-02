@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -78,6 +78,7 @@ WHITELISTED_LICENSES = [
     'Public domain',
     'libpng',
     'zlib/libpng',
+    'SGI Free Software License B',
 ]
 
 
@@ -114,17 +115,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
     'googleurl': [  # http://code.google.com/p/google-url/issues/detail?id=15
-        'UNKNOWN',
-    ],
-
-    # http://crbug.com/98097
-    'gpu/GLES2': [
-        'UNKNOWN',
-    ],
-    'gpu/KHR': [
-        'UNKNOWN',
-    ],
-    'gpu/gles2_conform_support/egl/native/EGL': [
         'UNKNOWN',
     ],
 
@@ -179,7 +169,9 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
     'third_party/WebKit/Source/ThirdParty/ANGLE/src/compiler': [
+        # http://crbug.com/105232
         'GPL',
+        'GPL (v3 or later)',
     ],
     'third_party/WebKit/Source/JavaScriptCore/tests/mozilla': [
         'GPL',
@@ -195,7 +187,9 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     ],
 
     'third_party/angle/src/compiler': [
+        # http://crbug.com/105232
         'GPL',
+        'GPL (v3 or later)',
     ],
     'third_party/ashmem/ashmem.h': [  # http://crbug.com/98116
         'UNKNOWN',
@@ -417,7 +411,7 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
 }
 
 
-def main(options, args):
+def check_licenses(options, args):
   # Figure out which directory we have to check.
   if len(args) == 0:
     # No directory to check specified, use the repository root.
@@ -429,7 +423,7 @@ def main(options, args):
   else:
     # More than one argument, we don't handle this.
     PrintUsage()
-    sys.exit(1)
+    return 1
 
   print "Using base directory:", options.base_directory
   print "Checking:", start_dir
@@ -453,7 +447,7 @@ def main(options, args):
     print stderr
     print '--------- end licensecheck stderr ---------'
     print "\nFAILED\n"
-    sys.exit(1)
+    return 1
 
   success = True
   for line in stdout.splitlines():
@@ -490,7 +484,7 @@ def main(options, args):
 
   if success:
     print "\nSUCCESS\n"
-    sys.exit(0)
+    return 0
   else:
     print "\nFAILED\n"
     print "Please read",
@@ -499,11 +493,10 @@ def main(options, args):
     print
     print "Please respect OWNERS of checklicenses.py. Changes violating"
     print "this requirement may be reverted."
+    return 1
 
-    sys.exit(1)
 
-
-if '__main__' == __name__:
+def main():
   default_root = os.path.abspath(
       os.path.join(os.path.dirname(__file__), '..', '..'))
   option_parser = optparse.OptionParser()
@@ -519,4 +512,8 @@ if '__main__' == __name__:
                            default=False,
                            help='Ignore path-specific license whitelist.')
   options, args = option_parser.parse_args()
-  main(options, args)
+  return check_licenses(options, args)
+
+
+if '__main__' == __name__:
+  sys.exit(main())

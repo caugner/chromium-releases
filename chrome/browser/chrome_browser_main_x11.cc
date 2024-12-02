@@ -4,17 +4,21 @@
 
 #include "chrome/browser/chrome_browser_main.h"
 
+#include "base/bind.h"
 #include "base/debug/debugger.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "content/browser/browser_thread.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_result_codes.h"
+#include "content/public/browser/browser_thread.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/base/x/x11_util_internal.h"
 
 #if defined(USE_LINUX_BREAKPAD)
 #include "chrome/app/breakpad_linux.h"
 #endif
+
+using content::BrowserThread;
 
 namespace {
 
@@ -29,7 +33,7 @@ int BrowserX11ErrorHandler(Display* d, XErrorEvent* error) {
   if (!g_in_x11_io_error_handler)
     MessageLoop::current()->PostTask(
         FROM_HERE,
-        NewRunnableFunction(ui::LogErrorEventDescription, d, *error));
+        base::Bind(&ui::LogErrorEventDescription, d, *error));
   return 0;
 }
 
@@ -55,6 +59,7 @@ int BrowserX11IOErrorHandler(Display* d) {
   if (!g_in_x11_io_error_handler) {
     g_in_x11_io_error_handler = true;
     LOG(ERROR) << "X IO Error detected";
+    browser_shutdown::SetShuttingDownWithoutClosingBrowsers(true);
     BrowserList::SessionEnding();
   }
 
@@ -84,17 +89,6 @@ void RecordBrowserStartupTime() {
 
 int DoUninstallTasks(bool chrome_still_running) {
   return content::RESULT_CODE_NORMAL_EXIT;
-}
-
-int HandleIconsCommands(const CommandLine &parsed_command_line) {
-  return 0;
-}
-
-bool CheckMachineLevelInstall() {
-  return false;
-}
-
-void PrepareRestartOnCrashEnviroment(const CommandLine &parsed_command_line) {
 }
 
 void SetBrowserX11ErrorHandlers() {

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/sessions/base_session_service.h"
 
+#include "base/bind.h"
 #include "base/pickle.h"
 #include "base/stl_util.h"
 #include "base/threading/thread.h"
@@ -13,7 +14,10 @@
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/navigation_entry.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebReferrerPolicy.h"
 #include "webkit/glue/webkit_glue.h"
+
+using WebKit::WebReferrerPolicy;
 
 // InternalGetCommandsRequest -------------------------------------------------
 
@@ -66,7 +70,7 @@ BaseSessionService::BaseSessionService(SessionType type,
     : profile_(profile),
       path_(path),
       backend_thread_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(save_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       pending_reset_(false),
       commands_since_reset_(0) {
   if (profile) {
@@ -89,8 +93,8 @@ void BaseSessionService::DeleteLastSession() {
   if (!backend_thread()) {
     backend()->DeleteLastSession();
   } else {
-    backend_thread()->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-        backend(), &SessionBackend::DeleteLastSession));
+    backend_thread()->message_loop()->PostTask(
+        FROM_HERE, base::Bind(&SessionBackend::DeleteLastSession, backend()));
   }
 }
 
@@ -104,9 +108,10 @@ void BaseSessionService::ScheduleCommand(SessionCommand* command) {
 void BaseSessionService::StartSaveTimer() {
   // Don't start a timer when testing (profile == NULL or
   // MessageLoop::current() is NULL).
-  if (MessageLoop::current() && profile() && save_factory_.empty()) {
-    MessageLoop::current()->PostDelayedTask(FROM_HERE,
-        save_factory_.NewRunnableMethod(&BaseSessionService::Save),
+  if (MessageLoop::current() && profile() && !weak_factory_.HasWeakPtrs()) {
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&BaseSessionService::Save, weak_factory_.GetWeakPtr()),
         kSaveDelayMS);
   }
 }
@@ -121,10 +126,11 @@ void BaseSessionService::Save() {
     backend()->AppendCommands(
         new std::vector<SessionCommand*>(pending_commands_), pending_reset_);
   } else {
-    backend_thread()->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-        backend(), &SessionBackend::AppendCommands,
-        new std::vector<SessionCommand*>(pending_commands_),
-        pending_reset_));
+    backend_thread()->message_loop()->PostTask(
+        FROM_HERE,
+        base::Bind(&SessionBackend::AppendCommands, backend(),
+                   new std::vector<SessionCommand*>(pending_commands_),
+                   pending_reset_));
   }
   // Backend took ownership of commands.
   pending_commands_.clear();
@@ -175,7 +181,9 @@ SessionCommand* BaseSessionService::CreateUpdateTabNavigationCommand(
   pickle.WriteInt(type_mask);
 
   WriteStringToPickle(pickle, &bytes_written, max_state_size,
-      entry.referrer().is_valid() ? entry.referrer().spec() : std::string());
+      entry.referrer().url.is_valid() ?
+          entry.referrer().url.spec() : std::string());
+  pickle.WriteInt(entry.referrer().policy);
 
   // Adding more data? Be sure and update TabRestoreService too.
   return new SessionCommand(command_id, pickle);
@@ -226,8 +234,17 @@ bool BaseSessionService::RestoreUpdateTabNavigationCommand(
     // stream. As such, we don't fail if it can't be read.
     std::string referrer_spec;
     pickle->ReadString(&iterator, &referrer_spec);
-    if (!referrer_spec.empty())
-      navigation->referrer_ = GURL(referrer_spec);
+    // The "referrer policy" property was added even later, so we fall back to
+    // the default policy if the property is not present.
+    int policy_int;
+    WebReferrerPolicy policy;
+    if (pickle->ReadInt(&iterator, &policy_int))
+      policy = static_cast<WebReferrerPolicy>(policy_int);
+    else
+      policy = WebKit::WebReferrerPolicyDefault;
+    navigation->referrer_ = content::Referrer(
+        referrer_spec.empty() ? GURL() : GURL(referrer_spec),
+        policy);
   }
 
   navigation->virtual_url_ = GURL(url_spec);
@@ -259,8 +276,10 @@ BaseSessionService::Handle BaseSessionService::ScheduleGetLastSessionCommands(
   scoped_refptr<InternalGetCommandsRequest> request_wrapper(request);
   AddRequest(request, consumer);
   if (backend_thread()) {
-    backend_thread()->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-        backend(), &SessionBackend::ReadLastSessionCommands, request_wrapper));
+    backend_thread()->message_loop()->PostTask(
+        FROM_HERE,
+        base::Bind(&SessionBackend::ReadLastSessionCommands, backend(),
+                   request_wrapper));
   } else {
     backend()->ReadLastSessionCommands(request);
   }
@@ -274,10 +293,10 @@ BaseSessionService::Handle
   scoped_refptr<InternalGetCommandsRequest> request_wrapper(request);
   AddRequest(request, consumer);
   if (backend_thread()) {
-    backend_thread()->message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(backend(),
-                          &SessionBackend::ReadCurrentSessionCommands,
-                          request_wrapper));
+    backend_thread()->message_loop()->PostTask(
+        FROM_HERE,
+        base::Bind(&SessionBackend::ReadCurrentSessionCommands, backend(),
+                   request_wrapper));
   } else {
     backend()->ReadCurrentSessionCommands(request);
   }

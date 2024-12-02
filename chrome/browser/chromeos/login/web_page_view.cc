@@ -23,10 +23,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "views/background.h"
-#include "views/border.h"
-#include "views/controls/label.h"
-#include "views/controls/throbber.h"
+#include "ui/views/background.h"
+#include "ui/views/border.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/throbber.h"
 
 using base::TimeDelta;
 using views::Label;
@@ -82,10 +82,6 @@ void WizardWebPageViewTabContents::DidRunInsecureContent(
 void WizardWebPageViewTabContents::DocumentLoadedInFrame(
     long long /*frame_id*/) {
   page_delegate_->OnPageLoaded();
-}
-
-void WizardWebPageViewTabContents::DidFinishLoad(
-    long long /*frame_id*/) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////

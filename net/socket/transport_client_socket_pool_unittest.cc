@@ -365,10 +365,10 @@ class TransportClientSocketPoolTest : public testing::Test {
           ClientSocketPoolBaseHelper::set_connect_backup_jobs_enabled(true)),
         params_(
             new TransportSocketParams(HostPortPair("www.google.com", 80),
-                                     kDefaultPriority, GURL(), false, false)),
+                                     kDefaultPriority, false, false)),
         low_params_(
             new TransportSocketParams(HostPortPair("www.google.com", 80),
-                                      LOW, GURL(), false, false)),
+                                      LOW, false, false)),
         histograms_(new ClientSocketPoolHistograms("TCPUnitTest")),
         host_resolver_(new MockHostResolver),
         pool_(kMaxSockets,
@@ -386,7 +386,7 @@ class TransportClientSocketPoolTest : public testing::Test {
 
   int StartRequest(const std::string& group_name, RequestPriority priority) {
     scoped_refptr<TransportSocketParams> params(new TransportSocketParams(
-        HostPortPair("www.google.com", 80), MEDIUM, GURL(), false, false));
+        HostPortPair("www.google.com", 80), MEDIUM, false, false));
     return test_base_.StartRequestUsingPool(
         &pool_, group_name, priority, params);
   }
@@ -520,7 +520,7 @@ TEST_F(TransportClientSocketPoolTest, InitHostResolutionFailure) {
   ClientSocketHandle handle;
   HostPortPair host_port_pair("unresolvable.host.name", 80);
   scoped_refptr<TransportSocketParams> dest(new TransportSocketParams(
-          host_port_pair, kDefaultPriority, GURL(), false, false));
+          host_port_pair, kDefaultPriority, false, false));
   EXPECT_EQ(ERR_IO_PENDING,
             handle.Init("a", dest, kDefaultPriority, &callback, &pool_,
                         BoundNetLog()));
@@ -780,7 +780,7 @@ class RequestSocketCallback : public CallbackRunner< Tuple1<int> > {
       }
       within_callback_ = true;
       scoped_refptr<TransportSocketParams> dest(new TransportSocketParams(
-          HostPortPair("www.google.com", 80), LOWEST, GURL(), false, false));
+          HostPortPair("www.google.com", 80), LOWEST, false, false));
       int rv = handle_->Init("a", dest, LOWEST, this, pool_, BoundNetLog());
       EXPECT_EQ(OK, rv);
     }
@@ -797,17 +797,11 @@ class RequestSocketCallback : public CallbackRunner< Tuple1<int> > {
   TestOldCompletionCallback callback_;
 };
 
-// Disabled in release with dcheck : http://crbug.com/94501
-#if defined(DCHECK_ALWAYS_ON)
-#define MAYBE_RequestTwice DISABLED_RequestTwice
-#else
-#define MAYBE_RequestTwice RequestTwice
-#endif
-TEST_F(TransportClientSocketPoolTest, MAYBE_RequestTwice) {
+TEST_F(TransportClientSocketPoolTest, RequestTwice) {
   ClientSocketHandle handle;
   RequestSocketCallback callback(&handle, &pool_);
   scoped_refptr<TransportSocketParams> dest(new TransportSocketParams(
-      HostPortPair("www.google.com", 80), LOWEST, GURL(), false, false));
+      HostPortPair("www.google.com", 80), LOWEST, false, false));
   int rv = handle.Init("a", dest, LOWEST, &callback, &pool_,
                        BoundNetLog());
   ASSERT_EQ(ERR_IO_PENDING, rv);
@@ -999,18 +993,7 @@ TEST_F(TransportClientSocketPoolTest, BackupSocketCancel) {
 // Test the case where a socket took long enough to start the creation
 // of the backup socket and never completes, and then the backup
 // connection fails.
-//
-// Flaky on Mac + Linux - http://crbug.com/86550
-// Flaky on ChromeOS - http://crbug.com/89273
-// Disabled in release with dcheck : http://crbug.com/94501
-#if defined(OS_MACOSX) || defined(OS_CHROMEOS) || defined(OS_LINUX)
-#define MAYBE_BackupSocketFailAfterStall BackupSocketFailAfterStall
-#elif defined(DCHECK_ALWAYS_ON)
-#define MAYBE_BackupSocketFailAfterStall DISABLED_BackupSocketFailAfterStall
-#else
-#define MAYBE_BackupSocketFailAfterStall BackupSocketFailAfterStall
-#endif
-TEST_F(TransportClientSocketPoolTest, MAYBE_BackupSocketFailAfterStall) {
+TEST_F(TransportClientSocketPoolTest, BackupSocketFailAfterStall) {
   MockClientSocketFactory::ClientSocketType case_types[] = {
     // The first socket will not connect.
     MockClientSocketFactory::MOCK_STALLED_CLIENT_SOCKET,
@@ -1055,13 +1038,7 @@ TEST_F(TransportClientSocketPoolTest, MAYBE_BackupSocketFailAfterStall) {
 // Test the case where a socket took long enough to start the creation
 // of the backup socket and eventually completes, but the backup socket
 // fails.
-// Disabled in release with dcheck : http://crbug.com/94501
-#if defined(DCHECK_ALWAYS_ON)
-#define MAYBE_BackupSocketFailAfterDelay DISABLED_BackupSocketFailAfterDelay
-#else
-#define MAYBE_BackupSocketFailAfterDelay BackupSocketFailAfterDelay
-#endif
-TEST_F(TransportClientSocketPoolTest, MAYBE_BackupSocketFailAfterDelay) {
+TEST_F(TransportClientSocketPoolTest, BackupSocketFailAfterDelay) {
   MockClientSocketFactory::ClientSocketType case_types[] = {
     // The first socket will connect, although delayed.
     MockClientSocketFactory::MOCK_DELAYED_CLIENT_SOCKET,

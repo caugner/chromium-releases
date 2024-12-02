@@ -7,13 +7,15 @@
 #include "base/basictypes.h"
 #include "base/stl_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/balloon_host.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/common/notification_service.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_process_host.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -34,7 +36,8 @@ TaskManagerNotificationResource::TaskManagerNotificationResource(
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     default_icon_ = rb.GetBitmapNamed(IDR_PLUGIN);
   }
-  process_handle_ = balloon_host_->render_view_host()->process()->GetHandle();
+  process_handle_ =
+      balloon_host_->tab_contents()->render_view_host()->process()->GetHandle();
   pid_ = base::GetProcId(process_handle_);
   title_ = l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_NOTIFICATION_PREFIX,
                                       balloon_host_->GetSource());
@@ -61,6 +64,15 @@ base::ProcessHandle TaskManagerNotificationResource::GetProcess() const {
 
 TaskManager::Resource::Type TaskManagerNotificationResource::GetType() const {
   return NOTIFICATION;
+}
+
+bool TaskManagerNotificationResource::CanInspect() const {
+  return true;
+}
+
+void TaskManagerNotificationResource::Inspect() const {
+  DevToolsWindow::OpenDevToolsWindow(
+      balloon_host_->tab_contents()->render_view_host());
 }
 
 bool TaskManagerNotificationResource::SupportNetworkUsage() const {
@@ -110,9 +122,9 @@ void TaskManagerNotificationResourceProvider::StartUpdating() {
 
   // Register for notifications about extension process changes.
   registrar_.Add(this, chrome::NOTIFICATION_NOTIFY_BALLOON_CONNECTED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_NOTIFY_BALLOON_DISCONNECTED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 void TaskManagerNotificationResourceProvider::StopUpdating() {
@@ -121,9 +133,9 @@ void TaskManagerNotificationResourceProvider::StopUpdating() {
 
   // Unregister for notifications about extension process changes.
   registrar_.Remove(this, chrome::NOTIFICATION_NOTIFY_BALLOON_CONNECTED,
-                    NotificationService::AllSources());
+                    content::NotificationService::AllSources());
   registrar_.Remove(this, chrome::NOTIFICATION_NOTIFY_BALLOON_DISCONNECTED,
-                    NotificationService::AllSources());
+                    content::NotificationService::AllSources());
 
   // Delete all the resources.
   STLDeleteContainerPairSecondPointers(resources_.begin(), resources_.end());
@@ -132,14 +144,14 @@ void TaskManagerNotificationResourceProvider::StopUpdating() {
 
 void TaskManagerNotificationResourceProvider::Observe(
     int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_NOTIFY_BALLOON_CONNECTED:
-      AddToTaskManager(Source<BalloonHost>(source).ptr());
+      AddToTaskManager(content::Source<BalloonHost>(source).ptr());
       break;
     case chrome::NOTIFICATION_NOTIFY_BALLOON_DISCONNECTED:
-      RemoveFromTaskManager(Source<BalloonHost>(source).ptr());
+      RemoveFromTaskManager(content::Source<BalloonHost>(source).ptr());
       break;
     default:
       NOTREACHED() << "Unexpected notification.";

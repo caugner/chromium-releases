@@ -5,10 +5,9 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 
 #include <cairo/cairo.h>
-#include <gdk/gdkx.h>
-#include <gtk/gtk.h>
 
 #include <cstdarg>
+
 #include <map>
 
 #include "base/environment.h"
@@ -25,24 +24,25 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/gtk/cairo_cached_surface.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "content/browser/disposition_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/renderer_preferences.h"
+#include "content/public/common/renderer_preferences.h"
 #include "googleurl/src/gurl.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/events.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/gtk_util.h"
+#include "ui/gfx/image/cairo_cached_surface.h"
 #include "ui/gfx/image/image.h"
 
 #if defined(OS_CHROMEOS)
@@ -51,6 +51,10 @@
 #else
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #endif
+
+// These conflict with base/tracked_objects.h, so need to come last.
+#include <gdk/gdkx.h>
+#include <gtk/gtk.h>
 
 namespace {
 
@@ -101,7 +105,7 @@ gboolean OnMouseButtonReleased(GtkWidget* widget, GdkEventButton* event,
 // Returns the approximate number of characters that can horizontally fit in
 // |pixel_width| pixels.
 int GetCharacterWidthForPixels(GtkWidget* widget, int pixel_width) {
-  DCHECK(GTK_WIDGET_REALIZED(widget))
+  DCHECK(gtk_widget_get_realized(widget))
       << " widget must be realized to compute font metrics correctly";
 
   PangoContext* context = gtk_widget_create_pango_context(widget);
@@ -274,7 +278,7 @@ GtkWidget* CreateBoldLabel(const std::string& text) {
 void GetWidgetSizeFromCharacters(
     GtkWidget* widget, double width_chars, double height_lines,
     int* width, int* height) {
-  DCHECK(GTK_WIDGET_REALIZED(widget))
+  DCHECK(gtk_widget_get_realized(widget))
       << " widget must be realized to compute font metrics correctly";
   PangoContext* context = gtk_widget_create_pango_context(widget);
   PangoFontMetrics* metrics = pango_context_get_metrics(context,
@@ -297,7 +301,7 @@ void GetWidgetSizeFromCharacters(
 void GetWidgetSizeFromResources(
     GtkWidget* widget, int width_chars, int height_lines,
     int* width, int* height) {
-  DCHECK(GTK_WIDGET_REALIZED(widget))
+  DCHECK(gtk_widget_get_realized(widget))
       << " widget must be realized to compute font metrics correctly";
 
   double chars = 0;
@@ -636,7 +640,7 @@ GtkWidget* IndentWidget(GtkWidget* content) {
   return content_alignment;
 }
 
-void UpdateGtkFontSettings(RendererPreferences* prefs) {
+void UpdateGtkFontSettings(content::RendererPreferences* prefs) {
   DCHECK(prefs);
 
   // From http://library.gnome.org/devel/gtk/unstable/GtkSettings.html, this is
@@ -660,9 +664,9 @@ void UpdateGtkFontSettings(RendererPreferences* prefs) {
 
   // Set some reasonable defaults.
   prefs->should_antialias_text = true;
-  prefs->hinting = RENDERER_PREFERENCES_HINTING_SYSTEM_DEFAULT;
+  prefs->hinting = content::RENDERER_PREFERENCES_HINTING_SYSTEM_DEFAULT;
   prefs->subpixel_rendering =
-      RENDERER_PREFERENCES_SUBPIXEL_RENDERING_SYSTEM_DEFAULT;
+      content::RENDERER_PREFERENCES_SUBPIXEL_RENDERING_SYSTEM_DEFAULT;
 
   if (cursor_blink) {
     // Dividing by 2*1000ms follows the WebKit GTK port and makes the blink
@@ -680,25 +684,30 @@ void UpdateGtkFontSettings(RendererPreferences* prefs) {
     prefs->should_antialias_text = antialias;
 
     if (hinting == 0 || strcmp(hint_style, "hintnone") == 0) {
-      prefs->hinting = RENDERER_PREFERENCES_HINTING_NONE;
+      prefs->hinting = content::RENDERER_PREFERENCES_HINTING_NONE;
     } else if (strcmp(hint_style, "hintslight") == 0) {
-      prefs->hinting = RENDERER_PREFERENCES_HINTING_SLIGHT;
+      prefs->hinting = content::RENDERER_PREFERENCES_HINTING_SLIGHT;
     } else if (strcmp(hint_style, "hintmedium") == 0) {
-      prefs->hinting = RENDERER_PREFERENCES_HINTING_MEDIUM;
+      prefs->hinting = content::RENDERER_PREFERENCES_HINTING_MEDIUM;
     } else if (strcmp(hint_style, "hintfull") == 0) {
-      prefs->hinting = RENDERER_PREFERENCES_HINTING_FULL;
+      prefs->hinting = content::RENDERER_PREFERENCES_HINTING_FULL;
     }
 
     if (strcmp(rgba_style, "none") == 0) {
-      prefs->subpixel_rendering = RENDERER_PREFERENCES_SUBPIXEL_RENDERING_NONE;
+      prefs->subpixel_rendering =
+          content::RENDERER_PREFERENCES_SUBPIXEL_RENDERING_NONE;
     } else if (strcmp(rgba_style, "rgb") == 0) {
-      prefs->subpixel_rendering = RENDERER_PREFERENCES_SUBPIXEL_RENDERING_RGB;
+      prefs->subpixel_rendering =
+          content::RENDERER_PREFERENCES_SUBPIXEL_RENDERING_RGB;
     } else if (strcmp(rgba_style, "bgr") == 0) {
-      prefs->subpixel_rendering = RENDERER_PREFERENCES_SUBPIXEL_RENDERING_BGR;
+      prefs->subpixel_rendering =
+          content::RENDERER_PREFERENCES_SUBPIXEL_RENDERING_BGR;
     } else if (strcmp(rgba_style, "vrgb") == 0) {
-      prefs->subpixel_rendering = RENDERER_PREFERENCES_SUBPIXEL_RENDERING_VRGB;
+      prefs->subpixel_rendering =
+          content::RENDERER_PREFERENCES_SUBPIXEL_RENDERING_VRGB;
     } else if (strcmp(rgba_style, "vbgr") == 0) {
-      prefs->subpixel_rendering = RENDERER_PREFERENCES_SUBPIXEL_RENDERING_VBGR;
+      prefs->subpixel_rendering =
+          content::RENDERER_PREFERENCES_SUBPIXEL_RENDERING_VBGR;
     }
   }
 
@@ -792,9 +801,9 @@ void DrawThemedToolbarBackground(GtkWidget* widget,
   // The toolbar is supposed to blend in with the active tab, so we have to pass
   // coordinates for the IDR_THEME_TOOLBAR bitmap relative to the top of the
   // tab strip.
-  CairoCachedSurface* background = theme_service->GetSurfaceNamed(
+  gfx::CairoCachedSurface* background = theme_service->GetSurfaceNamed(
       IDR_THEME_TOOLBAR, widget);
-  background->SetSource(cr, tabstrip_origin.x(), tabstrip_origin.y());
+  background->SetSource(cr, widget, tabstrip_origin.x(), tabstrip_origin.y());
   // We tile the toolbar background in both directions.
   cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
   cairo_rectangle(cr,
@@ -836,11 +845,11 @@ void SetAlwaysShowImage(GtkWidget* image_menu_item) {
 }
 
 gfx::Rect GetWidgetRectRelativeToToplevel(GtkWidget* widget) {
-  DCHECK(GTK_WIDGET_REALIZED(widget));
+  DCHECK(gtk_widget_get_realized(widget));
 
   GtkWidget* toplevel = gtk_widget_get_toplevel(widget);
   DCHECK(toplevel);
-  DCHECK(GTK_WIDGET_REALIZED(toplevel));
+  DCHECK(gtk_widget_get_realized(toplevel));
 
   gint x = 0, y = 0;
   gtk_widget_translate_coordinates(widget,
@@ -1140,7 +1149,7 @@ void SetLabelWidth(GtkWidget* label, int pixel_width) {
     gtk_widget_set_size_request(label, pixel_width, -1);
   } else {
     // The label has to be realized before we can adjust its width.
-    if (GTK_WIDGET_REALIZED(label)) {
+    if (gtk_widget_get_realized(label)) {
       OnLabelRealize(label, GINT_TO_POINTER(pixel_width));
     } else {
       g_signal_connect(label, "realize", G_CALLBACK(OnLabelRealize),

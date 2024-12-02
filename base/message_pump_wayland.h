@@ -8,34 +8,17 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_pump_glib.h"
+#include "base/message_pump_observer.h"
 
 typedef struct _GMainContext GMainContext;
 typedef struct _GPollFD GPollFD;
 typedef struct _GSource GSource;
 
-namespace ui {
-union WaylandEvent;
-}  // namespace ui
-
 namespace base {
 
-// The documentation for this class is in message_pump_glib.h
-class BASE_EXPORT MessagePumpObserver {
- public:
-   enum EventStatus {
-     EVENT_CONTINUE,    // The event should be dispatched as normal.
-     EVENT_HANDLED      // The event should not be processed any farther.
-   };
-
-  // This method is called before processing an Event. If the method returns
-  // EVENT_HANDLED, it indicates the event has already been handled, so the
-  // event is not processed any farther. If the method returns EVENT_CONTINUE,
-  // the event dispatching proceeds as normal.
-  virtual EventStatus WillProcessEvent(ui::WaylandEvent* event);
-
- protected:
-  virtual ~MessagePumpObserver() {}
-};
+namespace wayland {
+union WaylandEvent;
+}
 
 // The documentation for this class is in message_pump_glib.h
 //
@@ -52,7 +35,7 @@ class MessagePumpDispatcher {
 
   // Dispatches the event. If true is returned processing continues as
   // normal. If false is returned, the nested loop exits immediately.
-  virtual DispatchStatus Dispatch(ui::WaylandEvent* event) = 0;
+  virtual DispatchStatus Dispatch(wayland::WaylandEvent* event) = 0;
 
  protected:
   virtual ~MessagePumpDispatcher() {}

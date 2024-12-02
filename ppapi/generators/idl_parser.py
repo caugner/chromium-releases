@@ -45,6 +45,7 @@ Option('parse_debug', 'Debug parse reduction steps.')
 Option('token_debug', 'Debug token generation.')
 Option('dump_tree', 'Dump the tree.')
 Option('srcroot', 'Working directory.', default=os.path.join('..', 'api'))
+Option('include_private', 'Include private IDL directory in default API paths.')
 
 #
 # ERROR_REMAP
@@ -1005,13 +1006,15 @@ default_dirs = ['.', 'trusted', 'dev']
 def ParseFiles(filenames):
   parser = IDLParser()
   filenodes = []
-  errors = 0
 
   if not filenames:
     filenames = []
     srcroot = GetOption('srcroot')
-    for dir in default_dirs:
-      srcdir = os.path.join(srcroot, dir, '*.idl')
+    dirs = default_dirs
+    if GetOption('include_private'):
+      dirs += ['private']
+    for dirname in dirs:
+      srcdir = os.path.join(srcroot, dirname, '*.idl')
       srcdir = os.path.normpath(srcdir)
       filenames += sorted(glob.glob(srcdir))
 
@@ -1048,4 +1051,3 @@ def Main(args):
 
 if __name__ == '__main__':
   sys.exit(Main(sys.argv[1:]))
-

@@ -17,6 +17,8 @@
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppb_file_ref_proxy.h"
 #include "ppapi/proxy/serialized_var.h"
+#include "ppapi/shared_impl/ppapi_globals.h"
+#include "ppapi/shared_impl/resource_tracker.h"
 #include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/resource_creation_api.h"
 #include "ppapi/thunk/thunk.h"
@@ -87,7 +89,7 @@ FileChooser::~FileChooser() {
 
   // Any existing files we haven't transferred ownership to the plugin need
   // to be freed.
-  PluginResourceTracker* tracker = PluginResourceTracker::GetInstance();
+  ResourceTracker* tracker = PpapiGlobals::Get()->GetResourceTracker();
   while (!file_queue_.empty()) {
     tracker->ReleaseResource(file_queue_.front());
     file_queue_.pop();
@@ -122,7 +124,7 @@ int32_t FileChooser::Show(bool require_user_gesture,
   current_show_callback_ = callback;
   PluginDispatcher::GetForResource(this)->Send(
       new PpapiHostMsg_PPBFileChooser_Show(
-          INTERFACE_ID_PPB_FILE_CHOOSER,
+          API_ID_PPB_FILE_CHOOSER,
           host_resource(),
           save_as,
           suggested_file_name ? suggested_file_name : "",
@@ -171,7 +173,7 @@ const InterfaceProxy::Info* PPB_FileChooser_Proxy::GetTrustedInfo() {
   static const Info info = {
     thunk::GetPPB_FileChooser_Trusted_Thunk(),
     PPB_FILECHOOSER_TRUSTED_INTERFACE,
-    INTERFACE_ID_NONE,  // FILE_CHOOSER is the canonical one.
+    API_ID_NONE,  // FILE_CHOOSER is the canonical one.
     false,
     &CreateFileChooserProxy
   };
@@ -189,7 +191,7 @@ PP_Resource PPB_FileChooser_Proxy::CreateProxyResource(
 
   HostResource result;
   dispatcher->Send(new PpapiHostMsg_PPBFileChooser_Create(
-      INTERFACE_ID_PPB_FILE_CHOOSER, instance,
+      API_ID_PPB_FILE_CHOOSER, instance,
       mode,
       accept_mime_types ? accept_mime_types : "",
       &result));
@@ -266,7 +268,7 @@ void PPB_FileChooser_Proxy::OnShowCallback(int32_t result,
   std::vector<PPB_FileRef_CreateInfo> files;
   if (enter.succeeded() && result == PP_OK) {
     PPB_FileRef_Proxy* file_ref_proxy = static_cast<PPB_FileRef_Proxy*>(
-        dispatcher()->GetInterfaceProxy(INTERFACE_ID_PPB_FILE_REF));
+        dispatcher()->GetInterfaceProxy(API_ID_PPB_FILE_REF));
 
     // Convert the returned files to the serialized info.
     while (PP_Resource cur_file_resource =
@@ -278,7 +280,7 @@ void PPB_FileChooser_Proxy::OnShowCallback(int32_t result,
   }
 
   dispatcher()->Send(new PpapiMsg_PPBFileChooser_ChooseComplete(
-      INTERFACE_ID_PPB_FILE_CHOOSER, chooser, result, files));
+      API_ID_PPB_FILE_CHOOSER, chooser, result, files));
 }
 
 }  // namespace proxy

@@ -10,16 +10,18 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/ui/shell_dialogs.h"
+#include "chrome/browser/ui/select_file_dialog.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "net/base/directory_lister.h"
 
 class Profile;
 class RenderViewHost;
-struct ViewHostMsg_RunFileChooser_Params;
 
+namespace content {
+struct FileChooserParams;
+}
 
 // This class handles file-selection requests coming from WebUI elements
 // (via the ExtensionHost class). It implements both the initialisation
@@ -27,14 +29,14 @@ struct ViewHostMsg_RunFileChooser_Params;
 class FileSelectHelper
     : public base::RefCountedThreadSafe<FileSelectHelper>,
       public SelectFileDialog::Listener,
-      public NotificationObserver {
+      public content::NotificationObserver {
  public:
   explicit FileSelectHelper(Profile* profile);
 
   // Show the file chooser dialog.
   void RunFileChooser(RenderViewHost* render_view_host,
                       TabContents* tab_contents,
-                      const ViewHostMsg_RunFileChooser_Params& params);
+                      const content::FileChooserParams& params);
 
   // Enumerates all the files in directory.
   void EnumerateDirectory(int request_id,
@@ -55,10 +57,10 @@ class FileSelectHelper
           id_(id) {}
     virtual ~DirectoryListerDispatchDelegate() {}
     virtual void OnListFile(
-        const net::DirectoryLister::DirectoryListerData& data) {
+        const net::DirectoryLister::DirectoryListerData& data) OVERRIDE {
       parent_->OnListFile(id_, data);
     }
-    virtual void OnListDone(int error) {
+    virtual void OnListDone(int error) OVERRIDE {
       parent_->OnListDone(id_, error);
     }
    private:
@@ -70,9 +72,9 @@ class FileSelectHelper
   };
 
   void RunFileChooserOnFileThread(
-      const ViewHostMsg_RunFileChooser_Params& params);
+      const content::FileChooserParams& params);
   void RunFileChooserOnUIThread(
-      const ViewHostMsg_RunFileChooser_Params& params);
+      const content::FileChooserParams& params);
 
   // Cleans up and releases this instance. This must be called after the last
   // callback is received from the file chooser dialog.
@@ -85,10 +87,10 @@ class FileSelectHelper
                                   void* params) OVERRIDE;
   virtual void FileSelectionCanceled(void* params) OVERRIDE;
 
-  // NotificationObserver overrides.
+  // content::NotificationObserver overrides.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Kicks off a new directory enumeration.
   void StartNewEnumeration(const FilePath& path,
@@ -108,8 +110,9 @@ class FileSelectHelper
   // Helper method to get allowed extensions for select file dialog from
   // the specified accept types as defined in the spec:
   //   http://whatwg.org/html/number-state.html#attr-input-accept
+  // |accept_types| contains only valid lowercased MIME types.
   SelectFileDialog::FileTypeInfo* GetFileTypesFromAcceptType(
-      const string16& accept_types);
+      const std::vector<string16>& accept_types);
 
   // Profile used to set/retrieve the last used directory.
   Profile* profile_;
@@ -133,7 +136,7 @@ class FileSelectHelper
   std::map<int, ActiveDirectoryEnumeration*> directory_enumerations_;
 
   // Registrar for notifications regarding our RenderViewHost.
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(FileSelectHelper);
 };

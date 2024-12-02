@@ -184,7 +184,7 @@ TEST_F(SpdyStreamTest, SendDataAfterOpen) {
 
   HostPortPair host_port_pair("www.google.com", 80);
   scoped_refptr<TransportSocketParams> transport_params(
-      new TransportSocketParams(host_port_pair, LOWEST, GURL(), false, false));
+      new TransportSocketParams(host_port_pair, LOWEST, false, false));
 
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(OK,
@@ -192,7 +192,7 @@ TEST_F(SpdyStreamTest, SendDataAfterOpen) {
                              transport_params,
                              LOWEST,
                              NULL,
-                             session_->transport_socket_pool(),
+                             session_->GetTransportSocketPool(),
                              BoundNetLog()));
   session->InitializeWithSocket(connection.release(), false, OK);
 

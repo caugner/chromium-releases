@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/process_util.h"
@@ -27,6 +28,7 @@
 #include "ipc/ipc_channel_handle.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/plugin_lib.h"
+#include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/npapi/webplugin_delegate_impl.h"
 
 #if defined(TOOLKIT_USES_GTK)
@@ -53,7 +55,7 @@ class EnsureTerminateMessageFilter : public IPC::ChannelProxy::MessageFilter {
     // We achieve this by posting an exit process task on the IO thread.
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
-        NewRunnableMethod(this, &EnsureTerminateMessageFilter::Terminate),
+        base::Bind(&EnsureTerminateMessageFilter::Terminate, this),
         kPluginProcessTerminateTimeoutMs);
   }
 
@@ -64,8 +66,8 @@ class EnsureTerminateMessageFilter : public IPC::ChannelProxy::MessageFilter {
 
 }  // namespace
 
-static base::LazyInstance<base::ThreadLocalPointer<PluginThread> > lazy_tls(
-    base::LINKER_INITIALIZED);
+static base::LazyInstance<base::ThreadLocalPointer<PluginThread> > lazy_tls =
+    LAZY_INSTANCE_INITIALIZER;
 
 PluginThread::PluginThread()
     : preloaded_plugin_module_(NULL) {
@@ -113,6 +115,9 @@ PluginThread::PluginThread()
 
   content::GetContentClient()->plugin()->PluginProcessStarted(
       plugin.get() ? plugin->plugin_info().name : string16());
+
+  content::GetContentClient()->AddNPAPIPlugins(
+      webkit::npapi::PluginList::Singleton());
 
   // Certain plugins, such as flash, steal the unhandled exception filter
   // thus we never get crash reports when they fault. This call fixes it.

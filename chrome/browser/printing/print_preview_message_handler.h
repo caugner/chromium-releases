@@ -29,7 +29,8 @@ class PrintPreviewMessageHandler : public TabContentsObserver {
 
   // TabContentsObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void DidStartLoading() OVERRIDE;
+  virtual void NavigateToPendingEntry(const GURL& url,
+      NavigationController::ReloadType reload_type) OVERRIDE;
 
  private:
   // Gets the print preview tab associated with the TabContents being observed.
@@ -43,7 +44,7 @@ class PrintPreviewMessageHandler : public TabContentsObserver {
   PrintPreviewUI* OnFailure(int document_cookie);
 
   // Message handlers.
-  void OnRequestPrintPreview();
+  void OnRequestPrintPreview(bool source_is_modifiable);
   void OnDidGetDefaultPageLayout(
       const printing::PageSizeMargins& page_layout_in_points);
   void OnDidGetPreviewPageCount(

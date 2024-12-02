@@ -4,6 +4,8 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/stl_util.h"
 #include "base/threading/thread.h"
 #include "base/synchronization/waitable_event.h"
@@ -87,7 +89,7 @@ class MockHttpServer {
         "Cache-Control: no-store\0"
         "\0";
 
-    if (path == "/files/wrong-mime-manifest") {
+    if (path == "/files/missing-mime-manifest") {
       (*headers) = std::string(ok_headers, arraysize(ok_headers));
       (*body) = "CACHE MANIFEST\n";
     } else if (path == "/files/bad-manifest") {
@@ -514,8 +516,6 @@ class IOThread : public base::Thread {
   }
 
   ~IOThread() {
-    // We cannot rely on our base class to stop the thread since we want our
-    // CleanUp function to run.
     Stop();
   }
 
@@ -570,7 +570,7 @@ class AppCacheUpdateJobTest : public testing::Test,
   void RunTestOnIOThread(Method method) {
     event_.reset(new base::WaitableEvent(false, false));
     io_thread_->message_loop()->PostTask(
-        FROM_HERE, NewRunnableMethod(this, method));
+        FROM_HERE, base::Bind(method, base::Unretained(this)));
 
     // Wait until task is done before exiting the test.
     event_->Wait();
@@ -627,13 +627,13 @@ class AppCacheUpdateJobTest : public testing::Test,
       MockFrontend mock_frontend3;
 
       AppCacheHost host1(1, &mock_frontend1, service_.get());
-      host1.AssociateCache(cache1);
+      host1.AssociateCompleteCache(cache1);
 
       AppCacheHost host2(2, &mock_frontend2, service_.get());
-      host2.AssociateCache(cache2);
+      host2.AssociateCompleteCache(cache2);
 
       AppCacheHost host3(3, &mock_frontend1, service_.get());
-      host3.AssociateCache(cache1);
+      host3.AssociateCompleteCache(cache1);
 
       AppCacheHost host4(4, &mock_frontend3, service_.get());
 
@@ -715,8 +715,8 @@ class AppCacheUpdateJobTest : public testing::Test,
     MockFrontend* frontend2 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
     AppCacheHost* host2 = MakeHost(2, frontend2);
-    host1->AssociateCache(cache);
-    host2->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
+    host2->AssociateCompleteCache(cache);
 
     update->StartUpdate(NULL, GURL());
     EXPECT_TRUE(update->manifest_fetcher_ != NULL);
@@ -766,27 +766,39 @@ class AppCacheUpdateJobTest : public testing::Test,
     WaitForUpdateToFinish();
   }
 
-  void ManifestWrongMimeTypeTest() {
+  void ManifestMissingMimeTypeTest() {
     ASSERT_EQ(MessageLoop::TYPE_IO, MessageLoop::current()->type());
 
     MakeService();
     group_ = new AppCacheGroup(
-        service_.get(), MockHttpServer::GetMockUrl("files/wrong-mime-manifest"),
+        service_.get(),
+        MockHttpServer::GetMockUrl("files/missing-mime-manifest"),
         service_->storage()->NewGroupId());
     AppCacheUpdateJob* update = new AppCacheUpdateJob(service_.get(), group_);
     group_->update_job_ = update;
 
+    AppCache* cache = MakeCacheForGroup(service_->storage()->NewCacheId(), 33);
     MockFrontend* frontend = MakeMockFrontend();
     AppCacheHost* host = MakeHost(1, frontend);
-    update->StartUpdate(host, GURL());
+    host->AssociateCompleteCache(cache);
+
+    frontend->SetVerifyProgressEvents(true);
+
+    update->StartUpdate(NULL, GURL());
     EXPECT_TRUE(update->manifest_fetcher_ != NULL);
 
     // Set up checks for when update job finishes.
     do_checks_after_update_finished_ = true;
     expect_group_obsolete_ = false;
-    expect_group_has_cache_ = false;  // bad mime type is like a failed request
-    frontend->AddExpectedEvent(MockFrontend::HostIds(1, host->host_id()),
-                               CHECKING_EVENT);
+    expect_group_has_cache_ = true;
+    expect_old_cache_ = cache;
+    tested_manifest_ = EMPTY_MANIFEST;
+    tested_manifest_path_override_ = "files/missing-mime-manifest";
+    MockFrontend::HostIds ids(1, host->host_id());
+    frontend->AddExpectedEvent(ids, CHECKING_EVENT);
+    frontend->AddExpectedEvent(ids, DOWNLOADING_EVENT);
+    frontend->AddExpectedEvent(ids, PROGRESS_EVENT);  // final
+    frontend->AddExpectedEvent(ids, UPDATE_READY_EVENT);
 
     WaitForUpdateToFinish();
   }
@@ -806,8 +818,8 @@ class AppCacheUpdateJobTest : public testing::Test,
     MockFrontend* frontend2 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
     AppCacheHost* host2 = MakeHost(2, frontend2);
-    host1->AssociateCache(cache);
-    host2->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
+    host2->AssociateCompleteCache(cache);
 
     update->StartUpdate(NULL, GURL());
     EXPECT_TRUE(update->manifest_fetcher_ != NULL);
@@ -892,8 +904,8 @@ class AppCacheUpdateJobTest : public testing::Test,
     MockFrontend* frontend2 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
     AppCacheHost* host2 = MakeHost(2, frontend2);
-    host1->AssociateCache(cache);
-    host2->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
+    host2->AssociateCompleteCache(cache);
 
     update->StartUpdate(NULL, GURL());
     EXPECT_TRUE(update->manifest_fetcher_ != NULL);
@@ -925,15 +937,16 @@ class AppCacheUpdateJobTest : public testing::Test,
 
     // Create response writer to get a response id.
     response_writer_.reset(
-        service_->storage()->CreateResponseWriter(group_->manifest_url()));
+        service_->storage()->CreateResponseWriter(group_->manifest_url(),
+                                                  group_->group_id()));
 
     AppCache* cache = MakeCacheForGroup(1, response_writer_->response_id());
     MockFrontend* frontend1 = MakeMockFrontend();
     MockFrontend* frontend2 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
     AppCacheHost* host2 = MakeHost(2, frontend2);
-    host1->AssociateCache(cache);
-    host2->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
+    host2->AssociateCompleteCache(cache);
 
     // Set up checks for when update job finishes.
     do_checks_after_update_finished_ = true;
@@ -1011,7 +1024,8 @@ class AppCacheUpdateJobTest : public testing::Test,
 
     // Create a response writer to get a response id.
     response_writer_.reset(
-        service_->storage()->CreateResponseWriter(group_->manifest_url()));
+        service_->storage()->CreateResponseWriter(group_->manifest_url(),
+                                                  group_->group_id()));
 
     AppCache* cache = MakeCacheForGroup(service_->storage()->NewCacheId(),
                                         response_writer_->response_id());
@@ -1019,8 +1033,8 @@ class AppCacheUpdateJobTest : public testing::Test,
     MockFrontend* frontend2 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
     AppCacheHost* host2 = MakeHost(2, frontend2);
-    host1->AssociateCache(cache);
-    host2->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
+    host2->AssociateCompleteCache(cache);
     frontend1->SetVerifyProgressEvents(true);
     frontend2->SetVerifyProgressEvents(true);
 
@@ -1071,11 +1085,12 @@ class AppCacheUpdateJobTest : public testing::Test,
     AppCache* cache = MakeCacheForGroup(service_->storage()->NewCacheId(), 42);
     MockFrontend* frontend = MakeMockFrontend();
     AppCacheHost* host = MakeHost(1, frontend);
-    host->AssociateCache(cache);
+    host->AssociateCompleteCache(cache);
 
     // Give the newest cache an entry that is in storage.
     response_writer_.reset(
-        service_->storage()->CreateResponseWriter(group_->manifest_url()));
+        service_->storage()->CreateResponseWriter(group_->manifest_url(),
+                                                  group_->group_id()));
     cache->AddEntry(MockHttpServer::GetMockUrl("files/explicit1"),
                     AppCacheEntry(AppCacheEntry::EXPLICIT,
                                   response_writer_->response_id()));
@@ -1132,11 +1147,12 @@ class AppCacheUpdateJobTest : public testing::Test,
     AppCache* cache = MakeCacheForGroup(service_->storage()->NewCacheId(), 42);
     MockFrontend* frontend = MakeMockFrontend();
     AppCacheHost* host = MakeHost(1, frontend);
-    host->AssociateCache(cache);
+    host->AssociateCompleteCache(cache);
 
     // Give the newest cache an entry that is in storage.
     response_writer_.reset(
-        service_->storage()->CreateResponseWriter(group_->manifest_url()));
+        service_->storage()->CreateResponseWriter(group_->manifest_url(),
+                                                  group_->group_id()));
     cache->AddEntry(MockHttpServer::GetMockUrl("files/explicit1"),
                     AppCacheEntry(AppCacheEntry::EXPLICIT,
                                   response_writer_->response_id()));
@@ -1190,11 +1206,12 @@ class AppCacheUpdateJobTest : public testing::Test,
     AppCache* cache = MakeCacheForGroup(service_->storage()->NewCacheId(), 42);
     MockFrontend* frontend = MakeMockFrontend();
     AppCacheHost* host = MakeHost(1, frontend);
-    host->AssociateCache(cache);
+    host->AssociateCompleteCache(cache);
 
     // Give the newest cache an entry that is in storage.
     response_writer_.reset(
-        service_->storage()->CreateResponseWriter(group_->manifest_url()));
+        service_->storage()->CreateResponseWriter(group_->manifest_url(),
+                                                  group_->group_id()));
     cache->AddEntry(MockHttpServer::GetMockUrl("files/explicit1"),
                     AppCacheEntry(AppCacheEntry::EXPLICIT,
                                   response_writer_->response_id()));
@@ -1250,8 +1267,8 @@ class AppCacheUpdateJobTest : public testing::Test,
     MockFrontend* frontend2 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
     AppCacheHost* host2 = MakeHost(2, frontend2);
-    host1->AssociateCache(cache);
-    host2->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
+    host2->AssociateCompleteCache(cache);
 
     // Give the newest cache a master entry that is also one of the explicit
     // entries in the manifest.
@@ -1327,8 +1344,8 @@ class AppCacheUpdateJobTest : public testing::Test,
     frontend2->SetIgnoreProgressEvents(true);
     AppCacheHost* host1 = MakeHost(1, frontend1);
     AppCacheHost* host2 = MakeHost(2, frontend2);
-    host1->AssociateCache(cache);
-    host2->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
+    host2->AssociateCompleteCache(cache);
 
     update->StartUpdate(NULL, GURL());
     EXPECT_TRUE(update->manifest_fetcher_ != NULL);
@@ -1369,8 +1386,8 @@ class AppCacheUpdateJobTest : public testing::Test,
     MockFrontend* frontend2 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
     AppCacheHost* host2 = MakeHost(2, frontend2);
-    host1->AssociateCache(cache);
-    host2->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
+    host2->AssociateCompleteCache(cache);
 
     // Give the newest cache some existing entries; one will fail with a 404.
     cache->AddEntry(
@@ -1460,8 +1477,8 @@ class AppCacheUpdateJobTest : public testing::Test,
     MockFrontend* frontend2 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
     AppCacheHost* host2 = MakeHost(2, frontend2);
-    host1->AssociateCache(cache);
-    host2->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
+    host2->AssociateCompleteCache(cache);
 
     frontend1->SetVerifyProgressEvents(true);
 
@@ -1501,7 +1518,7 @@ class AppCacheUpdateJobTest : public testing::Test,
     AppCache* cache = MakeCacheForGroup(service_->storage()->NewCacheId(), 22);
     MockFrontend* frontend = MakeMockFrontend();
     AppCacheHost* host = MakeHost(1, frontend);
-    host->AssociateCache(cache);
+    host->AssociateCompleteCache(cache);
     frontend->SetVerifyProgressEvents(true);
 
     update->StartUpdate(host, GURL());
@@ -1725,8 +1742,8 @@ class AppCacheUpdateJobTest : public testing::Test,
     MockFrontend* frontend2 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
     AppCacheHost* host2 = MakeHost(2, frontend2);
-    host1->AssociateCache(cache);
-    host2->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
+    host2->AssociateCompleteCache(cache);
 
     update->StartUpdate(NULL, GURL());
 
@@ -1820,8 +1837,8 @@ class AppCacheUpdateJobTest : public testing::Test,
     MockFrontend* frontend2 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
     AppCacheHost* host2 = MakeHost(2, frontend2);
-    host1->AssociateCache(cache);
-    host2->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
+    host2->AssociateCompleteCache(cache);
 
     update->StartUpdate(NULL, GURL());
     EXPECT_TRUE(update->manifest_fetcher_ != NULL);
@@ -2002,7 +2019,7 @@ class AppCacheUpdateJobTest : public testing::Test,
     AppCache* cache = MakeCacheForGroup(service_->storage()->NewCacheId(), 42);
     MockFrontend* frontend1 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
-    host1->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
 
     MockFrontend* frontend2 = MakeMockFrontend();
     frontend2->SetIgnoreProgressEvents(true);
@@ -2099,7 +2116,7 @@ class AppCacheUpdateJobTest : public testing::Test,
     AppCache* cache = MakeCacheForGroup(service_->storage()->NewCacheId(), 42);
     MockFrontend* frontend1 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
-    host1->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
 
     MockFrontend* frontend2 = MakeMockFrontend();
     frontend2->SetIgnoreProgressEvents(true);
@@ -2156,7 +2173,7 @@ class AppCacheUpdateJobTest : public testing::Test,
     AppCache* cache = MakeCacheForGroup(1, 111);
     MockFrontend* frontend1 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
-    host1->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
 
     // Give cache an existing entry that can also be fetched.
     cache->AddEntry(MockHttpServer::GetMockUrl("files/explicit2"),
@@ -2296,7 +2313,7 @@ class AppCacheUpdateJobTest : public testing::Test,
     AppCache* cache = MakeCacheForGroup(1, 111);
     MockFrontend* frontend1 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
-    host1->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
 
     // Give cache an existing entry.
     cache->AddEntry(MockHttpServer::GetMockUrl("files/explicit2"),
@@ -2375,7 +2392,7 @@ class AppCacheUpdateJobTest : public testing::Test,
     AppCache* cache = MakeCacheForGroup(service_->storage()->NewCacheId(), 42);
     MockFrontend* frontend1 = MakeMockFrontend();
     AppCacheHost* host1 = MakeHost(1, frontend1);
-    host1->AssociateCache(cache);
+    host1->AssociateCompleteCache(cache);
 
     update->StartUpdate(NULL, GURL());
 
@@ -2471,7 +2488,7 @@ class AppCacheUpdateJobTest : public testing::Test,
     // Delete update, causing it to finish, which should trigger a new update
     // for the queued host and master entry after a delay.
     delete update;
-    EXPECT_TRUE(group_->restart_update_task_);
+    EXPECT_FALSE(group_->restart_update_task_.IsCancelled());
 
     // Set up checks for when queued update job finishes.
     do_checks_after_update_finished_ = true;
@@ -2573,13 +2590,14 @@ class AppCacheUpdateJobTest : public testing::Test,
 
     // Give the newest cache a manifest enry that is in storage.
     response_writer_.reset(
-        service_->storage()->CreateResponseWriter(group_->manifest_url()));
+        service_->storage()->CreateResponseWriter(group_->manifest_url(),
+                                                  group_->group_id()));
 
     AppCache* cache = MakeCacheForGroup(service_->storage()->NewCacheId(),
                                         response_writer_->response_id());
     MockFrontend* frontend = MakeMockFrontend();
     AppCacheHost* host = MakeHost(1, frontend);
-    host->AssociateCache(cache);
+    host->AssociateCompleteCache(cache);
 
     // Set up checks for when update job finishes.
     do_checks_after_update_finished_ = true;
@@ -2631,13 +2649,14 @@ class AppCacheUpdateJobTest : public testing::Test,
 
     // Give the newest cache a manifest enry that is in storage.
     response_writer_.reset(
-        service_->storage()->CreateResponseWriter(group_->manifest_url()));
+        service_->storage()->CreateResponseWriter(group_->manifest_url(),
+                                                  group_->group_id()));
 
     AppCache* cache = MakeCacheForGroup(service_->storage()->NewCacheId(),
                                         response_writer_->response_id());
     MockFrontend* frontend = MakeMockFrontend();
     AppCacheHost* host = MakeHost(1, frontend);
-    host->AssociateCache(cache);
+    host->AssociateCompleteCache(cache);
 
     // Set up checks for when update job finishes.
     do_checks_after_update_finished_ = true;
@@ -2814,8 +2833,9 @@ class AppCacheUpdateJobTest : public testing::Test,
   void UpdateFinished() {
     // We unwind the stack prior to finishing up to let stack-based objects
     // get deleted.
-    MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-            this, &AppCacheUpdateJobTest::UpdateFinishedUnwound));
+    MessageLoop::current()->PostTask(
+        FROM_HERE, base::Bind(&AppCacheUpdateJobTest::UpdateFinishedUnwound,
+                              base::Unretained(this)));
   }
 
   void UpdateFinishedUnwound() {
@@ -3259,8 +3279,8 @@ TEST_F(AppCacheUpdateJobTest, ManifestRedirect) {
   RunTestOnIOThread(&AppCacheUpdateJobTest::ManifestRedirectTest);
 }
 
-TEST_F(AppCacheUpdateJobTest, ManifestWrongMimeType) {
-  RunTestOnIOThread(&AppCacheUpdateJobTest::ManifestWrongMimeTypeTest);
+TEST_F(AppCacheUpdateJobTest, ManifestMissingMimeTypeTest) {
+  RunTestOnIOThread(&AppCacheUpdateJobTest::ManifestMissingMimeTypeTest);
 }
 
 TEST_F(AppCacheUpdateJobTest, ManifestNotFound) {
@@ -3446,7 +3466,3 @@ TEST_F(AppCacheUpdateJobTest, CrossOriginHttpsDenied) {
 }
 
 }  // namespace appcache
-
-// AppCacheUpdateJobTest is expected to always live longer than the
-// runnable methods.  This lets us call NewRunnableMethod on its instances.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(appcache::AppCacheUpdateJobTest);

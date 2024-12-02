@@ -8,7 +8,8 @@
 
 #include <string>
 
-#include "views/controls/button/menu_button.h"
+#include "base/compiler_specific.h"
+#include "ui/views/controls/button/menu_button.h"
 
 namespace chromeos {
 
@@ -22,12 +23,12 @@ class DropDownButton : public views::MenuButton {
                  bool show_menu_marker);
   virtual ~DropDownButton();
 
-  virtual void OnPaintFocusBorder(gfx::Canvas* canvas);
+  virtual void OnPaintFocusBorder(gfx::Canvas* canvas) OVERRIDE;
 
   // Override SetText to set the accessible value, rather than the
   // accessible name, since this acts more like a combo box than a
   // menu.
-  virtual void SetText(const string16& text);
+  virtual void SetText(const string16& text) OVERRIDE;
 
   virtual string16 GetAccessibleValue();
 

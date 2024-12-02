@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/basictypes.h"
 #include "base/string16.h"
 #include "chrome/browser/chromeos/notifications/balloon_view_host.h"  // MessageCallback
@@ -50,7 +51,7 @@ class SystemNotification {
   // Same as Show() above with a footer link at the bottom and a callback
   // for when the link is clicked.
   void Show(const string16& message, const string16& link_text,
-            MessageCallback* callback, bool urgent, bool sticky);
+            const MessageCallback& callback, bool urgent, bool sticky);
 
   // Hide will dismiss the notification, if the notification is already
   // hidden it does nothing
@@ -66,11 +67,11 @@ class SystemNotification {
   class Delegate : public NotificationDelegate {
    public:
     explicit Delegate(const std::string& id);
-    virtual void Display() {}
-    virtual void Error() {}
-    virtual void Close(bool by_user) {}
-    virtual void Click() {}
-    virtual std::string id() const;
+    virtual void Display() OVERRIDE {}
+    virtual void Error() OVERRIDE {}
+    virtual void Close(bool by_user) OVERRIDE {}
+    virtual void Click() OVERRIDE {}
+    virtual std::string id() const OVERRIDE;
 
    private:
     std::string id_;

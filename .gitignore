@@ -46,6 +46,8 @@ v8.log
 /chrome/app/theme/google_chrome
 /chrome/browser/autofill/internal
 /chrome/browser/extensions/default_extensions/chromeos
+/chrome/browser/protector/internal
+/chrome/browser/resources/software_rendering_list
 /chrome/browser/spellchecker/internal
 /chrome/installer/linux
 /chrome/installer/mac/internal
@@ -60,6 +62,7 @@ v8.log
 /chrome/test/data/layout_tests
 /chrome/test/data/osdd
 /chrome/test/data/perf/frame_rate/content
+/chrome/test/data/perf/frame_rate/private
 /chrome/test/data/plugin
 /chrome/test/data/pyauto_private
 /chrome/tools/memory
@@ -75,6 +78,8 @@ v8.log
 /net/testserver.log
 /out
 /out_*
+/remoting/appengine/
+/remoting/tools/internal/
 /rlz
 /sdch/open-vcdiff
 /seccompsandbox
@@ -103,14 +108,17 @@ v8.log
 /third_party/hunspell
 /third_party/hunspell_dictionaries
 /third_party/icu
+/third_party/jsoncpp/source
 /third_party/leveldatabase/src
 /third_party/leveldb
 /third_party/libjingle/source
 /third_party/libjpeg_turbo
+/third_party/libphonenumber/src
 /third_party/libsrtp/src
 /third_party/libvpx
 /third_party/libvpx/include
 /third_party/libvpx/lib
+/third_party/libyuv
 /third_party/lighttpd
 /third_party/lss
 /third_party/llvm
@@ -130,6 +138,7 @@ v8.log
 /third_party/pthreads-win32
 /third_party/pylib
 /third_party/pyftpdlib/src
+/third_party/pymox/src
 /third_party/python_24
 /third_party/python_26
 /third_party/pywebsocket
@@ -144,7 +153,8 @@ v8.log
 /third_party/syzygy/binaries
 /third_party/v8-i18n
 /third_party/valgrind
-/third_party/webdriver/python
+/third_party/webdriver/pylib
+/third_party/webdriver/python/selenium
 /third_party/webgl_conformance
 /third_party/webrtc
 /third_party/xdg-utils

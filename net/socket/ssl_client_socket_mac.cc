@@ -23,6 +23,7 @@
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/ssl_connection_status_flags.h"
 #include "net/base/ssl_info.h"
+#include "net/base/x509_certificate_net_log_param.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_error_params.h"
 
@@ -485,8 +486,8 @@ class EnabledCipherSuites {
   DISALLOW_COPY_AND_ASSIGN(EnabledCipherSuites);
 };
 
-static base::LazyInstance<EnabledCipherSuites> g_enabled_cipher_suites(
-    base::LINKER_INITIALIZED);
+static base::LazyInstance<EnabledCipherSuites> g_enabled_cipher_suites =
+    LAZY_INSTANCE_INITIALIZER;
 
 EnabledCipherSuites::EnabledCipherSuites() {
   SSLContextRef ssl_context;
@@ -730,6 +731,8 @@ void SSLClientSocketMac::GetSSLInfo(SSLInfo* ssl_info) {
   ssl_info->public_key_hashes = server_cert_verify_result_.public_key_hashes;
   ssl_info->is_issued_by_known_root =
       server_cert_verify_result_.is_issued_by_known_root;
+  ssl_info->client_cert_sent =
+      ssl_config_.send_client_cert && ssl_config_.client_cert;
 
   // security info
   SSLCipherSuite suite;
@@ -789,8 +792,10 @@ int SSLClientSocketMac::ExportKeyingMaterial(const base::StringPiece& label,
 }
 
 SSLClientSocket::NextProtoStatus
-SSLClientSocketMac::GetNextProto(std::string* proto) {
+SSLClientSocketMac::GetNextProto(std::string* proto,
+                                 std::string* server_protos) {
   proto->clear();
+  server_protos->clear();
   return kNextProtoUnsupported;
 }
 
@@ -1158,9 +1163,11 @@ int SSLClientSocketMac::DoVerifyCert() {
   verifier_.reset(new SingleRequestCertVerifier(cert_verifier_));
   return verifier_->Verify(
       server_cert_, host_and_port_.host(), flags,
+      NULL /* no CRL set */,
       &server_cert_verify_result_,
       base::Bind(&SSLClientSocketMac::OnHandshakeIOComplete,
-                 base::Unretained(this)));
+                 base::Unretained(this)),
+      net_log_);
 }
 
 int SSLClientSocketMac::DoVerifyCertComplete(int result) {
@@ -1280,6 +1287,11 @@ int SSLClientSocketMac::DidCompleteHandshake() {
       GetServerCert(ssl_context_));
   if (!new_server_cert)
     return ERR_UNEXPECTED;
+  if (net_log_.IsLoggingBytes()) {
+    net_log_.AddEvent(
+        NetLog::TYPE_SSL_CERTIFICATES_RECEIVED,
+        make_scoped_refptr(new X509CertificateNetLogParam(new_server_cert)));
+  }
 
   if (renegotiating_ &&
       X509Certificate::IsSameOSCert(server_cert_->os_cert_handle(),

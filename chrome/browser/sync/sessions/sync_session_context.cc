@@ -4,10 +4,12 @@
 
 #include "chrome/browser/sync/sessions/sync_session_context.h"
 
-#include "chrome/browser/sync/util/extensions_activity_monitor.h"
 #include "chrome/browser/sync/sessions/debug_info_getter.h"
 #include "chrome/browser/sync/sessions/session_state.h"
-#include "content/browser/browser_thread.h"
+#include "chrome/browser/sync/util/extensions_activity_monitor.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace browser_sync {
 namespace sessions {
@@ -31,12 +33,56 @@ SyncSessionContext::SyncSessionContext(
     listeners_.AddObserver(*it);
 }
 
+SyncSessionContext::SyncSessionContext()
+    : connection_manager_(NULL),
+      directory_manager_(NULL),
+      registrar_(NULL),
+      extensions_activity_monitor_(NULL),
+      debug_info_getter_(NULL) {
+}
+
 SyncSessionContext::~SyncSessionContext() {
   // In unittests, there may be no UI thread, so the above will fail.
   if (!BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE,
                                 extensions_activity_monitor_)) {
     delete extensions_activity_monitor_;
   }
+}
+
+void SyncSessionContext::SetUnthrottleTime(const syncable::ModelTypeSet& types,
+                                           const base::TimeTicks& time) {
+  for (syncable::ModelTypeSet::const_iterator it = types.begin();
+       it != types.end();
+       ++it) {
+    unthrottle_times_[*it] = time;
+  }
+}
+
+void SyncSessionContext::PruneUnthrottledTypes(const base::TimeTicks& time) {
+  UnthrottleTimes::iterator it = unthrottle_times_.begin();
+  while (it != unthrottle_times_.end()) {
+    if (it->second <= time) {
+      // Delete and increment the iterator.
+      UnthrottleTimes::iterator iterator_to_delete = it;
+      ++it;
+      unthrottle_times_.erase(iterator_to_delete);
+    } else {
+      // Just increment the iterator.
+      ++it;
+    }
+  }
+}
+
+// TODO(lipalani): Call this function and fill the return values in snapshot
+// so it could be shown in the about:sync page.
+syncable::ModelTypeSet SyncSessionContext::GetThrottledTypes() const {
+  syncable::ModelTypeSet types;
+  for (UnthrottleTimes::const_iterator it = unthrottle_times_.begin();
+       it != unthrottle_times_.end();
+       ++it) {
+    types.insert(it->first);
+  }
+  return types;
 }
 
 }  // namespace sessions

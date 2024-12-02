@@ -77,15 +77,20 @@ class CloudPrintURLFetcherTest : public testing::Test,
 
   // CloudPrintURLFetcher::Delegate
   virtual CloudPrintURLFetcher::ResponseAction HandleRawResponse(
-      const URLFetcher* source,
+      const content::URLFetcher* source,
       const GURL& url,
       const net::URLRequestStatus& status,
       int response_code,
       const net::ResponseCookies& cookies,
       const std::string& data);
 
-  virtual void OnRequestAuthError() {
+  virtual CloudPrintURLFetcher::ResponseAction OnRequestAuthError() {
     ADD_FAILURE();
+    return CloudPrintURLFetcher::STOP_PROCESSING;
+  }
+
+  virtual std::string GetAuthHeader() {
+    return std::string();
   }
 
   scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy() {
@@ -125,7 +130,7 @@ class CloudPrintURLFetcherBasicTest : public CloudPrintURLFetcherTest {
       : handle_raw_response_(false), handle_raw_data_(false) { }
   // CloudPrintURLFetcher::Delegate
   virtual CloudPrintURLFetcher::ResponseAction HandleRawResponse(
-      const URLFetcher* source,
+      const content::URLFetcher* source,
       const GURL& url,
       const net::URLRequestStatus& status,
       int response_code,
@@ -133,12 +138,12 @@ class CloudPrintURLFetcherBasicTest : public CloudPrintURLFetcherTest {
       const std::string& data);
 
   virtual CloudPrintURLFetcher::ResponseAction HandleRawData(
-      const URLFetcher* source,
+      const content::URLFetcher* source,
       const GURL& url,
       const std::string& data);
 
   virtual CloudPrintURLFetcher::ResponseAction HandleJSONData(
-      const URLFetcher* source,
+      const content::URLFetcher* source,
       const GURL& url,
       DictionaryValue* json_data,
       bool succeeded);
@@ -162,7 +167,7 @@ class CloudPrintURLFetcherOverloadTest : public CloudPrintURLFetcherTest {
 
   // CloudPrintURLFetcher::Delegate
   virtual CloudPrintURLFetcher::ResponseAction HandleRawData(
-      const URLFetcher* source,
+      const content::URLFetcher* source,
       const GURL& url,
       const std::string& data);
 
@@ -178,7 +183,7 @@ class CloudPrintURLFetcherRetryBackoffTest : public CloudPrintURLFetcherTest {
 
   // CloudPrintURLFetcher::Delegate
   virtual CloudPrintURLFetcher::ResponseAction HandleRawData(
-      const URLFetcher* source,
+      const content::URLFetcher* source,
       const GURL& url,
       const std::string& data);
 
@@ -198,7 +203,7 @@ void CloudPrintURLFetcherTest::CreateFetcher(const GURL& url, int max_retries) {
 
 CloudPrintURLFetcher::ResponseAction
 CloudPrintURLFetcherTest::HandleRawResponse(
-    const URLFetcher* source,
+    const content::URLFetcher* source,
     const GURL& url,
     const net::URLRequestStatus& status,
     int response_code,
@@ -212,7 +217,7 @@ CloudPrintURLFetcherTest::HandleRawResponse(
 
 CloudPrintURLFetcher::ResponseAction
 CloudPrintURLFetcherBasicTest::HandleRawResponse(
-    const URLFetcher* source,
+    const content::URLFetcher* source,
     const GURL& url,
     const net::URLRequestStatus& status,
     int response_code,
@@ -233,7 +238,7 @@ CloudPrintURLFetcherBasicTest::HandleRawResponse(
 
 CloudPrintURLFetcher::ResponseAction
 CloudPrintURLFetcherBasicTest::HandleRawData(
-    const URLFetcher* source,
+    const content::URLFetcher* source,
     const GURL& url,
     const std::string& data) {
   // We should never get here if we returned true in HandleRawResponse
@@ -247,7 +252,7 @@ CloudPrintURLFetcherBasicTest::HandleRawData(
 
 CloudPrintURLFetcher::ResponseAction
 CloudPrintURLFetcherBasicTest::HandleJSONData(
-    const URLFetcher* source,
+    const content::URLFetcher* source,
     const GURL& url,
     DictionaryValue* json_data,
     bool succeeded) {
@@ -259,9 +264,10 @@ CloudPrintURLFetcherBasicTest::HandleJSONData(
 }
 
 CloudPrintURLFetcher::ResponseAction
-CloudPrintURLFetcherOverloadTest::HandleRawData(const URLFetcher* source,
-                                                const GURL& url,
-                                                const std::string& data) {
+CloudPrintURLFetcherOverloadTest::HandleRawData(
+    const content::URLFetcher* source,
+    const GURL& url,
+    const std::string& data) {
   const TimeDelta one_second = TimeDelta::FromMilliseconds(1000);
   response_count_++;
   if (response_count_ < 20) {
@@ -279,9 +285,10 @@ CloudPrintURLFetcherOverloadTest::HandleRawData(const URLFetcher* source,
 }
 
 CloudPrintURLFetcher::ResponseAction
-CloudPrintURLFetcherRetryBackoffTest::HandleRawData(const URLFetcher* source,
-                                                    const GURL& url,
-                                                    const std::string& data) {
+CloudPrintURLFetcherRetryBackoffTest::HandleRawData(
+    const content::URLFetcher* source,
+    const GURL& url,
+    const std::string& data) {
   response_count_++;
   // First attempt + 11 retries = 12 total responses.
   EXPECT_LE(response_count_, 12);

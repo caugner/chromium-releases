@@ -23,6 +23,7 @@
 #include "webkit/glue/form_field.h"
 
 using base::WaitableEvent;
+using content::BrowserThread;
 using sync_datatype_helper::test;
 using testing::_;
 
@@ -40,7 +41,7 @@ class GetAllAutofillEntries
     BrowserThread::PostTask(
         BrowserThread::DB,
         FROM_HERE,
-        NewRunnableMethod(this, &GetAllAutofillEntries::Run));
+        base::Bind(&GetAllAutofillEntries::Run, this));
     done_event_.Wait();
   }
 
@@ -72,10 +73,10 @@ class AutofillDBThreadObserverHelper : public DBThreadObserverHelper {
   virtual void RegisterObservers() {
     registrar_.Add(&observer_,
                    chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
     registrar_.Add(&observer_,
                    chrome::NOTIFICATION_AUTOFILL_PROFILE_CHANGED,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
 };
 

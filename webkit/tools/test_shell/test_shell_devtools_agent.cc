@@ -43,23 +43,11 @@ class WebKitClientMessageLoopImpl
 
 } //  namespace
 
-// static
-void TestShellDevToolsAgent::DispatchMessageLoop() {
-  MessageLoop* current = MessageLoop::current();
-  bool old_state = current->NestableTasksAllowed();
-  current->SetNestableTasksAllowed(true);
-  current->RunAllPending();
-  current->SetNestableTasksAllowed(old_state);
-}
-
 TestShellDevToolsAgent::TestShellDevToolsAgent()
     : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       dev_tools_client_(NULL) {
   static int dev_tools_agent_counter;
   routing_id_ = ++dev_tools_agent_counter;
-  if (routing_id_ == 1)
-    WebDevToolsAgent::setMessageLoopDispatchHandler(
-        &TestShellDevToolsAgent::DispatchMessageLoop);
 }
 
 TestShellDevToolsAgent::~TestShellDevToolsAgent() {
@@ -105,12 +93,6 @@ void TestShellDevToolsAgent::Call(const TestShellDevToolsCallArgs &args) {
     dev_tools_client_->all_messages_processed();
 }
 
-void TestShellDevToolsAgent::DelayedFrontendLoaded() {
-  WebDevToolsAgent *web_agent = GetWebAgent();
-  if (web_agent)
-    web_agent->frontendLoaded();
-}
-
 WebDevToolsAgent* TestShellDevToolsAgent::GetWebAgent() {
   if (!web_view_)
     return NULL;
@@ -131,13 +113,6 @@ void TestShellDevToolsAgent::detach() {
   if (web_agent)
     web_agent->detach();
   dev_tools_client_ = NULL;
-}
-
-void TestShellDevToolsAgent::frontendLoaded() {
-  MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&TestShellDevToolsAgent::DelayedFrontendLoaded,
-                 weak_factory_.GetWeakPtr()));
 }
 
 bool TestShellDevToolsAgent::evaluateInWebInspector(

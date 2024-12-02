@@ -7,24 +7,25 @@
 #include "chrome/browser/content_settings/content_settings_details.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "googleurl/src/gurl.h"
 
 MockSettingsObserver::MockSettingsObserver() {
   registrar_.Add(this, chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 MockSettingsObserver::~MockSettingsObserver() {}
 
-void MockSettingsObserver::Observe(int type,
-                                   const NotificationSource& source,
-                                   const NotificationDetails& details) {
+void MockSettingsObserver::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   HostContentSettingsMap* map =
-      Source<HostContentSettingsMap>(source).ptr();
+      content::Source<HostContentSettingsMap>(source).ptr();
   ContentSettingsDetails* settings_details =
-      Details<ContentSettingsDetails>(details).ptr();
+      content::Details<ContentSettingsDetails>(details).ptr();
   OnContentSettingsChanged(map,
                            settings_details->type(),
                            settings_details->update_all_types(),
@@ -33,6 +34,6 @@ void MockSettingsObserver::Observe(int type,
                            settings_details->update_all());
   // This checks that calling a Get function from an observer doesn't
   // deadlock.
-  map->GetContentSettings(GURL("http://random-hostname.com/"),
-                          GURL("http://random-hostname.com/"));
+  GURL url("http://random-hostname.com/");
+  map->GetContentSetting(url, url, CONTENT_SETTINGS_TYPE_IMAGES, "");
 }

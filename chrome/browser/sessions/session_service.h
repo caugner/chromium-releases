@@ -17,8 +17,8 @@
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/ui_base_types.h"
 
 class NavigationEntry;
@@ -49,7 +49,7 @@ class TabContentsWrapper;
 // SessionService rebuilds the contents of the file from the open state
 // of the browser.
 class SessionService : public BaseSessionService,
-                       public NotificationObserver {
+                       public content::NotificationObserver {
   friend class SessionServiceTestHelper;
  public:
   // Creates a SessionService for the specified profile.
@@ -157,7 +157,7 @@ class SessionService : public BaseSessionService,
   // notified. To take ownership of the vector clear it before returning.
   //
   // The time gives the time the session was closed.
-  typedef Callback2<Handle, std::vector<SessionWindow*>*>::Type
+  typedef base::Callback<void(Handle, std::vector<SessionWindow*>*)>
       SessionCallback;
 
   // Fetches the contents of the last session, notifying the callback when
@@ -168,7 +168,7 @@ class SessionService : public BaseSessionService,
   // callback invokes OnGotSessionCommands from which we map the
   // SessionCommands to browser state, then notify the callback.
   Handle GetLastSession(CancelableRequestConsumerBase* consumer,
-                        SessionCallback* callback);
+                        const SessionCallback& callback);
 
   // Fetches the contents of the current session, notifying the callback when
   // done. If the callback is supplied an empty vector of SessionWindows
@@ -178,11 +178,11 @@ class SessionService : public BaseSessionService,
   // callback invokes OnGotSessionCommands from which we map the
   // SessionCommands to browser state, then notify the callback.
   Handle GetCurrentSession(CancelableRequestConsumerBase* consumer,
-                           SessionCallback* callback);
+                           const SessionCallback& callback);
 
   // Overridden from BaseSessionService because we want some UMA reporting on
   // session update activities.
-  virtual void Save();
+  virtual void Save() OVERRIDE;
 
  private:
   typedef std::map<SessionID::id_type, std::pair<int, int> > IdToRange;
@@ -207,8 +207,8 @@ class SessionService : public BaseSessionService,
                           Browser* browser);
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Sets the application extension id of the specified tab.
   void SetTabExtensionAppID(const SessionID& window_id,
@@ -350,7 +350,7 @@ class SessionService : public BaseSessionService,
 
   // Schedules the specified command. This method takes ownership of the
   // command.
-  virtual void ScheduleCommand(SessionCommand* command);
+  virtual void ScheduleCommand(SessionCommand* command) OVERRIDE;
 
   // Converts all pending tab/window closes to commands and schedules them.
   void CommitPendingCloses();
@@ -404,7 +404,7 @@ class SessionService : public BaseSessionService,
   static WindowType WindowTypeForBrowserType(Browser::Type type);
   static Browser::Type BrowserTypeForWindowType(WindowType type);
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Maps from session tab id to the range of navigation entries that has
   // been written to disk.

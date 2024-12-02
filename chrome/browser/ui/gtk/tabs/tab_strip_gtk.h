@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/task.h"
@@ -18,7 +19,8 @@
 #include "chrome/browser/ui/gtk/tabstrip_origin_provider.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/tabs/hover_tab_selector.h"
-#include "content/common/notification_observer.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/gfx/rect.h"
@@ -31,7 +33,7 @@ class GtkThemeService;
 class TabStripGtk : public TabStripModelObserver,
                     public TabGtk::TabDelegate,
                     public MessageLoopForUI::Observer,
-                    public NotificationObserver,
+                    public content::NotificationObserver,
                     public TabstripOriginProvider,
                     public ViewIDUtil::Delegate {
  public:
@@ -97,69 +99,73 @@ class TabStripGtk : public TabStripModelObserver,
   void SetVerticalOffset(int offset);
 
   // TabstripOriginProvider implementation -------------------------------------
-  virtual gfx::Point GetTabStripOriginForWidget(GtkWidget* widget);
+  virtual gfx::Point GetTabStripOriginForWidget(GtkWidget* widget) OVERRIDE;
 
   // ViewIDUtil::Delegate implementation ---------------------------------------
-  virtual GtkWidget* GetWidgetForViewID(ViewID id);
+  virtual GtkWidget* GetWidgetForViewID(ViewID id) OVERRIDE;
 
  protected:
   // TabStripModelObserver implementation:
   virtual void TabInsertedAt(TabContentsWrapper* contents,
                              int index,
-                             bool foreground);
-  virtual void TabDetachedAt(TabContentsWrapper* contents, int index);
+                             bool foreground) OVERRIDE;
+  virtual void TabDetachedAt(TabContentsWrapper* contents, int index) OVERRIDE;
   virtual void TabMoved(TabContentsWrapper* contents,
                         int from_index,
-                        int to_index);
+                        int to_index) OVERRIDE;
   virtual void ActiveTabChanged(TabContentsWrapper* old_contents,
                                 TabContentsWrapper* new_contents,
                                 int index,
-                                bool user_gesture);
-  virtual void TabSelectionChanged(TabStripModel* tab_strip_model,
-                                   const TabStripSelectionModel& old_model);
+                                bool user_gesture) OVERRIDE;
+  virtual void TabSelectionChanged(
+      TabStripModel* tab_strip_model,
+      const TabStripSelectionModel& old_model) OVERRIDE;
   virtual void TabChangedAt(TabContentsWrapper* contents, int index,
-                            TabChangeType change_type);
+                            TabChangeType change_type) OVERRIDE;
   virtual void TabReplacedAt(TabStripModel* tab_strip_model,
                              TabContentsWrapper* old_contents,
                              TabContentsWrapper* new_contents,
-                             int index);
-  virtual void TabMiniStateChanged(TabContentsWrapper* contents, int index);
+                             int index) OVERRIDE;
+  virtual void TabMiniStateChanged(TabContentsWrapper* contents,
+                                   int index) OVERRIDE;
   virtual void TabBlockedStateChanged(TabContentsWrapper* contents,
-                                      int index);
+                                      int index) OVERRIDE;
 
   // TabGtk::TabDelegate implementation:
-  virtual bool IsTabActive(const TabGtk* tab) const;
-  virtual bool IsTabSelected(const TabGtk* tab) const;
-  virtual bool IsTabPinned(const TabGtk* tab) const;
-  virtual bool IsTabDetached(const TabGtk* tab) const;
-  virtual void ActivateTab(TabGtk* tab);
-  virtual void ToggleTabSelection(TabGtk* tab);
-  virtual void ExtendTabSelection(TabGtk* tab);
-  virtual void CloseTab(TabGtk* tab);
+  virtual bool IsTabActive(const TabGtk* tab) const OVERRIDE;
+  virtual bool IsTabSelected(const TabGtk* tab) const OVERRIDE;
+  virtual bool IsTabPinned(const TabGtk* tab) const OVERRIDE;
+  virtual bool IsTabDetached(const TabGtk* tab) const OVERRIDE;
+  virtual void ActivateTab(TabGtk* tab) OVERRIDE;
+  virtual void ToggleTabSelection(TabGtk* tab) OVERRIDE;
+  virtual void ExtendTabSelection(TabGtk* tab) OVERRIDE;
+  virtual void CloseTab(TabGtk* tab) OVERRIDE;
   virtual bool IsCommandEnabledForTab(
-      TabStripModel::ContextMenuCommand command_id, const TabGtk* tab) const;
+      TabStripModel::ContextMenuCommand command_id,
+      const TabGtk* tab) const OVERRIDE;
   virtual void ExecuteCommandForTab(
-      TabStripModel::ContextMenuCommand command_id, TabGtk* tab);
+      TabStripModel::ContextMenuCommand command_id, TabGtk* tab) OVERRIDE;
   virtual void StartHighlightTabsForCommand(
-      TabStripModel::ContextMenuCommand command_id, TabGtk* tab);
+      TabStripModel::ContextMenuCommand command_id, TabGtk* tab) OVERRIDE;
   virtual void StopHighlightTabsForCommand(
-      TabStripModel::ContextMenuCommand command_id, TabGtk* tab);
-  virtual void StopAllHighlighting();
-  virtual void MaybeStartDrag(TabGtk* tab, const gfx::Point& point);
-  virtual void ContinueDrag(GdkDragContext* context);
-  virtual bool EndDrag(bool canceled);
-  virtual bool HasAvailableDragActions() const;
-  virtual ThemeService* GetThemeProvider();
-  virtual TabStripMenuController* GetTabStripMenuControllerForTab(TabGtk* tab);
+      TabStripModel::ContextMenuCommand command_id, TabGtk* tab) OVERRIDE;
+  virtual void StopAllHighlighting() OVERRIDE;
+  virtual void MaybeStartDrag(TabGtk* tab, const gfx::Point& point) OVERRIDE;
+  virtual void ContinueDrag(GdkDragContext* context) OVERRIDE;
+  virtual bool EndDrag(bool canceled) OVERRIDE;
+  virtual bool HasAvailableDragActions() const OVERRIDE;
+  virtual GtkThemeService* GetThemeProvider() OVERRIDE;
+  virtual TabStripMenuController* GetTabStripMenuControllerForTab(
+      TabGtk* tab) OVERRIDE;
 
   // MessageLoop::Observer implementation:
-  virtual void WillProcessEvent(GdkEvent* event);
-  virtual void DidProcessEvent(GdkEvent* event);
+  virtual void WillProcessEvent(GdkEvent* event) OVERRIDE;
+  virtual void DidProcessEvent(GdkEvent* event) OVERRIDE;
 
-  // Overridden from NotificationObserver:
+  // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Horizontal gap between mini-tabs and normal tabs.
   static const int mini_to_non_mini_gap_;
@@ -284,6 +290,9 @@ class TabStripGtk : public TabStripModelObserver,
   // Initializes the new tab button.
   CustomDrawButton* MakeNewTabButton();
 
+  // Sets the theme specific background on the new tab button.
+  void SetNewTabButtonBackground();
+
   // Gets the number of Tabs in the collection.
   int GetTabCount() const;
 
@@ -324,14 +333,8 @@ class TabStripGtk : public TabStripModelObserver,
   // Returns the x-coordinate tabs start from.
   int tab_start_x() const;
 
-  // Perform an animated resize-relayout of the TabStrip immediately. The
-  // value returned indicates whether a resize actually took place.
-  bool ResizeLayoutTabs();
-
-  // See ResizeLayoutTabs. Does not return success or failure. Necessitated by
-  // base::Bind and friends, which cannot handle a WeakPtr for a closure that
-  // has a return value.
-  void ResizeLayoutTabsWithoutResult();
+  // Perform an animated resize-relayout of the TabStrip immediately.
+  void ResizeLayoutTabs();
 
   // Returns whether or not the cursor is currently in the "tab strip zone"
   // which is defined as the region above the TabStrip and a bit below it.
@@ -417,8 +420,6 @@ class TabStripGtk : public TabStripModelObserver,
   // Optionally a full Layout will be performed, specified by |layout|.
   void FinishAnimation(TabAnimation* animation, bool layout);
 
-  NotificationRegistrar registrar_;
-
   // The Tabs we contain, and their last generated "good" bounds.
   std::vector<TabData> tab_data_;
 
@@ -481,11 +482,16 @@ class TabStripGtk : public TabStripModelObserver,
   // ResizeLayoutTabsNow method.
   base::WeakPtrFactory<TabStripGtk> weak_factory_;
 
+  // A different factory for calls to Layout().
+  base::WeakPtrFactory<TabStripGtk> layout_factory_;
+
   // True if the tabstrip has already been added as a MessageLoop observer.
   bool added_as_message_loop_observer_;
 
   // Helper for performing tab selection as a result of dragging over a tab.
   HoverTabSelector hover_tab_selector_;
+
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(TabStripGtk);
 };

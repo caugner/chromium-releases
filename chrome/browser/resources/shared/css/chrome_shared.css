@@ -125,12 +125,6 @@ html.hide-menu #mainview {
   padding: 0 24px;
 }
 
-div.checkbox,
-div.radio {
-  margin: 5px 0;
-  color: #444;
-}
-
 div.disabled {
   color: #888;
 }
@@ -146,56 +140,21 @@ input:not([type]) {
   padding: 3px;
 }
 
-/* CHECKBOX, RADIO */
-input[type=checkbox],
-input[type=radio] {
-  margin-left: 0;
-  margin-right: 0;
-  position: relative;
-  top: 1px;
-}
-
-/* Checkbox and radio buttons have different sizes on different platforms. The
- * following rules have platform specific tweaks.
- * TODO(arv): Test the vertical position on Linux and CrOS as well.
- */
-
-label > input[type=checkbox],
-label > input[type=radio] {
-  opacity: 0.7;
-  margin-top: 1px;
-}
-
-html[os=mac] label > input[type=checkbox],
-html[os=mac] label > input[type=radio] {
-  margin-top: 2px;
-}
-
-html[os=chromeos] label > input[type=checkbox],
-html[os=chromeos] label > input[type=radio] {
-  top: 2px;
-}
-
-/* Checkbox and radio hover visuals.
- * Their appearance when checked is set to be the same.
- */
-label:hover > input[type=checkbox]:not([disabled]),
-label:hover > input[type=radio]:not([disabled]),
-label > input:not([disabled]):checked {
-  opacity: 1;
-}
-
-label:hover > input[type=checkbox]:not([disabled]) ~ span,
-label:hover > input[type=radio]:not([disabled]) ~ span,
-label > input:not([disabled]):checked ~ span {
-  color: #222;
-}
-
-/* This will 'disable' the label associated with any input whose next sibling is
- * the span containing the label (usually a checkbox or radio).
- */
-label > input[disabled] ~ span {
+input[type='text']:disabled {
   color: #888;
+}
+
+/* CHECKBOX, RADIO */
+/* TODO(estade): all of this should be merged into checkbox.css and then we can
+ * remove the print-preview hack. */
+div.checkbox,
+div.radio {
+  margin: 5px 0;
+}
+
+input[type=radio] ~ span,
+input[type=checkbox] ~ span {
+  color: #444;
 }
 
 /* Elements that need to be LTR even in an RTL context, but should align
@@ -211,8 +170,8 @@ html[dir='rtl'] .weakrtl {
  * on some), the class needs to be on the enclosing div.
  */
 html[dir='rtl'] div.weakrtl input {
-    direction: ltr;
-    text-align: right;
+  direction: ltr;
+  text-align: right;
 }
 
 html[dir='rtl'] .favicon-cell.weakrtl {
@@ -253,5 +212,3 @@ html[dir='rtl'] .weakrtl input::-webkit-input-placeholder {
   padding-top: 13px;
   text-shadow: white 0 1px 2px;
 }
-
-

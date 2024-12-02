@@ -242,12 +242,7 @@ void FakeSession::CreateDatagramChannel(
   callback.Run(channel);
 }
 
-FakeSocket* FakeSession::control_channel() {
-  return &control_channel_;
-}
-
-FakeSocket* FakeSession::event_channel() {
-  return &event_channel_;
+void FakeSession::CancelChannelCreation(const std::string& name) {
 }
 
 const std::string& FakeSession::jid() {
@@ -264,30 +259,6 @@ const SessionConfig& FakeSession::config() {
 
 void FakeSession::set_config(const SessionConfig& config) {
   config_ = config;
-}
-
-const std::string& FakeSession::initiator_token() {
-  return initiator_token_;
-}
-
-void FakeSession::set_initiator_token(const std::string& initiator_token) {
-  initiator_token_ = initiator_token;
-}
-
-const std::string& FakeSession::receiver_token() {
-  return receiver_token_;
-}
-
-void FakeSession::set_receiver_token(const std::string& receiver_token) {
-  receiver_token_ = receiver_token;
-}
-
-void FakeSession::set_shared_secret(const std::string& shared_secret) {
-  shared_secret_ = shared_secret;
-}
-
-const std::string& FakeSession::shared_secret() {
-  return shared_secret_;
 }
 
 void FakeSession::Close() {

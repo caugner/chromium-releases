@@ -23,8 +23,8 @@
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/rect.h"
-#include "views/controls/native/native_view_host.h"
-#include "views/drag_controller.h"
+#include "ui/views/controls/native/native_view_host.h"
+#include "ui/views/drag_controller.h"
 
 #if defined(USE_AURA)
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
@@ -49,12 +49,7 @@ class TabContents;
 class TabContentsWrapper;
 class TemplateURLService;
 
-namespace views {
-class HorizontalPainter;
-class Label;
-}  // namespace views
-
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(USE_AURA)
 class SuggestedTextView;
 #endif
 
@@ -73,7 +68,7 @@ class LocationBarView : public LocationBar,
                         public AutocompleteEditController,
                         public DropdownBarHostDelegate,
                         public TemplateURLServiceObserver,
-                        public NotificationObserver {
+                        public content::NotificationObserver {
  public:
   // The location bar view's class name.
   static const char kViewClassName[];
@@ -164,7 +159,7 @@ class LocationBarView : public LocationBar,
   // appears, not where the icons are shown).
   gfx::Point GetLocationEntryOrigin() const;
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(USE_AURA)
   // Invoked from OmniboxViewWin to show the instant suggestion.
   void SetInstantSuggestion(const string16& text,
                             bool animate_to_complete);
@@ -192,6 +187,8 @@ class LocationBarView : public LocationBar,
   // in the toolbar in full keyboard accessibility mode.
   virtual void SelectAll();
 
+  const gfx::Font& font() const { return font_; }
+
 #if defined(OS_WIN) && !defined(USE_AURA)
   // Event Handlers
   virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
@@ -200,9 +197,12 @@ class LocationBarView : public LocationBar,
   virtual void OnMouseCaptureLost() OVERRIDE;
 #endif
 
+  LocationIconView* location_icon_view() { return location_icon_view_; }
   const LocationIconView* location_icon_view() const {
     return location_icon_view_;
   }
+
+  views::View* location_entry_view() const { return location_entry_view_; }
 
   // AutocompleteEditController
   virtual void OnAutocompleteAccept(const GURL& url,
@@ -264,10 +264,10 @@ class LocationBarView : public LocationBar,
   // Overridden from TemplateURLServiceObserver
   virtual void OnTemplateURLServiceChanged() OVERRIDE;
 
-  // Overridden from NotificationObserver
+  // Overridden from content::NotificationObserver
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Thickness of the left and right edges of the omnibox, in normal mode.
   static const int kNormalHorizontalEdgeThickness;
@@ -322,7 +322,7 @@ class LocationBarView : public LocationBar,
   // Sets the visibility of view to new_vis.
   void ToggleVisibility(bool new_vis, views::View* view);
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(USE_AURA)
 #if !defined(USE_AURA)
   // Helper for the Mouse event handlers that does all the real work.
   void OnMouseEvent(const views::MouseEvent& event, UINT msg);
@@ -387,7 +387,7 @@ class LocationBarView : public LocationBar,
   // Shown if the user has selected a keyword.
   SelectedKeywordView* selected_keyword_view_;
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(USE_AURA)
   // View responsible for showing suggested text. This is NULL when there is no
   // suggested text.
   SuggestedTextView* suggested_text_view_;

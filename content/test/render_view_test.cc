@@ -5,9 +5,9 @@
 #include "content/test/render_view_test.h"
 
 #include "content/common/dom_storage_common.h"
-#include "content/common/renderer_preferences.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/common/renderer_preferences.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_main_platform_delegate.h"
 #include "content/test/mock_render_process.h"
@@ -16,7 +16,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -96,10 +96,8 @@ void RenderViewTest::SetUp() {
     render_thread_.reset(new MockRenderThread());
   render_thread_->set_routing_id(kRouteId);
 
-  sandbox_init_wrapper_.reset(new SandboxInitWrapper());
   command_line_.reset(new CommandLine(CommandLine::NO_PROGRAM));
-  params_.reset(new MainFunctionParams(*command_line_, *sandbox_init_wrapper_,
-                                       NULL));
+  params_.reset(new content::MainFunctionParams(*command_line_));
   platform_.reset(new RendererMainPlatformDelegate(*params_));
   platform_->PlatformInitialize();
 
@@ -114,7 +112,7 @@ void RenderViewTest::SetUp() {
   RenderViewImpl* view = RenderViewImpl::Create(
       0,
       kOpenerId,
-      RendererPreferences(),
+      content::RendererPreferences(),
       WebPreferences(),
       new SharedRenderViewCounter(0),
       kRouteId,
@@ -154,14 +152,16 @@ void RenderViewTest::TearDown() {
   platform_.reset();
   params_.reset();
   command_line_.reset();
-  sandbox_init_wrapper_.reset();
 }
 
 int RenderViewTest::SendKeyEvent(MockKeyboard::Layout layout,
                                  int key_code,
                                  MockKeyboard::Modifiers modifiers,
                                  std::wstring* output) {
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  NOTIMPLEMENTED();
+  return L'\0';
+#elif defined(OS_WIN)
   // Retrieve the Unicode character for the given tuple (keyboard-layout,
   // key-code, and modifiers).
   // Exit when a keyboard-layout driver cannot assign a Unicode character to
@@ -179,17 +179,20 @@ int RenderViewTest::SendKeyEvent(MockKeyboard::Layout layout,
   // WM_KEYDOWN, WM_CHAR, and WM_KEYUP.
   // WM_KEYDOWN and WM_KEYUP sends virtual-key codes. On the other hand,
   // WM_CHAR sends a composed Unicode character.
-  NativeWebKeyboardEvent keydown_event(NULL, WM_KEYDOWN, key_code, 0);
+  MSG msg1 = { NULL, WM_KEYDOWN, key_code, 0 };
+  NativeWebKeyboardEvent keydown_event(msg1);
   SendNativeKeyEvent(keydown_event);
 
-  NativeWebKeyboardEvent char_event(NULL, WM_CHAR, (*output)[0], 0);
+  MSG msg2 = { NULL, WM_CHAR, (*output)[0], 0 };
+  NativeWebKeyboardEvent char_event(msg2);
   SendNativeKeyEvent(char_event);
 
-  NativeWebKeyboardEvent keyup_event(NULL, WM_KEYUP, key_code, 0);
+  MSG msg3 = { NULL, WM_KEYUP, key_code, 0 };
+  NativeWebKeyboardEvent keyup_event(msg3);
   SendNativeKeyEvent(keyup_event);
 
   return length;
-#elif defined(OS_LINUX) && !defined(USE_AURA)
+#elif defined(OS_LINUX)
   // We ignore |layout|, which means we are only testing the layout of the
   // current locale. TODO(estade): fix this to respect |layout|.
   std::vector<GdkEvent*> events;
@@ -206,7 +209,7 @@ int RenderViewTest::SendKeyEvent(MockKeyboard::Layout layout,
     // events for the modifier keys).
     if ((i + 1) == (events.size() / 2) || i == (events.size() / 2)) {
       unicode_key = gdk_keyval_to_unicode(events[i]->key.keyval);
-      NativeWebKeyboardEvent webkit_event(&events[i]->key);
+      NativeWebKeyboardEvent webkit_event(events[i]);
       SendNativeKeyEvent(webkit_event);
 
       // Need to add a char event after the key down.
@@ -230,6 +233,11 @@ int RenderViewTest::SendKeyEvent(MockKeyboard::Layout layout,
 
 void RenderViewTest::SendNativeKeyEvent(
     const NativeWebKeyboardEvent& key_event) {
+  SendWebKeyboardEvent(key_event);
+}
+
+void RenderViewTest::SendWebKeyboardEvent(
+    const WebKit::WebKeyboardEvent& key_event) {
   scoped_ptr<IPC::Message> input_message(new ViewMsg_HandleInputEvent(0));
   input_message->WriteData(reinterpret_cast<const char*>(&key_event),
                            sizeof(WebKit::WebKeyboardEvent));

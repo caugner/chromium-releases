@@ -34,19 +34,27 @@ std::string GetRequestType(const GURL& url) {
 namespace policy {
 
 // An URLFetcher that calls back to its factory to figure out what to respond.
-class TestingPolicyURLFetcher : public URLFetcher {
+class TestingPolicyURLFetcher : public TestURLFetcher {
  public:
   TestingPolicyURLFetcher(
       const base::WeakPtr<TestingPolicyURLFetcherFactory>& parent,
       const GURL& url,
-      URLFetcher::RequestType request_type,
-      URLFetcher::Delegate* delegate);
+      content::URLFetcherDelegate* delegate);
 
   virtual void Start() OVERRIDE;
   void Respond();
 
+  virtual int GetResponseCode() const OVERRIDE {
+    return response_.response_code;
+  }
+
+  virtual bool GetResponseAsString(
+      std::string* out_response_string) const OVERRIDE {
+    *out_response_string = response_.response_data;
+    return true;
+  }
+
  private:
-  GURL url_;
   TestURLResponse response_;
   base::WeakPtr<TestingPolicyURLFetcherFactory> parent_;
 
@@ -56,11 +64,11 @@ class TestingPolicyURLFetcher : public URLFetcher {
 TestingPolicyURLFetcher::TestingPolicyURLFetcher(
     const base::WeakPtr<TestingPolicyURLFetcherFactory>& parent,
     const GURL& url,
-    URLFetcher::RequestType request_type,
-    URLFetcher::Delegate* delegate)
-        : URLFetcher(url, request_type, delegate),
-          url_(url),
-          parent_(parent) {
+    content::URLFetcherDelegate* delegate)
+    : TestURLFetcher(0, url, delegate),
+      parent_(parent) {
+  set_url(url);
+  set_status(net::URLRequestStatus(net::URLRequestStatus::SUCCESS, 0));
 }
 
 void TestingPolicyURLFetcher::Start() {
@@ -68,7 +76,7 @@ void TestingPolicyURLFetcher::Start() {
 
   std::string auth_header;
   net::HttpRequestHeaders headers;
-  std::string request = GetRequestType(url_);
+  std::string request = GetRequestType(GetURL());
   GetExtraRequestHeaders(&headers);
   headers.GetHeader("Authorization", &auth_header);
   // The following method is mocked by the currently running test.
@@ -82,13 +90,7 @@ void TestingPolicyURLFetcher::Start() {
 }
 
 void TestingPolicyURLFetcher::Respond() {
-  delegate()->OnURLFetchComplete(
-      this,
-      url_,
-      net::URLRequestStatus(net::URLRequestStatus::SUCCESS, 0),
-      response_.response_code,
-      net::ResponseCookies(),
-      response_.response_data);
+  delegate()->OnURLFetchComplete(this);
 }
 
 TestingPolicyURLFetcherFactory::TestingPolicyURLFetcherFactory(
@@ -114,13 +116,13 @@ void TestingPolicyURLFetcherFactory::GetResponse(
   Intercept(auth_header, request, response);
 }
 
-URLFetcher* TestingPolicyURLFetcherFactory::CreateURLFetcher(
+content::URLFetcher* TestingPolicyURLFetcherFactory::CreateURLFetcher(
     int id,
     const GURL& url,
-    URLFetcher::RequestType request_type,
-    URLFetcher::Delegate* delegate) {
+    content::URLFetcher::RequestType request_type,
+    content::URLFetcherDelegate* delegate) {
   return new TestingPolicyURLFetcher(
-      weak_ptr_factory_.GetWeakPtr(), url, request_type, delegate);
+      weak_ptr_factory_.GetWeakPtr(), url, delegate);
 }
 
 }  // namespace policy

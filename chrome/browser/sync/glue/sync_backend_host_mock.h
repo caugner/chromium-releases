@@ -8,7 +8,7 @@
 
 #include <set>
 
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "content/public/browser/notification_types.h"
@@ -25,7 +25,7 @@ class SyncBackendHostMock : public SyncBackendHost {
                void(const std::set<syncable::ModelType>&,
                     const std::set<syncable::ModelType>&,
                     sync_api::ConfigureReason,
-                    base::Callback<void(bool)>,
+                    base::Callback<void(const syncable::ModelTypeSet&)>,
                     bool));
   MOCK_METHOD0(StartSyncingWithServer, void());
 };

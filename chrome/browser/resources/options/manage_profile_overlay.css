@@ -53,7 +53,7 @@
 }
 
 #manage-profile-error-bubble {
-  -webkit-transition: max-height 0.2s, padding 0.2s;
+  -webkit-transition: max-height 200ms, padding 200ms;
   background-color: #eeb939;
   border-radius: 4px;
   font-weight: bold;
@@ -78,3 +78,11 @@
   padding: 2px;
 }
 
+#delete-profile-message {
+  background-repeat: no-repeat;
+  -webkit-padding-start: 48px;
+}
+
+html[dir='rtl'] #delete-profile-message {
+  background-position: right;
+}

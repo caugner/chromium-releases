@@ -13,15 +13,17 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/tab_contents/title_updated_details.h"
-#include "content/common/notification_service.h"
-#include "content/common/view_messages.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/common/frame_navigate_params.h"
 
 HistoryTabHelper::HistoryTabHelper(TabContents* tab_contents)
     : TabContentsObserver(tab_contents),
       received_page_title_(false) {
   registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_TITLE_UPDATED,
-                 Source<TabContents>(tab_contents));
+                 content::Source<TabContents>(tab_contents));
 }
 
 HistoryTabHelper::~HistoryTabHelper() {
@@ -44,11 +46,11 @@ scoped_refptr<history::HistoryAddPageArgs>
 HistoryTabHelper::CreateHistoryAddPageArgs(
     const GURL& virtual_url,
     const content::LoadCommittedDetails& details,
-    const ViewHostMsg_FrameNavigate_Params& params) {
+    const content::FrameNavigateParams& params) {
   scoped_refptr<history::HistoryAddPageArgs> add_page_args(
       new history::HistoryAddPageArgs(
           params.url, base::Time::Now(), tab_contents(), params.page_id,
-          params.referrer, params.redirects, params.transition,
+          params.referrer.url, params.redirects, params.transition,
           history::SOURCE_BROWSED, details.did_replace_entry));
   if (content::PageTransitionIsMainFrame(params.transition) &&
       virtual_url != params.url) {
@@ -76,16 +78,16 @@ bool HistoryTabHelper::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void HistoryTabHelper::DidNavigateMainFramePostCommit(
+void HistoryTabHelper::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
-    const ViewHostMsg_FrameNavigate_Params& params) {
+    const content::FrameNavigateParams& params) {
   // Allow the new page to set the title again.
   received_page_title_ = false;
 }
 
-void HistoryTabHelper::DidNavigateAnyFramePostCommit(
+void HistoryTabHelper::DidNavigateAnyFrame(
     const content::LoadCommittedDetails& details,
-    const ViewHostMsg_FrameNavigate_Params& params) {
+    const content::FrameNavigateParams& params) {
   // Update history. Note that this needs to happen after the entry is complete,
   // which WillNavigate[Main,Sub]Frame will do before this function is called.
   if (!params.should_update_history)
@@ -106,10 +108,11 @@ void HistoryTabHelper::DidNavigateAnyFramePostCommit(
 }
 
 void HistoryTabHelper::Observe(int type,
-                               const NotificationSource& source,
-                               const NotificationDetails& details) {
+                               const content::NotificationSource& source,
+                               const content::NotificationDetails& details) {
   DCHECK(type == content::NOTIFICATION_TAB_CONTENTS_TITLE_UPDATED);
-  TitleUpdatedDetails* title = Details<TitleUpdatedDetails>(details).ptr();
+  TitleUpdatedDetails* title =
+      content::Details<TitleUpdatedDetails>(details).ptr();
 
   if (received_page_title_)
     return;

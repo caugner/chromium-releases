@@ -9,13 +9,14 @@
 #include "base/string16.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/intents_messages.h"
 #include "content/public/common/content_switches.h"
-#include "ipc/ipc_message_macros.h"
 #include "webkit/glue/web_intent_data.h"
 #include "webkit/glue/web_intent_reply_data.h"
 
 IntentInjector::IntentInjector(TabContents* tab_contents)
     : TabContentsObserver(tab_contents),
+      source_tab_(NULL),
       intent_id_(0) {
   DCHECK(tab_contents);
 }
@@ -24,13 +25,22 @@ IntentInjector::~IntentInjector() {
 }
 
 void IntentInjector::TabContentsDestroyed(TabContents* tab) {
+  if (source_tab_) {
+    source_tab_->Send(new IntentsMsg_WebIntentReply(
+        0, webkit_glue::WEB_INTENT_SERVICE_TAB_CLOSED, string16(), intent_id_));
+  }
+
   delete this;
+}
+
+void IntentInjector::SourceTabContentsDestroyed(TabContents* tab) {
+  source_tab_ = NULL;
 }
 
 void IntentInjector::SetIntent(IPC::Message::Sender* source_tab,
                                const webkit_glue::WebIntentData& intent,
                                int intent_id) {
-  source_tab_.reset(source_tab);
+  source_tab_ = source_tab;
   source_intent_.reset(new webkit_glue::WebIntentData(intent));
   intent_id_ = intent_id;
 
@@ -41,9 +51,9 @@ void IntentInjector::RenderViewCreated(RenderViewHost* host) {
   SendIntent();
 }
 
-void IntentInjector::DidNavigateMainFramePostCommit(
+void IntentInjector::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
-    const ViewHostMsg_FrameNavigate_Params& params) {
+    const content::FrameNavigateParams& params) {
   SendIntent();
 }
 
@@ -85,8 +95,8 @@ void IntentInjector::OnReply(const IPC::Message& message,
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableWebIntents))
     NOTREACHED();
 
-  // TODO(gbillock): We need to observe source_tab_ and make
-  // sure it hasn't been closed or something...
-  source_tab_->Send(new IntentsMsg_WebIntentReply(
-      0, reply_type, data, intent_id));
+  if (source_tab_) {
+    source_tab_->Send(new IntentsMsg_WebIntentReply(
+        0, reply_type, data, intent_id));
+  }
 }

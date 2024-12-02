@@ -18,7 +18,7 @@
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "skia/ext/skia_utils_mac.h"
 
 namespace {
@@ -61,7 +61,7 @@ PageActionDecoration::PageActionDecoration(
   }
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
-      Source<Profile>(profile_));
+      content::Source<Profile>(profile_));
 
   // We set the owner last of all so that we can determine whether we are in
   // the process of initializing this class or not.
@@ -186,10 +186,10 @@ void PageActionDecoration::UpdateVisibility(TabContents* contents,
 
   if (IsVisible() != visible) {
     SetVisible(visible);
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED,
-        Source<ExtensionAction>(page_action_),
-        Details<TabContents>(contents));
+        content::Source<ExtensionAction>(page_action_),
+        content::Details<TabContents>(contents));
   }
 }
 
@@ -242,8 +242,8 @@ NSMenu* PageActionDecoration::GetMenu() {
 
 void PageActionDecoration::Observe(
     int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE: {
       ExtensionPopupController* popup = [ExtensionPopupController popup];

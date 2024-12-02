@@ -98,6 +98,8 @@ class BASE_EXPORT Value {
   virtual bool GetAsString(string16* out_value) const;
   virtual bool GetAsList(ListValue** out_value);
   virtual bool GetAsList(const ListValue** out_value) const;
+  virtual bool GetAsDictionary(DictionaryValue** out_value);
+  virtual bool GetAsDictionary(const DictionaryValue** out_value) const;
 
   // This creates a deep copy of the entire Value tree, and returns a pointer
   // to the copy.  The caller gets ownership of the copy, of course.
@@ -214,6 +216,11 @@ class BASE_EXPORT DictionaryValue : public Value {
  public:
   DictionaryValue();
   virtual ~DictionaryValue();
+
+  // Overridden from Value:
+  virtual bool GetAsDictionary(DictionaryValue** out_value) OVERRIDE;
+  virtual bool GetAsDictionary(
+      const DictionaryValue** out_value) const OVERRIDE;
 
   // Returns true if the current dictionary has a value for the given key.
   bool HasKey(const std::string& key) const;
@@ -341,6 +348,24 @@ class BASE_EXPORT DictionaryValue : public Value {
 
   key_iterator begin_keys() const { return key_iterator(dictionary_.begin()); }
   key_iterator end_keys() const { return key_iterator(dictionary_.end()); }
+
+  // This class provides an iterator over both keys and values in the
+  // dictionary.  It can't be used to modify the dictionary.
+  class Iterator {
+   public:
+    explicit Iterator(const DictionaryValue& target)
+        : target_(target), it_(target.dictionary_.begin()) {}
+
+    bool HasNext() const { return it_ != target_.dictionary_.end(); }
+    void Advance() { ++it_; }
+
+    const std::string& key() const { return it_->first; }
+    const Value& value() const { return *it_->second; }
+
+   private:
+    const DictionaryValue& target_;
+    ValueMap::const_iterator it_;
+  };
 
   // Overridden from Value:
   virtual DictionaryValue* DeepCopy() const OVERRIDE;

@@ -50,6 +50,7 @@ void PageSetup::Clear() {
   content_area_.SetRect(0, 0, 0, 0);
   effective_margins_.Clear();
   text_height_ = 0;
+  forced_margins_ = false;
 }
 
 bool PageSetup::Equals(const PageSetup& rhs) const {
@@ -76,19 +77,17 @@ void PageSetup::Init(const gfx::Size& physical_size,
   printable_area_ = printable_area;
   text_height_ = text_height;
 
-  CalculateSizesWithinRect(printable_area_, text_height_);
+  SetRequestedMarginsAndCalculateSizes(requested_margins_);
 }
 
 void PageSetup::SetRequestedMargins(const PageMargins& requested_margins) {
-  requested_margins_ = requested_margins;
-  if (printable_area_.width() && printable_area_.height())
-    CalculateSizesWithinRect(printable_area_, text_height_);
+  forced_margins_ = false;
+  SetRequestedMarginsAndCalculateSizes(requested_margins);
 }
 
 void PageSetup::ForceRequestedMargins(const PageMargins& requested_margins) {
-  requested_margins_ = requested_margins;
-  if (physical_size_.width() && physical_size_.height())
-    CalculateSizesWithinRect(gfx::Rect(physical_size_), 0);
+  forced_margins_ = true;
+  SetRequestedMarginsAndCalculateSizes(requested_margins);
 }
 
 void PageSetup::FlipOrientation() {
@@ -101,6 +100,17 @@ void PageSetup::FlipOrientation() {
                                  printable_area_.height(),
                                  printable_area_.width());
     Init(new_size, new_printable_area, text_height_);
+  }
+}
+
+void PageSetup::SetRequestedMarginsAndCalculateSizes(
+    const PageMargins& requested_margins) {
+  requested_margins_ = requested_margins;
+  if (physical_size_.width() && physical_size_.height()) {
+    if (forced_margins_)
+      CalculateSizesWithinRect(gfx::Rect(physical_size_), 0);
+    else
+      CalculateSizesWithinRect(printable_area_, text_height_);
   }
 }
 

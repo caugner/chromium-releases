@@ -19,7 +19,11 @@ void ShellContentClient::SetGpuInfo(const GPUInfo& gpu_info) {
 }
 
 void ShellContentClient::AddPepperPlugins(
-    std::vector<PepperPluginInfo>* plugins) {
+    std::vector<content::PepperPluginInfo>* plugins) {
+}
+
+void ShellContentClient::AddNPAPIPlugins(
+    webkit::npapi::PluginList* plugin_list) {
 }
 
 bool ShellContentClient::CanSendWhileSwappedOut(const IPC::Message* msg) {
@@ -46,6 +50,14 @@ base::StringPiece ShellContentClient::GetDataResource(int resource_id) const {
 #if defined(OS_WIN)
 bool ShellContentClient::SandboxPlugin(CommandLine* command_line,
                                        sandbox::TargetPolicy* policy) {
+  return false;
+}
+#endif
+
+#if defined(OS_MACOSX)
+bool ShellContentClient::GetSandboxProfileForSandboxType(
+    int sandbox_type,
+    int* sandbox_profile_resource_id) const {
   return false;
 }
 #endif

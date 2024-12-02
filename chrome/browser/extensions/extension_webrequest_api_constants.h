@@ -14,6 +14,7 @@ namespace extension_webrequest_api_constants {
 extern const char kChallengerKey[];
 extern const char kErrorKey[];
 extern const char kFrameIdKey[];
+extern const char kParentFrameIdKey[];
 extern const char kFromCache[];
 extern const char kHostKey[];
 extern const char kIpKey[];
@@ -32,6 +33,7 @@ extern const char kResponseHeadersKey[];
 extern const char kHeadersKey[];
 extern const char kHeaderNameKey[];
 extern const char kHeaderValueKey[];
+extern const char kHeaderBinaryValueKey[];
 extern const char kIsProxyKey[];
 extern const char kSchemeKey[];
 extern const char kRealmKey[];
@@ -54,6 +56,7 @@ extern const char kOnSendHeaders[];
 extern const char kInvalidRedirectUrl[];
 extern const char kInvalidBlockingResponse[];
 extern const char kInvalidRequestFilterUrl[];
+extern const char kBlockingPermissionRequired[];
 
 }  // namespace extension_webrequest_api_constants
 

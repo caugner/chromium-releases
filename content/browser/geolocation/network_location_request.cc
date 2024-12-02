@@ -12,6 +12,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/common/geoposition.h"
+#include "content/common/net/url_fetcher_impl.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -86,10 +87,10 @@ bool NetworkLocationRequest::MakeRequest(const std::string& host_name,
 
   GURL request_url = FormRequestURL(url_.spec(), access_token,
                                     wifi_data, timestamp_);
-  url_fetcher_.reset(URLFetcher::Create(
-      url_fetcher_id_for_tests, request_url, URLFetcher::GET, this));
-  url_fetcher_->set_request_context(url_context_);
-  url_fetcher_->set_load_flags(
+  url_fetcher_.reset(URLFetcherImpl::Create(
+      url_fetcher_id_for_tests, request_url, URLFetcherImpl::GET, this));
+  url_fetcher_->SetRequestContext(url_context_);
+  url_fetcher_->SetLoadFlags(
       net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE |
       net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES |
       net::LOAD_DO_NOT_SEND_AUTH_DATA);
@@ -98,19 +99,22 @@ bool NetworkLocationRequest::MakeRequest(const std::string& host_name,
   return true;
 }
 
-void NetworkLocationRequest::OnURLFetchComplete(const URLFetcher* source) {
+void NetworkLocationRequest::OnURLFetchComplete(
+    const content::URLFetcher* source) {
   DCHECK_EQ(url_fetcher_.get(), source);
 
-  net::URLRequestStatus status = source->status();
-  int response_code = source->response_code();
+  net::URLRequestStatus status = source->GetStatus();
+  int response_code = source->GetResponseCode();
 
   Geoposition position;
   string16 access_token;
+  std::string data;
+  source->GetResponseAsString(&data);
   GetLocationFromResponse(status.is_success(),
                           response_code,
-                          source->GetResponseStringRef(),
+                          data,
                           timestamp_,
-                          source->url(),
+                          source->GetURL(),
                           &position,
                           &access_token);
   const bool server_error =

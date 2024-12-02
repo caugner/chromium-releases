@@ -7,6 +7,7 @@
 #include "chrome/browser/jankometer.h"
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
@@ -19,7 +20,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/chrome_switches.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 
 #if defined(TOOLKIT_USES_GTK)
 #include "chrome/browser/ui/gtk/gtk_util.h"
@@ -27,6 +28,7 @@
 
 using base::TimeDelta;
 using base::TimeTicks;
+using content::BrowserThread;
 
 namespace {
 
@@ -408,8 +410,7 @@ void InstallJankometer(const CommandLine& parsed_command_line) {
           io_watchdog_enabled));
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(io_observer->get(),
-                        &IOJankObserver::AttachToCurrentThread));
+      base::Bind(&IOJankObserver::AttachToCurrentThread, io_observer->get()));
 }
 
 void UninstallJankometer() {

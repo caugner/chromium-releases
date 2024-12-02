@@ -8,13 +8,13 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/timer.h"
 #include "chrome/browser/ui/views/dom_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "views/view.h"
+#include "ui/views/view.h"
 
 class Profile;
-class SiteContents;
 class TabContentsDelegate;
 
 namespace views {
@@ -53,7 +53,6 @@ class WizardWebPageViewTabContents : public TabContents {
   virtual void DidDisplayInsecureContent();
   virtual void DidRunInsecureContent(const std::string& security_origin);
   virtual void DocumentLoadedInFrame(long long frame_id);
-  virtual void DidFinishLoad(long long frame_id);
 
  private:
   WebPageDelegate* page_delegate_;
@@ -116,7 +115,7 @@ class WebPageView : public views::View {
 
  private:
   // Overriden from views::View:
-  virtual void Layout();
+  virtual void Layout() OVERRIDE;
 
   // Called by stop_timer_. Shows rendered page.
   void ShowRenderedPage();

@@ -24,10 +24,6 @@
 
 namespace net {
 
-// This is the expected list of advertised protocols from the browser's NPN
-// list.
-static const char kExpectedNPNString[] = "\x08http/1.1\x06spdy/2";
-
 enum SpdyNetworkTransactionTestTypes {
   SPDYNPN,
   SPDYNOSSL,
@@ -122,13 +118,18 @@ class SpdyNetworkTransactionTest
       HttpStreamFactory::set_use_alternate_protocols(false);
       HttpStreamFactory::set_force_spdy_over_ssl(false);
       HttpStreamFactory::set_force_spdy_always(false);
+
+      std::vector<std::string> next_protos;
+      next_protos.push_back("http/1.1");
+      next_protos.push_back("spdy/2");
+
       switch (test_type_) {
         case SPDYNPN:
           session_->http_server_properties()->SetAlternateProtocol(
               HostPortPair("www.google.com", 80), 443,
               NPN_SPDY_2);
           HttpStreamFactory::set_use_alternate_protocols(true);
-          HttpStreamFactory::set_next_protos(kExpectedNPNString);
+          HttpStreamFactory::set_next_protos(next_protos);
           break;
         case SPDYNOSSL:
           HttpStreamFactory::set_force_spdy_over_ssl(false);
@@ -852,8 +853,8 @@ TEST_P(SpdyNetworkTransactionTest, TwoGetsLateBindingFromPreconnect) {
   helper.session()->ssl_config_service()->GetSSLConfig(&preconnect_ssl_config);
   HttpStreamFactory* http_stream_factory =
       helper.session()->http_stream_factory();
-  if (http_stream_factory->next_protos()) {
-    preconnect_ssl_config.next_protos = *http_stream_factory->next_protos();
+  if (http_stream_factory->has_next_protos()) {
+    preconnect_ssl_config.next_protos = http_stream_factory->next_protos();
   }
 
   http_stream_factory->PreconnectStreams(
@@ -4205,7 +4206,8 @@ TEST_P(SpdyNetworkTransactionTest, SettingsSaved) {
   // Verify that no settings exist initially.
   HostPortPair host_port_pair("www.google.com", helper.port());
   SpdySessionPool* spdy_session_pool = helper.session()->spdy_session_pool();
-  EXPECT_TRUE(spdy_session_pool->spdy_settings().Get(host_port_pair).empty());
+  EXPECT_TRUE(spdy_session_pool->http_server_properties()->GetSpdySettings(
+      host_port_pair).empty());
 
   // Construct the request.
   scoped_ptr<spdy::SpdyFrame> req(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
@@ -4267,7 +4269,8 @@ TEST_P(SpdyNetworkTransactionTest, SettingsSaved) {
   {
     // Verify we had two persisted settings.
     spdy::SpdySettings saved_settings =
-        spdy_session_pool->spdy_settings().Get(host_port_pair);
+        spdy_session_pool->http_server_properties()->GetSpdySettings(
+            host_port_pair);
     ASSERT_EQ(2u, saved_settings.size());
 
     // Verify the first persisted setting.
@@ -4314,7 +4317,8 @@ TEST_P(SpdyNetworkTransactionTest, SettingsPlayback) {
   // Verify that no settings exist initially.
   HostPortPair host_port_pair("www.google.com", helper.port());
   SpdySessionPool* spdy_session_pool = helper.session()->spdy_session_pool();
-  EXPECT_TRUE(spdy_session_pool->spdy_settings().Get(host_port_pair).empty());
+  EXPECT_TRUE(spdy_session_pool->http_server_properties()->GetSpdySettings(
+      host_port_pair).empty());
 
   unsigned int kSampleId1 = 0x1;
   unsigned int kSampleValue1 = 0x0a0a0a0a;
@@ -4333,14 +4337,17 @@ TEST_P(SpdyNetworkTransactionTest, SettingsPlayback) {
     setting.set_id(kSampleId2);
     settings.push_back(std::make_pair(setting, kSampleValue2));
 
-    spdy_session_pool->mutable_spdy_settings()->Set(host_port_pair, settings);
+    spdy_session_pool->http_server_properties()->SetSpdySettings(
+        host_port_pair, settings);
   }
 
-  EXPECT_EQ(2u, spdy_session_pool->spdy_settings().Get(host_port_pair).size());
+  EXPECT_EQ(2u, spdy_session_pool->http_server_properties()->GetSpdySettings(
+      host_port_pair).size());
 
   // Construct the SETTINGS frame.
   const spdy::SpdySettings& settings =
-      spdy_session_pool->spdy_settings().Get(host_port_pair);
+      spdy_session_pool->http_server_properties()->GetSpdySettings(
+          host_port_pair);
   scoped_ptr<spdy::SpdyFrame> settings_frame(ConstructSpdySettings(settings));
 
   // Construct the request.
@@ -4380,7 +4387,8 @@ TEST_P(SpdyNetworkTransactionTest, SettingsPlayback) {
   {
     // Verify we had two persisted settings.
     spdy::SpdySettings saved_settings =
-        spdy_session_pool->spdy_settings().Get(host_port_pair);
+        spdy_session_pool->http_server_properties()->GetSpdySettings(
+            host_port_pair);
     ASSERT_EQ(2u, saved_settings.size());
 
     // Verify the first persisted setting.
@@ -4934,10 +4942,9 @@ TEST_P(SpdyNetworkTransactionTest, SpdyBasicAuth) {
   EXPECT_EQ("MyRealm", auth_challenge->realm);
 
   // Restart with a username/password.
-  const string16 kFoo(ASCIIToUTF16("foo"));
-  const string16 kBar(ASCIIToUTF16("bar"));
+  AuthCredentials credentials(ASCIIToUTF16("foo"), ASCIIToUTF16("bar"));
   TestOldCompletionCallback callback_restart;
-  const int rv_restart = trans->RestartWithAuth(kFoo, kBar, &callback_restart);
+  const int rv_restart = trans->RestartWithAuth(credentials, &callback_restart);
   EXPECT_EQ(ERR_IO_PENDING, rv_restart);
   const int rv_restart_complete = callback_restart.WaitForResult();
   EXPECT_EQ(OK, rv_restart_complete);

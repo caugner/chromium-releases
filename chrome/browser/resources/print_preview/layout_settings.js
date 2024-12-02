@@ -50,14 +50,14 @@ cr.define('print_preview', function() {
      * @return {boolean} true if the chosen layout mode has changed since last
      *     time the state was updated.
      */
-    hasChanged_ : function() {
-      return this.isLandscape() !=  this.wasLandscape_;
+    hasChanged_: function() {
+      return this.isLandscape() != this.wasLandscape_;
     },
 
     /**
      * Saves the currently selected layout mode. Used  in |this.hasChanged_|.
      */
-    updateState : function() {
+    updateState: function() {
       this.wasLandscape_ = this.isLandscape();
     },
 
@@ -69,13 +69,14 @@ cr.define('print_preview', function() {
     addEventListeners_: function() {
       this.landscapeRadioButton_.onclick = this.onLayoutButtonClick_.bind(this);
       this.portraitRadioButton_.onclick = this.onLayoutButtonClick_.bind(this);
-      document.addEventListener('PDFLoaded', this.onPDFLoaded_.bind(this));
-      document.addEventListener('printerCapabilitiesUpdated',
+      document.addEventListener(customEvents.PDF_LOADED,
+                                this.onPDFLoaded_.bind(this));
+      document.addEventListener(customEvents.PRINTER_CAPABILITIES_UPDATED,
                                 this.onPrinterCapabilitiesUpdated_.bind(this));
     },
 
     /**
-     * Listener triggered when a printerCapabilitiesUpdated event occurs.
+     * Executes when a |customEvents.PRINTER_CAPABILITIES_UPDATED| event occurs.
      * @private
      */
     onPrinterCapabilitiesUpdated_: function(e) {
@@ -95,7 +96,7 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * Listener executing when a PDFLoaded event occurs.
+     * Listener executing when a |customEvents.PDF_LOADED| event occurs.
      * @private
      */
     onPDFLoaded_: function() {
@@ -108,8 +109,8 @@ cr.define('print_preview', function() {
      * @private
      */
     fadeInOut_: function(fadeOut) {
-      fadeOut ? fadeOutElement(this.layoutOption_) :
-          fadeInElement(this.layoutOption_);
+      fadeOut ? fadeOutOption(this.layoutOption_) :
+          fadeInOption(this.layoutOption_);
     }
   };
 

@@ -15,12 +15,6 @@
 #include "base/message_loop.h"
 #include "ui/base/x/x11_util.h"
 
-#if defined(TOOLKIT_USES_GTK)
-// TODO(sad) Remove all TOOLKIT_USES_GTK uses once we move to aura only.
-#include <gtk/gtk.h>
-#include <gdk/gdkx.h>
-#endif
-
 namespace {
 
 // The X cursor is hidden if it is idle for kCursorIdleSeconds seconds.
@@ -69,57 +63,15 @@ XIValuatorClassInfo* FindTPValuator(Display* display,
     XIValuatorClassInfo* v =
         reinterpret_cast<XIValuatorClassInfo*>(info->classes[i]);
 
-    const char* atom = XGetAtomName(display, v->label);
-    if (atom && strcmp(atom, atom_tp) == 0)
-      return v;
+    if (v->label) {
+      const char* atom = XGetAtomName(display, v->label);
+      if (atom && strcmp(atom, atom_tp) == 0)
+        return v;
+    }
   }
 
   return NULL;
 }
-
-#if defined(TOOLKIT_USES_GTK)
-// Setup XInput2 select for the GtkWidget.
-gboolean GtkWidgetRealizeCallback(GSignalInvocationHint* hint, guint nparams,
-                                  const GValue* pvalues, gpointer data) {
-  GtkWidget* widget = GTK_WIDGET(g_value_get_object(pvalues));
-  GdkWindow* window = widget->window;
-  ui::TouchFactory* factory = static_cast<ui::TouchFactory*>(data);
-
-  if (GDK_WINDOW_TYPE(window) != GDK_WINDOW_TOPLEVEL &&
-      GDK_WINDOW_TYPE(window) != GDK_WINDOW_CHILD &&
-      GDK_WINDOW_TYPE(window) != GDK_WINDOW_DIALOG)
-    return true;
-
-  factory->SetupXI2ForXWindow(GDK_WINDOW_XID(window));
-  return true;
-}
-
-// We need to capture all the GDK windows that get created, and start
-// listening for XInput2 events. So we setup a callback to the 'realize'
-// signal for GTK+ widgets, so that whenever the signal triggers for any
-// GtkWidget, which means the GtkWidget should now have a GdkWindow, we can
-// setup XInput2 events for the GdkWindow.
-guint realize_signal_id = 0;
-guint realize_hook_id = 0;
-
-void SetupGtkWidgetRealizeNotifier(ui::TouchFactory* factory) {
-  gpointer klass = g_type_class_ref(GTK_TYPE_WIDGET);
-
-  g_signal_parse_name("realize", GTK_TYPE_WIDGET,
-                      &realize_signal_id, NULL, FALSE);
-  realize_hook_id = g_signal_add_emission_hook(realize_signal_id, 0,
-      GtkWidgetRealizeCallback, static_cast<gpointer>(factory), NULL);
-
-  g_type_class_unref(klass);
-}
-
-void RemoveGtkWidgetRealizeNotifier() {
-  if (realize_signal_id != 0)
-    g_signal_remove_emission_hook(realize_signal_id, realize_hook_id);
-  realize_signal_id = 0;
-  realize_hook_id = 0;
-}
-#endif
 
 }  // namespace
 
@@ -132,7 +84,6 @@ TouchFactory* TouchFactory::GetInstance() {
 
 TouchFactory::TouchFactory()
     : is_cursor_visible_(true),
-      keep_mouse_cursor_(false),
       cursor_timer_(),
       pointer_device_lookup_(),
       touch_device_available_(false),
@@ -141,7 +92,7 @@ TouchFactory::TouchFactory()
       min_available_slot_(0),
 #endif
       slots_used_() {
-#if defined(TOUCH_UI)
+#if defined(USE_AURA)
   if (!base::MessagePumpForUI::HasXInput2())
     return;
 #endif
@@ -159,12 +110,6 @@ TouchFactory::TouchFactory()
   SetCursorVisible(false, false);
   UpdateDeviceList(display);
 
-#if defined(TOOLKIT_USES_GTK)
-  // TODO(sad): Here, we only setup so that the X windows created by GTK+ are
-  // setup for XInput2 events. We need a way to listen for XInput2 events for X
-  // windows created by other means (e.g. for context menus).
-  SetupGtkWidgetRealizeNotifier(this);
-#endif
   // Make sure the list of devices is kept up-to-date by listening for
   // XI_HierarchyChanged event on the root window.
   unsigned char mask[XIMaskLen(XI_LASTEVENT)];
@@ -180,7 +125,7 @@ TouchFactory::TouchFactory()
 }
 
 TouchFactory::~TouchFactory() {
-#if defined(TOUCH_UI)
+#if defined(USE_AURA)
   if (!base::MessagePumpForUI::HasXInput2())
     return;
 #endif
@@ -189,10 +134,6 @@ TouchFactory::~TouchFactory() {
   Display* display = ui::GetXDisplay();
   XFreeCursor(display, invisible_cursor_);
   XFreeCursor(display, arrow_cursor_);
-
-#if defined(TOOLKIT_USES_GTK)
-  RemoveGtkWidgetRealizeNotifier();
-#endif
 }
 
 void TouchFactory::UpdateDeviceList(Display* display) {
@@ -331,7 +272,7 @@ bool TouchFactory::IsTouchDevice(unsigned deviceid) const {
       touch_device_lookup_[deviceid] : false;
 }
 
-bool TouchFactory::IsRealTouchDevice(unsigned int deviceid) const {
+bool TouchFactory::IsMultiTouchDevice(unsigned int deviceid) const {
   return (deviceid < touch_device_lookup_.size() &&
           touch_device_lookup_[deviceid]) ?
           touch_device_list_.find(deviceid)->second :
@@ -385,7 +326,7 @@ void TouchFactory::SetSlotUsed(int slot, bool used) {
 }
 
 bool TouchFactory::GrabTouchDevices(Display* display, ::Window window) {
-#if defined(TOUCH_UI)
+#if defined(USE_AURA)
   if (!base::MessagePumpForUI::HasXInput2() ||
       touch_device_list_.empty())
     return true;
@@ -420,7 +361,7 @@ bool TouchFactory::GrabTouchDevices(Display* display, ::Window window) {
 }
 
 bool TouchFactory::UngrabTouchDevices(Display* display) {
-#if defined(TOUCH_UI)
+#if defined(USE_AURA)
   if (!base::MessagePumpForUI::HasXInput2())
     return true;
 #endif
@@ -436,7 +377,7 @@ bool TouchFactory::UngrabTouchDevices(Display* display) {
 }
 
 void TouchFactory::SetCursorVisible(bool show, bool start_timer) {
-#if defined(TOUCH_UI)
+#if defined(USE_AURA)
   if (!base::MessagePumpForUI::HasXInput2())
     return;
 #endif
@@ -491,6 +432,19 @@ void TouchFactory::SetupValuator() {
         touch_param_max_[info->deviceid][j] = valuator->max;
       }
     }
+
+#if !defined(USE_XI2_MT)
+    // In order to support multi-touch with XI2.0, we need both a slot_id and
+    // tracking_id valuator.  Without these we'll treat the device as a
+    // single-touch device (like a mouse).
+    if (valuator_lookup_[info->deviceid][TP_SLOT_ID] == -1 ||
+        valuator_lookup_[info->deviceid][TP_TRACKING_ID] == -1) {
+      DVLOG(1) << "Touch device " << info->deviceid <<
+        " does not provide enough information for multi-touch, treating as "
+        "a single-touch device.";
+      touch_device_list_[info->deviceid] = false;
+    }
+#endif
   }
 
   if (info_list)

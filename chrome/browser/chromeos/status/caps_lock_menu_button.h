@@ -8,13 +8,14 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/timer.h"
 #include "chrome/browser/chromeos/status/status_area_button.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/common/notification_observer.h"
-#include "views/controls/menu/menu_delegate.h"
-#include "views/controls/menu/view_menu_delegate.h"
+#include "content/public/browser/notification_observer.h"
+#include "ui/views/controls/menu/menu_delegate.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
 
 class Bubble;
 
@@ -24,49 +25,39 @@ class MenuRunner;
 
 namespace chromeos {
 
-class StatusAreaHost;
+class StatusAreaBubbleContentView;
+class StatusAreaBubbleController;
 
 // A class for the button in the status area which alerts the user when caps
 // lock is active.
-class CapsLockMenuButton : public NotificationObserver,
+class CapsLockMenuButton : public content::NotificationObserver,
                            public StatusAreaButton,
                            public views::MenuDelegate,
                            public views::ViewMenuDelegate,
                            public SystemKeyEventListener::CapsLockObserver {
  public:
-  explicit CapsLockMenuButton(StatusAreaHost* host);
+  explicit CapsLockMenuButton(StatusAreaButton::Delegate* delegate);
   virtual ~CapsLockMenuButton();
 
   // views::View implementation.
-  virtual void OnLocaleChanged();
+  virtual void OnLocaleChanged() OVERRIDE;
 
   // views::MenuDelegate implementation.
-  virtual string16 GetLabel(int id) const;
-  virtual bool IsCommandEnabled(int id) const;
+  virtual string16 GetLabel(int id) const OVERRIDE;
 
   // views::ViewMenuDelegate implementation.
-  virtual void RunMenu(views::View* unused_source, const gfx::Point& pt);
+  virtual void RunMenu(views::View* unused_source,
+                       const gfx::Point& pt) OVERRIDE;
 
   // SystemKeyEventListener::CapsLockObserver implementation
-  virtual void OnCapsLockChange(bool enabled);
+  virtual void OnCapsLockChange(bool enabled) OVERRIDE;
 
-  // NotificationObserver implementation
+  // content::NotificationObserver implementation
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
-
-  // Updates the accessible name.
-  void UpdateAccessibleName();
-
-  // Gets the text for the drop-down menu and bubble.
-  string16 GetText() const;
-
-  // Updates the button from the current state.
-  void UpdateUIFromCurrentCapsLock(bool enabled);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
-  class StatusView;
-
   // Returns true if the Search key is assigned to Caps Lock.
   bool HasCapsLock() const;
 
@@ -78,24 +69,31 @@ class CapsLockMenuButton : public NotificationObserver,
   void CreateAndShowBubble();
   void HideBubble();
 
+  // Updates the accessible name.
+  void UpdateAccessibleName();
+
+  // Gets the text for the drop-down menu and bubble.
+  string16 GetText() const;
+
+  // Updates the button from the current state.
+  void UpdateUIFromCurrentCapsLock(bool enabled);
+
   PrefService* prefs_;
   IntegerPrefMember remap_search_key_to_;
 
   // The currently showing status view. NULL if menu is not being displayed.
-  StatusView* status_;
+  StatusAreaBubbleContentView* status_;
   // If non-null the menu is showing.
   scoped_ptr<views::MenuRunner> menu_runner_;
 
-  // The currently showing bubble. NULL if bubble is not being displayed.
-  Bubble* bubble_;
+  // The currently showing bubble controller.
+  // NULL if bubble is not being displayed.
+  scoped_ptr<StatusAreaBubbleController> bubble_controller_;
   // If true, |bubble_| is shown when both shift keys are pressed.
   bool should_show_bubble_;
   // # of times |bubble_| is shown.
   size_t bubble_count_;
   // TODO(yusukes): Save should_show_bubble_ and bubble_count_ in Preferences.
-
-  // The timer for hiding the bubble.
-  base::OneShotTimer<CapsLockMenuButton> bubble_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(CapsLockMenuButton);
 };

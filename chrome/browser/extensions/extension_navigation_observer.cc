@@ -8,7 +8,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 
 ExtensionNavigationObserver::ExtensionNavigationObserver(Profile* profile)
     : profile_(profile) {
@@ -17,15 +17,17 @@ ExtensionNavigationObserver::ExtensionNavigationObserver(Profile* profile)
 
 ExtensionNavigationObserver::~ExtensionNavigationObserver() {}
 
-void ExtensionNavigationObserver::Observe(int type,
-                                          const NotificationSource& source,
-                                          const NotificationDetails& details) {
+void ExtensionNavigationObserver::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (type != content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
     NOTREACHED();
     return;
   }
 
-  NavigationController* controller = Source<NavigationController>(source).ptr();
+  NavigationController* controller =
+      content::Source<NavigationController>(source).ptr();
   if (!profile_->IsSameProfile(
           Profile::FromBrowserContext(controller->browser_context())))
     return;
@@ -35,7 +37,7 @@ void ExtensionNavigationObserver::Observe(int type,
 
 void ExtensionNavigationObserver::RegisterForNotifications() {
   registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 void ExtensionNavigationObserver::PromptToEnableExtensionIfNecessary(

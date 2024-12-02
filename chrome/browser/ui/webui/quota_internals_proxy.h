@@ -12,7 +12,8 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "content/browser/browser_thread.h"
+#include "base/memory/weak_ptr.h"
+#include "content/public/browser/browser_thread.h"
 #include "webkit/quota/quota_manager.h"
 #include "webkit/quota/quota_types.h"
 
@@ -28,8 +29,9 @@ typedef std::map<std::string, std::string> Statistics;
 // Each QuotaInternalsHandler instances creates and owns a instance of this
 // class.
 class QuotaInternalsProxy
-    : public base::RefCountedThreadSafe<QuotaInternalsProxy,
-                                        BrowserThread::DeleteOnIOThread> {
+    : public base::RefCountedThreadSafe<
+          QuotaInternalsProxy,
+          content::BrowserThread::DeleteOnIOThread> {
  public:
   explicit QuotaInternalsProxy(QuotaInternalsHandler* handler);
   ~QuotaInternalsProxy();
@@ -69,14 +71,15 @@ class QuotaInternalsProxy
   QuotaInternalsHandler* handler_;
 
   // Used on IO Thread.
-  base::ScopedCallbackFactory<QuotaInternalsProxy> callback_factory_;
+  base::WeakPtrFactory<QuotaInternalsProxy> weak_factory_;
   scoped_refptr<quota::QuotaManager> quota_manager_;
   std::set<std::pair<std::string, quota::StorageType> >
       hosts_visited_, hosts_pending_;
   std::vector<PerHostStorageInfo> report_pending_;
 
   friend class QuotaInternalsHandler;
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::IO>;
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::IO>;
   friend class DeleteTask<QuotaInternalsProxy>;
 
   DISALLOW_COPY_AND_ASSIGN(QuotaInternalsProxy);

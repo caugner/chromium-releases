@@ -5,10 +5,14 @@
 #ifndef WEBKIT_PLATFORM_SUPPORT_IMPL_H_
 #define WEBKIT_PLATFORM_SUPPORT_IMPL_H_
 
+#include "base/compiler_specific.h"
 #include "base/platform_file.h"
 #include "base/threading/thread_local_storage.h"
 #include "base/timer.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitPlatformSupport.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebKitPlatformSupport.h"
+#include "webkit/glue/resource_loader_bridge.h"
+#include "webkit/glue/webkit_glue_export.h"
+
 #if defined(OS_WIN)
 #include "webkit/glue/webthemeengine_impl_win.h"
 #elif defined(OS_MACOSX)
@@ -20,9 +24,21 @@
 
 class MessageLoop;
 
+namespace webkit {
+struct WebPluginInfo;
+}
+
+namespace WebKit {
+class WebSocketStreamHandle;
+}
+
 namespace webkit_glue {
 
-class WebKitPlatformSupportImpl : public WebKit::WebKitPlatformSupport {
+class WebSocketStreamHandleDelegate;
+class WebSocketStreamHandleBridge;
+
+class WEBKIT_GLUE_EXPORT WebKitPlatformSupportImpl :
+    NON_EXPORTED_BASE(public WebKit::WebKitPlatformSupport) {
  public:
   WebKitPlatformSupportImpl();
   virtual ~WebKitPlatformSupportImpl();
@@ -54,6 +70,7 @@ class WebKitPlatformSupportImpl : public WebKit::WebKitPlatformSupport {
     const char* name, int sample, int min, int max, int bucket_count);
   virtual void histogramEnumeration(
     const char* name, int sample, int boundary_value);
+  virtual bool isTraceEventEnabled() const;
   virtual void traceEventBegin(const char* name, void* id, const char* extra);
   virtual void traceEventEnd(const char* name, void* id, const char* extra);
   virtual WebKit::WebData loadResource(const char* name);
@@ -80,6 +97,29 @@ class WebKitPlatformSupportImpl : public WebKit::WebKitPlatformSupport {
   virtual void callOnMainThread(void (*func)(void*), void* context);
   virtual WebKit::WebThread* createThread(const char* name);
   virtual WebKit::WebThread* currentThread();
+
+
+  // Embedder functions. The following are not implemented by the glue layer and
+  // need to be specialized by the embedder.
+
+  // Gets a localized string given a message id.  Returns an empty string if the
+  // message id is not found.
+  virtual string16 GetLocalizedString(int message_id) = 0;
+
+  // Returns the raw data for a resource.  This resource must have been
+  // specified as BINDATA in the relevant .rc file.
+  virtual base::StringPiece GetDataResource(int resource_id) = 0;
+
+  // Returns the list of plugins.
+  virtual void GetPlugins(bool refresh,
+                          std::vector<webkit::WebPluginInfo>* plugins) = 0;
+  // Creates a ResourceLoaderBridge.
+  virtual ResourceLoaderBridge* CreateResourceLoader(
+      const ResourceLoaderBridge::RequestInfo& request_info) = 0;
+  // Creates a WebSocketStreamHandleBridge.
+  virtual WebSocketStreamHandleBridge* CreateWebSocketBridge(
+      WebKit::WebSocketStreamHandle* handle,
+      WebSocketStreamHandleDelegate* delegate) = 0;
 
   void SuspendSharedTimer();
   void ResumeSharedTimer();

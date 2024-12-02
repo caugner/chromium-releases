@@ -76,12 +76,15 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kImeiProperty, PROPERTY_INDEX_IMEI },
   { flimflam::kImsiProperty, PROPERTY_INDEX_IMSI },
   { flimflam::kIsActiveProperty, PROPERTY_INDEX_IS_ACTIVE },
+  { flimflam::kL2tpIpsecAuthenticationType,
+    PROPERTY_INDEX_IPSEC_AUTHENTICATIONTYPE },
   { flimflam::kL2tpIpsecCaCertNssProperty,
     PROPERTY_INDEX_L2TPIPSEC_CA_CERT_NSS },
   { flimflam::kL2tpIpsecClientCertIdProperty,
     PROPERTY_INDEX_L2TPIPSEC_CLIENT_CERT_ID },
   { flimflam::kL2tpIpsecClientCertSlotProp,
     PROPERTY_INDEX_L2TPIPSEC_CLIENT_CERT_SLOT },
+  { flimflam::kL2tpIpsecIkeVersion, PROPERTY_INDEX_IPSEC_IKEVERSION },
   { flimflam::kL2tpIpsecPinProperty, PROPERTY_INDEX_L2TPIPSEC_PIN },
   { flimflam::kL2tpIpsecPskProperty, PROPERTY_INDEX_L2TPIPSEC_PSK },
   { flimflam::kL2tpIpsecPasswordProperty, PROPERTY_INDEX_L2TPIPSEC_PASSWORD },
@@ -108,10 +111,13 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kPriorityProperty, PROPERTY_INDEX_PRIORITY },
   { flimflam::kProfileProperty, PROPERTY_INDEX_PROFILE },
   { flimflam::kProfilesProperty, PROPERTY_INDEX_PROFILES },
+  { flimflam::kProviderHostProperty, PROPERTY_INDEX_PROVIDER_HOST },
   { flimflam::kProviderProperty, PROPERTY_INDEX_PROVIDER },
+  { flimflam::kProviderTypeProperty, PROPERTY_INDEX_PROVIDER_TYPE },
   { flimflam::kProxyConfigProperty, PROPERTY_INDEX_PROXY_CONFIG },
   { flimflam::kRoamingStateProperty, PROPERTY_INDEX_ROAMING_STATE },
   { flimflam::kSIMLockStatusProperty, PROPERTY_INDEX_SIM_LOCK },
+  { flimflam::kSSIDProperty, PROPERTY_INDEX_SSID },
   { flimflam::kSaveCredentialsProperty, PROPERTY_INDEX_SAVE_CREDENTIALS },
   { flimflam::kScanningProperty, PROPERTY_INDEX_SCANNING },
   { flimflam::kSecurityProperty, PROPERTY_INDEX_SECURITY },
@@ -125,12 +131,57 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
     PROPERTY_INDEX_SUPPORT_NETWORK_SCAN },
   { flimflam::kTechnologyFamilyProperty, PROPERTY_INDEX_TECHNOLOGY_FAMILY },
   { flimflam::kTypeProperty, PROPERTY_INDEX_TYPE },
+  { flimflam::kUIDataProperty, PROPERTY_INDEX_UI_DATA },
   { flimflam::kUsageURLProperty, PROPERTY_INDEX_USAGE_URL },
   { flimflam::kOpenVPNUserProperty, PROPERTY_INDEX_OPEN_VPN_USER },
   { flimflam::kOpenVPNPasswordProperty, PROPERTY_INDEX_OPEN_VPN_PASSWORD },
   { flimflam::kOpenVPNClientCertIdProperty,
     PROPERTY_INDEX_OPEN_VPN_CLIENT_CERT_ID },
+  { flimflam::kOpenVPNAuthProperty, PROPERTY_INDEX_OPEN_VPN_AUTH },
+  { flimflam::kOpenVPNAuthRetryProperty, PROPERTY_INDEX_OPEN_VPN_AUTHRETRY },
+  { flimflam::kOpenVPNAuthNoCacheProperty,
+    PROPERTY_INDEX_OPEN_VPN_AUTHNOCACHE },
+  { flimflam::kOpenVPNAuthUserPassProperty,
+    PROPERTY_INDEX_OPEN_VPN_AUTHUSERPASS },
+  { flimflam::kOpenVPNCaCertNSSProperty, PROPERTY_INDEX_OPEN_VPN_CACERT },
+  { flimflam::kOpenVPNClientCertSlotProperty,
+    PROPERTY_INDEX_OPEN_VPN_CLIENT_CERT_SLOT },
+  { flimflam::kOpenVPNCipherProperty, PROPERTY_INDEX_OPEN_VPN_CIPHER },
+  { flimflam::kOpenVPNCompLZOProperty, PROPERTY_INDEX_OPEN_VPN_COMPLZO },
+  { flimflam::kOpenVPNCompNoAdaptProperty,
+    PROPERTY_INDEX_OPEN_VPN_COMPNOADAPT },
+  { flimflam::kOpenVPNKeyDirectionProperty,
+    PROPERTY_INDEX_OPEN_VPN_KEYDIRECTION },
+  { flimflam::kOpenVPNMgmtEnableProperty,
+    PROPERTY_INDEX_OPEN_VPN_MGMT_ENABLE },
+  { flimflam::kOpenVPNNsCertTypeProperty, PROPERTY_INDEX_OPEN_VPN_NSCERTTYPE },
+  { flimflam::kOpenVPNOTPProperty, PROPERTY_INDEX_OPEN_VPN_OTP },
+  { flimflam::kOpenVPNPasswordProperty, PROPERTY_INDEX_OPEN_VPN_PASSWORD },
+  { flimflam::kOpenVPNPinProperty, PROPERTY_INDEX_OPEN_VPN_PIN },
+  { flimflam::kOpenVPNPortProperty, PROPERTY_INDEX_OPEN_VPN_PORT },
+  { flimflam::kOpenVPNProtoProperty, PROPERTY_INDEX_OPEN_VPN_PROTO },
+  { flimflam::kOpenVPNProviderProperty,
+    PROPERTY_INDEX_OPEN_VPN_PKCS11_PROVIDER },
+  { flimflam::kOpenVPNPushPeerInfoProperty,
+    PROPERTY_INDEX_OPEN_VPN_PUSHPEERINFO },
+  { flimflam::kOpenVPNRemoteCertEKUProperty,
+    PROPERTY_INDEX_OPEN_VPN_REMOTECERTEKU },
+  { flimflam::kOpenVPNRemoteCertKUProperty,
+    PROPERTY_INDEX_OPEN_VPN_REMOTECERTKU },
+  { flimflam::kOpenVPNRemoteCertTLSProperty,
+    PROPERTY_INDEX_OPEN_VPN_REMOTECERTTLS },
+  { flimflam::kOpenVPNRenegSecProperty, PROPERTY_INDEX_OPEN_VPN_RENEGSEC },
+  { flimflam::kOpenVPNServerPollTimeoutProperty,
+    PROPERTY_INDEX_OPEN_VPN_SERVERPOLLTIMEOUT },
+  { flimflam::kOpenVPNShaperProperty, PROPERTY_INDEX_OPEN_VPN_SHAPER },
+  { flimflam::kOpenVPNStaticChallengeProperty,
+    PROPERTY_INDEX_OPEN_VPN_STATICCHALLENGE },
+  { flimflam::kOpenVPNTLSAuthContentsProperty,
+    PROPERTY_INDEX_OPEN_VPN_TLSAUTHCONTENTS },
+  { flimflam::kOpenVPNTLSRemoteProperty, PROPERTY_INDEX_OPEN_VPN_TLSREMOTE },
+  { flimflam::kOpenVPNUserProperty, PROPERTY_INDEX_OPEN_VPN_USER },
   { flimflam::kPaymentPortalProperty, PROPERTY_INDEX_OLP },
+  { flimflam::kVPNDomainProperty, PROPERTY_INDEX_VPN_DOMAIN },
   { flimflam::kWifiAuthMode, PROPERTY_INDEX_WIFI_AUTH_MODE },
   { flimflam::kWifiFrequency, PROPERTY_INDEX_WIFI_FREQUENCY },
   { flimflam::kWifiHexSsid, PROPERTY_INDEX_WIFI_HEX_SSID },
@@ -138,26 +189,53 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kWifiPhyMode, PROPERTY_INDEX_WIFI_PHY_MODE },
 };
 
+EnumMapper<ConnectionType>::Pair network_type_table[] = {
+  { flimflam::kTypeEthernet, TYPE_ETHERNET },
+  { flimflam::kTypeWifi, TYPE_WIFI },
+  { flimflam::kTypeWimax, TYPE_WIMAX },
+  { flimflam::kTypeBluetooth, TYPE_BLUETOOTH },
+  { flimflam::kTypeCellular, TYPE_CELLULAR },
+  { flimflam::kTypeVPN, TYPE_VPN },
+};
+
+EnumMapper<ConnectionSecurity>::Pair network_security_table[] = {
+  { flimflam::kSecurityNone, SECURITY_NONE },
+  { flimflam::kSecurityWep, SECURITY_WEP },
+  { flimflam::kSecurityWpa, SECURITY_WPA },
+  { flimflam::kSecurityRsn, SECURITY_RSN },
+  { flimflam::kSecurityPsk, SECURITY_PSK },
+  { flimflam::kSecurity8021x, SECURITY_8021X },
+};
+
+EnumMapper<EAPMethod>::Pair network_eap_method_table[] = {
+  { flimflam::kEapMethodPEAP, EAP_METHOD_PEAP },
+  { flimflam::kEapMethodTLS, EAP_METHOD_TLS },
+  { flimflam::kEapMethodTTLS, EAP_METHOD_TTLS },
+  { flimflam::kEapMethodLEAP, EAP_METHOD_LEAP },
+};
+
+EnumMapper<EAPPhase2Auth>::Pair network_eap_auth_table[] = {
+  { flimflam::kEapPhase2AuthPEAPMD5, EAP_PHASE_2_AUTH_MD5 },
+  { flimflam::kEapPhase2AuthPEAPMSCHAPV2, EAP_PHASE_2_AUTH_MSCHAPV2 },
+  { flimflam::kEapPhase2AuthTTLSMD5, EAP_PHASE_2_AUTH_MD5 },
+  { flimflam::kEapPhase2AuthTTLSMSCHAPV2, EAP_PHASE_2_AUTH_MSCHAPV2 },
+  { flimflam::kEapPhase2AuthTTLSMSCHAP, EAP_PHASE_2_AUTH_MSCHAP },
+  { flimflam::kEapPhase2AuthTTLSPAP, EAP_PHASE_2_AUTH_PAP },
+  { flimflam::kEapPhase2AuthTTLSCHAP, EAP_PHASE_2_AUTH_CHAP },
+};
+
+EnumMapper<ProviderType>::Pair provider_type_table[] = {
+  { flimflam::kProviderL2tpIpsec, PROVIDER_TYPE_L2TP_IPSEC_PSK },
+  { flimflam::kProviderOpenVpn, PROVIDER_TYPE_OPEN_VPN },
+};
+
 // Serve the singleton mapper instance.
 const EnumMapper<PropertyIndex>* get_native_mapper() {
-  static const EnumMapper<PropertyIndex> mapper(property_index_table,
-                                                arraysize(property_index_table),
-                                                PROPERTY_INDEX_UNKNOWN);
+  CR_DEFINE_STATIC_LOCAL(EnumMapper<PropertyIndex>, mapper,
+      (property_index_table,
+       arraysize(property_index_table),
+       PROPERTY_INDEX_UNKNOWN));
   return &mapper;
-}
-
-ConnectionType ParseNetworkType(const std::string& type) {
-  static EnumMapper<ConnectionType>::Pair table[] = {
-    { flimflam::kTypeEthernet, TYPE_ETHERNET },
-    { flimflam::kTypeWifi, TYPE_WIFI },
-    { flimflam::kTypeWimax, TYPE_WIMAX },
-    { flimflam::kTypeBluetooth, TYPE_BLUETOOTH },
-    { flimflam::kTypeCellular, TYPE_CELLULAR },
-    { flimflam::kTypeVPN, TYPE_VPN },
-  };
-  static EnumMapper<ConnectionType> parser(
-      table, arraysize(table), TYPE_UNKNOWN);
-  return parser.Get(type);
 }
 
 }  // namespace
@@ -389,7 +467,7 @@ bool NativeNetworkDeviceParser::ParseValue(
 }
 
 ConnectionType NativeNetworkDeviceParser::ParseType(const std::string& type) {
-  return ParseNetworkType(type);
+  return NativeNetworkParser::network_type_mapper()->Get(type);
 }
 
 bool NativeNetworkDeviceParser::ParseApnList(const ListValue& list,
@@ -455,8 +533,8 @@ SimLockState NativeNetworkDeviceParser::ParseSimLockState(
     { flimflam::kSIMLockPin, SIM_LOCKED_PIN },
     { flimflam::kSIMLockPuk, SIM_LOCKED_PUK },
   };
-  static EnumMapper<SimLockState> parser(
-      table, arraysize(table), SIM_UNKNOWN);
+  CR_DEFINE_STATIC_LOCAL(EnumMapper<SimLockState>, parser,
+      (table, arraysize(table), SIM_UNKNOWN));
   SimLockState parsed_state = parser.Get(state);
   DCHECK(parsed_state != SIM_UNKNOWN) << "Unknown SIMLock state encountered";
   return parsed_state;
@@ -484,8 +562,8 @@ TechnologyFamily NativeNetworkDeviceParser::ParseTechnologyFamily(
     { flimflam::kTechnologyFamilyCdma, TECHNOLOGY_FAMILY_CDMA },
     { flimflam::kTechnologyFamilyGsm, TECHNOLOGY_FAMILY_GSM },
   };
-  static EnumMapper<TechnologyFamily> parser(
-      table, arraysize(table), TECHNOLOGY_FAMILY_UNKNOWN);
+  CR_DEFINE_STATIC_LOCAL(EnumMapper<TechnologyFamily>, parser,
+      (table, arraysize(table), TECHNOLOGY_FAMILY_UNKNOWN));
   return parser.Get(technology_family);
 }
 
@@ -503,9 +581,50 @@ const EnumMapper<PropertyIndex>* NativeNetworkParser::property_mapper() {
   return get_native_mapper();
 }
 
+// static
+const EnumMapper<ConnectionType>* NativeNetworkParser::network_type_mapper() {
+  CR_DEFINE_STATIC_LOCAL(
+      EnumMapper<ConnectionType>,
+      network_type_mapper,
+      (network_type_table, arraysize(network_type_table), TYPE_UNKNOWN));
+  return &network_type_mapper;
+}
+
+// static
+const EnumMapper<ConnectionSecurity>*
+    NativeNetworkParser::network_security_mapper() {
+  CR_DEFINE_STATIC_LOCAL(
+      EnumMapper<ConnectionSecurity>,
+      network_security_mapper,
+      (network_security_table, arraysize(network_security_table),
+          SECURITY_UNKNOWN));
+  return &network_security_mapper;
+}
+
+// static
+const EnumMapper<EAPMethod>* NativeNetworkParser::network_eap_method_mapper() {
+  CR_DEFINE_STATIC_LOCAL(
+      EnumMapper<EAPMethod>,
+      network_eap_method_mapper,
+      (network_eap_method_table, arraysize(network_eap_method_table),
+          EAP_METHOD_UNKNOWN));
+  return &network_eap_method_mapper;
+}
+
+// static
+const EnumMapper<EAPPhase2Auth>*
+    NativeNetworkParser::network_eap_auth_mapper() {
+  CR_DEFINE_STATIC_LOCAL(
+      EnumMapper<EAPPhase2Auth>,
+      network_eap_auth_mapper,
+      (network_eap_auth_table, arraysize(network_eap_auth_table),
+          EAP_PHASE_2_AUTH_AUTO));
+  return &network_eap_auth_mapper;
+}
+
 const ConnectionType NativeNetworkParser::ParseConnectionType(
     const std::string& connection_type) {
-  return ParseNetworkType(connection_type);
+  return network_type_mapper()->Get(connection_type);
 }
 
 Network* NativeNetworkParser::CreateNewNetwork(
@@ -610,7 +729,7 @@ bool NativeNetworkParser::ParseValue(PropertyIndex index,
 }
 
 ConnectionType NativeNetworkParser::ParseType(const std::string& type) {
-  return ParseNetworkType(type);
+  return network_type_mapper()->Get(type);
 }
 
 ConnectionType NativeNetworkParser::ParseTypeFromDictionary(
@@ -625,8 +744,8 @@ ConnectionMode NativeNetworkParser::ParseMode(const std::string& mode) {
     { flimflam::kModeManaged, MODE_MANAGED },
     { flimflam::kModeAdhoc, MODE_ADHOC },
   };
-  static EnumMapper<ConnectionMode> parser(
-      table, arraysize(table), MODE_UNKNOWN);
+  CR_DEFINE_STATIC_LOCAL(EnumMapper<ConnectionMode>, parser,
+      (table, arraysize(table), MODE_UNKNOWN));
   return parser.Get(mode);
 }
 
@@ -643,8 +762,8 @@ ConnectionState NativeNetworkParser::ParseState(const std::string& state) {
     { flimflam::kStatePortal, STATE_PORTAL },
     { flimflam::kStateOnline, STATE_ONLINE },
   };
-  static EnumMapper<ConnectionState> parser(
-      table, arraysize(table), STATE_UNKNOWN);
+  CR_DEFINE_STATIC_LOCAL(EnumMapper<ConnectionState>, parser,
+      (table, arraysize(table), STATE_UNKNOWN));
   return parser.Get(state);
 }
 
@@ -668,8 +787,8 @@ ConnectionError NativeNetworkParser::ParseError(const std::string& error) {
     { flimflam::kErrorIpsecCertAuthFailed, ERROR_IPSEC_CERT_AUTH_FAILED },
     { flimflam::kErrorPppAuthFailed, ERROR_PPP_AUTH_FAILED },
   };
-  static EnumMapper<ConnectionError> parser(
-      table, arraysize(table), ERROR_NO_ERROR);
+  CR_DEFINE_STATIC_LOCAL(EnumMapper<ConnectionError>, parser,
+      (table, arraysize(table), ERROR_NO_ERROR));
   return parser.Get(error);
 }
 
@@ -848,8 +967,8 @@ ActivationState NativeCellularNetworkParser::ParseActivationState(
       ACTIVATION_STATE_PARTIALLY_ACTIVATED},
     { flimflam::kActivationStateUnknown, ACTIVATION_STATE_UNKNOWN},
   };
-  static EnumMapper<ActivationState> parser(
-      table, arraysize(table), ACTIVATION_STATE_UNKNOWN);
+  CR_DEFINE_STATIC_LOCAL(EnumMapper<ActivationState>, parser,
+      (table, arraysize(table), ACTIVATION_STATE_UNKNOWN));
   return parser.Get(state);
 }
 
@@ -868,8 +987,8 @@ NetworkTechnology NativeCellularNetworkParser::ParseNetworkTechnology(
       NETWORK_TECHNOLOGY_LTE_ADVANCED },
     { flimflam::kNetworkTechnologyGsm, NETWORK_TECHNOLOGY_GSM },
   };
-  static EnumMapper<NetworkTechnology> parser(
-      table, arraysize(table), NETWORK_TECHNOLOGY_UNKNOWN);
+  CR_DEFINE_STATIC_LOCAL(EnumMapper<NetworkTechnology>, parser,
+      (table, arraysize(table), NETWORK_TECHNOLOGY_UNKNOWN));
   return parser.Get(technology);
 }
 
@@ -880,8 +999,8 @@ NetworkRoamingState NativeCellularNetworkParser::ParseRoamingState(
     { flimflam::kRoamingStateRoaming, ROAMING_STATE_ROAMING },
     { flimflam::kRoamingStateUnknown, ROAMING_STATE_UNKNOWN },
   };
-  static EnumMapper<NetworkRoamingState> parser(
-      table, arraysize(table), ROAMING_STATE_UNKNOWN);
+  CR_DEFINE_STATIC_LOCAL(EnumMapper<NetworkRoamingState>, parser,
+      (table, arraysize(table), ROAMING_STATE_UNKNOWN));
   return parser.Get(roaming_state);
 }
 
@@ -1032,45 +1151,16 @@ bool NativeWifiNetworkParser::ParseValue(PropertyIndex index,
 
 ConnectionSecurity NativeWifiNetworkParser::ParseSecurity(
     const std::string& security) {
-  static EnumMapper<ConnectionSecurity>::Pair table[] = {
-    { flimflam::kSecurityNone, SECURITY_NONE },
-    { flimflam::kSecurityWep, SECURITY_WEP },
-    { flimflam::kSecurityWpa, SECURITY_WPA },
-    { flimflam::kSecurityRsn, SECURITY_RSN },
-    { flimflam::kSecurityPsk, SECURITY_PSK },
-    { flimflam::kSecurity8021x, SECURITY_8021X },
-  };
-  static EnumMapper<ConnectionSecurity> parser(
-      table, arraysize(table), SECURITY_UNKNOWN);
-  return parser.Get(security);
+  return network_security_mapper()->Get(security);
 }
 
 EAPMethod NativeWifiNetworkParser::ParseEAPMethod(const std::string& method) {
-  static EnumMapper<EAPMethod>::Pair table[] = {
-    { flimflam::kEapMethodPEAP, EAP_METHOD_PEAP },
-    { flimflam::kEapMethodTLS, EAP_METHOD_TLS },
-    { flimflam::kEapMethodTTLS, EAP_METHOD_TTLS },
-    { flimflam::kEapMethodLEAP, EAP_METHOD_LEAP },
-  };
-  static EnumMapper<EAPMethod> parser(
-      table, arraysize(table), EAP_METHOD_UNKNOWN);
-  return parser.Get(method);
+  return network_eap_method_mapper()->Get(method);
 }
 
 EAPPhase2Auth NativeWifiNetworkParser::ParseEAPPhase2Auth(
     const std::string& auth) {
-  static EnumMapper<EAPPhase2Auth>::Pair table[] = {
-    { flimflam::kEapPhase2AuthPEAPMD5, EAP_PHASE_2_AUTH_MD5 },
-    { flimflam::kEapPhase2AuthPEAPMSCHAPV2, EAP_PHASE_2_AUTH_MSCHAPV2 },
-    { flimflam::kEapPhase2AuthTTLSMD5, EAP_PHASE_2_AUTH_MD5 },
-    { flimflam::kEapPhase2AuthTTLSMSCHAPV2, EAP_PHASE_2_AUTH_MSCHAPV2 },
-    { flimflam::kEapPhase2AuthTTLSMSCHAP, EAP_PHASE_2_AUTH_MSCHAP },
-    { flimflam::kEapPhase2AuthTTLSPAP, EAP_PHASE_2_AUTH_PAP },
-    { flimflam::kEapPhase2AuthTTLSCHAP, EAP_PHASE_2_AUTH_CHAP },
-  };
-  static EnumMapper<EAPPhase2Auth> parser(
-      table, arraysize(table), EAP_PHASE_2_AUTH_AUTO);
-  return parser.Get(auth);
+  return network_eap_auth_mapper()->Get(auth);
 }
 
 // -------------------- NativeVirtualNetworkParser --------------------
@@ -1153,7 +1243,8 @@ bool NativeVirtualNetworkParser::ParseProviderValue(PropertyIndex index,
       network->set_provider_type(ParseProviderType(provider_type_string));
       return true;
     }
-    case PROPERTY_INDEX_L2TPIPSEC_CA_CERT_NSS: {
+    case PROPERTY_INDEX_L2TPIPSEC_CA_CERT_NSS:
+    case PROPERTY_INDEX_OPEN_VPN_CACERT: {
       std::string ca_cert_nss;
       if (!value.GetAsString(&ca_cert_nss))
         break;
@@ -1204,15 +1295,18 @@ bool NativeVirtualNetworkParser::ParseProviderValue(PropertyIndex index,
   return false;
 }
 
+// static
+const EnumMapper<ProviderType>*
+    NativeVirtualNetworkParser::provider_type_mapper() {
+  CR_DEFINE_STATIC_LOCAL(EnumMapper<ProviderType>, parser,
+      (provider_type_table, arraysize(provider_type_table),
+       PROVIDER_TYPE_MAX));
+  return &parser;
+}
+
 ProviderType NativeVirtualNetworkParser::ParseProviderType(
     const std::string& type) {
-  static EnumMapper<ProviderType>::Pair table[] = {
-    { flimflam::kProviderL2tpIpsec, PROVIDER_TYPE_L2TP_IPSEC_PSK },
-    { flimflam::kProviderOpenVpn, PROVIDER_TYPE_OPEN_VPN },
-  };
-  static EnumMapper<ProviderType> parser(
-      table, arraysize(table), PROVIDER_TYPE_MAX);
-  return parser.Get(type);
+  return provider_type_mapper()->Get(type);
 }
 
 }  // namespace chromeos

@@ -6,16 +6,32 @@
 
 #include "content/browser/renderer_host/cross_site_resource_handler.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "content/browser/renderer_host/global_request_id.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
-#include "content/browser/renderer_host/render_view_host_notification_task.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
-#include "content/common/resource_response.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/common/resource_response.h"
 #include "net/base/io_buffer.h"
 #include "net/http/http_response_headers.h"
+
+namespace {
+
+void OnCrossSiteResponseHelper(int render_process_id,
+                               int render_view_id,
+                               int request_id) {
+  RenderViewHost* rvh = RenderViewHost::FromID(render_process_id,
+                                               render_view_id);
+  if (rvh && rvh->delegate()->GetRendererManagementDelegate()) {
+    rvh->delegate()->GetRendererManagementDelegate()->OnCrossSiteResponse(
+        render_process_id, request_id);
+  }
+}
+
+}  // namespace
 
 CrossSiteResourceHandler::CrossSiteResourceHandler(
     ResourceHandler* handler,
@@ -39,18 +55,20 @@ bool CrossSiteResourceHandler::OnUploadProgress(int request_id,
   return next_handler_->OnUploadProgress(request_id, position, size);
 }
 
-bool CrossSiteResourceHandler::OnRequestRedirected(int request_id,
-                                                   const GURL& new_url,
-                                                   ResourceResponse* response,
-                                                   bool* defer) {
+bool CrossSiteResourceHandler::OnRequestRedirected(
+    int request_id,
+    const GURL& new_url,
+    content::ResourceResponse* response,
+    bool* defer) {
   // We should not have started the transition before being redirected.
   DCHECK(!in_cross_site_transition_);
   return next_handler_->OnRequestRedirected(
       request_id, new_url, response, defer);
 }
 
-bool CrossSiteResourceHandler::OnResponseStarted(int request_id,
-                                                 ResourceResponse* response) {
+bool CrossSiteResourceHandler::OnResponseStarted(
+    int request_id,
+    content::ResourceResponse* response) {
   // At this point, we know that the response is safe to send back to the
   // renderer: it is not a download, and it has passed the SSL and safe
   // browsing checks.
@@ -80,8 +98,7 @@ bool CrossSiteResourceHandler::OnResponseStarted(int request_id,
   // cross-site navigation, since we are unable to tell when to destroy it.
   // See RenderViewHostManager::RendererAbortedProvisionalLoad.
   if (info->is_download() ||
-      (response->response_head.headers &&
-       response->response_head.headers->response_code() == 204)) {
+      (response->headers && response->headers->response_code() == 204)) {
     return next_handler_->OnResponseStarted(request_id, response);
   }
 
@@ -190,7 +207,7 @@ CrossSiteResourceHandler::~CrossSiteResourceHandler() {}
 // telling the old RenderViewHost to run its onunload handler.
 void CrossSiteResourceHandler::StartCrossSiteTransition(
     int request_id,
-    ResourceResponse* response,
+    content::ResourceResponse* response,
     const GlobalRequestID& global_id) {
   in_cross_site_transition_ = true;
   request_id_ = request_id;
@@ -219,10 +236,14 @@ void CrossSiteResourceHandler::StartCrossSiteTransition(
   // Tell the tab responsible for this request that a cross-site response is
   // starting, so that it can tell its old renderer to run its onunload
   // handler now.  We will wait to hear the corresponding ClosePage_ACK.
-  CallRenderViewHostRendererManagementDelegate(
-      render_process_host_id_, render_view_id_,
-      &RenderViewHostDelegate::RendererManagement::OnCrossSiteResponse,
-      render_process_host_id_, request_id);
+  content::BrowserThread::PostTask(
+      content::BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(
+          &OnCrossSiteResponseHelper,
+          render_process_host_id_,
+          render_view_id_,
+          request_id));
 
   // TODO(creis): If the above call should fail, then we need to notify the IO
   // thread to proceed anyway, using ResourceDispatcherHost::OnClosePageACK.

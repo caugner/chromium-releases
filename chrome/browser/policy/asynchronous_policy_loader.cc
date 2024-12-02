@@ -6,7 +6,9 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace policy {
 
@@ -46,7 +48,7 @@ void AsynchronousPolicyLoader::Stop() {
 AsynchronousPolicyLoader::~AsynchronousPolicyLoader() {
 }
 
-void AsynchronousPolicyLoader::Reload() {
+void AsynchronousPolicyLoader::Reload(bool force) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   if (delegate_.get()) {
     PostUpdatePolicyTask(delegate_->Load());
@@ -79,7 +81,7 @@ void AsynchronousPolicyLoader::ScheduleFallbackReloadTask() {
 
 void AsynchronousPolicyLoader::ReloadFromTask() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  Reload();
+  Reload(false);
 }
 
 void AsynchronousPolicyLoader::InitOnFileThread() {

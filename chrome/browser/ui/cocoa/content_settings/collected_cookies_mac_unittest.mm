@@ -10,7 +10,10 @@
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/test/test_browser_thread.h"
 #include "chrome/test/base/testing_profile.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -22,7 +25,7 @@ class CollectedCookiesWindowControllerTest
   }
 
  private:
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
 };
 
 TEST_F(CollectedCookiesWindowControllerTest, Construction) {

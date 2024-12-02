@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,11 @@
 namespace gpu {
 namespace gles2 {
 
-RenderbufferManager::RenderbufferManager(GLint max_renderbuffer_size)
-    : max_renderbuffer_size_(max_renderbuffer_size) {
+RenderbufferManager::RenderbufferManager(
+    GLint max_renderbuffer_size, GLint max_samples)
+    : max_renderbuffer_size_(max_renderbuffer_size),
+      max_samples_(max_samples),
+      num_uncleared_renderbuffers_(0)  {
 }
 
 RenderbufferManager::~RenderbufferManager() {
@@ -32,14 +35,39 @@ void RenderbufferManager::Destroy(bool have_context) {
   }
 }
 
+void RenderbufferManager::SetInfo(
+  RenderbufferInfo* renderbuffer,
+  GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height) {
+  DCHECK(renderbuffer);
+  if (!renderbuffer->cleared()) {
+    --num_uncleared_renderbuffers_;
+  }
+  renderbuffer->SetInfo(samples, internalformat, width, height);
+  if (!renderbuffer->cleared()) {
+    ++num_uncleared_renderbuffers_;
+  }
+}
+
+void RenderbufferManager::SetCleared(RenderbufferInfo* renderbuffer) {
+  DCHECK(renderbuffer);
+  if (!renderbuffer->cleared()) {
+    --num_uncleared_renderbuffers_;
+  }
+  renderbuffer->set_cleared();
+  if (!renderbuffer->cleared()) {
+    ++num_uncleared_renderbuffers_;
+  }
+}
+
 void RenderbufferManager::CreateRenderbufferInfo(
     GLuint client_id, GLuint service_id) {
+  RenderbufferInfo::Ref info(new RenderbufferInfo(service_id));
   std::pair<RenderbufferInfoMap::iterator, bool> result =
-      renderbuffer_infos_.insert(
-          std::make_pair(
-              client_id,
-              RenderbufferInfo::Ref(new RenderbufferInfo(service_id))));
+      renderbuffer_infos_.insert(std::make_pair(client_id, info));
   DCHECK(result.second);
+  if (!info->cleared()) {
+    ++num_uncleared_renderbuffers_;
+  }
 }
 
 RenderbufferManager::RenderbufferInfo* RenderbufferManager::GetRenderbufferInfo(
@@ -51,7 +79,11 @@ RenderbufferManager::RenderbufferInfo* RenderbufferManager::GetRenderbufferInfo(
 void RenderbufferManager::RemoveRenderbufferInfo(GLuint client_id) {
   RenderbufferInfoMap::iterator it = renderbuffer_infos_.find(client_id);
   if (it != renderbuffer_infos_.end()) {
-    it->second->MarkAsDeleted();
+    RenderbufferInfo* info = it->second;
+    if (!info->cleared()) {
+      --num_uncleared_renderbuffers_;
+    }
+    info->MarkAsDeleted();
     renderbuffer_infos_.erase(it);
   }
 }

@@ -34,10 +34,10 @@
   ],
   'target_defaults': {
     'dependencies': [
-      '../chrome/chrome.gyp:chrome_resources',
-      '../chrome/chrome.gyp:chrome_strings',
-      '../chrome/chrome.gyp:packed_resources',
-      '../chrome/chrome.gyp:theme_resources',
+      '../chrome/chrome_resources.gyp:chrome_resources',
+      '../chrome/chrome_resources.gyp:chrome_strings',
+      '../chrome/chrome_resources.gyp:packed_resources',
+      '../chrome/chrome_resources.gyp:theme_resources',
       '../skia/skia.gyp:skia',
     ],
     'defines': [ 'ISOLATION_AWARE_ENABLED=1' ],
@@ -62,7 +62,7 @@
       'type': 'none',
       'msvs_settings': {
         'VCMIDLTool': {
-          'OutputDirectory': '<(SHARED_INTERMEDIATE_DIR)',
+          'OutputDirectory': '<(SHARED_INTERMEDIATE_DIR)/chrome_frame',
         },
       },
       'sources': [
@@ -89,13 +89,12 @@
         'locales/locales.gyp:*',
       ],
       'sources': [
-        '<(SHARED_INTERMEDIATE_DIR)/chrome_tab.h',
+        '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/chrome_tab.h',
         'chrome_frame_unittest_main.cc',
         'chrome_launcher.cc',
         'chrome_launcher.h',
         'chrome_launcher_unittest.cc',
         'function_stub_unittest.cc',
-        'renderer_glue.cc',
         'test/chrome_tab_mocks.h',
         'test/chrome_frame_test_utils.h',
         'test/chrome_frame_test_utils.cc',
@@ -125,7 +124,6 @@
       ],
       'resource_include_dirs': [
         '<(INTERMEDIATE_DIR)',
-        '<(SHARED_INTERMEDIATE_DIR)',
       ],
       'conditions': [
         # We can't instrument code for coverage if it depends on 3rd party
@@ -249,7 +247,7 @@
         'test/win_event_receiver.cc',
         'test/win_event_receiver.h',
         'chrome_launcher_version.rc',
-        '<(SHARED_INTERMEDIATE_DIR)/chrome_tab.h',
+        '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/chrome_tab.h',
         'test_utils.cc',
         'test_utils.h',
       ],
@@ -324,7 +322,7 @@
         '../chrome/test/base/chrome_process_util.cc',
         '../chrome/test/base/chrome_process_util.h',
         '../chrome/test/ui/ui_test.cc',
-        '<(SHARED_INTERMEDIATE_DIR)/chrome_tab.h',
+        '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/chrome_tab.h',
         'test/chrome_frame_test_utils.cc',
         'test/chrome_frame_test_utils.h',
         'test/perf/chrome_frame_perftest.cc',
@@ -377,11 +375,12 @@
       'dependencies': [
         '../base/base.gyp:test_support_base',
         '../chrome/chrome.gyp:browser',
-        '../chrome/chrome.gyp:chrome_resources',
         '../chrome/chrome.gyp:debugger',
         '../chrome/chrome.gyp:renderer',
         '../chrome/chrome.gyp:syncapi_core',
+        '../chrome/chrome_resources.gyp:chrome_resources',
         '../content/content.gyp:content_gpu',
+        '../content/content.gyp:test_support_content',
         '../net/net.gyp:net',
         '../net/net.gyp:net_test_support',
         '../skia/skia.gyp:skia',
@@ -414,7 +413,7 @@
         'test/net/test_automation_provider.h',
         'test/net/test_automation_resource_message_filter.cc',
         'test/net/test_automation_resource_message_filter.h',
-        '<(SHARED_INTERMEDIATE_DIR)/chrome_tab.h',
+        '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/chrome_tab.h',
         '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
         'test_utils.cc',
         'test_utils.h',
@@ -485,7 +484,7 @@
         'test/simulate_input.h',
         'test/win_event_receiver.cc',
         'test/win_event_receiver.h',
-        '<(SHARED_INTERMEDIATE_DIR)/chrome_tab.h',
+        '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/chrome_tab.h',
         '../base/test/test_file_util_win.cc',
         '../chrome/test/automation/proxy_launcher.cc',
         '../chrome/test/automation/proxy_launcher.h',
@@ -537,6 +536,7 @@
         '../third_party/iaccessible2/iaccessible2.gyp:iaccessible2',
         'chrome_frame_ie',
         'chrome_frame_strings',
+        'chrome_tab_idl',
         'locales/locales.gyp:*',
         'npchrome_frame',
       ],
@@ -561,17 +561,14 @@
         'test/test_with_web_server.h',
         'test/win_event_receiver.cc',
         'test/win_event_receiver.h',
-        '<(SHARED_INTERMEDIATE_DIR)/chrome_tab.h',
+        '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/chrome_tab.h',
         'chrome_tab.idl',
-        'renderer_glue.cc',
         'test_utils.cc',
         'test_utils.h',
       ],
       'include_dirs': [
         '<(DEPTH)/third_party/wtl/include',
         '<(DEPTH)/breakpad/src',
-        # To allow including "chrome_tab.h"
-        '<(INTERMEDIATE_DIR)',
       ],
       'resource_include_dirs': [
         '<(INTERMEDIATE_DIR)',
@@ -627,6 +624,7 @@
       ],
       'include_dirs': [
         # To allow including "version.h"
+        # TODO(grt): remove this as per http://crbug.com/99368
         '<(SHARED_INTERMEDIATE_DIR)',
       ],
       'sources': [
@@ -675,7 +673,7 @@
         'chrome_protocol.cc',
         'chrome_protocol.h',
         'chrome_protocol.rgs',
-        '<(SHARED_INTERMEDIATE_DIR)/chrome_tab.h',
+        '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/chrome_tab.h',
         'com_message_event.cc',
         'com_message_event.h',
         'com_type_info_holder.cc',
@@ -745,7 +743,6 @@
         '../third_party/active_doc/ole_document_impl.h',
       ],
       'include_dirs': [
-        '<(INTERMEDIATE_DIR)/../chrome_frame',
         '<(DEPTH)/third_party/wtl/include',
       ],
       'conditions': [
@@ -859,19 +856,13 @@
         'chrome_frame_reporting.h',
         'chrome_tab.cc',
         'chrome_tab.def',
-        '<(SHARED_INTERMEDIATE_DIR)/chrome_tab.h',
+        '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/chrome_tab.h',
         # FIXME(slightlyoff): For chrome_tab.tlb. Giant hack until we can
         #   figure out something more gyp-ish.
         'resources/tlb_resource.rc',
         'chrome_tab.rgs',
         'chrome_tab_version.rc',
-        'renderer_glue.cc',
         'resource.h',
-      ],
-      'include_dirs': [
-        # For chrome_tab.h
-        '<(SHARED_INTERMEDIATE_DIR)',
-        '<(INTERMEDIATE_DIR)/../npchrome_frame',
       ],
       'conditions': [
         ['OS=="win"', {

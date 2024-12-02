@@ -17,7 +17,6 @@
 #include "base/memory/linked_ptr.h"
 #include "base/shared_memory.h"
 #include "base/string16.h"
-#include "base/task.h"
 #include "build/build_config.h"
 #include "content/browser/browser_message_filter.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
@@ -27,9 +26,9 @@
 #include "ui/gfx/surface/transport_dib.h"
 
 struct FontDescriptor;
+class PluginService;
 class RenderWidgetHelper;
 struct ViewHostMsg_CreateWindow_Params;
-struct ViewHostMsg_CreateWorker_Params;
 
 namespace WebKit {
 struct WebScreenInfo;
@@ -41,6 +40,7 @@ class ResourceContext;
 }
 
 namespace base {
+class ProcessMetrics;
 class SharedMemory;
 }
 
@@ -61,10 +61,6 @@ namespace webkit {
 struct WebPluginInfo;
 }
 
-namespace webkit_glue {
-struct WebCookie;
-}
-
 // This class filters out incoming IPC messages for the renderer process on the
 // IPC thread.
 class RenderMessageFilter : public BrowserMessageFilter {
@@ -78,14 +74,12 @@ class RenderMessageFilter : public BrowserMessageFilter {
 
   // IPC::ChannelProxy::MessageFilter methods:
   virtual void OnChannelClosing() OVERRIDE;
-#if defined (OS_WIN)
-  virtual void OnChannelError() OVERRIDE;
-#endif
+  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
 
   // BrowserMessageFilter methods:
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
-  virtual void OnDestruct() const;
+                                 bool* message_was_ok) OVERRIDE;
+  virtual void OnDestruct() const OVERRIDE;
 
   bool OffTheRecord() const;
 
@@ -100,7 +94,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
   net::URLRequestContext* GetRequestContextForURL(const GURL& url);
 
  private:
-  friend class BrowserThread;
+  friend class content::BrowserThread;
   friend class DeleteTask<RenderMessageFilter>;
 
   class OpenChannelToNpapiPluginCallback;
@@ -137,21 +131,13 @@ class RenderMessageFilter : public BrowserMessageFilter {
                   uint32* font_id);
 #endif
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // On Windows, we handle these on the IO thread to avoid a deadlock with
   // plugins.  On non-Windows systems, we need to handle them on the UI thread.
   void OnGetScreenInfo(gfx::NativeViewId window,
                        WebKit::WebScreenInfo* results);
   void OnGetWindowRect(gfx::NativeViewId window, gfx::Rect* rect);
   void OnGetRootWindowRect(gfx::NativeViewId window, gfx::Rect* rect);
-
-  // This hack is Windows-specific.
-  // Cache fonts for the renderer. See RenderMessageFilter::OnPreCacheFont
-  // implementation for more details.
-  void OnPreCacheFont(const LOGFONT& font);
-
-  // Release fonts cached for renderer.
-  void OnReleaseCachedFonts();
 #endif
 
   void OnGetPlugins(bool refresh, IPC::Message* reply_msg);
@@ -179,9 +165,13 @@ class RenderMessageFilter : public BrowserMessageFilter {
                      const GURL& url,
                      const GURL& referrer,
                      const string16& suggested_name);
-  void OnCheckNotificationPermission(const GURL& source_url,
+  void OnCheckNotificationPermission(const GURL& source_origin,
                                      int* permission_level);
 
+  void OnGetCPUUsage(int* cpu_usage);
+
+  void OnGetHardwareBufferSize(uint32* buffer_size);
+  void OnGetHardwareInputSampleRate(double* sample_rate);
   void OnGetHardwareSampleRate(double* sample_rate);
 
   // Used to ask the browser to allocate a block of shared memory for the
@@ -263,6 +253,13 @@ class RenderMessageFilter : public BrowserMessageFilter {
   int render_process_id_;
 
   std::set<OpenChannelToNpapiPluginCallback*> plugin_host_clients_;
+
+  // Records the last time we sampled CPU usage of the renderer process.
+  base::TimeTicks cpu_usage_sample_time_;
+  // Records the last sampled CPU usage in percents.
+  int cpu_usage_;
+  // Used for sampling CPU usage of the renderer process.
+  scoped_ptr<base::ProcessMetrics> process_metrics_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderMessageFilter);
 };

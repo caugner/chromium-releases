@@ -4,19 +4,25 @@
 
 #include "content/browser/download/mhtml_generation_manager.h"
 
+#include "base/bind.h"
 #include "base/platform_file.h"
-#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/notification_types.h"
+
+using content::BrowserThread;
 
 MHTMLGenerationManager::Job::Job()
     : browser_file(base::kInvalidPlatformFileValue),
       renderer_file(IPC::InvalidPlatformFileForTransit()),
       process_id(-1),
       routing_id(-1) {
+}
+
+MHTMLGenerationManager::Job::~Job() {
 }
 
 MHTMLGenerationManager::MHTMLGenerationManager() {
@@ -26,22 +32,24 @@ MHTMLGenerationManager::~MHTMLGenerationManager() {
 }
 
 void MHTMLGenerationManager::GenerateMHTML(TabContents* tab_contents,
-                                           const FilePath& file) {
+    const FilePath& file,
+    const GenerateMHTMLCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   static int id_counter = 0;
 
   int job_id = id_counter++;
   Job job;
   job.file_path = file;
-  job.process_id = tab_contents->GetRenderProcessHost()->id();
+  job.process_id = tab_contents->GetRenderProcessHost()->GetID();
   job.routing_id = tab_contents->render_view_host()->routing_id();
+  job.callback = callback;
   id_to_job_[job_id] = job;
 
   base::ProcessHandle renderer_process =
       tab_contents->GetRenderProcessHost()->GetHandle();
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this, &MHTMLGenerationManager::CreateFile,
-                        job_id, file, renderer_process));
+      base::Bind(&MHTMLGenerationManager::CreateFile, this,
+                 job_id, file, renderer_process));
 }
 
 void MHTMLGenerationManager::MHTMLGenerated(int job_id, int64 mhtml_data_size) {
@@ -63,8 +71,8 @@ void MHTMLGenerationManager::CreateFile(int job_id, const FilePath& file_path,
       IPC::GetFileHandleForProcess(browser_file, renderer_process, false);
 
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &MHTMLGenerationManager::FileCreated,
-                        job_id, browser_file, renderer_file));
+      base::Bind(&MHTMLGenerationManager::FileCreated, this,
+                 job_id, browser_file, renderer_file));
 }
 
 void MHTMLGenerationManager::FileCreated(int job_id,
@@ -106,22 +114,10 @@ void MHTMLGenerationManager::JobFinished(int job_id, int64 file_size) {
   }
 
   Job& job = iter->second;
-
-  RenderViewHost* rvh = RenderViewHost::FromID(job.process_id, job.routing_id);
-  if (rvh) {
-    NotificationDetails details;
-    details.file_path = job.file_path;
-    details.file_size = file_size;
-
-    NotificationService::current()->Notify(
-        content::NOTIFICATION_MHTML_GENERATED,
-        Source<RenderViewHost>(rvh),
-        Details<NotificationDetails>(&details));
-  }
+  job.callback.Run(job.file_path, file_size);
 
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this, &MHTMLGenerationManager::CloseFile,
-                        job.browser_file));
+      base::Bind(&MHTMLGenerationManager::CloseFile, this, job.browser_file));
 
   id_to_job_.erase(job_id);
 }

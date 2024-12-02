@@ -11,21 +11,19 @@
 #include "base/logging.h"
 #include "base/synchronization/lock.h"
 #include "base/utf_string_conversions.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/plugins/npapi/plugin_constants_win.h"
 #include "webkit/plugins/npapi/plugin_instance.h"
 
 #pragma comment(lib, "imm32.lib")
-
-using WebKit::WebInputEvent;
-using WebKit::WebCompositionEvent;
 
 namespace webkit {
 namespace npapi {
 
 // A critical section that prevents two or more plug-ins from accessing a
 // WebPluginIMEWin instance through our patch function.
-base::LazyInstance<base::Lock> g_webplugin_ime_lock(base::LINKER_INITIALIZED);
+base::LazyInstance<base::Lock,
+                   base::LeakyLazyInstanceTraits<base::Lock> >
+    g_webplugin_ime_lock = LAZY_INSTANCE_INITIALIZER;
 
 WebPluginIMEWin* WebPluginIMEWin::instance_ = NULL;
 

@@ -16,9 +16,8 @@
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_types.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
-#include "content/common/dom_storage_common.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class CannedBrowsingDataAppCacheHelper;
 class CannedBrowsingDataCookieHelper;
@@ -36,7 +35,7 @@ class CookieOptions;
 }
 
 class TabSpecificContentSettings : public TabContentsObserver,
-                                   public NotificationObserver {
+                                   public content::NotificationObserver {
  public:
   explicit TabSpecificContentSettings(TabContents* tab);
 
@@ -86,7 +85,7 @@ class TabSpecificContentSettings : public TabContentsObserver,
   static void DOMStorageAccessed(int render_process_id,
                                  int render_view_id,
                                  const GURL& url,
-                                 DOMStorageType storage_type,
+                                 bool local,
                                  bool blocked_by_policy);
 
   // Called when a specific indexed db factory in the current page was
@@ -160,10 +159,9 @@ class TabSpecificContentSettings : public TabContentsObserver,
 
   // TabContentsObserver overrides.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void DidNavigateMainFramePostCommit(
+  virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
-  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
+      const content::FrameNavigateParams& params) OVERRIDE;
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
       bool is_main_frame,
@@ -192,7 +190,7 @@ class TabSpecificContentSettings : public TabContentsObserver,
                            const string16& description,
                            bool blocked_by_policy);
   void OnLocalStorageAccessed(const GURL& url,
-                              DOMStorageType storage_type,
+                              bool local,
                               bool blocked_by_policy);
   void OnWebDatabaseAccessed(const GURL& url,
                              const string16& name,
@@ -253,10 +251,10 @@ class TabSpecificContentSettings : public TabContentsObserver,
 
   void OnContentAccessed(ContentSettingsType type);
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Stores which content setting types actually have blocked content.
   bool content_blocked_[CONTENT_SETTINGS_NUM_TYPES];
@@ -285,7 +283,7 @@ class TabSpecificContentSettings : public TabContentsObserver,
   // Stores whether the user can load blocked plugins on this page.
   bool load_plugins_link_enabled_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(TabSpecificContentSettings);
 };

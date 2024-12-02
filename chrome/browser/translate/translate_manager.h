@@ -16,9 +16,9 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/translate_errors.h"
-#include "content/common/net/url_fetcher.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/common/url_fetcher_delegate.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 template <typename T> struct DefaultSingletonTraits;
 class GURL;
@@ -32,8 +32,8 @@ class TranslateInfoBarDelegate;
 // page translation the user requests.
 // It is a singleton.
 
-class TranslateManager : public NotificationObserver,
-                         public URLFetcher::Delegate {
+class TranslateManager : public content::NotificationObserver,
+                         public content::URLFetcherDelegate {
  public:
   // Returns the singleton instance.
   static TranslateManager* GetInstance();
@@ -69,18 +69,13 @@ class TranslateManager : public NotificationObserver,
   // Clears the translate script, so it will be fetched next time we translate.
   void ClearTranslateScript() { translate_script_.clear(); }
 
-  // NotificationObserver implementation:
+  // content::NotificationObserver implementation:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
-  // URLFetcher::Delegate implementation:
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data);
+  // content::URLFetcherDelegate implementation:
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
   // Used by unit-tests to override the default delay after which the translate
   // script is fetched again from the translation server.
@@ -180,7 +175,7 @@ class TranslateManager : public NotificationObserver,
   static TranslateInfoBarDelegate* GetTranslateInfoBarDelegate(
       TabContents* tab);
 
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 
   // Each PrefChangeRegistrar only tracks a single PrefService, so a map from
   // each PrefService used to its registrar is needed.
@@ -202,11 +197,11 @@ class TranslateManager : public NotificationObserver,
   int translate_script_expiration_delay_;
 
   // Set when the translate JS is currently being retrieved. NULL otherwise.
-  scoped_ptr<URLFetcher> translate_script_request_pending_;
+  scoped_ptr<content::URLFetcher> translate_script_request_pending_;
 
   // Set when the list of languages is currently being retrieved.
   // NULL otherwise.
-  scoped_ptr<URLFetcher> language_list_request_pending_;
+  scoped_ptr<content::URLFetcher> language_list_request_pending_;
 
   // The list of pending translate requests.  Translate requests are queued when
   // the translate script is not ready and has to be fetched from the translate

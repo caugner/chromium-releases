@@ -10,9 +10,10 @@
 
 #include "chrome/browser/search_engines/template_url_service_observer.h"
 #include "ui/gfx/size.h"
-#include "views/controls/button/text_button.h"
-#include "views/view.h"
-#include "views/widget/widget_delegate.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/view.h"
+#include "ui/views/widget/widget_delegate.h"
+#include "ui/views/window/client_view.h"
 
 class Profile;
 class TemplateURL;
@@ -74,7 +75,8 @@ class SearchEngineChoice : public views::NativeTextButton {
 
 // This class displays a large search engine choice dialog view during
 // initial first run import.
-class FirstRunSearchEngineView : public views::WidgetDelegateView,
+class FirstRunSearchEngineView : public views::ClientView,
+                                 public views::WidgetDelegate,
                                  public views::ButtonListener,
                                  public TemplateURLServiceObserver {
  public:
@@ -84,9 +86,16 @@ class FirstRunSearchEngineView : public views::WidgetDelegateView,
 
   virtual ~FirstRunSearchEngineView();
 
-  // Overridden from views::WidgetDelegateView:
+  // Overridden from views::WidgetDelegate:
   virtual string16 GetWindowTitle() const OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE { return this; }
+  virtual views::View* GetContentsView() OVERRIDE;
+  virtual views::ClientView* CreateClientView(views::Widget* widget) OVERRIDE;
+  virtual void WindowClosing() OVERRIDE;
+  virtual views::Widget* GetWidget() OVERRIDE;
+  virtual const views::Widget* GetWidget() const OVERRIDE;
+
+  // Overridden from views::ClientView:
+  virtual bool CanClose() OVERRIDE;
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
@@ -108,10 +117,19 @@ class FirstRunSearchEngineView : public views::WidgetDelegateView,
   // to present to the user.
   virtual void OnTemplateURLServiceChanged() OVERRIDE;
 
+#if defined(UNIT_TEST)
+  void set_quit_on_closing(bool quit_on_closing) {
+    quit_on_closing_ = quit_on_closing;
+  }
+#endif
+
  private:
   // Once the TemplateURLService has loaded and we're in a View hierarchy, it's
   // OK to add the search engines from the TemplateURLService.
   void AddSearchEnginesIfPossible();
+
+  // Sets the default search engine to the one represented by |choice|.
+  void ChooseSearchEngine(SearchEngineChoice* choice);
 
   // One for each search engine choice offered, either three or four.
   std::vector<SearchEngineChoice*> search_engine_choices_;
@@ -125,7 +143,6 @@ class FirstRunSearchEngineView : public views::WidgetDelegateView,
 
   bool text_direction_is_rtl_;
 
-  bool template_url_service_loaded_;
   bool added_to_view_hierarchy_;
 
   // Image of browser search box with grey background and bubble arrow.
@@ -134,6 +151,22 @@ class FirstRunSearchEngineView : public views::WidgetDelegateView,
   // UI elements:
   views::Label* title_label_;
   views::Label* text_label_;
+
+  // True when the user has chosen a particular search engine. Defaults to
+  // false. When the user closes the window without choosing a search engine,
+  // the engine specified by |fallback_choice_| is chosen.
+  bool user_chosen_engine_;
+
+  // The engine to choose when the user closes the window without explicitly
+  // making a selection. Because of randomization functionality, we cannot
+  // reliably deduce this from slot order, so this value is saved prior to
+  // randomization.
+  SearchEngineChoice* fallback_choice_;
+
+  // Defaults to true. Indicates that the current message loop should be quit
+  // when the window is closed. This is false in tests when this dialog does not
+  // spin its own message loop.
+  bool quit_on_closing_;
 
   DISALLOW_COPY_AND_ASSIGN(FirstRunSearchEngineView);
 };

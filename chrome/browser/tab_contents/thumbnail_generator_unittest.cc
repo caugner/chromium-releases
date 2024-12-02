@@ -13,8 +13,8 @@
 #include "content/browser/renderer_host/mock_render_process_host.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/tab_contents/render_view_host_manager.h"
-#include "content/common/notification_service.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "skia/ext/platform_canvas.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -68,10 +68,10 @@ class ThumbnailGeneratorTest : public testing::Test {
     // Need to send out a create notification for the RWH to get hooked. This is
     // a little scary in that we don't have a RenderView, but the only listener
     // will want a RenderWidget, so it works out OK.
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
-        Source<RenderViewHostManager>(NULL),
-        Details<RenderViewHost>(reinterpret_cast<RenderViewHost*>(
+        content::Source<RenderViewHostManager>(NULL),
+        content::Details<RenderViewHost>(reinterpret_cast<RenderViewHost*>(
             widget_.get())));
 
     transport_dib_.reset(TransportDIB::Create(kBitmapWidth * kBitmapHeight * 4,
@@ -206,7 +206,7 @@ TEST_F(ThumbnailGeneratorTest, DiscardBackingStore) {
   ASSERT_TRUE(result.isNull());
 }
 
-#endif  // !defined(OS_MAC)
+#endif  // !defined(OS_MACOSX)
 
 typedef testing::Test ThumbnailGeneratorSimpleTest;
 
@@ -220,7 +220,7 @@ TEST_F(ThumbnailGeneratorSimpleTest, CalculateBoringScore_SingleColor) {
   const gfx::Size kSize(20, 10);
   gfx::CanvasSkia canvas(kSize.width(), kSize.height(), true);
   // Fill all pixesl in black.
-  canvas.FillRectInt(kBlack, 0, 0, kSize.width(), kSize.height());
+  canvas.FillRect(kBlack, gfx::Rect(gfx::Point(), kSize));
 
   SkBitmap bitmap =
       skia::GetTopDevice(*canvas.sk_canvas())->accessBitmap(false);
@@ -235,9 +235,9 @@ TEST_F(ThumbnailGeneratorSimpleTest, CalculateBoringScore_TwoColors) {
 
   gfx::CanvasSkia canvas(kSize.width(), kSize.height(), true);
   // Fill all pixesl in black.
-  canvas.FillRectInt(kBlack, 0, 0, kSize.width(), kSize.height());
+  canvas.FillRect(kBlack, gfx::Rect(gfx::Point(), kSize));
   // Fill the left half pixels in white.
-  canvas.FillRectInt(kWhite, 0, 0, kSize.width() / 2, kSize.height());
+  canvas.FillRect(kWhite, gfx::Rect(0, 0, kSize.width() / 2, kSize.height()));
 
   SkBitmap bitmap =
       skia::GetTopDevice(*canvas.sk_canvas())->accessBitmap(false);

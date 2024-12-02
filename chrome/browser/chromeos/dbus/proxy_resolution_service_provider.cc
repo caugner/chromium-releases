@@ -17,6 +17,8 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
+using content::BrowserThread;
+
 namespace chromeos {
 
 // The ProxyResolverInterface implementation used in production.
@@ -222,8 +224,9 @@ bool ProxyResolutionServiceProvider::OnOriginThread() {
   return base::PlatformThread::CurrentId() == origin_thread_id_;
 }
 
-dbus::Response* ProxyResolutionServiceProvider::ResolveProxyHandler(
-    dbus::MethodCall* method_call) {
+void ProxyResolutionServiceProvider::ResolveProxyHandler(
+    dbus::MethodCall* method_call,
+    dbus::ExportedObject::ResponseSender response_sender) {
   DCHECK(OnOriginThread());
   VLOG(1) << "Handing method call: " << method_call->ToString();
   // The method call should contain the three string parameters.
@@ -235,7 +238,8 @@ dbus::Response* ProxyResolutionServiceProvider::ResolveProxyHandler(
       !reader.PopString(&signal_interface) ||
       !reader.PopString(&signal_name)) {
     LOG(ERROR) << "Unexpected method call: " << method_call->ToString();
-    return NULL;
+    response_sender.Run(NULL);
+    return;
   }
 
   resolver_->ResolveProxy(source_url,
@@ -243,21 +247,23 @@ dbus::Response* ProxyResolutionServiceProvider::ResolveProxyHandler(
                           signal_name,
                           exported_object_);
 
-  // Return an empty response for now. We'll send a signal once the
-  // network proxy resolution is completed.
+  // Send an empty response for now. We'll send a signal once the network proxy
+  // resolution is completed.
   dbus::Response* response = dbus::Response::FromMethodCall(method_call);
-  return response;
+  response_sender.Run(response);
 }
 
 // static
-dbus::Response* ProxyResolutionServiceProvider::CallResolveProxyHandler(
+void ProxyResolutionServiceProvider::CallResolveProxyHandler(
     base::WeakPtr<ProxyResolutionServiceProvider> provider_weak_ptr,
-    dbus::MethodCall* method_call) {
+    dbus::MethodCall* method_call,
+    dbus::ExportedObject::ResponseSender response_sender) {
   if (!provider_weak_ptr) {
     LOG(WARNING) << "Called after the object is deleted";
-    return NULL;
+    response_sender.Run(NULL);
+    return;
   }
-  return provider_weak_ptr->ResolveProxyHandler(method_call);
+  provider_weak_ptr->ResolveProxyHandler(method_call, response_sender);
 }
 
 ProxyResolutionServiceProvider* ProxyResolutionServiceProvider::Create() {

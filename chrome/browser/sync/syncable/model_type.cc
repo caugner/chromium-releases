@@ -9,6 +9,7 @@
 #include "base/values.h"
 #include "chrome/browser/sync/engine/syncproto.h"
 #include "chrome/browser/sync/protocol/app_notification_specifics.pb.h"
+#include "chrome/browser/sync/protocol/app_setting_specifics.pb.h"
 #include "chrome/browser/sync/protocol/app_specifics.pb.h"
 #include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
@@ -63,6 +64,9 @@ void AddDefaultExtensionValue(syncable::ModelType datatype,
       break;
     case APPS:
       specifics->MutableExtension(sync_pb::app);
+      break;
+    case APP_SETTINGS:
+      specifics->MutableExtension(sync_pb::app_setting);
       break;
     case EXTENSION_SETTINGS:
       specifics->MutableExtension(sync_pb::extension_setting);
@@ -122,6 +126,9 @@ int GetExtensionFieldNumberFromModelType(ModelType model_type) {
       break;
     case APPS:
       return sync_pb::kAppFieldNumber;
+      break;
+    case APP_SETTINGS:
+      return sync_pb::kAppSettingFieldNumber;
       break;
     case EXTENSION_SETTINGS:
       return sync_pb::kExtensionSettingFieldNumber;
@@ -206,6 +213,9 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
   if (specifics.HasExtension(sync_pb::session))
     return SESSIONS;
 
+  if (specifics.HasExtension(sync_pb::app_setting))
+    return APP_SETTINGS;
+
   if (specifics.HasExtension(sync_pb::extension_setting))
     return EXTENSION_SETTINGS;
 
@@ -219,7 +229,7 @@ bool ShouldMaintainPosition(ModelType model_type) {
   return model_type == BOOKMARKS;
 }
 
-std::string ModelTypeToString(ModelType model_type) {
+const char* ModelTypeToString(ModelType model_type) {
   // This is used in serialization routines as well as for displaying debug
   // information.  Do not attempt to change these string values unless you know
   // what you're doing.
@@ -252,6 +262,8 @@ std::string ModelTypeToString(ModelType model_type) {
       return "Apps";
     case AUTOFILL_PROFILE:
       return "Autofill Profiles";
+    case APP_SETTINGS:
+      return "App settings";
     case EXTENSION_SETTINGS:
       return "Extension settings";
     case APP_NOTIFICATIONS:
@@ -326,6 +338,8 @@ ModelType ModelTypeFromString(const std::string& model_type_string) {
     return SESSIONS;
   else if (model_type_string == "Apps")
     return APPS;
+  else if (model_type_string == "App settings")
+    return APP_SETTINGS;
   else if (model_type_string == "Extension settings")
     return EXTENSION_SETTINGS;
   else if (model_type_string == "App Notifications")
@@ -356,6 +370,17 @@ ModelTypeBitSet ModelTypeBitSetFromSet(const ModelTypeSet& set) {
     bitset.set(*iter);
   }
   return bitset;
+}
+
+ModelTypeSet ModelTypeBitSetToSet(const ModelTypeBitSet& bit_set) {
+  ModelTypeSet set;
+  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
+    syncable::ModelType type = syncable::ModelTypeFromInt(i);
+    if (bit_set[type]) {
+      set.insert(type);
+    }
+  }
+  return set;
 }
 
 ListValue* ModelTypeBitSetToValue(const ModelTypeBitSet& model_types) {
@@ -422,6 +447,8 @@ std::string ModelTypeToRootTag(ModelType type) {
       return "google_chrome_apps";
     case AUTOFILL_PROFILE:
       return "google_chrome_autofill_profiles";
+    case APP_SETTINGS:
+      return "google_chrome_app_settings";
     case EXTENSION_SETTINGS:
       return "google_chrome_extension_settings";
     case APP_NOTIFICATIONS:
@@ -489,6 +516,10 @@ void PostTimeToTypeHistogram(ModelType model_type, base::TimeDelta time) {
         SYNC_FREQ_HISTOGRAM("Sync.FreqApps", time);
         return;
     }
+    case APP_SETTINGS: {
+        SYNC_FREQ_HISTOGRAM("Sync.FreqAppSettings", time);
+        return;
+    }
     case EXTENSION_SETTINGS: {
         SYNC_FREQ_HISTOGRAM("Sync.FreqExtensionSettings", time);
         return;
@@ -516,6 +547,7 @@ const char kTypedUrlNotificationType[] = "TYPED_URL";
 const char kExtensionNotificationType[] = "EXTENSION";
 const char kExtensionSettingNotificationType[] = "EXTENSION_SETTING";
 const char kNigoriNotificationType[] = "NIGORI";
+const char kAppSettingNotificationType[] = "APP_SETTING";
 const char kAppNotificationType[] = "APP";
 const char kSearchEngineNotificationType[] = "SEARCH_ENGINE";
 const char kSessionNotificationType[] = "SESSION";
@@ -549,6 +581,9 @@ bool RealModelTypeToNotificationType(ModelType model_type,
       return true;
     case NIGORI:
       *notification_type = kNigoriNotificationType;
+      return true;
+    case APP_SETTINGS:
+      *notification_type = kAppNotificationType;
       return true;
     case APPS:
       *notification_type = kAppNotificationType;
@@ -613,15 +648,19 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
   } else if (notification_type == kAutofillProfileNotificationType) {
     *model_type = AUTOFILL_PROFILE;
     return true;
+  } else if (notification_type == kAppSettingNotificationType) {
+    *model_type = APP_SETTINGS;
+    return true;
   } else if (notification_type == kExtensionSettingNotificationType) {
     *model_type = EXTENSION_SETTINGS;
     return true;
   } else if (notification_type == kAppNotificationNotificationType) {
     *model_type = APP_NOTIFICATIONS;
     return true;
+  } else {
+    *model_type = UNSPECIFIED;
+    return false;
   }
-  *model_type = UNSPECIFIED;
-  return false;
 }
 
 ModelTypeSet GetAllRealModelTypes() {

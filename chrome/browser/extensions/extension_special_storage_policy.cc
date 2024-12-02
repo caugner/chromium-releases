@@ -4,17 +4,20 @@
 
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 ExtensionSpecialStoragePolicy::ExtensionSpecialStoragePolicy(
-    HostContentSettingsMap* host_content_settings_map)
-    : host_content_settings_map_(host_content_settings_map) {}
+    CookieSettings* cookie_settings)
+    : cookie_settings_(cookie_settings) {}
 
 ExtensionSpecialStoragePolicy::~ExtensionSpecialStoragePolicy() {}
 
@@ -31,24 +34,21 @@ bool ExtensionSpecialStoragePolicy::IsStorageUnlimited(const GURL& origin) {
 }
 
 bool ExtensionSpecialStoragePolicy::IsStorageSessionOnly(const GURL& origin) {
-  if (host_content_settings_map_ == NULL)
+  if (cookie_settings_ == NULL)
     return false;
-  ContentSetting content_setting = host_content_settings_map_->
-      GetCookieContentSetting(origin, origin, true);
-  return (content_setting == CONTENT_SETTING_SESSION_ONLY);
+  return cookie_settings_->IsCookieSessionOnly(origin);
 }
 
 bool ExtensionSpecialStoragePolicy::HasSessionOnlyOrigins() {
-  if (host_content_settings_map_ == NULL)
+  if (cookie_settings_ == NULL)
     return false;
-  if (host_content_settings_map_->GetDefaultContentSetting(
-          CONTENT_SETTINGS_TYPE_COOKIES) == CONTENT_SETTING_SESSION_ONLY)
+  if (cookie_settings_->GetDefaultCookieSetting(NULL) ==
+      CONTENT_SETTING_SESSION_ONLY)
     return true;
-  HostContentSettingsMap::SettingsForOneType entries;
-  host_content_settings_map_->GetSettingsForOneType(
-      CONTENT_SETTINGS_TYPE_COOKIES, "", &entries);
+  ContentSettingsForOneType entries;
+  cookie_settings_->GetCookieSettings(&entries);
   for (size_t i = 0; i < entries.size(); ++i) {
-    if (entries[i].c == CONTENT_SETTING_SESSION_ONLY)
+    if (entries[i].setting == CONTENT_SETTING_SESSION_ONLY)
       return true;
   }
   return false;
@@ -72,7 +72,7 @@ void ExtensionSpecialStoragePolicy::GrantRightsForExtension(
   }
   {
     base::AutoLock locker(lock_);
-    if (extension->is_hosted_app())
+    if (extension->is_hosted_app() && !extension->from_bookmark())
       protected_apps_.Add(extension);
     if (extension->HasAPIPermission(ExtensionAPIPermission::kUnlimitedStorage))
       unlimited_extensions_.Add(extension);
@@ -96,7 +96,7 @@ void ExtensionSpecialStoragePolicy::RevokeRightsForExtension(
   }
   {
     base::AutoLock locker(lock_);
-    if (extension->is_hosted_app())
+    if (extension->is_hosted_app() && !extension->from_bookmark())
       protected_apps_.Remove(extension);
     if (extension->HasAPIPermission(ExtensionAPIPermission::kUnlimitedStorage))
       unlimited_extensions_.Remove(extension);
@@ -121,8 +121,7 @@ void ExtensionSpecialStoragePolicy::RevokeRightsForAllExtensions() {
 void ExtensionSpecialStoragePolicy::NotifyChanged() {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this,
-            &ExtensionSpecialStoragePolicy::NotifyChanged));
+        base::Bind(&ExtensionSpecialStoragePolicy::NotifyChanged, this));
     return;
   }
   SpecialStoragePolicy::NotifyObservers();

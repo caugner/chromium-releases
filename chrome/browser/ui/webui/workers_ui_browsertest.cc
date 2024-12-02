@@ -31,7 +31,7 @@ class WorkersUITest : public InProcessBrowserTest {
 #if defined(OS_MACOSX)
 #define MAYBE_SharedWorkersList DISABLED_SharedWorkersList
 #else
-#define MAYBE_SharedWorkersList SharedWorkersList
+#define MAYBE_SharedWorkersList FLAKY_SharedWorkersList
 #endif
 IN_PROC_BROWSER_TEST_F(WorkersUITest, MAYBE_SharedWorkersList) {
   ASSERT_TRUE(test_server()->Start());
@@ -59,4 +59,3 @@ IN_PROC_BROWSER_TEST_F(WorkersUITest, MAYBE_SharedWorkersList) {
 }
 
 }  // namespace
-

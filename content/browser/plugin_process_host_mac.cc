@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,15 @@
 
 #include <vector>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/plugin_process_host.h"
 #include "content/common/plugin_messages.h"
+#include "content/public/browser/browser_thread.h"
 #include "ui/gfx/rect.h"
+
+using content::BrowserThread;
 
 void PluginProcessHost::OnPluginSelectWindow(uint32 window_id,
                                              gfx::Rect window_rect,
@@ -42,10 +45,9 @@ void PluginProcessHost::OnPluginShowWindow(uint32 window_id,
     // the main display, hide the menubar so that it has the whole screen.
     // (but only if we haven't already seen this fullscreen window, since
     // otherwise our refcounting can get skewed).
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        NewRunnableFunction(base::mac::RequestFullScreen,
-                            base::mac::kFullScreenModeHideAll));
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(base::mac::RequestFullScreen,
+                                       base::mac::kFullScreenModeHideAll));
   }
 }
 
@@ -75,16 +77,14 @@ void PluginProcessHost::OnPluginHideWindow(uint32 window_id,
     plugin_fullscreen_windows_set_.erase(window_id);
     pid_t plugin_pid = browser_needs_activation ? -1 : handle();
     browser_needs_activation = false;
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        NewRunnableFunction(ReleasePluginFullScreen, plugin_pid));
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(ReleasePluginFullScreen, plugin_pid));
   }
 
   if (browser_needs_activation) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableFunction(base::mac::ActivateProcess,
-                            base::GetCurrentProcId()));
+        base::Bind(base::mac::ActivateProcess, base::GetCurrentProcId()));
   }
 }
 
@@ -94,18 +94,16 @@ void PluginProcessHost::OnAppActivation() {
   // If our plugin process has any modal windows up, we need to bring it forward
   // so that they act more like an in-process modal window would.
   if (!plugin_modal_windows_set_.empty()) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        NewRunnableFunction(base::mac::ActivateProcess, handle()));
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(base::mac::ActivateProcess, handle()));
   }
 }
 
 void PluginProcessHost::OnPluginSetCursorVisibility(bool visible) {
   if (plugin_cursor_visible_ != visible) {
     plugin_cursor_visible_ = visible;
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        NewRunnableFunction(base::mac::SetCursorVisibility,
-                            visible));
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(base::mac::SetCursorVisibility,
+                                       visible));
   }
 }

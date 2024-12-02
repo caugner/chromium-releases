@@ -8,11 +8,11 @@
 #define CHROME_BROWSER_CHROMEOS_NOTIFICATIONS_NOTIFICATION_PANEL_H_
 #pragma once
 
+#include "base/memory/weak_ptr.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
 #include "chrome/browser/chromeos/frame/panel_controller.h"
 #include "chrome/browser/chromeos/notifications/balloon_collection_impl.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/gfx/rect.h"
 
 class Balloon;
@@ -71,7 +71,8 @@ class NotificationPanelTester;
 //
 class NotificationPanel : public PanelController::Delegate,
                           public BalloonCollectionImpl::NotificationUI,
-                          public NotificationObserver {
+                          public content::NotificationObserver,
+                          public base::SupportsWeakPtr<NotificationPanel> {
  public:
   enum State {
     FULL,  // Show all notifications
@@ -106,8 +107,8 @@ class NotificationPanel : public PanelController::Delegate,
 
   // NotificationObserver overrides:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Called when a mouse left the panel window.
   void OnMouseLeave();
@@ -176,8 +177,6 @@ class NotificationPanel : public PanelController::Delegate,
   // Panel's state.
   State state_;
 
-  ScopedRunnableMethodFactory<NotificationPanel> task_factory_;
-
   // The minimum size of a notification.
   gfx::Rect min_bounds_;
 
@@ -185,7 +184,7 @@ class NotificationPanel : public PanelController::Delegate,
   int stale_timeout_;
 
   // A registrar to subscribe PANEL_STATE_CHANGED event.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // The notification a mouse pointer is currently on. NULL if the mouse
   // is out of the panel.

@@ -29,11 +29,12 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/location.h"
 #include "base/time.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/pending_task.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/platform_thread.h"
@@ -47,25 +48,6 @@ class BASE_EXPORT PosixDynamicThreadPool
     : public RefCountedThreadSafe<PosixDynamicThreadPool> {
  public:
   class PosixDynamicThreadPoolPeer;
-
-  struct PendingTask {
-    PendingTask(const tracked_objects::Location& posted_from,
-                const base::Closure& task);
-    ~PendingTask();
-
-#if defined(TRACK_ALL_TASK_OBJECTS)
-    // Counter for location where the Closure was posted from.
-    tracked_objects::Births* post_births;
-
-    // Time the task was posted.
-    TimeTicks time_posted;
-#endif  // defined(TRACK_ALL_TASK_OBJECTS)
-
-    const tracked_objects::Location posted_from;
-
-    // The task to run.
-    base::Closure task;
-  };
 
   // All worker threads will share the same |name_prefix|.  They will exit after
   // |idle_seconds_before_exit|.
@@ -86,7 +68,7 @@ class BASE_EXPORT PosixDynamicThreadPool
 
   // Adds |task| to the thread pool.
   void PostTask(const tracked_objects::Location& from_here,
-                const base::Closure& task);
+                const Closure& task);
 
   // Worker thread method to wait for up to |idle_seconds_before_exit| for more
   // work from the thread pool.  Returns NULL if no work is available.
@@ -109,7 +91,7 @@ class BASE_EXPORT PosixDynamicThreadPool
   // is being deleted and they can exit.
   ConditionVariable pending_tasks_available_cv_;
   int num_idle_threads_;
-  std::queue<PendingTask> pending_tasks_;
+  TaskQueue pending_tasks_;
   bool terminated_;
   // Only used for tests to ensure correct thread ordering.  It will always be
   // NULL in non-test code.

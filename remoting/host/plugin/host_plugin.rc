@@ -40,8 +40,7 @@ END
 
 3 TEXTINCLUDE 
 BEGIN
-    "\r\n"
-    "\0"
+    "\r#include ""remoting/host/plugin/host_plugin_version.rc""\0"
 END
 
 #endif    // APSTUDIO_INVOKED
@@ -49,56 +48,18 @@ END
 
 /////////////////////////////////////////////////////////////////////////////
 //
-// Version
-//
-
-VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,1
- PRODUCTVERSION 1,0,0,1
- FILEFLAGSMASK 0x17L
-#ifdef _DEBUG
- FILEFLAGS 0x1L
-#else
- FILEFLAGS 0x0L
-#endif
- FILEOS 0x4L
- FILETYPE 0x2L
- FILESUBTYPE 0x0L
-BEGIN
-    BLOCK "StringFileInfo"
-    BEGIN
-        BLOCK "040904b0"
-        BEGIN
-            VALUE "FileDescription", "Remoting Host Plugin"
-            VALUE "FileVersion", "1, 0, 0, 1"
-            VALUE "InternalName", "remoting_host_plugin.dll"
-            VALUE "LegalCopyright", "Copyright (C) 2011 The Chromium Authors. All rights reserved."
-            VALUE "MIMEType", "application/vnd.chromium.remoting-host"
-            VALUE "OriginalFilename", "remoting_host_plugin.dll"
-            VALUE "ProductName", "Remoting Host Plugin"
-            VALUE "ProductVersion", "1, 0, 0, 1"
-        END
-    END
-    BLOCK "VarFileInfo"
-    BEGIN
-        VALUE "Translation", 0x409, 1200
-    END
-END
-
-
-/////////////////////////////////////////////////////////////////////////////
-//
 // Dialog
 //
 
-IDD_DISCONNECT DIALOGEX 0, 0, 166, 59
-STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION
+IDD_DISCONNECT DIALOGEX 0, 0, 145, 24
+STYLE DS_SETFONT | WS_POPUP
 EXSTYLE WS_EX_TOPMOST
-CAPTION "kTitle"
 FONT 9, "Microsoft Sans Serif", 400, 0, 0x0
 BEGIN
-    DEFPUSHBUTTON   "kDisconnectButton",IDC_DISCONNECT,20,38,126,14
-    LTEXT           "kSharingWith",IDC_DISCONNECT_SHARINGWITH,7,7,152,28
+    DEFPUSHBUTTON   "kDisconnectButton",IDC_DISCONNECT,68,5,70,14
+    LTEXT           "kSharingWith",IDC_DISCONNECT_SHARINGWITH,18,7,43,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDVERT,6,6,1,12
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDVERT,8,6,1,12
 END
 
 IDD_CONTINUE DIALOGEX 0, 0, 221, 58
@@ -123,12 +84,8 @@ GUIDELINES DESIGNINFO
 BEGIN
     IDD_DISCONNECT, DIALOG
     BEGIN
-        LEFTMARGIN, 7
-        RIGHTMARGIN, 159
         VERTGUIDE, 20
-        VERTGUIDE, 146
-        TOPMARGIN, 7
-        BOTTOMMARGIN, 52
+        BOTTOMMARGIN, 23
     END
 
     IDD_CONTINUE, DIALOG
@@ -154,7 +111,7 @@ END
 //
 // Generated from the TEXTINCLUDE 3 resource.
 //
-
+#include "remoting/host/plugin/host_plugin_version.rc"
 
 /////////////////////////////////////////////////////////////////////////////
 #endif    // not APSTUDIO_INVOKED

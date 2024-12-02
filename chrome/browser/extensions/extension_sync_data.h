@@ -14,9 +14,11 @@
 #include "chrome/common/extensions/extension.h"
 #include "googleurl/src/gurl.h"
 
-class ExtensionService;
 class SyncData;
-namespace sync_pb { class ExtensionSpecifics; }
+namespace sync_pb {
+class AppSpecifics;
+class ExtensionSpecifics;
+}
 
 // A class that encapsulates the synced properties of an Extension.
 class ExtensionSyncData {
@@ -26,11 +28,14 @@ class ExtensionSyncData {
   explicit ExtensionSyncData(const SyncChange& sync_change);
   ExtensionSyncData(const Extension& extension,
                     bool enabled,
-                    bool incognito_enabled);
+                    bool incognito_enabled,
+                    const std::string& notifications_client_id,
+                    bool notifications_disabled);
   ~ExtensionSyncData();
 
   // Convert an ExtensionSyncData back out to a sync structure.
   void PopulateSyncSpecifics(sync_pb::ExtensionSpecifics* specifics) const;
+  void PopulateAppSpecifics(sync_pb::AppSpecifics* specifics) const;
   SyncData GetSyncData() const;
   SyncChange GetSyncChange(SyncChange::SyncChangeType change_type) const;
 
@@ -51,6 +56,14 @@ class ExtensionSyncData {
   // Used only for debugging.
   const std::string& name() const { return name_; }
 
+  const std::string& notifications_client_id() const {
+    return notifications_client_id_;
+  }
+
+  bool notifications_disabled() const {
+    return notifications_disabled_;
+  }
+
  private:
   void PopulateFromExtensionSpecifics(
       const sync_pb::ExtensionSpecifics& specifics);
@@ -64,6 +77,8 @@ class ExtensionSyncData {
   Version version_;
   GURL update_url_;
   std::string name_;
+  std::string notifications_client_id_;
+  bool notifications_disabled_;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_SYNC_DATA_H_

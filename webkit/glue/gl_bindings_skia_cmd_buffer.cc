@@ -8,9 +8,8 @@
 #ifndef GL_GLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES
 #endif
-#include "gpu/GLES2/gl2.h"
-#include "gpu/GLES2/gl2ext.h"
-
+#include "third_party/khronos/GLES2/gl2.h"
+#include "third_party/khronos/GLES2/gl2ext.h"
 #include "third_party/skia/include/gpu/GrGLInterface.h"
 
 namespace webkit_glue {
@@ -47,6 +46,8 @@ GrGLInterface* CreateCommandBufferSkiaGLBinding() {
   interface->fDrawElements = glDrawElements;
   interface->fEnable = glEnable;
   interface->fEnableVertexAttribArray = glEnableVertexAttribArray;
+  interface->fFinish = glFinish;
+  interface->fFlush = glFlush;
   interface->fFrontFace = glFrontFace;
   interface->fGenBuffers = glGenBuffers;
   interface->fGenTextures = glGenTextures;
@@ -117,4 +118,3 @@ GrGLInterface* CreateCommandBufferSkiaGLBinding() {
 }
 
 }  // namespace webkit_glue
-

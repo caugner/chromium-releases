@@ -71,8 +71,8 @@ void AcceleratedSurface::Destroy() {
   // these objects.
 
   // Release the old TransportDIB in the browser.
-  if (dib_free_callback_.get() && transport_dib_.get()) {
-    dib_free_callback_->Run(transport_dib_->id());
+  if (!dib_free_callback_.is_null() && transport_dib_.get()) {
+    dib_free_callback_.Run(transport_dib_->id());
   }
   transport_dib_.reset();
 
@@ -87,9 +87,9 @@ void AcceleratedSurface::SwapBuffers() {
     if (allocate_fbo_) {
       // Bind and unbind the framebuffer to make changes to the
       // IOSurface show up in the other process.
-      glFlush();
       glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);
       glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fbo_);
+      glFlush();
     } else {
       // Copy the current framebuffer's contents into our "live" texture.
       // Note that the current GL context might not be ours at this point!
@@ -146,16 +146,24 @@ static void AddIntegerValue(CFMutableDictionaryRef dictionary,
   CFDictionaryAddValue(dictionary, key, number.get());
 }
 
+// Creates a new OpenGL texture object bound to the given texture target.
+// Caller owns the returned texture.
+static GLuint CreateTexture(GLenum target) {
+  GLuint texture = 0;
+  glGenTextures(1, &texture);
+  glBindTexture(target, texture);
+  glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  return texture;
+}
+
 void AcceleratedSurface::AllocateRenderBuffers(GLenum target,
                                                const gfx::Size& size) {
   if (!texture_) {
     // Generate the texture object.
-    glGenTextures(1, &texture_);
-    glBindTexture(target, texture_);
-    glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    texture_ = CreateTexture(target);
     // Generate and bind the framebuffer object.
     glGenFramebuffersEXT(1, &fbo_);
     glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fbo_);
@@ -225,7 +233,7 @@ void AcceleratedSurface::Clear(const gfx::Rect& rect) {
   glClear(GL_COLOR_BUFFER_BIT);
 }
 
-uint64 AcceleratedSurface::SetSurfaceSize(const gfx::Size& size) {
+uint32 AcceleratedSurface::SetSurfaceSize(const gfx::Size& size) {
   if (surface_size_ == size) {
     // Return 0 to indicate to the caller that no new backing store
     // allocation occurred.
@@ -255,12 +263,7 @@ uint64 AcceleratedSurface::SetSurfaceSize(const gfx::Size& size) {
     AllocateRenderBuffers(target, clamped_size);
   } else if (!texture_) {
     // Generate the texture object.
-    glGenTextures(1, &texture_);
-    glBindTexture(target, texture_);
-    glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    texture_ = CreateTexture(target);
   }
 
   // Allocate a new IOSurface, which is the GPU resource that can be
@@ -315,7 +318,7 @@ uint64 AcceleratedSurface::SetSurfaceSize(const gfx::Size& size) {
   return io_surface_id_;
 }
 
-uint64 AcceleratedSurface::GetSurfaceId() {
+uint32 AcceleratedSurface::GetSurfaceId() {
   return io_surface_id_;
 }
 
@@ -331,8 +334,8 @@ TransportDIB::Handle AcceleratedSurface::SetTransportDIBSize(
   real_surface_size_ = clamped_size;
 
   // Release the old TransportDIB in the browser.
-  if (dib_free_callback_.get() && transport_dib_.get()) {
-    dib_free_callback_->Run(transport_dib_->id());
+  if (!dib_free_callback_.is_null() && transport_dib_.get()) {
+    dib_free_callback_.Run(transport_dib_->id());
   }
   transport_dib_.reset();
 
@@ -340,8 +343,8 @@ TransportDIB::Handle AcceleratedSurface::SetTransportDIBSize(
   size_t dib_size =
       clamped_size.width() * 4 * clamped_size.height();  // 4 bytes per pixel.
   TransportDIB::Handle dib_handle;
-  if (dib_alloc_callback_.get()) {
-    dib_alloc_callback_->Run(dib_size, &dib_handle);
+  if (!dib_alloc_callback_.is_null()) {
+    dib_alloc_callback_.Run(dib_size, &dib_handle);
   }
   if (!TransportDIB::is_valid_handle(dib_handle)) {
     // If the allocator fails, it means the DIB was not created in the browser,
@@ -376,8 +379,8 @@ TransportDIB::Handle AcceleratedSurface::SetTransportDIBSize(
 }
 
 void AcceleratedSurface::SetTransportDIBAllocAndFree(
-    Callback2<size_t, TransportDIB::Handle*>::Type* allocator,
-    Callback1<TransportDIB::Id>::Type* deallocator) {
-  dib_alloc_callback_.reset(allocator);
-  dib_free_callback_.reset(deallocator);
+    const base::Callback<void(size_t, TransportDIB::Handle*)>& allocator,
+    const base::Callback<void(TransportDIB::Id)>& deallocator) {
+  dib_alloc_callback_ = allocator;
+  dib_free_callback_ = deallocator;
 }

@@ -9,7 +9,9 @@
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/sync/profile_sync_factory_mock.h"
+#include "chrome/browser/prefs/pref_service_mock_builder.h"
+#include "chrome/browser/prefs/testing_pref_store.h"
+#include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/sync_setup_flow.h"
@@ -35,20 +37,20 @@ class MockSyncSetupHandler : public OptionsSyncSetupHandler {
   MockSyncSetupHandler() : OptionsSyncSetupHandler(NULL) {}
 
   // SyncSetupFlowHandler implementation.
-  virtual void ShowGaiaLogin(const DictionaryValue& args) {}
-  virtual void ShowGaiaSuccessAndClose() {
+  virtual void ShowGaiaLogin(const DictionaryValue& args) OVERRIDE {}
+  virtual void ShowGaiaSuccessAndClose() OVERRIDE {
     flow()->OnDialogClosed("");
   }
-  virtual void ShowGaiaSuccessAndSettingUp() {}
-  virtual void ShowConfigure(const DictionaryValue& args) {}
-  virtual void ShowPassphraseEntry(const DictionaryValue& args) {}
-  virtual void ShowSettingUp() {}
-  virtual void ShowSetupDone(const std::wstring& user) {
+  virtual void ShowGaiaSuccessAndSettingUp() OVERRIDE {}
+  virtual void ShowConfigure(const DictionaryValue& args) OVERRIDE {}
+  virtual void ShowPassphraseEntry(const DictionaryValue& args) OVERRIDE {}
+  virtual void ShowSettingUp() OVERRIDE {}
+  virtual void ShowSetupDone(const string16& user) OVERRIDE {
     flow()->OnDialogClosed("");
   }
 
   void CloseSetupUI() {
-    ShowSetupDone(std::wstring());
+    ShowSetupDone(string16());
   }
 
  private:
@@ -58,7 +60,8 @@ class MockSyncSetupHandler : public OptionsSyncSetupHandler {
 // A PSS subtype to inject.
 class ProfileSyncServiceForWizardTest : public ProfileSyncService {
  public:
-  ProfileSyncServiceForWizardTest(ProfileSyncFactory* factory, Profile* profile)
+  ProfileSyncServiceForWizardTest(ProfileSyncComponentsFactory* factory,
+                                  Profile* profile)
       : ProfileSyncService(factory, profile, new SigninManager(), ""),
         user_cancelled_dialog_(false),
         is_using_secondary_passphrase_(false),
@@ -146,6 +149,18 @@ class ProfileSyncServiceForWizardTest : public ProfileSyncService {
     cros_user_ = kTestUser;
   }
 
+  virtual void ShowSyncSetup(const std::string& sub_page) {
+    // Do Nothing.
+  }
+
+  void ClearObservers() {
+    observers_.Clear();
+  }
+
+  SyncSetupWizard* GetWizard() {
+    return &wizard_;
+  }
+
   std::string username_;
   std::string password_;
   std::string captcha_;
@@ -155,7 +170,6 @@ class ProfileSyncServiceForWizardTest : public ProfileSyncService {
   bool is_using_secondary_passphrase_;
   bool encrypt_everything_;
   syncable::ModelTypeSet chosen_data_types_;
-
   std::string passphrase_;
 
  private:
@@ -172,7 +186,7 @@ class TestingProfileWithSyncService : public TestingProfile {
     return sync_service_.get();
   }
  private:
-  ProfileSyncFactoryMock factory_;
+  ProfileSyncComponentsFactoryMock factory_;
   scoped_ptr<ProfileSyncService> sync_service_;
 };
 
@@ -190,16 +204,19 @@ class SyncSetupWizardTest : public BrowserWithTestWindowTest {
     profile()->CreateBookmarkModel(false);
     // Wait for the bookmarks model to load.
     profile()->BlockUntilBookmarkModelLoaded();
+    PrefService* prefs = profile()->GetPrefs();
+    prefs->SetString(prefs::kGoogleServicesUsername, kTestUser);
+
     set_browser(new Browser(Browser::TYPE_TABBED, profile()));
     browser()->set_window(window());
     BrowserList::SetLastActive(browser());
     service_ = static_cast<ProfileSyncServiceForWizardTest*>(
         profile()->GetProfileSyncService());
-    wizard_.reset(new SyncSetupWizard(service_));
+    wizard_ = service_->GetWizard();
   }
 
   virtual void TearDown() {
-    wizard_.reset();
+    wizard_ = NULL;
     service_ = NULL;
     flow_ = NULL;
   }
@@ -223,7 +240,8 @@ class SyncSetupWizardTest : public BrowserWithTestWindowTest {
     handler_.CloseSetupUI();
   }
 
-  scoped_ptr<SyncSetupWizard> wizard_;
+  // This pointer is owned by the |Service_|.
+  SyncSetupWizard* wizard_;
   ProfileSyncServiceForWizardTest* service_;
   SyncSetupFlow* flow_;
   MockSyncSetupHandler handler_;
@@ -313,8 +331,8 @@ TEST_F(SyncSetupWizardTest, ChooseDataTypesSetsPrefs) {
       "{\"syncAllDataTypes\":false,\"syncBookmarks\":true,"
       "\"syncPreferences\":true,\"syncThemes\":false,\"syncPasswords\":false,"
       "\"syncAutofill\":false,\"syncExtensions\":false,\"syncTypedUrls\":true,"
-      "\"syncApps\":true,\"syncSearchEngines\":false,\"syncSessions\":false,"
-      "\"usePassphrase\":false,\"encryptAllData\":false}";
+      "\"syncApps\":true,\"syncSessions\":false,\"usePassphrase\":false,"
+      "\"encryptAllData\":false}";
   data_type_choices_value.Append(new StringValue(data_type_choices));
 
   // Simulate the user choosing data types; bookmarks, prefs, typed URLS, and
@@ -332,7 +350,46 @@ TEST_F(SyncSetupWizardTest, ChooseDataTypesSetsPrefs) {
   EXPECT_EQ(0U, service_->chosen_data_types_.count(syncable::EXTENSIONS));
   EXPECT_EQ(1U, service_->chosen_data_types_.count(syncable::TYPED_URLS));
   EXPECT_EQ(1U, service_->chosen_data_types_.count(syncable::APPS));
-  EXPECT_EQ(0U, service_->chosen_data_types_.count(syncable::SEARCH_ENGINES));
+  EXPECT_EQ(0U, service_->chosen_data_types_.count(
+      syncable::APP_NOTIFICATIONS));
+}
+
+TEST_F(SyncSetupWizardTest, ShowErrorUIForPasswordTest) {
+  service_->ClearObservers();
+  CompleteSetup();
+
+  // Simulate an auth error and make sure the start and end state are set
+  // right.
+  service_->set_last_auth_error(
+      AuthError(GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS));
+  service_->ShowErrorUI();
+  AttachSyncSetupHandler();
+  EXPECT_EQ(SyncSetupWizard::GAIA_LOGIN, flow_->current_state_);
+  EXPECT_EQ(SyncSetupWizard::GAIA_SUCCESS, flow_->end_state_);
+  ASSERT_TRUE(wizard_->IsVisible());
+
+  // Make sure the wizard is dismissed.
+  wizard_->Step(SyncSetupWizard::GAIA_SUCCESS);
+  ASSERT_FALSE(wizard_->IsVisible());
+}
+
+TEST_F(SyncSetupWizardTest, ShowErrorUIForPassphraseTest) {
+  service_->ClearObservers();
+  CompleteSetup();
+
+  // Simulate a passphrase error and make sure the start and end state are set
+  // right and wizard is shown.
+  service_->set_passphrase_required_reason(sync_api::REASON_ENCRYPTION);
+  service_->set_is_using_secondary_passphrase(true);
+  service_->ShowErrorUI();
+  AttachSyncSetupHandler();
+  EXPECT_EQ(SyncSetupWizard::ENTER_PASSPHRASE, flow_->current_state_);
+  EXPECT_EQ(SyncSetupWizard::DONE, flow_->end_state_);
+  ASSERT_TRUE(wizard_->IsVisible());
+
+  // Make sure the wizard is dismissed.
+  wizard_->Step(SyncSetupWizard::DONE);
+  ASSERT_FALSE(wizard_->IsVisible());
 }
 
 TEST_F(SyncSetupWizardTest, EnterPassphraseRequired) {

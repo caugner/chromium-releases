@@ -13,11 +13,13 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_collator.h"
 #include "unicode/ucnv.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -408,9 +410,9 @@ std::string CharacterEncoding::GetCanonicalEncodingNameByAliasName(
 
 // Static
 // According to the behavior of user recently selected encoding short list in
-// FireFox, we always put UTF-8 as toppest position, after then put user
-// recently selected encodings, then put local dependent encoding items.
-// At last, we put all rest encoding items.
+// Firefox, we always put UTF-8 as top position, after then put user
+// recent selected encodings, then put local dependent encoding items.
+// At last, we put all remaining encoding items.
 const std::vector<CharacterEncoding::EncodingInfo>*
     CharacterEncoding::GetCurrentDisplayEncodings(
     const std::string& locale,
@@ -427,7 +429,7 @@ const std::vector<CharacterEncoding::EncodingInfo>*
                                         locale_dependent_encoding_list,
                                         kUserSelectedEncodingsMaxLength);
 
-  static std::string cached_user_selected_encodings;
+  CR_DEFINE_STATIC_LOCAL(std::string, cached_user_selected_encodings, ());
   // Build current display encoding list.
   if (encoding_list->empty() ||
       cached_user_selected_encodings != recently_select_encodings) {

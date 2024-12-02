@@ -7,8 +7,7 @@
 // browser IO thread, handles queries like enumerate/open/close from
 // MediaStreamManager and start/stop from AudioInputRendererHost.
 
-// All the queries come from the IO thread, while the work to enumerate devices
-// is done on its own thread.
+// All the queries and work are handled on the IO thread.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_MEDIA_AUDIO_INPUT_DEVICE_MANAGER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_MEDIA_AUDIO_INPUT_DEVICE_MANAGER_H_
@@ -31,19 +30,19 @@ class CONTENT_EXPORT AudioInputDeviceManager : public MediaStreamProvider {
   // even though Open() has not been called. This is used to be able to use the
   // AudioInputDeviceManager before MediaStream is implemented.
   static const int kFakeOpenSessionId;
+
   static const int kInvalidSessionId;
-  static const int kInvalidDevice;
-  static const int kDefaultDeviceIndex;
+  static const char kInvalidDeviceId[];
 
   AudioInputDeviceManager();
   virtual ~AudioInputDeviceManager();
 
   // MediaStreamProvider implementation, called on IO thread.
-  virtual void Register(MediaStreamProviderListener* listener);
-  virtual void Unregister();
-  virtual void EnumerateDevices();
-  virtual int Open(const StreamDeviceInfo& device);
-  virtual void Close(int session_id);
+  virtual void Register(MediaStreamProviderListener* listener) OVERRIDE;
+  virtual void Unregister() OVERRIDE;
+  virtual void EnumerateDevices() OVERRIDE;
+  virtual int Open(const StreamDeviceInfo& device) OVERRIDE;
+  virtual void Close(int session_id) OVERRIDE;
 
   // Functions used by AudioInputRenderHost, called on IO thread.
   // Start the device referenced by the session id.
@@ -52,46 +51,17 @@ class CONTENT_EXPORT AudioInputDeviceManager : public MediaStreamProvider {
   // Stop the device referenced by the session id.
   void Stop(int session_id);
 
-  // Function used for testing to mock platform dependent device code.
-  MessageLoop* message_loop();
-
  private:
-  // Executed on audio_input_device_thread_.
-  void EnumerateOnDeviceThread();
-  void OpenOnDeviceThread(int session_id, const StreamDeviceInfo& device);
-  void CloseOnDeviceThread(int session_id);
-  void StartOnDeviceThread(int session_id);
-  void StopOnDeviceThread(int session_id);
-
   // Executed on IO thread to call Listener.
-  void DevicesEnumeratedOnIOThread(const StreamDeviceInfoArray& devices);
+  void DevicesEnumeratedOnIOThread(StreamDeviceInfoArray* devices);
   void OpenedOnIOThread(int session_id);
   void ClosedOnIOThread(int session_id);
   void ErrorOnIOThread(int session_id, MediaStreamProviderError error);
 
-  // Executed on IO thread to call the event handler.
-  void StartedOnIOThread(int session_id, int index);
-  void StoppedOnIOThread(int session_id);
-
-  // Executed on audio_input_device_thread_ to make sure
-  // MediaStreamProviderListener is called from IO thread.
-  void SignalError(int session_id, MediaStreamProviderError error);
-
-  // Helpers.
-  bool IsOnCaptureDeviceThread() const;
-  void UnregisterEventHandler(int session_id);
-  bool HasEventHandler(int session_id);
-
-  // Thread for all calls to AudioInputDeviceManager.
-  base::Thread audio_input_device_thread_;
-
-  // Only accessed on Browser::IO thread.
   MediaStreamProviderListener* listener_;
   int next_capture_session_id_;
   typedef std::map<int, AudioInputDeviceManagerEventHandler*> EventHandlerMap;
   EventHandlerMap event_handlers_;
-
-  // Only accessed from audio_input_device_thread_.
   typedef std::map<int, media::AudioDeviceName> AudioInputDeviceMap;
   AudioInputDeviceMap devices_;
 

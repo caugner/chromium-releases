@@ -9,10 +9,7 @@
 #include "base/basictypes.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/native_browser_frame.h"
-#include "views/widget/native_widget_gtk.h"
-
-class BrowserNonClientFrameView;
-class BrowserRootView;
+#include "ui/views/widget/native_widget_gtk.h"
 
 class BrowserFrameGtk : public views::NativeWidgetGtk,
                         public NativeBrowserFrame {

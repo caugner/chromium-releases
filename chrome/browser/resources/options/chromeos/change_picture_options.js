@@ -8,6 +8,15 @@ cr.define('options', function() {
   var UserImagesGrid = options.UserImagesGrid;
   var ButtonImages = UserImagesGrid.ButtonImages;
 
+  /**
+   * Array of button URLs used on this page.
+   * @type {Array.<string>}
+   */
+  const ButtonImageUrls = [
+    ButtonImages.TAKE_PHOTO,
+    ButtonImages.CHOOSE_FILE
+  ];
+
   /////////////////////////////////////////////////////////////////////////////
   // ChangePictureOptions class:
 
@@ -39,13 +48,8 @@ cr.define('options', function() {
       var imageGrid = $('images-grid');
       UserImagesGrid.decorate(imageGrid);
 
-      imageGrid.addEventListener('change', function(e) {
-        // Ignore programmatical selection.
-        if (!imageGrid.inProgramSelection) {
-          // Button selections will be ignored by Chrome handler.
-          chrome.send('selectImage', [this.selectedItemUrl || '']);
-        }
-      });
+      imageGrid.addEventListener('change',
+                                 this.handleImageSelected_.bind(this));
       imageGrid.addEventListener('activate',
                                  this.handleImageActivated_.bind(this));
       imageGrid.addEventListener('dblclick',
@@ -63,6 +67,8 @@ cr.define('options', function() {
 
       // Old user image data (if present).
       this.oldImage_ = null;
+
+      chrome.send('onChangePicturePageInitialized');
     },
 
     /**
@@ -70,15 +76,17 @@ cr.define('options', function() {
      */
     didShowPage: function() {
       $('images-grid').updateAndFocus();
-      chrome.send('getSelectedImage');
+      chrome.send('onChangePicturePageShown');
     },
 
     /**
      * Called right before the page is hidden.
      */
     willHidePage: function() {
+      var imageGrid = $('images-grid');
+      imageGrid.blur();  // Make sure the image grid is not active.
       if (this.oldImage_) {
-        $('images-grid').removeItem(this.oldImage_);
+        imageGrid.removeItem(this.oldImage_);
         this.oldImage_ = null;
       }
     },
@@ -110,6 +118,22 @@ cr.define('options', function() {
     },
 
     /**
+     * Handles image selection change.
+     * @private
+     */
+    handleImageSelected_: function() {
+      var imageGrid = $('images-grid');
+      var url = imageGrid.selectedItemUrl;
+      // Ignore deselection, selection change caused by program itself and
+      // selection of one of the action buttons.
+      if (url &&
+          !imageGrid.inProgramSelection &&
+          ButtonImageUrls.indexOf(url) == -1) {
+        chrome.send('selectImage', [url]);
+      }
+    },
+
+    /**
      * Handles image activation (by pressing Enter).
      * @private
      */
@@ -120,8 +144,6 @@ cr.define('options', function() {
           break;
         case ButtonImages.CHOOSE_FILE:
           this.handleChooseFile_();
-          break;
-        case ButtonImages.PROFILE_PICTURE:
           break;
         default:
           this.closePage_();
@@ -134,16 +156,11 @@ cr.define('options', function() {
      * @param {Event} e Double click Event.
      */
     handleImageDblClick_: function(e) {
-      // Close page unless the click target is the grid itself,
-      // any of the buttons or the Profile image until it's not loaded.
+      // Close page unless the click target is the grid itself or
+      // any of the buttons.
       var url = e.target.src;
-      if (!url)
-        return;
-      for (var k in ButtonImages) {
-        if (url == ButtonImages[k])
-          return;
-      }
-      this.closePage_();
+      if (url && ButtonImageUrls.indexOf(url) == -1)
+        this.closePage_();
     },
 
     /**
@@ -151,7 +168,7 @@ cr.define('options', function() {
      * @type {string}
      */
     get currentUserImageUrl() {
-      return 'chrome://userimage/' + PersonalOptions.getLoggedInUserEmail() +
+      return 'chrome://userimage/' + PersonalOptions.getLoggedInUsername() +
           '?id=' + (new Date()).getTime();
     },
 
@@ -186,7 +203,7 @@ cr.define('options', function() {
         this.oldImage_ = imageGrid.updateItem(this.oldImage_, url);
       } else {
         // Insert next to the profile image.
-        var pos = imageGrid.findItem(this.profileImage_) + 1;
+        var pos = imageGrid.indexOf(this.profileImage_) + 1;
         this.oldImage_ = imageGrid.addItem(url, undefined, undefined, pos);
         imageGrid.selectedItem = this.oldImage_;
       }
@@ -216,11 +233,11 @@ cr.define('options', function() {
     },
 
     /**
-     * Appends received images to the image grid.
-     * @param {Array.<string>} images An array of URLs to user images.
+     * Appends default images to the image grid. Should only be called once.
+     * @param {Array.<string>} images An array of URLs to default images.
      * @private
      */
-    setUserImages_: function(images) {
+    setDefaultImages_: function(images) {
       var imageGrid = $('images-grid');
       for (var i = 0, url; url = images[i]; i++) {
         imageGrid.addItem(url);
@@ -231,10 +248,10 @@ cr.define('options', function() {
   // Forward public APIs to private implementations.
   [
     'setCameraPresent',
+    'setDefaultImages',
     'setOldImage',
     'setProfileImage',
     'setSelectedImage',
-    'setUserImages',
   ].forEach(function(name) {
     ChangePictureOptions[name] = function(value1, value2) {
       ChangePictureOptions.getInstance()[name + '_'](value1, value2);

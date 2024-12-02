@@ -8,7 +8,9 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace policy {
 

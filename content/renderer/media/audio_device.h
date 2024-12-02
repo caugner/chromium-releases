@@ -59,11 +59,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "base/threading/simple_thread.h"
+#include "content/common/content_export.h"
 #include "content/renderer/media/audio_message_filter.h"
 
 struct AudioParameters;
 
-class AudioDevice
+class CONTENT_EXPORT AudioDevice
     : public AudioMessageFilter::Delegate,
       public base::DelegateSimpleThread::Delegate,
       public base::RefCountedThreadSafe<AudioDevice> {
@@ -100,18 +101,16 @@ class AudioDevice
   double sample_rate() const { return sample_rate_; }
   size_t buffer_size() const { return buffer_size_; }
 
-  static double GetAudioHardwareSampleRate();
-  static size_t GetAudioHardwareBufferSize();
-
   // Methods called on IO thread ----------------------------------------------
   // AudioMessageFilter::Delegate methods, called by AudioMessageFilter.
-  virtual void OnRequestPacket(AudioBuffersState buffers_state);
-  virtual void OnStateChanged(AudioStreamState state);
-  virtual void OnCreated(base::SharedMemoryHandle handle, uint32 length);
+  virtual void OnRequestPacket(AudioBuffersState buffers_state) OVERRIDE;
+  virtual void OnStateChanged(AudioStreamState state) OVERRIDE;
+  virtual void OnCreated(base::SharedMemoryHandle handle,
+                         uint32 length) OVERRIDE;
   virtual void OnLowLatencyCreated(base::SharedMemoryHandle handle,
                                    base::SyncSocket::Handle socket_handle,
-                                   uint32 length);
-  virtual void OnVolume(double volume);
+                                   uint32 length) OVERRIDE;
+  virtual void OnVolume(double volume) OVERRIDE;
 
  private:
   // Methods called on IO thread ----------------------------------------------
@@ -131,7 +130,7 @@ class AudioDevice
   void FireRenderCallback();
 
   // DelegateSimpleThread::Delegate implementation.
-  virtual void Run();
+  virtual void Run() OVERRIDE;
 
   // Format
   size_t buffer_size_;  // in sample-frames

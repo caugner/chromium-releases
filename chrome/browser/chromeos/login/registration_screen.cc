@@ -56,9 +56,6 @@ WebPageDomView* RegistrationView::dom_view() {
 // RegistrationScreen, public:
 RegistrationScreen::RegistrationScreen(ViewScreenDelegate* delegate)
     : ViewScreen<RegistrationView>(delegate) {
-  if (!host_page_url_.get())
-    set_registration_host_page_url(GURL(kRegistrationHostPageUrl));
-
   ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
       chrome::kCrosScheme);
   net::URLRequestFilter::GetInstance()->AddHostnameHandler(
@@ -66,14 +63,6 @@ RegistrationScreen::RegistrationScreen(ViewScreenDelegate* delegate)
       kRegistrationHostnameUrl,
       &RegistrationScreen::Factory);
 }
-
-// static
-void RegistrationScreen::set_registration_host_page_url(const GURL& url) {
-  host_page_url_.reset(new GURL(url));
-}
-
-// static
-scoped_ptr<GURL> RegistrationScreen::host_page_url_;
 
 ///////////////////////////////////////////////////////////////////////////////
 // RegistrationScreen, ViewScreen implementation:
@@ -84,7 +73,7 @@ void RegistrationScreen::CreateView() {
 
 void RegistrationScreen::Refresh() {
   StartTimeoutTimer();
-  GURL url(*host_page_url_);
+  GURL url(kRegistrationHostPageUrl);
   Profile* profile = ProfileManager::GetDefaultProfile();
   view()->InitDOM(profile,
                   SiteInstance::CreateSiteInstanceForURL(profile, url));
@@ -118,18 +107,6 @@ void RegistrationScreen::OnPageLoadFailed(const std::string& url) {
 
 ///////////////////////////////////////////////////////////////////////////////
 // RegistrationScreen, TabContentsDelegate implementation:
-
-// TODO(adriansc): Remove this method once refactoring changed all call sites.
-TabContents* RegistrationScreen::OpenURLFromTab(
-    TabContents* source,
-    const GURL& url,
-    const GURL& referrer,
-    WindowOpenDisposition disposition,
-    content::PageTransition transition) {
-  return OpenURLFromTab(source,
-                        OpenURLParams(url, referrer, disposition, transition,
-                                      false));
-}
 
 TabContents* RegistrationScreen::OpenURLFromTab(TabContents* source,
                                                 const OpenURLParams& params) {

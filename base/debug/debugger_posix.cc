@@ -29,8 +29,12 @@
 #include <AvailabilityMacros.h>
 #endif
 
-#if defined(OS_MACOSX) || defined(OS_OPENBSD) || defined(OS_FREEBSD)
+#if defined(OS_MACOSX) || defined(OS_BSD)
 #include <sys/sysctl.h>
+#endif
+
+#if defined(OS_FREEBSD)
+#include <sys/user.h>
 #endif
 
 #include <ostream>
@@ -59,7 +63,7 @@ bool SpawnDebuggerOnProcess(unsigned /* process_id */) {
   return false;
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_BSD)
 
 // Based on Apple's recommended method as described in
 // http://developer.apple.com/qa/qa2004/qa1361.html
@@ -80,12 +84,23 @@ bool BeingDebugged() {
     KERN_PROC,
     KERN_PROC_PID,
     getpid()
+#if defined(OS_OPENBSD)
+    , sizeof(struct kinfo_proc),
+    0
+#endif
   };
 
   // Caution: struct kinfo_proc is marked __APPLE_API_UNSTABLE.  The source and
   // binary interfaces may change.
   struct kinfo_proc info;
   size_t info_size = sizeof(info);
+
+#if defined(OS_OPENBSD)
+  if (sysctl(mib, arraysize(mib), NULL, &info_size, NULL, 0) < 0)
+    return -1;
+
+  mib[5] = (info_size / sizeof(struct kinfo_proc));
+#endif
 
   int sysctl_result = sysctl(mib, arraysize(mib), &info, &info_size, NULL, 0);
   DCHECK_EQ(sysctl_result, 0);
@@ -97,7 +112,13 @@ bool BeingDebugged() {
 
   // This process is being debugged if the P_TRACED flag is set.
   is_set = true;
+#if defined(OS_FREEBSD)
+  being_debugged = (info.ki_flag & P_TRACED) != 0;
+#elif defined(OS_BSD)
+  being_debugged = (info.p_flag & P_TRACED) != 0;
+#else
   being_debugged = (info.kp_proc.p_flag & P_TRACED) != 0;
+#endif
   return being_debugged;
 }
 
@@ -137,22 +158,14 @@ bool BeingDebugged() {
   return pid_index < status.size() && status[pid_index] != '0';
 }
 
-#elif defined(OS_NACL)
-
-bool BeingDebugged() {
-  NOTIMPLEMENTED();
-  return false;
-}
-
 #else
 
 bool BeingDebugged() {
-  // TODO(benl): can we determine this under FreeBSD?
   NOTIMPLEMENTED();
   return false;
 }
 
-#endif  // defined(OS_FREEBSD)
+#endif
 
 // We want to break into the debugger in Debug mode, and cause a crash dump in
 // Release mode. Breakpad behaves as follows:

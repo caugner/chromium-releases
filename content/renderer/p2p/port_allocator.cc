@@ -13,11 +13,11 @@
 #include "net/base/ip_endpoint.h"
 #include "ppapi/c/dev/ppb_transport_dev.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoader.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoader.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderOptions.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
 
 using WebKit::WebString;
 using WebKit::WebURL;
@@ -177,8 +177,13 @@ void P2PPortAllocatorSession::AllocateRelaySession() {
 
   WebURLLoaderOptions options;
   options.allowCredentials = false;
+
+  // TODO(sergeyu): Set to CrossOriginRequestPolicyUseAccessControl
+  // when this code can be used by untrusted plugins.
+  // See http://crbug.com/104195 .
   options.crossOriginRequestPolicy =
-      WebURLLoaderOptions::CrossOriginRequestPolicyUseAccessControl;
+      WebURLLoaderOptions::CrossOriginRequestPolicyAllow;
+
   relay_session_request_.reset(
       allocator_->web_frame_->createAssociatedURLLoader(options));
   if (!relay_session_request_.get()) {
@@ -189,7 +194,7 @@ void P2PPortAllocatorSession::AllocateRelaySession() {
   WebURLRequest request;
   request.initialize();
   request.setURL(WebURL(GURL(
-      "http://" + allocator_->config_.relay_server + kCreateRelaySessionURL)));
+      "https://" + allocator_->config_.relay_server + kCreateRelaySessionURL)));
   request.setAllowStoredCredentials(false);
   request.setCachePolicy(WebURLRequest::ReloadIgnoringCacheData);
   request.setHTTPMethod("GET");

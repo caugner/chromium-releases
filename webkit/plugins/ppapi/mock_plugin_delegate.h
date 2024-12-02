@@ -7,6 +7,8 @@
 
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 
+struct PP_NetAddress_Private;
+
 namespace webkit {
 namespace ppapi {
 
@@ -17,6 +19,7 @@ class MockPluginDelegate : public PluginDelegate {
 
   virtual void PluginFocusChanged(PluginInstance* instance, bool focused);
   virtual void PluginTextInputTypeChanged(PluginInstance* instance);
+  virtual void PluginCaretPositionChanged(PluginInstance* instance);
   virtual void PluginRequestedCancelComposition(PluginInstance* instance);
   virtual void PluginCrashed(PluginInstance* instance);
   virtual void InstanceCreated(PluginInstance* instance);
@@ -31,7 +34,11 @@ class MockPluginDelegate : public PluginDelegate {
       media::VideoCapture::EventHandler* handler);
   virtual PlatformAudio* CreateAudio(uint32_t sample_rate,
                                      uint32_t sample_count,
-                                     PlatformAudio::Client* client);
+                                     PlatformAudioCommonClient* client);
+  virtual PlatformAudioInput* CreateAudioInput(
+      uint32_t sample_rate,
+      uint32_t sample_count,
+      PlatformAudioCommonClient* client);
   virtual PpapiBroker* ConnectToPpapiBroker(PPB_Broker_Impl* client);
   virtual void NumberOfFindResultsChanged(int identifier,
                                           int total,
@@ -88,7 +95,6 @@ class MockPluginDelegate : public PluginDelegate {
                                                  DirContents* contents);
   virtual void SyncGetFileSystemPlatformPath(const GURL& url,
                                              FilePath* platform_path);
-  virtual void PublishPolicy(const std::string& policy_json);
   virtual scoped_refptr<base::MessageLoopProxy>
       GetFileThreadMessageLoopProxy();
   virtual int32_t ConnectTcp(
@@ -97,7 +103,31 @@ class MockPluginDelegate : public PluginDelegate {
       uint16_t port);
   virtual int32_t ConnectTcpAddress(
       webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
-      const struct PP_Flash_NetAddress* addr);
+      const PP_NetAddress_Private* addr);
+  virtual uint32 TCPSocketCreate();
+  virtual void TCPSocketConnect(PPB_TCPSocket_Private_Impl* socket,
+                                uint32 socket_id,
+                                const std::string& host,
+                                uint16_t port);
+  virtual void TCPSocketConnectWithNetAddress(
+      PPB_TCPSocket_Private_Impl* socket,
+      uint32 socket_id,
+      const PP_NetAddress_Private& addr);
+  virtual void TCPSocketSSLHandshake(uint32 socket_id,
+                                     const std::string& server_name,
+                                     uint16_t server_port);
+  virtual void TCPSocketRead(uint32 socket_id, int32_t bytes_to_read);
+  virtual void TCPSocketWrite(uint32 socket_id, const std::string& buffer);
+  virtual void TCPSocketDisconnect(uint32 socket_id);
+  virtual uint32 UDPSocketCreate();
+  virtual void UDPSocketBind(PPB_UDPSocket_Private_Impl* socket,
+                             uint32 socket_id,
+                             const PP_NetAddress_Private& addr);
+  virtual void UDPSocketRecvFrom(uint32 socket_id, int32_t num_bytes);
+  virtual void UDPSocketSendTo(uint32 socket_id,
+                               const std::string& buffer,
+                               const PP_NetAddress_Private& addr);
+  virtual void UDPSocketClose(uint32 socket_id);
   virtual int32_t ShowContextMenu(
       PluginInstance* instance,
       webkit::ppapi::PPB_Flash_Menu_Impl* menu,
@@ -108,7 +138,6 @@ class MockPluginDelegate : public PluginDelegate {
   virtual std::string GetDefaultEncoding();
   virtual void ZoomLimitsChanged(double minimum_factor,
                                  double maximum_factor);
-  virtual void SubscribeToPolicyUpdates(PluginInstance* instance);
   virtual std::string ResolveProxy(const GURL& url);
   virtual void DidStartLoading();
   virtual void DidStopLoading();

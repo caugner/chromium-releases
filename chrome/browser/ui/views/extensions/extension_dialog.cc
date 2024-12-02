@@ -9,15 +9,17 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/extensions/extension_dialog_observer.h"
 #include "chrome/browser/ui/views/window.h"  // CreateViewsWindow
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "googleurl/src/gurl.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/frame/bubble_window.h"
@@ -33,9 +35,9 @@ views::Widget* CreateWindow(gfx::NativeWindow parent,
   // On Chrome OS we need to override the style to suppress padding around
   // the borders.
   return chromeos::BubbleWindow::Create(parent,
-      chromeos::STYLE_FLUSH, delegate);
+      STYLE_FLUSH, delegate);
 #else
-  return browser::CreateViewsWindow(parent, delegate);
+  return browser::CreateViewsWindow(parent, delegate, STYLE_GENERIC);
 #endif
 }
 
@@ -50,7 +52,7 @@ ExtensionDialog::ExtensionDialog(ExtensionHost* host,
 
   // Listen for the containing view calling window.close();
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
-                 Source<Profile>(host->profile()));
+                 content::Source<Profile>(host->profile()));
 }
 
 ExtensionDialog::~ExtensionDialog() {
@@ -63,6 +65,7 @@ ExtensionDialog* ExtensionDialog::Show(
     TabContents* tab_contents,
     int width,
     int height,
+    const string16& title,
     ExtensionDialogObserver* observer) {
   CHECK(browser);
   ExtensionHost* host = CreateExtensionHost(url, browser);
@@ -71,9 +74,10 @@ ExtensionDialog* ExtensionDialog::Show(
   host->set_associated_tab_contents(tab_contents);
 
   ExtensionDialog* dialog = new ExtensionDialog(host, observer);
+  dialog->set_title(title);
   dialog->InitWindow(browser, width, height);
   // Ensure the DOM JavaScript can respond immediately to keyboard shortcuts.
-  host->render_view_host()->view()->Focus();
+  host->host_contents()->Focus();
   return dialog;
 }
 
@@ -110,9 +114,6 @@ void ExtensionDialog::Close() {
   if (!window_)
     return;
 
-  if (observer_)
-    observer_->ExtensionDialogIsClosing(this);
-
   window_->Close();
   window_ = NULL;
 }
@@ -129,7 +130,16 @@ bool ExtensionDialog::IsModal() const {
 }
 
 bool ExtensionDialog::ShouldShowWindowTitle() const {
-  return false;
+  return !window_title_.empty();
+}
+
+string16 ExtensionDialog::GetWindowTitle() const {
+  return window_title_;
+}
+
+void ExtensionDialog::WindowClosing() {
+  if (observer_)
+    observer_->ExtensionDialogClosing(this);
 }
 
 void ExtensionDialog::DeleteDelegate() {
@@ -150,15 +160,15 @@ views::View* ExtensionDialog::GetContentsView() {
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// NotificationObserver overrides.
+// content::NotificationObserver overrides.
 
 void ExtensionDialog::Observe(int type,
-                             const NotificationSource& source,
-                             const NotificationDetails& details) {
+                             const content::NotificationSource& source,
+                             const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE:
       // If we aren't the host of the popup, then disregard the notification.
-      if (Details<ExtensionHost>(host()) != details)
+      if (content::Details<ExtensionHost>(host()) != details)
         return;
       Close();
       break;

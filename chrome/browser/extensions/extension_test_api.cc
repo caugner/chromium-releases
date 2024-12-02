@@ -13,7 +13,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 
 namespace {
 
@@ -28,10 +28,10 @@ const char kNoTestConfigDataError[] = "Test configuration was not set.";
 ExtensionTestPassFunction::~ExtensionTestPassFunction() {}
 
 bool ExtensionTestPassFunction::RunImpl() {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_TEST_PASSED,
-      Source<Profile>(dispatcher()->profile()),
-      NotificationService::NoDetails());
+      content::Source<Profile>(dispatcher()->profile()),
+      content::NotificationService::NoDetails());
   return true;
 }
 
@@ -40,10 +40,10 @@ ExtensionTestFailFunction::~ExtensionTestFailFunction() {}
 bool ExtensionTestFailFunction::RunImpl() {
   std::string message;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &message));
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_TEST_FAILED,
-      Source<Profile>(dispatcher()->profile()),
-      Details<std::string>(&message));
+      content::Source<Profile>(dispatcher()->profile()),
+      content::Details<std::string>(&message));
   return true;
 }
 
@@ -80,10 +80,10 @@ bool ExtensionTestSendMessageFunction::RunImpl() {
   std::string message;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &message));
   AddRef();  // balanced in Reply
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_TEST_MESSAGE,
-      Source<ExtensionTestSendMessageFunction>(this),
-      Details<std::string>(&message));
+      content::Source<ExtensionTestSendMessageFunction>(this),
+      content::Details<std::string>(&message));
   return true;
 }
 ExtensionTestSendMessageFunction::~ExtensionTestSendMessageFunction() {}

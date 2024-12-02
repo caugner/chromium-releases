@@ -22,6 +22,7 @@
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/browser/ui/cocoa/ui_localizer.h"
 #include "content/browser/download/download_item.h"
+#include "content/browser/download/download_state_info.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
@@ -162,7 +163,7 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
   DCHECK_EQ(bridge_->download_model(), downloadModel);
 
   // Handle dangerous downloads.
-  if (downloadModel->download()->safety_state() == DownloadItem::DANGEROUS) {
+  if (downloadModel->download()->GetSafetyState() == DownloadItem::DANGEROUS) {
     [self setState:kDangerous];
 
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -173,17 +174,18 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
     // The dangerous download label, button text and icon are different under
     // different cases.
     if (downloadModel->download()->GetDangerType() ==
-        DownloadItem::DANGEROUS_URL) {
+        DownloadStateInfo::DANGEROUS_URL) {
+      // TODO(noelutz): add support for malicious content.
       // Safebrowsing shows the download URL leads to malicious file.
       alertIcon = rb.GetNativeImageNamed(IDR_SAFEBROWSING_WARNING);
       dangerousWarning = l10n_util::GetNSStringWithFixup(
-          IDS_PROMPT_UNSAFE_DOWNLOAD_URL);
+          IDS_PROMPT_MALICIOUS_DOWNLOAD_URL);
       confirmButtonTitle = l10n_util::GetNSStringWithFixup(
           IDS_CONFIRM_DOWNLOAD);
     } else {
       // It's a dangerous file type (e.g.: an executable).
       DCHECK_EQ(downloadModel->download()->GetDangerType(),
-                DownloadItem::DANGEROUS_FILE);
+                DownloadStateInfo::DANGEROUS_FILE);
       alertIcon = rb.GetNativeImageNamed(IDR_WARNING);
       if (ChromeDownloadManagerDelegate::IsExtensionDownload(
               downloadModel->download())) {
@@ -195,7 +197,7 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
         // This basic fixup copies Windows DownloadItemView::DownloadItemView().
 
         // Extract the file extension (if any).
-        FilePath filename(downloadModel->download()->target_name());
+        FilePath filename(downloadModel->download()->GetTargetName());
         FilePath::StringType extension = filename.Extension();
 
         // Remove leading '.' from the extension
@@ -236,7 +238,7 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
   // Set correct popup menu. Also, set draggable download on completion.
   if (downloadModel->download()->IsComplete()) {
     [progressView_ setMenu:completeDownloadMenu_];
-    [progressView_ setDownload:downloadModel->download()->full_path()];
+    [progressView_ setDownload:downloadModel->download()->GetFullPath()];
   } else {
     [progressView_ setMenu:activeDownloadMenu_];
   }

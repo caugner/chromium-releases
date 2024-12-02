@@ -9,9 +9,9 @@
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/extensions/extension_test_api.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -22,23 +22,23 @@ const char kSetInputMethodDone[] = "done";
 
 // Class that listens for the JS message then changes input method and replies
 // back.
-class SetInputMethodListener : public NotificationObserver {
+class SetInputMethodListener : public content::NotificationObserver {
  public:
   // Creates listener, which should reply exactly |count_| times.
   explicit SetInputMethodListener(int count) : count_(count) {
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_TEST_MESSAGE,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
 
   virtual ~SetInputMethodListener() {
     EXPECT_EQ(0, count_);
   }
 
-  // Implements the NotificationObserver interface.
+  // Implements the content::NotificationObserver interface.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
-    const std::string& content = *Details<std::string>(details).ptr();
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
+    const std::string& content = *content::Details<std::string>(details).ptr();
     const std::string expected_message = StringPrintf("%s:%s",
                                                       kSetInputMethodMessage,
                                                       kNewInputMethod);
@@ -47,14 +47,14 @@ class SetInputMethodListener : public NotificationObserver {
           ChangeInputMethod(StringPrintf("xkb:%s", kNewInputMethod));
 
       ExtensionTestSendMessageFunction* function =
-          Source<ExtensionTestSendMessageFunction>(source).ptr();
+          content::Source<ExtensionTestSendMessageFunction>(source).ptr();
       EXPECT_GT(count_--, 0);
       function->Reply(kSetInputMethodDone);
     }
   }
 
  private:
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   int count_;
 };

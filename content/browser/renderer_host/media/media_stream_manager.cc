@@ -6,15 +6,18 @@
 
 #include <list>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/media/audio_input_device_manager.h"
 #include "content/browser/renderer_host/media/media_stream_device_settings.h"
 #include "content/browser/renderer_host/media/media_stream_requester.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/common/media/media_stream_options.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace media_stream {
 
@@ -45,6 +48,37 @@ static bool Requested(const StreamOptions& options,
   }
   return false;
 }
+
+struct MediaStreamManager::DeviceRequest {
+  DeviceRequest()
+      : requester(NULL),
+        state(kNumMediaStreamTypes, kNotRequested) {
+    options.audio = false;
+    options.video_option = StreamOptions::kNoCamera;
+  }
+  DeviceRequest(MediaStreamRequester* requester,
+                const StreamOptions& request_options)
+      : requester(requester),
+        options(request_options),
+        state(kNumMediaStreamTypes, kNotRequested) {
+    DCHECK(requester);
+  }
+  ~DeviceRequest() {}
+
+  enum RequestState {
+    kNotRequested = 0,
+    kRequested,
+    kOpening,
+    kDone,
+    kError
+  };
+
+  MediaStreamRequester* requester;
+  StreamOptions options;
+  std::vector<RequestState> state;
+  StreamDeviceInfoArray audio_devices;
+  StreamDeviceInfoArray video_devices;
+};
 
 MediaStreamManager::MediaStreamManager()
     : ALLOW_THIS_IN_INITIALIZER_LIST(
@@ -101,9 +135,17 @@ void MediaStreamManager::GenerateStream(MediaStreamRequester* requester,
   requests_.insert(std::make_pair(request_label, new_request));
 
   // Get user confirmation to use capture devices.
-  device_settings_->RequestCaptureDeviceUsage(request_label, render_process_id,
-                                              render_view_id, options,
-                                              security_origin);
+  // Need to make an asynchronous call to make sure the |requester| gets the
+  // |label| before it would receive any event.
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&MediaStreamDeviceSettings::RequestCaptureDeviceUsage,
+                 base::Unretained(device_settings_.get()),
+                 request_label, render_process_id,
+                 render_view_id, options,
+                 security_origin));
+
   (*label) = request_label;
 }
 
@@ -401,22 +443,5 @@ MediaStreamProvider* MediaStreamManager::GetDeviceManager(
   NOTREACHED();
   return NULL;
 }
-
-MediaStreamManager::DeviceRequest::DeviceRequest()
-    : requester(NULL),
-      state(kNumMediaStreamTypes, kNotRequested) {
-  options.audio = false;
-  options.video_option = StreamOptions::kNoCamera;
-}
-
-MediaStreamManager::DeviceRequest::DeviceRequest(
-    MediaStreamRequester* requester, const StreamOptions& request_options)
-    : requester(requester),
-      options(request_options),
-      state(kNumMediaStreamTypes, kNotRequested) {
-  DCHECK(requester);
-}
-
-MediaStreamManager::DeviceRequest::~DeviceRequest() {}
 
 }  // namespace media_stream

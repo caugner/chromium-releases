@@ -5,24 +5,25 @@
 #include "base/message_loop.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service_unittest.h"
+#include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/network_delay_listener.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_view_types.h"
+#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension_file_util.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/mock_resource_context.h"
 #include "content/browser/renderer_host/dummy_resource_handler.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/browser/renderer_host/resource_queue.h"
 #include "content/browser/site_instance.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-
-class Profile;
 
 using content::DummyResourceHandler;
 
@@ -36,9 +37,10 @@ const char kTestExtensionNoNetworkDelay[] = "aocebcndggcnnmflapdklcmnfojmkmie";
 
 ResourceDispatcherHostRequestInfo* CreateRequestInfo(int request_id) {
   return new ResourceDispatcherHostRequestInfo(
-      new DummyResourceHandler(), ChildProcessInfo::RENDER_PROCESS, 0, 0, 0,
-      request_id, false, -1, ResourceType::MAIN_FRAME,
+      new DummyResourceHandler(), content::PROCESS_TYPE_RENDERER, 0, 0, 0,
+      request_id, false, -1, false, -1, ResourceType::MAIN_FRAME,
       content::PAGE_TRANSITION_LINK, 0, false, false, false,
+      WebKit::WebReferrerPolicyDefault,
       content::MockResourceContext::GetInstance());
 }
 
@@ -119,7 +121,7 @@ class NetworkDelayListenerTest
         .AppendASCII(id)
         .AppendASCII("1.0");
 
-    service_->LoadExtension(extension_path);
+    extensions::UnpackedInstaller::Create(service_)->Load(extension_path);
     MessageLoop::current()->RunAllPending();
   }
 
@@ -134,10 +136,10 @@ class NetworkDelayListenerTest
     scoped_ptr<TestExtensionHost> background_host(
         new TestExtensionHost(extension,
                               chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE));
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
-        Source<Profile>(profile_.get()),
-        Details<ExtensionHost>(background_host.get()));
+        content::Source<Profile>(profile_.get()),
+        content::Details<ExtensionHost>(background_host.get()));
     MessageLoop::current()->RunAllPending();
   }
 
@@ -164,10 +166,10 @@ TEST_F(NetworkDelayListenerTest, DelayAndLoad) {
   // We don't care about a loaded extension dialog.
   scoped_ptr<TestExtensionHost> dialog_host(
       new TestExtensionHost(extension1_, chrome::VIEW_TYPE_EXTENSION_DIALOG));
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
-      Source<Profile>(profile_.get()),
-      Details<ExtensionHost>(dialog_host.get()));
+      content::Source<Profile>(profile_.get()),
+      content::Details<ExtensionHost>(dialog_host.get()));
   MessageLoop::current()->RunAllPending();
 
   SendExtensionLoadedNotification(extension1_);

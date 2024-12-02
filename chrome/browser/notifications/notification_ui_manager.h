@@ -8,6 +8,7 @@
 
 #include <deque>
 #include <string>
+#include <vector>
 
 #include "base/id_map.h"
 #include "base/memory/scoped_ptr.h"
@@ -15,20 +16,19 @@
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class Notification;
 class PrefService;
 class Profile;
 class QueuedNotification;
-class SiteInstance;
 
 // The notification manager manages use of the desktop for notifications.
 // It maintains a queue of pending notifications when space becomes constrained.
 class NotificationUIManager
     : public BalloonCollection::BalloonSpaceChangeListener,
-      public NotificationObserver {
+      public content::NotificationObserver {
  public:
   virtual ~NotificationUIManager();
 
@@ -79,13 +79,18 @@ class NotificationUIManager
   // be placed on the screen.
   void SetPositionPreference(BalloonCollection::PositionPreference preference);
 
+  // Retrieves an ordered list of all queued notifications.
+  // Used only for automation/testing.
+  void GetQueuedNotificationsForTesting(
+      std::vector<const Notification*>* notifications);
+
  private:
   explicit NotificationUIManager(PrefService* local_state);
 
-  // NotificationObserver override.
+  // content::NotificationObserver override.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Attempts to display notifications from the show_queue if the user
   // is active.
@@ -95,7 +100,7 @@ class NotificationUIManager
   void ShowNotifications();
 
   // BalloonCollectionObserver implementation.
-  virtual void OnBalloonSpaceChanged();
+  virtual void OnBalloonSpaceChanged() OVERRIDE;
 
   // Replace an existing notification with this one if applicable;
   // returns true if the replacement happened.
@@ -112,7 +117,7 @@ class NotificationUIManager
   NotificationDeque show_queue_;
 
   // Registrar for the other kind of notifications (event signaling).
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Prefs listener for the position preference.
   IntegerPrefMember position_pref_;

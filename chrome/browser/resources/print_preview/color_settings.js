@@ -46,7 +46,7 @@ cr.define('print_preview', function() {
      */
     get colorMode() {
       return this.bwRadioButton_.checked ?
-             this.printerColorModelForBlack_:
+             this.printerColorModelForBlack_ :
              this.printerColorModelForColor_;
     },
 
@@ -62,20 +62,21 @@ cr.define('print_preview', function() {
       this.bwRadioButton_.onclick = function() {
         setColor(false);
       };
-      document.addEventListener('PDFLoaded', this.onPDFLoaded_.bind(this));
-      document.addEventListener('printerCapabilitiesUpdated',
+      document.addEventListener(customEvents.PDF_LOADED,
+                                this.onPDFLoaded_.bind(this));
+      document.addEventListener(customEvents.PRINTER_CAPABILITIES_UPDATED,
                                 this.onPrinterCapabilitiesUpdated_.bind(this));
     },
 
     /**
-     * Listener triggered when a printerCapabilitiesUpdated event occurs.
+     * Executes when a |customEvents.PRINTER_CAPABILITIES_UPDATED| event occurs.
      * @private
      */
     onPrinterCapabilitiesUpdated_: function(e) {
       var disableColorOption = e.printerCapabilities.disableColorOption;
 
-      disableColorOption ? fadeOutElement(this.colorOption_) :
-          fadeInElement(this.colorOption_);
+      disableColorOption ? fadeOutOption(this.colorOption_) :
+          fadeInOption(this.colorOption_);
       this.colorOption_.setAttribute('aria-hidden', disableColorOption);
 
       var setColorAsDefault = e.printerCapabilities.setColorAsDefault;
@@ -97,7 +98,7 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * Executes when a PDFLoaded event occurs.
+     * Executes when a |customEvents.PDF_LOADED| event occurs.
      * @private
      */
     onPDFLoaded_: function() {

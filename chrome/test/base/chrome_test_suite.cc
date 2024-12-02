@@ -6,7 +6,6 @@
 
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/stats_table.h"
 #include "base/path_service.h"
@@ -20,21 +19,19 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "content/common/content_paths.h"
+#include "content/public/common/content_paths.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
-
-#if defined(TOOLKIT_VIEWS)
-#include "views/view.h"
-#endif
+#include "ui/gfx/test/gfx_test_utils.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
-#include "content/common/chrome_application_mac.h"
+#include "base/mac/scoped_nsautorelease_pool.h"
+#include "chrome/browser/chrome_browser_application_mac.h"
 #endif
 
 #if defined(OS_POSIX)
@@ -161,10 +158,9 @@ ChromeTestSuite::~ChromeTestSuite() {
 
 void ChromeTestSuite::Initialize() {
 #if defined(OS_MACOSX)
-  chrome_application_mac::RegisterCrApp();
-#endif
-
   base::mac::ScopedNSAutoreleasePool autorelease_pool;
+  chrome_browser_application_mac::RegisterBrowserCrApp();
+#endif
 
   base::TestSuite::Initialize();
 
@@ -196,10 +192,8 @@ void ChromeTestSuite::Initialize() {
       resources_pack_path.Append(FILE_PATH_LITERAL("resources.pak"));
   ResourceBundle::AddDataPackToSharedInstance(resources_pack_path);
 
-#if defined(TOOLKIT_VIEWS) && defined(OS_LINUX)
-  // Turn of GPU compositing in browser during unit tests.
-  views::View::set_use_acceleration_when_possible(false);
-#endif
+  // Mock out the compositor on platforms that use it.
+  ui::gfx_test_utils::SetupTestCompositor();
 
   stats_filename_ = base::StringPrintf("unit_tests-%d",
                                        base::GetCurrentProcId());

@@ -151,7 +151,6 @@ PPAPITest.URLUtil
 PPAPITest.VarDeprecated
 PPAPITest.VideoDecoder
 PreferenceServiceTest.PreservedWindowPlacementIsLoaded
-PrintPreviewUITest.LoadPrintPreviewByURL
 RedirectTest.Server
 RedirectTest.ServerReference
 RepostFormWarningTest.TestDoubleReload
@@ -172,7 +171,6 @@ WorkerFileSystemTest.FileFromFileEntrySync
 WorkerFileSystemTest.FileWriterSyncTruncateExtend
 WorkerFileSystemTest.FileWriterTruncateExtend
 WorkerFileSystemTest.Temporary
-PrintPreviewUITest.AdvancedPrintCommandEnabled
 
 # Valgrind dies on bszB assertion, see http://crbug.com/58145
 AutomatedUITestBase.Home
@@ -231,7 +229,7 @@ OutOfProcessPPAPITest.Graphics2D
 PPAPITest.Broker
 PPAPITest.Core
 PPAPITest.Memory
-PPAPITest.PostMessage
+PPAPITest.PostMessage*
 PreferenceServiceTest.PreservedWindowPlacementIsMigrated
 RedirectTest.Client
 RedirectTest.ClientFragments
@@ -242,10 +240,6 @@ ResourceDispatcherTest.CrossOriginRedirectBlocked
 ResourceDispatcherTest.SniffHTMLWithNoContentType
 WorkerFileSystemTest.Persistent
 WorkerFileSystemTest.SyncTemporary
-
-# Fails, see http://crbug.com/75250
-NewTabUITest.AboutHangInNTP
-NewTabUIProcessPerTabTest.NavBeforeNTPCommits
 
 # Fails with valgrind assertion, see http://crbug.com/75396
 ViewSourceTest.ViewSourceInMenuEnabledOnANormalPage
@@ -279,12 +273,10 @@ AutomationProxyTest4.BooleanValueIsEchoedByDomAutomationController
 
 # http://crbug.com/87625
 PPAPITest.Var
+OutOfProcessPPAPITest.Var
 
 # http://crbug.com/87766
 PPAPITest.URLLoader
-
-# http://crbug.com/87992
-PrintPreviewUITest.PrintCommandDisabled
 
 # http://crbug.com/88068
 LocaleTestsHe.TestStart
@@ -311,3 +303,67 @@ CustomHandlerWebcalStartupTest.CustomHandlerWebcalStartup
 # http://crbug.com/99828
 OutOfProcessPPAPITest.Crypto
 PPAPITest.Crypto
+
+# PPAPITests fail with Valgrind WARNING, http://crbug.com/104022
+PPAPITest.NetAddressPrivate
+PPAPITest.FlashClipboard
+OutOfProcessPPAPITest.NetAddressPrivate
+OutOfProcessPPAPITest.FlashClipboard
+
+# Fails intermittently. http://crbug.com/104534.
+PrintPreviewUITest.PrintCommands
+
+# Fails consistently. http://crbug.com/104535.
+OutOfProcessPPAPITest.Audio_Creation
+OutOfProcessPPAPITest.Audio_DestroyNoStop
+OutOfProcessPPAPITest.Audio_Failures
+OutOfProcessPPAPITest.AudioConfig_InvalidConfigs
+OutOfProcessPPAPITest.AudioConfig_ValidConfigs
+OutOfProcessPPAPITest.Flash_GetCommandLineArgs
+OutOfProcessPPAPITest.Flash_GetLocalTimeZoneOffset
+OutOfProcessPPAPITest.Flash_GetProxyForURL
+OutOfProcessPPAPITest.Flash_MessageLoop
+OutOfProcessPPAPITest.Flash_SetInstanceAlwaysOnTop
+OutOfProcessPPAPITest.InputEvent
+OutOfProcessPPAPITest.TCPSocketPrivate
+OutOfProcessPPAPITest.URLLoader
+PPAPITest.AudioConfig_InvalidConfigs
+PPAPITest.AudioConfig_ValidConfigs
+PPAPITest.Flash_GetCommandLineArgs
+PPAPITest.Flash_GetLocalTimeZoneOffset
+PPAPITest.Flash_GetProxyForURL
+PPAPITest.Flash_MessageLoop
+PPAPITest.Flash_SetInstanceAlwaysOnTop
+PPAPITest.InputEvent
+
+# Fails consistently.  http://crbug.com/105080.
+OutOfProcessPPAPITest.NetAddressPrivate_AreEqual
+OutOfProcessPPAPITest.NetAddressPrivate_AreHostsEqual
+OutOfProcessPPAPITest.NetAddressPrivate_Describe
+OutOfProcessPPAPITest.NetAddressPrivate_DescribeIPv6
+OutOfProcessPPAPITest.NetAddressPrivate_GetAnyAddress
+OutOfProcessPPAPITest.NetAddressPrivate_ReplacePort
+PPAPITest.NetAddressPrivate_AreEqual
+PPAPITest.NetAddressPrivate_AreHostsEqual
+PPAPITest.NetAddressPrivate_Describe
+PPAPITest.NetAddressPrivate_DescribeIPv6
+PPAPITest.NetAddressPrivate_GetAnyAddress
+PPAPITest.NetAddressPrivate_ReplacePort
+
+# http://crbug.com/105551
+PPAPITest.WebSocket_IsWebSocket
+PPAPITest.WebSocket_InvalidConnect
+PPAPITest.WebSocket_GetURL
+PPAPITest.WebSocket_ValidConnect
+PPAPITest.WebSocket_GetProtocol
+PPAPITest.WebSocket_TextSendReceive
+
+# More PPAPI crashes under Valgrind.  http://crbug.com/105080
+PPAPITest.UDPSocketPrivateShared
+PPAPITest.TCPSocketPrivateShared
+OutOfProcessPPAPITest.UDPSocketPrivateShared
+OutOfProcessPPAPITest.TCPSocketPrivateShared
+
+# Crashes intermittently.
+LoadtimesExtensionBindingsUITest.LoadTimesSameAfterClientInDocNavigation
+LoadtimesExtensionBindingsUITest.LoadTimesSameAfterUserInDocNavigation

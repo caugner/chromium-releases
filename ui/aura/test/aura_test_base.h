@@ -14,19 +14,23 @@
 namespace aura {
 namespace test {
 
+class TestStackingClient;
+
 // A base class for aura unit tests.
 class AuraTestBase : public testing::Test {
  public:
   AuraTestBase();
   virtual ~AuraTestBase();
 
-  void RunPendingMessages() {
-    message_loop_.RunAllPending();
-  }
+  TestStackingClient* GetTestStackingClient();
 
   // testing::Test:
   virtual void SetUp() OVERRIDE;
   virtual void TearDown() OVERRIDE;
+
+ protected:
+  // Flushes message loop.
+  void RunAllPendingInMessageLoop();
 
  private:
   MessageLoopForUI message_loop_;

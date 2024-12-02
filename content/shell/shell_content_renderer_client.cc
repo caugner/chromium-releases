@@ -117,7 +117,11 @@ bool ShellContentRendererClient::HandleSetCookieRequest(
   return false;
 }
 
-bool ShellContentRendererClient::IsProtocolSupportedForMedia(const GURL& url) {
+void ShellContentRendererClient::RegisterPPAPIInterfaceFactories(
+    webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) {
+}
+
+bool ShellContentRendererClient::AllowSocketAPI(const GURL& url) {
   return false;
 }
 

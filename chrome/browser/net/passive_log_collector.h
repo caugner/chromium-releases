@@ -93,9 +93,9 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
     virtual ~GlobalSourceTracker();
 
     // SourceTrackerInterface implementation:
-    virtual void OnAddEntry(const ChromeNetLog::Entry& entry);
-    virtual void Clear();
-    virtual void AppendAllEntries(ChromeNetLog::EntryList* out) const;
+    virtual void OnAddEntry(const ChromeNetLog::Entry& entry) OVERRIDE;
+    virtual void Clear() OVERRIDE;
+    virtual void AppendAllEntries(ChromeNetLog::EntryList* out) const OVERRIDE;
 
    private:
     typedef std::deque<ChromeNetLog::Entry> CircularEntryList;
@@ -119,9 +119,9 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
     virtual ~SourceTracker();
 
     // SourceTrackerInterface implementation:
-    virtual void OnAddEntry(const ChromeNetLog::Entry& entry);
-    virtual void Clear();
-    virtual void AppendAllEntries(ChromeNetLog::EntryList* out) const;
+    virtual void OnAddEntry(const ChromeNetLog::Entry& entry) OVERRIDE;
+    virtual void Clear() OVERRIDE;
+    virtual void AppendAllEntries(ChromeNetLog::EntryList* out) const OVERRIDE;
 
 #ifdef UNIT_TEST
     // Helper used to inspect the current state by unit-tests.
@@ -202,7 +202,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
 
    private:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
-                              SourceInfo* out_info);
+                              SourceInfo* out_info) OVERRIDE;
     DISALLOW_COPY_AND_ASSIGN(ConnectJobTracker);
   };
 
@@ -216,7 +216,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
 
    private:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
-                              SourceInfo* out_info);
+                              SourceInfo* out_info) OVERRIDE;
 
     DISALLOW_COPY_AND_ASSIGN(SocketTracker);
   };
@@ -231,7 +231,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
 
    private:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
-                              SourceInfo* out_info);
+                              SourceInfo* out_info) OVERRIDE;
 
     DISALLOW_COPY_AND_ASSIGN(RequestTracker);
   };
@@ -247,7 +247,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
 
    private:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
-                              SourceInfo* out_info);
+                              SourceInfo* out_info) OVERRIDE;
 
     DISALLOW_COPY_AND_ASSIGN(InitProxyResolverTracker);
   };
@@ -262,7 +262,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
 
    private:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
-                              SourceInfo* out_info);
+                              SourceInfo* out_info) OVERRIDE;
 
     DISALLOW_COPY_AND_ASSIGN(SpdySessionTracker);
   };
@@ -277,7 +277,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
 
    private:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
-                              SourceInfo* out_info);
+                              SourceInfo* out_info) OVERRIDE;
 
     DISALLOW_COPY_AND_ASSIGN(DNSRequestTracker);
   };
@@ -292,7 +292,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
 
    private:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
-                              SourceInfo* out_info);
+                              SourceInfo* out_info) OVERRIDE;
 
     DISALLOW_COPY_AND_ASSIGN(DNSJobTracker);
   };
@@ -307,7 +307,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
 
    private:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
-                              SourceInfo* out_info);
+                              SourceInfo* out_info) OVERRIDE;
 
     DISALLOW_COPY_AND_ASSIGN(DiskCacheEntryTracker);
   };
@@ -322,7 +322,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
 
    protected:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
-                              SourceInfo* out_info);
+                              SourceInfo* out_info) OVERRIDE;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(MemCacheEntryTracker);
@@ -337,7 +337,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
 
    private:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
-                              SourceInfo* out_info);
+                              SourceInfo* out_info) OVERRIDE;
     DISALLOW_COPY_AND_ASSIGN(HttpStreamJobTracker);
   };
 
@@ -350,7 +350,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
 
    private:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
-                              SourceInfo* out_info);
+                              SourceInfo* out_info) OVERRIDE;
     DISALLOW_COPY_AND_ASSIGN(ExponentialBackoffThrottlingTracker);
   };
 
@@ -364,7 +364,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
 
    private:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
-                              SourceInfo* out_info);
+                              SourceInfo* out_info) OVERRIDE;
 
     DISALLOW_COPY_AND_ASSIGN(DnsTransactionTracker);
   };
@@ -379,9 +379,40 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
 
    private:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
-                              SourceInfo* out_info);
+                              SourceInfo* out_info) OVERRIDE;
 
     DISALLOW_COPY_AND_ASSIGN(AsyncHostResolverRequestTracker);
+  };
+
+
+  // Tracks the log entries for the last seen SOURCE_UDP_SOCKET.
+  class UDPSocketTracker : public SourceTracker {
+   public:
+    static const size_t kMaxNumSources;
+    static const size_t kMaxGraveyardSize;
+
+    UDPSocketTracker();
+
+   private:
+    virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
+                              SourceInfo* out_info) OVERRIDE;
+
+    DISALLOW_COPY_AND_ASSIGN(UDPSocketTracker);
+  };
+
+  // Tracks the log entries for the last seen SOURCE_CERT_VERIFIER_JOB
+  class CertVerifierJobTracker : public SourceTracker {
+   public:
+    static const size_t kMaxNumSources;
+    static const size_t kMaxGraveyardSize;
+
+    CertVerifierJobTracker();
+
+   private:
+    virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
+                              SourceInfo* out_info) OVERRIDE;
+
+    DISALLOW_COPY_AND_ASSIGN(CertVerifierJobTracker);
   };
 
   PassiveLogCollector();
@@ -392,7 +423,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
                           const base::TimeTicks& time,
                           const net::NetLog::Source& source,
                           net::NetLog::EventPhase phase,
-                          net::NetLog::EventParameters* params);
+                          net::NetLog::EventParameters* params) OVERRIDE;
 
   // Clears all of the passively logged data.
   void Clear();
@@ -426,6 +457,8 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
   ExponentialBackoffThrottlingTracker exponential_backoff_throttling_tracker_;
   DnsTransactionTracker dns_transaction_tracker_;
   AsyncHostResolverRequestTracker async_host_resolver_request_tracker_;
+  UDPSocketTracker udp_socket_tracker_;
+  CertVerifierJobTracker cert_verifier_job_tracker_;
 
   // This array maps each NetLog::SourceType to one of the tracker instances
   // defined above. Use of this array avoid duplicating the list of trackers

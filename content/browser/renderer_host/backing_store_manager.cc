@@ -4,12 +4,12 @@
 
 #include "content/browser/renderer_host/backing_store_manager.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/mru_cache.h"
 #include "base/sys_info.h"
 #include "content/browser/renderer_host/backing_store.h"
 #include "content/browser/renderer_host/render_widget_host.h"
-#include "content/common/notification_service.h"
 #include "content/public/common/content_switches.h"
 
 namespace {
@@ -195,7 +195,9 @@ void BackingStoreManager::PrepareBackingStore(
     TransportDIB::Id bitmap,
     const gfx::Rect& bitmap_rect,
     const std::vector<gfx::Rect>& copy_rects,
-    bool* needs_full_paint) {
+    const base::Closure& completion_callback,
+    bool* needs_full_paint,
+    bool* scheduled_completion_callback) {
   BackingStore* backing_store = GetBackingStore(host, backing_store_size);
   if (!backing_store) {
     // We need to get Webkit to generate a new paint here, as we
@@ -206,6 +208,7 @@ void BackingStoreManager::PrepareBackingStore(
         !(backing_store = CreateBackingStore(host, backing_store_size))) {
       DCHECK(needs_full_paint != NULL);
       *needs_full_paint = true;
+      *scheduled_completion_callback = false;
       // Makes no sense to paint the transport dib if we are going
       // to request a full paint.
       return;
@@ -213,7 +216,9 @@ void BackingStoreManager::PrepareBackingStore(
   }
 
   backing_store->PaintToBackingStore(host->process(), bitmap,
-                                     bitmap_rect, copy_rects);
+                                     bitmap_rect, copy_rects,
+                                     completion_callback,
+                                     scheduled_completion_callback);
 }
 
 // static

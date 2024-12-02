@@ -4,8 +4,10 @@
 
 #include "net/url_request/url_request_http_job.h"
 
-#include "base/bind.h"
 #include "base/base_switches.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/build_time.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
@@ -178,21 +180,19 @@ URLRequestJob* URLRequestHttpJob::Factory(URLRequest* request,
   TransportSecurityState::DomainState domain_state;
   if (scheme == "http" &&
       request->context()->transport_security_state() &&
-      request->context()->transport_security_state()->IsEnabledForHost(
+      request->context()->transport_security_state()->GetDomainState(
           &domain_state,
           request->url().host(),
           SSLConfigService::IsSNIAvailable(
-              request->context()->ssl_config_service()))) {
-    if (domain_state.mode ==
-         TransportSecurityState::DomainState::MODE_STRICT) {
-      DCHECK_EQ(request->url().scheme(), "http");
-      url_canon::Replacements<char> replacements;
-      static const char kNewScheme[] = "https";
-      replacements.SetScheme(kNewScheme,
-                             url_parse::Component(0, strlen(kNewScheme)));
-      GURL new_location = request->url().ReplaceComponents(replacements);
-      return new URLRequestRedirectJob(request, new_location);
-    }
+              request->context()->ssl_config_service())) &&
+      domain_state.ShouldRedirectHTTPToHTTPS()) {
+    DCHECK_EQ(request->url().scheme(), "http");
+    url_canon::Replacements<char> replacements;
+    static const char kNewScheme[] = "https";
+    replacements.SetScheme(kNewScheme,
+                           url_parse::Component(0, strlen(kNewScheme)));
+    GURL new_location = request->url().ReplaceComponents(replacements);
+    return new URLRequestRedirectJob(request, new_location);
   }
 
   return new URLRequestHttpJob(request);
@@ -210,7 +210,8 @@ URLRequestHttpJob::URLRequestHttpJob(URLRequest* request)
       ALLOW_THIS_IN_INITIALIZER_LIST(read_callback_(
           this, &URLRequestHttpJob::OnReadCompleted)),
       ALLOW_THIS_IN_INITIALIZER_LIST(notify_before_headers_sent_callback_(
-          this, &URLRequestHttpJob::NotifyBeforeSendHeadersCallback)),
+          base::Bind(&URLRequestHttpJob::NotifyBeforeSendHeadersCallback,
+                     base::Unretained(this)))),
       read_in_progress_(false),
       transaction_(NULL),
       throttling_entry_(URLRequestThrottlerManager::GetInstance()->
@@ -229,9 +230,9 @@ URLRequestHttpJob::URLRequestHttpJob(URLRequest* request)
           filter_context_(new HttpFilterContext(this))),
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          on_headers_received_callback_(
-              this, &URLRequestHttpJob::OnHeadersReceivedCallback)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(on_headers_received_callback_(
+          base::Bind(&URLRequestHttpJob::OnHeadersReceivedCallback,
+                     base::Unretained(this)))),
       awaiting_callback_(false) {
   ResetTimer();
 }
@@ -255,7 +256,7 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
 
   if (SdchManager::Global() &&
       SdchManager::Global()->IsInSupportedDomain(request_->url())) {
-    static const std::string name = "Get-Dictionary";
+    const std::string name = "Get-Dictionary";
     std::string url_text;
     void* iter = NULL;
     // TODO(jar): We need to not fetch dictionaries the first time they are
@@ -282,7 +283,7 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
     // URLRequestTestHTTP.BasicAuthWithCookies
     // where OnBeforeSendHeaders -> OnSendHeaders -> OnBeforeSendHeaders
     // occurs.
-    RestartTransactionWithAuth(string16(), string16());
+    RestartTransactionWithAuth(AuthCredentials());
     return;
   }
 
@@ -306,7 +307,7 @@ void URLRequestHttpJob::DestroyTransaction() {
 void URLRequestHttpJob::StartTransaction() {
   if (request_->context() && request_->context()->network_delegate()) {
     int rv = request_->context()->network_delegate()->NotifyBeforeSendHeaders(
-        request_, &notify_before_headers_sent_callback_,
+        request_, notify_before_headers_sent_callback_,
         &request_info_.extra_headers);
     // If an extension blocks the request, we rely on the callback to
     // StartTransactionInternal().
@@ -334,7 +335,7 @@ void URLRequestHttpJob::StartTransactionInternal() {
   // NOTE: This method assumes that request_info_ is already setup properly.
 
   // If we already have a transaction, then we should restart the transaction
-  // with auth provided by username_ and password_.
+  // with auth provided by auth_credentials_.
 
   int rv;
 
@@ -344,9 +345,8 @@ void URLRequestHttpJob::StartTransactionInternal() {
   }
 
   if (transaction_.get()) {
-    rv = transaction_->RestartWithAuth(username_, password_, &start_callback_);
-    username_.clear();
-    password_.clear();
+    rv = transaction_->RestartWithAuth(auth_credentials_, &start_callback_);
+    auth_credentials_ = AuthCredentials();
   } else {
     DCHECK(request_->context());
     DCHECK(request_->context()->http_transaction_factory());
@@ -472,34 +472,36 @@ void URLRequestHttpJob::AddCookieHeaderAndStart() {
 
   CookieStore* cookie_store =
       request_->context()->cookie_store();
-  if (cookie_store) {
-    cookie_store->GetCookieMonster()->GetAllCookiesForURLAsync(
-        request_->url(),
-        base::Bind(&URLRequestHttpJob::CheckCookiePolicyAndLoad,
-                   weak_ptr_factory_.GetWeakPtr()));
+  if (cookie_store && !(request_info_.load_flags & LOAD_DO_NOT_SEND_COOKIES)) {
+    net::CookieMonster* cookie_monster = cookie_store->GetCookieMonster();
+    if (cookie_monster) {
+      cookie_monster->GetAllCookiesForURLAsync(
+          request_->url(),
+          base::Bind(&URLRequestHttpJob::CheckCookiePolicyAndLoad,
+                     weak_ptr_factory_.GetWeakPtr()));
+    } else {
+      DoLoadCookies();
+    }
   } else {
     DoStartTransaction();
   }
 }
 
+void URLRequestHttpJob::DoLoadCookies() {
+  CookieOptions options;
+  options.set_include_httponly();
+  request_->context()->cookie_store()->GetCookiesWithInfoAsync(
+      request_->url(), options,
+      base::Bind(&URLRequestHttpJob::OnCookiesLoaded,
+                 weak_ptr_factory_.GetWeakPtr()));
+}
+
 void URLRequestHttpJob::CheckCookiePolicyAndLoad(
     const CookieList& cookie_list) {
-  bool allow = true;
-  if ((request_info_.load_flags & LOAD_DO_NOT_SEND_COOKIES) ||
-      !CanGetCookies(cookie_list)) {
-    allow = false;
-  }
-
-  if (allow) {
-    CookieOptions options;
-    options.set_include_httponly();
-    request_->context()->cookie_store()->GetCookiesWithInfoAsync(
-        request_->url(), options,
-        base::Bind(&URLRequestHttpJob::OnCookiesLoaded,
-                   weak_ptr_factory_.GetWeakPtr()));
-  } else {
+  if (CanGetCookies(cookie_list))
+    DoLoadCookies();
+  else
     DoStartTransaction();
-  }
 }
 
 void URLRequestHttpJob::OnCookiesLoaded(
@@ -591,7 +593,7 @@ void URLRequestHttpJob::CookieHandled() {
 
 void URLRequestHttpJob::FetchResponseCookies(
     std::vector<std::string>* cookies) {
-  std::string name = "Set-Cookie";
+  const std::string name = "Set-Cookie";
   std::string value;
 
   void* iter = NULL;
@@ -613,7 +615,7 @@ void URLRequestHttpJob::ProcessStrictTransportSecurityHeader() {
   const bool valid_https =
       https && !IsCertStatusError(response_info_->ssl_info.cert_status);
 
-  std::string name = "Strict-Transport-Security";
+  const std::string name = "Strict-Transport-Security";
   std::string value;
 
   int max_age;
@@ -668,30 +670,45 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
   // TODO(agl): we might have an issue here where a request for foo.example.com
   // merges into a SPDY connection to www.example.com, and gets a different
   // certificate.
-  const SSLInfo& ssl_info = transaction_->GetResponseInfo()->ssl_info;
-  if (result == OK &&
-      ssl_info.is_valid() &&
-      ssl_info.is_issued_by_known_root &&
-      context_->transport_security_state()) {
-    TransportSecurityState::DomainState domain_state;
-    bool sni = SSLConfigService::IsSNIAvailable(context_->ssl_config_service());
-    if (context_->transport_security_state()->HasPinsForHost(
-            &domain_state,
-            request_->url().host(), sni)) {
-      if (!domain_state.IsChainOfPublicKeysPermitted(
-              ssl_info.public_key_hashes)) {
-        result = ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN;
-        UMA_HISTOGRAM_BOOLEAN("Net.CertificatePinSuccess", false);
-        FraudulentCertificateReporter* reporter =
-            context_->fraudulent_certificate_reporter();
-        if (reporter != NULL)
-          reporter->SendReport(request_->url().host(), ssl_info, sni);
-      } else {
-        UMA_HISTOGRAM_BOOLEAN("Net.CertificatePinSuccess", true);
+  if (transaction_->GetResponseInfo() != NULL) {
+    const SSLInfo& ssl_info = transaction_->GetResponseInfo()->ssl_info;
+    if (ssl_info.is_valid() &&
+        (result == OK || (IsCertificateError(result) &&
+                          IsCertStatusMinorError(ssl_info.cert_status))) &&
+        ssl_info.is_issued_by_known_root &&
+        context_->transport_security_state()) {
+      TransportSecurityState::DomainState domain_state;
+      bool sni_available = SSLConfigService::IsSNIAvailable(
+          context_->ssl_config_service());
+      std::string host = request_->url().host();
+
+      if (context_->transport_security_state()->HasPinsForHost(
+              &domain_state, host, sni_available)) {
+        if (!domain_state.IsChainOfPublicKeysPermitted(
+                ssl_info.public_key_hashes)) {
+          const base::Time build_time = base::GetBuildTime();
+          // Pins are not enforced if the build is sufficiently old. Chrome
+          // users should get updates every six weeks or so, but it's possible
+          // that some users will stop getting updates for some reason. We
+          // don't want those users building up as a pool of people with bad
+          // pins.
+          if ((base::Time::Now() - build_time).InDays() < 70 /* 10 weeks */) {
+            result = ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN;
+            UMA_HISTOGRAM_BOOLEAN("Net.PublicKeyPinSuccess", false);
+            TransportSecurityState::ReportUMAOnPinFailure(host);
+            FraudulentCertificateReporter* reporter =
+                context_->fraudulent_certificate_reporter();
+            if (reporter != NULL)
+              reporter->SendReport(host, ssl_info, sni_available);
+          }
+        } else {
+          UMA_HISTOGRAM_BOOLEAN("Net.PublicKeyPinSuccess", true);
+        }
       }
     }
   }
 #endif
+
   if (result == OK) {
     scoped_refptr<HttpResponseHeaders> headers = GetResponseHeaders();
     if (request_->context() && request_->context()->network_delegate()) {
@@ -699,7 +716,7 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
       // |on_headers_received_callback_| or
       // |NetworkDelegate::URLRequestDestroyed()| has been called.
       int error = request_->context()->network_delegate()->
-          NotifyHeadersReceived(request_, &on_headers_received_callback_,
+          NotifyHeadersReceived(request_, on_headers_received_callback_,
                                 headers, &override_response_headers_);
       if (error != net::OK) {
         if (error == net::ERR_IO_PENDING) {
@@ -724,9 +741,10 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
     TransportSecurityState::DomainState domain_state;
     const bool is_hsts_host =
         context_->transport_security_state() &&
-        context_->transport_security_state()->IsEnabledForHost(
+        context_->transport_security_state()->GetDomainState(
             &domain_state, request_info_.url.host(),
-            SSLConfigService::IsSNIAvailable(context_->ssl_config_service()));
+            SSLConfigService::IsSNIAvailable(context_->ssl_config_service())) &&
+        domain_state.ShouldCertificateErrorsBeFatal();
     NotifySSLCertificateError(transaction_->GetResponseInfo()->ssl_info,
                               is_hsts_host);
   } else if (result == ERR_SSL_CLIENT_AUTH_CERT_NEEDED) {
@@ -763,10 +781,8 @@ void URLRequestHttpJob::OnReadCompleted(int result) {
 }
 
 void URLRequestHttpJob::RestartTransactionWithAuth(
-    const string16& username,
-    const string16& password) {
-  username_ = username;
-  password_ = password;
+    const AuthCredentials& credentials) {
+  auth_credentials_ = credentials;
 
   // These will be reset in OnStartCompleted.
   response_info_ = NULL;
@@ -995,8 +1011,7 @@ void URLRequestHttpJob::GetAuthChallengeInfo(
   *result = response_info_->auth_challenge;
 }
 
-void URLRequestHttpJob::SetAuth(const string16& username,
-                                const string16& password) {
+void URLRequestHttpJob::SetAuth(const AuthCredentials& credentials) {
   DCHECK(transaction_.get());
 
   // Proxy gets set first, then WWW.
@@ -1007,7 +1022,7 @@ void URLRequestHttpJob::SetAuth(const string16& username,
     server_auth_state_ = AUTH_STATE_HAVE_AUTH;
   }
 
-  RestartTransactionWithAuth(username, password);
+  RestartTransactionWithAuth(credentials);
 }
 
 void URLRequestHttpJob::CancelAuth() {
@@ -1111,7 +1126,7 @@ bool URLRequestHttpJob::ShouldFixMismatchedContentLength(int rv) const {
 }
 
 bool URLRequestHttpJob::ReadRawData(IOBuffer* buf, int buf_size,
-                                    int *bytes_read) {
+                                    int* bytes_read) {
   DCHECK_NE(buf_size, 0);
   DCHECK(bytes_read);
   DCHECK(!read_in_progress_);
@@ -1283,7 +1298,7 @@ void URLRequestHttpJob::RecordPacketStats(
     do { \
       UMA_HISTOGRAM_CUSTOM_COUNTS("Net.Compress." name, sample, \
                                   500, 1000000, 100); \
-    } while(0)
+    } while (0)
 
 void URLRequestHttpJob::RecordCompressionHistograms() {
   DCHECK(request_);

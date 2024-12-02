@@ -10,7 +10,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "content/browser/content_browser_client.h"
+#include "content/public/browser/content_browser_client.h"
 
 #if defined(OS_WIN)
 #include "content/browser/tab_contents/tab_contents_view_win_delegate.h"
@@ -24,7 +24,7 @@ class ShellContentBrowserClient : public ContentBrowserClient
 #if defined(OS_WIN)
                                   , public TabContentsViewWinDelegate
 #endif
-    {
+{
  public:
   ShellContentBrowserClient();
   virtual ~ShellContentBrowserClient();
@@ -34,17 +34,16 @@ class ShellContentBrowserClient : public ContentBrowserClient
   }
 
   virtual BrowserMainParts* CreateBrowserMainParts(
-      const MainFunctionParams& parameters) OVERRIDE;
+      const content::MainFunctionParams& parameters) OVERRIDE;
   virtual RenderWidgetHostView* CreateViewForWidget(
       RenderWidgetHost* widget) OVERRIDE;
   virtual TabContentsView* CreateTabContentsView(
       TabContents* tab_contents) OVERRIDE;
   virtual void RenderViewHostCreated(
       RenderViewHost* render_view_host) OVERRIDE;
-  virtual void BrowserRenderProcessHostCreated(
-      BrowserRenderProcessHost* host) OVERRIDE;
+  virtual void RenderProcessHostCreated(
+      RenderProcessHost* host) OVERRIDE;
   virtual void PluginProcessHostCreated(PluginProcessHost* host) OVERRIDE;
-  virtual void WorkerProcessHostCreated(WorkerProcessHost* host) OVERRIDE;
   virtual WebUIFactory* GetWebUIFactory() OVERRIDE;
   virtual GURL GetEffectiveURL(content::BrowserContext* browser_context,
                                const GURL& url) OVERRIDE;
@@ -53,6 +52,8 @@ class ShellContentBrowserClient : public ContentBrowserClient
   virtual bool IsURLSameAsAnySiteInstance(const GURL& url) OVERRIDE;
   virtual bool IsSuitableHost(RenderProcessHost* process_host,
                               const GURL& site_url) OVERRIDE;
+  virtual void SiteInstanceGotProcess(SiteInstance* site_instance) OVERRIDE;
+  virtual void SiteInstanceDeleting(SiteInstance* site_instance) OVERRIDE;
   virtual bool ShouldSwapProcessesForNavigation(const GURL& current_url,
                                                 const GURL& new_url) OVERRIDE;
 
@@ -61,7 +62,8 @@ class ShellContentBrowserClient : public ContentBrowserClient
   virtual void AppendExtraCommandLineSwitches(CommandLine* command_line,
                                               int child_process_id) OVERRIDE;
   virtual std::string GetApplicationLocale() OVERRIDE;
-  virtual std::string GetAcceptLangs(const TabContents* tab) OVERRIDE;
+  virtual std::string GetAcceptLangs(
+      content::BrowserContext* context) OVERRIDE;
   virtual SkBitmap* GetDefaultFavicon() OVERRIDE;
   virtual bool AllowAppCache(const GURL& manifest_url,
                              const GURL& first_party,
@@ -81,6 +83,17 @@ class ShellContentBrowserClient : public ContentBrowserClient
                               net::CookieOptions* options) OVERRIDE;
   virtual bool AllowSaveLocalState(
       const content::ResourceContext& context) OVERRIDE;
+  virtual bool AllowWorkerDatabase(
+      int worker_route_id,
+      const GURL& url,
+      const string16& name,
+      const string16& display_name,
+      unsigned long estimated_size,
+      WorkerProcessHost* worker_process_host) OVERRIDE;
+  virtual bool AllowWorkerFileSystem(
+      int worker_route_id,
+      const GURL& url,
+      WorkerProcessHost* worker_process_host) OVERRIDE;
   virtual net::URLRequestContext* OverrideRequestContextForURL(
       const GURL& url, const content::ResourceContext& context) OVERRIDE;
   virtual QuotaPermissionContext* CreateQuotaPermissionContext() OVERRIDE;
@@ -107,10 +120,11 @@ class ShellContentBrowserClient : public ContentBrowserClient
       int render_view_id) OVERRIDE;
   virtual WebKit::WebNotificationPresenter::Permission
       CheckDesktopNotificationPermission(
-          const GURL& source_url,
-          const content::ResourceContext& context) OVERRIDE;
+          const GURL& origin,
+          const content::ResourceContext& context,
+          int render_process_id) OVERRIDE;
   virtual void ShowDesktopNotification(
-      const DesktopNotificationHostMsg_Show_Params& params,
+      const content::ShowDesktopNotificationHostMsgParams& params,
       int render_process_id,
       int render_view_id,
       bool worker) OVERRIDE;
@@ -119,22 +133,20 @@ class ShellContentBrowserClient : public ContentBrowserClient
       int render_view_id,
       int notification_id) OVERRIDE;
   virtual bool CanCreateWindow(
-      const GURL& source_url,
+      const GURL& origin,
       WindowContainerType container_type,
-      const content::ResourceContext& context) OVERRIDE;
+      const content::ResourceContext& context,
+      int render_process_id) OVERRIDE;
   virtual std::string GetWorkerProcessTitle(
       const GURL& url, const content::ResourceContext& context) OVERRIDE;
   virtual ResourceDispatcherHost* GetResourceDispatcherHost() OVERRIDE;
   virtual ui::Clipboard* GetClipboard() OVERRIDE;
   virtual MHTMLGenerationManager* GetMHTMLGenerationManager() OVERRIDE;
-  virtual DevToolsManager* GetDevToolsManager() OVERRIDE;
   virtual net::NetLog* GetNetLog() OVERRIDE;
   virtual speech_input::SpeechInputManager* GetSpeechInputManager() OVERRIDE;
   virtual AccessTokenStore* CreateAccessTokenStore() OVERRIDE;
   virtual bool IsFastShutdownPossible() OVERRIDE;
-  virtual WebPreferences GetWebkitPrefs(
-      content::BrowserContext* browser_context,
-      bool is_web_ui) OVERRIDE;
+  virtual WebPreferences GetWebkitPrefs(RenderViewHost* rvh) OVERRIDE;
   virtual void UpdateInspectorSetting(RenderViewHost* rvh,
                                       const std::string& key,
                                       const std::string& value) OVERRIDE;
@@ -143,6 +155,7 @@ class ShellContentBrowserClient : public ContentBrowserClient
   virtual void ClearCache(RenderViewHost* rvh)  OVERRIDE;
   virtual void ClearCookies(RenderViewHost* rvh)  OVERRIDE;
   virtual FilePath GetDefaultDownloadDirectory() OVERRIDE;
+  virtual std::string GetDefaultDownloadName() OVERRIDE;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   virtual int GetCrashSignalFD(const CommandLine& command_line) OVERRIDE;

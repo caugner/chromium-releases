@@ -6,38 +6,31 @@
 #define CHROME_BROWSER_CHROMEOS_STATUS_CLOCK_MENU_BUTTON_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
-#include "chrome/browser/chromeos/cros/power_library.h"
 #include "chrome/browser/chromeos/status/status_area_button.h"
-#include "chrome/browser/chromeos/system/timezone_settings.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/common/notification_observer.h"
+#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_types.h"
+#include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/menu/menu_delegate.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
 #include "unicode/calendar.h"
-#include "views/controls/button/menu_button.h"
-#include "views/controls/menu/menu_delegate.h"
-#include "views/controls/menu/view_menu_delegate.h"
 
 namespace views {
 class MenuRunner;
 }
-
-namespace chromeos {
-
-class StatusAreaHost;
 
 // The clock menu button in the status area.
 // This button shows the current time.
 class ClockMenuButton : public StatusAreaButton,
                         public views::MenuDelegate,
                         public views::ViewMenuDelegate,
-                        public NotificationObserver,
-                        public PowerLibrary::Observer,
-                        public system::TimezoneSettings::Observer {
+                        public content::NotificationObserver {
  public:
-  explicit ClockMenuButton(StatusAreaHost* host);
+  explicit ClockMenuButton(StatusAreaButton::Delegate* delegate);
   virtual ~ClockMenuButton();
 
   // views::MenuDelegate implementation
@@ -45,34 +38,26 @@ class ClockMenuButton : public StatusAreaButton,
   virtual bool IsCommandEnabled(int id) const OVERRIDE;
   virtual void ExecuteCommand(int id) OVERRIDE;
 
-  // Overridden from ResumeLibrary::Observer:
-  virtual void PowerChanged(PowerLibrary* obj) {}
-  virtual void SystemResumed();
-
-  // Overridden from TimezoneSettings::Observer:
-  virtual void TimezoneChanged(const icu::TimeZone& timezone);
-
   // views::View
   virtual void OnLocaleChanged() OVERRIDE;
 
-  // Updates the time on the menu button. Can be called by host if timezone
-  // changes.
+  // Updates the time on the menu button.
   void UpdateText();
 
   // Sets default use 24hour clock mode.
   void SetDefaultUse24HourClock(bool use_24hour_clock);
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  protected:
-  virtual int horizontal_padding();
+  virtual int horizontal_padding() OVERRIDE;
 
  private:
   // views::ViewMenuDelegate implementation.
-  virtual void RunMenu(views::View* source, const gfx::Point& pt);
+  virtual void RunMenu(views::View* source, const gfx::Point& pt) OVERRIDE;
 
   // Create and initialize menu if not already present.
   void EnsureMenu();
@@ -87,13 +72,10 @@ class ClockMenuButton : public StatusAreaButton,
 
   PrefChangeRegistrar registrar_;
 
-  // Default value for use_24hour_clock. Used when StatusAreaHost does not
-  // have a profile, i.e. on login screen and lock screen.
+  // Default value for use_24hour_clock.
   bool default_use_24hour_clock_;
 
   DISALLOW_COPY_AND_ASSIGN(ClockMenuButton);
 };
-
-}  // namespace chromeos
 
 #endif  // CHROME_BROWSER_CHROMEOS_STATUS_CLOCK_MENU_BUTTON_H_

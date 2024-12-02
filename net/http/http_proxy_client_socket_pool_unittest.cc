@@ -50,7 +50,7 @@ class HttpProxyClientSocketPoolTest : public TestWithHttpParam {
   HttpProxyClientSocketPoolTest()
       : ssl_config_(),
         ignored_transport_socket_params_(new TransportSocketParams(
-            HostPortPair("proxy", 80), LOWEST, GURL(), false, false)),
+            HostPortPair("proxy", 80), LOWEST, false, false)),
         ignored_ssl_socket_params_(new SSLSocketParams(
             ignored_transport_socket_params_, NULL, NULL,
             ProxyServer::SCHEME_DIRECT, HostPortPair("www.google.com", 443),
@@ -102,8 +102,7 @@ class HttpProxyClientSocketPoolTest : public TestWithHttpParam {
                                      "MyRealm1",
                                      HttpAuth::AUTH_SCHEME_BASIC,
                                      "Basic realm=MyRealm1",
-                                     kFoo,
-                                     kBar,
+                                     AuthCredentials(kFoo, kBar),
                                      "/");
   }
 

@@ -79,8 +79,8 @@ class GcryptInitializer {
   }
 };
 
-static base::LazyInstance<GcryptInitializer> g_gcrypt_initializer(
-    base::LINKER_INITIALIZED);
+static base::LazyInstance<GcryptInitializer> g_gcrypt_initializer =
+    LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 #endif  // !defined(OS_MACOSX)
@@ -97,14 +97,15 @@ class PrintBackendCUPS : public PrintBackend {
   virtual ~PrintBackendCUPS() {}
 
   // PrintBackend implementation.
-  virtual bool EnumeratePrinters(PrinterList* printer_list);
+  virtual bool EnumeratePrinters(PrinterList* printer_list) OVERRIDE;
 
-  virtual std::string GetDefaultPrinterName();
+  virtual std::string GetDefaultPrinterName() OVERRIDE;
 
-  virtual bool GetPrinterCapsAndDefaults(const std::string& printer_name,
-                                         PrinterCapsAndDefaults* printer_info);
+  virtual bool GetPrinterCapsAndDefaults(
+      const std::string& printer_name,
+      PrinterCapsAndDefaults* printer_info) OVERRIDE;
 
-  virtual bool IsValidPrinter(const std::string& printer_name);
+  virtual bool IsValidPrinter(const std::string& printer_name) OVERRIDE;
 
  private:
   // Following functions are wrappers around corresponding CUPS functions.
@@ -262,7 +263,7 @@ int PrintBackendCUPS::GetDests(cups_dest_t** dests) {
 FilePath PrintBackendCUPS::GetPPD(const char* name) {
   // cupsGetPPD returns a filename stored in a static buffer in CUPS.
   // Protect this code with lock.
-  static base::Lock ppd_lock;
+  CR_DEFINE_STATIC_LOCAL(base::Lock, ppd_lock, ());
   base::AutoLock ppd_autolock(ppd_lock);
   FilePath ppd_path;
   const char* ppd_file_path = NULL;

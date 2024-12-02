@@ -25,19 +25,28 @@ class CrossSiteResourceHandler : public ResourceHandler {
                            ResourceDispatcherHost* resource_dispatcher_host);
 
   // ResourceHandler implementation:
-  virtual bool OnUploadProgress(int request_id, uint64 position, uint64 size);
-  virtual bool OnRequestRedirected(int request_id, const GURL& new_url,
-                                   ResourceResponse* response, bool* defer);
+  virtual bool OnUploadProgress(int request_id,
+                                uint64 position,
+                                uint64 size) OVERRIDE;
+  virtual bool OnRequestRedirected(int request_id,
+                                   const GURL& new_url,
+                                   content::ResourceResponse* response,
+                                   bool* defer) OVERRIDE;
   virtual bool OnResponseStarted(int request_id,
-                                 ResourceResponse* response);
-  virtual bool OnWillStart(int request_id, const GURL& url, bool* defer);
-  virtual bool OnWillRead(int request_id, net::IOBuffer** buf, int* buf_size,
-                          int min_size);
-  virtual bool OnReadCompleted(int request_id, int* bytes_read);
+                                 content::ResourceResponse* response) OVERRIDE;
+  virtual bool OnWillStart(int request_id,
+                           const GURL& url,
+                           bool* defer) OVERRIDE;
+  virtual bool OnWillRead(int request_id,
+                          net::IOBuffer** buf,
+                          int* buf_size,
+                          int min_size) OVERRIDE;
+  virtual bool OnReadCompleted(int request_id,
+                               int* bytes_read) OVERRIDE;
   virtual bool OnResponseCompleted(int request_id,
                                    const net::URLRequestStatus& status,
-                                   const std::string& security_info);
-  virtual void OnRequestClosed();
+                                   const std::string& security_info) OVERRIDE;
+  virtual void OnRequestClosed() OVERRIDE;
 
   // We can now send the response to the new renderer, which will cause
   // TabContents to swap in the new renderer and destroy the old one.
@@ -50,7 +59,7 @@ class CrossSiteResourceHandler : public ResourceHandler {
   // telling the old RenderViewHost to run its onunload handler.
   void StartCrossSiteTransition(
       int request_id,
-      ResourceResponse* response,
+      content::ResourceResponse* response,
       const GlobalRequestID& global_id);
 
   scoped_refptr<ResourceHandler> next_handler_;
@@ -62,7 +71,7 @@ class CrossSiteResourceHandler : public ResourceHandler {
   bool completed_during_transition_;
   net::URLRequestStatus completed_status_;
   std::string completed_security_info_;
-  ResourceResponse* response_;
+  content::ResourceResponse* response_;
   ResourceDispatcherHost* rdh_;
 
   DISALLOW_COPY_AND_ASSIGN(CrossSiteResourceHandler);

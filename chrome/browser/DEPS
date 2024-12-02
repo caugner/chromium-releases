@@ -6,7 +6,6 @@ include_rules = [
   "+chrome/profile_import",
   "+chrome/tools/profiles",  # For history unit tests.
   "+chrome/views",
-  "+content/browser",
   "+content/plugin/plugin_interpose_util_mac.h",
   "+content/public/browser",
   "+grit",  # For generated headers
@@ -27,11 +26,19 @@ include_rules = [
   "+webkit/quota",
   "+xib_localizers", # For generated mac localization helpers
 
+  # TODO(jam): this needs to be removed, and only use content/public. BUG=98716
+  "+content/browser",
+
+  "-content/common",
+  # TODO(jam): remove all the exceptions. BUG=98716
+  "+content/common/chrome_application_mac.h",
+  "+content/common/view_messages.h",
+
   # Other libraries.
   "+chrome/third_party/hunspell",
   "+chrome/third_party/mozilla_security_manager",
   "+libxml",  # For search engine definition parsing.
-  "+third_party/apple",  # Apple code ImageAndTextCell.
+  "+third_party/apple_sample_code",  # Apple code ImageAndTextCell.
   "+third_party/cld",
   "+third_party/expat",
   "+third_party/iaccessible2",

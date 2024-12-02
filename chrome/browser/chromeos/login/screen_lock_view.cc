@@ -8,25 +8,28 @@
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/textfield_with_margin.h"
-#include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_view.h"
 #include "chrome/browser/chromeos/login/username_view.h"
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "chrome/browser/chromeos/views/copy_background.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "views/background.h"
-#include "views/border.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/controls/textfield/native_textfield_wrapper.h"
-#include "views/controls/textfield/textfield.h"
-#include "views/layout/grid_layout.h"
+#include "ui/views/background.h"
+#include "ui/views/border.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/textfield/native_textfield_wrapper.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/layout/grid_layout.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include "ui/views/widget/native_widget_gtk.h"
+#endif
 
 namespace chromeos {
 
@@ -119,7 +122,7 @@ void ScreenLockView::Layout() {
 void ScreenLockView::Init() {
   registrar_.Add(this,
                  chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 
   user_view_ = new UserView(this,
                             false,  // is_login
@@ -139,7 +142,7 @@ void ScreenLockView::Init() {
   set_host_view(password_field_);
 
   // User icon.
-  UserManager::User user = screen_locker_->user();
+  const User& user = screen_locker_->user();
   user_view_->SetImage(user.image(), user.image());
 
   // User name.
@@ -200,12 +203,6 @@ void ScreenLockView::SetSignoutEnabled(bool enabled) {
   user_view_->SetSignoutEnabled(enabled);
 }
 
-gfx::Rect ScreenLockView::GetPasswordBoundsRelativeTo(const views::View* view) {
-  gfx::Point p;
-  views::View::ConvertPointToView(password_field_, view, &p);
-  return gfx::Rect(p, size());
-}
-
 void ScreenLockView::SetEnabled(bool enabled) {
   views::View::SetEnabled(enabled);
 
@@ -249,12 +246,12 @@ bool ScreenLockView::HandleKeyEvent(
 
 void ScreenLockView::Observe(
     int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (type != chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED || !user_view_)
     return;
 
-  UserManager::User* user = Details<UserManager::User>(details).ptr();
+  User* user = content::Details<User>(details).ptr();
   if (screen_locker_->user().email() != user->email())
     return;
   user_view_->SetImage(user->image(), user->image());

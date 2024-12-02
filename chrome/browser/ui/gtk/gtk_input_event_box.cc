@@ -4,10 +4,8 @@
 
 #include "chrome/browser/ui/gtk/gtk_input_event_box.h"
 
-#include <gdk/gdkwindow.h>
+#include <gdk/gdk.h>
 #include <gtk/gtk.h>
-#include <gtk/gtkwidget.h>
-#include <gtk/gtkbin.h>
 
 G_BEGIN_DECLS
 
@@ -125,7 +123,7 @@ static void gtk_input_event_box_size_allocate(GtkWidget* widget,
                                               GtkAllocation* allocation) {
   g_return_if_fail(GTK_IS_INPUT_EVENT_BOX(widget));
 
-  widget->allocation = *allocation;
+  gtk_widget_set_allocation(widget, allocation);
 
   GtkInputEventBoxPrivate* priv = GTK_INPUT_EVENT_BOX_GET_PRIVATE(widget);
   if (priv->event_window) {

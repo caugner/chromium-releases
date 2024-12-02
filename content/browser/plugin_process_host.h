@@ -17,6 +17,7 @@
 #include "base/memory/ref_counted.h"
 #include "content/browser/browser_child_process_host.h"
 #include "content/common/content_export.h"
+#include "ipc/ipc_channel_proxy.h"
 #include "webkit/plugins/webplugininfo.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -31,8 +32,6 @@ class Rect;
 namespace IPC {
 struct ChannelHandle;
 }
-
-class GURL;
 
 // Represents the browser side of the browser <--> plugin communication
 // channel.  Different plugins run in their own process, but multiple instances
@@ -71,7 +70,7 @@ class CONTENT_EXPORT PluginProcessHost : public BrowserChildProcessHost {
   bool Init(const webkit::WebPluginInfo& info, const std::string& locale);
 
   // Force the plugin process to shutdown (cleanly).
-  virtual void ForceShutdown();
+  void ForceShutdown();
 
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
@@ -111,6 +110,9 @@ class CONTENT_EXPORT PluginProcessHost : public BrowserChildProcessHost {
   void AddWindow(HWND window);
 #endif
 
+  // Adds an IPC message filter.  A reference will be kept to the filter.
+  void AddFilter(IPC::ChannelProxy::MessageFilter* filter);
+
  private:
   // Sends a message to the plugin process to request creation of a new channel
   // for the given mime type.
@@ -137,7 +139,7 @@ class CONTENT_EXPORT PluginProcessHost : public BrowserChildProcessHost {
   void OnPluginSetCursorVisibility(bool visible);
 #endif
 
-  virtual bool CanShutdown();
+  virtual bool CanShutdown() OVERRIDE;
 
   void CancelRequests();
 

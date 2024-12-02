@@ -19,6 +19,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -72,6 +73,8 @@ bool AutofillAgent::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutofillMsg_FormDataFilled, OnFormDataFilled)
     IPC_MESSAGE_HANDLER(AutofillMsg_FieldTypePredictionsAvailable,
                         OnFieldTypePredictionsAvailable)
+    IPC_MESSAGE_HANDLER(AutofillMsg_SelectAutofillSuggestionAtIndex,
+                        OnSelectAutofillSuggestionAtIndex)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -112,16 +115,17 @@ void AutofillAgent::WillSubmitForm(WebFrame* frame,
   }
 }
 
-void AutofillAgent::FrameTranslated(WebFrame* frame) {
-  // The page is translated, so try to extract the form data again.
-  DidFinishDocumentLoad(frame);
-}
-
 bool AutofillAgent::InputElementClicked(const WebInputElement& element,
                                         bool was_focused,
                                         bool is_focused) {
   if (was_focused)
     ShowSuggestions(element, true, false, true);
+
+  return false;
+}
+
+bool AutofillAgent::InputElementLostFocus() {
+  Send(new AutofillHostMsg_HideAutofillPopup(routing_id()));
 
   return false;
 }
@@ -202,6 +206,7 @@ void AutofillAgent::removeAutocompleteSuggestion(const WebString& name,
 void AutofillAgent::textFieldDidEndEditing(const WebInputElement& element) {
   password_autofill_manager_->TextFieldDidEndEditing(element);
   has_shown_autofill_popup_for_current_edit_ = false;
+  Send(new AutofillHostMsg_DidEndTextFieldEditing(routing_id()));
 }
 
 void AutofillAgent::textFieldDidChange(const WebInputElement& element) {
@@ -355,6 +360,12 @@ void AutofillAgent::OnFieldTypePredictionsAvailable(
   }
 }
 
+void AutofillAgent::OnSelectAutofillSuggestionAtIndex(int listIndex) {
+  NOTIMPLEMENTED();
+  // TODO(jrg): enable once changes land in WebKit
+  // render_view()->webview()->selectAutofillSuggestionAtIndex(listIndex);
+}
+
 void AutofillAgent::ShowSuggestions(const WebInputElement& element,
                                     bool autofill_on_empty_values,
                                     bool requires_caret_at_end,
@@ -407,8 +418,17 @@ void AutofillAgent::QueryAutofillSuggestions(const WebInputElement& element,
     WebFormControlElementToFormField(element, EXTRACT_VALUE, &field);
   }
 
-  Send(new AutofillHostMsg_QueryFormFieldAutofill(
-      routing_id(), autofill_query_id_, form, field));
+  // TODO(csharp): Stop using the hardcoded value once the WebKit change to
+  // expose the position lands.
+  // gfx::Rect bounding_box(autofill_query_element_.boundsInRootViewSpace());
+  gfx::Rect bounding_box(26, 51, 155, 22);
+
+  Send(new AutofillHostMsg_QueryFormFieldAutofill(routing_id(),
+                                                  autofill_query_id_,
+                                                  form,
+                                                  field,
+                                                  bounding_box,
+                                                  display_warning_if_disabled));
 }
 
 void AutofillAgent::FillAutofillFormData(const WebNode& node,

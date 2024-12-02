@@ -2,19 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/threading/thread.h"
 #include "base/test/test_timeouts.h"
+#include "base/threading/thread.h"
 #include "base/timer.h"
 #include "chrome/browser/sync/glue/browser_thread_model_worker.h"
-#include "content/browser/browser_thread.h"
+#include "chrome/browser/sync/util/unrecoverable_error_info.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::OneShotTimer;
 using base::Thread;
 using base::TimeDelta;
+using content::BrowserThread;
 
 namespace browser_sync {
 
@@ -38,23 +41,25 @@ class BrowserThreadModelWorkerTest : public testing::Test {
   // Schedule DoWork to be executed on the DB thread and have the test fail if
   // DoWork hasn't executed within action_timeout_ms() ms.
   void ScheduleWork() {
-    scoped_ptr<Callback0::Type> c(NewCallback(this,
-        &BrowserThreadModelWorkerTest::DoWork));
+   // We wait until the callback is done. So it is safe to use unretained.
+   WorkCallback c = base::Bind(&BrowserThreadModelWorkerTest::DoWork,
+                               base::Unretained(this));
     timer()->Start(
         FROM_HERE,
         TimeDelta::FromMilliseconds(TestTimeouts::action_timeout_ms()),
         this,
         &BrowserThreadModelWorkerTest::Timeout);
-    worker()->DoWorkAndWaitUntilDone(c.get());
+    worker()->DoWorkAndWaitUntilDone(c);
   }
 
   // This is the work that will be scheduled to be done on the DB thread.
-  void DoWork() {
+  UnrecoverableErrorInfo DoWork() {
     EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
     timer_.Stop();  // Stop the failure timer so the test succeeds.
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE, new MessageLoop::QuitTask());
     did_do_work_ = true;
+    return UnrecoverableErrorInfo();
   }
 
   // This will be called by the OneShotTimer and make the test fail unless
@@ -81,9 +86,9 @@ class BrowserThreadModelWorkerTest : public testing::Test {
   scoped_refptr<BrowserThreadModelWorker> worker_;
   OneShotTimer<BrowserThreadModelWorkerTest> timer_;
 
-  BrowserThread db_thread_;
+  content::TestBrowserThread db_thread_;
   MessageLoopForIO io_loop_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread io_thread_;
 
   ScopedRunnableMethodFactory<BrowserThreadModelWorkerTest> method_factory_;
 };

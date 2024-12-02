@@ -7,11 +7,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task.h"
 #include "base/test/test_timeouts.h"
@@ -31,11 +32,13 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
+#include "content/test/test_browser_thread.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
@@ -47,6 +50,8 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
+
+using content::BrowserThread;
 
 namespace switches {
 const char kPasswordFileForTest[] = "password-file-for-test";
@@ -63,21 +68,26 @@ const char kIssueAuthTokenUrl[] =
     "https://www.google.com/accounts/IssueAuthToken";
 const char kSearchDomainCheckUrl[] =
     "https://www.google.com/searchdomaincheck?format=domain&type=chrome";
+const char kOAuth2LoginTokenValidResponse[] =
+    "{"
+    "  \"refresh_token\": \"rt1\","
+    "  \"access_token\": \"at1\","
+    "  \"expires_in\": 3600,"
+    "  \"token_type\": \"Bearer\""
+    "}";
 }
 
 // Helper class that checks whether a sync test server is running or not.
-class SyncServerStatusChecker : public URLFetcher::Delegate {
+class SyncServerStatusChecker : public content::URLFetcherDelegate {
  public:
   SyncServerStatusChecker() : running_(false) {}
 
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data) {
-    running_ = (status.status() == net::URLRequestStatus::SUCCESS &&
-                response_code == 200 && data.find("ok") == 0);
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) {
+    std::string data;
+    source->GetResponseAsString(&data);
+    running_ =
+        (source->GetStatus().status() == net::URLRequestStatus::SUCCESS &&
+        source->GetResponseCode() == 200 && data.find("ok") == 0);
     MessageLoop::current()->Quit();
   }
 
@@ -87,29 +97,16 @@ class SyncServerStatusChecker : public URLFetcher::Delegate {
   bool running_;
 };
 
-class SetProxyConfigTask : public Task {
- public:
-  SetProxyConfigTask(base::WaitableEvent* done,
-                     net::URLRequestContextGetter* url_request_context_getter,
-                     const net::ProxyConfig& proxy_config)
-      : done_(done),
-        url_request_context_getter_(url_request_context_getter),
-        proxy_config_(proxy_config) {
-  }
-
-  void Run() {
-    net::ProxyService* proxy_service =
-        url_request_context_getter_->GetURLRequestContext()->proxy_service();
-    proxy_service->ResetConfigService(
-        new net::ProxyConfigServiceFixed(proxy_config_));
-    done_->Signal();
-  }
-
- private:
-  base::WaitableEvent* done_;
-  net::URLRequestContextGetter* url_request_context_getter_;
-  net::ProxyConfig proxy_config_;
-};
+void SetProxyConfigCallback(
+    base::WaitableEvent* done,
+    net::URLRequestContextGetter* url_request_context_getter,
+    const net::ProxyConfig& proxy_config) {
+  net::ProxyService* proxy_service =
+      url_request_context_getter->GetURLRequestContext()->proxy_service();
+  proxy_service->ResetConfigService(
+      new net::ProxyConfigServiceFixed(proxy_config));
+  done->Signal();
+}
 
 SyncTest::SyncTest(TestType test_type)
     : sync_server_(net::TestServer::TYPE_SYNC, FilePath()),
@@ -131,10 +128,6 @@ SyncTest::SyncTest(TestType test_type)
     }
     case MULTIPLE_CLIENT: {
       num_clients_ = 3;
-      break;
-    }
-    case MANY_CLIENT: {
-      num_clients_ = 10;
       break;
     }
   }
@@ -223,10 +216,6 @@ void SyncTest::AddOptionalTypesToCommandLine(CommandLine* cl) {
   // TODO(sync): Remove this once sessions sync is enabled by default.
   if (!cl->HasSwitch(switches::kEnableSyncTabs))
     cl->AppendSwitch(switches::kEnableSyncTabs);
-
-  // TODO(stevet): Remove this once search engines sync is enabled by default.
-  if (!cl->HasSwitch(switches::kEnableSyncSearchEngines))
-    cl->AppendSwitch(switches::kEnableSyncSearchEngines);
 }
 
 // static
@@ -384,12 +373,20 @@ void SyncTest::ReadPasswordFile() {
 void SyncTest::SetupMockGaiaResponses() {
   username_ = "user@gmail.com";
   password_ = "password";
-  factory_.reset(new URLFetcherFactory());
+  factory_.reset(new URLFetcherImplFactory());
   fake_factory_.reset(new FakeURLFetcherFactory(factory_.get()));
   fake_factory_->SetFakeResponse(kClientLoginUrl, "SID=sid\nLSID=lsid", true);
   fake_factory_->SetFakeResponse(kGetUserInfoUrl, "email=user@gmail.com", true);
   fake_factory_->SetFakeResponse(kIssueAuthTokenUrl, "auth", true);
   fake_factory_->SetFakeResponse(kSearchDomainCheckUrl, ".google.com", true);
+  fake_factory_->SetFakeResponse(
+      GaiaUrls::GetInstance()->client_login_to_oauth2_url(),
+      "some_response",
+      true);
+  fake_factory_->SetFakeResponse(
+      GaiaUrls::GetInstance()->oauth2_token_url(),
+      kOAuth2LoginTokenValidResponse,
+      true);
 }
 
 // Start up a local sync server based on the value of server_type_, which
@@ -419,7 +416,7 @@ bool SyncTest::SetUpLocalPythonTestServer() {
   if (server_type_ == LOCAL_PYTHON_SERVER) {
     std::string sync_service_url = sync_server_.GetURL("chromiumsync").spec();
     cl->AppendSwitchASCII(switches::kSyncServiceURL, sync_service_url);
-    VLOG(1) << "Started local python sync server at " << sync_service_url;
+    DVLOG(1) << "Started local python sync server at " << sync_service_url;
   }
 
   int xmpp_port = 0;
@@ -442,8 +439,8 @@ bool SyncTest::SetUpLocalPythonTestServer() {
     // The local XMPP server only supports insecure connections.
     cl->AppendSwitch(switches::kSyncAllowInsecureXmppConnection);
   }
-  VLOG(1) << "Started local python XMPP server at "
-          << xmpp_host_port_pair.ToString();
+  DVLOG(1) << "Started local python XMPP server at "
+           << xmpp_host_port_pair.ToString();
 
   return true;
 }
@@ -466,8 +463,8 @@ bool SyncTest::SetUpLocalTestServer() {
   const int kMaxWaitTime = TestTimeouts::action_max_timeout_ms();
   const int kNumIntervals = 15;
   if (WaitForTestServerToStart(kMaxWaitTime, kNumIntervals)) {
-    VLOG(1) << "Started local test server at "
-            << cl->GetSwitchValueASCII(switches::kSyncServiceURL) << ".";
+    DVLOG(1) << "Started local test server at "
+             << cl->GetSwitchValueASCII(switches::kSyncServiceURL) << ".";
     return true;
   } else {
     LOG(ERROR) << "Could not start local test server at "
@@ -509,9 +506,10 @@ bool SyncTest::IsTestServerRunning() {
   std::string sync_url = cl->GetSwitchValueASCII(switches::kSyncServiceURL);
   GURL sync_url_status(sync_url.append("/healthz"));
   SyncServerStatusChecker delegate;
-  URLFetcher fetcher(sync_url_status, URLFetcher::GET, &delegate);
-  fetcher.set_request_context(Profile::Deprecated::GetDefaultRequestContext());
-  fetcher.Start();
+  scoped_ptr<content::URLFetcher> fetcher(content::URLFetcher::Create(
+    sync_url_status, content::URLFetcher::GET, &delegate));
+  fetcher->SetRequestContext(Profile::Deprecated::GetDefaultRequestContext());
+  fetcher->Start();
   ui_test_utils::RunMessageLoop();
   return delegate.running();
 }
@@ -701,14 +699,21 @@ void SyncTest::TriggerSetSyncTabs() {
             UTF16ToASCII(browser()->GetSelectedTabContents()->GetTitle()));
 }
 
+int SyncTest::NumberOfDefaultSyncItems() const {
+  // Just return the current number of basic sync items that are synced,
+  // including preferences, themes, and search engines.
+  // TODO(stevet): It would be nice if there was some mechanism for retrieving
+  // this sum from each data type without having to manually count and update
+  // this value.
+  return 7;
+}
+
 void SyncTest::SetProxyConfig(net::URLRequestContextGetter* context_getter,
                               const net::ProxyConfig& proxy_config) {
   base::WaitableEvent done(false, false);
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      new SetProxyConfigTask(&done,
-                             context_getter,
-                             proxy_config));
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&SetProxyConfigCallback, &done,
+                 make_scoped_refptr(context_getter), proxy_config));
   done.Wait();
 }

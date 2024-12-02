@@ -15,11 +15,12 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/result_codes.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/common/result_codes.h"
 
 class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
  protected:
@@ -50,7 +51,7 @@ class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
     Balloon* balloon = GetNotificationDelegate(index);
     NotificationUIManager* manager =
         g_browser_process->notification_ui_manager();
-    manager->CancelById(balloon->notification().notification_id());
+    ASSERT_TRUE(manager->CancelById(balloon->notification().notification_id()));
   }
 
   size_t CountBalloons() {
@@ -67,17 +68,17 @@ class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
         GetExtensionService()->extensions()->at(index);
     ASSERT_TRUE(extension);
     std::string extension_id(extension->id());
-    ExtensionHost* extension_host =
-        GetExtensionProcessManager()->GetBackgroundHostForExtension(extension);
+    ExtensionHost* extension_host = GetExtensionProcessManager()->
+        GetBackgroundHostForExtension(extension_id);
     ASSERT_TRUE(extension_host);
 
-    RenderProcessHost* extension_rph =
+    content::RenderProcessHost* extension_rph =
         extension_host->render_view_host()->process();
     base::KillProcess(extension_rph->GetHandle(), content::RESULT_CODE_KILLED,
                       false);
     ASSERT_TRUE(WaitForExtensionCrash(extension_id));
-    ASSERT_FALSE(
-        GetExtensionProcessManager()->GetBackgroundHostForExtension(extension));
+    ASSERT_FALSE(GetExtensionProcessManager()->
+                 GetBackgroundHostForExtension(extension_id));
   }
 
   void CheckExtensionConsistency(size_t index) {
@@ -85,13 +86,16 @@ class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
     const Extension* extension =
         GetExtensionService()->extensions()->at(index);
     ASSERT_TRUE(extension);
-    ExtensionHost* extension_host =
-        GetExtensionProcessManager()->GetBackgroundHostForExtension(extension);
+    ExtensionHost* extension_host = GetExtensionProcessManager()->
+        GetBackgroundHostForExtension(extension->id());
     ASSERT_TRUE(extension_host);
     ASSERT_TRUE(GetExtensionProcessManager()->HasExtensionHost(extension_host));
     ASSERT_TRUE(extension_host->IsRenderViewLive());
-    ASSERT_EQ(extension_host->render_view_host()->process(),
-        GetExtensionProcessManager()->GetExtensionProcess(extension->id()));
+    extensions::ProcessMap* process_map =
+        browser()->profile()->GetExtensionService()->process_map();
+    ASSERT_TRUE(process_map->Contains(
+        extension->id(), extension_host->render_view_host()->process()->
+            GetID()));
   }
 
   void LoadTestExtension() {
@@ -351,14 +355,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
   ASSERT_EQ(size_before, GetExtensionService()->extensions()->size());
 }
 
-// Flaky on mac&&linux due to http://crbug.com/89078.
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-#define MAYBE_TwoExtensionsIgnoreFirst FLAKY_TwoExtensionsIgnoreFirst
-#else
-#define MAYBE_TwoExtensionsIgnoreFirst TwoExtensionsIgnoreFirst
-#endif  // defined(OS_LINUX) || defined(OS_MACOSX)
 IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
-                       MAYBE_TwoExtensionsIgnoreFirst) {
+                       TwoExtensionsIgnoreFirst) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   LoadSecondExtension();
@@ -367,13 +365,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
   CrashExtension(size_before);
   ASSERT_EQ(size_before, GetExtensionService()->extensions()->size());
 
+  // Accept notification 1 before canceling notification 0.
+  // Otherwise, on Linux and Windows, there is a race here, in which
+  // canceled notifications do not immediately go away.
+  AcceptNotification(1);
   CancelNotification(0);
-  // Cancelling the balloon at 0 will close the balloon, and the balloon in
-  // index 1 will move into index 0.
-  AcceptNotification(0);
 
   SCOPED_TRACE("balloons done");
   ASSERT_EQ(size_before + 1, GetExtensionService()->extensions()->size());
+  EXPECT_EQ(second_extension_id_,
+            GetExtensionService()->extensions()->at(size_before)->id());
   CheckExtensionConsistency(size_before);
 }
 
@@ -450,4 +451,43 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, MAYBE_CrashAndUnloadAll) {
   GetExtensionService()->UnloadAllExtensions();
   ASSERT_EQ(crash_size_before,
             GetExtensionService()->terminated_extensions()->size());
+}
+
+// Test that when an extension with a background page that has a tab open
+// crashes, the tab stays open, and reloading it reloads the extension.
+// Regression test for issue 71629.
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
+                       ReloadTabsWithBackgroundPage) {
+  TabStripModel* tab_strip = browser()->tabstrip_model();
+  const size_t size_before = GetExtensionService()->extensions()->size();
+  const size_t crash_size_before =
+      GetExtensionService()->terminated_extensions()->size();
+  LoadTestExtension();
+
+  // Open a tab extension.
+  browser()->NewTab();
+  ui_test_utils::NavigateToURL(
+      browser(),
+      GURL("chrome-extension://" + first_extension_id_ + "/background.html"));
+
+  const int tabs_before = tab_strip->count();
+  CrashExtension(size_before);
+
+  // Tab should still be open, and extension should be crashed.
+  EXPECT_EQ(tabs_before, tab_strip->count());
+  EXPECT_EQ(size_before, GetExtensionService()->extensions()->size());
+  EXPECT_EQ(crash_size_before + 1,
+            GetExtensionService()->terminated_extensions()->size());
+
+  {
+    ui_test_utils::WindowedNotificationObserver observer(
+        content::NOTIFICATION_LOAD_STOP,
+        content::Source<NavigationController>(
+            &browser()->GetSelectedTabContentsWrapper()->controller()));
+    browser()->Reload(CURRENT_TAB);
+    observer.Wait();
+  }
+  // Extension should now be loaded.
+  ASSERT_EQ(size_before + 1, GetExtensionService()->extensions()->size());
+  ASSERT_EQ(0U, CountBalloons());
 }

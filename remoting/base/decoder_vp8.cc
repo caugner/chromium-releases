@@ -4,6 +4,7 @@
 
 #include "remoting/base/decoder_vp8.h"
 
+#include "base/logging.h"
 #include "media/base/media.h"
 #include "media/base/yuv_convert.h"
 #include "remoting/base/util.h"
@@ -19,6 +20,7 @@ DecoderVp8::DecoderVp8()
     : state_(kUninitialized),
       codec_(NULL),
       last_image_(NULL),
+      clip_rect_(SkIRect::MakeEmpty()),
       horizontal_scale_ratio_(1.0),
       vertical_scale_ratio_(1.0) {
 }

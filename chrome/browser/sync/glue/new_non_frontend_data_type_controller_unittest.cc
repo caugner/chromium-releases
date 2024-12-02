@@ -5,21 +5,22 @@
 #include "chrome/browser/sync/glue/new_non_frontend_data_type_controller.h"
 
 #include "base/callback.h"
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/task.h"
 #include "base/test/test_timeouts.h"
 #include "base/tracked_objects.h"
-#include "base/synchronization/waitable_event.h"
 #include "chrome/browser/sync/api/syncable_service_mock.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
 #include "chrome/browser/sync/glue/data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/new_non_frontend_data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/shared_change_processor_mock.h"
-#include "chrome/browser/sync/profile_sync_factory_mock.h"
+#include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/test/base/profile_mock.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::WaitableEvent;
@@ -30,6 +31,7 @@ using browser_sync::GROUP_DB;
 using browser_sync::NewNonFrontendDataTypeController;
 using browser_sync::NewNonFrontendDataTypeControllerMock;
 using browser_sync::StartCallback;
+using content::BrowserThread;
 using syncable::AUTOFILL_PROFILE;
 using testing::_;
 using testing::DoAll;
@@ -64,7 +66,7 @@ class NewNonFrontendDataTypeControllerFake
     : public NewNonFrontendDataTypeController {
  public:
   NewNonFrontendDataTypeControllerFake(
-      ProfileSyncFactory* profile_sync_factory,
+      ProfileSyncComponentsFactory* profile_sync_factory,
       Profile* profile,
       NewNonFrontendDataTypeControllerMock* mock)
       : NewNonFrontendDataTypeController(profile_sync_factory,
@@ -132,7 +134,7 @@ class NewNonFrontendDataTypeControllerTest : public testing::Test {
     EXPECT_CALL(service_, GetUserShare()).WillRepeatedly(
         Return((sync_api::UserShare*)NULL));
     db_thread_.Start();
-    profile_sync_factory_.reset(new ProfileSyncFactoryMock());
+    profile_sync_factory_.reset(new ProfileSyncComponentsFactoryMock());
     change_processor_ = new SharedChangeProcessorMock();
 
     // Both of these are refcounted, so don't need to be released.
@@ -200,6 +202,8 @@ class NewNonFrontendDataTypeControllerTest : public testing::Test {
   }
 
   void SetStartFailExpectations(DataTypeController::StartResult result) {
+    EXPECT_CALL(*dtc_mock_, StopLocalServiceAsync());
+    EXPECT_CALL(syncable_service_, StopSyncing(_));
     EXPECT_CALL(*dtc_mock_, StopModels());
     EXPECT_CALL(*dtc_mock_, RecordStartFailure(result));
     EXPECT_CALL(start_callback_, Run(result,_));
@@ -210,10 +214,10 @@ class NewNonFrontendDataTypeControllerTest : public testing::Test {
   }
 
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread db_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread db_thread_;
   ProfileMock profile_;
-  scoped_ptr<ProfileSyncFactoryMock> profile_sync_factory_;
+  scoped_ptr<ProfileSyncComponentsFactoryMock> profile_sync_factory_;
   ProfileSyncServiceMock service_;
   StartCallback start_callback_;
   // Must be destroyed after new_non_frontend_dtc_.
@@ -259,7 +263,9 @@ TEST_F(NewNonFrontendDataTypeControllerTest, StartFirstRun) {
 
 TEST_F(NewNonFrontendDataTypeControllerTest, AbortDuringStartModels) {
   EXPECT_CALL(*dtc_mock_, StartModels()).WillOnce(Return(false));
-  SetStartFailExpectations(DataTypeController::ABORTED);
+  EXPECT_CALL(*dtc_mock_, StopModels());
+  EXPECT_CALL(*dtc_mock_, RecordStartFailure(DataTypeController::ABORTED));
+  EXPECT_CALL(start_callback_, Run(DataTypeController::ABORTED,_));
   EXPECT_EQ(DataTypeController::NOT_RUNNING, new_non_frontend_dtc_->state());
   new_non_frontend_dtc_->Start(
       NewCallback(&start_callback_, &StartCallback::Run));
@@ -284,7 +290,6 @@ TEST_F(NewNonFrontendDataTypeControllerTest, StartAssociationFailed) {
                    Return(SyncError(FROM_HERE, "failed", AUTOFILL_PROFILE))));
   EXPECT_CALL(*dtc_mock_, RecordAssociationTime(_));
   SetStartFailExpectations(DataTypeController::ASSOCIATION_FAILED);
-  EXPECT_CALL(syncable_service_, StopSyncing(_));
   // Set up association to fail with an association failed error.
   EXPECT_EQ(DataTypeController::NOT_RUNNING, new_non_frontend_dtc_->state());
   new_non_frontend_dtc_->Start(
@@ -349,8 +354,6 @@ TEST_F(NewNonFrontendDataTypeControllerTest, AbortDuringAssociation) {
   EXPECT_CALL(*change_processor_, Disconnect()).
       WillOnce(DoAll(SignalEvent(&pause_db_thread), Return(true)));
   EXPECT_CALL(service_, DeactivateDataType(_));
-  EXPECT_CALL(*dtc_mock_, StopLocalServiceAsync());
-  EXPECT_CALL(syncable_service_, StopSyncing(_));
   EXPECT_EQ(DataTypeController::NOT_RUNNING, new_non_frontend_dtc_->state());
   new_non_frontend_dtc_->Start(
       NewCallback(&start_callback_, &StartCallback::Run));

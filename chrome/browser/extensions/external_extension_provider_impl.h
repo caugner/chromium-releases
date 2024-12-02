@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTERNAL_EXTENSION_PROVIDER_IMPL_H_
 #pragma once
 
+#include <string>
+
 #include "chrome/browser/extensions/external_extension_provider_interface.h"
 
 #include "base/memory/ref_counted.h"
@@ -17,7 +19,6 @@ class Version;
 
 namespace base {
 class DictionaryValue;
-class ValueSerializer;
 }
 
 // A specialization of the ExternalExtensionProvider that uses an instance
@@ -38,7 +39,8 @@ class ExternalExtensionProviderImpl
       VisitorInterface* service,
       ExternalExtensionLoader* loader,
       Extension::Location crx_location,
-      Extension::Location download_location);
+      Extension::Location download_location,
+      int creation_flags);
 
   virtual ~ExternalExtensionProviderImpl();
 
@@ -54,13 +56,13 @@ class ExternalExtensionProviderImpl
 
   // ExternalExtensionProvider implementation:
   virtual void ServiceShutdown() OVERRIDE;
-  virtual void VisitRegisteredExtension() const OVERRIDE;
+  virtual void VisitRegisteredExtension() OVERRIDE;
   virtual bool HasExtension(const std::string& id) const OVERRIDE;
   virtual bool GetExtensionDetails(const std::string& id,
                                    Extension::Location* location,
                                    scoped_ptr<Version>* version) const OVERRIDE;
 
-  virtual bool IsReady();
+  virtual bool IsReady() const OVERRIDE;
 
   static const char kLocation[];
   static const char kState[];
@@ -68,9 +70,6 @@ class ExternalExtensionProviderImpl
   static const char kExternalVersion[];
   static const char kExternalUpdateUrl[];
   static const char kSupportedLocales[];
-
- protected:
-  VisitorInterface* service() const { return service_; }
 
  private:
   // Location for external extensions that are provided by this provider from
@@ -95,6 +94,10 @@ class ExternalExtensionProviderImpl
   // The loader that loads the list of external extensions and reports them
   // via |SetPrefs|.
   scoped_refptr<ExternalExtensionLoader> loader_;
+
+  // Creation flags to use for the extension.  These flags will be used
+  // when calling Extenion::Create() by the crx installer.
+  int creation_flags_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalExtensionProviderImpl);
 };

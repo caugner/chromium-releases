@@ -7,8 +7,10 @@
 #include <algorithm>
 
 #include "base/logging.h"
+#include "base/stl_util.h"
+#include "base/string_util.h"
+#include "ui/aura/client/stacking_client.h"
 #include "ui/aura/desktop.h"
-#include "ui/aura/desktop_delegate.h"
 #include "ui/aura/event.h"
 #include "ui/aura/event_filter.h"
 #include "ui/aura/layout_manager.h"
@@ -18,21 +20,19 @@
 #include "ui/base/animation/multi_animation.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/compositor/compositor.h"
-#include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/screen.h"
 
 namespace aura {
 
-using internal::RootWindow;
-
 Window::Window(WindowDelegate* delegate)
-    : type_(kWindowType_Toplevel),
+    : type_(WINDOW_TYPE_UNKNOWN),
       delegate_(delegate),
-      show_state_(ui::SHOW_STATE_NORMAL),
       parent_(NULL),
+      transient_parent_(NULL),
       id_(-1),
       user_data_(NULL),
-      stops_event_propagation_(false) {
+      stops_event_propagation_(false),
+      ignore_events_(false) {
 }
 
 Window::~Window() {
@@ -41,9 +41,9 @@ Window::~Window() {
     delegate_->OnWindowDestroying();
 
   // Let the root know so that it can remove any references to us.
-  RootWindow* root = GetRoot();
-  if (root)
-    root->WindowDestroying(this);
+  Desktop* desktop = GetDesktop();
+  if (desktop)
+    desktop->WindowDestroying(this);
 
   // Then destroy the children.
   while (!children_.empty()) {
@@ -53,28 +53,47 @@ Window::~Window() {
     DCHECK(std::find(children_.begin(), children_.end(), child) ==
            children_.end());
   }
+
+  // Removes ourselves from our transient parent.
+  if (transient_parent_)
+    transient_parent_->RemoveTransientChild(this);
+
   // And let the delegate do any post cleanup.
   if (delegate_)
     delegate_->OnWindowDestroyed();
   if (parent_)
     parent_->RemoveChild(this);
+
+  // Destroy transient children, only after we've removed ourselves from our
+  // parent, as destroying an active transient child may otherwise attempt to
+  // refocus us.
+  Windows transient_children(transient_children_);
+  STLDeleteElements(&transient_children);
+  DCHECK(transient_children_.empty());
+
+  FOR_EACH_OBSERVER(WindowObserver, observers_, OnWindowDestroyed(this));
 }
 
-void Window::Init() {
-  ui::Layer::LayerType type = ui::Layer::LAYER_HAS_NO_TEXTURE;
-  if (delegate_)
-    type = ui::Layer::LAYER_HAS_TEXTURE;
-  layer_.reset(new ui::Layer(Desktop::GetInstance()->compositor(), type));
-  // Windows (and therefore their layers) should initially be hidden, except for
-  // controls.
-  layer_->SetVisible(type_ == kWindowType_Control);
+void Window::Init(ui::Layer::LayerType layer_type) {
+  layer_.reset(new ui::Layer(layer_type));
+  layer_->SetVisible(false);
   layer_->set_delegate(this);
+  UpdateLayerName(name_);
+
+  Desktop::GetInstance()->WindowInitialized(this);
 }
 
-void Window::SetType(int type) {
+void Window::SetType(WindowType type) {
   // Cannot change type after the window is initialized.
   DCHECK(!layer());
   type_ = type;
+}
+
+void Window::SetName(const std::string& name) {
+  name_ = name;
+
+  if (layer())
+    UpdateLayerName(name_);
 }
 
 void Window::Show() {
@@ -94,22 +113,12 @@ bool Window::IsVisible() const {
   return layer_->IsDrawn();
 }
 
-void Window::Maximize() {
-  if (UpdateShowStateAndRestoreBounds(ui::SHOW_STATE_MAXIMIZED))
-    SetBoundsInternal(gfx::Screen::GetMonitorWorkAreaNearestWindow(this));
-}
-
-void Window::Fullscreen() {
-  if (UpdateShowStateAndRestoreBounds(ui::SHOW_STATE_FULLSCREEN))
-    SetBoundsInternal(gfx::Screen::GetMonitorAreaNearestWindow(this));
-}
-
-void Window::Restore() {
-  if (show_state_ != ui::SHOW_STATE_NORMAL) {
-    show_state_ = ui::SHOW_STATE_NORMAL;
-    SetBoundsInternal(restore_bounds_);
-    restore_bounds_.SetRect(0, 0, 0, 0);
-  }
+gfx::Rect Window::GetScreenBounds() const {
+  gfx::Point origin = bounds().origin();
+  Window::ConvertPointToWindow(parent_,
+                               aura::Desktop::GetInstance(),
+                               &origin);
+  return gfx::Rect(origin, bounds().size());
 }
 
 void Window::Activate() {
@@ -125,12 +134,8 @@ bool Window::IsActive() const {
   return aura::Desktop::GetInstance()->active_window() == this;
 }
 
-ToplevelWindowContainer* Window::AsToplevelWindowContainer() {
-  return NULL;
-}
-
-const ToplevelWindowContainer* Window::AsToplevelWindowContainer() const {
-  return NULL;
+void Window::SetTransform(const ui::Transform& transform) {
+  layer()->SetTransform(transform);
 }
 
 void Window::SetLayoutManager(LayoutManager* layout_manager) {
@@ -138,12 +143,14 @@ void Window::SetLayoutManager(LayoutManager* layout_manager) {
 }
 
 void Window::SetBounds(const gfx::Rect& new_bounds) {
-  if (show_state_ == ui::SHOW_STATE_MAXIMIZED ||
-      show_state_ == ui::SHOW_STATE_FULLSCREEN) {
-    restore_bounds_ = new_bounds;
-    return;
-  }
-  SetBoundsInternal(new_bounds);
+  if (parent_ && parent_->layout_manager())
+    parent_->layout_manager()->SetChildBounds(this, new_bounds);
+  else
+    SetBoundsInternal(new_bounds);
+}
+
+gfx::Rect Window::GetTargetBounds() const {
+  return layer_->GetTargetBounds();
 }
 
 const gfx::Rect& Window::bounds() const {
@@ -165,28 +172,55 @@ void Window::SetCanvas(const SkCanvas& canvas, const gfx::Point& origin) {
 void Window::SetParent(Window* parent) {
   if (parent)
     parent->AddChild(this);
-  else if (Desktop::GetInstance()->delegate())
-    Desktop::GetInstance()->delegate()->AddChildToDefaultParent(this);
+  else if (Desktop::GetInstance()->stacking_client())
+    Desktop::GetInstance()->stacking_client()->AddChildToDefaultParent(this);
   else
     NOTREACHED();
 }
 
-void Window::MoveChildToFront(Window* child) {
-  DCHECK_EQ(child->parent(), this);
-  const Windows::iterator i(std::find(children_.begin(), children_.end(),
-                                      child));
-  DCHECK(i != children_.end());
-  children_.erase(i);
+void Window::StackChildAtTop(Window* child) {
+  if (children_.size() <= 1 || child == children_.back())
+    return;  // In the front already.
+  StackChildAbove(child, children_.back());
+}
 
-  // TODO(beng): this obviously has to handle different window types.
-  children_.insert(children_.begin() + children_.size(), child);
-  SchedulePaintInRect(gfx::Rect());
+void Window::StackChildAbove(Window* child, Window* other) {
+  DCHECK_NE(child, other);
+  DCHECK(child);
+  DCHECK(other);
+  DCHECK_EQ(this, child->parent());
+  DCHECK_EQ(this, other->parent());
 
-  child->layer()->parent()->MoveToFront(child->layer());
+  const size_t child_i =
+      std::find(children_.begin(), children_.end(), child) - children_.begin();
+  const size_t other_i =
+      std::find(children_.begin(), children_.end(), other) - children_.begin();
+  if (child_i == other_i + 1)
+    return;
+
+  const size_t dest_i = child_i < other_i ? other_i : other_i + 1;
+  children_.erase(children_.begin() + child_i);
+  children_.insert(children_.begin() + dest_i, child);
+
+  layer()->StackAbove(child->layer(), other->layer());
+
+  // Stack any transient children that share the same parent to be in front of
+  // 'child'.
+  Window* last_transient = child;
+  for (Windows::iterator i = child->transient_children_.begin();
+       i != child->transient_children_.end(); ++i) {
+    Window* transient_child = *i;
+    if (transient_child->parent_ == this) {
+      StackChildAbove(transient_child, last_transient);
+      last_transient = transient_child;
+    }
+  }
+
+  child->OnStackingChanged();
 }
 
 bool Window::CanActivate() const {
-  return IsVisible() && delegate_ && delegate_->ShouldActivate(NULL);
+  return IsVisible() && (!delegate_ || delegate_->ShouldActivate(NULL));
 }
 
 void Window::AddChild(Window* child) {
@@ -195,18 +229,55 @@ void Window::AddChild(Window* child) {
   if (child->parent())
     child->parent()->RemoveChild(child);
   child->parent_ = this;
+
   layer_->Add(child->layer_.get());
+
   children_.push_back(child);
+  if (layout_manager_.get())
+    layout_manager_->OnWindowAddedToLayout(child);
   FOR_EACH_OBSERVER(WindowObserver, observers_, OnWindowAdded(child));
+  child->OnParentChanged();
+}
+
+void Window::AddTransientChild(Window* child) {
+  if (child->transient_parent_)
+    child->transient_parent_->RemoveTransientChild(child);
+  DCHECK(std::find(transient_children_.begin(), transient_children_.end(),
+                   child) == transient_children_.end());
+  transient_children_.push_back(child);
+  child->transient_parent_ = this;
+}
+
+void Window::RemoveTransientChild(Window* child) {
+  Windows::iterator i =
+      std::find(transient_children_.begin(), transient_children_.end(), child);
+  DCHECK(i != transient_children_.end());
+  transient_children_.erase(i);
+  if (child->transient_parent_ == this)
+    child->transient_parent_ = NULL;
 }
 
 void Window::RemoveChild(Window* child) {
   Windows::iterator i = std::find(children_.begin(), children_.end(), child);
   DCHECK(i != children_.end());
+  if (layout_manager_.get())
+    layout_manager_->OnWillRemoveWindowFromLayout(child);
   FOR_EACH_OBSERVER(WindowObserver, observers_, OnWillRemoveWindow(child));
+  aura::Window* desktop = child->GetDesktop();
   child->parent_ = NULL;
+  if (desktop)
+    desktop->WindowDetachedFromDesktop(child);
   layer_->Remove(child->layer_.get());
   children_.erase(i);
+  child->OnParentChanged();
+}
+
+bool Window::Contains(const Window* other) const {
+  for (const Window* parent = other; parent; parent = parent->parent_) {
+    if (parent == this)
+      return true;
+  }
+  return false;
 }
 
 Window* Window::GetChildById(int id) {
@@ -226,9 +297,11 @@ const Window* Window::GetChildById(int id) const {
 }
 
 // static
-void Window::ConvertPointToWindow(Window* source,
-                                  Window* target,
+void Window::ConvertPointToWindow(const Window* source,
+                                  const Window* target,
                                   gfx::Point* point) {
+  if (!source)
+    return;
   ui::Layer::ConvertPointToLayer(source->layer(), target->layer(), point);
 }
 
@@ -238,32 +311,6 @@ gfx::NativeCursor Window::GetCursor(const gfx::Point& point) const {
 
 void Window::SetEventFilter(EventFilter* event_filter) {
   event_filter_.reset(event_filter);
-}
-
-bool Window::OnMouseEvent(MouseEvent* event) {
-  if (!parent_ || !IsVisible())
-    return false;
-  if (!parent_->event_filter_.get())
-    parent_->SetEventFilter(new EventFilter(parent_));
-  return parent_->event_filter_->OnMouseEvent(this, event) ||
-      delegate_->OnMouseEvent(event);
-}
-
-bool Window::OnKeyEvent(KeyEvent* event) {
-  return IsVisible() && delegate_->OnKeyEvent(event);
-}
-
-ui::TouchStatus Window::OnTouchEvent(TouchEvent* event) {
-  if (!parent_ || !IsVisible())
-    return ui::TOUCH_STATUS_UNKNOWN;
-
-  if (!parent_->event_filter_.get())
-    parent_->SetEventFilter(new EventFilter(parent_));
-
-  ui::TouchStatus status = parent_->event_filter_->OnTouchEvent(this, event);
-  if (status == ui::TOUCH_STATUS_UNKNOWN && delegate_)
-    status = delegate_->OnTouchEvent(event);
-  return status;
 }
 
 void Window::AddObserver(WindowObserver* observer) {
@@ -292,6 +339,15 @@ Window* Window::GetTopWindowContainingPoint(const gfx::Point& local_point) {
   return GetWindowForPoint(local_point, false, false);
 }
 
+Window* Window::GetToplevelWindow() {
+  Window* topmost_window_with_delegate = NULL;
+  for (aura::Window* window = this; window != NULL; window = window->parent()) {
+    if (window->delegate())
+      topmost_window_with_delegate = window;
+  }
+  return topmost_window_with_delegate;
+}
+
 void Window::Focus() {
   DCHECK(GetFocusManager());
   GetFocusManager()->SetFocusedWindow(this);
@@ -312,8 +368,7 @@ bool Window::HasFocus() const {
 // propagation of events that would otherwise be targeted at windows behind it.
 // We then perform this same check on every window up to the root.
 bool Window::CanFocus() const {
-  // TODO(beng): Figure out how to consult the delegate wrt. focusability also.
-  if (!IsVisible() || !parent_)
+  if (!IsVisible() || !parent_ || (delegate_ && !delegate_->CanFocus()))
     return false;
 
   Windows::const_iterator i = std::find(parent_->children().begin(),
@@ -328,7 +383,7 @@ bool Window::CanFocus() const {
 
 internal::FocusManager* Window::GetFocusManager() {
   return const_cast<internal::FocusManager*>(
-      const_cast<const Window*>(this)->GetFocusManager());
+      static_cast<const Window*>(this)->GetFocusManager());
 }
 
 const internal::FocusManager* Window::GetFocusManager() const {
@@ -339,74 +394,89 @@ void Window::SetCapture() {
   if (!IsVisible())
     return;
 
-  RootWindow* root = GetRoot();
-  if (!root)
+  Desktop* desktop = GetDesktop();
+  if (!desktop)
     return;
 
-  root->SetCapture(this);
+  desktop->SetCapture(this);
 }
 
 void Window::ReleaseCapture() {
-  RootWindow* root = GetRoot();
-  if (!root)
+  Desktop* desktop = GetDesktop();
+  if (!desktop)
     return;
 
-  root->ReleaseCapture(this);
+  desktop->ReleaseCapture(this);
 }
 
 bool Window::HasCapture() {
-  RootWindow* root = GetRoot();
-  return root && root->capture_window() == this;
+  Desktop* desktop = GetDesktop();
+  return desktop && desktop->capture_window() == this;
 }
 
-Window* Window::GetToplevelWindow() {
-  Window* window = this;
-  while (window && window->parent() &&
-         !window->parent()->AsToplevelWindowContainer())
-    window = window->parent();
-  return window && window->parent() ? window : NULL;
+void Window::SetProperty(const char* name, void* value) {
+  void* old = GetProperty(name);
+  if (value)
+    prop_map_[name] = value;
+  else
+    prop_map_.erase(name);
+  FOR_EACH_OBSERVER(
+      WindowObserver, observers_, OnWindowPropertyChanged(this, name, old));
 }
 
-bool Window::IsOrContainsFullscreenWindow() const {
-  if (delegate_)
-    return IsVisible() && show_state_ == ui::SHOW_STATE_FULLSCREEN;
-
-  for (Windows::const_iterator it = children_.begin();
-       it != children_.end(); ++it) {
-    if ((*it)->IsOrContainsFullscreenWindow())
-      return true;
-  }
-  return false;
+void Window::SetIntProperty(const char* name, int value) {
+  SetProperty(name, reinterpret_cast<void*>(value));
 }
 
-// static
-ui::Animation* Window::CreateDefaultAnimation() {
-  std::vector<ui::MultiAnimation::Part> parts;
-  parts.push_back(ui::MultiAnimation::Part(200, ui::Tween::LINEAR));
-  ui::MultiAnimation* multi_animation = new ui::MultiAnimation(parts);
-  multi_animation->set_continuous(false);
-  return multi_animation;
+void* Window::GetProperty(const char* name) const {
+  std::map<const char*, void*>::const_iterator iter = prop_map_.find(name);
+  if (iter == prop_map_.end())
+    return NULL;
+  return iter->second;
 }
 
-internal::RootWindow* Window::GetRoot() {
-  return parent_ ? parent_->GetRoot() : NULL;
+int Window::GetIntProperty(const char* name) const {
+  return static_cast<int>(reinterpret_cast<intptr_t>(
+      GetProperty(name)));
+}
+
+Desktop* Window::GetDesktop() {
+  return parent_ ? parent_->GetDesktop() : NULL;
+}
+
+void Window::WindowDetachedFromDesktop(aura::Window* window) {
 }
 
 void Window::SetBoundsInternal(const gfx::Rect& new_bounds) {
-  const gfx::Rect old_bounds = bounds();
-  bool was_move = old_bounds.size() == new_bounds.size();
-  layer_->SetBounds(new_bounds);
+  gfx::Rect actual_new_bounds(new_bounds);
+
+  // Ensure we don't go smaller than our minimum bounds.
+  if (delegate_) {
+    const gfx::Size& min_size = delegate_->GetMinimumSize();
+    actual_new_bounds.set_width(
+        std::max(min_size.width(), actual_new_bounds.width()));
+    actual_new_bounds.set_height(
+        std::max(min_size.height(), actual_new_bounds.height()));
+  }
+
+  const gfx::Rect old_bounds = layer_->GetTargetBounds();
+
+  // Always need to set the layer's bounds -- even if it is to the same thing.
+  // This may cause important side effects such as stopping animation.
+  layer_->SetBounds(actual_new_bounds);
+
+  // If we're not changing the effective bounds, then we can bail early and skip
+  // notifying our listeners.
+  if (old_bounds == actual_new_bounds)
+    return;
 
   if (layout_manager_.get())
     layout_manager_->OnWindowResized();
   if (delegate_)
-    delegate_->OnBoundsChanged(old_bounds, new_bounds);
-  if (IsVisible()) {
-    if (was_move)
-      layer()->ScheduleDraw();
-    else
-      layer()->SchedulePaint(gfx::Rect());
-  }
+    delegate_->OnBoundsChanged(old_bounds, actual_new_bounds);
+  FOR_EACH_OBSERVER(WindowObserver,
+                    observers_,
+                    OnWindowBoundsChanged(this, actual_new_bounds));
 }
 
 void Window::SetVisible(bool visible) {
@@ -421,8 +491,11 @@ void Window::SetVisible(bool visible) {
     if (delegate_)
       delegate_->OnWindowVisibilityChanged(is_visible);
   }
+
+  if (parent_ && parent_->layout_manager_.get())
+    parent_->layout_manager_->OnChildWindowVisibilityChanged(this, visible);
   FOR_EACH_OBSERVER(WindowObserver, observers_,
-                    OnWindowVisibilityChanged(this, is_visible));
+                    OnWindowVisibilityChanged(this, visible));
 }
 
 void Window::SchedulePaint() {
@@ -431,16 +504,6 @@ void Window::SchedulePaint() {
 
 bool Window::StopsEventPropagation() const {
   return stops_event_propagation_ && !children_.empty();
-}
-
-bool Window::UpdateShowStateAndRestoreBounds(
-    ui::WindowShowState new_show_state) {
-  if (show_state_ == new_show_state)
-    return false;
-  show_state_ = new_show_state;
-  if (restore_bounds_.IsEmpty())
-    restore_bounds_ = bounds();
-  return true;
 }
 
 Window* Window::GetWindowForPoint(const gfx::Point& local_point,
@@ -459,7 +522,7 @@ Window* Window::GetWindowForPoint(const gfx::Point& local_point,
   for (Windows::const_reverse_iterator it = children_.rbegin();
        it != children_.rend(); ++it) {
     Window* child = *it;
-    if (!child->IsVisible())
+    if (!child->IsVisible() || (for_event_handling && child->ignore_events_))
       continue;
 
     gfx::Point point_in_child_coords(local_point);
@@ -477,8 +540,35 @@ Window* Window::GetWindowForPoint(const gfx::Point& local_point,
   return delegate_ ? this : NULL;
 }
 
+void Window::OnParentChanged() {
+  FOR_EACH_OBSERVER(
+      WindowObserver, observers_, OnWindowParentChanged(this, parent_));
+}
+
+void Window::OnStackingChanged() {
+  FOR_EACH_OBSERVER(WindowObserver, observers_, OnWindowStackingChanged(this));
+}
+
 void Window::OnPaintLayer(gfx::Canvas* canvas) {
-  delegate_->OnPaint(canvas);
+  if (delegate_)
+    delegate_->OnPaint(canvas);
+}
+
+void Window::UpdateLayerName(const std::string& name) {
+#if !defined(NDEBUG)
+  DCHECK(layer());
+
+  std::string layer_name(name_);
+  if (layer_name.empty())
+    layer_name.append("Unnamed Window");
+
+  if (id_ != -1) {
+    char id_buf[10];
+    base::snprintf(id_buf, sizeof(id_buf), " %d", id_);
+    layer_name.append(id_buf);
+  }
+  layer()->set_name(layer_name);
+#endif
 }
 
 }  // namespace aura

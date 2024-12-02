@@ -47,7 +47,22 @@ ProcessId GetParentProcessId(ProcessHandle process) {
 }
 
 FilePath GetProcessExecutablePath(ProcessHandle process) {
-  return FilePath(std::string("/usr/local/chrome/chrome"));
+  struct kinfo_proc kp;
+  size_t len;
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, process,
+                sizeof(struct kinfo_proc), 0 };
+
+  if (sysctl(mib, arraysize(mib), NULL, &len, NULL, 0) == -1)
+    return FilePath();
+  mib[5] = (len / sizeof(struct kinfo_proc));
+  if (sysctl(mib, arraysize(mib), &kp, &len, NULL, 0) < 0)
+    return FilePath();
+  if ((kp.p_flag & P_SYSTEM) != 0)
+    return FilePath();
+  if (strcmp(kp.p_comm, "chrome") == 0)
+    return FilePath(kp.p_comm);
+
+  return FilePath();
 }
 
 ProcessIterator::ProcessIterator(const ProcessFilter* filter)
@@ -64,7 +79,7 @@ ProcessIterator::ProcessIterator(const ProcessFilter* filter)
   do {
     size_t len = 0;
     if (sysctl(mib, arraysize(mib), NULL, &len, NULL, 0) < 0) {
-      LOG(ERROR) << "failed to get the size needed for the process list";
+      DLOG(ERROR) << "failed to get the size needed for the process list";
       kinfo_procs_.resize(0);
       done = true;
     } else {
@@ -78,7 +93,7 @@ ProcessIterator::ProcessIterator(const ProcessFilter* filter)
         // If we get a mem error, it just means we need a bigger buffer, so
         // loop around again.  Anything else is a real error and give up.
         if (errno != ENOMEM) {
-          LOG(ERROR) << "failed to get the process list";
+          DLOG(ERROR) << "failed to get the process list";
           kinfo_procs_.resize(0);
           done = true;
         }
@@ -92,7 +107,7 @@ ProcessIterator::ProcessIterator(const ProcessFilter* filter)
   } while (!done && (try_num++ < max_tries));
 
   if (!done) {
-    LOG(ERROR) << "failed to collect the process list in a few tries";
+    DLOG(ERROR) << "failed to collect the process list in a few tries";
     kinfo_procs_.resize(0);
   }
 }
@@ -137,7 +152,7 @@ bool ProcessIterator::CheckForNextProcess() {
     // to populate |entry_.exe_file_|.
     size_t exec_name_end = data.find('\0');
     if (exec_name_end == std::string::npos) {
-      LOG(ERROR) << "command line data didn't match expected format";
+      DLOG(ERROR) << "command line data didn't match expected format";
       continue;
     }
 

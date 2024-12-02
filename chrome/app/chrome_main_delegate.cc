@@ -30,11 +30,11 @@
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/utility/chrome_content_utility_client.h"
 #include "content/app/content_main.h"
-#include "content/app/content_main_delegate.h"
-#include "content/browser/renderer_host/render_process_host.h"
-#include "content/common/content_client.h"
 #include "content/common/content_counters.h"
-#include "content/common/content_paths.h"
+#include "content/public/app/content_main_delegate.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/common/content_client.h"
+#include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "media/base/media.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -72,7 +72,7 @@
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-#include "chrome/common/nacl_fork_delegate_linux.h"
+#include "chrome/app/nacl_fork_delegate_linux.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -97,16 +97,16 @@
 #endif
 
 base::LazyInstance<chrome::ChromeContentBrowserClient>
-    g_chrome_content_browser_client(base::LINKER_INITIALIZED);
+    g_chrome_content_browser_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<chrome::ChromeContentRendererClient>
-    g_chrome_content_renderer_client(base::LINKER_INITIALIZED);
+    g_chrome_content_renderer_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<chrome::ChromeContentUtilityClient>
-    g_chrome_content_utility_client(base::LINKER_INITIALIZED);
+    g_chrome_content_utility_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<chrome::ChromeContentPluginClient>
-    g_chrome_content_plugin_client(base::LINKER_INITIALIZED);
+    g_chrome_content_plugin_client = LAZY_INSTANCE_INITIALIZER;
 
-extern int NaClMain(const MainFunctionParams&);
-extern int ServiceProcessMain(const MainFunctionParams&);
+extern int NaClMain(const content::MainFunctionParams&);
+extern int ServiceProcessMain(const content::MainFunctionParams&);
 
 namespace {
 
@@ -139,8 +139,10 @@ bool LoadUserDataDirPolicyFromRegistry(HKEY hive,
                                        FilePath* user_data_dir) {
   std::wstring value;
 
-  base::win::RegKey hklm_policy_key(hive, policy::kRegistrySubKey, KEY_READ);
-  if (hklm_policy_key.ReadValue(key_name.c_str(), &value) == ERROR_SUCCESS) {
+  base::win::RegKey policy_key(hive,
+                               policy::kRegistryMandatorySubKey,
+                               KEY_READ);
+  if (policy_key.ReadValue(key_name.c_str(), &value) == ERROR_SUCCESS) {
     *user_data_dir = FilePath(policy::path_parser::ExpandPathVariables(value));
     return true;
   }
@@ -282,8 +284,13 @@ bool SubprocessNeedsResourceBundle(const std::string& process_type) {
       process_type == switches::kZygoteProcess ||
 #endif
 #if defined(OS_MACOSX)
-      // Mac needs them to for scrollbar related images.
+      // Mac needs them too for scrollbar related images and for sandbox
+      // profiles.
       process_type == switches::kWorkerProcess ||
+      process_type == switches::kNaClLoaderProcess ||
+      process_type == switches::kPpapiPluginProcess ||
+      process_type == switches::kPpapiBrokerProcess ||
+      process_type == switches::kGpuProcess ||
 #endif
       process_type == switches::kRendererProcess ||
       process_type == switches::kUtilityProcess;
@@ -374,7 +381,7 @@ void SetUpProfilingShutdownHandler() {
 
 struct MainFunction {
   const char* name;
-  int (*function)(const MainFunctionParams&);
+  int (*function)(const content::MainFunctionParams&);
 };
 
 }  // namespace
@@ -570,7 +577,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
   // don't enable it for official Chrome builds.
 #if !defined(GOOGLE_CHROME_BUILD)
   if (command_line.HasSwitch(switches::kSingleProcess)) {
-    RenderProcessHost::set_run_renderer_in_process(true);
+    content::RenderProcessHost::set_run_renderer_in_process(true);
 #if defined(OS_MACOSX)
     // TODO(port-mac): This is from renderer_main_platform_delegate.cc.
     // shess tried to refactor things appropriately, but it sprawled out
@@ -607,7 +614,11 @@ void ChromeMainDelegate::PreSandboxStartup() {
     // sources.  The language should have been passed in to us from the
     // browser process as a command line flag.
     DCHECK(command_line.HasSwitch(switches::kLang) ||
-           process_type == switches::kZygoteProcess);
+           process_type == switches::kZygoteProcess ||
+           process_type == switches::kGpuProcess ||
+           process_type == switches::kNaClLoaderProcess ||
+           process_type == switches::kPpapiBrokerProcess ||
+           process_type == switches::kPpapiPluginProcess);
 
     // TODO(markusheintz): The command line flag --lang is actually processed
     // by the CommandLinePrefStore, and made available through the PrefService
@@ -657,7 +668,7 @@ void ChromeMainDelegate::SandboxInitialized(const std::string& process_type) {
 
 int ChromeMainDelegate::RunProcess(
     const std::string& process_type,
-    const MainFunctionParams& main_function_params) {
+    const content::MainFunctionParams& main_function_params) {
   static const MainFunction kMainFunctions[] = {
     { switches::kServiceProcess,     ServiceProcessMain },
 #if defined(OS_MACOSX)
@@ -704,7 +715,7 @@ bool ChromeMainDelegate::DelaySandboxInitialization(
       process_type == switches::kRelauncherProcess;
 }
 #elif defined(OS_POSIX)
-ZygoteForkDelegate* ChromeMainDelegate::ZygoteStarting() {
+content::ZygoteForkDelegate* ChromeMainDelegate::ZygoteStarting() {
   // Each Renderer we spawn will re-attempt initialization of the media
   // libraries, at which point failure will be detected and handled, so
   // we do not need to cope with initialization failures here.

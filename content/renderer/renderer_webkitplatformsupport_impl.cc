@@ -20,25 +20,29 @@
 #include "content/common/webmessageportchannel_impl.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/renderer/content_renderer_client.h"
+#include "content/renderer/gamepad_shared_memory_reader.h"
 #include "content/renderer/gpu/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/renderer/media/audio_device.h"
+#include "content/renderer/media/audio_hardware.h"
 #include "content/renderer/render_thread_impl.h"
+#include "content/renderer/renderer_clipboard_client.h"
 #include "content/renderer/renderer_webaudiodevice_impl.h"
 #include "content/renderer/renderer_webidbfactory_impl.h"
 #include "content/renderer/renderer_webstoragenamespace_impl.h"
 #include "content/renderer/websharedworkerrepository_impl.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_sync_message_filter.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebBlobRegistry.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebBlobRegistry.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebGraphicsContext3D.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGamepads.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKey.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKeyPath.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSerializedScriptValue.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSerializedScriptValue.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "webkit/glue/simple_webmimeregistry_impl.h"
 #include "webkit/glue/webclipboard_impl.h"
 #include "webkit/glue/webfileutilities_impl.h"
@@ -47,13 +51,13 @@
 
 #if defined(OS_WIN)
 #include "content/common/child_process_messages.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/win/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/win/WebSandboxSupport.h"
 #endif
 
 #if defined(OS_MACOSX)
 #include "content/common/mac/font_descriptor.h"
 #include "content/common/mac/font_loader.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/mac/WebSandboxSupport.h"
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -62,7 +66,8 @@
 
 #include "base/synchronization/lock.h"
 #include "content/common/child_process_sandbox_support_impl_linux.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/linux/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/linux/WebFontFamily.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/linux/WebSandboxSupport.h"
 #endif
 
 #if defined(OS_POSIX)
@@ -73,6 +78,7 @@ using WebKit::WebAudioDevice;
 using WebKit::WebBlobRegistry;
 using WebKit::WebFileSystem;
 using WebKit::WebFrame;
+using WebKit::WebGamepads;
 using WebKit::WebIDBFactory;
 using WebKit::WebIDBKey;
 using WebKit::WebIDBKeyPath;
@@ -120,10 +126,11 @@ class RendererWebKitPlatformSupportImpl::SandboxSupport
       CGFontRef* container,
       uint32* font_id);
 #elif defined(OS_POSIX)
-  virtual WebKit::WebString getFontFamilyForCharacters(
+  virtual void getFontFamilyForCharacters(
       const WebKit::WebUChar* characters,
       size_t numCharacters,
-      const char* preferred_locale);
+      const char* preferred_locale,
+      WebKit::WebFontFamily* family);
   virtual void getRenderStyleForStrike(
       const char* family, int sizeAndStyle, WebKit::WebFontRenderStyle* out);
 
@@ -133,14 +140,15 @@ class RendererWebKitPlatformSupportImpl::SandboxSupport
   // here. The key in this map is an array of 16-bit UTF16 values from WebKit.
   // The value is a string containing the correct font family.
   base::Lock unicode_font_families_mutex_;
-  std::map<string16, std::string> unicode_font_families_;
+  std::map<string16, WebKit::WebFontFamily> unicode_font_families_;
 #endif
 };
 
 //------------------------------------------------------------------------------
 
 RendererWebKitPlatformSupportImpl::RendererWebKitPlatformSupportImpl()
-    : clipboard_(new webkit_glue::WebClipboardImpl),
+    : clipboard_client_(new RendererClipboardClient),
+      clipboard_(new webkit_glue::WebClipboardImpl(clipboard_client_.get())),
       mime_registry_(new RendererWebKitPlatformSupportImpl::MimeRegistry),
       sandbox_support_(new RendererWebKitPlatformSupportImpl::SandboxSupport),
       sudden_termination_disables_(0),
@@ -480,24 +488,29 @@ bool RendererWebKitPlatformSupportImpl::SandboxSupport::loadFont(
 
 #elif defined(OS_POSIX)
 
-WebString
+void
 RendererWebKitPlatformSupportImpl::SandboxSupport::getFontFamilyForCharacters(
     const WebKit::WebUChar* characters,
     size_t num_characters,
-    const char* preferred_locale) {
+    const char* preferred_locale,
+    WebKit::WebFontFamily* family) {
   base::AutoLock lock(unicode_font_families_mutex_);
   const string16 key(characters, num_characters);
-  const std::map<string16, std::string>::const_iterator iter =
+  const std::map<string16, WebKit::WebFontFamily>::const_iterator iter =
       unicode_font_families_.find(key);
-  if (iter != unicode_font_families_.end())
-    return WebString::fromUTF8(iter->second);
+  if (iter != unicode_font_families_.end()) {
+    family->name = iter->second.name;
+    family->isBold = iter->second.isBold;
+    family->isItalic = iter->second.isItalic;
+    return;
+  }
 
-  const std::string family_name = content::GetFontFamilyForCharacters(
+  content::GetFontFamilyForCharacters(
       characters,
       num_characters,
-      preferred_locale);
-  unicode_font_families_.insert(make_pair(key, family_name));
-  return WebString::fromUTF8(family_name);
+      preferred_locale,
+      family);
+  unicode_font_families_.insert(make_pair(key, *family));
 }
 
 void
@@ -564,11 +577,11 @@ RendererWebKitPlatformSupportImpl::createGraphicsContext3D() {
 }
 
 double RendererWebKitPlatformSupportImpl::audioHardwareSampleRate() {
-  return AudioDevice::GetAudioHardwareSampleRate();
+  return audio_hardware::GetOutputSampleRate();
 }
 
 size_t RendererWebKitPlatformSupportImpl::audioHardwareBufferSize() {
-  return AudioDevice::GetAudioHardwareBufferSize();
+  return audio_hardware::GetOutputBufferSize();
 }
 
 WebAudioDevice*
@@ -607,4 +620,25 @@ WebBlobRegistry* RendererWebKitPlatformSupportImpl::blobRegistry() {
     blob_registry_.reset(new WebBlobRegistryImpl(ChildThread::current()));
   }
   return blob_registry_.get();
+}
+
+//------------------------------------------------------------------------------
+
+void RendererWebKitPlatformSupportImpl::sampleGamepads(WebGamepads& gamepads) {
+  if (!gamepad_shared_memory_reader_.get())
+    gamepad_shared_memory_reader_.reset(new content::GamepadSharedMemoryReader);
+  gamepad_shared_memory_reader_->SampleGamepads(gamepads);
+}
+
+WebKit::WebString RendererWebKitPlatformSupportImpl::userAgent(
+    const WebKit::WebURL& url) {
+ return WebKitPlatformSupportImpl::userAgent(url);
+}
+
+void RendererWebKitPlatformSupportImpl::GetPlugins(
+    bool refresh, std::vector<webkit::WebPluginInfo>* plugins) {
+  if (!RenderThreadImpl::current()->plugin_refresh_allowed())
+    refresh = false;
+  RenderThreadImpl::current()->Send(
+      new ViewHostMsg_GetPlugins(refresh, plugins));
 }

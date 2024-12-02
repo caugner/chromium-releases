@@ -11,8 +11,8 @@
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
-#include "chrome/browser/ui/shell_dialogs.h"
-#include "views/window/dialog_delegate.h"
+#include "chrome/browser/ui/select_file_dialog.h"
+#include "ui/views/window/dialog_delegate.h"
 
 class FilePath;
 
@@ -34,8 +34,7 @@ class UserDataDirDialog : public views::DialogDelegate,
   FilePath user_data_dir() const { return user_data_dir_; }
 
   // views::DialogDelegate methods:
-  virtual string16 GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool Accept() OVERRIDE;

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/profiles/off_the_record_profile_impl.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
@@ -25,7 +26,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/extensions/extension_webrequest_api.h"
-#include "chrome/browser/net/pref_proxy_config_service.h"
+#include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -45,14 +46,14 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/chrome_blob_storage_context.h"
 #include "content/browser/file_system/browser_file_system_helper.h"
 #include "content/browser/host_zoom_map.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/browser/ssl/ssl_host_state.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "net/base/transport_security_state.h"
 #include "net/http/http_server_properties.h"
 #include "webkit/database/database_tracker.h"
@@ -60,7 +61,10 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/preferences.h"
+#include "chrome/browser/chromeos/proxy_config_service_impl.h"
 #endif
+
+using content::BrowserThread;
 
 namespace {
 
@@ -108,18 +112,17 @@ void OffTheRecordProfileImpl::Init() {
   GetChromeURLDataManager()->AddDataSource(icon_source);
 
   ChromePluginServiceFilter::GetInstance()->RegisterResourceContext(
-    PluginPrefs::GetForProfile(this), &GetResourceContext());
+      PluginPrefs::GetForProfile(this), &GetResourceContext());
 
   BrowserThread::PostTask(
-    BrowserThread::IO, FROM_HERE,
-    NewRunnableFunction(
-      &NotifyOTRProfileCreatedOnIOThread, profile_, this));
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&NotifyOTRProfileCreatedOnIOThread, profile_, this));
 }
 
 OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
-  NotificationService::current()->Notify(
-    chrome::NOTIFICATION_PROFILE_DESTROYED, Source<Profile>(this),
-    NotificationService::NoDetails());
+  content::NotificationService::current()->Notify(
+    chrome::NOTIFICATION_PROFILE_DESTROYED, content::Source<Profile>(this),
+    content::NotificationService::NoDetails());
 
   ChromePluginServiceFilter::GetInstance()->UnregisterResourceContext(
     &GetResourceContext());
@@ -128,15 +131,14 @@ OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableFunction(&NotifyOTRProfileDestroyedOnIOThread, profile_,
-                          this));
+      base::Bind(&NotifyOTRProfileDestroyedOnIOThread, profile_, this));
 
   // Clean up all DB files/directories
   if (db_tracker_) {
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(db_tracker_.get(),
-                          &webkit_database::DatabaseTracker::Shutdown));
+        base::Bind(&webkit_database::DatabaseTracker::Shutdown,
+                   db_tracker_.get()));
   }
 
   BrowserList::RemoveObserver(this);
@@ -144,7 +146,7 @@ OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
   if (host_content_settings_map_)
     host_content_settings_map_->ShutdownOnUIThread();
 
-  if (pref_proxy_config_tracker_)
+  if (pref_proxy_config_tracker_.get())
     pref_proxy_config_tracker_->DetachFromPrefService();
 
   ExtensionService* extension_service = GetExtensionService();
@@ -241,6 +243,10 @@ SSLHostState* OffTheRecordProfileImpl::GetSSLHostState() {
 
   DCHECK(ssl_host_state_->CalledOnValidThread());
   return ssl_host_state_.get();
+}
+
+GAIAInfoUpdateService* OffTheRecordProfileImpl::GetGAIAInfoUpdateService() {
+  return NULL;
 }
 
 HistoryService* OffTheRecordProfileImpl::GetHistoryService(
@@ -384,7 +390,7 @@ HostZoomMap* OffTheRecordProfileImpl::GetHostZoomMap() {
      // Observe parent's HZM change for propagating change of parent's
      // change to this HZM.
      registrar_.Add(this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
-                    Source<HostZoomMap>(profile_->GetHostZoomMap()));
+                    content::Source<HostZoomMap>(profile_->GetHostZoomMap()));
   }
   return host_zoom_map_.get();
 }
@@ -517,9 +523,8 @@ ChromeBlobStorageContext* OffTheRecordProfileImpl::GetBlobStorageContext() {
     blob_storage_context_ = new ChromeBlobStorageContext();
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(
-            blob_storage_context_.get(),
-            &ChromeBlobStorageContext::InitializeOnIOThread));
+        base::Bind(&ChromeBlobStorageContext::InitializeOnIOThread,
+                   blob_storage_context_.get()));
   }
   return blob_storage_context_;
 }
@@ -549,9 +554,11 @@ void OffTheRecordProfileImpl::OnLogin() {
 #endif  // defined(OS_CHROMEOS)
 
 PrefProxyConfigTracker* OffTheRecordProfileImpl::GetProxyConfigTracker() {
-  if (!pref_proxy_config_tracker_)
-    pref_proxy_config_tracker_ = new PrefProxyConfigTracker(GetPrefs());
-  return pref_proxy_config_tracker_;
+  if (!pref_proxy_config_tracker_.get()) {
+    pref_proxy_config_tracker_.reset(
+        ProxyServiceFactory::CreatePrefProxyConfigTracker(GetPrefs()));
+  }
+  return pref_proxy_config_tracker_.get();
 }
 
 chrome_browser_net::Predictor* OffTheRecordProfileImpl::GetNetworkPredictor() {
@@ -564,11 +571,20 @@ void OffTheRecordProfileImpl::ClearNetworkingHistorySince(base::Time time) {
   // No need to do anything here, our transport security state is read-only.
 }
 
+GURL OffTheRecordProfileImpl::GetHomePage() {
+  return profile_->GetHomePage();
+}
+
+NetworkActionPredictor* OffTheRecordProfileImpl::GetNetworkActionPredictor() {
+  return NULL;
+}
+
 void OffTheRecordProfileImpl::Observe(int type,
-                     const NotificationSource& source,
-                     const NotificationDetails& details) {
+                     const content::NotificationSource& source,
+                     const content::NotificationDetails& details) {
   if (type == content::NOTIFICATION_ZOOM_LEVEL_CHANGED) {
-    const std::string& host = *(Details<const std::string>(details).ptr());
+    const std::string& host =
+        *(content::Details<const std::string>(details).ptr());
     if (!host.empty()) {
       double level = profile_->GetHostZoomMap()->GetZoomLevel(host);
       GetHostZoomMap()->SetZoomLevel(host, level);
@@ -612,13 +628,12 @@ void OffTheRecordProfileImpl::CreateQuotaManagerAndClients() {
   appcache_service_ = new ChromeAppCacheService(quota_manager_->proxy());
   BrowserThread::PostTask(
     BrowserThread::IO, FROM_HERE,
-    NewRunnableMethod(
-        appcache_service_.get(),
-        &ChromeAppCacheService::InitializeOnIOThread,
-        IsOffTheRecord()
-            ? FilePath() : GetPath().Append(chrome::kAppCacheDirname),
-        &GetResourceContext(),
-        make_scoped_refptr(GetExtensionSpecialStoragePolicy())));
+    base::Bind(&ChromeAppCacheService::InitializeOnIOThread,
+               appcache_service_.get(),
+               IsOffTheRecord()
+                   ? FilePath() : GetPath().Append(chrome::kAppCacheDirname),
+               &GetResourceContext(),
+               make_scoped_refptr(GetExtensionSpecialStoragePolicy())));
 }
 
 #if defined(OS_CHROMEOS)

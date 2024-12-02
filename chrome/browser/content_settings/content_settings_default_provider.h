@@ -5,15 +5,17 @@
 #ifndef CHROME_BROWSER_CONTENT_SETTINGS_CONTENT_SETTINGS_DEFAULT_PROVIDER_H_
 #define CHROME_BROWSER_CONTENT_SETTINGS_CONTENT_SETTINGS_DEFAULT_PROVIDER_H_
 
+#include <map>
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/memory/linked_ptr.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/content_settings/content_settings_observable_provider.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class PrefService;
 
@@ -23,7 +25,7 @@ namespace content_settings {
 // user prefs. If no default values are set by the user we use the hard coded
 // default values.
 class DefaultProvider : public ObservableProvider,
-                        public NotificationObserver {
+                        public content::NotificationObserver {
  public:
   static void RegisterUserPrefs(PrefService* prefs);
 
@@ -37,27 +39,26 @@ class DefaultProvider : public ObservableProvider,
       const ResourceIdentifier& resource_identifier,
       bool incognito) const OVERRIDE;
 
-  virtual void SetContentSetting(
+  virtual bool SetWebsiteSetting(
       const ContentSettingsPattern& primary_pattern,
       const ContentSettingsPattern& secondary_pattern,
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier,
-      ContentSetting content_setting) OVERRIDE;
+      Value* value) OVERRIDE;
 
   virtual void ClearAllContentSettingsRules(
       ContentSettingsType content_type) OVERRIDE;
 
   virtual void ShutdownOnUIThread() OVERRIDE;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // Sets the fields of |settings| based on the values in |dictionary|.
-  void GetSettingsFromDictionary(const base::DictionaryValue* dictionary,
-                                 ContentSettings* settings);
+  void GetSettingsFromDictionary(const base::DictionaryValue* dictionary);
 
   // Forces the default settings to be explicitly set instead of themselves
   // being CONTENT_SETTING_DEFAULT.
@@ -70,8 +71,10 @@ class DefaultProvider : public ObservableProvider,
   void MigrateObsoleteNotificationPref();
   void MigrateObsoleteGeolocationPref();
 
+  typedef linked_ptr<base::Value> ValuePtr;
+  typedef std::map<ContentSettingsType, ValuePtr> ValueMap;
   // Copies of the pref data, so that we can read it on the IO thread.
-  ContentSettings default_content_settings_;
+  ValueMap default_settings_;
 
   PrefService* prefs_;
 

@@ -9,9 +9,14 @@
 #include <set>
 #include <vector>
 
-#include "content/browser/download/mock_download_manager_delegate.h"
+#include "base/memory/scoped_ptr.h"
+#include "content/browser/browser_thread_impl.h"
 #include "content/browser/download/mock_download_manager.h"
+#include "content/browser/download/mock_download_manager_delegate.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
+using content::BrowserThreadImpl;
 
 class DownloadIdTest : public testing::Test {
  public:
@@ -25,7 +30,7 @@ class DownloadIdTest : public testing::Test {
     // Create the download managers.
     for (i = 0; i < num_managers_; ++i) {
       managers[i] =
-          new MockDownloadManager(download_manager_delegate_.get(), NULL);
+          new MockDownloadManager(download_manager_delegate_.get(), NULL, NULL);
     }
     // Sort by pointer value.
     std::sort(managers.begin(), managers.end());
@@ -45,7 +50,8 @@ class DownloadIdTest : public testing::Test {
   scoped_ptr<MockDownloadManagerDelegate> download_manager_delegate_;
   scoped_refptr<DownloadManager> download_managers_[2];
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;  // Necessary to delete |DownloadManager|s.
+  // Necessary to delete |DownloadManager|s.
+  BrowserThreadImpl ui_thread_;
   size_t num_managers_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadIdTest);

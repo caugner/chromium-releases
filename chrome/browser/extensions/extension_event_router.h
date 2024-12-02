@@ -13,17 +13,20 @@
 #include "base/compiler_specific.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ipc/ipc_message.h"
 
 class GURL;
 class Extension;
 class ExtensionDevToolsManager;
 class Profile;
-class RenderProcessHost;
 
-class ExtensionEventRouter : public NotificationObserver {
+namespace content {
+class RenderProcessHost;
+}
+
+class ExtensionEventRouter : public content::NotificationObserver {
  public:
   // Sends an event via ipc_sender to the given extension. Can be called on
   // any thread.
@@ -41,10 +44,10 @@ class ExtensionEventRouter : public NotificationObserver {
   // collapsing. Also, a single extension can have 2 processes if it is a split
   // mode extension.
   void AddEventListener(const std::string& event_name,
-                        RenderProcessHost* process,
+                        content::RenderProcessHost* process,
                         const std::string& extension_id);
   void RemoveEventListener(const std::string& event_name,
-                           RenderProcessHost* process,
+                           content::RenderProcessHost* process,
                            const std::string& extension_id);
 
   // Returns true if there is at least one listener for the given event.
@@ -88,6 +91,13 @@ class ExtensionEventRouter : public NotificationObserver {
       const std::string& cross_incognito_args,
       const GURL& event_url);
 
+  // Record the Event Ack from the renderer. (One less event in-flight.)
+  void OnExtensionEventAck(const std::string& extension_id);
+
+  // Check if there are any Extension Events that have not yet been acked by
+  // the renderer.
+  bool HasInFlightEvents(const std::string& extension_id);
+
  protected:
   // The details of an event to be dispatched.
   struct ExtensionEvent;
@@ -111,12 +121,12 @@ class ExtensionEventRouter : public NotificationObserver {
   struct EventListener;
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   Profile* profile_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   scoped_refptr<ExtensionDevToolsManager> extension_devtools_manager_;
 
@@ -131,6 +141,11 @@ class ExtensionEventRouter : public NotificationObserver {
   typedef std::map<std::string,
                    linked_ptr<PendingEventsList> > PendingEventsPerExtMap;
   PendingEventsPerExtMap pending_events_;
+
+  // Track of the number of dispatched events that have not yet sent an
+  // ACK from the renderer.
+  void IncrementInFlightEvents(const std::string& extension_id);
+  std::map<std::string, int> in_flight_events_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionEventRouter);
 };

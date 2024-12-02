@@ -10,16 +10,15 @@
 #include "ui/aura_shell/shell_window_ids.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
-#include "views/widget/widget.h"
-#include "views/widget/widget_delegate.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace aura_shell {
 namespace examples {
 
 class LockView : public views::WidgetDelegateView {
  public:
-  LockView() {
-  }
+  LockView() {}
   virtual ~LockView() {}
 
   // Overridden from View:
@@ -30,7 +29,7 @@ class LockView : public views::WidgetDelegateView {
  private:
   // Overridden from View:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-    canvas->FillRectInt(SK_ColorYELLOW, 0, 0, width(), height());
+    canvas->FillRect(SK_ColorYELLOW, GetLocalBounds());
     string16 text = ASCIIToUTF16("LOCKED!");
     int string_width = font_.GetStringWidth(text);
     canvas->DrawStringInt(text, font_, SK_ColorRED, (width() - string_width)/ 2,
@@ -49,23 +48,24 @@ class LockView : public views::WidgetDelegateView {
   DISALLOW_COPY_AND_ASSIGN(LockView);
 };
 
-void CreateLock() {
+void CreateLockScreen() {
   LockView* lock_view = new LockView;
   views::Widget* widget = new views::Widget;
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_CONTROL);
   gfx::Size ps = lock_view->GetPreferredSize();
 
-  gfx::Rect desktop_bounds = aura::Desktop::GetInstance()->window()->bounds();
-  params.bounds = gfx::Rect((desktop_bounds.width() - ps.width()) / 2,
-                            (desktop_bounds.height() - ps.height()) / 2,
+  gfx::Size desktop_size  = aura::Desktop::GetInstance()->GetHostSize();
+  params.bounds = gfx::Rect((desktop_size.width() - ps.width()) / 2,
+                            (desktop_size.height() - ps.height()) / 2,
                             ps.width(), ps.height());
   params.delegate = lock_view;
-  params.parent = Shell::GetInstance()->GetContainer(
-      aura_shell::internal::kShellWindowId_LockScreenContainer);
   widget->Init(params);
+  Shell::GetInstance()->GetContainer(
+      aura_shell::internal::kShellWindowId_LockScreenContainer)->
+      AddChild(widget->GetNativeView());
   widget->SetContentsView(lock_view);
   widget->Show();
-  widget->GetNativeView()->set_name("LockView");
+  widget->GetNativeView()->SetName("LockView");
 }
 
 }  // namespace examples

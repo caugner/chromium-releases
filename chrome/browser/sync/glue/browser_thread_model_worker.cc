@@ -4,10 +4,12 @@
 
 #include "chrome/browser/sync/glue/browser_thread_model_worker.h"
 
+#include "base/bind.h"
 #include "base/synchronization/waitable_event.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 
 using base::WaitableEvent;
+using content::BrowserThread;
 
 namespace browser_sync {
 
@@ -17,31 +19,32 @@ BrowserThreadModelWorker::BrowserThreadModelWorker(
 
 BrowserThreadModelWorker::~BrowserThreadModelWorker() {}
 
-void BrowserThreadModelWorker::DoWorkAndWaitUntilDone(Callback0::Type* work) {
+UnrecoverableErrorInfo BrowserThreadModelWorker::DoWorkAndWaitUntilDone(
+    const WorkCallback& work) {
+  UnrecoverableErrorInfo error_info;
   if (BrowserThread::CurrentlyOn(thread_)) {
     DLOG(WARNING) << "Already on thread " << thread_;
-    work->Run();
-    return;
+    return work.Run();
   }
   WaitableEvent done(false, false);
   if (!BrowserThread::PostTask(
       thread_,
       FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &BrowserThreadModelWorker::CallDoWorkAndSignalTask,
-          work,
-          &done))) {
+      base::Bind(&BrowserThreadModelWorker::CallDoWorkAndSignalTask, this,
+                 work, &done, &error_info))) {
     NOTREACHED() << "Failed to post task to thread " << thread_;
-    return;
+    return error_info;
   }
   done.Wait();
+  return error_info;
 }
 
 void BrowserThreadModelWorker::CallDoWorkAndSignalTask(
-    Callback0::Type* work, WaitableEvent* done) {
+    const WorkCallback& work,
+    WaitableEvent* done,
+    UnrecoverableErrorInfo* error_info) {
   DCHECK(BrowserThread::CurrentlyOn(thread_));
-  work->Run();
+  *error_info = work.Run();
   done->Signal();
 }
 
@@ -55,8 +58,10 @@ DatabaseModelWorker::DatabaseModelWorker()
 DatabaseModelWorker::~DatabaseModelWorker() {}
 
 void DatabaseModelWorker::CallDoWorkAndSignalTask(
-    Callback0::Type* work, WaitableEvent* done) {
-  BrowserThreadModelWorker::CallDoWorkAndSignalTask(work, done);
+    const WorkCallback& work,
+    WaitableEvent* done,
+    UnrecoverableErrorInfo* error_info) {
+  BrowserThreadModelWorker::CallDoWorkAndSignalTask(work, done, error_info);
 }
 
 FileModelWorker::FileModelWorker()
@@ -65,8 +70,10 @@ FileModelWorker::FileModelWorker()
 FileModelWorker::~FileModelWorker() {}
 
 void FileModelWorker::CallDoWorkAndSignalTask(
-    Callback0::Type* work, WaitableEvent* done) {
-  BrowserThreadModelWorker::CallDoWorkAndSignalTask(work, done);
+    const WorkCallback& work,
+    WaitableEvent* done,
+    UnrecoverableErrorInfo* error_info) {
+  BrowserThreadModelWorker::CallDoWorkAndSignalTask(work, done, error_info);
 }
 
 }  // namespace browser_sync

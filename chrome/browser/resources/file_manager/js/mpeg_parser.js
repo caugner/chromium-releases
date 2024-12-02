@@ -3,15 +3,10 @@
 // found in the LICENSE file.
 
 function MpegParser(parent) {
-  MetadataParser.apply(this, [parent]);
-  this.verbose = true;
+  MetadataParser.call(this, parent, 'mpeg', /\.(mp4|m4v|m4a|mpe?g4?)$/i);
 }
 
-MpegParser.parserType = 'mpeg';
-
 MpegParser.prototype = {__proto__: MetadataParser.prototype};
-
-MpegParser.prototype.urlFilter = /\.(mp4|m4v|m4a|mpe?g4?)$/i;
 
 MpegParser.HEADER_SIZE = 8;
 
@@ -122,9 +117,7 @@ MpegParser.createRootParser = function(metadata) {
   };
 };
 
-MpegParser.prototype.parse = function (file, callback, onError) {
-  var metadata = {metadataType: 'mpeg'};
-
+MpegParser.prototype.parse = function (file, metadata, callback, onError) {
   this.rootParser_ = MpegParser.createRootParser(metadata);
 
   // Kick off the processing by reading the first atom's header.

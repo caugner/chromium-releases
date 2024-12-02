@@ -7,6 +7,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_install_dialog.h"
+#include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/webstore_inline_installer.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
@@ -78,73 +79,39 @@ class WebstoreInlineInstallTest : public InProcessBrowserTest {
   std::string test_gallery_url_;
 };
 
-// Flakily fails on linux.  http://crbug.com/95246
-#if defined(OS_LINUX)
-#define MAYBE_Install FLAKY_Install
-#else
-#define MAYBE_Install Install
-#endif
-
-IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, MAYBE_Install) {
-  SetExtensionInstallDialogForManifestAutoConfirmForTests(true);
-
-  ui_test_utils::WindowedNotificationObserver load_signal(
-        chrome::NOTIFICATION_EXTENSION_LOADED,
-        Source<Profile>(browser()->profile()));
+IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, Install) {
+  SetExtensionInstallDialogAutoConfirmForTests(true);
 
   ui_test_utils::NavigateToURL(
       browser(), GenerateTestServerUrl(kAppDomain, "install.html"));
 
   RunInlineInstallTest("runTest");
 
-  load_signal.Wait();
-
   const Extension* extension = browser()->profile()->GetExtensionService()->
       GetExtensionById("ecglahbcnmdpdciemllbhojghbkagdje", false);
-  EXPECT_TRUE(extension != NULL);
+  EXPECT_TRUE(extension);
 }
 
-// Flakily fails on Linux.  http://crbug.com/95246
-#if defined(OS_LINUX)
-#define MAYBE_InstallNotAllowedFromNonVerifiedDomains FLAKY_InstallNotAllowedFromNonVerifiedDomains
-#else
-#define MAYBE_InstallNotAllowedFromNonVerifiedDomains InstallNotAllowedFromNonVerifiedDomains
-#endif
-
 IN_PROC_BROWSER_TEST_F(
-    WebstoreInlineInstallTest, MAYBE_InstallNotAllowedFromNonVerifiedDomains) {
-  SetExtensionInstallDialogForManifestAutoConfirmForTests(false);
+    WebstoreInlineInstallTest, InstallNotAllowedFromNonVerifiedDomains) {
+  SetExtensionInstallDialogAutoConfirmForTests(false);
   ui_test_utils::NavigateToURL(
       browser(),
-      GenerateTestServerUrl(kNonAppDomain, "install-non-verified-domain.html"));
+      GenerateTestServerUrl(kNonAppDomain, "install_non_verified_domain.html"));
 
   RunInlineInstallTest("runTest1");
   RunInlineInstallTest("runTest2");
 }
 
-// Flakily fails on Linux.  http://crbug.com/95246
-#if defined(OS_LINUX)
-#define MAYBE_FindLink FLAKY_FindLink
-#else
-#define MAYBE_FindLink FindLink
-#endif
-
-IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, MAYBE_FindLink) {
+IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, FindLink) {
   ui_test_utils::NavigateToURL(
       browser(), GenerateTestServerUrl(kAppDomain, "find_link.html"));
 
   RunInlineInstallTest("runTest");
 }
 
-// Flakily fails on Linux and Mac.  http://crbug.com/95246
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-#define MAYBE_ArgumentValidation FLAKY_ArgumentValidation
-#else
-#define MAYBE_ArgumentValidation ArgumentValidation
-#endif
-
-IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, MAYBE_ArgumentValidation) {
-  SetExtensionInstallDialogForManifestAutoConfirmForTests(false);
+IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, ArgumentValidation) {
+  SetExtensionInstallDialogAutoConfirmForTests(false);
   ui_test_utils::NavigateToURL(
       browser(), GenerateTestServerUrl(kAppDomain, "argument_validation.html"));
 
@@ -152,10 +119,10 @@ IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, MAYBE_ArgumentValidation) {
 }
 
 IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, InstallNotSupported) {
-  SetExtensionInstallDialogForManifestAutoConfirmForTests(false);
+  SetExtensionInstallDialogAutoConfirmForTests(false);
   ui_test_utils::NavigateToURL(
       browser(),
-      GenerateTestServerUrl(kAppDomain, "install-not-supported.html"));
+      GenerateTestServerUrl(kAppDomain, "install_not_supported.html"));
 
   RunInlineInstallTest("runTest");
 
@@ -166,4 +133,33 @@ IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, InstallNotSupported) {
   }
   TabContents* tab_contents = browser()->GetSelectedTabContents();
   EXPECT_EQ(GURL("http://cws.com/show-me-the-money"), tab_contents->GetURL());
+}
+
+// The unpack failure test needs to use a different install .crx, which is
+// specified via a command-line flag, so it needs its own test subclass.
+class WebstoreInlineInstallUnpackFailureTest
+    : public WebstoreInlineInstallTest {
+ public:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    WebstoreInlineInstallTest::SetUpCommandLine(command_line);
+
+    GURL crx_url = GenerateTestServerUrl(
+        kWebstoreDomain, "malformed_extension.crx");
+    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kAppsGalleryUpdateURL, crx_url.spec());
+  }
+
+  void SetUpInProcessBrowserTestFixture() OVERRIDE {
+    WebstoreInlineInstallTest::SetUpInProcessBrowserTestFixture();
+    ExtensionInstallUI::DisableFailureUIForTests();
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallUnpackFailureTest, Test) {
+  SetExtensionInstallDialogAutoConfirmForTests(true);
+
+  ui_test_utils::NavigateToURL(browser(),
+      GenerateTestServerUrl(kAppDomain, "install_unpack_failure.html"));
+
+  RunInlineInstallTest("runTest");
 }

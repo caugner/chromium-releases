@@ -15,14 +15,14 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/background.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/controls/textfield/textfield.h"
-#include "views/layout/grid_layout.h"
-#include "views/layout/layout_constants.h"
-#include "views/widget/widget.h"
+#include "ui/views/background.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
 
 using views::Label;
 using views::Textfield;
@@ -52,7 +52,7 @@ class CaptchaField : public TextfieldWithMargin {
 
 class WideTextButton : public views::TextButton {
  public:
-  WideTextButton(views::ButtonListener* listener, const std::wstring& text)
+  WideTextButton(views::ButtonListener* listener, const string16& text)
       : TextButton(listener, text) {
     SetFont(font().DeriveFont(kFontSizeCorrectionDelta));
   }
@@ -197,8 +197,7 @@ void CaptchaView::Init() {
 
   if (is_standalone_) {
     layout->StartRow(0, column_view_set_id);
-    ok_button_ = new WideTextButton(
-        this, UTF16ToWide(l10n_util::GetStringUTF16(IDS_OK)));
+    ok_button_ = new WideTextButton(this, l10n_util::GetStringUTF16(IDS_OK));
     ok_button_->set_alignment(views::TextButton::ALIGN_CENTER);
     ok_button_->set_focusable(true);
     static_cast<views::TextButtonBorder*>(ok_button_->border())->

@@ -14,9 +14,9 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/controls/label.h"
-#include "views/layout/layout_constants.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
 
 // Default size of the dialog window.
 static const int kDefaultWindowWidth = 320;
@@ -66,12 +66,11 @@ void ImportLockDialogView::Layout() {
 }
 
 string16 ImportLockDialogView::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
+    ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK)
     return l10n_util::GetStringUTF16(IDS_IMPORTER_LOCK_OK);
-  } else if (button == MessageBoxFlags::DIALOGBUTTON_CANCEL) {
+  else if (button == ui::DIALOG_BUTTON_CANCEL)
     return l10n_util::GetStringUTF16(IDS_IMPORTER_LOCK_CANCEL);
-  }
   return string16();
 }
 

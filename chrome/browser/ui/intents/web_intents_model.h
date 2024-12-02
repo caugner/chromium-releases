@@ -103,12 +103,15 @@ class WebIntentsModel : public ui::TreeNodeModel<WebIntentsTreeNode>,
 
   virtual void OnIntentsQueryDone(
       WebIntentsRegistry::QueryID query_id,
-      const std::vector<WebIntentServiceData>& intents) OVERRIDE;
+      const std::vector<webkit_glue::WebIntentServiceData>& services) OVERRIDE;
 
  private:
   // Loads the data model from the WebIntentsRegistry.
   // TODO(gbillock): need an observer on that to absorb async updates?
   void LoadModel();
+
+  // Get the model node for a particular host.
+  WebIntentsTreeNode* GetNodeForHost(const std::string& host);
 
   // Do batch-specific notifies for updates coming from the LoadModel.
   void NotifyObserverBeginBatch();

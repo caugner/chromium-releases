@@ -7,22 +7,25 @@
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/values.h"
 #include "chrome/browser/component_updater/component_updater_interceptor.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/test_url_request_context_getter.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/net/url_fetcher.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_service.h"
+#include "content/test/test_browser_thread.h"
+#include "content/public/common/url_fetcher.h"
 #include "content/test/test_notification_tracker.h"
 
 #include "googleurl/src/gurl.h"
 #include "libxml/globals.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace {
 // Overrides some of the component updater behaviors so it is easier to test
@@ -151,14 +154,14 @@ class ComponentUpdaterTest : public testing::Test {
     };
 
     for (int ix = 0; ix != arraysize(notifications); ++ix) {
-      notification_tracker_.ListenFor(notifications[ix],
-                                      NotificationService::AllSources());
+      notification_tracker_.ListenFor(
+          notifications[ix], content::NotificationService::AllSources());
     }
-    URLFetcher::enable_interception_for_tests(true);
+    content::URLFetcher::SetEnableInterceptionForTests(true);
   }
 
   ~ComponentUpdaterTest() {
-    URLFetcher::enable_interception_for_tests(false);
+    content::URLFetcher::SetEnableInterceptionForTests(false);
   }
 
   ComponentUpdateService* component_updater() {
@@ -178,7 +181,7 @@ class ComponentUpdaterTest : public testing::Test {
     return test_config_;
   }
 
-  void RegisterComponent(CrxComponent* com, 
+  void RegisterComponent(CrxComponent* com,
                        TestComponents component,
                        const Version& version) {
     if (component == kTestComponent_abag) {
@@ -212,7 +215,7 @@ TEST_F(ComponentUpdaterTest, VerifyFixture) {
 // if there is no work to do, there are no notifications generated.
 TEST_F(ComponentUpdaterTest, StartStop) {
   MessageLoop message_loop;
-  BrowserThread ui_thread(BrowserThread::UI, &message_loop);
+  content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
 
   component_updater()->Start();
   message_loop.RunAllPending();
@@ -226,11 +229,11 @@ TEST_F(ComponentUpdaterTest, StartStop) {
 // are generated.
 TEST_F(ComponentUpdaterTest, CheckCrxSleep) {
   MessageLoop message_loop;
-  BrowserThread ui_thread(BrowserThread::UI, &message_loop);
-  BrowserThread file_thread(BrowserThread::FILE);
-  BrowserThread io_thread(BrowserThread::IO);
+  content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
+  content::TestBrowserThread file_thread(BrowserThread::FILE);
+  content::TestBrowserThread io_thread(BrowserThread::IO);
 
-  io_thread.StartWithOptions(base::Thread::Options(MessageLoop::TYPE_IO, 0));
+  io_thread.StartIOThread();
   file_thread.Start();
 
   scoped_refptr<ComponentUpdateInterceptor>
@@ -310,11 +313,11 @@ TEST_F(ComponentUpdaterTest, CheckCrxSleep) {
 // 3- second manifest check.
 TEST_F(ComponentUpdaterTest, InstallCrx) {
   MessageLoop message_loop;
-  BrowserThread ui_thread(BrowserThread::UI, &message_loop);
-  BrowserThread file_thread(BrowserThread::FILE);
-  BrowserThread io_thread(BrowserThread::IO);
+  content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
+  content::TestBrowserThread file_thread(BrowserThread::FILE);
+  content::TestBrowserThread io_thread(BrowserThread::IO);
 
-  io_thread.StartWithOptions(base::Thread::Options(MessageLoop::TYPE_IO, 0));
+  io_thread.StartIOThread();
   file_thread.Start();
 
   scoped_refptr<ComponentUpdateInterceptor>
@@ -324,7 +327,7 @@ TEST_F(ComponentUpdaterTest, InstallCrx) {
   RegisterComponent(&com1, kTestComponent_jebg, Version("0.9"));
   CrxComponent com2;
   RegisterComponent(&com2, kTestComponent_abag, Version("2.2"));
-  
+
   const char expected_update_url_1[] =
       "http://localhost/upd?extra=foo&x=id%3D"
       "jebgalgnebhfojomionfpkfelancnnkf%26v%3D0.9%26uc&x=id%3D"
@@ -376,11 +379,11 @@ TEST_F(ComponentUpdaterTest, InstallCrx) {
 // version is much higher than of chrome.
 TEST_F(ComponentUpdaterTest, ProdVersionCheck) {
   MessageLoop message_loop;
-  BrowserThread ui_thread(BrowserThread::UI, &message_loop);
-  BrowserThread file_thread(BrowserThread::FILE);
-  BrowserThread io_thread(BrowserThread::IO);
+  content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
+  content::TestBrowserThread file_thread(BrowserThread::FILE);
+  content::TestBrowserThread io_thread(BrowserThread::IO);
 
-  io_thread.StartWithOptions(base::Thread::Options(MessageLoop::TYPE_IO, 0));
+  io_thread.StartIOThread();
   file_thread.Start();
 
   scoped_refptr<ComponentUpdateInterceptor>

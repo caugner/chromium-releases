@@ -12,10 +12,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/process_util.h"
+#include "base/task.h"
 #include "chrome/browser/sync/protocol/sync_protocol_error.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "net/base/mock_host_resolver.h"
@@ -25,7 +27,7 @@ class CommandLine;
 class Profile;
 class ProfileSyncServiceHarness;
 class FakeURLFetcherFactory;
-class URLFetcherFactory;
+class URLFetcherImplFactory;
 
 namespace net {
 class ProxyConfig;
@@ -51,11 +53,7 @@ class SyncTest : public InProcessBrowserTest {
     // Tests where three or more client profiles are synced with the server.
     // Typically, these tests create client side races and verify that sync
     // works.
-    MULTIPLE_CLIENT,
-
-    // Tests where several client profiles are synced with the server. Only used
-    // by stress tests.
-    MANY_CLIENT
+    MULTIPLE_CLIENT
   };
 
   // The type of server we're running against.
@@ -179,6 +177,9 @@ class SyncTest : public InProcessBrowserTest {
 
   // Triggers setting the sync_tabs field of the nigori node.
   void TriggerSetSyncTabs();
+
+  // Returns the number of default items that every client syncs.
+  int NumberOfDefaultSyncItems() const;
 
  protected:
   // Add custom switches needed for running the test.
@@ -310,8 +311,8 @@ class SyncTest : public InProcessBrowserTest {
   // Fake URLFetcher factory used to mock out GAIA signin.
   scoped_ptr<FakeURLFetcherFactory> fake_factory_;
 
-  // The URLFetcherFactory instance used to instantiate |fake_factory_|.
-  scoped_ptr<URLFetcherFactory> factory_;
+  // The URLFetcherImplFactory instance used to instantiate |fake_factory_|.
+  scoped_ptr<URLFetcherImplFactory> factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncTest);
 };

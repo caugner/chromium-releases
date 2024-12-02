@@ -158,6 +158,11 @@ class InotifyReaderTask : public Task {
       : reader_(reader),
         inotify_fd_(inotify_fd),
         shutdown_fd_(shutdown_fd) {
+    // Make sure the file descriptors are good for use with select().
+    CHECK_LE(0, inotify_fd_);
+    CHECK_GT(FD_SETSIZE, inotify_fd_);
+    CHECK_LE(0, shutdown_fd_);
+    CHECK_GT(FD_SETSIZE, shutdown_fd_);
   }
 
   virtual void Run() {
@@ -218,8 +223,8 @@ class InotifyReaderTask : public Task {
   DISALLOW_COPY_AND_ASSIGN(InotifyReaderTask);
 };
 
-static base::LazyInstance<InotifyReader> g_inotify_reader(
-    base::LINKER_INITIALIZED);
+static base::LazyInstance<InotifyReader> g_inotify_reader =
+    LAZY_INSTANCE_INITIALIZER;
 
 InotifyReader::InotifyReader()
     : thread_("inotify_reader"),
@@ -407,7 +412,8 @@ void FilePathWatcherImpl::Cancel() {
   // Switch to the message_loop_ if necessary so we can access |watches_|.
   if (!message_loop()->BelongsToCurrentThread()) {
     message_loop()->PostTask(FROM_HERE,
-                             new FilePathWatcher::CancelTask(this));
+                             base::Bind(&FilePathWatcher::CancelWatch,
+                                        make_scoped_refptr(this)));
   } else {
     CancelOnMessageLoopThread();
   }

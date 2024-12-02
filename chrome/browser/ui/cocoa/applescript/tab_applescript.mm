@@ -4,6 +4,9 @@
 
 #import "chrome/browser/ui/cocoa/applescript/tab_applescript.h"
 
+#import <Carbon/Carbon.h>
+#import <Foundation/NSAppleEventDescriptor.h>
+
 #include "base/file_path.h"
 #include "base/logging.h"
 #import "base/memory/scoped_nsobject.h"
@@ -20,8 +23,102 @@
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/common/view_messages.h"
 #include "googleurl/src/gurl.h"
+
+@interface AnyResultValue : NSObject {
+ @private
+  scoped_nsobject<NSAppleEventDescriptor> descriptor;
+}
+- (id)initWithDescriptor:(NSAppleEventDescriptor*)desc;
+- (NSAppleEventDescriptor *)scriptingAnyDescriptor;
+@end
+
+@implementation AnyResultValue
+
+- (id)initWithDescriptor:(NSAppleEventDescriptor*)desc {
+  if (self = [super init]) {
+    descriptor.reset([desc retain]);
+  }
+  return self;
+}
+
+- (NSAppleEventDescriptor *)scriptingAnyDescriptor {
+  return descriptor.get();
+}
+
+@end
+
+static NSAppleEventDescriptor* valueToDescriptor(Value* value) {
+  NSAppleEventDescriptor* descriptor = nil;
+  switch (value->GetType()) {
+    case Value::TYPE_NULL:
+      descriptor = [NSAppleEventDescriptor
+          descriptorWithTypeCode:cMissingValue];
+      break;
+    case Value::TYPE_BOOLEAN: {
+      bool bool_value;
+      value->GetAsBoolean(&bool_value);
+      descriptor = [NSAppleEventDescriptor descriptorWithBoolean:bool_value];
+      break;
+    }
+    case Value::TYPE_INTEGER: {
+      int int_value;
+      value->GetAsInteger(&int_value);
+      descriptor = [NSAppleEventDescriptor descriptorWithInt32:int_value];
+      break;
+    }
+    case Value::TYPE_DOUBLE: {
+      double double_value;
+      value->GetAsDouble(&double_value);
+      descriptor = [NSAppleEventDescriptor
+          descriptorWithDescriptorType:typeIEEE64BitFloatingPoint
+                                 bytes:&double_value
+                                length:sizeof(double_value)];
+      break;
+    }
+    case Value::TYPE_STRING: {
+      std::string string_value;
+      value->GetAsString(&string_value);
+      descriptor = [NSAppleEventDescriptor descriptorWithString:
+          base::SysUTF8ToNSString(string_value)];
+      break;
+    }
+    case Value::TYPE_BINARY:
+      NOTREACHED();
+      break;
+    case Value::TYPE_DICTIONARY: {
+      DictionaryValue* dictionary_value = static_cast<DictionaryValue*>(value);
+      descriptor = [NSAppleEventDescriptor recordDescriptor];
+      NSAppleEventDescriptor* userRecord = [NSAppleEventDescriptor
+          listDescriptor];
+      for (DictionaryValue::key_iterator iter(dictionary_value->begin_keys());
+           iter != dictionary_value->end_keys(); ++iter) {
+        Value* item;
+        if (dictionary_value->Get(*iter, &item)) {
+          [userRecord insertDescriptor:[NSAppleEventDescriptor
+              descriptorWithString:base::SysUTF8ToNSString(*iter)] atIndex:0];
+          [userRecord insertDescriptor:valueToDescriptor(item) atIndex:0];
+        }
+      }
+      // Description of what keyASUserRecordFields does.
+      // http://www.mail-archive.com/cocoa-dev%40lists.apple.com/msg40149.html
+      [descriptor setDescriptor:userRecord forKeyword:keyASUserRecordFields];
+      break;
+    }
+    case Value::TYPE_LIST: {
+      ListValue* list_value;
+      value->GetAsList(&list_value);
+      descriptor = [NSAppleEventDescriptor listDescriptor];
+      for (unsigned i = 0; i < list_value->GetSize(); ++i) {
+        Value* item;
+        list_value->Get(i, &item);
+        [descriptor insertDescriptor:valueToDescriptor(item) atIndex:0];
+      }
+      break;
+    }
+  }
+  return descriptor;
+}
 
 @interface TabAppleScript()
 @property (nonatomic, copy) NSString* tempURL;
@@ -40,7 +137,6 @@
         [[NSNumber alloc]
             initWithInt:futureSessionIDOfTab]);
     [self setUniqueID:numID];
-    [self setTempURL:@""];
   }
   return self;
 }
@@ -80,7 +176,8 @@
           initWithInt:tabContents_->restore_tab_helper()->session_id().id()]);
   [self setUniqueID:numID];
 
-  [self setURL:[self tempURL]];
+  if ([self tempURL])
+    [self setURL:[self tempURL]];
 }
 
 - (NSString*)URL {
@@ -116,10 +213,12 @@
     return;
 
   const GURL& previousURL = entry->virtual_url();
-  tabContents_->tab_contents()->OpenURL(url,
-                                        previousURL,
-                                        CURRENT_TAB,
-                                        content::PAGE_TRANSITION_TYPED);
+  tabContents_->tab_contents()->OpenURL(OpenURLParams(
+      url,
+      content::Referrer(previousURL, WebKit::WebReferrerPolicyDefault),
+      CURRENT_TAB,
+      content::PAGE_TRANSITION_TYPED,
+      false));
 }
 
 - (NSString*)title {
@@ -301,10 +400,9 @@
 
   string16 script = base::SysNSStringToUTF16(
       [[command evaluatedArguments] objectForKey:@"javascript"]);
-  view->ExecuteJavascriptInWebFrame(string16(), script);
-
-  // TODO(Shreyas): Figure out a way to get the response back.
-  return nil;
+  Value* value = view->ExecuteJavascriptAndGetValue(string16(), script);
+  NSAppleEventDescriptor* descriptor = valueToDescriptor(value);
+  return [[[AnyResultValue alloc] initWithDescriptor:descriptor] autorelease];
 }
 
 @end

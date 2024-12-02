@@ -9,7 +9,7 @@
 
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/extensions/extension_bookmark_manager_api.h"
+#include "chrome/browser/bookmarks/bookmark_manager_extension_api.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -162,8 +162,8 @@ ExtensionWebUI::ExtensionWebUI(TabContents* tab_contents, const GURL& url)
     TabContentsWrapper* tab =
         TabContentsWrapper::GetCurrentWrapperForContents(tab_contents_);
     DCHECK(tab);
-    extension_bookmark_manager_event_router_.reset(
-        new ExtensionBookmarkManagerEventRouter(profile, tab));
+    bookmark_manager_extension_event_router_.reset(
+        new BookmarkManagerExtensionEventRouter(profile, tab));
 
     link_transition_type_ = content::PAGE_TRANSITION_AUTO_BOOKMARK;
   }
@@ -171,9 +171,9 @@ ExtensionWebUI::ExtensionWebUI(TabContents* tab_contents, const GURL& url)
 
 ExtensionWebUI::~ExtensionWebUI() {}
 
-ExtensionBookmarkManagerEventRouter*
-ExtensionWebUI::extension_bookmark_manager_event_router() {
-  return extension_bookmark_manager_event_router_.get();
+BookmarkManagerExtensionEventRouter*
+ExtensionWebUI::bookmark_manager_extension_event_router() {
+  return bookmark_manager_extension_event_router_.get();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -351,8 +351,9 @@ void ExtensionWebUI::UnregisterAndReplaceOverride(const std::string& page,
 
       // Don't use Reload() since |url| isn't the same as the internal URL
       // that NavigationController has.
-      tab->controller().LoadURL(url, url, content::PAGE_TRANSITION_RELOAD,
-                                std::string());
+      tab->controller().LoadURL(
+          url, content::Referrer(url, WebKit::WebReferrerPolicyDefault),
+          content::PAGE_TRANSITION_RELOAD, std::string());
     }
   }
 }

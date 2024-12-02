@@ -20,7 +20,12 @@
 #include "third_party/isimpledom/ISimpleDOMText.h"
 #include "webkit/glue/webaccessibility.h"
 
-class BrowserAccessibilityManagerWin;
+class BrowserAccessibilityRelation;
+
+namespace ui {
+enum TextBoundaryDirection;
+enum TextBoundaryType;
+}
 
 using webkit_glue::WebAccessibility;
 
@@ -33,7 +38,8 @@ using webkit_glue::WebAccessibility;
 // to be used by screen readers and other assistive technology (AT).
 //
 ////////////////////////////////////////////////////////////////////////////////
-class BrowserAccessibilityWin
+class __declspec(uuid("562072fe-3390-43b1-9e2c-dd4118f5ac79"))
+BrowserAccessibilityWin
     : public BrowserAccessibility,
       public CComObjectRootEx<CComMultiThreadModel>,
       public IDispatchImpl<IAccessible2, &IID_IAccessible2,
@@ -179,34 +185,28 @@ class BrowserAccessibilityWin
   // Get this object's index in its parent object.
   CONTENT_EXPORT STDMETHODIMP get_indexInParent(LONG* index_in_parent);
 
-  // IAccessible2 methods not implemented.
-  CONTENT_EXPORT STDMETHODIMP get_extendedRole(BSTR* extended_role) {
-    return E_NOTIMPL;
-  }
-  CONTENT_EXPORT STDMETHODIMP get_nRelations(LONG* n_relations) {
-    return E_NOTIMPL;
-  }
+  CONTENT_EXPORT STDMETHODIMP get_nRelations(LONG* n_relations);
+
   CONTENT_EXPORT STDMETHODIMP get_relation(LONG relation_index,
-                                           IAccessibleRelation** relation) {
-    return E_NOTIMPL;
-  }
+                                           IAccessibleRelation** relation);
+
   CONTENT_EXPORT STDMETHODIMP get_relations(LONG max_relations,
       IAccessibleRelation** relations,
-      LONG* n_relations) {
-    return E_NOTIMPL;
-  }
-  CONTENT_EXPORT STDMETHODIMP scrollTo(enum IA2ScrollType scroll_type) {
-    return E_NOTIMPL;
-  }
+      LONG* n_relations);
+
+  CONTENT_EXPORT STDMETHODIMP scrollTo(enum IA2ScrollType scroll_type);
+
   CONTENT_EXPORT STDMETHODIMP scrollToPoint(
       enum IA2CoordinateType coordinate_type,
       LONG x,
-      LONG y) {
-    return E_NOTIMPL;
-  }
+      LONG y);
+
   CONTENT_EXPORT STDMETHODIMP get_groupPosition(LONG* group_level,
                                                 LONG* similar_items_in_group,
-                                                LONG* position_in_group) {
+                                                LONG* position_in_group);
+
+  // IAccessible2 methods not implemented.
+  CONTENT_EXPORT STDMETHODIMP get_extendedRole(BSTR* extended_role) {
     return E_NOTIMPL;
   }
   CONTENT_EXPORT STDMETHODIMP get_localizedExtendedRole(
@@ -417,17 +417,20 @@ class BrowserAccessibilityWin
   CONTENT_EXPORT STDMETHODIMP get_text(LONG start_offset, LONG end_offset,
                                        BSTR* text);
 
-  CONTENT_EXPORT STDMETHODIMP get_textAtOffset(LONG offset,
+  CONTENT_EXPORT STDMETHODIMP get_textAtOffset(
+      LONG offset,
       enum IA2TextBoundaryType boundary_type,
       LONG* start_offset, LONG* end_offset,
       BSTR* text);
 
-  CONTENT_EXPORT STDMETHODIMP get_textBeforeOffset(LONG offset,
+  CONTENT_EXPORT STDMETHODIMP get_textBeforeOffset(
+      LONG offset,
       enum IA2TextBoundaryType boundary_type,
       LONG* start_offset, LONG* end_offset,
       BSTR* text);
 
-  CONTENT_EXPORT STDMETHODIMP get_textAfterOffset(LONG offset,
+  CONTENT_EXPORT STDMETHODIMP get_textAfterOffset(
+      LONG offset,
       enum IA2TextBoundaryType boundary_type,
       LONG* start_offset, LONG* end_offset,
       BSTR* text);
@@ -440,10 +443,28 @@ class BrowserAccessibilityWin
       enum IA2CoordinateType coord_type,
       LONG* offset);
 
+  CONTENT_EXPORT STDMETHODIMP scrollSubstringTo(
+       LONG start_index,
+       LONG end_index,
+       enum IA2ScrollType scroll_type);
+
+  CONTENT_EXPORT STDMETHODIMP scrollSubstringToPoint(
+      LONG start_index,
+      LONG end_index,
+      enum IA2CoordinateType coordinate_type,
+      LONG x, LONG y);
+
+  CONTENT_EXPORT STDMETHODIMP addSelection(LONG start_offset, LONG end_offset);
+
+  CONTENT_EXPORT STDMETHODIMP removeSelection(LONG selection_index);
+
+  CONTENT_EXPORT STDMETHODIMP setCaretOffset(LONG offset);
+
+  CONTENT_EXPORT STDMETHODIMP setSelection(LONG selection_index,
+                                           LONG start_offset,
+                                           LONG end_offset);
+
   // IAccessibleText methods not implemented.
-  CONTENT_EXPORT STDMETHODIMP addSelection(LONG start_offset, LONG end_offset) {
-    return E_NOTIMPL;
-  }
   CONTENT_EXPORT STDMETHODIMP get_attributes(LONG offset, LONG* start_offset,
                                              LONG* end_offset,
                                              BSTR* text_attributes) {
@@ -453,28 +474,6 @@ class BrowserAccessibilityWin
       enum IA2CoordinateType coord_type,
       LONG* x, LONG* y,
       LONG* width, LONG* height) {
-    return E_NOTIMPL;
-  }
-  CONTENT_EXPORT STDMETHODIMP removeSelection(LONG selection_index) {
-    return E_NOTIMPL;
-  }
-  CONTENT_EXPORT STDMETHODIMP setCaretOffset(LONG offset) {
-    return E_NOTIMPL;
-  }
-  CONTENT_EXPORT STDMETHODIMP setSelection(LONG selection_index,
-                                           LONG start_offset,
-                                           LONG end_offset) {
-    return E_NOTIMPL;
-  }
-  CONTENT_EXPORT STDMETHODIMP scrollSubstringTo(LONG start_index,
-       LONG end_index,
-       enum IA2ScrollType scroll_type) {
-    return E_NOTIMPL;
-  }
-  CONTENT_EXPORT STDMETHODIMP scrollSubstringToPoint(LONG start_index,
-      LONG end_index,
-      enum IA2CoordinateType coordinate_type,
-      LONG x, LONG y) {
     return E_NOTIMPL;
   }
 
@@ -678,13 +677,16 @@ class BrowserAccessibilityWin
   // value of offset and returns, otherwise offset remains unchanged.
   void HandleSpecialTextOffset(const string16& text, LONG* offset);
 
-  // Search forwards (direction == 1) or backwards (direction == -1) from
-  // the given offset until the given IAccessible2 boundary (like word,
-  // sentence) is found, and return its offset.
+  // Convert from a IA2TextBoundaryType to a ui::TextBoundaryType.
+  ui::TextBoundaryType IA2TextBoundaryToTextBoundary(IA2TextBoundaryType type);
+
+  // Search forwards (direction == 1) or backwards (direction == -1)
+  // from the given offset until the given boundary is found, and
+  // return the offset of that boundary.
   LONG FindBoundary(const string16& text,
-                    IA2TextBoundaryType boundary,
+                    IA2TextBoundaryType ia2_boundary,
                     LONG start_offset,
-                    LONG direction);
+                    ui::TextBoundaryDirection direction);
 
   // Return a pointer to the object corresponding to the given renderer_id,
   // does not make a new reference.
@@ -713,8 +715,15 @@ class BrowserAccessibilityWin
   // is initialized again but the text doesn't change.
   string16 old_text_;
 
+  // The previous state, used to see if there was a state change.
+  int32 old_ia_state_;
+
+  // Relationships between this node and other nodes.
+  std::vector<BrowserAccessibilityRelation*> relations_;
+
   // Give BrowserAccessibility::Create access to our constructor.
   friend class BrowserAccessibility;
+  friend class BrowserAccessibilityRelation;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserAccessibilityWin);
 };

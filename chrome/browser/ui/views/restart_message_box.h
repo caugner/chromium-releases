@@ -8,7 +8,7 @@
 
 #include "base/basictypes.h"
 #include "ui/gfx/native_widget_types.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/window/dialog_delegate.h"
 
 namespace views {
 class MessageBoxView;
@@ -24,8 +24,7 @@ class RestartMessageBox : public views::DialogDelegate {
  protected:
   // views::DialogDelegate:
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual string16 GetDialogButtonLabel(
-      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
 
   // views::WidgetDelegate:

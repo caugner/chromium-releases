@@ -20,13 +20,14 @@
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "webkit/glue/web_intent_service_data.h"
 
+using content::BrowserThread;
 using testing::_;
 using testing::AtMost;
 using testing::DoAll;
@@ -82,6 +83,8 @@ class WebIntentPickerMock : public WebIntentPicker {
   MOCK_METHOD1(SetDefaultServiceIcon, void(size_t index));
   MOCK_METHOD0(Show, void(void));
   MOCK_METHOD0(Close, void(void));
+
+  TabContents* SetInlineDisposition(const GURL& url) { return NULL; }
 };
 
 class WebIntentPickerFactoryMock : public WebIntentPickerFactory {
@@ -102,6 +105,7 @@ class TestWebIntentPickerController : public WebIntentPickerController {
 
   MOCK_METHOD1(OnServiceChosen, void(size_t index));
   MOCK_METHOD0(OnCancelled, void(void));
+  MOCK_METHOD0(OnClosing, void(void));
 
   // helper functions to forward to the base class.
   void BaseOnServiceChosen(size_t index) {
@@ -110,6 +114,10 @@ class TestWebIntentPickerController : public WebIntentPickerController {
 
   void BaseOnCancelled() {
     WebIntentPickerController::OnCancelled();
+  }
+
+  void BaseOnClosing() {
+    WebIntentPickerController::OnClosing();
   }
 };
 
@@ -148,11 +156,11 @@ class WebIntentPickerControllerTest : public TabContentsWrapperTestHarness {
  protected:
   void AddWebIntentService(const string16& action,
                            const GURL& service_url) {
-    WebIntentServiceData web_intent_service_data;
-    web_intent_service_data.action = action;
-    web_intent_service_data.type = kType;
-    web_intent_service_data.service_url = service_url;
-    web_data_service_->AddWebIntent(web_intent_service_data);
+    webkit_glue::WebIntentServiceData service;
+    service.action = action;
+    service.type = kType;
+    service.service_url = service_url;
+    web_data_service_->AddWebIntentService(service);
   }
 
   void AddFaviconForURL(const GURL& url) {
@@ -193,8 +201,8 @@ class WebIntentPickerControllerTest : public TabContentsWrapperTestHarness {
     MessageLoop::current()->Run();
   }
 
-  BrowserThread ui_thread_;
-  BrowserThread db_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread db_thread_;
   WebIntentPickerMock picker_;
 
   // |controller_| takes ownership.
@@ -250,12 +258,12 @@ TEST_F(WebIntentPickerControllerTest, Cancel) {
 
   EXPECT_CALL(*controller_, OnServiceChosen(0))
       .Times(0);
-  EXPECT_CALL(*controller_, OnCancelled())
+  EXPECT_CALL(*controller_, OnCancelled()).Times(0);
+  EXPECT_CALL(*controller_, OnClosing())
       .WillOnce(Invoke(controller_.get(),
-                       &TestWebIntentPickerController::BaseOnCancelled));
-  EXPECT_CALL(*picker_factory_, ClosePicker(_));
+                       &TestWebIntentPickerController::BaseOnClosing));
 
   controller_->ShowDialog(NULL, kAction1, kType);
   WaitForDialogToShow();
-  delegate_->OnCancelled();
+  delegate_->OnClosing();
 }

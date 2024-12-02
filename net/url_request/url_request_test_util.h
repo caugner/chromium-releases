@@ -8,7 +8,7 @@
 
 #include <stdlib.h>
 
-#include <sstream>
+#include <map>
 #include <string>
 
 #include "base/compiler_specific.h"
@@ -38,10 +38,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::TimeDelta;
-
-namespace net {
-class HostPortPair;
-}
 
 //-----------------------------------------------------------------------------
 
@@ -107,8 +103,9 @@ class TestDelegate : public net::URLRequest::Delegate {
     allow_certificate_errors_ = val;
   }
   void set_cookie_options(int o) {cookie_options_bit_mask_ = o; }
-  void set_username(const string16& u) { username_ = u; }
-  void set_password(const string16& p) { password_ = p; }
+  void set_credentials(const net::AuthCredentials& credentials) {
+    credentials_ = credentials;
+  }
 
   // query state
   const std::string& data_received() const { return data_received_; }
@@ -123,6 +120,7 @@ class TestDelegate : public net::URLRequest::Delegate {
   }
   bool request_failed() const { return request_failed_; }
   bool have_certificate_errors() const { return have_certificate_errors_; }
+  bool is_hsts_host() const { return is_hsts_host_; }
   bool auth_required_called() const { return auth_required_; }
 
   // net::URLRequest::Delegate:
@@ -156,9 +154,7 @@ class TestDelegate : public net::URLRequest::Delegate {
   bool quit_on_redirect_;
   bool allow_certificate_errors_;
   int cookie_options_bit_mask_;
-
-  string16 username_;
-  string16 password_;
+  net::AuthCredentials credentials_;
 
   // tracks status of callbacks
   int response_started_count_;
@@ -170,6 +166,7 @@ class TestDelegate : public net::URLRequest::Delegate {
   bool received_data_before_response_;
   bool request_failed_;
   bool have_certificate_errors_;
+  bool is_hsts_host_;
   bool auth_required_;
   std::string data_received_;
 
@@ -193,16 +190,16 @@ class TestNetworkDelegate : public net::NetworkDelegate {
  protected:
   // net::NetworkDelegate:
   virtual int OnBeforeURLRequest(net::URLRequest* request,
-                                 net::OldCompletionCallback* callback,
+                                 const net::CompletionCallback& callback,
                                  GURL* new_url) OVERRIDE;
   virtual int OnBeforeSendHeaders(net::URLRequest* request,
-                                  net::OldCompletionCallback* callback,
+                                  const net::CompletionCallback& callback,
                                   net::HttpRequestHeaders* headers) OVERRIDE;
   virtual void OnSendHeaders(net::URLRequest* request,
                              const net::HttpRequestHeaders& headers) OVERRIDE;
   virtual int OnHeadersReceived(
       net::URLRequest* request,
-      net::OldCompletionCallback* callback,
+      const net::CompletionCallback& callback,
       net::HttpResponseHeaders* original_response_headers,
       scoped_refptr<net::HttpResponseHeaders>* override_response_headers)
       OVERRIDE;

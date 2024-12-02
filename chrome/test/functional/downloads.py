@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -64,9 +64,9 @@ class DownloadsTest(pyauto.PyUITest):
   def _GetDangerousDownload(self):
     """Returns the file path for a dangerous download for this OS."""
     sub_path = os.path.join(self.DataDir(), 'downloads', 'dangerous')
-    if self.IsMac():
-      return os.path.join(sub_path, 'invalid-dummy.dmg')
-    return os.path.join(sub_path, 'dangerous.exe')
+    if self.IsWin():
+      return os.path.join(sub_path, 'dangerous.com')
+    return os.path.join(sub_path, 'dangerous.jar')
 
   def _EqualFileContents(self, file1, file2):
     """Determine if 2 given files have the same contents."""
@@ -92,6 +92,7 @@ class DownloadsTest(pyauto.PyUITest):
     os.write(fd, 'a')
     os.close(fd)
     logging.debug('Created temporary file %s of size %d' % (file_path, size))
+    self._DeleteAfterShutdown(file_path)
     return file_path
 
   def _GetAllDownloadIDs(self):

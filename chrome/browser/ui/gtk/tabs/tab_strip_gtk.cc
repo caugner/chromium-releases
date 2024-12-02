@@ -27,13 +27,14 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_screen_utils.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
@@ -54,6 +55,10 @@ const int kNewTabButtonVOffset = 5;
 // The delay between when the mouse leaves the tabstrip and the resize animation
 // is started.
 const int kResizeTabsTimeMs = 300;
+
+// A very short time just to make sure we don't clump up our Layout() calls
+// during slow window resizes.
+const int kLayoutAfterSizeAllocateMs = 10;
 
 // The range outside of the tabstrip where the pointer must enter/leave to
 // start/stop the resize animation.
@@ -706,11 +711,9 @@ TabStripGtk::TabStripGtk(TabStripModel* model, BrowserWindowGtk* window)
       window_(window),
       theme_service_(GtkThemeService::GetFrom(model->profile())),
       weak_factory_(this),
+      layout_factory_(this),
       added_as_message_loop_observer_(false),
       hover_tab_selector_(model) {
-  theme_service_->InitThemesFor(this);
-  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(theme_service_));
 }
 
 TabStripGtk::~TabStripGtk() {
@@ -781,6 +784,10 @@ void TabStripGtk::Init() {
     drop_indicator_width = gdk_pixbuf_get_width(drop_image);
     drop_indicator_height = gdk_pixbuf_get_height(drop_image);
   }
+
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 content::Source<ThemeService>(theme_service_));
+  theme_service_->InitThemesFor(this);
 
   ViewIDUtil::SetDelegateForWidget(widget(), this);
 }
@@ -1279,7 +1286,7 @@ bool TabStripGtk::HasAvailableDragActions() const {
   return model_->delegate()->GetDragActions() != 0;
 }
 
-ThemeService* TabStripGtk::GetThemeProvider() {
+GtkThemeService* TabStripGtk::GetThemeProvider() {
   return theme_service_;
 }
 
@@ -1307,17 +1314,13 @@ void TabStripGtk::DidProcessEvent(GdkEvent* event) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// TabStripGtk, NotificationObserver implementation:
+// TabStripGtk, content::NotificationObserver implementation:
 
 void TabStripGtk::Observe(int type,
-                          const NotificationSource& source,
-                          const NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
-    TabRendererGtk::SetSelectedTitleColor(theme_service_->GetColor(
-        ThemeService::COLOR_TAB_TEXT));
-    TabRendererGtk::SetUnselectedTitleColor(theme_service_->GetColor(
-        ThemeService::COLOR_BACKGROUND_TAB_TEXT));
-  }
+                          const content::NotificationSource& source,
+                          const content::NotificationDetails& details) {
+  DCHECK_EQ(type, chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
+  SetNewTabButtonBackground();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1392,7 +1395,7 @@ void TabStripGtk::HandleGlobalMouseMoveEvent() {
     if (!weak_factory_.HasWeakPtrs()) {
       MessageLoop::current()->PostDelayedTask(
           FROM_HERE,
-          base::Bind(&TabStripGtk::ResizeLayoutTabsWithoutResult,
+          base::Bind(&TabStripGtk::ResizeLayoutTabs,
                      weak_factory_.GetWeakPtr()),
           kResizeTabsTimeMs);
     }
@@ -1448,7 +1451,7 @@ void TabStripGtk::LayoutNewTabButton(double last_tab_right,
     // We're shrinking tabs, so we need to anchor the New Tab button to the
     // right edge of the TabStrip's bounds, rather than the right edge of the
     // right-most Tab, otherwise it'll bounce when animating.
-    bounds.set_x(bounds_.width() - newtab_button_->width());
+    bounds.set_x(bounds_.width() - newtab_button_->WidgetWidth());
   } else {
     bounds.set_x(Round(last_tab_right - kTabHOffset) + kNewTabButtonHOffset);
   }
@@ -1483,7 +1486,7 @@ void TabStripGtk::GetDesiredTabWidths(int tab_count,
   if (available_width_for_tabs_ < 0) {
     available_width = bounds_.width();
     available_width -=
-        (kNewTabButtonHOffset + newtab_button_->width());
+        (kNewTabButtonHOffset + newtab_button_->WidgetWidth());
   } else {
     // Interesting corner case: if |available_width_for_tabs_| > the result
     // of the calculation in the conditional arm above, the strip is in
@@ -1557,8 +1560,9 @@ int TabStripGtk::tab_start_x() const {
   return 0;
 }
 
-bool TabStripGtk::ResizeLayoutTabs() {
+void TabStripGtk::ResizeLayoutTabs() {
   weak_factory_.InvalidateWeakPtrs();
+  layout_factory_.InvalidateWeakPtrs();
 
   // It is critically important that this is unhooked here, otherwise we will
   // keep spying on messages forever.
@@ -1569,7 +1573,7 @@ bool TabStripGtk::ResizeLayoutTabs() {
   if (mini_tab_count == GetTabCount()) {
     // Only mini tabs, we know the tab widths won't have changed (all mini-tabs
     // have the same width), so there is nothing to do.
-    return false;
+    return;
   }
   TabGtk* first_tab = GetTabAt(mini_tab_count);
   double unselected, selected;
@@ -1578,16 +1582,8 @@ bool TabStripGtk::ResizeLayoutTabs() {
 
   // We only want to run the animation if we're not already at the desired
   // size.
-  if (abs(first_tab->width() - w) > 1) {
+  if (abs(first_tab->width() - w) > 1)
     StartResizeLayoutAnimation();
-    return true;
-  }
-
-  return false;
-}
-
-void TabStripGtk::ResizeLayoutTabsWithoutResult() {
-  ResizeLayoutTabs();
 }
 
 bool TabStripGtk::IsCursorInTabStripZone() const {
@@ -1608,7 +1604,7 @@ bool TabStripGtk::IsCursorInTabStripZone() const {
 }
 
 void TabStripGtk::ReStack() {
-  if (!GTK_WIDGET_REALIZED(tabstrip_.get())) {
+  if (!gtk_widget_get_realized(tabstrip_.get())) {
     // If the window isn't realized yet, we can't stack them yet. It will be
     // done by the OnMap signal handler.
     return;
@@ -1625,7 +1621,6 @@ void TabStripGtk::ReStack() {
   if (active_tab)
     active_tab->Raise();
 }
-
 
 void TabStripGtk::AddMessageLoopObserver() {
   if (!added_as_message_loop_observer_) {
@@ -2007,15 +2002,34 @@ gboolean TabStripGtk::OnExpose(GtkWidget* widget, GdkEventExpose* event) {
   }
   g_free(rects);
 
-  // TODO(jhawkins): Ideally we'd like to only draw what's needed in the damage
-  // rect, but the tab widgets overlap each other, and painting on one widget
-  // will cause an expose-event to be sent to the widgets underneath.  The
-  // underlying widget does not need to be redrawn as we control the order of
-  // expose-events.  Currently we hack it to redraw the entire tabstrip.  We
-  // could change the damage rect to just contain the tabs + the new tab button.
+  // Ideally we'd like to only draw what's needed in the damage rect, but the
+  // tab widgets overlap each other. To get the proper visual look, we need to
+  // draw tabs from the rightmost to the leftmost tab. So if we have a dirty
+  // rectangle in the center of the tabstrip, we'll have to draw all the tabs
+  // to the left of it.
+  //
+  // TODO(erg): Figure out why we can't have clip rects that don't start from
+  // x=0. jhawkins had a big comment here about how painting on one widget will
+  // cause an expose-event to be sent to the widgets underneath, but that
+  // should still obey clip rects, but doesn't seem to.
+  if (active_animation_.get() || drag_controller_.get()) {
+    // If we have an active animation or the tab is being dragged, no matter
+    // what GTK tells us our dirty rectangles are, we need to redraw the entire
+    // tabstrip.
+    event->area.width = bounds_.width();
+  } else {
+    // Expand whatever dirty rectangle we were given to the area from the
+    // leftmost edge of the tabstrip to the rightmost edge of the dirty
+    // rectangle given.
+    //
+    // Doing this frees up CPU when redrawing the tabstrip with throbbing
+    // tabs. The most likely tabs to throb are pinned or minitabs which live on
+    // the very leftmost of the tabstrip.
+    event->area.width += event->area.x;
+  }
+
   event->area.x = 0;
   event->area.y = 0;
-  event->area.width = bounds_.width();
   event->area.height = bounds_.height();
   gdk_region_union_with_rect(event->region, &event->area);
 
@@ -2065,10 +2079,16 @@ void TabStripGtk::OnSizeAllocate(GtkWidget* widget, GtkAllocation* allocation) {
     return;
 
   // When there is only one tab, Layout() so we don't animate it. With more
-  // tabs, do ResizeLayoutTabs(). In RTL(), we will also need to manually
-  // Layout() when ResizeLayoutTabs() is a no-op.
-  if ((GetTabCount() == 1) || (!ResizeLayoutTabs() && base::i18n::IsRTL()))
+  // tabs, we should always attempt a resize unless we already have one coming
+  // up in our message loop.
+  if (GetTabCount() == 1) {
     Layout();
+  } else if (!layout_factory_.HasWeakPtrs()) {
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&TabStripGtk::Layout, layout_factory_.GetWeakPtr()),
+        kLayoutAfterSizeAllocateMs);
+  }
 }
 
 gboolean TabStripGtk::OnDragMotion(GtkWidget* widget, GdkDragContext* context,
@@ -2115,7 +2135,7 @@ gboolean TabStripGtk::OnDragDataReceived(GtkWidget* widget,
     success = CompleteDrop(data->data, info == ui::TEXT_PLAIN);
   }
 
-  gtk_drag_finish(context, success, success, time);
+  gtk_drag_finish(context, success, FALSE, time);
   return TRUE;
 }
 
@@ -2177,8 +2197,14 @@ bool TabStripGtk::CanPaintOnlyFavicons(const GdkRectangle* rects,
 
 void TabStripGtk::PaintOnlyFavicons(GdkEventExpose* event,
                                     const std::vector<int>& tabs_to_paint) {
-  for (size_t i = 0; i < tabs_to_paint.size(); ++i)
-    GetTabAt(tabs_to_paint[i])->PaintFaviconArea(event);
+  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(event->window));
+  for (size_t i = 0; i < tabs_to_paint.size(); ++i) {
+    cairo_save(cr);
+    GetTabAt(tabs_to_paint[i])->PaintFaviconArea(tabstrip_.get(), cr);
+    cairo_restore(cr);
+  }
+
+  cairo_destroy(cr);
 }
 
 CustomDrawButton* TabStripGtk::MakeNewTabButton() {
@@ -2193,4 +2219,13 @@ CustomDrawButton* TabStripGtk::MakeNewTabButton() {
   gtk_fixed_put(GTK_FIXED(tabstrip_.get()), button->widget(), 0, 0);
 
   return button;
+}
+
+void TabStripGtk::SetNewTabButtonBackground() {
+  SkColor color = theme_service_->GetColor(
+      ThemeService::COLOR_BUTTON_BACKGROUND);
+  SkBitmap* background = theme_service_->GetBitmapNamed(
+      IDR_THEME_WINDOW_CONTROL_BACKGROUND);
+  SkBitmap* mask = theme_service_->GetBitmapNamed(IDR_NEWTAB_BUTTON_MASK);
+  newtab_button_->SetBackground(color, background, mask);
 }

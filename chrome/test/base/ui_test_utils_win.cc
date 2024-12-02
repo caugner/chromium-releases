@@ -10,7 +10,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "views/focus/focus_manager.h"
+#include "ui/views/focus/focus_manager.h"
 
 namespace ui_test_utils {
 
@@ -19,9 +19,10 @@ bool IsViewFocused(const Browser* browser, ViewID vid) {
   DCHECK(browser_window);
   gfx::NativeWindow window = browser_window->GetNativeHandle();
   DCHECK(window);
-  views::Widget* widget = views::Widget::GetTopLevelWidgetForNativeView(window);
+  const views::Widget* widget =
+      views::Widget::GetTopLevelWidgetForNativeView(window);
   DCHECK(widget);
-  views::FocusManager* focus_manager = widget->GetFocusManager();
+  const views::FocusManager* focus_manager = widget->GetFocusManager();
   DCHECK(focus_manager);
   return focus_manager->GetFocusedView()->id() == vid;
 }
@@ -46,10 +47,15 @@ void HideNativeWindow(gfx::NativeWindow window) {
   ::ShowWindow(window, SW_HIDE);
 }
 
-void ShowAndFocusNativeWindow(gfx::NativeWindow window) {
+bool ShowAndFocusNativeWindow(gfx::NativeWindow window) {
   // TODO(jcampan): retrieve the NativeWidgetWin and show/hide on it instead of
   // using Windows API.
   ::ShowWindow(window, SW_SHOW);
+
+  // ShowWindow does not necessarily activate the window. In particular if a
+  // window from another app is the foreground window then the request to
+  // activate the window fails. See SetForegroundWindow for details.
+  return GetForegroundWindow() == window;
 }
 
 }  // namespace ui_test_utils

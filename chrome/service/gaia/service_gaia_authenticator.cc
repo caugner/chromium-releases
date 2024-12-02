@@ -4,9 +4,11 @@
 
 #include "chrome/service/gaia/service_gaia_authenticator.h"
 
+#include "base/bind.h"
 #include "base/message_loop_proxy.h"
 #include "chrome/service/net/service_url_request_context.h"
 #include "chrome/service/service_process.h"
+#include "content/public/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 
 ServiceGaiaAuthenticator::ServiceGaiaAuthenticator(
@@ -30,8 +32,7 @@ bool ServiceGaiaAuthenticator::Post(const GURL& url,
   DCHECK(io_message_loop_proxy_);
   io_message_loop_proxy_->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this, &ServiceGaiaAuthenticator::DoPost, url,
-                        post_body));
+      base::Bind(&ServiceGaiaAuthenticator::DoPost, this, url, post_body));
   // TODO(sanjeevr): Waiting here until the network request completes is not
   // desirable. We need to change Post to be asynchronous.
   // Block until network request completes. See OnURLFetchComplete.
@@ -63,18 +64,20 @@ int ServiceGaiaAuthenticator::GetBackoffDelaySeconds(
 void ServiceGaiaAuthenticator::DoPost(const GURL& post_url,
                                       const std::string& post_body) {
   DCHECK(io_message_loop_proxy_->BelongsToCurrentThread());
-  URLFetcher* request = new URLFetcher(post_url, URLFetcher::POST, this);
-  request->set_request_context(
+  content::URLFetcher* request = content::URLFetcher::Create(
+      post_url, content::URLFetcher::POST, this);
+  request->SetRequestContext(
       g_service_process->GetServiceURLRequestContextGetter());
-  request->set_upload_data("application/x-www-form-urlencoded", post_body);
+  request->SetUploadData("application/x-www-form-urlencoded", post_body);
   request->Start();
 }
 
-// URLFetcher::Delegate implementation
-void ServiceGaiaAuthenticator::OnURLFetchComplete(const URLFetcher* source) {
+// content::URLFetcherDelegate implementation
+void ServiceGaiaAuthenticator::OnURLFetchComplete(
+    const content::URLFetcher* source) {
   DCHECK(io_message_loop_proxy_->BelongsToCurrentThread());
-  http_response_code_ = source->response_code();
-  response_data_ = source->GetResponseStringRef();
+  http_response_code_ = source->GetResponseCode();
+  source->GetResponseAsString(&response_data_);
   delete source;
   // Add an extra reference because we want http_post_completed_ to remain
   // valid until after Signal() returns.

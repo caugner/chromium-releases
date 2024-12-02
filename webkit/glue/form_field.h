@@ -9,11 +9,12 @@
 
 #include "base/string16.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFormControlElement.h"
+#include "webkit/glue/webkit_glue_export.h"
 
 namespace webkit_glue {
 
 // Stores information about a field in a form.
-struct FormField {
+struct WEBKIT_GLUE_EXPORT FormField {
   FormField();
   virtual ~FormField();
 
@@ -31,6 +32,8 @@ struct FormField {
   string16 autocomplete_type;
   size_t max_length;
   bool is_autofilled;
+  bool is_focusable;
+  bool should_autocomplete;
 
   // For the HTML snippet |<option value="US">United States</option>|, the
   // value is "US" and the contents are "United States".
@@ -39,7 +42,8 @@ struct FormField {
 };
 
 // So we can compare FormFields with EXPECT_EQ().
-std::ostream& operator<<(std::ostream& os, const FormField& field);
+WEBKIT_GLUE_EXPORT std::ostream& operator<<(std::ostream& os,
+                                            const FormField& field);
 
 }  // namespace webkit_glue
 

@@ -5,8 +5,8 @@
 #include "chrome/browser/ui/views/infobars/translate_message_infobar.h"
 
 #include "chrome/browser/translate/translate_infobar_delegate.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/label.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/label.h"
 
 TranslateMessageInfoBar::TranslateMessageInfoBar(
     InfoBarTabHelper* owner,

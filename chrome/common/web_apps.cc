@@ -22,8 +22,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNodeList.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/size.h"
@@ -209,7 +209,7 @@ bool ParseWebAppFromWebDocument(WebFrame* frame,
 bool ParseWebAppFromDefinitionFile(Value* definition_value,
                                    WebApplicationInfo* web_app,
                                    string16* error) {
-  CHECK(web_app->manifest_url.is_valid());
+  DCHECK(web_app->manifest_url.is_valid());
 
   int error_code = 0;
   std::string error_message;
@@ -220,9 +220,9 @@ bool ParseWebAppFromDefinitionFile(Value* definition_value,
           false,  // disallow trailing comma
           &error_code,
           &error_message));
-  CHECK(schema.get())
+  DCHECK(schema.get())
       << "Error parsing JSON schema: " << error_code << ": " << error_message;
-  CHECK(schema->IsType(Value::TYPE_DICTIONARY))
+  DCHECK(schema->IsType(Value::TYPE_DICTIONARY))
       << "schema root must be dictionary.";
 
   JSONSchemaValidator validator(static_cast<DictionaryValue*>(schema.get()));
@@ -239,7 +239,7 @@ bool ParseWebAppFromDefinitionFile(Value* definition_value,
 
   // This must be true because the schema requires the root value to be a
   // dictionary.
-  CHECK(definition_value->IsType(Value::TYPE_DICTIONARY));
+  DCHECK(definition_value->IsType(Value::TYPE_DICTIONARY));
   DictionaryValue* definition = static_cast<DictionaryValue*>(definition_value);
 
   // Parse launch URL. It must be a valid URL in the same origin as the

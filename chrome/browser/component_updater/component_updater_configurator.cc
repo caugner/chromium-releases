@@ -55,20 +55,31 @@ const char kExtraInfo[] =
   #else
     #error "unknown windows architecture"
   #endif
+#elif defined(OS_CHROMEOS)
+  #if defined(__i386__)
+    "os=cros&arch=x86&prod=chrome&prodversion=";
+  #elif defined(__arm__)
+    "os=cros&arch=arm&prod=chrome&prodversion=";
+  #else
+    "os=cros&arch=unknown&prod=chrome&prodversion=";
+  #endif
 #elif defined(OS_LINUX)
   #if defined(__amd64__)
     "os=linux&arch=x64&prod=chrome&prodversion=";
   #elif defined(__i386__)
     "os=linux&arch=x86&prod=chrome&prodversion=";
+  #elif defined(__arm__)
+    "os=linux&arch=arm&prod=chrome&prodversion=";
   #else
     "os=linux&arch=unknown&prod=chrome&prodversion=";
   #endif
-#elif defined(OS_CHROMEOS)
-  #if defined(__i386__)
-    "os=cros&arch=x86&prod=chrome&prodversion=";
+#elif defined(OS_OPENBSD)
+  #if defined(__amd64__)
+    "os=openbsd&arch=x64";
+  #elif defined(__i386__)
+    "os=openbsd&arch=x86";
   #else
-    // TODO(cpu): Fix this for ARM.
-    "os=cros&arch=unknown&prod=chrome&prodversion=";
+    "os=openbsd&arch=unknown";
   #endif
 #else
     #error "unknown os or architecture"

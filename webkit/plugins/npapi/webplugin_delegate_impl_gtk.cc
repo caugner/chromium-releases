@@ -19,6 +19,7 @@
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/gfx/blit.h"
 #include "webkit/plugins/npapi/gtk_plugin_container.h"
 #include "webkit/plugins/npapi/plugin_constants_win.h"
@@ -242,7 +243,7 @@ void WebPluginDelegateImpl::WindowlessUpdateGeometry(
 void WebPluginDelegateImpl::EnsurePixmapAtLeastSize(int width, int height) {
   if (pixmap_) {
     gint cur_width, cur_height;
-    gdk_drawable_get_size(pixmap_, &cur_width, &cur_height);
+    gdk_pixmap_get_size(pixmap_, &cur_width, &cur_height);
     if (cur_width >= width && cur_height >= height)
       return;  // We are already the appropriate size.
 
@@ -256,9 +257,10 @@ void WebPluginDelegateImpl::EnsurePixmapAtLeastSize(int width, int height) {
   pixmap_ = gdk_pixmap_new(NULL,  // use width/height/depth params
                            std::max(1, width), std::max(1, height),
                            sys_visual->depth);
+  // TODO(erg): Replace this with GdkVisual when we move to GTK3.
   GdkColormap* colormap = gdk_colormap_new(gdk_visual_get_system(),
                                            FALSE);
-  gdk_drawable_set_colormap(GDK_DRAWABLE(pixmap_), colormap);
+  gdk_drawable_set_colormap(pixmap_, colormap);
   // The GdkDrawable now owns the GdkColormap.
   g_object_unref(colormap);
 }
@@ -442,8 +444,7 @@ void WebPluginDelegateImpl::WindowlessPaint(cairo_t* context,
     // Tell the plugin to paint into the pixmap.
     base::StatsRate plugin_paint("Plugin.Paint");
     base::StatsScope<base::StatsRate> scope(plugin_paint);
-    NPError err = instance()->NPP_HandleEvent(&np_event);
-    DCHECK_EQ(err, NPERR_NO_ERROR);
+    instance()->NPP_HandleEvent(&np_event);
 
     if (pixmap != None) {
       // Copy the rendered image pixmap back into the shm pixmap
@@ -473,8 +474,7 @@ void WebPluginDelegateImpl::WindowlessPaint(cairo_t* context,
     // Tell the plugin to paint into the pixmap.
     base::StatsRate plugin_paint("Plugin.Paint");
     base::StatsScope<base::StatsRate> scope(plugin_paint);
-    NPError err = instance()->NPP_HandleEvent(&np_event);
-    DCHECK_EQ(err, NPERR_NO_ERROR);
+    instance()->NPP_HandleEvent(&np_event);
 
     cairo_save(context);
     // Now copy the rendered image pixmap back into the drawing buffer.

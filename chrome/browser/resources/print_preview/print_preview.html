@@ -1,59 +1,73 @@
 <!DOCTYPE html>
-<html i18n-values="dir:textdirection;">
+<html i18n-values="dir:textdirection;" id="print-preview">
 <head>
 <meta charset="utf-8">
 <title i18n-content="title"></title>
 <link rel="icon" href="../../../app/theme/print_preview_favicon.png">
-<link rel="stylesheet" href="../webui.css">
-<link rel="stylesheet" href="chrome://resources/css/throbber.css">
+
+<link rel="stylesheet" href="margins.css">
 <link rel="stylesheet" href="print_preview.css">
+<link rel="stylesheet" href="../shared/css/button.css">
+<link rel="stylesheet" href="../shared/css/checkbox.css">
+<link rel="stylesheet" href="../shared/css/chrome_shared.css">
+<link rel="stylesheet" href="../shared/css/select.css">
+<link rel="stylesheet" href="../shared/css/throbber.css">
+
+<script src="chrome://resources/js/event_tracker.js"></script>
 <script src="chrome://resources/js/local_strings.js"></script>
 <script src="chrome://resources/js/cr.js"></script>
+<script src="chrome://resources/js/event_tracker.js"></script>
 <script src="chrome://resources/js/util.js"></script>
 <script src="chrome://print/print_preview.js"></script>
 <script src="chrome://print/strings.js"></script>
 </head>
-<body>
-  <div id="sidebar">
+<body i18n-values=".style.fontFamily:fontfamily">
+  <div id="navbar-container">
     <header>
-      <h1 i18n-content="title"></h1>
+      <h1 id="navbar-content-title" i18n-content="title"></h1>
       <div id="print-header">
         <span id="print-summary"></span>
-        <button id="print-button" i18n-content="printButton" class="default">
-        </button>
-        <button id="cancel-button" i18n-content="cancelButton"></button>
+        <div class="button-strip">
+          <button id="print-button" i18n-content="printButton" class="default">
+              </button>
+          <button id="cancel-button" i18n-content="cancelButton"></button>
+        </div>
       </div>
     </header>
-    <div id="main">
-      <div id="destination-option" class="two-column">
+    <div id="settings">
+      <div id="destination-option" class="two-column visible">
         <h1 i18n-content="destinationLabel"></h1>
-        <select id="printer-list"></select>
+        <div class="right-column">
+          <select id="printer-list"></select>
+        </div>
       </div>
-      <hr>
       <include src="page_settings.html"></include>
-      <hr id="hr-before-copies" class="invisible">
       <include src="copies_settings.html"></include>
-      <hr>
       <include src="layout_settings.html"></include>
-      <hr>
       <include src="color_settings.html"></include>
-      <hr>
       <include src="margin_settings.html"></include>
-      <hr>
       <include src="header_footer_settings.html"></include>
-      <hr>
-      <div id="system-dialog-div">
+      <div>
         <if expr="pp_ifdef('chromeos')">
-          <button id="system-dialog-link" class="link-button"
+          <button id="system-dialog-link"
+              class="link-button preview-link-button"
               i18n-content="cloudPrintDialogOption"></button>
         </if>
         <if expr="not pp_ifdef('chromeos')">
-          <button id="system-dialog-link" class="link-button"
+          <button id="system-dialog-link"
+              class="link-button preview-link-button"
               i18n-content="systemDialogOption"></button>
         </if>
-        <!-- TODO(dpapad): Investigate whey hidden attribute does not work. -->
-        <div id="system-dialog-throbber" class="throbber hidden"></div>
+        <div id="system-dialog-throbber" class="throbber" hidden></div>
       </div>
+      <if expr="os == 'darwin'">
+        <div>
+          <button id="open-pdf-in-preview-link"
+              class="link-button preview-link-button"
+              i18n-content="openPdfInPreviewOption"></button>
+          <div id="open-preview-app-throbber" class="throbber" hidden></div>
+        </div>
+      </if>
     </div>
   </div>
   <div id="mainview">
@@ -67,8 +81,8 @@
         <div id="custom-message-with-dots"
           class="message-with-dots" hidden></div>
         <div id="error-action-area">
-          <button id="error-button" class="hidden"></button>
-          <div id="native-print-dialog-throbber" class="throbber hidden"></div>
+          <button id="error-button" hidden></button>
+          <div id="native-print-dialog-throbber" class="throbber" hidden></div>
         </div>
       </div>
     </div>

@@ -21,6 +21,7 @@
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/ssl_connection_status_flags.h"
 #include "net/base/ssl_info.h"
+#include "net/base/x509_certificate_net_log_param.h"
 #include "net/socket/ssl_error_params.h"
 
 namespace net {
@@ -561,6 +562,8 @@ void SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
       server_cert_verify_result_.is_issued_by_known_root;
   ssl_info->public_key_hashes =
     server_cert_verify_result_.public_key_hashes;
+  ssl_info->client_cert_sent =
+      ssl_config_.send_client_cert && ssl_config_.client_cert;
 
   const SSL_CIPHER* cipher = SSL_get_current_cipher(ssl_);
   CHECK(cipher);
@@ -602,8 +605,9 @@ int SSLClientSocketOpenSSL::ExportKeyingMaterial(
 }
 
 SSLClientSocket::NextProtoStatus SSLClientSocketOpenSSL::GetNextProto(
-    std::string* proto) {
+    std::string* proto, std::string* server_protos) {
   *proto = npn_proto_;
+  *server_protos = server_protos_;
   return npn_status_;
 }
 
@@ -758,6 +762,11 @@ int SSLClientSocketOpenSSL::DoHandshake() {
     // SSL handshake is completed.  Let's verify the certificate.
     const bool got_cert = !!UpdateServerCert();
     DCHECK(got_cert);
+    if (net_log_.IsLoggingBytes()) {
+      net_log_.AddEvent(
+          NetLog::TYPE_SSL_CERTIFICATES_RECEIVED,
+          make_scoped_refptr(new X509CertificateNetLogParam(server_cert_)));
+    }
     GotoState(STATE_VERIFY_CERT);
   } else {
     int ssl_error = SSL_get_error(ssl_, rv);
@@ -778,6 +787,10 @@ int SSLClientSocketOpenSSL::DoHandshake() {
   return net_error;
 }
 
+// SelectNextProtoCallback is called by OpenSSL during the handshake. If the
+// server supports NPN, selects a protocol from the list that the server
+// provides. According to third_party/openssl/openssl/ssl/ssl_lib.c, the
+// callback can assume that |in| is syntactically valid.
 int SSLClientSocketOpenSSL::SelectNextProtoCallback(unsigned char** out,
                                                     unsigned char* outlen,
                                                     const unsigned char* in,
@@ -790,16 +803,32 @@ int SSLClientSocketOpenSSL::SelectNextProtoCallback(unsigned char** out,
     return SSL_TLSEXT_ERR_OK;
   }
 
-  int status = SSL_select_next_proto(
-      out, outlen, in, inlen,
-      reinterpret_cast<const unsigned char*>(ssl_config_.next_protos.data()),
-      ssl_config_.next_protos.size());
+  // Assume there's no overlap between our protocols and the server's list.
+  int status = OPENSSL_NPN_NO_OVERLAP;
+  *out = const_cast<unsigned char*>(in) + 1;
+  *outlen = in[0];
+
+  // For each protocol in server preference order, see if we support it.
+  for (unsigned int i = 0; i < inlen; i += in[i] + 1) {
+    for (std::vector<std::string>::const_iterator
+             j = ssl_config_.next_protos.begin();
+         j != ssl_config_.next_protos.end(); ++j) {
+      if (in[i] == j->size() &&
+          memcmp(&in[i + 1], j->data(), in[i]) == 0) {
+        // We find a match.
+        *out = const_cast<unsigned char*>(in) + i + 1;
+        *outlen = in[i];
+        status = OPENSSL_NPN_NEGOTIATED;
+        break;
+      }
+    }
+    if (status == OPENSSL_NPN_NEGOTIATED)
+      break;
+  }
 
   npn_proto_.assign(reinterpret_cast<const char*>(*out), *outlen);
+  server_protos_.assign(reinterpret_cast<const char*>(in), inlen);
   switch (status) {
-    case OPENSSL_NPN_UNSUPPORTED:
-      npn_status_ = SSLClientSocket::kNextProtoUnsupported;
-      break;
     case OPENSSL_NPN_NEGOTIATED:
       npn_status_ = SSLClientSocket::kNextProtoNegotiated;
       break;
@@ -836,9 +865,11 @@ int SSLClientSocketOpenSSL::DoVerifyCert(int result) {
   verifier_.reset(new SingleRequestCertVerifier(cert_verifier_));
   return verifier_->Verify(
       server_cert_, host_and_port_.host(), flags,
+      NULL /* no CRL set */,
       &server_cert_verify_result_,
       base::Bind(&SSLClientSocketOpenSSL::OnHandshakeIOComplete,
-                 base::Unretained(this)));
+                 base::Unretained(this)),
+      net_log_);
 }
 
 int SSLClientSocketOpenSSL::DoVerifyCertComplete(int result) {

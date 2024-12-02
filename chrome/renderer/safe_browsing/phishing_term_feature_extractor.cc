@@ -7,6 +7,7 @@
 #include <list>
 #include <map>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
@@ -101,7 +102,7 @@ PhishingTermFeatureExtractor::PhishingTermFeatureExtractor(
       murmurhash3_seed_(murmurhash3_seed),
       negative_word_cache_(kMaxNegativeWordCacheSize),
       clock_(clock),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   Clear();
 }
 
@@ -114,7 +115,7 @@ PhishingTermFeatureExtractor::~PhishingTermFeatureExtractor() {
 void PhishingTermFeatureExtractor::ExtractFeatures(
     const string16* page_text,
     FeatureMap* features,
-    DoneCallback* done_callback) {
+    const DoneCallback& done_callback) {
   // The RenderView should have called CancelPendingExtraction() before
   // starting a new extraction, so DCHECK this.
   CheckNoPendingExtraction();
@@ -124,18 +125,18 @@ void PhishingTermFeatureExtractor::ExtractFeatures(
 
   page_text_ = page_text;
   features_ = features;
-  done_callback_.reset(done_callback);
+  done_callback_ = done_callback;
 
   state_.reset(new ExtractionState(*page_text_, clock_->Now()));
   MessageLoop::current()->PostTask(
       FROM_HERE,
-      method_factory_.NewRunnableMethod(
-          &PhishingTermFeatureExtractor::ExtractFeaturesWithTimeout));
+      base::Bind(&PhishingTermFeatureExtractor::ExtractFeaturesWithTimeout,
+                 weak_factory_.GetWeakPtr()));
 }
 
 void PhishingTermFeatureExtractor::CancelPendingExtraction() {
   // Cancel any pending callbacks, and clear our state.
-  method_factory_.RevokeAll();
+  weak_factory_.InvalidateWeakPtrs();
   Clear();
 }
 
@@ -196,8 +197,9 @@ void PhishingTermFeatureExtractor::ExtractFeaturesWithTimeout() {
                             chunk_elapsed);
         MessageLoop::current()->PostTask(
             FROM_HERE,
-            method_factory_.NewRunnableMethod(
-                &PhishingTermFeatureExtractor::ExtractFeaturesWithTimeout));
+            base::Bind(
+                &PhishingTermFeatureExtractor::ExtractFeaturesWithTimeout,
+                weak_factory_.GetWeakPtr()));
         return;
       }
       // Otherwise, continue.
@@ -275,9 +277,9 @@ void PhishingTermFeatureExtractor::HandleWord(
 }
 
 void PhishingTermFeatureExtractor::CheckNoPendingExtraction() {
-  DCHECK(!done_callback_.get());
+  DCHECK(done_callback_.is_null());
   DCHECK(!state_.get());
-  if (done_callback_.get() || state_.get()) {
+  if (!done_callback_.is_null() || state_.get()) {
     LOG(ERROR) << "Extraction in progress, missing call to "
                << "CancelPendingExtraction";
   }
@@ -292,15 +294,15 @@ void PhishingTermFeatureExtractor::RunCallback(bool success) {
   UMA_HISTOGRAM_TIMES("SBClientPhishing.TermFeatureTotalTime",
                       clock_->Now() - state_->start_time);
 
-  DCHECK(done_callback_.get());
-  done_callback_->Run(success);
+  DCHECK(!done_callback_.is_null());
+  done_callback_.Run(success);
   Clear();
 }
 
 void PhishingTermFeatureExtractor::Clear() {
   page_text_ = NULL;
   features_ = NULL;
-  done_callback_.reset(NULL);
+  done_callback_.Reset();
   state_.reset(NULL);
   negative_word_cache_.Clear();
 }

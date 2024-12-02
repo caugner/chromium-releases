@@ -11,13 +11,11 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/power_library.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
-#include "chrome/browser/chromeos/proxy_config_service_impl.h"
+#include "chrome/browser/chromeos/system/screen_locker_settings.h"
 #include "chrome/browser/chromeos/system/touchpad_settings.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -25,8 +23,9 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
+#include "googleurl/src/gurl.h"
 #include "unicode/timezone.h"
 
 namespace chromeos {
@@ -195,11 +194,6 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
                              true,
                              PrefService::UNSYNCABLE_PREF);
 
-  // Use shared proxies default to off.
-  prefs->RegisterBooleanPref(prefs::kUseSharedProxies,
-                             false,
-                             PrefService::SYNCABLE_PREF);
-
   // OAuth1 all access token and secret pair.
   prefs->RegisterStringPref(prefs::kOAuth1Token,
                             "",
@@ -275,8 +269,6 @@ void Preferences::Init(PrefService* prefs) {
 
   enable_screen_lock_.Init(prefs::kEnableScreenLock, prefs, this);
 
-  use_shared_proxies_.Init(prefs::kUseSharedProxies, prefs, this);
-
   // Initialize preferences to currently saved state.
   NotifyPrefChanged(NULL);
 
@@ -291,10 +283,10 @@ void Preferences::Init(PrefService* prefs) {
 }
 
 void Preferences::Observe(int type,
-                          const NotificationSource& source,
-                          const NotificationDetails& details) {
+                          const content::NotificationSource& source,
+                          const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_PREF_CHANGED)
-    NotifyPrefChanged(Details<std::string>(details).ptr());
+    NotifyPrefChanged(content::Details<std::string>(details).ptr());
 }
 
 void Preferences::NotifyPrefChanged(const std::string* pref_name) {
@@ -463,13 +455,8 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
 
   // Init or update power manager config.
   if (!pref_name || *pref_name == prefs::kEnableScreenLock) {
-    CrosLibrary::Get()->GetPowerLibrary()->EnableScreenLock(
+    system::screen_locker_settings::EnableScreenLock(
         enable_screen_lock_.GetValue());
-  }
-
-  if (!pref_name || *pref_name == prefs::kUseSharedProxies) {
-    g_browser_process->chromeos_proxy_config_service_impl()->
-        UISetUseSharedProxies(use_shared_proxies_.GetValue());
   }
 }
 

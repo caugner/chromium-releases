@@ -8,15 +8,16 @@
 
 #include "content/common/gpu/gpu_channel.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
 #include "content/common/child_process.h"
-#include "content/common/content_client.h"
 #include "content/common/gpu/gpu_channel_manager.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/gpu/transport_texture.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "ui/gfx/gl/gl_context.h"
 #include "ui/gfx/gl/gl_surface.h"
@@ -37,8 +38,9 @@ GpuChannel::GpuChannel(GpuChannelManager* gpu_channel_manager,
       watchdog_(watchdog),
       software_(software),
       handle_messages_scheduled_(false),
+      processed_get_state_fast_(false),
       num_contexts_preferring_discrete_gpu_(0),
-      task_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   DCHECK(gpu_channel_manager);
   DCHECK(renderer_id);
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -67,8 +69,8 @@ void GpuChannel::DestroyTransportTexture(int32 route_id) {
 
 bool GpuChannel::OnMessageReceived(const IPC::Message& message) {
   if (log_messages_) {
-    VLOG(1) << "received message @" << &message << " on channel @" << this
-            << " with type " << message.type();
+    DVLOG(1) << "received message @" << &message << " on channel @" << this
+             << " with type " << message.type();
   }
 
   // Control messages are not deferred and can be handled out of order with
@@ -79,9 +81,26 @@ bool GpuChannel::OnMessageReceived(const IPC::Message& message) {
     return OnControlMessageReceived(message);
 
   if (message.type() == GpuCommandBufferMsg_GetStateFast::ID) {
-    // Move GetStateFast commands to the head of the queue, so the renderer
-    // doesn't have to wait any longer than necessary.
-    deferred_messages_.push_front(new IPC::Message(message));
+    if (processed_get_state_fast_) {
+      // Require a non-GetStateFast message in between two GetStateFast
+      // messages, to ensure progress is made.
+      std::deque<IPC::Message*>::iterator point = deferred_messages_.begin();
+
+      while (point != deferred_messages_.end() &&
+             (*point)->type() == GpuCommandBufferMsg_GetStateFast::ID) {
+        ++point;
+      }
+
+      if (point != deferred_messages_.end()) {
+        ++point;
+      }
+
+      deferred_messages_.insert(point, new IPC::Message(message));
+    } else {
+      // Move GetStateFast commands to the head of the queue, so the renderer
+      // doesn't have to wait any longer than necessary.
+      deferred_messages_.push_front(new IPC::Message(message));
+    }
   } else {
     deferred_messages_.push_back(new IPC::Message(message));
   }
@@ -105,8 +124,8 @@ bool GpuChannel::Send(IPC::Message* message) {
   // process. This could result in deadlock.
   DCHECK(!message->is_sync());
   if (log_messages_) {
-    VLOG(1) << "sending message @" << message << " on channel @" << this
-            << " with type " << message->type();
+    DVLOG(1) << "sending message @" << message << " on channel @" << this
+             << " with type " << message->type();
   }
 
   if (!channel_.get()) {
@@ -139,8 +158,7 @@ void GpuChannel::OnScheduled() {
   // task to prevent reentrancy.
   MessageLoop::current()->PostTask(
       FROM_HERE,
-      task_factory_.NewRunnableMethod(
-          &GpuChannel::HandleMessage));
+      base::Bind(&GpuChannel::HandleMessage, weak_factory_.GetWeakPtr()));
   handle_messages_scheduled_ = true;
 }
 
@@ -150,8 +168,7 @@ void GpuChannel::LoseAllContexts() {
 
 void GpuChannel::DestroySoon() {
   MessageLoop::current()->PostTask(
-      FROM_HERE, NewRunnableMethod(this,
-          &GpuChannel::OnDestroy));
+      FROM_HERE, base::Bind(&GpuChannel::OnDestroy, this));
 }
 
 void GpuChannel::OnDestroy() {
@@ -192,14 +209,6 @@ void GpuChannel::CreateViewCommandBuffer(
 #endif  // ENABLE_GPU
 }
 
-void GpuChannel::ViewResized(int32 command_buffer_route_id) {
-  GpuCommandBufferStub* stub = stubs_.Lookup(command_buffer_route_id);
-  if (stub == NULL)
-    return;
-
-  stub->ViewResized();
-}
-
 GpuCommandBufferStub* GpuChannel::LookupCommandBuffer(int32 route_id) {
   return stubs_.Lookup(route_id);
 }
@@ -234,6 +243,8 @@ void GpuChannel::HandleMessage() {
   if (!deferred_messages_.empty()) {
     scoped_ptr<IPC::Message> message(deferred_messages_.front());
     deferred_messages_.pop_front();
+    processed_get_state_fast_ =
+        (message->type() == GpuCommandBufferMsg_GetStateFast::ID);
     // Handle deferred control messages.
     if (message->routing_id() == MSG_ROUTING_CONTROL)
       OnControlMessageReceived(*message);
@@ -406,8 +417,11 @@ void GpuChannel::OnCloseChannel() {
 bool GpuChannel::Init(base::MessageLoopProxy* io_message_loop,
                       base::WaitableEvent* shutdown_event) {
   // Check whether we're already initialized.
-  if (channel_.get())
+  if (channel_.get()) {
+    // TODO(xhwang): Added to investigate crbug.com/95732. Clean up after fixed.
+    CHECK(false);
     return true;
+  }
 
   // Map renderer ID to a (single) channel to that process.
   std::string channel_name = GetChannelName();

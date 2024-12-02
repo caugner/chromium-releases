@@ -5,6 +5,7 @@
 #ifndef PPAPI_THUNK_RESOURCE_CREATION_API_H_
 #define PPAPI_THUNK_RESOURCE_CREATION_API_H_
 
+#include "ppapi/c/dev/ppb_audio_input_dev.h"
 #include "ppapi/c/dev/ppb_file_chooser_dev.h"
 #include "ppapi/c/dev/ppb_video_layer_dev.h"
 #include "ppapi/c/pp_bool.h"
@@ -18,11 +19,11 @@
 #include "ppapi/c/ppb_input_event.h"
 #include "ppapi/c/dev/pp_video_dev.h"
 #include "ppapi/c/dev/ppb_transport_dev.h"
-#include "ppapi/proxy/interface_id.h"
+#include "ppapi/c/dev/ppb_websocket_dev.h"
+#include "ppapi/shared_impl/api_id.h"
 
 struct PP_Flash_Menu;
 struct PP_FontDescription_Dev;
-struct PP_VideoCaptureDeviceInfo_Dev;
 struct PP_Size;
 
 namespace ppapi {
@@ -44,20 +45,18 @@ class ResourceCreationAPI {
                                   PP_Resource config_id,
                                   PPB_Audio_Callback audio_callback,
                                   void* user_data) = 0;
-  virtual PP_Resource CreateAudioTrusted(PP_Instance instace) = 0;
+  virtual PP_Resource CreateAudioTrusted(PP_Instance instance) = 0;
   virtual PP_Resource CreateAudioConfig(PP_Instance instance,
                                         PP_AudioSampleRate sample_rate,
                                         uint32_t sample_frame_count) = 0;
+  virtual PP_Resource CreateAudioInput(
+      PP_Instance instance,
+      PP_Resource config_id,
+      PPB_AudioInput_Callback audio_input_callback,
+      void* user_data) = 0;
+  virtual PP_Resource CreateAudioInputTrusted(PP_Instance instance) = 0;
   virtual PP_Resource CreateBroker(PP_Instance instance) = 0;
   virtual PP_Resource CreateBuffer(PP_Instance instance, uint32_t size) = 0;
-  virtual PP_Resource CreateContext3D(PP_Instance instance,
-                                      PP_Config3D_Dev config,
-                                      PP_Resource share_context,
-                                      const int32_t* attrib_list) = 0;
-  virtual PP_Resource CreateContext3DRaw(PP_Instance instance,
-                                         PP_Config3D_Dev config,
-                                         PP_Resource share_context,
-                                         const int32_t* attrib_list) = 0;
   virtual PP_Resource CreateDirectoryReader(PP_Resource directory_ref) = 0;
   virtual PP_Resource CreateFileChooser(
       PP_Instance instance,
@@ -71,8 +70,6 @@ class ResourceCreationAPI {
   virtual PP_Resource CreateFlashMenu(PP_Instance instance,
                                       const PP_Flash_Menu* menu_data) = 0;
   virtual PP_Resource CreateFlashNetConnector(PP_Instance instance) = 0;
-  virtual PP_Resource CreateFlashTCPSocket(PP_Instance instace) = 0;
-  virtual PP_Resource CreateFlashUDPSocket(PP_Instance instace) = 0;
   // Note: can't be called CreateFont due to Windows #defines.
   virtual PP_Resource CreateFontObject(
       PP_Instance instance,
@@ -108,12 +105,11 @@ class ResourceCreationAPI {
       const PP_Point* mouse_movement) = 0;
   virtual PP_Resource CreateScrollbar(PP_Instance instance,
                                       PP_Bool vertical) = 0;
-  virtual PP_Resource CreateSurface3D(PP_Instance instance,
-                                      PP_Config3D_Dev config,
-                                      const int32_t* attrib_list) = 0;
+  virtual PP_Resource CreateTCPSocketPrivate(PP_Instance instace) = 0;
   virtual PP_Resource CreateTransport(PP_Instance instance,
                                       const char* name,
                                       PP_TransportType type) = 0;
+  virtual PP_Resource CreateUDPSocketPrivate(PP_Instance instace) = 0;
   virtual PP_Resource CreateURLLoader(PP_Instance instance) = 0;
   virtual PP_Resource CreateURLRequestInfo(
       PP_Instance instance,
@@ -125,6 +121,7 @@ class ResourceCreationAPI {
       PP_VideoDecoder_Profile profile) = 0;
   virtual PP_Resource CreateVideoLayer(PP_Instance instance,
                                        PP_VideoLayerMode_Dev mode) = 0;
+  virtual PP_Resource CreateWebSocket(PP_Instance instance) = 0;
   virtual PP_Resource CreateWheelInputEvent(
       PP_Instance instance,
       PP_TimeTicks time_stamp,
@@ -133,8 +130,7 @@ class ResourceCreationAPI {
       const PP_FloatPoint* wheel_ticks,
       PP_Bool scroll_by_page) = 0;
 
-  static const proxy::InterfaceID interface_id =
-      proxy::INTERFACE_ID_RESOURCE_CREATION;
+  static const ApiID kApiID = API_ID_RESOURCE_CREATION;
 };
 
 }  // namespace thunk

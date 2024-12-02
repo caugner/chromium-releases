@@ -17,13 +17,16 @@
 #include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/read_node.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/ui/sync/tab_contents_wrapper_synced_tab_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
+
+using content::BrowserThread;
 
 namespace browser_sync {
 
@@ -31,9 +34,10 @@ namespace {
 
 // Extract the source SyncedTabDelegate from a NotificationSource originating
 // from a NavigationController, if it exists. Returns |NULL| otherwise.
-SyncedTabDelegate* ExtractSyncedTabDelegate(const NotificationSource& source) {
-  TabContentsWrapper* tab =  TabContentsWrapper::GetCurrentWrapperForContents(
-      Source<NavigationController>(source).ptr()->tab_contents());
+SyncedTabDelegate* ExtractSyncedTabDelegate(
+    const content::NotificationSource& source) {
+  TabContentsWrapper* tab = TabContentsWrapper::GetCurrentWrapperForContents(
+      content::Source<NavigationController>(source).ptr()->tab_contents());
   if (!tab)
     return NULL;
   return tab->synced_tab_delegate();
@@ -70,9 +74,10 @@ SessionChangeProcessor::~SessionChangeProcessor() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
-void SessionChangeProcessor::Observe(int type,
-                                     const NotificationSource& source,
-                                     const NotificationDetails& details) {
+void SessionChangeProcessor::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(running());
   DCHECK(profile_);
@@ -81,28 +86,28 @@ void SessionChangeProcessor::Observe(int type,
   std::vector<SyncedTabDelegate*> modified_tabs;
   switch (type) {
     case chrome::NOTIFICATION_BROWSER_OPENED: {
-      Browser* browser = Source<Browser>(source).ptr();
+      Browser* browser = content::Source<Browser>(source).ptr();
       if (!browser || browser->profile() != profile_) {
         return;
       }
-      VLOG(1) << "Received BROWSER_OPENED for profile " << profile_;
+      DVLOG(1) << "Received BROWSER_OPENED for profile " << profile_;
       break;
     }
 
     case content::NOTIFICATION_TAB_PARENTED: {
-      SyncedTabDelegate* tab = Source<SyncedTabDelegate>(source).ptr();
+      SyncedTabDelegate* tab = content::Source<SyncedTabDelegate>(source).ptr();
       if (!tab || tab->profile() != profile_) {
         return;
       }
       modified_tabs.push_back(tab);
-      VLOG(1) << "Received TAB_PARENTED for profile " << profile_;
+      DVLOG(1) << "Received TAB_PARENTED for profile " << profile_;
       break;
     }
 
     case content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME: {
       TabContentsWrapper* tab_contents_wrapper =
           TabContentsWrapper::GetCurrentWrapperForContents(
-              Source<TabContents>(source).ptr());
+              content::Source<TabContents>(source).ptr());
       if (!tab_contents_wrapper) {
         return;
       }
@@ -111,7 +116,7 @@ void SessionChangeProcessor::Observe(int type,
         return;
       }
       modified_tabs.push_back(tab);
-      VLOG(1) << "Received LOAD_COMPLETED_MAIN_FRAME for profile " << profile_;
+      DVLOG(1) << "Received LOAD_COMPLETED_MAIN_FRAME for profile " << profile_;
       break;
     }
 
@@ -121,7 +126,7 @@ void SessionChangeProcessor::Observe(int type,
         return;
       }
       modified_tabs.push_back(tab);
-      VLOG(1) << "Received TAB_CLOSED for profile " << profile_;
+      DVLOG(1) << "Received TAB_CLOSED for profile " << profile_;
       break;
     }
 
@@ -131,7 +136,7 @@ void SessionChangeProcessor::Observe(int type,
         return;
       }
       modified_tabs.push_back(tab);
-      VLOG(1) << "Received NAV_LIST_PRUNED for profile " << profile_;
+      DVLOG(1) << "Received NAV_LIST_PRUNED for profile " << profile_;
       break;
     }
 
@@ -141,7 +146,7 @@ void SessionChangeProcessor::Observe(int type,
         return;
       }
       modified_tabs.push_back(tab);
-      VLOG(1) << "Received NAV_ENTRY_CHANGED for profile " << profile_;
+      DVLOG(1) << "Received NAV_ENTRY_CHANGED for profile " << profile_;
       break;
     }
 
@@ -151,13 +156,13 @@ void SessionChangeProcessor::Observe(int type,
         return;
       }
       modified_tabs.push_back(tab);
-      VLOG(1) << "Received NAV_ENTRY_COMMITTED for profile " << profile_;
+      DVLOG(1) << "Received NAV_ENTRY_COMMITTED for profile " << profile_;
       break;
     }
 
     case chrome::NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED: {
       ExtensionTabHelper* extension_tab_helper =
-          Source<ExtensionTabHelper>(source).ptr();
+          content::Source<ExtensionTabHelper>(source).ptr();
       if (!extension_tab_helper ||
           extension_tab_helper->tab_contents()->browser_context() != profile_) {
         return;
@@ -166,8 +171,8 @@ void SessionChangeProcessor::Observe(int type,
         modified_tabs.push_back(extension_tab_helper->tab_contents_wrapper()->
             synced_tab_delegate());
       }
-      VLOG(1) << "Received TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED "
-              << "for profile " << profile_;
+      DVLOG(1) << "Received TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED "
+               << "for profile " << profile_;
       break;
     }
 
@@ -193,7 +198,7 @@ void SessionChangeProcessor::Observe(int type,
   }
 
   if (reassociation_needed) {
-    VLOG(1) << "Reassociation of local models triggered.";
+    DVLOG(1) << "Reassociation of local models triggered.";
     SyncError error;
     session_model_associator_->DisassociateModels(&error);
     session_model_associator_->AssociateModels(&error);
@@ -212,7 +217,7 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
     return;
   }
 
-  StopObserving();
+  ScopedStopObserving<SessionChangeProcessor> stop_observing(this);
 
   sync_api::ReadNode root(trans);
   if (!root.InitByTagLookup(kSessionsTag)) {
@@ -259,7 +264,6 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
       // if encryption was turned on. In that case, the data is still the same,
       // so we can ignore.
       LOG(WARNING) << "Dropping modification to local session.";
-      StartObserving();
       return;
     }
     const base::Time& mtime = sync_node.GetModificationTime();
@@ -268,12 +272,10 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
   }
 
   // Notify foreign session handlers that there are new sessions.
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED,
-      Source<Profile>(profile_),
-      NotificationService::NoDetails());
-
-  StartObserving();
+      content::Source<Profile>(profile_),
+      content::NotificationService::NoDetails());
 }
 
 void SessionChangeProcessor::StartImpl(Profile* profile) {
@@ -294,23 +296,23 @@ void SessionChangeProcessor::StartObserving() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(profile_);
   notification_registrar_.Add(this, content::NOTIFICATION_TAB_PARENTED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   notification_registrar_.Add(this, content::NOTIFICATION_TAB_CLOSED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   notification_registrar_.Add(this, content::NOTIFICATION_NAV_LIST_PRUNED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   notification_registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_CHANGED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   notification_registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   notification_registrar_.Add(this, chrome::NOTIFICATION_BROWSER_OPENED,
-      NotificationService::AllBrowserContextsAndSources());
+      content::NotificationService::AllBrowserContextsAndSources());
   notification_registrar_.Add(this,
       chrome::NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   notification_registrar_.Add(this,
       content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-      NotificationService::AllBrowserContextsAndSources());
+      content::NotificationService::AllBrowserContextsAndSources());
 }
 
 void SessionChangeProcessor::StopObserving() {

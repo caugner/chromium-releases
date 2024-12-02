@@ -8,10 +8,11 @@
 
 #include <set>
 
+#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
-#include "chrome/browser/chromeos/cros/update_library.h"
+#include "chrome/browser/chromeos/dbus/update_engine_client.h"
 #include "chrome/browser/chromeos/login/update_screen_actor.h"
 #include "chrome/browser/chromeos/login/wizard_screen.h"
 
@@ -22,7 +23,7 @@ class ScreenObserver;
 // Controller for the update screen. It does not depend on the specific
 // implementation of the screen showing (Views of WebUI based), the dependency
 // is moved to the UpdateScreenActor instead.
-class UpdateScreen: public UpdateLibrary::Observer,
+class UpdateScreen: public UpdateEngineClient::Observer,
                     public UpdateScreenActor::Delegate,
                     public WizardScreen {
  public:
@@ -30,9 +31,9 @@ class UpdateScreen: public UpdateLibrary::Observer,
   virtual ~UpdateScreen();
 
   // Overridden from WizardScreen.
-  virtual void PrepareToShow();
-  virtual void Show();
-  virtual void Hide();
+  virtual void PrepareToShow() OVERRIDE;
+  virtual void Show() OVERRIDE;
+  virtual void Hide() OVERRIDE;
 
   // UpdateScreenActor::Delegate implementation:
   virtual void CancelUpdate() OVERRIDE;
@@ -60,8 +61,9 @@ class UpdateScreen: public UpdateLibrary::Observer,
   // Reports update results to the ScreenObserver.
   virtual void ExitUpdate(ExitReason reason);
 
-  // UpdateLibrary::Observer implementation:
-  virtual void UpdateStatusChanged(UpdateLibrary* library);
+  // UpdateEngineClient::Observer implementation:
+  virtual void UpdateStatusChanged(
+      const UpdateEngineClient::Status& status) OVERRIDE;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(UpdateScreenTest, TestBasic);

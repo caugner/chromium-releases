@@ -7,20 +7,40 @@
 #include <list>
 #include <map>
 
-#include "base/tuple.h"
-#include "content/browser/browser_thread.h"
+#include "base/bind.h"
 #include "content/browser/debugger/devtools_agent_host.h"
-#include "content/browser/debugger/devtools_manager.h"
+#include "content/browser/debugger/devtools_manager_impl.h"
 #include "content/browser/debugger/worker_devtools_message_filter.h"
 #include "content/browser/worker_host/worker_process_host.h"
 #include "content/browser/worker_host/worker_service.h"
 #include "content/common/devtools_messages.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/devtools_agent_host_registry.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/common/process_type.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
-class WorkerDevToolsManager::AgentHosts : private NotificationObserver {
+using content::BrowserThread;
+
+namespace content {
+
+// Called on the UI thread.
+// static
+DevToolsAgentHost* DevToolsAgentHostRegistry::GetDevToolsAgentHostForWorker(
+    int worker_process_id,
+    int worker_route_id) {
+  return WorkerDevToolsManager::GetDevToolsAgentHostForWorker(
+      worker_process_id,
+      worker_route_id);
+}
+
+class WorkerDevToolsManager::AgentHosts
+    : private content::NotificationObserver {
 public:
   static void Add(WorkerId id, WorkerDevToolsAgentHost* host) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -53,19 +73,19 @@ public:
 private:
   AgentHosts() {
     registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
   ~AgentHosts() {}
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource&,
-                       const NotificationDetails&) OVERRIDE;
+                       const content::NotificationSource&,
+                       const content::NotificationDetails&) OVERRIDE;
 
   static AgentHosts* instance_;
   typedef std::map<WorkerId, WorkerDevToolsAgentHost*> Instances;
   Instances map_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 };
 
 WorkerDevToolsManager::AgentHosts*
@@ -92,7 +112,7 @@ class WorkerDevToolsManager::WorkerDevToolsAgentHost
     BrowserThread::PostTask(
         BrowserThread::IO,
         FROM_HERE,
-        NewRunnableFunction(
+        base::Bind(
             &RegisterAgent,
             worker_id.first,
             worker_id.second));
@@ -127,7 +147,7 @@ class WorkerDevToolsManager::WorkerDevToolsAgentHost
   virtual void SendMessageToAgent(IPC::Message* message) OVERRIDE {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableFunction(
+        base::Bind(
             &WorkerDevToolsAgentHost::ForwardToWorkerDevToolsAgent,
             worker_id_.first,
             worker_id_.second,
@@ -158,7 +178,10 @@ class WorkerDevToolsManager::DetachedClientHosts {
       RemovePendingWorkerData(id);
       return;
     }
-    int cookie = DevToolsManager::GetInstance()->DetachClientHost(agent);
+    DevToolsManagerImpl::GetInstance()->DispatchOnInspectorFrontend(
+        agent,
+        WebKit::WebDevToolsAgent::disconnectEventAsText().utf8());
+    int cookie = DevToolsManagerImpl::GetInstance()->DetachClientHost(agent);
     if (cookie == -1) {
       RemovePendingWorkerData(id);
       return;
@@ -184,7 +207,7 @@ class WorkerDevToolsManager::DetachedClientHosts {
         WorkerDevToolsManager::GetDevToolsAgentHostForWorker(
             new_id.first,
             new_id.second);
-    DevToolsManager::GetInstance()->AttachClientHost(
+    DevToolsManagerImpl::GetInstance()->AttachClientHost(
         it->second,
         agent);
     worker_id_to_cookie_.erase(it);
@@ -196,7 +219,7 @@ class WorkerDevToolsManager::DetachedClientHosts {
   static void RemovePendingWorkerData(WorkerId id) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableFunction(RemoveInspectedWorkerDataOnIOThread, id));
+        base::Bind(&RemoveInspectedWorkerDataOnIOThread, id));
   }
 
   static void RemoveInspectedWorkerDataOnIOThread(WorkerId id) {
@@ -212,9 +235,10 @@ WorkerDevToolsManager::DetachedClientHosts*
     WorkerDevToolsManager::DetachedClientHosts::instance_ = NULL;
 
 
-void WorkerDevToolsManager::AgentHosts::Observe(int type,
-                                                const NotificationSource&,
-                                                const NotificationDetails&) {
+void WorkerDevToolsManager::AgentHosts::Observe(
+    int type,
+    const content::NotificationSource&,
+    const content::NotificationDetails&) {
   DCHECK(type == content::NOTIFICATION_APP_TERMINATING);
   Instances copy(map_);
   for (Instances::iterator it = copy.begin(); it != copy.end(); ++it)
@@ -222,56 +246,17 @@ void WorkerDevToolsManager::AgentHosts::Observe(int type,
   DCHECK(!instance_);
 }
 
-class WorkerDevToolsManager::InspectedWorkersList {
- public:
-  InspectedWorkersList() {}
-
-  void AddInstance(WorkerProcessHost* host, int route_id) {
-    DCHECK(!Contains(host->id(), route_id));
-    map_.push_back(Entry(host, route_id));
-  }
-
-  bool Contains(int host_id, int route_id) {
-    return FindHost(host_id, route_id) != NULL;
-  }
-
-  WorkerProcessHost* FindHost(int host_id, int route_id) {
-    Entries::iterator it = FindEntry(host_id, route_id);
-    if (it == map_.end())
-      return NULL;
-    return it->host;
-  }
-
-  bool RemoveInstance(int host_id, int route_id) {
-    Entries::iterator it = FindEntry(host_id, route_id);
-    if (it == map_.end())
-      return false;
-    map_.erase(it);
-    return true;
-  }
-
- private:
-  struct Entry {
-    Entry(WorkerProcessHost* host, int route_id)
-        : host(host),
-          route_id(route_id) {}
-    WorkerProcessHost* const host;
-    int const route_id;
-  };
-  typedef std::list<Entry> Entries;
-
-  Entries::iterator FindEntry(int host_id, int route_id) {
-    Entries::iterator it = map_.begin();
-    while (it != map_.end()) {
-      if (it->host->id() == host_id && it->route_id == route_id)
-        break;
-      ++it;
-    }
-    return it;
-  }
-
-  Entries map_;
-  DISALLOW_COPY_AND_ASSIGN(InspectedWorkersList);
+struct WorkerDevToolsManager::InspectedWorker {
+  InspectedWorker(WorkerProcessHost* host, int route_id, const GURL& url,
+                  const string16& name)
+      : host(host),
+        route_id(route_id),
+        worker_url(url),
+        worker_name(name) {}
+  WorkerProcessHost* const host;
+  int const route_id;
+  GURL worker_url;
+  string16 worker_name;
 };
 
 // static
@@ -291,8 +276,7 @@ DevToolsAgentHost* WorkerDevToolsManager::GetDevToolsAgentHostForWorker(
   return result;
 }
 
-WorkerDevToolsManager::WorkerDevToolsManager()
-    : inspected_workers_(new InspectedWorkersList()) {
+WorkerDevToolsManager::WorkerDevToolsManager() {
   WorkerService::GetInstance()->AddObserver(this);
 }
 
@@ -318,24 +302,22 @@ void WorkerDevToolsManager::WorkerCreated(
 
 void WorkerDevToolsManager::WorkerDestroyed(
     WorkerProcessHost* worker,
-    const WorkerProcessHost::WorkerInstance& instance) {
-  if (!instance.shared())
+    int worker_route_id) {
+  InspectedWorkersList::iterator it = FindInspectedWorker(
+      worker->id(),
+      worker_route_id);
+  if (it == inspected_workers_.end())
     return;
-  if (!inspected_workers_->RemoveInstance(worker->id(),
-                                          instance.worker_route_id())) {
-    return;
-  }
 
-  WorkerId worker_id(worker->id(), instance.worker_route_id());
+  WorkerId worker_id(worker->id(), worker_route_id);
   terminated_workers_.push_back(TerminatedInspectedWorker(
       worker_id,
-      instance.url(),
-      instance.name()));
+      it->worker_url,
+      it->worker_name));
+  inspected_workers_.erase(it);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableFunction(
-          DetachedClientHosts::WorkerDestroyed,
-          worker_id));
+      base::Bind(&DetachedClientHosts::WorkerDestroyed, worker_id));
 }
 
 void WorkerDevToolsManager::WorkerContextStarted(WorkerProcessHost* process,
@@ -347,8 +329,8 @@ void WorkerDevToolsManager::WorkerContextStarted(WorkerProcessHost* process,
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableFunction(
-          DetachedClientHosts::WorkerReloaded,
+      base::Bind(
+          &DetachedClientHosts::WorkerReloaded,
           it->second,
           new_worker_id));
   paused_workers_.erase(it);
@@ -374,21 +356,23 @@ void WorkerDevToolsManager::RemoveInspectedWorkerData(
   }
 }
 
-static WorkerProcessHost* FindWorkerProcessHostForWorker(
-    int worker_process_id,
-    int worker_route_id) {
-  BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+WorkerDevToolsManager::InspectedWorkersList::iterator
+WorkerDevToolsManager::FindInspectedWorker(
+    int host_id, int route_id) {
+  InspectedWorkersList::iterator it = inspected_workers_.begin();
+  while (it != inspected_workers_.end()) {
+    if (it->host->id() == host_id && it->route_id == route_id)
+      break;
+    ++it;
+  }
+  return it;
+}
+
+static WorkerProcessHost* FindWorkerProcess(int worker_process_id) {
+  BrowserChildProcessHost::Iterator iter(content::PROCESS_TYPE_WORKER);
   for (; !iter.Done(); ++iter) {
-    if (iter->id() != worker_process_id)
-      continue;
-    WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
-    const WorkerProcessHost::Instances& instances = worker->instances();
-    for (WorkerProcessHost::Instances::const_iterator i = instances.begin();
-         i != instances.end(); ++i) {
-      if (i->shared() && i->worker_route_id() == worker_route_id)
-        return worker;
-    }
-    return NULL;
+    if (iter->id() == worker_process_id)
+      return static_cast<WorkerProcessHost*>(*iter);
   }
   return NULL;
 }
@@ -396,27 +380,35 @@ static WorkerProcessHost* FindWorkerProcessHostForWorker(
 void WorkerDevToolsManager::RegisterDevToolsAgentHostForWorker(
     int worker_process_id,
     int worker_route_id) {
-  WorkerProcessHost* host = FindWorkerProcessHostForWorker(
-      worker_process_id,
-      worker_route_id);
-  if (host)
-    inspected_workers_->AddInstance(host, worker_route_id);
-  else
-    NotifyWorkerDestroyedOnIOThread(worker_process_id, worker_route_id);
+  if (WorkerProcessHost* process = FindWorkerProcess(worker_process_id)) {
+    const WorkerProcessHost::Instances& instances = process->instances();
+    for (WorkerProcessHost::Instances::const_iterator i = instances.begin();
+         i != instances.end(); ++i) {
+      if (i->worker_route_id() == worker_route_id) {
+        DCHECK(FindInspectedWorker(worker_process_id, worker_route_id) ==
+               inspected_workers_.end());
+        inspected_workers_.push_back(
+            InspectedWorker(process, worker_route_id, i->url(), i->name()));
+        return;
+      }
+    }
+  }
+  NotifyWorkerDestroyedOnIOThread(worker_process_id, worker_route_id);
 }
 
 void WorkerDevToolsManager::ForwardToDevToolsClient(
     int worker_process_id,
     int worker_route_id,
-    const IPC::Message& message) {
-  if (!inspected_workers_->Contains(worker_process_id, worker_route_id)) {
+    const std::string& message) {
+  if (FindInspectedWorker(worker_process_id, worker_route_id) ==
+          inspected_workers_.end()) {
       NOTREACHED();
       return;
   }
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableFunction(
-          ForwardToDevToolsClientOnUIThread,
+      base::Bind(
+          &ForwardToDevToolsClientOnUIThread,
           worker_process_id,
           worker_route_id,
           message));
@@ -427,8 +419,8 @@ void WorkerDevToolsManager::SaveAgentRuntimeState(int worker_process_id,
                                                   const std::string& state) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableFunction(
-          SaveAgentRuntimeStateOnUIThread,
+      base::Bind(
+          &SaveAgentRuntimeStateOnUIThread,
           worker_process_id,
           worker_route_id,
           state));
@@ -438,27 +430,28 @@ void WorkerDevToolsManager::ForwardToWorkerDevToolsAgent(
     int worker_process_id,
     int worker_route_id,
     const IPC::Message& message) {
-  WorkerProcessHost* host = inspected_workers_->FindHost(
+  InspectedWorkersList::iterator it = FindInspectedWorker(
       worker_process_id,
       worker_route_id);
-  if (!host)
+  if (it == inspected_workers_.end())
     return;
   IPC::Message* msg = new IPC::Message(message);
   msg->set_routing_id(worker_route_id);
-  host->Send(msg);
+  it->host->Send(msg);
 }
 
 // static
 void WorkerDevToolsManager::ForwardToDevToolsClientOnUIThread(
     int worker_process_id,
     int worker_route_id,
-    const IPC::Message& message) {
+    const std::string& message) {
   WorkerDevToolsAgentHost* agent_host = AgentHosts::GetAgentHost(WorkerId(
       worker_process_id,
       worker_route_id));
   if (!agent_host)
     return;
-  DevToolsManager::GetInstance()->ForwardToDevToolsClient(agent_host, message);
+  DevToolsManagerImpl::GetInstance()->DispatchOnInspectorFrontend(agent_host,
+                                                                  message);
 }
 
 // static
@@ -471,7 +464,7 @@ void WorkerDevToolsManager::SaveAgentRuntimeStateOnUIThread(
       worker_route_id));
   if (!agent_host)
     return;
-  DevToolsManager::GetInstance()->SaveAgentRuntimeState(agent_host, state);
+  DevToolsManagerImpl::GetInstance()->SaveAgentRuntimeState(agent_host, state);
 }
 
 // static
@@ -480,7 +473,7 @@ void WorkerDevToolsManager::NotifyWorkerDestroyedOnIOThread(
     int worker_route_id) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableFunction(
+      base::Bind(
           &WorkerDevToolsManager::NotifyWorkerDestroyedOnUIThread,
           worker_process_id,
           worker_route_id));
@@ -498,12 +491,8 @@ void WorkerDevToolsManager::NotifyWorkerDestroyedOnUIThread(
 
 // static
 void WorkerDevToolsManager::SendResumeToWorker(const WorkerId& id) {
-  BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
-  for (; !iter.Done(); ++iter) {
-    if (iter->id() == id.first) {
-      iter->Send(new DevToolsAgentMsg_ResumeWorkerContext(id.second));
-      return;
-    }
-  }
+  if (WorkerProcessHost* process = FindWorkerProcess(id.first))
+    process->Send(new DevToolsAgentMsg_ResumeWorkerContext(id.second));
 }
 
+}  // namespace

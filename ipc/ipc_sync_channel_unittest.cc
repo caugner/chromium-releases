@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -70,9 +71,9 @@ class Worker : public Channel::Listener, public Message::Sender {
   // destruction.
   virtual ~Worker() {
     WaitableEvent listener_done(false, false), ipc_done(false, false);
-    ListenerThread()->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &Worker::OnListenerThreadShutdown1, &listener_done,
-        &ipc_done));
+    ListenerThread()->message_loop()->PostTask(
+        FROM_HERE, base::Bind(&Worker::OnListenerThreadShutdown1, this,
+                              &listener_done, &ipc_done));
     listener_done.Wait();
     ipc_done.Wait();
     ipc_thread_.Stop();
@@ -92,8 +93,8 @@ class Worker : public Channel::Listener, public Message::Sender {
   }
   void Start() {
     StartThread(&listener_thread_, MessageLoop::TYPE_DEFAULT);
-    ListenerThread()->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &Worker::OnStart));
+    ListenerThread()->message_loop()->PostTask(
+        FROM_HERE, base::Bind(&Worker::OnStart, this));
   }
   void OverrideThread(base::Thread* overrided_thread) {
     DCHECK(overrided_thread_ == NULL);
@@ -119,6 +120,7 @@ class Worker : public Channel::Listener, public Message::Sender {
     DCHECK_EQ(answer, (succeed ? 10 : 0));
     return result;
   }
+  const std::string& channel_name() { return channel_name_; }
   Channel::Mode mode() { return mode_; }
   WaitableEvent* done_event() { return done_.get(); }
   WaitableEvent* shutdown_event() { return &shutdown_event_; }
@@ -155,6 +157,12 @@ class Worker : public Channel::Listener, public Message::Sender {
     NOTREACHED();
   }
 
+  virtual SyncChannel* CreateChannel() {
+    return new SyncChannel(
+        channel_name_, mode_, this, ipc_thread_.message_loop_proxy(), true,
+        &shutdown_event_);
+  }
+
   base::Thread* ListenerThread() {
     return overrided_thread_ ? overrided_thread_ : &listener_thread_;
   }
@@ -166,9 +174,7 @@ class Worker : public Channel::Listener, public Message::Sender {
   void OnStart() {
     // Link ipc_thread_, listener_thread_ and channel_ altogether.
     StartThread(&ipc_thread_, MessageLoop::TYPE_IO);
-    channel_.reset(new SyncChannel(
-        channel_name_, mode_, this, ipc_thread_.message_loop_proxy(), true,
-        &shutdown_event_));
+    channel_.reset(CreateChannel());
     channel_created_->Signal();
     Run();
   }
@@ -180,8 +186,9 @@ class Worker : public Channel::Listener, public Message::Sender {
 
     MessageLoop::current()->RunAllPending();
 
-    ipc_thread_.message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &Worker::OnIPCThreadShutdown, listener_event, ipc_event));
+    ipc_thread_.message_loop()->PostTask(
+        FROM_HERE, base::Bind(&Worker::OnIPCThreadShutdown, this,
+                              listener_event, ipc_event));
   }
 
   void OnIPCThreadShutdown(WaitableEvent* listener_event,
@@ -189,8 +196,9 @@ class Worker : public Channel::Listener, public Message::Sender {
     MessageLoop::current()->RunAllPending();
     ipc_event->Signal();
 
-    listener_thread_.message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &Worker::OnListenerThreadShutdown2, listener_event));
+    listener_thread_.message_loop()->PostTask(
+        FROM_HERE, base::Bind(&Worker::OnListenerThreadShutdown2, this,
+                              listener_event));
   }
 
   void OnListenerThreadShutdown2(WaitableEvent* listener_event) {
@@ -303,6 +311,74 @@ TEST_F(IPCSyncChannelTest, Simple) {
   Simple(false);
   Simple(true);
 }
+
+//-----------------------------------------------------------------------------
+
+namespace {
+
+// Worker classes which override how the sync channel is created to use the
+// two-step initialization (calling the lightweight constructor and then
+// ChannelProxy::Init separately) process.
+class TwoStepServer : public Worker {
+ public:
+  explicit TwoStepServer(bool create_pipe_now)
+      : Worker(Channel::MODE_SERVER, "simpler_server"),
+        create_pipe_now_(create_pipe_now) { }
+
+  void Run() {
+    SendAnswerToLife(false, base::kNoTimeout, true);
+    Done();
+  }
+
+  virtual SyncChannel* CreateChannel() {
+    SyncChannel* channel = new SyncChannel(
+        this, ipc_thread().message_loop_proxy(), shutdown_event());
+    channel->Init(channel_name(), mode(), create_pipe_now_);
+    return channel;
+  }
+
+  bool create_pipe_now_;
+};
+
+class TwoStepClient : public Worker {
+ public:
+  TwoStepClient(bool create_pipe_now)
+      : Worker(Channel::MODE_CLIENT, "simple_client"),
+        create_pipe_now_(create_pipe_now) { }
+
+  void OnAnswer(int* answer) {
+    *answer = 42;
+    Done();
+  }
+
+  virtual SyncChannel* CreateChannel() {
+    SyncChannel* channel = new SyncChannel(
+        this, ipc_thread().message_loop_proxy(), shutdown_event());
+    channel->Init(channel_name(), mode(), create_pipe_now_);
+    return channel;
+  }
+
+  bool create_pipe_now_;
+};
+
+void TwoStep(bool create_server_pipe_now, bool create_client_pipe_now) {
+  std::vector<Worker*> workers;
+  workers.push_back(new TwoStepServer(create_server_pipe_now));
+  workers.push_back(new TwoStepClient(create_client_pipe_now));
+  RunTest(workers);
+}
+
+}  // namespace
+
+// Tests basic two-step initialization, where you call the lightweight
+// constructor then Init.
+TEST_F(IPCSyncChannelTest, TwoStepInitialization) {
+  TwoStep(false, false);
+  TwoStep(false, true);
+  TwoStep(true, false);
+  TwoStep(true, true);
+}
+
 
 //-----------------------------------------------------------------------------
 
@@ -956,26 +1032,17 @@ TEST_F(IPCSyncChannelTest, DISABLED_SendWithTimeoutMixedOKAndTimeout) {
 
 namespace {
 
-class NestedTask : public Task {
- public:
-  explicit NestedTask(Worker* server) : server_(server) {}
-  void Run() {
-    // Sleep a bit so that we wake up after the reply has been received.
-    base::PlatformThread::Sleep(250);
-    server_->SendAnswerToLife(true, base::kNoTimeout, true);
-  }
+void NestedCallback(Worker* server) {
+  // Sleep a bit so that we wake up after the reply has been received.
+  base::PlatformThread::Sleep(250);
+  server->SendAnswerToLife(true, base::kNoTimeout, true);
+}
 
-  Worker* server_;
-};
+bool timeout_occurred = false;
 
-static bool timeout_occured = false;
-
-class TimeoutTask : public Task {
- public:
-  void Run() {
-    timeout_occured = true;
-  }
-};
+void TimeoutCallback() {
+  timeout_occurred = true;
+}
 
 class DoneEventRaceServer : public Worker {
  public:
@@ -983,14 +1050,16 @@ class DoneEventRaceServer : public Worker {
       : Worker(Channel::MODE_SERVER, "done_event_race_server") { }
 
   void Run() {
-    MessageLoop::current()->PostTask(FROM_HERE, new NestedTask(this));
-    MessageLoop::current()->PostDelayedTask(FROM_HERE, new TimeoutTask(), 9000);
+    MessageLoop::current()->PostTask(FROM_HERE,
+                                     base::Bind(&NestedCallback, this));
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE, base::Bind(&TimeoutCallback), 9000);
     // Even though we have a timeout on the Send, it will succeed since for this
     // bug, the reply message comes back and is deserialized, however the done
     // event wasn't set.  So we indirectly use the timeout task to notice if a
     // timeout occurred.
     SendAnswerToLife(true, 10000, true);
-    DCHECK(!timeout_occured);
+    DCHECK(!timeout_occurred);
     Done();
   }
 };
@@ -1024,8 +1093,9 @@ class TestSyncMessageFilter : public SyncMessageFilter {
 
   virtual void OnFilterAdded(Channel* channel) {
     SyncMessageFilter::OnFilterAdded(channel);
-    thread_.message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &TestSyncMessageFilter::SendMessageOnHelperThread));
+    thread_.message_loop()->PostTask(
+        FROM_HERE,
+        base::Bind(&TestSyncMessageFilter::SendMessageOnHelperThread, this));
   }
 
   void SendMessageOnHelperThread() {
@@ -1065,8 +1135,10 @@ class ServerSendAfterClose : public Worker {
   }
 
   bool SendDummy() {
-    ListenerThread()->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &ServerSendAfterClose::Send, new SyncChannelTestMsg_NoArgs));
+    ListenerThread()->message_loop()->PostTask(
+        FROM_HERE, base::IgnoreReturn<bool>(
+            base::Bind(&ServerSendAfterClose::Send, this,
+                       new SyncChannelTestMsg_NoArgs)));
     return true;
   }
 
@@ -1130,8 +1202,8 @@ class RestrictedDispatchServer : public Worker {
     Send(msg);
     // Signal the event after the message has been sent on the channel, on the
     // IPC thread.
-    ipc_thread().message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &RestrictedDispatchServer::OnPingSent));
+    ipc_thread().message_loop()->PostTask(
+        FROM_HERE, base::Bind(&RestrictedDispatchServer::OnPingSent, this));
   }
 
   base::Thread* ListenerThread() { return Worker::ListenerThread(); }
@@ -1186,8 +1258,8 @@ class RestrictedDispatchClient : public Worker {
     // send a message on that same channel.
     channel()->SetRestrictDispatchToSameChannel(true);
 
-    server_->ListenerThread()->message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(server_, &RestrictedDispatchServer::OnDoPing, 1));
+    server_->ListenerThread()->message_loop()->PostTask(
+        FROM_HERE, base::Bind(&RestrictedDispatchServer::OnDoPing, server_, 1));
     sent_ping_event_->Wait();
     Send(new SyncChannelTestMsg_NoArgs);
     if (ping_ == 1)
@@ -1199,8 +1271,8 @@ class RestrictedDispatchClient : public Worker {
         "non_restricted_channel", Channel::MODE_CLIENT, this,
         ipc_thread().message_loop_proxy(), true, shutdown_event()));
 
-    server_->ListenerThread()->message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(server_, &RestrictedDispatchServer::OnDoPing, 2));
+    server_->ListenerThread()->message_loop()->PostTask(
+        FROM_HERE, base::Bind(&RestrictedDispatchServer::OnDoPing, server_, 2));
     sent_ping_event_->Wait();
     // Check that the incoming message is *not* dispatched when sending on the
     // non restricted channel.

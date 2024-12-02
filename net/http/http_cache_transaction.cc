@@ -183,7 +183,7 @@ int HttpCache::Transaction::WriteMetadata(IOBuffer* buf, int buf_len,
 }
 
 bool HttpCache::Transaction::AddTruncatedFlag() {
-  DCHECK(mode_ & WRITE);
+  DCHECK(mode_ & WRITE || mode_ == NONE);
 
   // Don't set the flag for sparse entries.
   if (partial_.get() && !truncated_)
@@ -282,8 +282,7 @@ int HttpCache::Transaction::RestartWithCertificate(
 }
 
 int HttpCache::Transaction::RestartWithAuth(
-    const string16& username,
-    const string16& password,
+    const AuthCredentials& credentials,
     OldCompletionCallback* callback) {
   DCHECK(auth_response_.headers);
   DCHECK(callback);
@@ -297,7 +296,7 @@ int HttpCache::Transaction::RestartWithAuth(
   // Clear the intermediate response since we are going to start over.
   auth_response_ = HttpResponseInfo();
 
-  int rv = RestartNetworkRequestWithAuth(username, password);
+  int rv = RestartNetworkRequestWithAuth(credentials);
 
   if (rv == ERR_IO_PENDING)
     callback_ = callback;
@@ -363,6 +362,17 @@ int HttpCache::Transaction::Read(IOBuffer* buf, int buf_len,
 }
 
 void HttpCache::Transaction::StopCaching() {
+  // We really don't know where we are now. Hopefully there is no operation in
+  // progress, but nothing really prevents this method to be called after we
+  // returned ERR_IO_PENDING. We cannot attempt to truncate the entry at this
+  // point because we need the state machine for that (and even if we are really
+  // free, that would be an asynchronous operation). In other words, keep the
+  // entry how it is (it will be marked as truncated at destruction), and let
+  // the next piece of code that executes know that we are now reading directly
+  // from the net.
+  if (cache_ && entry_ && (mode_ & WRITE) && network_trans_.get() &&
+      !is_sparse_ && !range_requested_)
+    mode_ = NONE;
 }
 
 void HttpCache::Transaction::DoneReading() {
@@ -795,9 +805,9 @@ int HttpCache::Transaction::DoNetworkReadComplete(int result) {
   if (!cache_)
     return ERR_UNEXPECTED;
 
-  // If there is an error and we are saving the data, just tell the user about
-  // it and wait until the destructor runs to see if we can keep the data.
-  if (mode_ != NONE && result < 0)
+  // If there is an error or we aren't saving the data, we are done; just wait
+  // until the destructor runs to see if we can keep the data.
+  if (mode_ == NONE || result < 0)
     return result;
 
   next_state_ = STATE_CACHE_WRITE_DATA;
@@ -1680,14 +1690,13 @@ int HttpCache::Transaction::RestartNetworkRequestWithCertificate(
 }
 
 int HttpCache::Transaction::RestartNetworkRequestWithAuth(
-    const string16& username,
-    const string16& password) {
+    const AuthCredentials& credentials) {
   DCHECK(mode_ & WRITE || mode_ == NONE);
   DCHECK(network_trans_.get());
   DCHECK_EQ(STATE_NONE, next_state_);
 
   next_state_ = STATE_SEND_REQUEST_COMPLETE;
-  int rv = network_trans_->RestartWithAuth(username, password, &io_callback_);
+  int rv = network_trans_->RestartWithAuth(credentials, &io_callback_);
   if (rv != ERR_IO_PENDING)
     return DoLoop(rv);
   return rv;

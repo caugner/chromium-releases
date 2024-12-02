@@ -7,10 +7,11 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
-#include "content/browser/browser_thread.h"
+#include "chrome/browser/sync/util/unrecoverable_error_info.h"
+#include "content/public/browser/browser_thread.h"
 
 namespace base {
 class WaitableEvent;
@@ -21,24 +22,28 @@ namespace browser_sync {
 // A ModelSafeWorker for models that accept requests from the syncapi that need
 // to be fulfilled on a browser thread, for example autofill on the DB thread.
 // TODO(sync): Try to generalize other ModelWorkers (e.g. history, etc).
-class BrowserThreadModelWorker : public browser_sync::ModelSafeWorker {
+class BrowserThreadModelWorker : public ModelSafeWorker {
  public:
-  BrowserThreadModelWorker(BrowserThread::ID thread, ModelSafeGroup group);
+  BrowserThreadModelWorker(content::BrowserThread::ID thread,
+                           ModelSafeGroup group);
   virtual ~BrowserThreadModelWorker();
 
   // ModelSafeWorker implementation. Called on the sync thread.
-  virtual void DoWorkAndWaitUntilDone(Callback0::Type* work);
-  virtual ModelSafeGroup GetModelSafeGroup();
+  virtual UnrecoverableErrorInfo DoWorkAndWaitUntilDone(
+      const WorkCallback& work) OVERRIDE;
+  virtual ModelSafeGroup GetModelSafeGroup() OVERRIDE;
 
  protected:
   // Marked pure virtual so subclasses have to override, but there is
   // an implementation that subclasses should use.  This is so that
   // (subclass)::CallDoWorkAndSignalTask shows up in callstacks.
   virtual void CallDoWorkAndSignalTask(
-      Callback0::Type* work, base::WaitableEvent* done) = 0;
+      const WorkCallback& work,
+      base::WaitableEvent* done,
+      UnrecoverableErrorInfo* error_info) = 0;
 
  private:
-  BrowserThread::ID thread_;
+  content::BrowserThread::ID thread_;
   ModelSafeGroup group_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserThreadModelWorker);
@@ -54,7 +59,9 @@ class DatabaseModelWorker : public BrowserThreadModelWorker {
 
  protected:
   virtual void CallDoWorkAndSignalTask(
-      Callback0::Type* work, base::WaitableEvent* done) OVERRIDE;
+      const WorkCallback& work,
+      base::WaitableEvent* done,
+      UnrecoverableErrorInfo* error_info) OVERRIDE;
 };
 
 class FileModelWorker : public BrowserThreadModelWorker {
@@ -64,7 +71,9 @@ class FileModelWorker : public BrowserThreadModelWorker {
 
  protected:
   virtual void CallDoWorkAndSignalTask(
-      Callback0::Type* work, base::WaitableEvent* done) OVERRIDE;
+      const WorkCallback& work,
+      base::WaitableEvent* done,
+      UnrecoverableErrorInfo* error_info) OVERRIDE;
 };
 
 }  // namespace browser_sync

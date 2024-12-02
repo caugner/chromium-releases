@@ -14,8 +14,8 @@
 #include "base/threading/non_thread_safe.h"
 #include "content/browser/browser_child_process_host.h"
 #include "content/common/content_export.h"
-#include "content/common/gpu/gpu_info.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
+#include "content/public/common/gpu_info.h"
 #include "ui/gfx/native_widget_types.h"
 
 struct GPUCreateCommandBufferConfig;
@@ -52,7 +52,7 @@ class GpuProcessHost : public BrowserChildProcessHost,
   static GpuProcessHost* FromID(int host_id);
   int host_id() const { return host_id_; }
 
-  virtual bool Send(IPC::Message* msg);
+  virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // ChildProcessHost implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
@@ -60,7 +60,7 @@ class GpuProcessHost : public BrowserChildProcessHost,
 
   typedef Callback3<const IPC::ChannelHandle&,
                     base::ProcessHandle,
-                    const GPUInfo&>::Type
+                    const content::GPUInfo&>::Type
     EstablishChannelCallback;
 
   // Tells the GPU process to create a new channel for communication with a
@@ -80,6 +80,9 @@ class GpuProcessHost : public BrowserChildProcessHost,
       const GPUCreateCommandBufferConfig& init_params,
       CreateCommandBufferCallback* callback);
 
+  // Whether this GPU process is set up to use software rendering.
+  bool software_rendering();
+
  private:
   GpuProcessHost(int host_id);
   virtual ~GpuProcessHost();
@@ -89,26 +92,24 @@ class GpuProcessHost : public BrowserChildProcessHost,
   // Post an IPC message to the UI shim's message handler on the UI thread.
   void RouteOnUIThread(const IPC::Message& message);
 
-  virtual bool CanShutdown();
-  virtual void OnProcessLaunched();
-  virtual void OnChildDied();
-  virtual void OnProcessCrashed(int exit_code);
+  virtual void OnProcessLaunched() OVERRIDE;
+  virtual void OnProcessCrashed(int exit_code) OVERRIDE;
 
   // Message handlers.
   void OnChannelEstablished(const IPC::ChannelHandle& channel_handle);
   void OnCommandBufferCreated(const int32 route_id);
   void OnDestroyCommandBuffer(
       gfx::PluginWindowHandle window, int32 renderer_id, int32 render_view_id);
-  void OnGraphicsInfoCollected(const GPUInfo& gpu_info);
+  void OnGraphicsInfoCollected(const content::GPUInfo& gpu_info);
 
-  bool LaunchGpuProcess();
+  bool LaunchGpuProcess(const std::string& channel_id);
 
   void SendOutstandingReplies();
   void EstablishChannelError(
       EstablishChannelCallback* callback,
       const IPC::ChannelHandle& channel_handle,
       base::ProcessHandle renderer_process_for_gpu,
-      const GPUInfo& gpu_info);
+      const content::GPUInfo& gpu_info);
   void CreateCommandBufferError(CreateCommandBufferCallback* callback,
                                 int32 route_id);
 
@@ -123,7 +124,7 @@ class GpuProcessHost : public BrowserChildProcessHost,
   std::queue<linked_ptr<CreateCommandBufferCallback> >
       create_command_buffer_requests_;
 
-#if defined(TOOLKIT_USES_GTK) && !defined(TOUCH_UI)
+#if defined(TOOLKIT_USES_GTK)
   typedef std::pair<int32 /* renderer_id */,
                     int32 /* render_view_id */> ViewID;
 
@@ -148,6 +149,8 @@ class GpuProcessHost : public BrowserChildProcessHost,
   // Whether we are running a GPU thread inside the browser process instead
   // of a separate GPU process.
   bool in_process_;
+
+  bool software_rendering_;
 
   scoped_ptr<GpuMainThread> in_process_gpu_thread_;
 

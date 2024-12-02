@@ -13,13 +13,14 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/net/gaia/gaia_oauth_fetcher.h"
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class GaiaAuthFetcher;
 class Profile;
@@ -39,7 +40,7 @@ struct GoogleServiceSigninSuccessDetails {
 
 class SigninManager : public GaiaAuthConsumer,
                       public GaiaOAuthConsumer,
-                      public NotificationObserver {
+                      public content::NotificationObserver {
  public:
   SigninManager();
   virtual ~SigninManager();
@@ -81,17 +82,21 @@ class SigninManager : public GaiaAuthConsumer,
   // associated with the user, and canceling all auth in progress.
   void SignOut();
 
+  // Called when a new request to re-authenticate a user is in progress.
+  // Will clear in memory data but leaves the db as such so when the browser
+  // restarts we can use the old token(which might throw a password error).
+  void ClearInMemoryData();
+
   // GaiaAuthConsumer
   virtual void OnClientLoginSuccess(const ClientLoginResult& result) OVERRIDE;
-  virtual void OnClientLoginFailure(const GoogleServiceAuthError& error)
-      OVERRIDE;
+  virtual void OnClientLoginFailure(
+      const GoogleServiceAuthError& error) OVERRIDE;
   virtual void OnGetUserInfoSuccess(const std::string& key,
                                     const std::string& value) OVERRIDE;
   virtual void OnGetUserInfoKeyNotFound(const std::string& key) OVERRIDE;
-  virtual void OnGetUserInfoFailure(const GoogleServiceAuthError& error)
-      OVERRIDE;
-  virtual void OnTokenAuthFailure(const GoogleServiceAuthError& error)
-      OVERRIDE;
+  virtual void OnGetUserInfoFailure(
+      const GoogleServiceAuthError& error) OVERRIDE;
+  virtual void OnTokenAuthFailure(const GoogleServiceAuthError& error) OVERRIDE;
 
   // GaiaOAuthConsumer
   virtual void OnOAuthGetAccessTokenSuccess(const std::string& token,
@@ -100,17 +105,17 @@ class SigninManager : public GaiaAuthConsumer,
       const GoogleServiceAuthError& error) OVERRIDE;
   virtual void OnOAuthWrapBridgeSuccess(const std::string& service_name,
                                         const std::string& token,
-                                        const std::string& expires_in)
-      OVERRIDE;
-  virtual void OnOAuthWrapBridgeFailure(const std::string& service_name,
-                                        const GoogleServiceAuthError& error);
+                                        const std::string& expires_in) OVERRIDE;
+  virtual void OnOAuthWrapBridgeFailure(
+      const std::string& service_name,
+      const GoogleServiceAuthError& error) OVERRIDE;
   virtual void OnUserInfoSuccess(const std::string& email) OVERRIDE;
   virtual void OnUserInfoFailure(const GoogleServiceAuthError& error) OVERRIDE;
 
-  // NotificationObserver
+  // content::NotificationObserver
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   void PrepareForSignin();
@@ -140,7 +145,7 @@ class SigninManager : public GaiaAuthConsumer,
   scoped_ptr<GaiaOAuthFetcher> oauth_login_;
 
   // Register for notifications from the TokenService.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninManager);
 };

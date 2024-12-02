@@ -13,16 +13,15 @@
 
 #include "base/hash_tables.h"
 #include "base/memory/linked_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/shared_memory.h"
-#include "base/task.h"
 #include "content/common/content_export.h"
 #include "ipc/ipc_channel.h"
 #include "webkit/glue/resource_loader_bridge.h"
 
-struct ResourceResponseHead;
-
 namespace content {
 class ResourceDispatcherDelegate;
+struct ResourceResponseHead;
 }
 
 // This class serves as a communication interface between the
@@ -34,7 +33,7 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Channel::Listener {
   virtual ~ResourceDispatcher();
 
   // IPC::Channel::Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Creates a ResourceLoaderBridge for this type of dispatcher, this is so
   // this can be tested regardless of the ResourceLoaderBridge::Create
@@ -105,7 +104,7 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Channel::Listener {
       int request_id,
       int64 position,
       int64 size);
-  void OnReceivedResponse(int request_id, const ResourceResponseHead&);
+  void OnReceivedResponse(int request_id, const content::ResourceResponseHead&);
   void OnReceivedCachedMetadata(int request_id, const std::vector<char>& data);
   void OnReceivedRedirect(
       const IPC::Message& message,
@@ -154,7 +153,7 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Channel::Listener {
   // All pending requests issued to the host
   PendingRequestList pending_requests_;
 
-  ScopedRunnableMethodFactory<ResourceDispatcher> method_factory_;
+  base::WeakPtrFactory<ResourceDispatcher> weak_factory_;
 
   content::ResourceDispatcherDelegate* delegate_;
 

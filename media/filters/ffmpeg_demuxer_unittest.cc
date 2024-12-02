@@ -42,8 +42,8 @@ class FFmpegDemuxerTest : public testing::Test {
  protected:
 
   FFmpegDemuxerTest() {
-    // Create an FFmpegDemuxer.
-    demuxer_ = new FFmpegDemuxer(&message_loop_);
+    // Create an FFmpegDemuxer with local data source.
+    demuxer_ = new FFmpegDemuxer(&message_loop_, true);
     demuxer_->disable_first_seek_hack_for_testing();
 
     // Inject a filter host and message loop and prepare a data source.
@@ -182,22 +182,35 @@ TEST_F(FFmpegDemuxerTest, Initialize_Successful) {
       demuxer_->GetStream(DemuxerStream::VIDEO);
   ASSERT_TRUE(stream);
   EXPECT_EQ(DemuxerStream::VIDEO, stream->type());
-  ASSERT_TRUE(stream->GetAVStream());
+
+  const VideoDecoderConfig& video_config = stream->video_decoder_config();
+  EXPECT_EQ(kCodecVP8, video_config.codec());
+  EXPECT_EQ(VideoFrame::YV12, video_config.format());
+  EXPECT_EQ(320, video_config.coded_size().width());
+  EXPECT_EQ(240, video_config.coded_size().height());
+  EXPECT_EQ(0, video_config.visible_rect().x());
+  EXPECT_EQ(0, video_config.visible_rect().y());
+  EXPECT_EQ(320, video_config.visible_rect().width());
+  EXPECT_EQ(240, video_config.visible_rect().height());
+  EXPECT_EQ(30000, video_config.frame_rate_numerator());
+  EXPECT_EQ(1001, video_config.frame_rate_denominator());
+  EXPECT_EQ(1, video_config.aspect_ratio_numerator());
+  EXPECT_EQ(1, video_config.aspect_ratio_denominator());
+  EXPECT_FALSE(video_config.extra_data());
+  EXPECT_EQ(0u, video_config.extra_data_size());
 
   // Audio stream should be present.
   stream = demuxer_->GetStream(DemuxerStream::AUDIO);
   ASSERT_TRUE(stream);
   EXPECT_EQ(DemuxerStream::AUDIO, stream->type());
-  ASSERT_TRUE(stream->GetAVStream());
 
-  // FFmpegDemuxer's audio streams support AudioDecoderConfig structs.
-  const AudioDecoderConfig& config = stream->audio_decoder_config();
-  EXPECT_EQ(kCodecVorbis, config.codec());
-  EXPECT_EQ(16, config.bits_per_channel());
-  EXPECT_EQ(CHANNEL_LAYOUT_STEREO, config.channel_layout());
-  EXPECT_EQ(44100, config.samples_per_second());
-  EXPECT_TRUE(config.extra_data());
-  EXPECT_GT(config.extra_data_size(), 0u);
+  const AudioDecoderConfig& audio_config = stream->audio_decoder_config();
+  EXPECT_EQ(kCodecVorbis, audio_config.codec());
+  EXPECT_EQ(16, audio_config.bits_per_channel());
+  EXPECT_EQ(CHANNEL_LAYOUT_STEREO, audio_config.channel_layout());
+  EXPECT_EQ(44100, audio_config.samples_per_second());
+  EXPECT_TRUE(audio_config.extra_data());
+  EXPECT_GT(audio_config.extra_data_size(), 0u);
 }
 
 TEST_F(FFmpegDemuxerTest, Read_Audio) {
@@ -376,7 +389,7 @@ class MockReadCallback : public base::RefCountedThreadSafe<MockReadCallback> {
   }
 
   MOCK_METHOD0(OnDelete, void());
-  MOCK_METHOD1(Run, void(Buffer* buffer));
+  MOCK_METHOD1(Run, void(const scoped_refptr<Buffer>& buffer));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockReadCallback);
@@ -495,7 +508,7 @@ TEST_F(FFmpegDemuxerTest, DisableAudioStream) {
 class MockFFmpegDemuxer : public FFmpegDemuxer {
  public:
   explicit MockFFmpegDemuxer(MessageLoop* message_loop)
-      : FFmpegDemuxer(message_loop) {
+      : FFmpegDemuxer(message_loop, true) {
   }
   virtual ~MockFFmpegDemuxer() {}
 
@@ -553,18 +566,18 @@ TEST_F(FFmpegDemuxerTest, ProtocolRead) {
       .WillOnce(DoAll(SetArgPointee<0>(1024), Return(true)));
 
   // First read.
-  EXPECT_EQ(512, demuxer->Read(512, kBuffer));
+  EXPECT_EQ(512u, demuxer->Read(512, kBuffer));
   int64 position;
   EXPECT_TRUE(demuxer->GetPosition(&position));
   EXPECT_EQ(512, position);
 
   // Second read.
-  EXPECT_EQ(512, demuxer->Read(512, kBuffer));
+  EXPECT_EQ(512u, demuxer->Read(512, kBuffer));
   EXPECT_TRUE(demuxer->GetPosition(&position));
   EXPECT_EQ(1024, position);
 
   // Third read will get an end-of-file error, which is represented as zero.
-  EXPECT_EQ(0, demuxer->Read(512, kBuffer));
+  EXPECT_EQ(0u, demuxer->Read(512, kBuffer));
 
   // This read complete signal is generated when demuxer is stopped.
   EXPECT_CALL(*demuxer, SignalReadCompleted(DataSource::kReadError));

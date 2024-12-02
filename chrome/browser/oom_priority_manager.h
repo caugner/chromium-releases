@@ -8,6 +8,7 @@
 
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/hash_tables.h"
 #include "base/process.h"
@@ -16,8 +17,8 @@
 #include "base/task.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class TabContents;
 
@@ -32,7 +33,7 @@ namespace browser {
 //
 // The algorithm used favors killing tabs that are not selected, not pinned,
 // and have been idle for longest, in that order of priority.
-class OomPriorityManager : public NotificationObserver {
+class OomPriorityManager : public content::NotificationObserver {
  public:
   OomPriorityManager();
   virtual ~OomPriorityManager();
@@ -81,12 +82,12 @@ class OomPriorityManager : public NotificationObserver {
   static bool CompareTabStats(TabStats first, TabStats second);
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   base::RepeatingTimer<OomPriorityManager> timer_;
   base::OneShotTimer<OomPriorityManager> focus_tab_score_adjust_timer_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // This lock is for pid_to_oom_score_ and focus_tab_pid_.
   base::Lock pid_to_oom_score_lock_;

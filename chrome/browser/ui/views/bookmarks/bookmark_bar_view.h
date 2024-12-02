@@ -7,6 +7,7 @@
 #pragma once
 
 #include <set>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -14,22 +15,21 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_instructions_view.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_controller_views.h"
 #include "chrome/browser/ui/views/detachable_toolbar_view.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/animation/animation_delegate.h"
-#include "views/context_menu_controller.h"
-#include "views/controls/button/button.h"
-#include "views/controls/menu/view_menu_delegate.h"
-#include "views/drag_controller.h"
+#include "ui/views/context_menu_controller.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
+#include "ui/views/drag_controller.h"
 
 class BookmarkContextMenu;
 class Browser;
 class PageNavigator;
-class PrefService;
 
 namespace ui {
 class SlideAnimation;
@@ -50,11 +50,10 @@ class TextButton;
 // waits until the HistoryService for the profile has been loaded before
 // creating the BookmarkModel.
 class BookmarkBarView : public DetachableToolbarView,
-                        public ProfileSyncServiceObserver,
                         public BookmarkModelObserver,
                         public views::ViewMenuDelegate,
                         public views::ButtonListener,
-                        public NotificationObserver,
+                        public content::NotificationObserver,
                         public views::ContextMenuController,
                         public views::DragController,
                         public ui::AnimationDelegate,
@@ -179,9 +178,6 @@ class BookmarkBarView : public DetachableToolbarView,
   // AccessiblePaneView methods:
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
-  // ProfileSyncServiceObserver method.
-  virtual void OnStateChanged() OVERRIDE;
-
   // SlideAnimationDelegate implementation.
   virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
   virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
@@ -239,8 +235,8 @@ class BookmarkBarView : public DetachableToolbarView,
 
   // NotificationService:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // If true we're running tests. This short circuits a couple of animations.
   static bool testing_;
@@ -288,9 +284,6 @@ class BookmarkBarView : public DetachableToolbarView,
 
   // Creates the button used when not all bookmark buttons fit.
   views::MenuButton* CreateOverflowButton();
-
-  // Creates the sync error button and adds it as a child view.
-  views::TextButton* CreateSyncErrorButton();
 
   // Creates the button for rendering the specified bookmark node.
   views::View* CreateBookmarkButton(const BookmarkNode* node);
@@ -357,7 +350,7 @@ class BookmarkBarView : public DetachableToolbarView,
   // desired bounds. If |compute_bounds_only| = FALSE, the bounds are set.
   gfx::Size LayoutItems(bool compute_bounds_only);
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Used for opening urls.
   PageNavigator* page_navigator_;
@@ -387,13 +380,6 @@ class BookmarkBarView : public DetachableToolbarView,
 
   // Used to track drops on the bookmark bar view.
   scoped_ptr<DropInfo> drop_info_;
-
-  // The sync re-login indicator which appears when the user needs to re-enter
-  // credentials in order to continue syncing.
-  views::TextButton* sync_error_button_;
-
-  // A pointer to the ProfileSyncService instance if one exists.
-  ProfileSyncService* sync_service_;
 
   // Visible if not all the bookmark buttons fit.
   views::MenuButton* overflow_button_;

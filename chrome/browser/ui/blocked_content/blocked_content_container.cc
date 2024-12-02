@@ -107,20 +107,6 @@ void BlockedContentContainer::Clear() {
 
 // Overridden from TabContentsDelegate:
 
-// TODO(adriansc): Remove this method once refactoring changed all call sites.
-TabContents* BlockedContentContainer::OpenURLFromTab(
-    TabContents* source,
-    const GURL& url,
-    const GURL& referrer,
-    WindowOpenDisposition disposition,
-    content::PageTransition transition) {
-  return owner_->tab_contents()->OpenURL(OpenURLParams(url,
-                                                       referrer,
-                                                       disposition,
-                                                       transition,
-                                                       false));
-}
-
 TabContents* BlockedContentContainer::OpenURLFromTab(
     TabContents* source,
     const OpenURLParams& params) {
@@ -161,7 +147,7 @@ void BlockedContentContainer::MoveContents(TabContents* source,
   }
 }
 
-bool BlockedContentContainer::IsPopup(const TabContents* source) const {
+bool BlockedContentContainer::IsPopupOrPanel(const TabContents* source) const {
   // Assume everything added is a popup. This may turn out to be wrong, but
   // callers don't cache this information so it should be fine if the value ends
   // up changing.

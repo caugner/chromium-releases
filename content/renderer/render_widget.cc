@@ -4,6 +4,7 @@
 
 #include "content/renderer/render_widget.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
@@ -23,14 +24,14 @@
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPoint.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenu.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenuInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRange.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/surface/transport_dib.h"
@@ -73,7 +74,7 @@ RenderWidget::RenderWidget(WebKit::WebPopupType popup_type)
       host_window_(0),
       current_paint_buf_(NULL),
       next_paint_flags_(0),
-      filtered_time_per_frame_(1.0f/60.0f),
+      filtered_time_per_frame_(0.0f),
       update_reply_pending_(false),
       using_asynchronous_swapbuffers_(false),
       num_swapbuffers_complete_pending_(0),
@@ -90,7 +91,6 @@ RenderWidget::RenderWidget(WebKit::WebPopupType popup_type)
       can_compose_inline_(true),
       popup_type_(popup_type),
       pending_window_rect_count_(0),
-      suppress_next_char_events_(false),
       is_accelerated_compositing_active_(false),
       animation_update_pending_(false),
       animation_task_posted_(false),
@@ -252,8 +252,8 @@ void RenderWidget::OnClose() {
   // If there is a Send call on the stack, then it could be dangerous to close
   // now.  Post a task that only gets invoked when there are no nested message
   // loops.
-  MessageLoop::current()->PostNonNestableTask(FROM_HERE,
-      NewRunnableMethod(this, &RenderWidget::Close));
+  MessageLoop::current()->PostNonNestableTask(
+      FROM_HERE, NewRunnableMethod(this, &RenderWidget::Close));
 
   // Balances the AddRef taken when we called AddRoute.
   Release();
@@ -272,34 +272,41 @@ void RenderWidget::OnResize(const gfx::Size& new_size,
   // Remember the rect where the resize corner will be drawn.
   resizer_rect_ = resizer_rect;
 
-  if (size_ == new_size)
-    return;
-
-  // TODO(darin): We should not need to reset this here.
-  SetHidden(false);
-  needs_repainting_on_restore_ = false;
-
-  size_ = new_size;
+  // NOTE: We may have entered fullscreen mode without changing our size.
+  bool fullscreen_change = is_fullscreen_ != is_fullscreen;
+  if (fullscreen_change)
+    WillToggleFullscreen();
   is_fullscreen_ = is_fullscreen;
 
-  // We should not be sent a Resize message if we have not ACK'd the previous
-  DCHECK(!next_paint_is_resize_ack());
+  if (size_ != new_size) {
+    // TODO(darin): We should not need to reset this here.
+    SetHidden(false);
+    needs_repainting_on_restore_ = false;
 
-  paint_aggregator_.ClearPendingUpdate();
+    size_ = new_size;
 
-  // When resizing, we want to wait to paint before ACK'ing the resize.  This
-  // ensures that we only resize as fast as we can paint.  We only need to send
-  // an ACK if we are resized to a non-empty rect.
-  webwidget_->resize(new_size);
-  if (!new_size.IsEmpty()) {
-    if (!is_accelerated_compositing_active_) {
-      // Resize should have caused an invalidation of the entire view.
-      DCHECK(paint_aggregator_.HasPendingUpdate());
+    // We should not be sent a Resize message if we have not ACK'd the previous
+    DCHECK(!next_paint_is_resize_ack());
+
+    paint_aggregator_.ClearPendingUpdate();
+
+    // When resizing, we want to wait to paint before ACK'ing the resize.  This
+    // ensures that we only resize as fast as we can paint.  We only need to
+    // send an ACK if we are resized to a non-empty rect.
+    webwidget_->resize(new_size);
+    if (!new_size.IsEmpty()) {
+      if (!is_accelerated_compositing_active_) {
+        // Resize should have caused an invalidation of the entire view.
+        DCHECK(paint_aggregator_.HasPendingUpdate());
+      }
+
+      // We will send the Resize_ACK flag once we paint again.
+      set_next_paint_is_resize_ack();
     }
-
-    // We will send the Resize_ACK flag once we paint again.
-    set_next_paint_is_resize_ack();
   }
+
+  if (fullscreen_change)
+    DidToggleFullscreen();
 }
 
 void RenderWidget::OnWasHidden() {
@@ -366,7 +373,8 @@ void RenderWidget::OnUpdateRectAck() {
   }
 
   // Notify subclasses.
-  DidFlushPaint();
+  if (!is_accelerated_compositing_active_)
+    DidFlushPaint();
 
   // Continue painting if necessary...
   DoDeferredUpdateAndSendInputAck();
@@ -418,10 +426,6 @@ void RenderWidget::OnSwapBuffersComplete() {
     return;
   }
 
-  // Notify subclasses.
-  if(is_accelerated_compositing_active_)
-    DidFlushPaint();
-
   // Continue painting if necessary...
   DoDeferredUpdateAndSendInputAck();
 }
@@ -441,11 +445,6 @@ void RenderWidget::OnHandleInputEvent(const IPC::Message& message) {
   const WebInputEvent* input_event =
       reinterpret_cast<const WebInputEvent*>(data);
 
-  bool is_keyboard_shortcut = false;
-  // is_keyboard_shortcut flag is only available for RawKeyDown events.
-  if (input_event->type == WebInputEvent::RawKeyDown)
-    message.ReadBool(&iter, &is_keyboard_shortcut);
-
   bool prevent_default = false;
   if (WebInputEvent::isMouseEventType(input_event->type)) {
     prevent_default = WillHandleMouseEvent(
@@ -453,17 +452,8 @@ void RenderWidget::OnHandleInputEvent(const IPC::Message& message) {
   }
 
   bool processed = prevent_default;
-  if (input_event->type != WebInputEvent::Char || !suppress_next_char_events_) {
-    suppress_next_char_events_ = false;
-    if (!processed && webwidget_)
-      processed = webwidget_->handleInputEvent(*input_event);
-  }
-
-  // If this RawKeyDown event corresponds to a browser keyboard shortcut and
-  // it's not processed by webkit, then we need to suppress the upcoming Char
-  // events.
-  if (!processed && is_keyboard_shortcut)
-    suppress_next_char_events_ = true;
+  if (!processed && webwidget_)
+    processed = webwidget_->handleInputEvent(*input_event);
 
   IPC::Message* response =
       new ViewHostMsg_HandleInputEvent_ACK(routing_id_, input_event->type,
@@ -534,8 +524,19 @@ void RenderWidget::PaintRect(const gfx::Rect& rect,
                                                     SkShader::kRepeat_TileMode,
                                                     SkShader::kRepeat_TileMode);
     paint.setShader(shader)->unref();
-    paint.setXfermodeMode(SkXfermode::kSrcOver_Mode);
+
+    // Use kSrc_Mode to handle background_ transparency properly.
+    paint.setXfermodeMode(SkXfermode::kSrc_Mode);
+
+    // Canvas could contain multiple update rects. Clip to given rect so that
+    // we don't accidentally clear other update rects.
+    canvas->save();
+    SkRect clip;
+    clip.set(SkIntToScalar(rect.x()), SkIntToScalar(rect.y()),
+             SkIntToScalar(rect.right()), SkIntToScalar(rect.bottom()));
+    canvas->clipRect(clip);
     canvas->drawPaint(paint);
+    canvas->restore();
   }
 
   // First see if this rect is a plugin that can paint itself faster.
@@ -642,8 +643,9 @@ void RenderWidget::AnimateIfNeeded() {
     // Set a timer to call us back after animationInterval before
     // running animation callbacks so that if a callback requests another
     // we'll be sure to run it at the proper time.
-    MessageLoop::current()->PostDelayedTask(FROM_HERE, NewRunnableMethod(
-        this, &RenderWidget::AnimationCallback), animationInterval);
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE, base::Bind(&RenderWidget::AnimationCallback, this),
+        animationInterval);
     animation_task_posted_ = true;
     animation_update_pending_ = false;
     webwidget_->animate(0.0);
@@ -662,8 +664,8 @@ void RenderWidget::AnimateIfNeeded() {
   // tasks until base::Time::Now() has advanced far enough.
   int64 delay = (animation_floor_time_ - now).InMillisecondsRoundedUp();
   animation_task_posted_ = true;
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      NewRunnableMethod(this, &RenderWidget::AnimationCallback), delay);
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE, base::Bind(&RenderWidget::AnimationCallback, this), delay);
 }
 
 bool RenderWidget::IsRenderingVSynced() {
@@ -880,8 +882,8 @@ void RenderWidget::didInvalidateRect(const WebRect& rect) {
   // 2) Allows us to collect more damage rects before painting to help coalesce
   //    the work that we will need to do.
   invalidation_task_posted_ = true;
-  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &RenderWidget::InvalidationCallback));
+  MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(&RenderWidget::InvalidationCallback, this));
 }
 
 void RenderWidget::didScrollRect(int dx, int dy, const WebRect& clip_rect) {
@@ -918,15 +920,21 @@ void RenderWidget::didScrollRect(int dx, int dy, const WebRect& clip_rect) {
   // 2) Allows us to collect more damage rects before painting to help coalesce
   //    the work that we will need to do.
   invalidation_task_posted_ = true;
-  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &RenderWidget::InvalidationCallback));
+  MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(&RenderWidget::InvalidationCallback, this));
+}
+
+void RenderWidget::didAutoResize(const WebSize& new_size) {
+  size_ = new_size;
 }
 
 void RenderWidget::didActivateCompositor(int compositor_identifier) {
   TRACE_EVENT0("gpu", "RenderWidget::didActivateCompositor");
 
-  RenderThreadImpl::current()->compositor_thread()->
-      AddCompositor(routing_id_, compositor_identifier);
+  CompositorThread* compositor_thread =
+      RenderThreadImpl::current()->compositor_thread();
+  if (compositor_thread)
+    compositor_thread->AddCompositor(routing_id_, compositor_identifier);
 
   is_accelerated_compositing_active_ = true;
   Send(new ViewHostMsg_DidActivateAcceleratedCompositing(
@@ -946,6 +954,31 @@ void RenderWidget::didDeactivateCompositor() {
 
   if (using_asynchronous_swapbuffers_)
     using_asynchronous_swapbuffers_ = false;
+}
+
+void RenderWidget::didCommitAndDrawCompositorFrame() {
+  TRACE_EVENT0("gpu", "RenderWidget::didCommitAndDrawCompositorFrame");
+  // Notify subclasses.
+  DidFlushPaint();
+}
+
+void RenderWidget::didCompleteSwapBuffers() {
+  if (update_reply_pending())
+    return;
+
+  if (!next_paint_flags_ && !plugin_window_moves_.size())
+    return;
+
+  ViewHostMsg_UpdateRect_Params params;
+  params.view_size = size_;
+  params.resizer_rect = resizer_rect_;
+  params.plugin_window_moves.swap(plugin_window_moves_);
+  params.flags = next_paint_flags_;
+  params.scroll_offset = GetScrollOffset();
+  update_reply_pending_ = true;
+
+  Send(new ViewHostMsg_UpdateRect(routing_id_, params));
+  next_paint_flags_ = 0;
 }
 
 void RenderWidget::scheduleComposite() {
@@ -968,8 +1001,8 @@ void RenderWidget::scheduleAnimation() {
     animation_update_pending_ = true;
     if (!animation_task_posted_) {
       animation_task_posted_ = true;
-      MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-          this, &RenderWidget::AnimationCallback));
+      MessageLoop::current()->PostTask(
+          FROM_HERE, base::Bind(&RenderWidget::AnimationCallback, this));
     }
   }
 }
@@ -1027,8 +1060,8 @@ void RenderWidget::closeWidgetSoon() {
   // could be closed before the JS finishes executing.  So instead, post a
   // message back to the message loop, which won't run until the JS is
   // complete, and then the Close message can be sent.
-  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &RenderWidget::DoDeferredClose));
+  MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(&RenderWidget::DoDeferredClose, this));
 }
 
 void RenderWidget::Close() {
@@ -1135,7 +1168,9 @@ void RenderWidget::OnImeSetComposition(
 void RenderWidget::OnImeConfirmComposition(
     const string16& text, const ui::Range& replacement_range) {
   if (webwidget_) {
+    handling_input_event_ = true;
     webwidget_->confirmComposition(text);
+    handling_input_event_ = false;
   }
   // Send an updated IME range with just the caret range.
   ui::Range range(ui::Range::InvalidRange());
@@ -1269,6 +1304,32 @@ void RenderWidget::SetHidden(bool hidden) {
     RenderThread::Get()->WidgetRestored();
 }
 
+void RenderWidget::WillToggleFullscreen() {
+#ifdef WEBKIT_HAS_NEW_FULLSCREEN_API
+  if (!webwidget_)
+    return;
+
+  if (is_fullscreen_) {
+    webwidget_->willExitFullScreen();
+  } else {
+    webwidget_->willEnterFullScreen();
+  }
+#endif
+}
+
+void RenderWidget::DidToggleFullscreen() {
+#ifdef WEBKIT_HAS_NEW_FULLSCREEN_API
+  if (!webwidget_)
+    return;
+
+  if (is_fullscreen_) {
+    webwidget_->didEnterFullScreen();
+  } else {
+    webwidget_->didExitFullScreen();
+  }
+#endif
+}
+
 void RenderWidget::SetBackground(const SkBitmap& background) {
   background_ = background;
 
@@ -1313,22 +1374,21 @@ void RenderWidget::UpdateTextInputState() {
   }
 }
 
-gfx::Rect RenderWidget::GetCaretBounds() {
-  if (!webwidget_)
-    return gfx::Rect();
-  return webwidget_->caretOrSelectionBounds();
+void RenderWidget::GetSelectionBounds(gfx::Rect* start, gfx::Rect* end) {
+  WebRect start_webrect;
+  WebRect end_webrect;
+  webwidget_->selectionBounds(start_webrect, end_webrect);
+  *start = start_webrect;
+  *end = end_webrect;
 }
 
 void RenderWidget::UpdateSelectionBounds() {
   if (!webwidget_)
     return;
 
-  WebRect start;
-  WebRect end;
-  webwidget_->selectionBounds(start, end);
-
-  gfx::Rect start_rect = start;
-  gfx::Rect end_rect = end;
+  gfx::Rect start_rect;
+  gfx::Rect end_rect;
+  GetSelectionBounds(&start_rect, &end_rect);
   if (selection_start_rect_ == start_rect && selection_end_rect_ == end_rect)
     return;
 

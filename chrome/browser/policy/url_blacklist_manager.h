@@ -10,17 +10,15 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
-#include "content/common/notification_observer.h"
+#include "content/public/browser/notification_observer.h"
 
 class GURL;
-class NotificationDetails;
-class NotificationSource;
 class PrefService;
 
 namespace policy {
@@ -41,7 +39,8 @@ class URLBlacklist {
   URLBlacklist();
   virtual ~URLBlacklist();
 
-  // URLs matching |filter| will be blocked.
+  // URLs matching |filter| will be blocked. The filter format is documented
+  // at http://www.chromium.org/administrators/url-blacklist-filter-format
   void Block(const std::string& filter);
 
   // URLs matching |filter| will be allowed. If |filter| is both Blocked and
@@ -67,20 +66,7 @@ class URLBlacklist {
                                  uint16* port,
                                  std::string* path);
  private:
-  struct PathFilter {
-    explicit PathFilter(const std::string& path, uint16 port, bool match)
-        : path_prefix(path),
-          port(port),
-          blocked_schemes(0),
-          allowed_schemes(0),
-          match_subdomains(match) {}
-
-    std::string path_prefix;
-    uint16 port;
-    uint8 blocked_schemes;
-    uint8 allowed_schemes;
-    bool match_subdomains;
-  };
+  struct PathFilter;
 
   typedef std::vector<PathFilter> PathFilterList;
   typedef base::hash_map<std::string, PathFilterList*> HostFilterTable;
@@ -109,7 +95,7 @@ class URLBlacklist {
 // exists in UI, then a potential destruction on IO will come after any task
 // posted to IO from that method on UI. This is used to go through IO before
 // the actual update starts, and grab a WeakPtr.
-class URLBlacklistManager : public NotificationObserver {
+class URLBlacklistManager : public content::NotificationObserver {
  public:
   // Must be constructed on the UI thread.
   explicit URLBlacklistManager(PrefService* pref_service);
@@ -145,8 +131,8 @@ class URLBlacklistManager : public NotificationObserver {
 
  private:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // ---------
   // UI thread

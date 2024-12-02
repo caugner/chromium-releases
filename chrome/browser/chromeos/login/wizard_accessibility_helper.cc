@@ -6,31 +6,26 @@
 
 #include "base/logging.h"
 #include "base/stl_util.h"
+#include "chrome/browser/accessibility/accessibility_extension_api.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/accessibility_util.h"
-#include "chrome/browser/extensions/extension_accessibility_api.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
+#include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/accelerator.h"
-#include "views/view.h"
+#include "ui/views/view.h"
 
 namespace chromeos {
 
-scoped_ptr<views::Accelerator> WizardAccessibilityHelper::accelerator_;
-
 // static
-views::Accelerator WizardAccessibilityHelper::GetAccelerator() {
-  if (!WizardAccessibilityHelper::accelerator_.get())
-    WizardAccessibilityHelper::accelerator_.reset(
-        new views::Accelerator(ui::VKEY_Z, false, true, true));
-  return *(WizardAccessibilityHelper::accelerator_.get());
+ui::Accelerator WizardAccessibilityHelper::GetAccelerator() {
+  return ui::Accelerator(ui::VKEY_Z, false, true, true);
 }
 
 // static
@@ -60,19 +55,19 @@ void WizardAccessibilityHelper::Init() {
 void WizardAccessibilityHelper::RegisterNotifications() {
   registrar_.Add(accessibility_handler_.get(),
                  chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_FOCUSED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(accessibility_handler_.get(),
                  chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_ACTION,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(accessibility_handler_.get(),
                  chrome::NOTIFICATION_ACCESSIBILITY_TEXT_CHANGED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(accessibility_handler_.get(),
                  chrome::NOTIFICATION_ACCESSIBILITY_MENU_OPENED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(accessibility_handler_.get(),
                  chrome::NOTIFICATION_ACCESSIBILITY_MENU_CLOSED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registered_notifications_ = true;
 }
 
@@ -92,7 +87,10 @@ bool WizardAccessibilityHelper::IsAccessibilityEnabled() {
 void WizardAccessibilityHelper::MaybeSpeak(const char* str, bool queue,
     bool interruptible) {
   if (IsAccessibilityEnabled()) {
-    accessibility::Speak(str, queue, interruptible);
+    // Note: queue and interruptible are no longer supported, but
+    // that shouldn't matter because the whole views-based wizard
+    // is obsolete and should be deleted soon.
+    accessibility::Speak(str);
   }
 }
 

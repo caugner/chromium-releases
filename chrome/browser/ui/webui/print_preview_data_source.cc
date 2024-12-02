@@ -51,18 +51,15 @@ PrintPreviewDataSource::PrintPreviewDataSource()
   AddLocalizedString("previewFailed", IDS_PRINT_PREVIEW_FAILED);
   AddLocalizedString("invalidPrinterSettings",
                      IDS_PRINT_PREVIEW_INVALID_PRINTER_SETTINGS);
-  AddLocalizedString("initiatorTabCrashed",
-                     IDS_PRINT_PREVIEW_INITIATOR_TAB_CRASHED);
-  AddLocalizedString("initiatorTabClosed",
-                     IDS_PRINT_PREVIEW_INITIATOR_TAB_CLOSED);
-  AddLocalizedString("reopenPage", IDS_PRINT_PREVIEW_REOPEN_PAGE);
-
   AddLocalizedString("printButton", IDS_PRINT_PREVIEW_PRINT_BUTTON);
   AddLocalizedString("cancelButton", IDS_PRINT_PREVIEW_CANCEL_BUTTON);
   AddLocalizedString("printing", IDS_PRINT_PREVIEW_PRINTING);
   AddLocalizedString("printingToPDFInProgress",
                      IDS_PRINT_PREVIEW_PRINTING_TO_PDF_IN_PROGRESS);
-
+#if defined(OS_MACOSX)
+  AddLocalizedString("openingPDFInPreview",
+                     IDS_PRINT_PREVIEW_OPENING_PDF_IN_PREVIEW);
+#endif
   AddLocalizedString("destinationLabel", IDS_PRINT_PREVIEW_DESTINATION_LABEL);
   AddLocalizedString("copiesLabel", IDS_PRINT_PREVIEW_COPIES_LABEL);
   AddLocalizedString("examplePageRangeText",
@@ -106,6 +103,10 @@ PrintPreviewDataSource::PrintPreviewDataSource()
   AddLocalizedString("printWithCloudPrint",
                      IDS_PRINT_PREVIEW_PRINT_WITH_CLOUD_PRINT);
 #endif
+#if defined(OS_MACOSX)
+  AddLocalizedString("openPdfInPreviewOption",
+                     IDS_PRINT_PREVIEW_OPEN_PDF_IN_PREVIEW_APP);
+#endif
   AddLocalizedString("pageRangeInstruction",
                      IDS_PRINT_PREVIEW_PAGE_RANGE_INSTRUCTION);
   AddLocalizedString("copiesInstruction", IDS_PRINT_PREVIEW_COPIES_INSTRUCTION);
@@ -123,6 +124,11 @@ PrintPreviewDataSource::PrintPreviewDataSource()
   AddLocalizedString("defaultMargins", IDS_PRINT_PREVIEW_DEFAULT_MARGINS);
   AddLocalizedString("noMargins", IDS_PRINT_PREVIEW_NO_MARGINS);
   AddLocalizedString("customMargins", IDS_PRINT_PREVIEW_CUSTOM_MARGINS);
+  AddLocalizedString("minimumMargins", IDS_PRINT_PREVIEW_MINIMUM_MARGINS);
+  AddLocalizedString("top", IDS_PRINT_PREVIEW_TOP_MARGIN_LABEL);
+  AddLocalizedString("bottom", IDS_PRINT_PREVIEW_BOTTOM_MARGIN_LABEL);
+  AddLocalizedString("left", IDS_PRINT_PREVIEW_LEFT_MARGIN_LABEL);
+  AddLocalizedString("right", IDS_PRINT_PREVIEW_RIGHT_MARGIN_LABEL);
 
   set_json_path("strings.js");
   add_resource_path("print_preview.js", IDR_PRINT_PREVIEW_JS);

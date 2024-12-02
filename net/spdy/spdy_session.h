@@ -37,7 +37,7 @@ namespace net {
 // somewhat arbitrary, but is reasonably small and ensures that we elicit
 // ACKs quickly from TCP (because TCP tries to only ACK every other packet).
 const int kMss = 1430;
-const int kMaxSpdyFrameChunkSize = (2 * kMss) - spdy::SpdyFrame::size();
+const int kMaxSpdyFrameChunkSize = (2 * kMss) - spdy::SpdyFrame::kHeaderSize;
 
 class BoundNetLog;
 class SpdySettingsStorage;
@@ -56,7 +56,7 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
   // network events to.
   SpdySession(const HostPortProxyPair& host_port_proxy_pair,
               SpdySessionPool* spdy_session_pool,
-              SpdySettingsStorage* spdy_settings,
+              HttpServerProperties* http_server_properties,
               bool verify_domain_authentication,
               NetLog* net_log);
 
@@ -99,9 +99,13 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
 
   // Check to see if this SPDY session can support an additional domain.
   // If the session is un-authenticated, then this call always returns true.
-  // For SSL-based sessions, verifies that the certificate in use by this
-  // session provides authentication for the domain.
+  // For SSL-based sessions, verifies that the server certificate in use by
+  // this session provides authentication for the domain and no client
+  // certificate was sent to the original server during the SSL handshake.
   // NOTE:  This function can have false negatives on some platforms.
+  // TODO(wtc): rename this function and the Net.SpdyIPPoolDomainMatch
+  // histogram because this function does more than verifying domain
+  // authentication now.
   bool VerifyDomainAuthentication(const std::string& domain);
 
   // Send the SYN frame for |stream_id|. This also sends PING message to check
@@ -228,6 +232,7 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
   friend class base::RefCounted<SpdySession>;
   // Allow tests to access our innards for testing purposes.
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, Ping);
+  FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, FailedPing);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, GetActivePushStream);
 
   struct PendingCreateStream {
@@ -375,26 +380,26 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
   void InvokeUserStreamCreationCallback(scoped_refptr<SpdyStream>* stream);
 
   // SpdyFramerVisitorInterface:
-  virtual void OnError(spdy::SpdyFramer*);
+  virtual void OnError(spdy::SpdyFramer*) OVERRIDE;
   virtual void OnStreamFrameData(spdy::SpdyStreamId stream_id,
                                  const char* data,
-                                 size_t len);
-  virtual void OnControl(const spdy::SpdyControlFrame* frame);
+                                 size_t len) OVERRIDE;
+  virtual void OnControl(const spdy::SpdyControlFrame* frame) OVERRIDE;
 
   virtual bool OnControlFrameHeaderData(spdy::SpdyStreamId stream_id,
                                         const char* header_data,
-                                        size_t len);
+                                        size_t len) OVERRIDE;
 
-  virtual void OnDataFrameHeader(const spdy::SpdyDataFrame* frame);
+  virtual void OnDataFrameHeader(const spdy::SpdyDataFrame* frame) OVERRIDE;
 
   // --------------------------
   // Helper methods for testing
   // --------------------------
-  static void set_connection_at_risk_of_loss_ms(int duration) {
-    connection_at_risk_of_loss_ms_ = duration;
+  static void set_connection_at_risk_of_loss_seconds(int duration) {
+    connection_at_risk_of_loss_seconds_ = duration;
   }
-  static int connection_at_risk_of_loss_ms() {
-    return connection_at_risk_of_loss_ms_;
+  static int connection_at_risk_of_loss_seconds() {
+    return connection_at_risk_of_loss_seconds_;
   }
 
   static void set_trailing_ping_delay_time_ms(int duration) {
@@ -442,7 +447,7 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
   // |spdy_session_pool_| owns us, therefore its lifetime must exceed ours.  We
   // set this to NULL after we are removed from the pool.
   SpdySessionPool* spdy_session_pool_;
-  SpdySettingsStorage* const spdy_settings_;
+  HttpServerProperties* const http_server_properties_;
 
   // The socket handle for this session.
   scoped_ptr<ClientSocketHandle> connection_;
@@ -559,7 +564,7 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
   // This enables or disables connection health checking system.
   static bool enable_ping_based_connection_checking_;
 
-  // |connection_at_risk_of_loss_ms_| is an optimization to avoid sending
+  // |connection_at_risk_of_loss_seconds_| is an optimization to avoid sending
   // wasteful preface pings (when we just got some data).
   //
   // If it is zero (the most conservative figure), then we always send the
@@ -572,7 +577,7 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
   // We don't think any connection will time out in under about 10 seconds. So
   // this might as well be set to something conservative like 10 seconds. Later,
   // we could adjust it to send fewer pings perhaps.
-  static int connection_at_risk_of_loss_ms_;
+  static int connection_at_risk_of_loss_seconds_;
 
   // This is the amount of time (in milliseconds) we wait before sending a
   // trailing ping. We use a trailing ping (sent after all data) to get an
@@ -598,7 +603,7 @@ class NetLogSpdySynParameter : public NetLog::EventParameters {
     return headers_;
   }
 
-  virtual base::Value* ToValue() const;
+  virtual base::Value* ToValue() const OVERRIDE;
 
  private:
   virtual ~NetLogSpdySynParameter();

@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/hash_tables.h"
 #include "base/time.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
@@ -50,6 +50,8 @@ struct SBAddPrefix {
   int32 GetAddChunkId() const { return chunk_id; }
   SBPrefix GetAddPrefix() const { return prefix; }
 };
+
+typedef std::deque<SBAddPrefix> SBAddPrefixes;
 
 struct SBSubPrefix {
   int32 chunk_id;
@@ -138,7 +140,7 @@ bool SBAddPrefixHashLess(const T& a, const U& b) {
 // TODO(shess): The original code did not process |sub_full_hashes|
 // for matches in |add_full_hashes|, so this code doesn't, either.  I
 // think this is probably a bug.
-void SBProcessSubs(std::vector<SBAddPrefix>* add_prefixes,
+void SBProcessSubs(SBAddPrefixes* add_prefixes,
                    std::vector<SBSubPrefix>* sub_prefixes,
                    std::vector<SBAddFullHash>* add_full_hashes,
                    std::vector<SBSubFullHash>* sub_full_hashes,
@@ -147,7 +149,7 @@ void SBProcessSubs(std::vector<SBAddPrefix>* add_prefixes,
 
 // Records a histogram of the number of items in |prefix_misses| which
 // are not in |add_prefixes|.
-void SBCheckPrefixMisses(const std::vector<SBAddPrefix>& add_prefixes,
+void SBCheckPrefixMisses(const SBAddPrefixes& add_prefixes,
                          const std::set<SBPrefix>& prefix_misses);
 
 // TODO(shess): This uses int32 rather than int because it's writing
@@ -174,7 +176,7 @@ class SafeBrowsingStore {
   virtual bool Delete() = 0;
 
   // Get all Add prefixes out from the store.
-  virtual bool GetAddPrefixes(std::vector<SBAddPrefix>* add_prefixes) = 0;
+  virtual bool GetAddPrefixes(SBAddPrefixes* add_prefixes) = 0;
 
   // Get all add full-length hashes.
   virtual bool GetAddFullHashes(
@@ -230,7 +232,7 @@ class SafeBrowsingStore {
   virtual bool FinishUpdate(
       const std::vector<SBAddFullHash>& pending_adds,
       const std::set<SBPrefix>& prefix_misses,
-      std::vector<SBAddPrefix>* add_prefixes_result,
+      SBAddPrefixes* add_prefixes_result,
       std::vector<SBAddFullHash>* add_full_hashes_result) = 0;
 
   // Cancel the update in process and remove any temporary disk

@@ -4,8 +4,8 @@
 
 // CancelableRequestProviders and Consumers work together to make requests that
 // execute on a background thread in the provider and return data to the
-// consumer. These class collaborate to keep a list of open requests and to
-// make sure that requests to not outlive either of the objects involved in the
+// consumer. These classes collaborate to keep a list of open requests and to
+// make sure that requests do not outlive either of the objects involved in the
 // transaction.
 //
 // If you do not need to return data to the consumer, do not use this system,
@@ -776,13 +776,14 @@ class CancelableRequest<base::Callback<void(A1)> > :
     DCHECK(!callback.is_null()) << "Callback must be initialized.";
   }
 
-  void ForwardResult(typename base::internal::ParamTraits<A1>::ForwardType a1) {
+  void ForwardResult(
+      typename base::internal::CallbackParamTraits<A1>::ForwardType a1) {
     if (canceled()) return;
     DoForward(base::Bind(callback_, a1), false);
   }
 
   void ForwardResultAsync(
-      typename base::internal::ParamTraits<A1>::ForwardType a1) {
+      typename base::internal::CallbackParamTraits<A1>::ForwardType a1) {
     if (canceled()) return;
     DoForward(base::Bind(callback_, a1), true);
   }
@@ -806,15 +807,16 @@ class CancelableRequest<base::Callback<void(A1,A2)> > :
     DCHECK(!callback.is_null()) << "Callback must be initialized.";
   }
 
-  void ForwardResult(typename base::internal::ParamTraits<A1>::ForwardType a1,
-                     typename base::internal::ParamTraits<A2>::ForwardType a2) {
+  void ForwardResult(
+      typename base::internal::CallbackParamTraits<A1>::ForwardType a1,
+      typename base::internal::CallbackParamTraits<A2>::ForwardType a2) {
     if (canceled()) return;
     DoForward(base::Bind(callback_, a1, a2), false);
   }
 
   void ForwardResultAsync(
-      typename base::internal::ParamTraits<A1>::ForwardType a1,
-      typename base::internal::ParamTraits<A2>::ForwardType a2) {
+      typename base::internal::CallbackParamTraits<A1>::ForwardType a1,
+      typename base::internal::CallbackParamTraits<A2>::ForwardType a2) {
     if (canceled()) return;
     DoForward(base::Bind(callback_, a1, a2), true);
   }
@@ -838,17 +840,18 @@ class CancelableRequest<base::Callback<void(A1,A2,A3)> > :
     DCHECK(!callback.is_null()) << "Callback must be initialized.";
   }
 
-  void ForwardResult(typename base::internal::ParamTraits<A1>::ForwardType a1,
-                     typename base::internal::ParamTraits<A2>::ForwardType a2,
-                     typename base::internal::ParamTraits<A3>::ForwardType a3) {
+  void ForwardResult(
+      typename base::internal::CallbackParamTraits<A1>::ForwardType a1,
+      typename base::internal::CallbackParamTraits<A2>::ForwardType a2,
+      typename base::internal::CallbackParamTraits<A3>::ForwardType a3) {
     if (canceled()) return;
     DoForward(base::Bind(callback_, a1, a2, a3), false);
   }
 
   void ForwardResultAsync(
-      typename base::internal::ParamTraits<A1>::ForwardType a1,
-      typename base::internal::ParamTraits<A2>::ForwardType a2,
-      typename base::internal::ParamTraits<A3>::ForwardType a3) {
+      typename base::internal::CallbackParamTraits<A1>::ForwardType a1,
+      typename base::internal::CallbackParamTraits<A2>::ForwardType a2,
+      typename base::internal::CallbackParamTraits<A3>::ForwardType a3) {
     if (canceled()) return;
     DoForward(base::Bind(callback_, a1, a2, a3), true);
   }
@@ -872,19 +875,20 @@ class CancelableRequest<base::Callback<void(A1, A2, A3, A4)> > :
     DCHECK(!callback.is_null()) << "Callback must be initialized.";
   }
 
-  void ForwardResult(typename base::internal::ParamTraits<A1>::ForwardType a1,
-                     typename base::internal::ParamTraits<A2>::ForwardType a2,
-                     typename base::internal::ParamTraits<A3>::ForwardType a3,
-                     typename base::internal::ParamTraits<A4>::ForwardType a4) {
+  void ForwardResult(
+      typename base::internal::CallbackParamTraits<A1>::ForwardType a1,
+      typename base::internal::CallbackParamTraits<A2>::ForwardType a2,
+      typename base::internal::CallbackParamTraits<A3>::ForwardType a3,
+      typename base::internal::CallbackParamTraits<A4>::ForwardType a4) {
     if (canceled()) return;
     DoForward(base::Bind(callback_, a1, a2, a3, a4), false);
   }
 
   void ForwardResultAsync(
-      typename base::internal::ParamTraits<A1>::ForwardType a1,
-      typename base::internal::ParamTraits<A2>::ForwardType a2,
-      typename base::internal::ParamTraits<A3>::ForwardType a3,
-      typename base::internal::ParamTraits<A4>::ForwardType a4) {
+      typename base::internal::CallbackParamTraits<A1>::ForwardType a1,
+      typename base::internal::CallbackParamTraits<A2>::ForwardType a2,
+      typename base::internal::CallbackParamTraits<A3>::ForwardType a3,
+      typename base::internal::CallbackParamTraits<A4>::ForwardType a4) {
     if (canceled()) return;
     DoForward(base::Bind(callback_, a1, a2, a3, a4), true);
   }
@@ -908,21 +912,22 @@ class CancelableRequest<base::Callback<void(A1, A2, A3, A4, A5)> > :
     DCHECK(!callback.is_null()) << "Callback must be initialized.";
   }
 
-  void ForwardResult(typename base::internal::ParamTraits<A1>::ForwardType a1,
-                     typename base::internal::ParamTraits<A2>::ForwardType a2,
-                     typename base::internal::ParamTraits<A3>::ForwardType a3,
-                     typename base::internal::ParamTraits<A4>::ForwardType a4,
-                     typename base::internal::ParamTraits<A5>::ForwardType a5) {
+  void ForwardResult(
+      typename base::internal::CallbackParamTraits<A1>::ForwardType a1,
+      typename base::internal::CallbackParamTraits<A2>::ForwardType a2,
+      typename base::internal::CallbackParamTraits<A3>::ForwardType a3,
+      typename base::internal::CallbackParamTraits<A4>::ForwardType a4,
+      typename base::internal::CallbackParamTraits<A5>::ForwardType a5) {
     if (canceled()) return;
     DoForward(base::Bind(callback_, a1, a2, a3, a4, a5), false);
   }
 
   void ForwardResultAsync(
-      typename base::internal::ParamTraits<A1>::ForwardType a1,
-      typename base::internal::ParamTraits<A2>::ForwardType a2,
-      typename base::internal::ParamTraits<A3>::ForwardType a3,
-      typename base::internal::ParamTraits<A4>::ForwardType a4,
-      typename base::internal::ParamTraits<A5>::ForwardType a5) {
+      typename base::internal::CallbackParamTraits<A1>::ForwardType a1,
+      typename base::internal::CallbackParamTraits<A2>::ForwardType a2,
+      typename base::internal::CallbackParamTraits<A3>::ForwardType a3,
+      typename base::internal::CallbackParamTraits<A4>::ForwardType a4,
+      typename base::internal::CallbackParamTraits<A5>::ForwardType a5) {
     if (canceled()) return;
     DoForward(base::Bind(callback_, a1, a2, a3, a4, a5), true);
   }
@@ -947,23 +952,24 @@ class CancelableRequest<base::Callback<void(A1, A2, A3, A4, A5, A6)> > :
     DCHECK(!callback.is_null()) << "Callback must be initialized.";
   }
 
-  void ForwardResult(typename base::internal::ParamTraits<A1>::ForwardType a1,
-                     typename base::internal::ParamTraits<A2>::ForwardType a2,
-                     typename base::internal::ParamTraits<A3>::ForwardType a3,
-                     typename base::internal::ParamTraits<A4>::ForwardType a4,
-                     typename base::internal::ParamTraits<A5>::ForwardType a5,
-                     typename base::internal::ParamTraits<A6>::ForwardType a6) {
+  void ForwardResult(
+      typename base::internal::CallbackParamTraits<A1>::ForwardType a1,
+      typename base::internal::CallbackParamTraits<A2>::ForwardType a2,
+      typename base::internal::CallbackParamTraits<A3>::ForwardType a3,
+      typename base::internal::CallbackParamTraits<A4>::ForwardType a4,
+      typename base::internal::CallbackParamTraits<A5>::ForwardType a5,
+      typename base::internal::CallbackParamTraits<A6>::ForwardType a6) {
     if (canceled()) return;
     DoForward(base::Bind(callback_, a1, a2, a3, a4, a5, a6), false);
   }
 
   void ForwardResultAsync(
-      typename base::internal::ParamTraits<A1>::ForwardType a1,
-      typename base::internal::ParamTraits<A2>::ForwardType a2,
-      typename base::internal::ParamTraits<A3>::ForwardType a3,
-      typename base::internal::ParamTraits<A4>::ForwardType a4,
-      typename base::internal::ParamTraits<A5>::ForwardType a5,
-      typename base::internal::ParamTraits<A6>::ForwardType a6) {
+      typename base::internal::CallbackParamTraits<A1>::ForwardType a1,
+      typename base::internal::CallbackParamTraits<A2>::ForwardType a2,
+      typename base::internal::CallbackParamTraits<A3>::ForwardType a3,
+      typename base::internal::CallbackParamTraits<A4>::ForwardType a4,
+      typename base::internal::CallbackParamTraits<A5>::ForwardType a5,
+      typename base::internal::CallbackParamTraits<A6>::ForwardType a6) {
     if (canceled()) return;
     DoForward(base::Bind(callback_, a1, a2, a3, a4, a5, a6), true);
   }

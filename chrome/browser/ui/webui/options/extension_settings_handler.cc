@@ -8,6 +8,7 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -19,20 +20,21 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/extensions/extension_warning_set.h"
+#include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/ui/webui/extension_icon_source.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/common/chrome_view_types.h"
 #include "content/browser/browsing_instance.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -50,7 +52,9 @@ bool ShouldShowExtension(const Extension* extension) {
 
   // Don't show component extensions because they are only extensions as an
   // implementation detail of Chrome.
-  if (extension->location() == Extension::COMPONENT)
+  if (extension->location() == Extension::COMPONENT &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kShowComponentExtensionOptions))
     return false;
 
   // Always show unpacked extensions and apps.
@@ -205,34 +209,31 @@ void ExtensionSettingsHandler::MaybeRegisterForNotifications() {
 
   // Register for notifications that we need to reload the page.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                 Source<Profile>(profile));
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_PROCESS_CREATED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_WARNING_CHANGED,
-                 Source<Profile>(profile));
-  registrar_.Add(this,
-                 content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::Source<Profile>(profile));
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_CREATED,
+                 content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this,
                  content::NOTIFICATION_RENDER_VIEW_HOST_CREATED,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this,
                  content::NOTIFICATION_RENDER_VIEW_HOST_DELETED,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this,
                  chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this,
                  chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(
       this,
       chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
-      Source<ExtensionPrefs>(profile->GetExtensionService()->
+      content::Source<ExtensionPrefs>(profile->GetExtensionService()->
                              extension_prefs()));
 }
 
@@ -427,7 +428,8 @@ void ExtensionSettingsHandler::HandleLoadMessage(const ListValue* args) {
   FilePath::StringType string_path;
   CHECK_EQ(1U, args->GetSize()) << args->GetSize();
   CHECK(args->GetString(0, &string_path));
-  extension_service_->LoadExtension(FilePath(string_path));
+  extensions::UnpackedInstaller::Create(extension_service_)->
+      Load(FilePath(string_path));
 }
 
 void ExtensionSettingsHandler::ShowAlert(const std::string& message) {
@@ -502,10 +504,8 @@ void ExtensionSettingsHandler::GetLocalizedValues(
   DCHECK(localized_strings);
 
   RegisterTitle(localized_strings, "extensionSettings",
-                IDS_OPTIONS_GENERAL_TAB_LABEL);
+                IDS_MANAGE_EXTENSIONS_SETTING_WINDOWS_TITLE);
 
-  localized_strings->SetString("extensionSettingsTitle",
-      l10n_util::GetStringUTF16(IDS_MANAGE_EXTENSIONS_SETTING_WINDOWS_TITLE));
   localized_strings->SetString("extensionSettingsVisitWebsite",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_VISIT_WEBSITE));
 
@@ -568,6 +568,10 @@ void ExtensionSettingsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_IN_DEVELOPMENT));
   localized_strings->SetString("extensionSettingsWarningsTitle",
       l10n_util::GetStringUTF16(IDS_EXTENSION_WARNINGS_TITLE));
+  localized_strings->SetString("extensionSettingsShowDetails",
+      l10n_util::GetStringUTF16(IDS_EXTENSIONS_SHOW_DETAILS));
+  localized_strings->SetString("extensionSettingsHideDetails",
+      l10n_util::GetStringUTF16(IDS_EXTENSIONS_HIDE_DETAILS));
 }
 
 void ExtensionSettingsHandler::Initialize() {
@@ -584,55 +588,45 @@ WebUIMessageHandler* ExtensionSettingsHandler::Attach(WebUI* web_ui) {
   return handler;
 }
 
-void ExtensionSettingsHandler::Observe(int type,
-                                       const NotificationSource& source,
-                                       const NotificationDetails& details) {
+void ExtensionSettingsHandler::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   Profile* profile = Profile::FromWebUI(web_ui_);
   Profile* source_profile = NULL;
   switch (type) {
     // We listen for notifications that will result in the page being
     // repopulated with data twice for the same event in certain cases.
-    // For instance, EXTENSION_LOADED & EXTENSION_PROCESS_CREATED because
+    // For instance, EXTENSION_LOADED & EXTENSION_HOST_CREATED because
     // we don't know about the views for an extension at EXTENSION_LOADED, but
-    // if we only listen to EXTENSION_PROCESS_CREATED, we'll miss extensions
-    // that don't have a process at startup. Similarly, NAV_ENTRY_COMMITTED &
-    // RENDER_VIEW_HOST_CREATED because we want to handle both
-    // the case of navigating from a non-extension page to an extension page in
-    // a TabContents (which will generate NAV_ENTRY_COMMITTED) as well as
-    // extension content being shown in popups and balloons (which will generate
-    // RENDER_VIEW_HOST_CREATED but no NAV_ENTRY_COMMITTED).
+    // if we only listen to EXTENSION_HOST_CREATED, we'll miss extensions
+    // that don't have a process at startup.
     //
     // Doing it this way gets everything but causes the page to be rendered
     // more than we need. It doesn't seem to result in any noticeable flicker.
     case content::NOTIFICATION_RENDER_VIEW_HOST_DELETED:
-      deleting_rvh_ = Source<RenderViewHost>(source).ptr();
+      deleting_rvh_ = content::Source<RenderViewHost>(source).ptr();
       // Fall through.
     case content::NOTIFICATION_RENDER_VIEW_HOST_CREATED:
       source_profile = Profile::FromBrowserContext(
-          Source<RenderViewHost>(source)->site_instance()->
+          content::Source<RenderViewHost>(source)->site_instance()->
           browsing_instance()->browser_context());
       if (!profile->IsSameProfile(source_profile))
         return;
       MaybeUpdateAfterNotification();
       break;
     case chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED:
-      deleting_rvh_ = Details<BackgroundContents>(details)->render_view_host();
+      deleting_rvh_ = content::Details<BackgroundContents>(details)->
+          tab_contents()->render_view_host();
       // Fall through.
     case chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED:
-      source_profile = Source<Profile>(source).ptr();
+    case chrome::NOTIFICATION_EXTENSION_HOST_CREATED:
+      source_profile = content::Source<Profile>(source).ptr();
       if (!profile->IsSameProfile(source_profile))
           return;
       MaybeUpdateAfterNotification();
       break;
-    case content::NOTIFICATION_NAV_ENTRY_COMMITTED:
-      source_profile = Profile::FromBrowserContext(
-          Source<NavigationController>(source).ptr()->browser_context());
-      if (!profile->IsSameProfile(source_profile))
-        return;
-      MaybeUpdateAfterNotification();
-      break;
     case chrome::NOTIFICATION_EXTENSION_LOADED:
-    case chrome::NOTIFICATION_EXTENSION_PROCESS_CREATED:
     case chrome::NOTIFICATION_EXTENSION_UNLOADED:
     case chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED:
     case chrome::NOTIFICATION_EXTENSION_WARNING_CHANGED:
@@ -753,8 +747,8 @@ std::vector<ExtensionPage> ExtensionSettingsHandler::GetActivePagesForExtension(
   ExtensionProcessManager* process_manager =
       extension_service_->profile()->GetExtensionProcessManager();
   GetActivePagesForExtensionProcess(
-      process_manager->GetExtensionProcess(extension->url()),
-      extension, &result);
+      process_manager->GetRenderViewHostsForExtension(
+          extension->id()), &result);
 
   // Repeat for the incognito process, if applicable.
   if (extension_service_->profile()->HasOffTheRecordProfile() &&
@@ -763,28 +757,19 @@ std::vector<ExtensionPage> ExtensionSettingsHandler::GetActivePagesForExtension(
         extension_service_->profile()->GetOffTheRecordProfile()->
             GetExtensionProcessManager();
     GetActivePagesForExtensionProcess(
-        process_manager->GetExtensionProcess(extension->url()),
-        extension, &result);
+        process_manager->GetRenderViewHostsForExtension(
+            extension->id()), &result);
   }
 
   return result;
 }
 
 void ExtensionSettingsHandler::GetActivePagesForExtensionProcess(
-    RenderProcessHost* process,
-    const Extension* extension,
+    const std::set<RenderViewHost*>& views,
     std::vector<ExtensionPage> *result) {
-  if (!process)
-    return;
-
-  RenderProcessHost::listeners_iterator iter = process->ListenersIterator();
-  for (; !iter.IsAtEnd(); iter.Advance()) {
-    const RenderWidgetHost* widget =
-        static_cast<const RenderWidgetHost*>(iter.GetCurrentValue());
-    DCHECK(widget);
-    if (!widget || !widget->IsRenderView())
-      continue;
-    const RenderViewHost* host = static_cast<const RenderViewHost*>(widget);
+  for (std::set<RenderViewHost*>::const_iterator iter = views.begin();
+       iter != views.end(); ++iter) {
+    RenderViewHost* host = *iter;
     int host_type = host->delegate()->GetRenderViewType();
     if (host == deleting_rvh_ ||
         chrome::VIEW_TYPE_EXTENSION_POPUP == host_type ||
@@ -792,15 +777,9 @@ void ExtensionSettingsHandler::GetActivePagesForExtensionProcess(
       continue;
 
     GURL url = host->delegate()->GetURL();
-    if (url.SchemeIs(chrome::kExtensionScheme)) {
-      if (url.host() != extension->id())
-        continue;
-    } else if (!extension->web_extent().MatchesURL(url)) {
-      continue;
-    }
-
+    content::RenderProcessHost* process = host->process();
     result->push_back(
-        ExtensionPage(url, process->id(), host->routing_id(),
-                      process->browser_context()->IsOffTheRecord()));
+        ExtensionPage(url, process->GetID(), host->routing_id(),
+                      process->GetBrowserContext()->IsOffTheRecord()));
   }
 }

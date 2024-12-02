@@ -1,5 +1,3 @@
-#!/usr/bin/python
-
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -83,9 +81,7 @@ def GoogleAccountsLogin(test, username, password, tab_index=0, windex=0):
              'window.domAutomationController.send("done")' % password
   test.ExecuteJavascript(email_id, tab_index, windex)
   test.ExecuteJavascript(password, tab_index, windex)
-  test.ExecuteJavascript('document.getElementById("gaia_loginform").submit();'
-                         'window.domAutomationController.send("done")',
-                         tab_index, windex)
+  test.assertTrue(test.SubmitForm('gaia_loginform', tab_index, windex))
 
 
 def VerifyGoogleAccountCredsFilled(test, username, password, tab_index=0,
@@ -316,3 +312,20 @@ def GetCredsKey():
   node = platform.uname()[1].split('.')[0]
   creds_key = 'test_google_acct_%s_%s' % (system_name, node)
   return creds_key
+
+
+def SignInToSyncAndVerifyState(test, account_key):
+  """Sign into sync and verify that it was successful.
+
+  Args:
+    test: derived from pyauto.PyUITest - base class for UI test cases.
+    account_key: the credentials key in the private account dictionary file.
+  """
+  creds = test.GetPrivateInfo()[account_key]
+  username = creds['username']
+  password = creds['password']
+  test.assertTrue(test.GetSyncInfo()['summary'] == 'OFFLINE_UNUSABLE')
+  test.assertTrue(test.GetSyncInfo()['last synced'] == 'Never')
+  test.assertTrue(test.SignInToSync(username, password))
+  test.assertTrue(test.GetSyncInfo()['summary'] == 'READY')
+  test.assertTrue(test.GetSyncInfo()['last synced'] == 'Just now')

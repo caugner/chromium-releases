@@ -56,12 +56,13 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/synchronization/lock.h"
+#include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "base/threading/watchdog.h"
 #include "base/time.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class CustomThreadWatcher;
 class StartupTimeBomb;
@@ -74,7 +75,7 @@ class ThreadWatcher {
   // base::Bind supports methods with up to 6 parameters. WatchingParams is used
   // as a workaround that limitation for invoking ThreadWatcher::StartWatching.
   struct WatchingParams {
-    const BrowserThread::ID& thread_id;
+    const content::BrowserThread::ID& thread_id;
     const std::string& thread_name;
     const base::TimeDelta& sleep_time;
     const base::TimeDelta& unresponsive_time;
@@ -82,7 +83,7 @@ class ThreadWatcher {
     bool crash_on_hang;
     uint32 live_threads_threshold;
 
-    WatchingParams(const BrowserThread::ID& thread_id_in,
+    WatchingParams(const content::BrowserThread::ID& thread_id_in,
                    const std::string& thread_name_in,
                    const base::TimeDelta& sleep_time_in,
                    const base::TimeDelta& unresponsive_time_in,
@@ -115,7 +116,7 @@ class ThreadWatcher {
   static void StartWatching(const WatchingParams& params);
 
   // Return the |thread_id_| of the thread being watched.
-  BrowserThread::ID thread_id() const { return thread_id_; }
+  content::BrowserThread::ID thread_id() const { return thread_id_; }
 
   // Return the name of the thread being watched.
   std::string thread_name() const { return thread_name_; }
@@ -197,7 +198,7 @@ class ThreadWatcher {
 
   // Watched thread does nothing except post callback_task to the WATCHDOG
   // Thread. This method is called on watched thread.
-  static void OnPingMessage(const BrowserThread::ID& thread_id,
+  static void OnPingMessage(const content::BrowserThread::ID& thread_id,
                             const base::Closure& callback_task);
 
   // This method resets |unresponsive_count_| to zero because watched thread is
@@ -214,7 +215,7 @@ class ThreadWatcher {
 
   // The |thread_id_| of the thread being watched. Only one instance can exist
   // for the given |thread_id_| of the thread being watched.
-  const BrowserThread::ID thread_id_;
+  const content::BrowserThread::ID thread_id_;
 
   // The name of the thread being watched.
   const std::string thread_name_;
@@ -307,7 +308,7 @@ class ThreadWatcher {
 class ThreadWatcherList {
  public:
   // A map from BrowserThread to the actual instances.
-  typedef std::map<BrowserThread::ID, ThreadWatcher*> RegistrationList;
+  typedef std::map<content::BrowserThread::ID, ThreadWatcher*> RegistrationList;
 
   // This method posts a task on WatchDogThread to start watching all browser
   // threads.
@@ -324,7 +325,7 @@ class ThreadWatcherList {
   static void Register(ThreadWatcher* watcher);
 
   // This method returns true if the ThreadWatcher object is registerd.
-  static bool IsRegistered(const BrowserThread::ID thread_id);
+  static bool IsRegistered(const content::BrowserThread::ID thread_id);
 
   // This method returns number of responsive and unresponsive watched threads.
   static void GetStatusOfThreads(uint32* responding_thread_count,
@@ -368,7 +369,7 @@ class ThreadWatcherList {
   // This method calls ThreadWatcher::StartWatching() to perform health check on
   // the given |thread_id|.
   static void StartWatching(
-      const BrowserThread::ID& thread_id,
+      const content::BrowserThread::ID& thread_id,
       const std::string& thread_name,
       const base::TimeDelta& sleep_time,
       const base::TimeDelta& unresponsive_time,
@@ -382,7 +383,7 @@ class ThreadWatcherList {
 
   // The Find() method can be used to test to see if a given ThreadWatcher was
   // already registered, or to retrieve a pointer to it from the global map.
-  static ThreadWatcher* Find(const BrowserThread::ID& thread_id);
+  static ThreadWatcher* Find(const content::BrowserThread::ID& thread_id);
 
   // The singleton of this class and is used to keep track of information about
   // threads that are being watched.
@@ -409,7 +410,7 @@ class ThreadWatcherList {
 
 // This class ensures that the thread watching is actively taking place. Only
 // one instance of this class exists.
-class ThreadWatcherObserver : public NotificationObserver {
+class ThreadWatcherObserver : public content::NotificationObserver {
  public:
   // Registers |g_thread_watcher_observer_| as the Notifications observer.
   // |wakeup_interval| specifies how often to wake up thread watchers. This
@@ -429,18 +430,18 @@ class ThreadWatcherObserver : public NotificationObserver {
 
   // This ensures all thread watchers are active because there is some user
   // activity. It will wake up all thread watchers every |wakeup_interval_|
-  // seconds. This is the implementation of NotificationObserver. When a
-  // matching notification is posted to the notification service, this method is
-  // called.
+  // seconds. This is the implementation of content::NotificationObserver. When
+  // a matching notification is posted to the notification service, this method
+  // is called.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // The singleton of this class.
   static ThreadWatcherObserver* g_thread_watcher_observer_;
 
   // The registrar that holds ints to be observed.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // This is the last time when woke all thread watchers up.
   base::TimeTicks last_wakeup_time_;
@@ -462,7 +463,7 @@ class WatchDogThread : public base::Thread {
   virtual ~WatchDogThread();
 
   // Callable on any thread.  Returns whether you're currently on a
-  // watchdog_thread_.
+  // WatchDogThread.
   static bool CurrentlyOnWatchDogThread();
 
   // These are the same methods in message_loop.h, but are guaranteed to either
@@ -477,19 +478,14 @@ class WatchDogThread : public base::Thread {
                               int64 delay_ms);
 
  protected:
-  virtual void Init();
-  virtual void CleanUp();
+  virtual void Init() OVERRIDE;
+  virtual void CleanUp() OVERRIDE;
 
  private:
   static bool PostTaskHelper(
       const tracked_objects::Location& from_here,
       const base::Closure& task,
       int64 delay_ms);
-
-  // This lock protects watchdog_thread_.
-  static base::Lock lock_;
-
-  static WatchDogThread* watchdog_thread_;  // The singleton of this class.
 
   DISALLOW_COPY_AND_ASSIGN(WatchDogThread);
 };
@@ -498,18 +494,34 @@ class WatchDogThread : public base::Thread {
 // startup.
 class StartupTimeBomb {
  public:
+  // This singleton is instantiated when the browser process is launched.
+  StartupTimeBomb();
+
+  // Destructor disarm's startup_watchdog_ (if it is arm'ed) so that alarm
+  // doesn't go off.
+  ~StartupTimeBomb();
+
   // Constructs |startup_watchdog_| which spawns a thread and starts timer.
   // |duration| specifies how long |startup_watchdog_| will wait before it
   // calls alarm.
-  static void Arm(const base::TimeDelta& duration);
+  void Arm(const base::TimeDelta& duration);
 
   // Disarms |startup_watchdog_| thread and then deletes it which stops the
   // Watchdog thread.
-  static void Disarm();
+  void Disarm();
+
+  // Disarms |g_startup_timebomb_|.
+  static void DisarmStartupTimeBomb();
 
  private:
+  // The singleton of this class.
+  static StartupTimeBomb* g_startup_timebomb_;
+
   // Watches for hangs during startup until it is disarm'ed.
-  static base::Watchdog* startup_watchdog_;
+  base::Watchdog* startup_watchdog_;
+
+  // The |thread_id_| on which this object is constructed.
+  const base::PlatformThreadId thread_id_;
 
   DISALLOW_COPY_AND_ASSIGN(StartupTimeBomb);
 };
@@ -530,6 +542,9 @@ class ShutdownWatcherHelper {
  private:
   // shutdown_watchdog_ watches for hangs during shutdown.
   base::Watchdog* shutdown_watchdog_;
+
+  // The |thread_id_| on which this object is constructed.
+  const base::PlatformThreadId thread_id_;
 
   DISALLOW_COPY_AND_ASSIGN(ShutdownWatcherHelper);
 };

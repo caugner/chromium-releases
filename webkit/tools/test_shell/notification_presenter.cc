@@ -11,9 +11,9 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotification.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPermissionCallback.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 
 using WebKit::WebNotification;
 using WebKit::WebNotificationPresenter;
@@ -40,9 +40,7 @@ void TestNotificationPresenter::Reset() {
 }
 
 void TestNotificationPresenter::grantPermission(const std::string& origin) {
-  // Make sure it's in the form of an origin.
-  GURL url(origin);
-  allowed_origins_.insert(url.GetOrigin().spec());
+  allowed_origins_.insert(origin);
 }
 
 // The output from all these methods matches what DumpRenderTree produces.
@@ -98,10 +96,10 @@ void TestNotificationPresenter::objectDestroyed(
 }
 
 WebNotificationPresenter::Permission TestNotificationPresenter::checkPermission(
-    const WebURL& url) {
+    const WebSecurityOrigin& origin) {
   // Check with the layout test controller
-  std::string origin = static_cast<GURL>(url).GetOrigin().spec();
-  bool allowed = allowed_origins_.find(origin) != allowed_origins_.end();
+  bool allowed = allowed_origins_.find(origin.toString().utf8().data())
+      != allowed_origins_.end();
   return allowed ? WebNotificationPresenter::PermissionAllowed
                  : WebNotificationPresenter::PermissionDenied;
 }

@@ -13,6 +13,7 @@
 
 #include <algorithm>
 
+#include "base/bind.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -22,10 +23,11 @@
 #include "base/stack_container.h"
 #include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
-#include "content/browser/browser_thread.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/profiles/profile.h"
+#include "content/public/browser/browser_thread.h"
 
+using content::BrowserThread;
 using file_util::ScopedFILE;
 using file_util::OpenFile;
 using file_util::TruncateFile;
@@ -990,7 +992,7 @@ void VisitedLinkMaster::TableBuilder::OnComplete(bool success) {
   // rebuild is complete.
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &TableBuilder::OnCompleteMainThread));
+      base::Bind(&TableBuilder::OnCompleteMainThread, this));
 }
 
 void VisitedLinkMaster::TableBuilder::OnCompleteMainThread() {

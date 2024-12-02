@@ -10,10 +10,12 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/url_pattern.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "net/url_request/url_request.h"
+
+using content::BrowserThread;
 
 struct UserScriptListener::ProfileData {
   // True if the user scripts contained in |url_patterns| are ready for
@@ -32,13 +34,13 @@ UserScriptListener::UserScriptListener()
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_USER_SCRIPTS_UPDATED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   AddRef();  // Will be balanced in Cleanup().
 }
 
@@ -166,14 +168,15 @@ void UserScriptListener::CollectURLPatterns(const Extension* extension,
 }
 
 void UserScriptListener::Observe(int type,
-                                 const NotificationSource& source,
-                                 const NotificationDetails& details) {
+                                 const content::NotificationSource& source,
+                                 const content::NotificationDetails& details) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   switch (type) {
     case chrome::NOTIFICATION_EXTENSION_LOADED: {
-      Profile* profile = Source<Profile>(source).ptr();
-      const Extension* extension = Details<const Extension>(details).ptr();
+      Profile* profile = content::Source<Profile>(source).ptr();
+      const Extension* extension =
+          content::Details<const Extension>(details).ptr();
       if (extension->content_scripts().empty())
         return;  // no new patterns from this extension.
 
@@ -188,9 +191,9 @@ void UserScriptListener::Observe(int type,
     }
 
     case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
-      Profile* profile = Source<Profile>(source).ptr();
+      Profile* profile = content::Source<Profile>(source).ptr();
       const Extension* unloaded_extension =
-          Details<UnloadedExtensionInfo>(details)->extension;
+          content::Details<UnloadedExtensionInfo>(details)->extension;
       if (unloaded_extension->content_scripts().empty())
         return;  // no patterns to delete for this extension.
 
@@ -209,14 +212,14 @@ void UserScriptListener::Observe(int type,
     }
 
     case chrome::NOTIFICATION_USER_SCRIPTS_UPDATED: {
-      Profile* profile = Source<Profile>(source).ptr();
+      Profile* profile = content::Source<Profile>(source).ptr();
       BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, base::Bind(
           &UserScriptListener::UserScriptsReady, this, profile));
       break;
     }
 
     case chrome::NOTIFICATION_PROFILE_DESTROYED: {
-      Profile* profile = Source<Profile>(source).ptr();
+      Profile* profile = content::Source<Profile>(source).ptr();
       BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, base::Bind(
           &UserScriptListener::ProfileDestroyed, this, profile));
       break;

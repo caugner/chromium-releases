@@ -30,6 +30,7 @@ class SocketAddress;
 
 namespace remoting {
 
+class IqSender;
 class JingleInfoRequest;
 
 namespace protocol {
@@ -50,16 +51,15 @@ class PepperSessionManager : public SessionManager,
   virtual void Init(const std::string& local_jid,
                     SignalStrategy* signal_strategy,
                     SessionManager::Listener* listener,
-                    crypto::RSAPrivateKey* private_key,
-                    const std::string& certificate,
                     bool allow_nat_traversal) OVERRIDE;
   virtual Session* Connect(
       const std::string& host_jid,
-      const std::string& host_public_key,
-      const std::string& client_token,
+      Authenticator* authenticator,
       CandidateSessionConfig* config,
       const Session::StateChangeCallback& state_change_callback) OVERRIDE;
   virtual void Close() OVERRIDE;
+  virtual void set_authenticator_factory(
+      AuthenticatorFactory* authenticator_factory) OVERRIDE;
 
   // SignalStrategy::Listener interface.
   virtual bool OnIncomingStanza(const buzz::XmlElement* stanza) OVERRIDE;
@@ -74,7 +74,7 @@ class PepperSessionManager : public SessionManager,
       const std::vector<std::string>& relay_hosts,
       const std::vector<talk_base::SocketAddress>& stun_hosts);
 
-  IqRequest* CreateIqRequest();
+  IqSender* iq_sender() { return iq_sender_.get(); }
   void SendReply(const buzz::XmlElement* original_stanza,
                  const JingleMessageReply& reply);
 
@@ -85,9 +85,9 @@ class PepperSessionManager : public SessionManager,
 
   std::string local_jid_;
   SignalStrategy* signal_strategy_;
+  scoped_ptr<AuthenticatorFactory> authenticator_factory_;
+  scoped_ptr<IqSender> iq_sender_;
   SessionManager::Listener* listener_;
-  scoped_ptr<crypto::RSAPrivateKey> private_key_;
-  std::string certificate_;
   bool allow_nat_traversal_;
 
   TransportConfig transport_config_;

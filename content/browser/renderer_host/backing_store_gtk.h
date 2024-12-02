@@ -6,7 +6,10 @@
 #define CONTENT_BROWSER_RENDERER_HOST_BACKING_STORE_GTK_H_
 #pragma once
 
+#include <vector>
+
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/backing_store.h"
 #include "content/common/content_export.h"
@@ -17,8 +20,8 @@ class Point;
 class Rect;
 }  // namespace gfx
 
+
 typedef struct _GdkDrawable GdkDrawable;
-class SkBitmap;
 
 class CONTENT_EXPORT BackingStoreGtk : public BackingStore {
  public:
@@ -55,17 +58,19 @@ class CONTENT_EXPORT BackingStoreGtk : public BackingStore {
 #endif
 
   // BackingStore implementation.
-  virtual size_t MemorySize();
+  virtual size_t MemorySize() OVERRIDE;
   virtual void PaintToBackingStore(
-      RenderProcessHost* process,
+      content::RenderProcessHost* process,
       TransportDIB::Id bitmap,
       const gfx::Rect& bitmap_rect,
-      const std::vector<gfx::Rect>& copy_rects);
+      const std::vector<gfx::Rect>& copy_rects,
+      const base::Closure& completion_callback,
+      bool* scheduled_completion_callback) OVERRIDE;
   virtual bool CopyFromBackingStore(const gfx::Rect& rect,
-                                    skia::PlatformCanvas* output);
+                                    skia::PlatformCanvas* output) OVERRIDE;
   virtual void ScrollBackingStore(int dx, int dy,
                                   const gfx::Rect& clip_rect,
-                                  const gfx::Size& view_size);
+                                  const gfx::Size& view_size) OVERRIDE;
 
  private:
   // Paints the bitmap from the renderer onto the backing store without

@@ -22,18 +22,21 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/base/view_event_test_base.h"
 #include "content/browser/tab_contents/page_navigator.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
+#include "content/test/test_browser_thread.h"
 #include "grit/generated_resources.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "views/controls/button/menu_button.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/menu/menu_controller.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/submenu_view.h"
-#include "views/views_delegate.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/menu/menu_controller.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/views_delegate.h"
+#include "ui/views/widget/widget.h"
+
+using content::BrowserThread;
 
 #if defined(OS_LINUX)
 // See http://crbug.com/40040 for details.
@@ -72,7 +75,6 @@ class ViewsDelegateImpl : public views::ViewsDelegate {
  public:
   ViewsDelegateImpl() {}
   virtual ui::Clipboard* GetClipboard() const OVERRIDE { return NULL; }
-  virtual views::View* GetDefaultParentView() OVERRIDE { return NULL; }
   virtual void SaveWindowPlacement(const views::Widget* window,
                                    const std::string& window_name,
                                    const gfx::Rect& bounds,
@@ -121,8 +123,8 @@ class TestingPageNavigator : public PageNavigator {
                                const GURL& referrer,
                                WindowOpenDisposition disposition,
                                content::PageTransition transition) OVERRIDE {
-    return OpenURL(OpenURLParams(url, referrer, disposition, transition,
-                                 false));
+    return OpenURL(OpenURLParams(url, content::Referrer(), disposition,
+                                 transition, false));
   }
 
   virtual TabContents* OpenURL(const OpenURLParams& params) OVERRIDE {
@@ -290,8 +292,8 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
   gfx::Size bb_view_pref_;
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<Browser> browser_;
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
   ViewsDelegateImpl views_delegate_;
 };
 
@@ -473,18 +475,18 @@ VIEW_TEST(BookmarkBarViewTest3, Submenus)
 // Observer that posts task upon the context menu creation.
 // This is necessary for Linux as the context menu has to check
 // the clipboard, which invokes the event loop.
-class ContextMenuNotificationObserver : public NotificationObserver {
+class ContextMenuNotificationObserver : public content::NotificationObserver {
  public:
   explicit ContextMenuNotificationObserver(const base::Closure& task)
       : task_(task) {
     registrar_.Add(this,
                    chrome::NOTIFICATION_BOOKMARK_CONTEXT_MENU_SHOWN,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     MessageLoop::current()->PostTask(FROM_HERE, task_);
   }
 
@@ -492,7 +494,7 @@ class ContextMenuNotificationObserver : public NotificationObserver {
   void set_task(const base::Closure& task) { task_ = task; }
 
  private:
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
   base::Closure task_;
 
   DISALLOW_COPY_AND_ASSIGN(ContextMenuNotificationObserver);

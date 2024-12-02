@@ -16,10 +16,6 @@ namespace base {
 class MessageLoopProxy;
 }  // namespace base
 
-namespace buzz {
-class XmppClient;
-}  // namespace buzz
-
 namespace remoting {
 
 class TaskPump : public talk_base::MessageHandler,
@@ -28,16 +24,16 @@ class TaskPump : public talk_base::MessageHandler,
   TaskPump();
 
   // TaskRunner methods.
-  virtual void WakeTasks();
-  virtual int64 CurrentTime();
+  virtual void WakeTasks() OVERRIDE;
+  virtual int64 CurrentTime() OVERRIDE;
 
   // MessageHandler methods.
-  virtual void OnMessage(talk_base::Message* pmsg);
+  virtual void OnMessage(talk_base::Message* pmsg) OVERRIDE;
 };
 
 class JingleThreadMessageLoop : public MessageLoop {
  public:
-  JingleThreadMessageLoop(talk_base::Thread* thread);
+  explicit JingleThreadMessageLoop(talk_base::Thread* thread);
   virtual ~JingleThreadMessageLoop();
 
  private:
@@ -54,10 +50,10 @@ class JingleThread : public talk_base::Thread {
   void Start();
 
   // Main function for the thread. Should not be called directly.
-  virtual void Run();
+  virtual void Run() OVERRIDE;
 
   // Stop the thread.
-  virtual void Stop();
+  virtual void Stop() OVERRIDE;
 
   // Returns Chromiums message loop for this thread.
   MessageLoop* message_loop();

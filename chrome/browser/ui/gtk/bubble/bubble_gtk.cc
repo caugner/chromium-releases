@@ -11,7 +11,8 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_source.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_windowing.h"
 #include "ui/gfx/gtk_util.h"
@@ -100,7 +101,7 @@ void BubbleGtk::Init(GtkWidget* anchor_widget,
   DCHECK(!window_);
   anchor_widget_ = anchor_widget;
   toplevel_window_ = GTK_WINDOW(gtk_widget_get_toplevel(anchor_widget_));
-  DCHECK(GTK_WIDGET_TOPLEVEL(toplevel_window_));
+  DCHECK(gtk_widget_is_toplevel(GTK_WIDGET(toplevel_window_)));
   rect_ = rect ? *rect : gtk_util::WidgetBounds(anchor_widget);
   preferred_arrow_location_ = arrow_location;
 
@@ -178,7 +179,7 @@ void BubbleGtk::Init(GtkWidget* anchor_widget,
   }
 
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(theme_service_));
+                 content::Source<ThemeService>(theme_service_));
   theme_service_->InitThemesFor(this);
 }
 
@@ -342,8 +343,8 @@ void BubbleGtk::StackWindow() {
 }
 
 void BubbleGtk::Observe(int type,
-                        const NotificationSource& source,
-                        const NotificationDetails& details) {
+                        const content::NotificationSource& source,
+                        const content::NotificationDetails& details) {
   DCHECK_EQ(type, chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
   if (theme_service_->UsingNativeTheme() && match_system_theme_) {
     gtk_widget_modify_bg(window_, GTK_STATE_NORMAL, NULL);

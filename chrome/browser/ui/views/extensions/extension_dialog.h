@@ -7,15 +7,14 @@
 #pragma once
 
 #include "base/memory/ref_counted.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "views/widget/widget_delegate.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "ui/views/widget/widget_delegate.h"
 
 class Browser;
 class ExtensionDialogObserver;
 class ExtensionHost;
 class GURL;
-class Profile;
 class TabContents;
 
 namespace views {
@@ -27,7 +26,7 @@ class Widget;
 // Dialog is automatically centered in the browser window and has fixed size.
 // For example, used by the Chrome OS file browser.
 class ExtensionDialog : public views::WidgetDelegate,
-                        public NotificationObserver,
+                        public content::NotificationObserver,
                         public base::RefCounted<ExtensionDialog> {
  public:
   virtual ~ExtensionDialog();
@@ -40,6 +39,7 @@ class ExtensionDialog : public views::WidgetDelegate,
                                TabContents* tab_contents,
                                int width,
                                int height,
+                               const string16& title,
                                ExtensionDialogObserver* observer);
 
   // Notifies the dialog that the observer has been destroyed and should not
@@ -49,21 +49,26 @@ class ExtensionDialog : public views::WidgetDelegate,
   // Closes the ExtensionDialog.
   void Close();
 
+  // Sets the window title.
+  void set_title(const string16& title) { window_title_ = title; }
+
   ExtensionHost* host() const { return extension_host_.get(); }
 
   // views::WidgetDelegate overrides.
   virtual bool CanResize() const OVERRIDE;
   virtual bool IsModal() const OVERRIDE;
   virtual bool ShouldShowWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual void WindowClosing() OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
 
-  // NotificationObserver overrides.
+  // content::NotificationObserver overrides.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // Use Show() to create instances.
@@ -77,10 +82,13 @@ class ExtensionDialog : public views::WidgetDelegate,
   // Window that holds the extension host view.
   views::Widget* window_;
 
+  // Window Title
+  string16 window_title_;
+
   // The contained host for the view.
   scoped_ptr<ExtensionHost> extension_host_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // The observer of this popup.
   ExtensionDialogObserver* observer_;

@@ -11,12 +11,11 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
-#include "ui/gfx/gl/gl_implementation.h"
+#include "ui/gfx/gl/gl_switches.h"
 
 class GPUBrowserTest : public InProcessBrowserTest {
  protected:
@@ -33,39 +32,15 @@ class GPUBrowserTest : public InProcessBrowserTest {
   virtual void SetUpCommandLine(CommandLine* command_line) {
     InProcessBrowserTest::SetUpCommandLine(command_line);
 
-    EXPECT_TRUE(test_launcher_utils::OverrideGLImplementation(
-        command_line,
-        gfx::kGLImplementationOSMesaName));
+    // GPU tests require gpu acceleration.
+    // We do not care which GL backend is used.
+    command_line->AppendSwitchASCII(switches::kUseGL, "any");
 
     command_line->AppendSwitch(switches::kDisablePopupBlocking);
-
-#if defined(OS_MACOSX)
-    // Accelerated compositing does not work with OSMesa. AcceleratedSurface
-    // assumes GL contexts are native.
-    command_line->AppendSwitch(switches::kDisableAcceleratedCompositing);
-#endif
   }
 
   FilePath gpu_test_dir_;
 };
-
-#if defined(TOOLKIT_VIEWS)
-// Flaky on Windows (dbg): http://crbug.com/72608
-// For ChromeOS: http://crbug.com/76217
-#define MAYBE_BrowserTestCanLaunchWithOSMesa DISABLED_BrowserTestCanLaunchWithOSMesa
-#else
-#define MAYBE_BrowserTestCanLaunchWithOSMesa BrowserTestCanLaunchWithOSMesa
-#endif
-
-IN_PROC_BROWSER_TEST_F(GPUBrowserTest, MAYBE_BrowserTestCanLaunchWithOSMesa) {
-  // Check the webgl test reports success and that the renderer was OSMesa.
-  ui_test_utils::NavigateToURL(
-      browser(),
-      net::FilePathToFileURL(gpu_test_dir_.AppendASCII("webgl.html")));
-
-  EXPECT_EQ(ASCIIToUTF16("SUCCESS: WebKit WebGL"),
-            browser()->GetSelectedTabContents()->GetTitle());
-}
 
 // Test is flaky and timing out.  See crbug.com/99883
 IN_PROC_BROWSER_TEST_F(GPUBrowserTest,

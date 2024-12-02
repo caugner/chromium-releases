@@ -513,11 +513,7 @@ std::string DumpIPNumber(const IPAddressNumber& v) {
 void RunGenerateFileNameTestCase(const GenerateFilenameCase* test_case,
                                  size_t iteration,
                                  const char* suite) {
-#if defined(OS_WIN)
-  string16 default_filename(test_case->default_filename);
-#else
-  string16 default_filename(WideToUTF16(test_case->default_filename));
-#endif
+  std::string default_filename(WideToUTF8(test_case->default_filename));
   FilePath file_path = GenerateFileName(
       GURL(test_case->url), test_case->content_disp_header,
       test_case->referrer_charset, test_case->suggested_filename,
@@ -1219,13 +1215,14 @@ TEST(NetUtilTest, GenerateSafeFileName) {
 }
 
 TEST(NetUtilTest, GenerateFileName) {
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
   // This test doesn't run when the locale is not UTF-8 because some of the
   // string conversions fail. This is OK (we have the default value) but they
   // don't match our expectations.
   std::string locale = setlocale(LC_CTYPE, NULL);
   StringToLowerASCII(&locale);
-  EXPECT_NE(std::string::npos, locale.find("utf-8"))
+  EXPECT_TRUE(locale.find("utf-8") != std::string::npos ||
+              locale.find("utf8") != std::string::npos)
       << "Your locale (" << locale << ") must be set to UTF-8 "
       << "for this test to pass!";
 #endif
@@ -2293,16 +2290,16 @@ TEST(NetUtilTest, GenerateFileName) {
       "",
       "",
       "",
-      "application/pdf",
+      "text/plain",
       L"download",
-      L"npdf.pdf"
+      L"npdf" TXT_EXT
     },
     { // Shouldn't overwrite C-D specified extension.
       "http://www.example.com/npdf.php?fn=foobar.pdf",
       "Content-Disposition: filename=foobar.jpg",
       "",
       "",
-      "application/pdf",
+      "text/plain",
       L"download",
       L"foobar.jpg"
     },
@@ -3212,12 +3209,12 @@ TEST(NetUtilTest, SetExplicitlyAllowedPortsTest) {
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(invalid); ++i) {
     SetExplicitlyAllowedPorts(invalid[i]);
-    EXPECT_EQ(0, static_cast<int>(explicitly_allowed_ports.size()));
+    EXPECT_EQ(0, static_cast<int>(GetCountOfExplicitlyAllowedPorts()));
   }
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(valid); ++i) {
     SetExplicitlyAllowedPorts(valid[i]);
-    EXPECT_EQ(i, explicitly_allowed_ports.size());
+    EXPECT_EQ(i, GetCountOfExplicitlyAllowedPorts());
   }
 }
 

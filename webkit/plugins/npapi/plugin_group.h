@@ -12,15 +12,12 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
+#include "webkit/plugins/webkit_plugins_export.h"
 #include "webkit/plugins/webplugininfo.h"
 
 class FilePath;
 class PluginExceptionsTableModelTest;
 class Version;
-
-namespace base {
-class DictionaryValue;
-}
 
 namespace webkit {
 namespace npapi {
@@ -76,18 +73,18 @@ struct VersionRange {
 // of a plugin that is needed in order not to exhibit known security
 // vulnerabilities.
 
-class PluginGroup {
+class WEBKIT_PLUGINS_EXPORT PluginGroup {
  public:
   // Used by about:plugins to disable Reader plugin when internal PDF viewer is
   // enabled.
-  static const char* kAdobeReaderGroupName;
-  static const char* kAdobeReaderUpdateURL;
-  static const char* kJavaGroupName;
-  static const char* kQuickTimeGroupName;
-  static const char* kShockwaveGroupName;
-  static const char* kRealPlayerGroupName;
-  static const char* kSilverlightGroupName;
-  static const char* kWindowsMediaPlayerGroupName;
+  static const char kAdobeReaderGroupName[];
+  static const char kAdobeReaderUpdateURL[];
+  static const char kJavaGroupName[];
+  static const char kQuickTimeGroupName[];
+  static const char kShockwaveGroupName[];
+  static const char kRealPlayerGroupName[];
+  static const char kSilverlightGroupName[];
+  static const char kWindowsMediaPlayerGroupName[];
 
   PluginGroup(const PluginGroup& other);
 
