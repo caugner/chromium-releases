@@ -585,7 +585,7 @@
       },
       {
         "args": [
-          "webgl_conformance",
+          "webgl2_conformance",
           "--show-stdout",
           "--browser=release_x64",
           "--passthrough",
@@ -625,7 +625,7 @@
       },
       {
         "args": [
-          "webgl_conformance",
+          "webgl2_conformance",
           "--show-stdout",
           "--browser=release_x64",
           "--passthrough",
@@ -666,7 +666,7 @@
       },
       {
         "args": [
-          "webgl_conformance",
+          "webgl1_conformance",
           "--show-stdout",
           "--browser=release_x64",
           "--passthrough",
@@ -705,7 +705,7 @@
       },
       {
         "args": [
-          "webgl_conformance",
+          "webgl1_conformance",
           "--show-stdout",
           "--browser=release_x64",
           "--passthrough",
@@ -745,7 +745,7 @@
       },
       {
         "args": [
-          "webgl_conformance",
+          "webgl1_conformance",
           "--show-stdout",
           "--browser=release_x64",
           "--passthrough",
@@ -784,7 +784,7 @@
       },
       {
         "args": [
-          "webgl_conformance",
+          "webgl1_conformance",
           "--show-stdout",
           "--browser=release_x64",
           "--passthrough",
@@ -824,7 +824,7 @@
       },
       {
         "args": [
-          "webgl_conformance",
+          "webgl1_conformance",
           "--show-stdout",
           "--browser=release_x64",
           "--passthrough",
@@ -862,7 +862,7 @@
       },
       {
         "args": [
-          "webgl_conformance",
+          "webgl1_conformance",
           "--show-stdout",
           "--browser=release_x64",
           "--passthrough",

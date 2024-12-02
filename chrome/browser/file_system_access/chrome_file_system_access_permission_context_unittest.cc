@@ -240,6 +240,12 @@ TEST_F(ChromeFileSystemAccessPermissionContextTest,
                 permission_context(), PathType::kExternal,
                 base::FilePath(FILE_PATH_LITERAL("foo/bar")), HandleType::kFile,
                 UserAction::kOpen));
+
+  // Path outside any special directories via no user action should be allowed.
+  EXPECT_EQ(SensitiveDirectoryResult::kAllowed,
+            ConfirmSensitiveEntryAccessSync(
+                permission_context(), PathType::kLocal, kTestPath,
+                HandleType::kDirectory, UserAction::kNone));
 }
 
 TEST_F(ChromeFileSystemAccessPermissionContextTest,
@@ -402,6 +408,12 @@ TEST_F(ChromeFileSystemAccessPermissionContextTest,
                 permission_context(), PathType::kLocal,
                 base::FilePath(FILE_PATH_LITERAL("/dev/foo")),
                 HandleType::kFile, UserAction::kOpen));
+  // Even if user action is none, a blocklisted path should be blocked.
+  EXPECT_EQ(SensitiveDirectoryResult::kAbort,
+            ConfirmSensitiveEntryAccessSync(
+                permission_context(), PathType::kLocal,
+                base::FilePath(FILE_PATH_LITERAL("/dev")),
+                HandleType::kDirectory, UserAction::kNone));
 #elif BUILDFLAG(IS_WIN)
   EXPECT_EQ(SensitiveDirectoryResult::kAbort,
             ConfirmSensitiveEntryAccessSync(
@@ -414,25 +426,76 @@ TEST_F(ChromeFileSystemAccessPermissionContextTest,
 #if BUILDFLAG(IS_WIN)
 TEST_F(ChromeFileSystemAccessPermissionContextTest,
        ConfirmSensitiveEntryAccess_UNCPath) {
+  if (!base::FeatureList::IsEnabled(
+          features::kFileSystemAccessLocalUNCPathBlock)) {
+    return;
+  }
+
+  EXPECT_EQ(
+      SensitiveDirectoryResult::kAllowed,
+      ConfirmSensitiveEntryAccessSync(
+          permission_context(), PathType::kLocal,
+          base::FilePath(FILE_PATH_LITERAL("\\\\server\\share\\foo\\bar")),
+          HandleType::kDirectory, UserAction::kOpen));
+
+  EXPECT_EQ(SensitiveDirectoryResult::kAllowed,
+            ConfirmSensitiveEntryAccessSync(
+                permission_context(), PathType::kLocal,
+                base::FilePath(FILE_PATH_LITERAL("c:\\\\foo\\bar")),
+                HandleType::kDirectory, UserAction::kOpen));
+
   EXPECT_EQ(
       SensitiveDirectoryResult::kAbort,
       ConfirmSensitiveEntryAccessSync(
           permission_context(), PathType::kLocal,
-          base::FilePath(FILE_PATH_LITERAL("\\\\127.0.0.1\\c:\\Program Files")),
+          base::FilePath(FILE_PATH_LITERAL("\\\\localhost\\c$\\foo\\bar")),
           HandleType::kDirectory, UserAction::kOpen));
 
   EXPECT_EQ(
       SensitiveDirectoryResult::kAbort,
       ConfirmSensitiveEntryAccessSync(
           permission_context(), PathType::kLocal,
-          base::FilePath(FILE_PATH_LITERAL("\\\\127.0.0.1\\c:\\foo\\bar")),
+          base::FilePath(FILE_PATH_LITERAL("\\\\LOCALHOST\\c$\\foo\\bar")),
           HandleType::kDirectory, UserAction::kOpen));
 
   EXPECT_EQ(
       SensitiveDirectoryResult::kAbort,
       ConfirmSensitiveEntryAccessSync(
           permission_context(), PathType::kLocal,
-          base::FilePath(FILE_PATH_LITERAL("\\\\localhost\\c:\\Program Files")),
+          base::FilePath(FILE_PATH_LITERAL("\\\\127.0.0.1\\c$\\foo\\bar")),
+          HandleType::kDirectory, UserAction::kOpen));
+
+  EXPECT_EQ(SensitiveDirectoryResult::kAbort,
+            ConfirmSensitiveEntryAccessSync(
+                permission_context(), PathType::kLocal,
+                base::FilePath(FILE_PATH_LITERAL("\\\\.\\c:\\foo\\bar")),
+                HandleType::kDirectory, UserAction::kOpen));
+
+  EXPECT_EQ(SensitiveDirectoryResult::kAbort,
+            ConfirmSensitiveEntryAccessSync(
+                permission_context(), PathType::kLocal,
+                base::FilePath(FILE_PATH_LITERAL("\\\\?\\c:\\foo\\bar")),
+                HandleType::kDirectory, UserAction::kOpen));
+
+  EXPECT_EQ(SensitiveDirectoryResult::kAbort,
+            ConfirmSensitiveEntryAccessSync(
+                permission_context(), PathType::kLocal,
+                base::FilePath(FILE_PATH_LITERAL(
+                    "\\\\;LanmanRedirector\\localhost\\c$\\foo\\bar")),
+                HandleType::kDirectory, UserAction::kOpen));
+
+  EXPECT_EQ(SensitiveDirectoryResult::kAbort,
+            ConfirmSensitiveEntryAccessSync(
+                permission_context(), PathType::kLocal,
+                base::FilePath(
+                    FILE_PATH_LITERAL("\\\\.\\UNC\\LOCALHOST\\c:\\foo\\bar")),
+                HandleType::kDirectory, UserAction::kOpen));
+
+  EXPECT_EQ(
+      SensitiveDirectoryResult::kAbort,
+      ConfirmSensitiveEntryAccessSync(
+          permission_context(), PathType::kLocal,
+          base::FilePath(FILE_PATH_LITERAL("\\\\myhostname\\c$\\foo\\bar")),
           HandleType::kDirectory, UserAction::kOpen));
 }
 #endif
@@ -451,6 +514,12 @@ TEST_F(ChromeFileSystemAccessPermissionContextTest,
                 permission_context(), PathType::kLocal,
                 temp_dir_.GetPath().AppendASCII("test.swf"), HandleType::kFile,
                 UserAction::kSave));
+  // Files with a dangerous extension from no user action should be allowed.
+  EXPECT_EQ(SensitiveDirectoryResult::kAllowed,
+            ConfirmSensitiveEntryAccessSync(
+                permission_context(), PathType::kLocal,
+                temp_dir_.GetPath().AppendASCII("test.swf"), HandleType::kFile,
+                UserAction::kNone));
   // Opening files with a dangerous extension should be allowed.
   EXPECT_EQ(SensitiveDirectoryResult::kAllowed,
             ConfirmSensitiveEntryAccessSync(
