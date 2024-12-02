@@ -20,6 +20,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/testing_browser_process.h"
+#include "chromeos/chromeos_switches.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -77,7 +78,7 @@ class UserImageManagerTest : public CrosInProcessBrowserTest,
 
   // Logs in |username|.
   void LogIn(const std::string& username) {
-    UserManager::Get()->UserLoggedIn(username, false);
+    UserManager::Get()->UserLoggedIn(username, username, false);
   }
 
   // Subscribes for image change notification.
@@ -182,7 +183,7 @@ class UserImageManagerTest : public CrosInProcessBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(UserImageManagerTest, PRE_DefaultUserImagePreserved) {
   // Setup an old default (stock) user image.
-  ScopedMockUserManagerEnabler mock_user_manager;
+  ScopedUserManagerEnabler(new MockUserManager);
   SetOldUserImageInfo(kTestUser1, kFirstDefaultImageIndex, base::FilePath());
 }
 
@@ -199,7 +200,7 @@ IN_PROC_BROWSER_TEST_F(UserImageManagerTest, DefaultUserImagePreserved) {
 
 IN_PROC_BROWSER_TEST_F(UserImageManagerTest, PRE_OtherUsersUnaffected) {
   // Setup two users with stock images.
-  ScopedMockUserManagerEnabler mock_user_manager;
+  ScopedUserManagerEnabler(new MockUserManager);
   SetOldUserImageInfo(kTestUser1, kFirstDefaultImageIndex, base::FilePath());
   SetOldUserImageInfo(kTestUser2, kFirstDefaultImageIndex + 1,
                       base::FilePath());
@@ -222,7 +223,7 @@ IN_PROC_BROWSER_TEST_F(UserImageManagerTest, OtherUsersUnaffected) {
 
 IN_PROC_BROWSER_TEST_F(UserImageManagerTest, PRE_PRE_NonJPEGImageFromFile) {
   // Setup a user with non-JPEG image.
-  ScopedMockUserManagerEnabler mock_user_manager;
+  ScopedUserManagerEnabler(new MockUserManager);
   SaveUserImagePNG(
       kTestUser1, kDefaultImageResourceIDs[kFirstDefaultImageIndex]);
 }

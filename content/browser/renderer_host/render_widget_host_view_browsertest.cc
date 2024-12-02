@@ -77,7 +77,7 @@ class RenderWidgetHostViewBrowserTest : public ContentBrowserTest {
     // not be available immediately so wait for it.
     while (!CheckCompositingSurface()) {
       base::RunLoop run_loop;
-      MessageLoop::current()->PostDelayedTask(
+      base::MessageLoop::current()->PostDelayedTask(
           FROM_HERE,
           run_loop.QuitClosure(),
           base::TimeDelta::FromMilliseconds(10));
@@ -126,10 +126,19 @@ class FakeFrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
   }
 
   virtual bool ShouldCaptureFrame(
+      base::Time present_time,
       scoped_refptr<media::VideoFrame>* storage,
       DeliverFrameCallback* callback) OVERRIDE {
+    // Only allow one frame capture to be made.  Otherwise, the compositor could
+    // start multiple captures, unbounded, and eventually its own limiter logic
+    // will begin invoking |callback| with a |false| result.  This flakes out
+    // the unit tests, since they receive a "failed" callback before the later
+    // "success" callbacks.
+    if (callback_.is_null())
+      return false;
     *storage = media::VideoFrame::CreateBlackFrame(gfx::Size(100, 100));
     *callback = callback_;
+    callback_.Reset();
     return true;
   }
 
@@ -152,13 +161,10 @@ static void DeliverFrameFunc(const scoped_refptr<base::MessageLoopProxy>& loop,
 #endif
 
 #if defined(OS_MACOSX)
-// TODO(miu): We're forcing synchronous copy for M27.  Need to re-enable these
-// tests once the asynchronous method is ready for M28.  http://crbug.com/223326
-
 // Tests that the callback passed to CopyFromBackingStore is always called, even
 // when the RenderWidgetHost is deleting in the middle of an async copy.
 IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
-                       DISABLED_MacAsyncCopyFromBackingStoreCallbackTest) {
+                       MacAsyncCopyFromBackingStoreCallbackTest) {
   if (!SetupCompositingSurface()) {
     LOG(WARNING) << "Accelerated compositing not running.";
     return;
@@ -190,7 +196,7 @@ IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
 // an async copy.
 IN_PROC_BROWSER_TEST_F(
     RenderWidgetHostViewBrowserTest,
-    DISABLED_MacAsyncCopyFromCompositingSurfaceToVideoFrameCallbackTest) {
+    MacAsyncCopyFromCompositingSurfaceToVideoFrameCallbackTest) {
   if (!SetupCompositingSurface()) {
     LOG(WARNING) << "Accelerated compositing not running.";
     return;
@@ -250,8 +256,14 @@ IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
 }
 
 // Test copying from backing store when page is non-accelerated-composited.
+// Flaky. http://crbug.com/224351
+#if defined(OS_MACOSX) || defined(OS_WIN)
+#define MAYBE_CopyFromBackingStore DISABLED_CopyFromBackingStore
+#else
+#define MAYBE_CopyFromBackingStore CopyFromBackingStore
+#endif
 IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
-                       CopyFromBackingStore) {
+                       MAYBE_CopyFromBackingStore) {
   SetupNonCompositing();
   base::RunLoop run_loop;
 

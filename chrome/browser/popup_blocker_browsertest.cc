@@ -55,7 +55,7 @@ class PopupBlockerBrowserTest : public InProcessBrowserTest {
     // Do a round trip to the renderer first to flush any in-flight IPCs to
     // create a to-be-blocked window.
     WebContents* tab = browser->tab_strip_model()->GetActiveWebContents();
-    CHECK(content::ExecuteScript(tab, ""));
+    CHECK(content::ExecuteScript(tab, std::string()));
     BlockedContentTabHelper* blocked_content_tab_helper =
         BlockedContentTabHelper::FromWebContents(tab);
     std::vector<WebContents*> blocked_contents;
@@ -114,7 +114,8 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
   BasicTest(CreateIncognitoBrowser(), GetTestURL());
 }
 
-IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, PopupBlockedFakeClickOnAnchor) {
+IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, 
+                       PopupBlockedFakeClickOnAnchor) {
   GURL url(ui_test_utils::GetTestUrl(
       base::FilePath(kTestDir),
       base::FilePath(FILE_PATH_LITERAL("popup-fake-click-on-anchor.html"))));
@@ -133,12 +134,12 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, MultiplePopups) {
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
                        AllowPopupThroughContentSetting) {
   GURL url(GetTestURL());
-  browser()->profile()->GetHostContentSettingsMap()->SetContentSetting(
-      ContentSettingsPattern::FromURL(url),
-      ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTINGS_TYPE_POPUPS,
-      "",
-      CONTENT_SETTING_ALLOW);
+  browser()->profile()->GetHostContentSettingsMap()
+      ->SetContentSetting(ContentSettingsPattern::FromURL(url),
+                          ContentSettingsPattern::Wildcard(),
+                          CONTENT_SETTINGS_TYPE_POPUPS,
+                          std::string(),
+                          CONTENT_SETTING_ALLOW);
 
   NavigateAndCheckPopupShown(browser(), url);
 }

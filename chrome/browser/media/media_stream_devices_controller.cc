@@ -10,9 +10,8 @@
 #include "chrome/browser/content_settings/content_settings_provider.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/extensions/api/tab_capture/tab_capture_registry.h"
-#include "chrome/browser/extensions/api/tab_capture/tab_capture_registry_factory.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
+#include "chrome/browser/media/media_stream_capture_indicator.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -39,18 +38,23 @@ bool HasAnyAvailableDevice() {
 }  // namespace
 
 MediaStreamDevicesController::MediaStreamDevicesController(
-    Profile* profile,
-    TabSpecificContentSettings* content_settings,
+    content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
     const content::MediaResponseCallback& callback)
-    : profile_(profile),
-      content_settings_(content_settings),
+    : web_contents_(web_contents),
       request_(request),
       callback_(callback),
+      // For MEDIA_OPEN_DEVICE requests (Pepper) we always request both webcam
+      // and microphone to avoid popping two infobars.
       microphone_requested_(
-          request.audio_type == content::MEDIA_DEVICE_AUDIO_CAPTURE),
+          request.audio_type == content::MEDIA_DEVICE_AUDIO_CAPTURE ||
+          request.request_type == content::MEDIA_OPEN_DEVICE),
       webcam_requested_(
-          request.video_type == content::MEDIA_DEVICE_VIDEO_CAPTURE) {
+          request.video_type == content::MEDIA_DEVICE_VIDEO_CAPTURE ||
+          request.request_type == content::MEDIA_OPEN_DEVICE) {
+  profile_ = Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  content_settings_ = TabSpecificContentSettings::FromWebContents(web_contents);
+
   // Don't call GetDevicePolicy from the initializer list since the
   // implementation depends on member variables.
   if (microphone_requested_ &&
@@ -68,27 +72,22 @@ MediaStreamDevicesController::~MediaStreamDevicesController() {}
 
 // static
 void MediaStreamDevicesController::RegisterUserPrefs(
-    PrefRegistrySyncable* prefs) {
+    user_prefs::PrefRegistrySyncable* prefs) {
   prefs->RegisterBooleanPref(prefs::kVideoCaptureAllowed,
                              true,
-                             PrefRegistrySyncable::UNSYNCABLE_PREF);
+                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kAudioCaptureAllowed,
                              true,
-                             PrefRegistrySyncable::UNSYNCABLE_PREF);
+                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 
 bool MediaStreamDevicesController::DismissInfoBarAndTakeActionOnSettings() {
-  // If this is a no UI check for policies only go straight to accept - policy
-  // check will be done automatically on the way.
-  if (request_.request_type == content::MEDIA_OPEN_DEVICE) {
-    Accept(false);
-    return true;
-  }
-
+  // Tab capture is allowed for extensions only and infobar is not shown for
+  // extensions.
   if (request_.audio_type == content::MEDIA_TAB_AUDIO_CAPTURE ||
       request_.video_type == content::MEDIA_TAB_VIDEO_CAPTURE) {
-    HandleTabMediaRequest();
+    Deny(false);
     return true;
   }
 
@@ -144,8 +143,8 @@ void MediaStreamDevicesController::Accept(bool update_content_setting) {
         // first available of the given type.
         MediaCaptureDevicesDispatcher::GetInstance()->GetRequestedDevice(
             request_.requested_device_id,
-            microphone_requested_,
-            webcam_requested_,
+            request_.audio_type == content::MEDIA_DEVICE_AUDIO_CAPTURE,
+            request_.video_type == content::MEDIA_DEVICE_VIDEO_CAPTURE,
             &devices);
         break;
       case content::MEDIA_DEVICE_ACCESS:
@@ -160,11 +159,24 @@ void MediaStreamDevicesController::Accept(bool update_content_setting) {
         break;
     }
 
-    if (update_content_setting && IsSchemeSecure() && !devices.empty())
-      SetPermission(true);
+    // TODO(raymes): We currently set the content permission for non-https
+    // websites for Pepper requests as well. This is temporary and should be
+    // removed.
+    if (update_content_setting) {
+      if ((IsSchemeSecure() && !devices.empty()) ||
+          request_.request_type == content::MEDIA_OPEN_DEVICE) {
+        SetPermission(true);
+      }
+    }
   }
 
-  callback_.Run(devices);
+  scoped_ptr<content::MediaStreamUI> ui;
+  if (!devices.empty()) {
+    ui = MediaCaptureDevicesDispatcher::GetInstance()->
+        GetMediaStreamCaptureIndicator()->RegisterMediaStream(
+            web_contents_, devices);
+  }
+  callback_.Run(devices, ui.Pass());
 }
 
 void MediaStreamDevicesController::Deny(bool update_content_setting) {
@@ -179,7 +191,8 @@ void MediaStreamDevicesController::Deny(bool update_content_setting) {
   if (update_content_setting)
     SetPermission(false);
 
-  callback_.Run(content::MediaStreamDevices());
+  callback_.Run(content::MediaStreamDevices(),
+                scoped_ptr<content::MediaStreamUI>());
 }
 
 MediaStreamDevicesController::DevicePolicy
@@ -214,13 +227,23 @@ bool MediaStreamDevicesController::IsRequestAllowedByDefault() const {
       continue;
 
     DevicePolicy policy = GetDevicePolicy(device_checks[i].policy_name);
-    if (policy == ALWAYS_DENY ||
-        (policy == POLICY_NOT_SET &&
-         profile_->GetHostContentSettingsMap()->GetContentSetting(
-            request_.security_origin, request_.security_origin,
-            device_checks[i].settings_type, NO_RESOURCE_IDENTIFIER) !=
-         CONTENT_SETTING_ALLOW)) {
+
+    if (policy == ALWAYS_DENY)
       return false;
+
+    if (policy == POLICY_NOT_SET) {
+      // Only load content settings from secure origins unless it is a
+      // content::MEDIA_OPEN_DEVICE (Pepper) request.
+      if (!IsSchemeSecure() &&
+          request_.request_type != content::MEDIA_OPEN_DEVICE) {
+        return false;
+      }
+      if (profile_->GetHostContentSettingsMap()->GetContentSetting(
+              request_.security_origin, request_.security_origin,
+              device_checks[i].settings_type, NO_RESOURCE_IDENTIFIER) !=
+              CONTENT_SETTING_ALLOW) {
+        return false;
+      }
     }
     // If we get here, then either policy is set to ALWAYS_ALLOW or the content
     // settings allow the request by default.
@@ -260,35 +283,6 @@ bool MediaStreamDevicesController::IsDefaultMediaAccessBlocked() const {
       profile_->GetHostContentSettingsMap()->GetDefaultContentSetting(
           CONTENT_SETTINGS_TYPE_MEDIASTREAM, NULL);
   return (current_setting == CONTENT_SETTING_BLOCK);
-}
-
-void MediaStreamDevicesController::HandleTabMediaRequest() {
-#if defined(OS_ANDROID)
-  Deny(false);
-#else
-  // For tab media requests, we need to make sure the request came from the
-  // extension API, so we check the registry here.
-  extensions::TabCaptureRegistry* registry =
-      extensions::TabCaptureRegistryFactory::GetForProfile(profile_);
-
-  if (!registry->VerifyRequest(request_.render_process_id,
-                               request_.render_view_id)) {
-    Deny(false);
-  } else {
-    content::MediaStreamDevices devices;
-
-    if (request_.audio_type == content::MEDIA_TAB_AUDIO_CAPTURE) {
-      devices.push_back(content::MediaStreamDevice(
-          content::MEDIA_TAB_AUDIO_CAPTURE, "", ""));
-    }
-    if (request_.video_type == content::MEDIA_TAB_VIDEO_CAPTURE) {
-      devices.push_back(content::MediaStreamDevice(
-          content::MEDIA_TAB_VIDEO_CAPTURE, "", ""));
-    }
-
-    callback_.Run(devices);
-  }
-#endif
 }
 
 bool MediaStreamDevicesController::IsSchemeSecure() const {

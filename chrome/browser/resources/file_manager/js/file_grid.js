@@ -32,6 +32,9 @@ FileGrid.decorate = function(self, metadataCache) {
   self.__proto__ = FileGrid.prototype;
   self.metadataCache_ = metadataCache;
 
+  if (util.platform.newUI())
+    ScrollBar.createVertical(self.parentNode, self);
+
   self.itemConstructor = function(entry) {
     var item = self.ownerDocument.createElement('LI');
     FileGrid.Item.decorate(item, entry, self);
@@ -55,6 +58,24 @@ FileGrid.prototype.updateListItemsMetadata = function(type, props) {
     FileGrid.decorateThumbnailBox(box, entry, this.metadataCache_,
                                   ThumbnailLoader.FillMode.FIT);
   }
+};
+
+/**
+ * Redraws the UI. Skips multiple consecutive calls.
+ */
+FileGrid.prototype.relayout = function() {
+  if (this.resizeGridTimer_) {
+    clearTimeout(this.resizeGridTimer_);
+    this.resizeGridTimer_ = null;
+  }
+  this.resizeGridTimer_ = setTimeout(function() {
+    this.startBatchUpdates();
+    this.columns = 0;
+    this.redraw();
+    cr.dispatchSimpleEvent(this, 'relayout');
+    this.endBatchUpdates();
+    this.resizeGridTimer_ = null;
+  }.bind(this), 100);
 };
 
 /**
@@ -123,11 +144,17 @@ FileGrid.decorateThumbnailBox = function(
     metadataTypes += '|media';
   }
 
+  var useEmbedded = util.platform.newUI() ?
+      ThumbnailLoader.UseEmbedded.NO_EMBEDDED :
+      ThumbnailLoader.UseEmbedded.USE_EMBEDDED;
+
   metadataCache.get(imageUrl, metadataTypes,
       function(metadata) {
         new ThumbnailLoader(imageUrl,
                             ThumbnailLoader.LoaderType.IMAGE,
-                            metadata).
+                            metadata,
+                            undefined,
+                            useEmbedded).
             load(box,
                  fillMode,
                  ThumbnailLoader.OptimizationMode.DISCARD_DETACHED,

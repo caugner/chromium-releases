@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "android_webview/browser/aw_browser_context.h"
+#include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/aw_request_interceptor.h"
 #include "android_webview/browser/net/aw_network_delegate.h"
 #include "android_webview/browser/net/aw_url_request_job_factory.h"
@@ -15,6 +16,7 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
+#include "net/base/cache_type.h"
 #include "net/cookies/cookie_store.h"
 #include "net/http/http_cache.h"
 #include "net/proxy/proxy_service.h"
@@ -55,8 +57,7 @@ void AwURLRequestContextGetter::Init() {
   builder.set_ftp_enabled(false);  // Android WebView does not support ftp yet.
   builder.set_proxy_config_service(proxy_config_service_.release());
   builder.set_accept_language(net::HttpUtil::GenerateAcceptLanguageHeader(
-      content::GetContentClient()->browser()->GetAcceptLangs(
-          browser_context_)));
+      AwContentBrowserClient::GetAcceptLangsImpl()));
 
   url_request_context_.reset(builder.Build());
 
@@ -67,6 +68,7 @@ void AwURLRequestContextGetter::Init() {
       network_session_params,
       new net::HttpCache::DefaultBackend(
           net::DISK_CACHE,
+          net::CACHE_BACKEND_DEFAULT,
           browser_context_->GetPath().Append(FILE_PATH_LITERAL("Cache")),
           10 * 1024 * 1024,  // 10M
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)));

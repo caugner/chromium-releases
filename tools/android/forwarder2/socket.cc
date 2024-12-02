@@ -31,9 +31,9 @@ bool FamilyIsTCP(int family) {
 
 namespace forwarder2 {
 
-bool Socket::BindUnix(const std::string& path, bool abstract) {
+bool Socket::BindUnix(const std::string& path) {
   errno = 0;
-  if (!InitUnixSocket(path, abstract) || !BindAndListen()) {
+  if (!InitUnixSocket(path) || !BindAndListen()) {
     Close();
     return false;
   }
@@ -49,9 +49,9 @@ bool Socket::BindTcp(const std::string& host, int port) {
   return true;
 }
 
-bool Socket::ConnectUnix(const std::string& path, bool abstract) {
+bool Socket::ConnectUnix(const std::string& path) {
   errno = 0;
-  if (!InitUnixSocket(path, abstract) || !Connect()) {
+  if (!InitUnixSocket(path) || !Connect()) {
     Close();
     return false;
   }
@@ -72,11 +72,8 @@ Socket::Socket()
       port_(0),
       socket_error_(false),
       family_(AF_INET),
-      abstract_(false),
       addr_ptr_(reinterpret_cast<sockaddr*>(&addr_.addr4)),
-      addr_len_(sizeof(sockaddr)),
-      exit_notifier_fd_(-1),
-      exited_(false) {
+      addr_len_(sizeof(sockaddr)) {
   memset(&addr_, 0, sizeof(addr_));
 }
 
@@ -109,31 +106,24 @@ bool Socket::InitSocketInternal() {
   return true;
 }
 
-bool Socket::InitUnixSocket(const std::string& path, bool abstract) {
+bool Socket::InitUnixSocket(const std::string& path) {
   static const size_t kPathMax = sizeof(addr_.addr_un.sun_path);
   // For abstract sockets we need one extra byte for the leading zero.
-  if ((abstract && path.size() + 2 /* '\0' */ > kPathMax) ||
-      (!abstract && path.size() + 1 /* '\0' */ > kPathMax)) {
+  if (path.size() + 2 /* '\0' */ > kPathMax) {
     LOG(ERROR) << "The provided path is too big to create a unix "
                << "domain socket: " << path;
     return false;
   }
-  abstract_ = abstract;
   family_ = PF_UNIX;
   addr_.addr_un.sun_family = family_;
-  if (abstract) {
-    // Copied from net/base/unix_domain_socket_posix.cc
-    // Convert the path given into abstract socket name. It must start with
-    // the '\0' character, so we are adding it. |addr_len| must specify the
-    // length of the structure exactly, as potentially the socket name may
-    // have '\0' characters embedded (although we don't support this).
-    // Note that addr_.addr_un.sun_path is already zero initialized.
-    memcpy(addr_.addr_un.sun_path + 1, path.c_str(), path.size());
-    addr_len_ = path.size() + offsetof(struct sockaddr_un, sun_path) + 1;
-  } else {
-    memcpy(addr_.addr_un.sun_path, path.c_str(), path.size());
-    addr_len_ = sizeof(sockaddr_un);
-  }
+  // Copied from net/socket/unix_domain_socket_posix.cc
+  // Convert the path given into abstract socket name. It must start with
+  // the '\0' character, so we are adding it. |addr_len| must specify the
+  // length of the structure exactly, as potentially the socket name may
+  // have '\0' characters embedded (although we don't support this).
+  // Note that addr_.addr_un.sun_path is already zero initialized.
+  memcpy(addr_.addr_un.sun_path + 1, path.c_str(), path.size());
+  addr_len_ = path.size() + offsetof(struct sockaddr_un, sun_path) + 1;
   addr_ptr_ = reinterpret_cast<sockaddr*>(&addr_.addr_un);
   return InitSocketInternal();
 }
@@ -338,6 +328,27 @@ int Socket::WriteString(const std::string& buffer) {
   return WriteNumBytes(buffer.c_str(), buffer.size());
 }
 
+void Socket::AddEventFd(int event_fd) {
+  Event event;
+  event.fd = event_fd;
+  event.was_fired = false;
+  events_.push_back(event);
+}
+
+bool Socket::DidReceiveEventOnFd(int fd) const {
+  for (size_t i = 0; i < events_.size(); ++i)
+    if (events_[i].fd == fd)
+      return events_[i].was_fired;
+  return false;
+}
+
+bool Socket::DidReceiveEvent() const {
+  for (size_t i = 0; i < events_.size(); ++i)
+    if (events_[i].was_fired)
+      return true;
+  return false;
+}
+
 int Socket::WriteNumBytes(const void* buffer, size_t num_bytes) {
   int bytes_written = 0;
   int ret = 1;
@@ -351,9 +362,8 @@ int Socket::WriteNumBytes(const void* buffer, size_t num_bytes) {
 }
 
 bool Socket::WaitForEvent(EventType type, int timeout_secs) {
-  if (exit_notifier_fd_ == -1 || socket_ == -1)
+  if (events_.empty() || socket_ == -1)
     return true;
-  const int nfds = std::max(socket_, exit_notifier_fd_) + 1;
   fd_set read_fds;
   fd_set write_fds;
   FD_ZERO(&read_fds);
@@ -362,8 +372,8 @@ bool Socket::WaitForEvent(EventType type, int timeout_secs) {
     FD_SET(socket_, &read_fds);
   else
     FD_SET(socket_, &write_fds);
-  FD_SET(exit_notifier_fd_, &read_fds);
-
+  for (size_t i = 0; i < events_.size(); ++i)
+    FD_SET(events_[i].fd, &read_fds);
   timeval tv = {};
   timeval* tv_ptr = NULL;
   if (timeout_secs > 0) {
@@ -371,19 +381,41 @@ bool Socket::WaitForEvent(EventType type, int timeout_secs) {
     tv.tv_usec = 0;
     tv_ptr = &tv;
   }
-  if (HANDLE_EINTR(select(nfds, &read_fds, &write_fds, NULL, tv_ptr)) <= 0)
-    return false;
-  if (FD_ISSET(exit_notifier_fd_, &read_fds)) {
-    exited_ = true;
+  int max_fd = socket_;
+  for (size_t i = 0; i < events_.size(); ++i)
+    if (events_[i].fd > max_fd)
+      max_fd = events_[i].fd;
+  if (HANDLE_EINTR(
+          select(max_fd + 1, &read_fds, &write_fds, NULL, tv_ptr)) <= 0) {
     return false;
   }
-  return true;
+  bool event_was_fired = false;
+  for (size_t i = 0; i < events_.size(); ++i) {
+    if (FD_ISSET(events_[i].fd, &read_fds)) {
+      events_[i].was_fired = true;
+      event_was_fired = true;
+    }
+  }
+  return !event_was_fired;
 }
 
 // static
-int Socket::GetHighestFileDescriptor(
-    const Socket& s1, const Socket& s2) {
+int Socket::GetHighestFileDescriptor(const Socket& s1, const Socket& s2) {
   return std::max(s1.socket_, s2.socket_);
 }
 
-}  // namespace forwarder
+// static
+pid_t Socket::GetUnixDomainSocketProcessOwner(const std::string& path) {
+  Socket socket;
+  if (!socket.ConnectUnix(path))
+    return -1;
+  ucred ucred;
+  socklen_t len = sizeof(ucred);
+  if (getsockopt(socket.socket_, SOL_SOCKET, SO_PEERCRED, &ucred, &len) == -1) {
+    CHECK_NE(ENOPROTOOPT, errno);
+    return -1;
+  }
+  return ucred.pid;
+}
+
+}  // namespace forwarder2

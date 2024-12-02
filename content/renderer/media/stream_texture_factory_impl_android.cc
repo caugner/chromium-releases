@@ -13,7 +13,6 @@
 #include "content/common/gpu/gpu_messages.h"
 #include "content/renderer/render_thread_impl.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebStreamTextureClient.h"
 #include "ui/gfx/size.h"
 
 namespace {
@@ -24,19 +23,14 @@ namespace {
 class StreamTextureProxyImpl : public webkit_media::StreamTextureProxy,
                                public content::StreamTextureHost::Listener {
  public:
-  virtual ~StreamTextureProxyImpl() {}
-
   explicit StreamTextureProxyImpl(content::StreamTextureHost* host);
+  virtual ~StreamTextureProxyImpl() {}
 
   // webkit_media::StreamTextureProxy implementation:
   virtual void BindToCurrentThread(
       int stream_id, int width, int height) OVERRIDE;
   virtual bool IsBoundToThread() OVERRIDE { return !!loop_.get(); }
-#ifndef REMOVE_WEBVIDEOFRAME
-  virtual void SetClient(WebKit::WebStreamTextureClient* client) OVERRIDE;
-#else
   virtual void SetClient(cc::VideoFrameProvider::Client* client) OVERRIDE;
-#endif
   virtual void Release() OVERRIDE;
 
   // StreamTextureHost::Listener implementation:
@@ -48,11 +42,7 @@ class StreamTextureProxyImpl : public webkit_media::StreamTextureProxy,
   scoped_refptr<base::MessageLoopProxy> loop_;
 
   base::Lock client_lock_;
-#ifndef REMOVE_WEBVIDEOFRAME
-  WebKit::WebStreamTextureClient* client_;
-#else
   cc::VideoFrameProvider::Client* client_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(StreamTextureProxyImpl);
 };
@@ -73,11 +63,7 @@ void StreamTextureProxyImpl::Release() {
     delete this;
 }
 
-#ifndef REMOVE_WEBVIDEOFRAME
-void StreamTextureProxyImpl::SetClient(WebKit::WebStreamTextureClient* client) {
-#else
 void StreamTextureProxyImpl::SetClient(cc::VideoFrameProvider::Client* client) {
-#endif
   base::AutoLock lock(client_lock_);
   client_ = client;
 }
@@ -90,24 +76,14 @@ void StreamTextureProxyImpl::BindToCurrentThread(
 
 void StreamTextureProxyImpl::OnFrameAvailable() {
   base::AutoLock lock(client_lock_);
-#ifndef REMOVE_WEBVIDEOFRAME
-  if (client_)
-    client_->didReceiveFrame();
-#else
   if (client_)
     client_->DidReceiveFrame();
-#endif
 }
 
 void StreamTextureProxyImpl::OnMatrixChanged(const float matrix[16]) {
   base::AutoLock lock(client_lock_);
-#ifndef REMOVE_WEBVIDEOFRAME
-  if (client_)
-    client_->didUpdateMatrix(matrix);
-#else
   if (client_)
     client_->DidUpdateMatrix(matrix);
-#endif
 }
 
 }  // anonymous namespace

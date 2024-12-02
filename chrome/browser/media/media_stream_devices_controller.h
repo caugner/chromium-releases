@@ -9,21 +9,27 @@
 
 #include "content/public/browser/web_contents_delegate.h"
 
-class PrefRegistrySyncable;
 class Profile;
 class TabSpecificContentSettings;
 
+namespace content {
+class WebContents;
+}
+
+namespace user_prefs {
+class PrefRegistrySyncable;
+}
+
 class MediaStreamDevicesController {
  public:
-  MediaStreamDevicesController(Profile* profile,
-                               TabSpecificContentSettings* content_settings,
+  MediaStreamDevicesController(content::WebContents* web_contents,
                                const content::MediaStreamRequest& request,
                                const content::MediaResponseCallback& callback);
 
   virtual ~MediaStreamDevicesController();
 
   // Registers the prefs backing the audio and video policies.
-  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
+  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // Public method to be called before creating the MediaStreamInfoBarDelegate.
   // This function will check the content settings exceptions and take the
@@ -60,9 +66,6 @@ class MediaStreamDevicesController {
   // |CONTENT_SETTING_BLOCK|, otherwise returns false.
   bool IsDefaultMediaAccessBlocked() const;
 
-  // Handles Tab Capture media request.
-  void HandleTabMediaRequest();
-
   // Returns true if the origin is a secure scheme, otherwise returns false.
   bool IsSchemeSecure() const;
 
@@ -73,6 +76,8 @@ class MediaStreamDevicesController {
   // Sets the permission of the origin of the request. This is triggered when
   // the users deny the request or allow the request for https sites.
   void SetPermission(bool allowed) const;
+
+  content::WebContents* web_contents_;
 
   // The owner of this class needs to make sure it does not outlive the profile.
   Profile* profile_;

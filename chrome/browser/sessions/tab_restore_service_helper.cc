@@ -305,6 +305,11 @@ void TabRestoreServiceHelper::NotifyTabsChanged() {
                     TabRestoreServiceChanged(tab_restore_service_));
 }
 
+void TabRestoreServiceHelper::NotifyLoaded() {
+  FOR_EACH_OBSERVER(TabRestoreServiceObserver, observer_list_,
+                    TabRestoreServiceLoaded(tab_restore_service_));
+}
+
 void TabRestoreServiceHelper::AddEntry(Entry* entry,
                                        bool notify,
                                        bool to_front) {
@@ -392,7 +397,7 @@ void TabRestoreServiceHelper::PopulateTab(
     NavigationEntry* entry = (i == pending_index) ?
         controller->GetPendingEntry() : controller->GetEntryAtIndex(i);
     tab->navigations[i] =
-        TabNavigation::FromNavigationEntry(i, *entry);
+        sessions::SerializedNavigationEntry::FromNavigationEntry(i, *entry);
   }
   tab->timestamp = TimeNow();
   tab->current_navigation_index = controller->GetCurrentEntryIndex();

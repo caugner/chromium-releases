@@ -50,7 +50,7 @@ content::WebUIDataSource* CreateVersionUIDataSource(Profile* profile) {
   html_source->AddLocalizedString("os_name", IDS_ABOUT_VERSION_OS);
   html_source->AddLocalizedString("platform", IDS_PLATFORM_LABEL);
   html_source->AddString("os_type", version_info.OSType());
-  html_source->AddString("webkit_version", webkit_glue::GetWebKitVersion());
+  html_source->AddString("blink_version", webkit_glue::GetWebKitVersion());
   html_source->AddString("js_engine", "V8");
   html_source->AddString("js_version", v8::V8::GetVersion());
 
@@ -62,8 +62,10 @@ content::WebUIDataSource* CreateVersionUIDataSource(Profile* profile) {
       base::android::BuildInfo::GetInstance();
   html_source->AddString("application_name",
                          android_build_info->package_label());
-  html_source->AddString("application_version",
+  html_source->AddString("application_version_name",
                          android_build_info->package_version_name());
+  html_source->AddString("application_version_code",
+                         android_build_info->package_version_code());
   html_source->AddLocalizedString("build_id_name",
                                   IDS_ABOUT_VERSION_BUILD_ID);
   html_source->AddString("build_id", CHROME_BUILD_ID);
@@ -92,7 +94,7 @@ content::WebUIDataSource* CreateVersionUIDataSource(Profile* profile) {
   html_source->AddString("command_line",
       WideToUTF16(CommandLine::ForCurrentProcess()->GetCommandLineString()));
 #elif defined(OS_POSIX)
-  std::string command_line = "";
+  std::string command_line;
   typedef std::vector<std::string> ArgvList;
   const ArgvList& argv = CommandLine::ForCurrentProcess()->argv();
   for (ArgvList::const_iterator iter = argv.begin(); iter != argv.end(); iter++)

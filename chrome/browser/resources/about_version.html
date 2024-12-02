@@ -39,7 +39,8 @@ about:version template page
           <td class="version" id="version">
 <if expr="pp_ifdef('android')">
             <span i18n-content="application_name"></span>
-            <span i18n-content="application_version"></span>
+            <span i18n-content="application_version_name"></span>
+            <span i18n-content="application_version_code"></span>
 </if>
 <if expr="not pp_ifdef('android')">
             <span i18n-content="version"></span>
@@ -63,8 +64,8 @@ about:version template page
           </td>
 </if>
         </tr>
-        <tr><td class="label">WebKit</td>
-          <td class="version" id="webkit_version" i18n-content="webkit_version"></td>
+        <tr><td class="label">Blink</td>
+          <td class="version" id="blink_version" i18n-content="blink_version"></td>
         </tr>
         <tr><td class="label">JavaScript</td>
           <td class="version" id="js_engine">

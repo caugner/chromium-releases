@@ -17,9 +17,6 @@ namespace content {
 class WebContents;
 }
 
-namespace chrome {
-namespace search {
-
 // Per-tab search "helper".  Acts as the owner and controller of the tab's
 // search UI model.
 class SearchTabHelper : public content::NotificationObserver,
@@ -34,7 +31,10 @@ class SearchTabHelper : public content::NotificationObserver,
 
   // Invoked when the OmniboxEditModel changes state in some way that might
   // affect the search mode.
-  void OmniboxEditModelChanged(bool user_input_in_progress, bool cancelling);
+  void OmniboxEditModelChanged(bool user_input_in_progress,
+                               bool cancelling,
+                               bool popup_is_open,
+                               bool user_text_is_empty);
 
   // Invoked when the active navigation entry is updated in some way that might
   // affect the search mode. This is used by Instant when it "fixes up" the
@@ -67,6 +67,8 @@ class SearchTabHelper : public content::NotificationObserver,
 
   // Tracks the last value passed to OmniboxEditModelChanged().
   bool user_input_in_progress_;
+  bool popup_is_open_;
+  bool user_text_is_empty_;
 
   // Model object for UI that cares about search state.
   SearchModel model_;
@@ -77,8 +79,5 @@ class SearchTabHelper : public content::NotificationObserver,
 
   DISALLOW_COPY_AND_ASSIGN(SearchTabHelper);
 };
-
-}  // namespace search
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_UI_SEARCH_SEARCH_TAB_HELPER_H_

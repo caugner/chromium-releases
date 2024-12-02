@@ -1054,7 +1054,7 @@ void TabStripGtk::TabDetachedAt(WebContents* contents, int index) {
 void TabStripGtk::ActiveTabChanged(WebContents* old_contents,
                                    WebContents* new_contents,
                                    int index,
-                                   bool user_gesture) {
+                                   int reason) {
   TRACE_EVENT0("ui::gtk", "TabStripGtk::ActiveTabChanged");
   ReStack();
 }
@@ -1406,7 +1406,7 @@ void TabStripGtk::RemoveTabAt(int index) {
   // Remove the Tab from the TabStrip's list.
   tab_data_.erase(tab_data_.begin() + index);
 
-  if (!IsDragSessionActive() || !drag_controller_->IsDraggingTab(removed)) {
+  if (!removed->dragging()) {
     gtk_container_remove(GTK_CONTAINER(tabstrip_.get()), removed->widget());
     delete removed;
   }

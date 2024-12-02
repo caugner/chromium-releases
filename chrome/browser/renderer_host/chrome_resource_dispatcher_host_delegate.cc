@@ -19,7 +19,6 @@
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/metrics/variations/variations_http_header_provider.h"
-#include "chrome/browser/net/load_timing_observer.h"
 #include "chrome/browser/net/resource_prefetch_predictor_observer.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
@@ -43,8 +42,10 @@
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/stream_handle.h"
+#include "content/public/common/resource_response.h"
 #include "extensions/common/constants.h"
 #include "net/base/load_flags.h"
+#include "net/base/load_timing_info.h"
 #include "net/http/http_response_headers.h"
 #include "net/ssl/ssl_config_service.h"
 #include "net/url_request/url_request.h"
@@ -60,6 +61,7 @@
 #endif
 
 #if defined(OS_ANDROID)
+#include "chrome/browser/android/intercept_download_resource_throttle.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
 #endif
 
@@ -280,6 +282,11 @@ void ChromeResourceDispatcherHostDelegate::DownloadStarting(
     throttles->push_back(new DownloadResourceThrottle(
         download_request_limiter_, child_id, route_id, request_id,
         request->method()));
+#if defined(OS_ANDROID)
+    throttles->push_back(
+        new chrome::InterceptDownloadResourceThrottle(
+            request, child_id, route_id, request_id));
+#endif
   }
 
   // If this isn't a new request, we've seen this before and added the standard
@@ -484,7 +491,9 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
     content::ResourceContext* resource_context,
     content::ResourceResponse* response,
     IPC::Sender* sender) {
-  LoadTimingObserver::PopulateTimingInfo(request, response);
+  // TODO(mmenke):  Figure out if LOAD_ENABLE_LOAD_TIMING is safe to remove.
+  if (request->load_flags() & net::LOAD_ENABLE_LOAD_TIMING)
+    request->GetLoadTimingInfo(&response->head.load_timing);
 
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
 
@@ -543,7 +552,9 @@ void ChromeResourceDispatcherHostDelegate::OnRequestRedirected(
     net::URLRequest* request,
     content::ResourceContext* resource_context,
     content::ResourceResponse* response) {
-  LoadTimingObserver::PopulateTimingInfo(request, response);
+  // TODO(mmenke):  Figure out if LOAD_ENABLE_LOAD_TIMING is safe to remove.
+  if (request->load_flags() & net::LOAD_ENABLE_LOAD_TIMING)
+    request->GetLoadTimingInfo(&response->head.load_timing);
 
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
 

@@ -11,7 +11,7 @@
 #include "base/mac/mac_util.h"
 #include "base/pickle.h"
 #include "base/string_util.h"
-#include "base/sys_string_conversions.h"
+#include "base/strings/sys_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
@@ -150,7 +150,7 @@ void PromiseWriterHelper(const WebDropData& drop_data,
       "<meta http-equiv=\"Content-Type\" content=\"text/html;charset=UTF-8\">");
 
   // Be extra paranoid; avoid crashing.
-  if (!dropData_.get()) {
+  if (!dropData_) {
     NOTREACHED();
     return;
   }
@@ -187,7 +187,7 @@ void PromiseWriterHelper(const WebDropData& drop_data,
               forType:kNSURLTitlePboardType];
 
   // File contents.
-  } else if ([type isEqualToString:base::mac::CFToNSCast(fileUTI_.get())]) {
+  } else if ([type isEqualToString:base::mac::CFToNSCast(fileUTI_)]) {
     [pboard setData:[NSData dataWithBytes:dropData_->file_contents.data()
                                    length:dropData_->file_contents.length()]
             forType:base::mac::CFToNSCast(fileUTI_.get())];
@@ -283,9 +283,8 @@ void PromiseWriterHelper(const WebDropData& drop_data,
     if (operation == (NSDragOperationMove | NSDragOperationCopy))
       operation &= ~NSDragOperationMove;
 
-    rvh->DragSourceEndedAt(localPoint.x, localPoint.y,
-                           screenPoint.x, screenPoint.y,
-                           static_cast<WebKit::WebDragOperation>(operation));
+    contents_->DragSourceEndedAt(localPoint.x, localPoint.y, screenPoint.x,
+        screenPoint.y, static_cast<WebKit::WebDragOperation>(operation));
   }
 
   // Make sure the pasteboard owner isn't us.
@@ -308,14 +307,14 @@ void PromiseWriterHelper(const WebDropData& drop_data,
     NSRect screenFrame = [[[contentsView_ window] screen] frame];
     screenPoint.y = screenFrame.size.height - screenPoint.y;
 
-    rvh->DragSourceMovedTo(localPoint.x, localPoint.y,
-                           screenPoint.x, screenPoint.y);
+    contents_->DragSourceMovedTo(localPoint.x, localPoint.y,
+                                 screenPoint.x, screenPoint.y);
   }
 }
 
 - (NSString*)dragPromisedFileTo:(NSString*)path {
   // Be extra paranoid; avoid crashing.
-  if (!dropData_.get()) {
+  if (!dropData_) {
     NOTREACHED() << "No drag-and-drop data available for promised file.";
     return nil;
   }
@@ -331,7 +330,7 @@ void PromiseWriterHelper(const WebDropData& drop_data,
   base::ThreadRestrictions::ScopedAllowIO allowIO;
   scoped_ptr<FileStream> fileStream(content::CreateFileStreamForDrop(
       &filePath, content::GetContentClient()->browser()->GetNetLog()));
-  if (!fileStream.get())
+  if (!fileStream)
     return nil;
 
   if (downloadURL_.is_valid()) {

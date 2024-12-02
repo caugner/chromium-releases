@@ -25,9 +25,9 @@
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/layer_animation_observer.h"
-#include "ui/gfx/insets.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
+#include "ui/gfx/transform.h"
 
 class SkCanvas;
 
@@ -52,6 +52,7 @@ class TestScreen;
 class RootWindow;
 class RootWindowHost;
 class RootWindowObserver;
+class RootWindowTransformer;
 
 // RootWindow is responsible for hosting a set of windows.
 class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
@@ -69,10 +70,6 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
     ~CreateParams() {}
 
     gfx::Rect initial_bounds;
-
-    gfx::Insets initial_insets;
-
-    float initial_root_window_scale;
 
     // A host to use in place of the default one that RootWindow will create.
     // NULL by default.
@@ -111,12 +108,8 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   void SetHostSize(const gfx::Size& size_in_pixel);
   gfx::Size GetHostSize() const;
 
-  // Sets the bounds and insets of the host window.
+  // Sets the bounds of the host window.
   void SetHostBounds(const gfx::Rect& size_in_pizel);
-  void SetHostBoundsAndInsetsAndRootWindowScale(
-      const gfx::Rect& bounds_in_pixel,
-      const gfx::Insets& insets_in_pixel,
-      float root_window_scale);
 
   // Returns where the RootWindow is on screen.
   gfx::Point GetHostOrigin() const;
@@ -146,7 +139,10 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   void Draw();
 
   // Draw the whole screen.
-  void ScheduleFullDraw();
+  void ScheduleFullRedraw();
+
+  // Draw the damage_rect.
+  void ScheduleRedrawRect(const gfx::Rect& damage_rect);
 
   // Returns a target window for the given gesture event.
   Window* GetGestureTarget(ui::GestureEvent* event);
@@ -163,7 +159,10 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // the bounds before change contained the |last_moust_location()|.
   void OnWindowBoundsChanged(Window* window, bool contained_mouse);
 
-  // Invoked when |window|'s visibility is changed.
+  // Dispatches OnMouseExited to the |window| which is hiding if nessessary.
+  void DispatchMouseExitToHidingWindow(Window* window);
+
+  // Invoked when |window|'s visibility has changed.
   void OnWindowVisibilityChanged(Window* window, bool is_visible);
 
   // Invoked when |window|'s tranfrom has changed. |contained_mouse|
@@ -246,11 +245,6 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
                           const gfx::Point& dest_offset,
                           SkCanvas* canvas);
 
-  // Grabs a snapshot of the root window using platform-specific APIs, encodes
-  // it in PNG format, and saves it to |png_representation|.
-  bool GrabSnapshot(const gfx::Rect& snapshot_bounds,
-                    std::vector<unsigned char>* png_representation);
-
   // Gets the last location seen in a mouse event in this root window's
   // coordinates. This may return a point outside the root window's bounds.
   gfx::Point GetLastMouseLocationInRoot() const;
@@ -259,9 +253,6 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   virtual RootWindow* GetRootWindow() OVERRIDE;
   virtual const RootWindow* GetRootWindow() const OVERRIDE;
   virtual void SetTransform(const gfx::Transform& transform) OVERRIDE;
-
-  // Returns the current transform matrix.
-  gfx::Transform GetRootTransform() const;
 
   // Overridden from ui::EventTarget:
   virtual ui::EventTarget* GetParentTarget() OVERRIDE;
@@ -299,6 +290,9 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // window that ate mouse downs).
   void ClearMouseHandlers();
 
+  void SetRootWindowTransformer(scoped_ptr<RootWindowTransformer> transformer);
+  gfx::Transform GetRootTransform() const;
+
  private:
   FRIEND_TEST_ALL_PREFIXES(RootWindowTest, KeepTranslatedEventInRoot);
 
@@ -322,6 +316,11 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // kept inside the root window's bounds.
   void TransformEventForDeviceScaleFactor(bool keep_inside_root,
                                           ui::LocatedEvent* event);
+
+  // Moves the cursor to the specified location. This method is internally used
+  // by MoveCursorTo() and MoveCursorToHostLocation().
+  void MoveCursorToInternal(const gfx::Point& root_location,
+                            const gfx::Point& host_location);
 
   // Called whenever the mouse moves, tracks the current |mouse_moved_handler_|,
   // sending exited and entered events as its value changes.
@@ -356,8 +355,6 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // transform and insets.
   void UpdateWindowSize(const gfx::Size& host_size);
 
-  void SetTransformInternal(const gfx::Transform& transform);
-
   // Overridden from ui::EventDispatcherDelegate.
   virtual bool CanDispatchToTarget(EventTarget* target) OVERRIDE;
 
@@ -382,7 +379,7 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   virtual void OnHostActivated() OVERRIDE;
   virtual void OnHostLostWindowCapture() OVERRIDE;
   virtual void OnHostLostMouseGrab() OVERRIDE;
-  virtual void OnHostPaint() OVERRIDE;
+  virtual void OnHostPaint(const gfx::Rect& damage_rect) OVERRIDE;
   virtual void OnHostMoved(const gfx::Point& origin) OVERRIDE;
   virtual void OnHostResized(const gfx::Size& size) OVERRIDE;
   virtual float GetDeviceScaleFactor() OVERRIDE;
@@ -410,6 +407,8 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // Creates and dispatches synthesized mouse move event using the
   // current mouse location.
   void SynthesizeMouseMoveEvent();
+
+  gfx::Transform GetInverseRootTransform() const;
 
   scoped_ptr<ui::Compositor> compositor_;
 
@@ -460,11 +459,7 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
 
   scoped_ptr<ui::ViewProp> prop_;
 
-  // The scale of the root window. This is used to expand the
-  // area of the root window (useful in HighDPI display).
-  // Note that this should not be confused with the device scale
-  // factor, which specfies the pixel density of the display.
-  float root_window_scale_;
+  scoped_ptr<RootWindowTransformer> transformer_;
 
   DISALLOW_COPY_AND_ASSIGN(RootWindow);
 };

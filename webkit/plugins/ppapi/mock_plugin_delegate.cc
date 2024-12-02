@@ -40,13 +40,14 @@ void MockPluginDelegate::PluginSelectionChanged(PluginInstance* instance) {
 }
 
 void MockPluginDelegate::SimulateImeSetComposition(
-    const string16& text,
+    const base::string16& text,
     const std::vector<WebKit::WebCompositionUnderline>& underlines,
     int selection_start,
     int selection_end) {
 }
 
-void MockPluginDelegate::SimulateImeConfirmComposition(const string16& text) {
+void MockPluginDelegate::SimulateImeConfirmComposition(
+    const base::string16& text) {
 }
 
 void MockPluginDelegate::PluginCrashed(PluginInstance* instance) {
@@ -101,6 +102,7 @@ MockPluginDelegate::CreateVideoDecoder(
 MockPluginDelegate::PlatformVideoCapture*
 MockPluginDelegate::CreateVideoCapture(
     const std::string& device_id,
+    const GURL& document_url,
     PlatformVideoCaptureEventHandler* handler){
   return NULL;
 }
@@ -122,6 +124,7 @@ MockPluginDelegate::PlatformAudioOutput* MockPluginDelegate::CreateAudioOutput(
 
 MockPluginDelegate::PlatformAudioInput* MockPluginDelegate::CreateAudioInput(
     const std::string& device_id,
+    const GURL& document_url,
     uint32_t sample_rate,
     uint32_t sample_count,
     PlatformAudioInputClient* client) {
@@ -154,6 +157,24 @@ bool MockPluginDelegate::AsyncOpenFileSystemURL(
   return false;
 }
 
+bool MockPluginDelegate::IsFileSystemOpened(
+    PP_Instance instance,
+    PP_Resource resource) const {
+  return false;
+}
+
+PP_FileSystemType MockPluginDelegate::GetFileSystemType(
+    PP_Instance instance,
+    PP_Resource resource) const {
+  return PP_FILESYSTEMTYPE_INVALID;
+}
+
+GURL MockPluginDelegate::GetFileSystemRootUrl(
+    PP_Instance instance,
+    PP_Resource resource) const {
+  return GURL();
+}
+
 bool MockPluginDelegate::OpenFileSystem(
     const GURL& origin_url,
     fileapi::FileSystemType type,
@@ -170,6 +191,12 @@ bool MockPluginDelegate::MakeDirectory(
 }
 
 bool MockPluginDelegate::Query(
+    const GURL& path,
+    fileapi::FileSystemCallbackDispatcher* dispatcher) {
+  return false;
+}
+
+bool MockPluginDelegate::ReadDirectoryEntries(
     const GURL& path,
     fileapi::FileSystemCallbackDispatcher* dispatcher) {
   return false;
@@ -387,6 +414,10 @@ IPC::PlatformFileForTransit MockPluginDelegate::ShareHandleWithRemote(
       base::ProcessId target_process_id,
       bool should_close_source) const {
   return IPC::InvalidPlatformFileForTransit();
+}
+
+bool MockPluginDelegate::IsRunningInProcess(PP_Instance instance) const {
+  return false;
 }
 
 }  // namespace ppapi

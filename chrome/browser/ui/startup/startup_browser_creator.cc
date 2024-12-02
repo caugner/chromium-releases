@@ -70,11 +70,12 @@
 #include "chrome/browser/chromeos/app_mode/startup_app_launcher.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/chromeos/profile_startup.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chromeos/chromeos_switches.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS) && defined(OS_LINUX)
-#include "ui/base/touch/touch_factory.h"
+#include "ui/base/touch/touch_factory_x11.h"
 #endif
 
 #if defined(OS_WIN)
@@ -251,6 +252,7 @@ bool StartupBrowserCreator::LaunchBrowser(
     chrome::startup::IsProcessStartup process_startup,
     chrome::startup::IsFirstRun is_first_run,
     int* return_code) {
+
   in_synchronous_profile_launch_ =
       process_startup == chrome::startup::IS_PROCESS_STARTUP;
   DCHECK(profile);
@@ -265,23 +267,33 @@ bool StartupBrowserCreator::LaunchBrowser(
                  << "browser session.";
   }
 
-  StartupBrowserCreatorImpl lwp(cur_dir, command_line, this, is_first_run);
-  std::vector<GURL> urls_to_launch =
-      GetURLsFromCommandLine(command_line, cur_dir, profile);
-  bool launched = lwp.Launch(profile, urls_to_launch,
-                             in_synchronous_profile_launch_);
-  in_synchronous_profile_launch_ = false;
+  // Note: This check should have been done in ProcessCmdLineImpl()
+  // before calling this function. However chromeos/login/login_utils.cc
+  // calls this function directly (see comments there) so it has to be checked
+  // again.
+  const bool silent_launch = command_line.HasSwitch(switches::kSilentLaunch);
 
-  if (!launched) {
-    LOG(ERROR) << "launch error";
-    if (return_code)
-      *return_code = chrome::RESULT_CODE_INVALID_CMDLINE_URL;
-    return false;
+  if (!silent_launch) {
+    StartupBrowserCreatorImpl lwp(cur_dir, command_line, this, is_first_run);
+    const std::vector<GURL> urls_to_launch =
+        GetURLsFromCommandLine(command_line, cur_dir, profile);
+    const bool launched = lwp.Launch(profile, urls_to_launch,
+                               in_synchronous_profile_launch_);
+    in_synchronous_profile_launch_ = false;
+    if (!launched) {
+      LOG(ERROR) << "launch error";
+      if (return_code)
+        *return_code = chrome::RESULT_CODE_INVALID_CMDLINE_URL;
+      return false;
+    }
+  } else {
+    in_synchronous_profile_launch_ = false;
   }
+
   profile_launch_observer.Get().AddLaunched(profile);
 
 #if defined(OS_CHROMEOS)
-  chromeos::ProfileStartup(profile, process_startup);
+  chromeos::ProfileHelper::ProfileStartup(profile, process_startup);
 #endif
   return true;
 }
@@ -456,7 +468,7 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
 #if defined(OS_CHROMEOS)
     // kLoginManager will cause Chrome to start up with the ChromeOS login
     // screen instead of a browser window, so it won't load any tabs.
-    } else if (command_line.HasSwitch(switches::kLoginManager)) {
+    } else if (command_line.HasSwitch(chromeos::switches::kLoginManager)) {
       expected_tab_count = 0;
 #endif
     } else if (command_line.HasSwitch(switches::kRestoreLastSession)) {
@@ -542,6 +554,24 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
     return false;
   }
 
+  if (command_line.HasSwitch(switches::kValidateCrx)) {
+    if (!process_startup) {
+      LOG(ERROR) << "chrome is already running; you must close all running "
+                 << "instances before running with the --"
+                 << switches::kValidateCrx << " flag";
+      return false;
+    }
+    extensions::StartupHelper helper;
+    std::string message;
+    std::string error;
+    if (helper.ValidateCrx(command_line, &error))
+      message = std::string("ValidateCrx Success");
+    else
+      message = std::string("ValidateCrx Failure: ") + error;
+    printf("%s\n", message.c_str());
+    return false;
+  }
+
   if (command_line.HasSwitch(switches::kLimitedInstallFromWebstore)) {
     extensions::StartupHelper helper;
     helper.LimitedInstallFromWebstore(command_line, last_used_profile,
@@ -550,8 +580,8 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
 
 #if defined(OS_CHROMEOS)
   // The browser will be launched after the user logs in.
-  if (command_line.HasSwitch(switches::kLoginManager) ||
-      command_line.HasSwitch(switches::kLoginPassword)) {
+  if (command_line.HasSwitch(chromeos::switches::kLoginManager) ||
+      command_line.HasSwitch(chromeos::switches::kLoginPassword)) {
     silent_launch = true;
   }
 
@@ -567,7 +597,7 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
   }
 #endif
 
-#if defined(TOOLKIT_VIEWS) && defined(OS_LINUX)
+#if defined(TOOLKIT_VIEWS) && defined(USE_X11)
   ui::TouchFactory::SetTouchDeviceListFromCommandLine();
 #endif
 

@@ -261,11 +261,14 @@ cr.define('options.internet', function() {
       $('auto-proxy').addEventListener('click', this.disableManualProxy_);
       $('proxy-all-protocols').addEventListener('click',
                                                 this.toggleSingleProxy_);
+      $('proxy-use-pac-url').addEventListener('change',
+                                              this.handleAutoConfigProxy_);
 
       observePrefsUI($('direct-proxy'));
       observePrefsUI($('manual-proxy'));
       observePrefsUI($('auto-proxy'));
       observePrefsUI($('proxy-all-protocols'));
+      observePrefsUI($('proxy-use-pac-url'));
 
       $('ip-automatic-configuration-checkbox').addEventListener('click',
         this.handleIpAutoConfig_);
@@ -283,7 +286,9 @@ cr.define('options.internet', function() {
       // The string isn't available because
       // chrome://settings-frame/strings.js (where the string is
       // stored) is not accessible from the login screen.
-      if (loadTimeData.data) {
+      // TODO(pneubeck): Remove this once i18n of the proxy dialog on the login
+      // page is fixed. http://crbug.com/242865
+      if (loadTimeData.data_) {
         $('google-dns-label').innerHTML =
           loadTimeData.getString('googleNameServers');
       }
@@ -400,6 +405,14 @@ cr.define('options.internet', function() {
      */
     updateProxyBannerVisibility_: function() {
       var bannerDiv = $('network-proxy-info-banner');
+      if (!loadTimeData.data_) {
+        // TODO(pneubeck): This temporarily prevents an exception below until
+        // i18n of the proxy dialog on the login page is
+        // fixed. http://crbug.com/242865
+        bannerDiv.hidden = true;
+        return;
+      }
+
       // Show banner and determine its message if necessary.
       var controlledBy = $('direct-proxy').controlledBy;
       if (!controlledBy || controlledBy == '') {
@@ -430,13 +443,26 @@ cr.define('options.internet', function() {
     },
 
     /**
+     * Handler for when the user clicks on the checkbox to enter
+     * auto configuration URL.
+     * @private
+     * @param {Event} e Click Event.
+     */
+    handleAutoConfigProxy_: function(e) {
+      $('proxy-pac-url').disabled = !$('proxy-use-pac-url').checked;
+    },
+
+    /**
      * Handler for selecting a radio button that will disable the manual
      * controls.
      * @private
      * @param {Event} e Click event.
      */
     disableManualProxy_: function(e) {
-      $('advanced-config').hidden = true;
+      $('ignored-host-list').disabled = true;
+      $('new-host').disabled = true;
+      $('remove-host').disabled = true;
+      $('add-host').disabled = true;
       $('proxy-all-protocols').disabled = true;
       $('proxy-host-name').disabled = true;
       $('proxy-host-port').disabled = true;
@@ -448,8 +474,12 @@ cr.define('options.internet', function() {
       $('ftp-proxy-port').disabled = true;
       $('socks-host').disabled = true;
       $('socks-port').disabled = true;
-      $('proxy-config').disabled = $('auto-proxy').disabled ||
-                                   !$('auto-proxy').checked;
+      $('proxy-use-pac-url').disabled = $('auto-proxy').disabled ||
+                                        !$('auto-proxy').checked;
+      $('proxy-pac-url').disabled = $('proxy-use-pac-url').disabled ||
+                                    !$('proxy-use-pac-url').checked;
+      $('auto-proxy-parms').hidden = !$('auto-proxy').checked;
+      $('manual-proxy-parms').hidden = !$('manual-proxy').checked;
     },
 
     /**
@@ -459,9 +489,9 @@ cr.define('options.internet', function() {
      * @param {Event} e Click event.
      */
     enableManualProxy_: function(e) {
-      $('advanced-config').hidden = false;
       $('ignored-host-list').redraw();
       var allDisabled = $('manual-proxy').disabled;
+      $('ignored-host-list').disabled = allDisabled;
       $('new-host').disabled = allDisabled;
       $('remove-host').disabled = allDisabled;
       $('add-host').disabled = allDisabled;
@@ -476,7 +506,10 @@ cr.define('options.internet', function() {
       $('ftp-proxy-port').disabled = allDisabled;
       $('socks-host').disabled = allDisabled;
       $('socks-port').disabled = allDisabled;
-      $('proxy-config').disabled = true;
+      $('proxy-use-pac-url').disabled = true;
+      $('proxy-pac-url').disabled = true;
+      $('auto-proxy-parms').hidden = !$('auto-proxy').checked;
+      $('manual-proxy-parms').hidden = !$('manual-proxy').checked;
     },
   };
 
@@ -545,6 +578,13 @@ cr.define('options.internet', function() {
     updateHidden('#details-internet-page .action-area', true);
     detailsPage.updateControls();
     detailsPage.visible = true;
+  };
+
+  /**
+   * Initializes even handling for keyboard driven flow.
+   */
+  DetailsInternetPage.initializeKeyboardFlow = function() {
+    keyboard.initializeKeyboardFlow();
   };
 
   DetailsInternetPage.updateProxySettings = function(type) {
@@ -1002,6 +1042,7 @@ cr.define('options.internet', function() {
       $('hardware-revision').textContent = data.hardwareRevision;
       $('prl-version').textContent = data.prlVersion;
       $('meid').textContent = data.meid;
+      $('iccid').textContent = data.iccid;
       $('imei').textContent = data.imei;
       $('mdn').textContent = data.mdn;
       $('esn').textContent = data.esn;

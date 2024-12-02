@@ -10,6 +10,7 @@
 #import "chrome/browser/ui/cocoa/panels/panel_utils_cocoa.h"
 #import "chrome/browser/ui/cocoa/panels/panel_window_controller_cocoa.h"
 #include "chrome/browser/ui/panels/panel.h"
+#include "chrome/browser/ui/panels/stacked_panel_collection.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 
 using content::NativeWebKeyboardEvent;
@@ -46,7 +47,7 @@ PanelCocoa::PanelCocoa(Panel* panel, const gfx::Rect& bounds)
 PanelCocoa::~PanelCocoa() {
 }
 
-bool PanelCocoa::isClosed() {
+bool PanelCocoa::IsClosed() const {
   return !controller_;
 }
 
@@ -62,7 +63,7 @@ void PanelCocoa::ShowPanel() {
 }
 
 void PanelCocoa::ShowPanelInactive() {
-  if (isClosed())
+  if (IsClosed())
     return;
 
   // This method may be called several times, meaning 'ensure it's shown'.
@@ -111,7 +112,7 @@ void PanelCocoa::setBoundsInternal(const gfx::Rect& bounds, bool animate) {
 }
 
 void PanelCocoa::ClosePanel() {
-  if (isClosed())
+  if (IsClosed())
       return;
 
   NSWindow* window = [controller_ window];
@@ -121,6 +122,13 @@ void PanelCocoa::ClosePanel() {
   // spin a nested loop.
   // TODO(dimich): refactor similar method from BWC and reuse here.
   if ([controller_ windowShouldClose:window]) {
+    // Make sure that the panel window is not associated with the underlying
+    // stack window because otherwise hiding the panel window could cause all
+    // other panel windows in the same stack to disappear.
+    NSWindow* stackWindow = [window parentWindow];
+    if (stackWindow)
+      [stackWindow removeChildWindow:window];
+
     [window orderOut:nil];
     [window close];
   }
@@ -264,12 +272,15 @@ void PanelCocoa::SetWindowCornerStyle(panel::CornerStyle corner_style) {
 }
 
 void PanelCocoa::MinimizePanelBySystem() {
-  NOTIMPLEMENTED();
+  [controller_ miniaturize];
 }
 
 bool PanelCocoa::IsPanelMinimizedBySystem() const {
-  NOTIMPLEMENTED();
-  return false;
+  return [controller_ isMiniaturized];
+}
+
+void PanelCocoa::ShowShadow(bool show) {
+  [controller_ showShadow:show];
 }
 
 void PanelCocoa::PanelExpansionStateChanging(
@@ -309,9 +320,9 @@ Panel* PanelCocoa::panel() const {
 }
 
 void PanelCocoa::DidCloseNativeWindow() {
-  DCHECK(!isClosed());
-  panel_->OnNativePanelClosed();
+  DCHECK(!IsClosed());
   controller_ = NULL;
+  panel_->OnNativePanelClosed();
 }
 
 // NativePanelTesting implementation.
@@ -414,7 +425,12 @@ bool CocoaNativePanelTesting::IsWindowSizeKnown() const {
 }
 
 bool CocoaNativePanelTesting::IsAnimatingBounds() const {
-  return [native_panel_window_->controller_ isAnimatingBounds];
+  if ([native_panel_window_->controller_ isAnimatingBounds])
+    return true;
+  StackedPanelCollection* stack = native_panel_window_->panel()->stack();
+  if (!stack)
+    return false;
+  return stack->IsAnimatingPanelBounds(native_panel_window_->panel());
 }
 
 bool CocoaNativePanelTesting::IsButtonVisible(

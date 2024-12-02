@@ -79,7 +79,7 @@ class LauncherButtonAnimation : public ui::AnimationDelegate {
 
  private:
   LauncherButtonAnimation()
-    : ALLOW_THIS_IN_INITIALIZER_LIST(animation_(this)) {
+      : animation_(this) {
     animation_.SetThrobDuration(kAttentionThrobDurationMS);
     animation_.SetTweenType(ui::Tween::SMOOTH_IN_OUT);
   }
@@ -96,7 +96,7 @@ class LauncherButtonAnimation : public ui::AnimationDelegate {
   }
 
   // ui::AnimationDelegate
-  void AnimationProgressed(const ui::Animation* animation) {
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE {
     if (animation != &animation_)
       return;
     if (!animation_.is_animating())
@@ -126,7 +126,7 @@ class LauncherButton::BarView : public views::ImageView,
         show_attention_(false) {
   }
 
-  ~BarView() {
+  virtual ~BarView() {
     if (show_attention_)
       LauncherButtonAnimation::GetInstance()->RemoveObserver(this);
   }
@@ -300,7 +300,7 @@ void LauncherButton::AddState(State state) {
           base::TimeDelta::FromMilliseconds(kHopUpMS));
     }
     state_ |= state;
-    UpdateState();
+    Layout();
     if (state & STATE_ATTENTION)
       bar_->ShowAttention(true);
   }
@@ -316,7 +316,7 @@ void LauncherButton::ClearState(State state) {
           base::TimeDelta::FromMilliseconds(kHopDownMS));
     }
     state_ &= ~state;
-    UpdateState();
+    Layout();
     if (state & STATE_ATTENTION)
       bar_->ShowAttention(false);
   }

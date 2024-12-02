@@ -7,11 +7,6 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "cc/layers/video_frame_provider.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebVideoFrame.h"
-
-namespace WebKit {
-class WebStreamTextureClient;
-}
 
 namespace webkit_media {
 
@@ -27,11 +22,7 @@ class StreamTextureProxy {
 
   // Setting the target for callback when a frame is available. This function
   // could be called on both the main thread and the compositor thread.
-#ifndef REMOVE_WEBVIDEOFRAME
-  virtual void SetClient(WebKit::WebStreamTextureClient* client) = 0;
-#else
   virtual void SetClient(cc::VideoFrameProvider::Client* client) = 0;
-#endif
 
   struct Deleter {
     inline void operator()(StreamTextureProxy* ptr) const { ptr->Release(); }

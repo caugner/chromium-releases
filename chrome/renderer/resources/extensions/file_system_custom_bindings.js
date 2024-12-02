@@ -6,28 +6,24 @@
 
 var binding = require('binding').Binding.create('fileSystem');
 
-var entryIdManager = require('entryIdManager');
 var fileSystemNatives = requireNative('file_system_natives');
 var forEach = require('utils').forEach;
 var GetIsolatedFileSystem = fileSystemNatives.GetIsolatedFileSystem;
 var lastError = require('lastError');
+var GetModuleSystem = requireNative('v8_context').GetModuleSystem;
+// TODO(sammc): Don't require extension. See http://crbug.com/235689.
+var GetExtensionViews = requireNative('extension').GetExtensionViews;
 
-binding.registerCustomHook(function(bindingsAPI) {
-  var apiFunctions = bindingsAPI.apiFunctions;
-  var fileSystem = bindingsAPI.compiledApi;
+// Fallback to using the current window if no background page is running.
+var backgroundPage = GetExtensionViews(-1, 'BACKGROUND')[0] || window;
+var backgroundPageModuleSystem = GetModuleSystem(backgroundPage);
 
-  function bindFileEntryFunction(i, functionName) {
-    apiFunctions.setUpdateArgumentsPostValidate(
-        functionName, function(fileEntry, callback) {
-      var fileSystemName = fileEntry.filesystem.name;
-      var relativePath = fileEntry.fullPath.slice(1);
-      return [fileSystemName, relativePath, callback];
-    });
-  }
-  forEach(['getDisplayPath', 'getWritableEntry', 'isWritableEntry'],
-          bindFileEntryFunction);
-
-  function bindFileEntryCallback(i, functionName) {
+// All windows use the bindFileEntryCallback from the background page so their
+// FileEntry objects have the background page's context as their own. This
+// allows them to be used from other windows (including the background page)
+// after the original window is closed.
+if (window == backgroundPage) {
+  var bindFileEntryCallback = function(functionName, apiFunctions) {
     apiFunctions.setCustomCallback(functionName,
         function(name, request, response) {
       if (request.callback && response) {
@@ -47,17 +43,49 @@ binding.registerCustomHook(function(bindingsAPI) {
             entryIdManager.registerEntry(id, fileEntry);
             callback(fileEntry);
           }, function(fileError) {
-            lastError.run('Error getting fileEntry, code: ' + fileError.code,
+            lastError.run('fileSystem.' + functionName,
+                          'Error getting fileEntry, code: ' + fileError.code,
+                          request.stack,
                           callback);
           });
         } catch (e) {
-          lastError.run('Error in event handler for onLaunched: ' + e.stack,
+          lastError.run('fileSystem.' + functionName,
+                        'Error in event handler for onLaunched: ' + e.stack,
+                        request.stack,
                         callback);
         }
       }
     });
+  };
+  var entryIdManager = require('entryIdManager');
+} else {
+  // Force the fileSystem API to be loaded in the background page. Using
+  // backgroundPageModuleSystem.require('fileSystem') is insufficient as
+  // requireNative is only allowed while lazily loading an API.
+  backgroundPage.chrome.fileSystem;
+  var bindFileEntryCallback = backgroundPageModuleSystem.require(
+      'fileSystem').bindFileEntryCallback;
+  var entryIdManager = backgroundPageModuleSystem.require('entryIdManager');
+}
+
+binding.registerCustomHook(function(bindingsAPI) {
+  var apiFunctions = bindingsAPI.apiFunctions;
+  var fileSystem = bindingsAPI.compiledApi;
+
+  function bindFileEntryFunction(i, functionName) {
+    apiFunctions.setUpdateArgumentsPostValidate(
+        functionName, function(fileEntry, callback) {
+      var fileSystemName = fileEntry.filesystem.name;
+      var relativePath = fileEntry.fullPath.slice(1);
+      return [fileSystemName, relativePath, callback];
+    });
   }
-  forEach(['getWritableEntry', 'chooseEntry'], bindFileEntryCallback);
+  forEach(['getDisplayPath', 'getWritableEntry', 'isWritableEntry'],
+          bindFileEntryFunction);
+
+  forEach(['getWritableEntry', 'chooseEntry'], function(i, functionName) {
+    bindFileEntryCallback(functionName, apiFunctions);
+  });
 
   apiFunctions.setHandleRequest('getEntryId', function(fileEntry) {
     return entryIdManager.getEntryId(fileEntry);
@@ -87,4 +115,5 @@ binding.registerCustomHook(function(bindingsAPI) {
   };
 });
 
+exports.bindFileEntryCallback = bindFileEntryCallback;
 exports.binding = binding.generate();
