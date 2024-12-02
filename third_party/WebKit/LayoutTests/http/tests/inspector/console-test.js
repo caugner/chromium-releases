@@ -395,8 +395,8 @@ InspectorTest.waitUntilNthMessageReceivedPromise = function(count)
 InspectorTest.changeExecutionContext = function(namePrefix)
 {
     var selector = Console.ConsoleView.instance()._consoleContextSelector;
-    for (var executionContext of selector._list._items) {
-        if (selector._titleFor(executionContext).startsWith(namePrefix)) {
+    for (var executionContext of selector._items) {
+        if (selector.titleFor(executionContext).startsWith(namePrefix)) {
             UI.context.setFlavor(SDK.ExecutionContext, executionContext);
             return;
         }

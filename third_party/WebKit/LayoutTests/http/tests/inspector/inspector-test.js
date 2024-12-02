@@ -475,7 +475,7 @@ InspectorTest.waitForUISourceCode = function(urlSuffix, projectType)
 
 InspectorTest.waitForUISourceCodeRemoved = function(callback)
 {
-    InspectorTest.waitForEvent(Workspace.Workspace.Events.UISourceCodeRemoved, Workspace.workspace).then(callback);
+    Workspace.workspace.once(Workspace.Workspace.Events.UISourceCodeRemoved).then(callback);
 }
 
 InspectorTest.waitForTarget = function(filter) {
@@ -503,7 +503,7 @@ InspectorTest.waitForTarget = function(filter) {
 InspectorTest.waitForExecutionContext = function(runtimeModel) {
     if (runtimeModel.executionContexts().length)
         return Promise.resolve(runtimeModel.executionContexts()[0]);
-    return InspectorTest.waitForEvent(SDK.RuntimeModel.Events.ExecutionContextCreated, runtimeModel);
+    return runtimeModel.once(SDK.RuntimeModel.Events.ExecutionContextCreated);
 }
 
 InspectorTest.waitForExecutionContextDestroyed = function(context) {
@@ -557,7 +557,7 @@ InspectorTest._innerReloadPage = function(hardReload, callback, scriptToEvaluate
     InspectorTest._pageLoadedCallback = InspectorTest.safeWrap(callback);
 
     if (UI.panels.network)
-        UI.panels.network._networkLogView.reset();
+        NetworkLog.networkLog.reset();
     InspectorTest.resourceTreeModel.reloadPage(hardReload, scriptToEvaluateOnLoad);
 }
 
@@ -585,11 +585,9 @@ InspectorTest.runWhenPageLoads = function(callback)
 
 InspectorTest.deprecatedRunAfterPendingDispatches = function(callback)
 {
-    var barrier = new CallbackBarrier();
     var targets = SDK.targetManager.targets();
-    for (var i = 0; i < targets.length; ++i)
-        targets[i]._deprecatedRunAfterPendingDispatches(barrier.createCallback());
-    barrier.callWhenDone(InspectorTest.safeWrap(callback));
+    var promises = targets.map(target => new Promise(resolve => target._deprecatedRunAfterPendingDispatches(resolve)));
+    Promise.all(promises).then(InspectorTest.safeWrap(callback));
 }
 
 InspectorTest.createKeyEvent = function(key, ctrlKey, altKey, shiftKey, metaKey)
@@ -825,16 +823,11 @@ InspectorTest.StringOutputStream = function(callback)
 };
 
 InspectorTest.StringOutputStream.prototype = {
-    open: function(fileName, callback)
-    {
-        callback(true);
-    },
+    open: async fileName => true,
 
-    write: function(chunk, callback)
+    write: async function(chunk)
     {
         this._buffer += chunk;
-        if (callback)
-            callback(this);
     },
 
     close: function()
@@ -858,119 +851,27 @@ InspectorTest.MockSetting.prototype = {
     }
 };
 
-
-/**
- * @constructor
- * @param {!string} dirPath
- * @param {!string} name
- * @param {!function(?Bindings.TempFile)} callback
- */
-InspectorTest.TempFileMock = function(dirPath, name)
+InspectorTest.loadedModules = function()
 {
-    this._chunks = [];
-    this._name = name;
+    return self.runtime._modules.filter(module => module._loadedForTest);
 }
 
-InspectorTest.TempFileMock.prototype = {
-    /**
-     * @param {!Array.<string>} chunks
-     * @param {!function(boolean)} callback
-     */
-    write: function(chunks, callback)
-    {
-        var size = 0;
-        for (var i = 0; i < chunks.length; ++i)
-            size += chunks[i].length;
-        this._chunks.push.apply(this._chunks, chunks);
-        setTimeout(callback.bind(this, size), 1);
-    },
-
-    finishWriting: function() { },
-
-    /**
-     * @param {function(?string)} callback
-     */
-    read: function(callback)
-    {
-        this.readRange(undefined, undefined, callback);
-    },
-
-    /**
-     * @param {number|undefined} startOffset
-     * @param {number|undefined} endOffset
-     * @param {function(?string)} callback
-     */
-    readRange: function(startOffset, endOffset, callback)
-    {
-        var blob = new Blob(this._chunks);
-        blob = blob.slice(startOffset || 0, endOffset || blob.size);
-        reader = new FileReader();
-        var self = this;
-        reader.onloadend = function()
-        {
-            callback(reader.result);
-        }
-        reader.readAsText(blob);
-    },
-
-    /**
-     * @param {!Common.OutputStream} outputStream
-     * @param {!Bindings.OutputStreamDelegate} delegate
-     */
-    copyToOutputStream: function(outputStream, delegate)
-    {
-        var name = this._name;
-        var text = this._chunks.join("");
-        var chunkedReaderMock = {
-            loadedSize: function()
-            {
-                return text.length;
-            },
-
-            fileSize: function()
-            {
-                return text.length;
-            },
-
-            fileName: function()
-            {
-                return name;
-            },
-
-            cancel: function() { }
-        }
-        delegate.onTransferStarted(chunkedReaderMock);
-        outputStream.write(text);
-        delegate.onChunkTransferred(chunkedReaderMock);
-        outputStream.close();
-        delegate.onTransferFinished(chunkedReaderMock);
-    },
-
-    remove: function() { }
-}
-
-InspectorTest.TempFileMock.create = function(dirPath, name)
+InspectorTest.dumpLoadedModules = function(relativeTo)
 {
-    var tempFile = new InspectorTest.TempFileMock(dirPath, name);
-    return Promise.resolve(tempFile);
-}
-
-InspectorTest.dumpLoadedModules = function(next)
-{
+    var previous = new Set(relativeTo || []);
     function moduleSorter(left, right)
     {
         return String.naturalOrderComparator(left._descriptor.name, right._descriptor.name);
     }
 
     InspectorTest.addResult("Loaded modules:");
-    var modules = self.runtime._modules;
-    modules.sort(moduleSorter);
-    for (var i = 0; i < modules.length; ++i) {
-        if (modules[i]._loadedForTest)
-            InspectorTest.addResult("    " + modules[i]._descriptor.name);
+    var loadedModules = InspectorTest.loadedModules().sort(moduleSorter);
+    for (var module of loadedModules) {
+        if (previous.has(module))
+            continue;
+        InspectorTest.addResult("    " + module._descriptor.name);
     }
-    if (next)
-        next();
+    return loadedModules;
 }
 
 InspectorTest.TimeoutMock = function()
@@ -1065,7 +966,7 @@ InspectorTest.preloadModule = function(moduleName)
 
 InspectorTest.isDedicatedWorker = function(target)
 {
-    return target && !target.hasBrowserCapability() && target.hasJSCapability() && !target.hasNetworkCapability() && !target.hasTargetCapability();
+    return target && !target.hasBrowserCapability() && target.hasJSCapability() && !target.hasTargetCapability();
 }
 
 InspectorTest.isServiceWorker = function(target)
