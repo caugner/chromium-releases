@@ -9,6 +9,7 @@
 
 #include "third_party/blink/renderer/core/fetch/form_data_bytes_consumer.h"
 
+#include "base/containers/span.h"
 #include "base/memory/scoped_refptr.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
@@ -29,6 +30,7 @@
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/testing/bytes_consumer_test_reader.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
+#include "third_party/blink/renderer/platform/network/wrapped_data_pipe_getter.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -143,6 +145,22 @@ class FormDataBytesConsumerTest : public PageTestBase {
         GetFrame().GetDocument()->GetExecutionContext());
   }
 
+  String DrainAsString(scoped_refptr<EncodedFormData> input_form_data) {
+    auto* consumer = MakeGarbageCollected<FormDataBytesConsumer>(
+        GetFrame().DomWindow(), input_form_data);
+    auto* reader = MakeGarbageCollected<BytesConsumerTestReader>(consumer);
+    std::pair<BytesConsumer::Result, Vector<char>> result = reader->Run();
+    EXPECT_EQ(Result::kDone, result.first);
+    return BytesConsumerTestUtil::CharVectorToString(result.second);
+  }
+
+  scoped_refptr<EncodedFormData> DrainAsFormData(
+      scoped_refptr<EncodedFormData> input_form_data) {
+    auto* consumer = MakeGarbageCollected<FormDataBytesConsumer>(
+        GetFrame().DomWindow(), input_form_data);
+    return consumer->DrainAsFormData();
+  }
+
  private:
   std::unique_ptr<FileBackedBlobFactoryTestHelper> file_factory_helper_;
 };
@@ -170,7 +188,7 @@ TEST_F(FormDataBytesConsumerTest, TwoPhaseReadFromStringNonLatin) {
 TEST_F(FormDataBytesConsumerTest, TwoPhaseReadFromArrayBuffer) {
   constexpr unsigned char kData[] = {0x21, 0xfe, 0x00, 0x00, 0xff, 0xa3,
                                      0x42, 0x30, 0x42, 0x99, 0x88};
-  DOMArrayBuffer* buffer = DOMArrayBuffer::Create(kData, std::size(kData));
+  DOMArrayBuffer* buffer = DOMArrayBuffer::Create(kData);
   auto result = (MakeGarbageCollected<BytesConsumerTestReader>(
                      MakeGarbageCollected<FormDataBytesConsumer>(buffer)))
                     ->Run();
@@ -185,7 +203,7 @@ TEST_F(FormDataBytesConsumerTest, TwoPhaseReadFromArrayBufferView) {
   constexpr unsigned char kData[] = {0x21, 0xfe, 0x00, 0x00, 0xff, 0xa3,
                                      0x42, 0x30, 0x42, 0x99, 0x88};
   constexpr size_t kOffset = 1, kSize = 4;
-  DOMArrayBuffer* buffer = DOMArrayBuffer::Create(kData, std::size(kData));
+  DOMArrayBuffer* buffer = DOMArrayBuffer::Create(kData);
   auto result = (MakeGarbageCollected<BytesConsumerTestReader>(
                      MakeGarbageCollected<FormDataBytesConsumer>(
                          DOMUint8Array::Create(buffer, kOffset, kSize))))
@@ -268,7 +286,7 @@ TEST_F(FormDataBytesConsumerTest, DrainAsBlobDataHandleFromString) {
 
 TEST_F(FormDataBytesConsumerTest, DrainAsBlobDataHandleFromArrayBuffer) {
   BytesConsumer* consumer = MakeGarbageCollected<FormDataBytesConsumer>(
-      DOMArrayBuffer::Create("foo", 3));
+      DOMArrayBuffer::Create(base::byte_span_from_cstring("foo")));
   scoped_refptr<BlobDataHandle> blob_data_handle =
       consumer->DrainAsBlobDataHandle();
   ASSERT_TRUE(blob_data_handle);
@@ -337,7 +355,7 @@ TEST_F(FormDataBytesConsumerTest, DrainAsFormDataFromString) {
 
 TEST_F(FormDataBytesConsumerTest, DrainAsFormDataFromArrayBuffer) {
   BytesConsumer* consumer = MakeGarbageCollected<FormDataBytesConsumer>(
-      DOMArrayBuffer::Create("foo", 3));
+      DOMArrayBuffer::Create(base::byte_span_from_cstring("foo")));
   scoped_refptr<EncodedFormData> form_data = consumer->DrainAsFormData();
   ASSERT_TRUE(form_data);
   EXPECT_TRUE(form_data->IsSafeToSendToAnotherThread());
@@ -523,6 +541,62 @@ TEST_F(FormDataBytesConsumerTest,
   EXPECT_EQ(Result::kDone, result.first);
   EXPECT_EQ(" hello world here's another data pipe bar baz",
             BytesConsumerTestUtil::CharVectorToString(result.second));
+}
+
+void AppendDataPipe(scoped_refptr<EncodedFormData> data, String content) {
+  mojo::PendingRemote<network::mojom::blink::DataPipeGetter> data_pipe_getter;
+  // Object deletes itself.
+  new SimpleDataPipeGetter(content,
+                           data_pipe_getter.InitWithNewPipeAndPassReceiver());
+  auto wrapped =
+      base::MakeRefCounted<WrappedDataPipeGetter>(std::move(data_pipe_getter));
+  data->AppendDataPipe(std::move(wrapped));
+}
+
+scoped_refptr<EncodedFormData> CreateDataPipeData() {
+  scoped_refptr<EncodedFormData> data = EncodedFormData::Create();
+
+  data->AppendData("foo", 3);
+  AppendDataPipe(data, " hello world");
+  return data;
+}
+
+TEST_F(FormDataBytesConsumerTest, InvalidType1) {
+  const String kExpected = "foo hello world";
+  ASSERT_EQ(kExpected, DrainAsString(CreateDataPipeData()));
+
+  scoped_refptr<EncodedFormData> data = CreateDataPipeData();
+  data->AppendFileRange("/foo/bar/baz", 3, 4,
+                        base::Time::FromSecondsSinceUnixEpoch(5));
+  ASSERT_EQ(EncodedFormData::FormDataType::kInvalid, data->GetType());
+
+  EXPECT_EQ(kExpected, DrainAsString(data));
+}
+
+scoped_refptr<EncodedFormData> CreateBlobData() {
+  scoped_refptr<EncodedFormData> data = EncodedFormData::Create();
+
+  data->AppendData("foo", 3);
+  auto blob_data = std::make_unique<BlobData>();
+  blob_data->AppendText("hello", false);
+  auto size = blob_data->length();
+  scoped_refptr<BlobDataHandle> blob_data_handle =
+      BlobDataHandle::Create(std::move(blob_data), size);
+  data->AppendBlob(blob_data_handle->Uuid(), blob_data_handle);
+  Vector<char> boundary;
+  boundary.Append("\0", 1);
+  data->SetBoundary(boundary);
+  return data;
+}
+
+TEST_F(FormDataBytesConsumerTest, InvaidType2) {
+  scoped_refptr<EncodedFormData> data = CreateBlobData();
+  AppendDataPipe(data, " hello world!");
+  ASSERT_EQ(EncodedFormData::FormDataType::kInvalid, data->GetType());
+
+  auto* consumer =
+      MakeGarbageCollected<FormDataBytesConsumer>(GetFrame().DomWindow(), data);
+  EXPECT_TRUE(consumer->DrainAsFormData());
 }
 
 }  // namespace

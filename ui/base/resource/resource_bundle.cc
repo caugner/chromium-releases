@@ -243,6 +243,7 @@ class ResourceBundle::BitmapImageSource : public gfx::ImageSkiaSource {
 #else
       DUMP_WILL_BE_NOTREACHED() << "Unable to load bitmap image with id "
                                 << resource_id_ << ", scale=" << scale;
+      return gfx::ImageSkiaRep(CreateEmptyBitmap(), scale);
 #endif
     }
 
@@ -677,7 +678,7 @@ base::RefCountedMemory* ResourceBundle::LoadDataResourceBytesForScale(
     return bytes_string;
   }
 
-  return new base::RefCountedStaticMemory(data.data(), data.length());
+  return new base::RefCountedStaticMemory(base::as_byte_span(data));
 }
 
 std::string_view ResourceBundle::GetRawDataResource(int resource_id) const {
@@ -814,7 +815,7 @@ base::RefCountedMemory* ResourceBundle::LoadLocalizedResourceBytes(
       if (auto data = locale_resources_data_->GetStringPiece(
               static_cast<uint16_t>(resource_id));
           data.has_value() && !data->empty()) {
-        return new base::RefCountedStaticMemory(data->data(), data->length());
+        return new base::RefCountedStaticMemory(base::as_byte_span(*data));
       }
     }
 
@@ -822,7 +823,7 @@ base::RefCountedMemory* ResourceBundle::LoadLocalizedResourceBytes(
       if (auto data = secondary_locale_resources_data_->GetStringPiece(
               static_cast<uint16_t>(resource_id));
           data.has_value() && !data->empty()) {
-        return new base::RefCountedStaticMemory(data->data(), data->length());
+        return new base::RefCountedStaticMemory(base::as_byte_span(*data));
       }
     }
   }

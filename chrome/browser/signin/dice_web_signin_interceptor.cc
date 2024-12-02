@@ -81,7 +81,6 @@
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/primary_account_mutator.h"
 #include "components/signin/public/identity_manager/tribool.h"
-#include "components/supervised_user/core/common/features.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/mojom/themes.mojom.h"
@@ -420,10 +419,6 @@ SinginInterceptSupervisionState CapabilityToSupervisionState(
 void MaybeRecordSupervisedUserStateMetrics(
     const AccountInfo& intercepted_account_info,
     WebSigninInterceptor::SigninInterceptionType interception_type) {
-  if (!base::FeatureList::IsEnabled(
-          supervised_user::kCustomWebSignInInterceptForSupervisedUsers)) {
-    return;
-  }
   if (interception_type !=
           WebSigninInterceptor::SigninInterceptionType::kChromeSignin &&
       interception_type !=
@@ -1143,12 +1138,8 @@ void DiceWebSigninInterceptor::OnProfileCreationChoice(
   std::u16string profile_name =
       profiles::GetDefaultNameForNewSignedInProfile(account_info);
   ProfilePresets profile_presets(profile_color);
-
-  if (search_engines::IsChoiceScreenFlagEnabled(
-          search_engines::ChoicePromo::kAny)) {
-    profile_presets.search_engine_choice_data =
-        SearchEngineChoiceDialogService::GetChoiceDataFromProfile(*profile_);
-  }
+  profile_presets.search_engine_choice_data =
+      SearchEngineChoiceDialogService::GetChoiceDataFromProfile(*profile_);
 
   DCHECK(!state_->dice_signed_in_profile_creator_);
   // Unretained is fine because the profile creator is owned by this.
@@ -1304,11 +1295,8 @@ void DiceWebSigninInterceptor::OnNewSignedInProfileCreated(
 
       // The new profile inherits the default search provider and the search
       // engine choice timestamp from the previous profile.
-      if (search_engines::IsChoiceScreenFlagEnabled(
-              search_engines::ChoicePromo::kAny)) {
-        SearchEngineChoiceDialogService::UpdateProfileFromChoiceData(
-            *new_profile, profile_presets->search_engine_choice_data);
-      }
+      SearchEngineChoiceDialogService::UpdateProfileFromChoiceData(
+          *new_profile, profile_presets->search_engine_choice_data);
     }
 
     // TODO(crbug.com/40269992): Move this to DiceSignedInProfileCreator when
@@ -1379,8 +1367,16 @@ void DiceWebSigninInterceptor::OnEnterpriseProfileCreationResult(
     }
   } else if (create == SigninInterceptionResult::kAcceptedWithExistingProfile) {
     state_->intercepted_account_management_accepted_ = true;
-    DCHECK_EQ(GetPrimaryAccountInfo(identity_manager_).account_id,
-              account_info.account_id);
+    if (GetPrimaryAccountInfo(identity_manager_).IsEmpty()) {
+      identity_manager_->GetPrimaryAccountMutator()->SetPrimaryAccount(
+          account_info.account_id, signin::ConsentLevel::kSignin,
+          signin_metrics::AccessPoint::
+              ACCESS_POINT_CHROME_SIGNIN_INTERCEPT_BUBBLE);
+    } else {
+      DCHECK_EQ(GetPrimaryAccountInfo(identity_manager_).account_id,
+                account_info.account_id);
+    }
+
     enterprise_util::SetUserAcceptedAccountManagement(
         profile_, state_->intercepted_account_management_accepted_);
     Reset();
@@ -1545,12 +1541,8 @@ bool DiceWebSigninInterceptor::IsFullExtendedAccountInfoAvailable(
   if (!IsRequiredExtendedAccountInfoAvailable(account_info)) {
     return false;
   }
-  if (base::FeatureList::IsEnabled(
-          supervised_user::kCustomWebSignInInterceptForSupervisedUsers)) {
-    return account_info.capabilities.is_subject_to_parental_controls() !=
-           signin::Tribool::kUnknown;
-  }
-  return true;
+  return account_info.capabilities.is_subject_to_parental_controls() !=
+         signin::Tribool::kUnknown;
 }
 
 // static
