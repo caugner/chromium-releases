@@ -116,6 +116,10 @@ bool SessionController::IsUserSessionBlocked() const {
          !(state_ == SessionState::LOCKED && is_unlocking_);
 }
 
+bool SessionController::IsUnlocking() const {
+  return is_unlocking_;
+}
+
 bool SessionController::IsInSecondaryLoginScreen() const {
   return state_ == SessionState::LOGIN_SECONDARY;
 }
@@ -343,7 +347,7 @@ void SessionController::PrepareForLock(PrepareForLockCallback callback) {
   // page or app to mimick the lock screen.
   wm::WindowState* active_window_state = wm::GetActiveWindowState();
   if (active_window_state && active_window_state->IsFullscreen() &&
-      active_window_state->hide_shelf_when_fullscreen()) {
+      active_window_state->GetHideShelfWhenFullscreen()) {
     const wm::WMEvent event(wm::WM_EVENT_TOGGLE_FULLSCREEN);
     active_window_state->OnWMEvent(&event);
   }

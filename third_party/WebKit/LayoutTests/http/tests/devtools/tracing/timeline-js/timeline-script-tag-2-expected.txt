@@ -1,4 +1,3 @@
-CONSOLE MESSAGE: line 1: SCRIPT TAG
 Tests the Timeline API instrumentation of a script tag with an external script.
 
 EvaluateScript Properties:
@@ -12,10 +11,10 @@ EvaluateScript Properties:
 EvaluateScript Properties:
 {
     data : {
-        columnNumber : <number>
+        columnNumber : 0
         frame : <string>
-        lineNumber : <number>
-        url : http://127.0.0.1:8000/devtools/tracing/timeline-js/resources/timeline-script-tag-2.js
+        lineNumber : 0
+        url : .../devtools/tracing/timeline-js/resources/timeline-script-tag-2.js
     }
     endTime : <number>
     frameId : <string>

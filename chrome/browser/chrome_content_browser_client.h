@@ -18,6 +18,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
+#include "chrome/browser/chrome_service.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/network_service.mojom.h"
 #include "content/public/common/resource_type.h"
@@ -98,6 +99,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       bool* in_memory) override;
   content::WebContentsViewDelegate* GetWebContentsViewDelegate(
       content::WebContents* web_contents) override;
+  bool AllowGpuLaunchRetryOnIOThread() override;
   void RenderProcessWillLaunch(content::RenderProcessHost* host) override;
   GURL GetEffectiveURL(content::BrowserContext* browser_context,
                        const GURL& url,
@@ -151,6 +153,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const GURL& new_url) override;
   bool ShouldAssignSiteForURL(const GURL& url) override;
   std::vector<url::Origin> GetOriginsRequiringDedicatedProcess() override;
+  bool IsFileAccessAllowed(const base::FilePath& path,
+                           const base::FilePath& absolute_path,
+                           const base::FilePath& profile_path) override;
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
                                       int child_process_id) override;
   void AdjustUtilityServiceProcessCommandLine(
@@ -171,6 +176,13 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const GURL& first_party,
       content::ResourceContext* context,
       const base::Callback<content::WebContents*(void)>& wc_getter) override;
+  bool AllowSharedWorker(const GURL& worker_url,
+                         const GURL& main_frame_url,
+                         const std::string& name,
+                         const url::Origin& constructor_origin,
+                         content::BrowserContext* context,
+                         int render_process_id,
+                         int render_frame_id) override;
   bool AllowGetCookie(const GURL& url,
                       const GURL& first_party,
                       const net::CookieList& cookie_list,
@@ -179,7 +191,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                       int render_frame_id) override;
   bool AllowSetCookie(const GURL& url,
                       const GURL& first_party,
-                      const std::string& cookie_line,
+                      const net::CanonicalCookie& cookie,
                       content::ResourceContext* context,
                       int render_process_id,
                       int render_frame_id,
@@ -256,7 +268,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void DidCreatePpapiPlugin(content::BrowserPpapiHost* browser_host) override;
   content::BrowserPpapiHost* GetExternalBrowserPpapiHost(
       int plugin_process_id) override;
-  gpu::GpuChannelEstablishFactory* GetGpuChannelEstablishFactory() override;
   bool AllowPepperSocketAPI(
       content::BrowserContext* browser_context,
       const GURL& url,
@@ -289,7 +300,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const GURL& url) override;
   void OverridePageVisibilityState(
       content::RenderFrameHost* render_frame_host,
-      blink::WebPageVisibilityState* visibility_state) override;
+      blink::mojom::PageVisibilityState* visibility_state) override;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   void GetAdditionalMappedFilesForChildProcess(
@@ -304,7 +315,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
 #endif
   void ExposeInterfacesToRenderer(
       service_manager::BinderRegistry* registry,
-      content::AssociatedInterfaceRegistry* associated_registry,
+      blink::AssociatedInterfaceRegistry* associated_registry,
       content::RenderProcessHost* render_process_host) override;
   void ExposeInterfacesToMediaService(
       service_manager::BinderRegistry* registry,
@@ -317,6 +328,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::RenderFrameHost* render_frame_host,
       const std::string& interface_name,
       mojo::ScopedInterfaceEndpointHandle* handle) override;
+  void BindInterfaceRequestFromWorker(
+      content::RenderProcessHost* render_process_host,
+      const url::Origin& origin,
+      const std::string& interface_name,
+      mojo::ScopedMessagePipeHandle interface_pipe) override;
   void BindInterfaceRequest(
       const service_manager::BindSourceInfo& source_info,
       const std::string& interface_name,
@@ -324,6 +340,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void RegisterInProcessServices(StaticServiceMap* services) override;
   void RegisterOutOfProcessServices(
       OutOfProcessServiceMap* services) override;
+  bool ShouldTerminateOnServiceQuit(
+      const service_manager::Identity& id) override;
   std::unique_ptr<base::Value> GetServiceManifestOverlay(
       base::StringPiece name) override;
   std::vector<content::ContentBrowserClient::ServiceManifestInfo>
@@ -365,6 +383,13 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   std::vector<std::unique_ptr<content::URLLoaderThrottle>>
   CreateURLLoaderThrottles(
       const base::Callback<content::WebContents*()>& wc_getter) override;
+  void RegisterNonNetworkNavigationURLLoaderFactories(
+      content::RenderFrameHost* frame_host,
+      NonNetworkURLLoaderFactoryMap* factories) override;
+  void RegisterNonNetworkSubresourceURLLoaderFactories(
+      content::RenderFrameHost* frame_host,
+      const GURL& frame_url,
+      NonNetworkURLLoaderFactoryMap* factories) override;
 
  protected:
   static bool HandleWebUI(GURL* url, content::BrowserContext* browser_context);
@@ -375,8 +400,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   friend class DisableWebRtcEncryptionFlagTest;
   friend class InProcessBrowserTest;
 
-  // Populate |frame_interfaces_|.
-  void InitFrameInterfaces();
+  // Populate |frame_interfaces_|, |frame_interfaces_parameterized_| and
+  // |worker_interfaces_parameterized_|.
+  void InitWebContextInterfaces();
 
 #if BUILDFLAG(ENABLE_WEBRTC)
   // Copies disable WebRTC encryption switch depending on the channel.
@@ -438,6 +464,10 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   std::unique_ptr<
       service_manager::BinderRegistryWithArgs<content::RenderFrameHost*>>
       frame_interfaces_parameterized_;
+  std::unique_ptr<
+      service_manager::BinderRegistryWithArgs<content::RenderProcessHost*,
+                                              const url::Origin&>>
+      worker_interfaces_parameterized_;
 
   base::WeakPtrFactory<ChromeContentBrowserClient> weak_factory_;
 

@@ -11,14 +11,47 @@ CONSOLE MESSAGE: line 147: interface CSSKeywordValue : CSSStyleValue
 CONSOLE MESSAGE: line 147:     getter value
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     setter value
+CONSOLE MESSAGE: line 147: interface CSSMathInvert : CSSMathValue
+CONSOLE MESSAGE: line 147:     getter value
+CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter value
+CONSOLE MESSAGE: line 147: interface CSSMathMax : CSSMathValue
+CONSOLE MESSAGE: line 147:     getter values
+CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter values
+CONSOLE MESSAGE: line 147: interface CSSMathMin : CSSMathValue
+CONSOLE MESSAGE: line 147:     getter values
+CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter values
+CONSOLE MESSAGE: line 147: interface CSSMathNegate : CSSMathValue
+CONSOLE MESSAGE: line 147:     getter value
+CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter value
+CONSOLE MESSAGE: line 147: interface CSSMathProduct : CSSMathValue
+CONSOLE MESSAGE: line 147:     getter values
+CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter values
+CONSOLE MESSAGE: line 147: interface CSSMathSum : CSSMathValue
+CONSOLE MESSAGE: line 147:     getter values
+CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter values
+CONSOLE MESSAGE: line 147: interface CSSMathValue : CSSNumericValue
+CONSOLE MESSAGE: line 147:     getter operator
+CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147: interface CSSMatrixComponent : CSSTransformComponent
 CONSOLE MESSAGE: line 147:     getter matrix
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     setter matrix
+CONSOLE MESSAGE: line 147: interface CSSNumericArray
+CONSOLE MESSAGE: line 147:     getter length
+CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147: interface CSSNumericValue : CSSStyleValue
 CONSOLE MESSAGE: line 147:     method add
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method div
+CONSOLE MESSAGE: line 147:     method equals
+CONSOLE MESSAGE: line 147:     method max
+CONSOLE MESSAGE: line 147:     method min
 CONSOLE MESSAGE: line 147:     method mul
 CONSOLE MESSAGE: line 147:     method sub
 CONSOLE MESSAGE: line 147:     method to
@@ -223,15 +256,12 @@ CONSOLE MESSAGE: line 147:     method getReader
 CONSOLE MESSAGE: line 147:     method pipeThrough
 CONSOLE MESSAGE: line 147:     method pipeTo
 CONSOLE MESSAGE: line 147:     method tee
-CONSOLE MESSAGE: line 147: interface SharedArrayBuffer
-CONSOLE MESSAGE: line 147:     getter byteLength
-CONSOLE MESSAGE: line 147:     method constructor
-CONSOLE MESSAGE: line 147:     method slice
-CONSOLE MESSAGE: line 147: interface StylePropertyMap : StylePropertyMapReadonly
+CONSOLE MESSAGE: line 147: interface StylePropertyMap : StylePropertyMapReadOnly
 CONSOLE MESSAGE: line 147:     method append
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method delete
 CONSOLE MESSAGE: line 147:     method set
+CONSOLE MESSAGE: line 147:     method update
 CONSOLE MESSAGE: line 147: interface StylePropertyMapReadonly
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method entries
@@ -242,6 +272,10 @@ CONSOLE MESSAGE: line 147:     method getProperties
 CONSOLE MESSAGE: line 147:     method has
 CONSOLE MESSAGE: line 147:     method keys
 CONSOLE MESSAGE: line 147:     method values
+CONSOLE MESSAGE: line 147: interface TransformStream
+CONSOLE MESSAGE: line 147:     getter readable
+CONSOLE MESSAGE: line 147:     getter writable
+CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147: interface WorkletGlobalScope
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147: interface WritableStream
@@ -250,7 +284,6 @@ CONSOLE MESSAGE: line 147:     method abort
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method getWriter
 CONSOLE MESSAGE: line 147: global object
-CONSOLE MESSAGE: line 147:     attribute Atomics
 CONSOLE MESSAGE: line 147:     attribute console
 CONSOLE MESSAGE: line 147:     getter devicePixelRatio
 CONSOLE MESSAGE: line 147:     method gc
@@ -267,14 +300,47 @@ CONSOLE MESSAGE: line 147: interface CSSKeywordValue : CSSStyleValue
 CONSOLE MESSAGE: line 147:     getter value
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     setter value
+CONSOLE MESSAGE: line 147: interface CSSMathInvert : CSSMathValue
+CONSOLE MESSAGE: line 147:     getter value
+CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter value
+CONSOLE MESSAGE: line 147: interface CSSMathMax : CSSMathValue
+CONSOLE MESSAGE: line 147:     getter values
+CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter values
+CONSOLE MESSAGE: line 147: interface CSSMathMin : CSSMathValue
+CONSOLE MESSAGE: line 147:     getter values
+CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter values
+CONSOLE MESSAGE: line 147: interface CSSMathNegate : CSSMathValue
+CONSOLE MESSAGE: line 147:     getter value
+CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter value
+CONSOLE MESSAGE: line 147: interface CSSMathProduct : CSSMathValue
+CONSOLE MESSAGE: line 147:     getter values
+CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter values
+CONSOLE MESSAGE: line 147: interface CSSMathSum : CSSMathValue
+CONSOLE MESSAGE: line 147:     getter values
+CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter values
+CONSOLE MESSAGE: line 147: interface CSSMathValue : CSSNumericValue
+CONSOLE MESSAGE: line 147:     getter operator
+CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147: interface CSSMatrixComponent : CSSTransformComponent
 CONSOLE MESSAGE: line 147:     getter matrix
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     setter matrix
+CONSOLE MESSAGE: line 147: interface CSSNumericArray
+CONSOLE MESSAGE: line 147:     getter length
+CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147: interface CSSNumericValue : CSSStyleValue
 CONSOLE MESSAGE: line 147:     method add
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method div
+CONSOLE MESSAGE: line 147:     method equals
+CONSOLE MESSAGE: line 147:     method max
+CONSOLE MESSAGE: line 147:     method min
 CONSOLE MESSAGE: line 147:     method mul
 CONSOLE MESSAGE: line 147:     method sub
 CONSOLE MESSAGE: line 147:     method to
@@ -479,15 +545,12 @@ CONSOLE MESSAGE: line 147:     method getReader
 CONSOLE MESSAGE: line 147:     method pipeThrough
 CONSOLE MESSAGE: line 147:     method pipeTo
 CONSOLE MESSAGE: line 147:     method tee
-CONSOLE MESSAGE: line 147: interface SharedArrayBuffer
-CONSOLE MESSAGE: line 147:     getter byteLength
-CONSOLE MESSAGE: line 147:     method constructor
-CONSOLE MESSAGE: line 147:     method slice
-CONSOLE MESSAGE: line 147: interface StylePropertyMap : StylePropertyMapReadonly
+CONSOLE MESSAGE: line 147: interface StylePropertyMap : StylePropertyMapReadOnly
 CONSOLE MESSAGE: line 147:     method append
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method delete
 CONSOLE MESSAGE: line 147:     method set
+CONSOLE MESSAGE: line 147:     method update
 CONSOLE MESSAGE: line 147: interface StylePropertyMapReadonly
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method entries
@@ -498,6 +561,10 @@ CONSOLE MESSAGE: line 147:     method getProperties
 CONSOLE MESSAGE: line 147:     method has
 CONSOLE MESSAGE: line 147:     method keys
 CONSOLE MESSAGE: line 147:     method values
+CONSOLE MESSAGE: line 147: interface TransformStream
+CONSOLE MESSAGE: line 147:     getter readable
+CONSOLE MESSAGE: line 147:     getter writable
+CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147: interface WorkletGlobalScope
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147: interface WritableStream
@@ -506,7 +573,6 @@ CONSOLE MESSAGE: line 147:     method abort
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method getWriter
 CONSOLE MESSAGE: line 147: global object
-CONSOLE MESSAGE: line 147:     attribute Atomics
 CONSOLE MESSAGE: line 147:     attribute console
 CONSOLE MESSAGE: line 147:     getter devicePixelRatio
 CONSOLE MESSAGE: line 147:     method gc
