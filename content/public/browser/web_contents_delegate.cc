@@ -252,6 +252,12 @@ void WebContentsDelegate::RunFileChooser(
   listener->FileSelectionCanceled();
 }
 
+#if BUILDFLAG(IS_ANDROID)
+bool WebContentsDelegate::UseFileChooserForFileSystemAccess() const {
+  return false;
+}
+#endif
+
 void WebContentsDelegate::EnumerateDirectory(
     WebContents* web_contents,
     scoped_refptr<FileSelectListener> listener,
@@ -424,6 +430,11 @@ bool WebContentsDelegate::ShouldUseInstancedSystemMediaControls() const {
 
 bool WebContentsDelegate::MaybeCopyContentAreaAsBitmap(
     base::OnceCallback<void(const SkBitmap&)> callback) {
+  return false;
+}
+
+bool WebContentsDelegate::IsWaitingForPointerLockPrompt(
+    WebContents* web_contents) {
   return false;
 }
 

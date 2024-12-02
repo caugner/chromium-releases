@@ -227,6 +227,11 @@ void OnDeviceModelComponentStateManager::InstallerRegistered() {
       state_ != nullptr);
 }
 
+bool OnDeviceModelComponentStateManager::IsInstallerRegistered() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return state_ != nullptr;
+}
+
 void OnDeviceModelComponentStateManager::BeginUpdateRegistration() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (switches::GetOnDeviceModelExecutionOverride()) {
@@ -270,7 +275,7 @@ void OnDeviceModelComponentStateManager::CompleteUpdateRegistration(
     delegate_->Uninstall(this);
   } else if (criteria.should_install() || criteria.is_already_installing) {
     component_installer_registered_ = true;
-    delegate_->RegisterInstaller(this);
+    delegate_->RegisterInstaller(this, criteria.is_already_installing);
   }
 
   // Log metrics only for first registration attempt.

@@ -8,6 +8,7 @@
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
+#include "base/i18n/rtl.h"
 #include "base/location.h"
 #include "base/time/time.h"
 #include "ui/aura/window.h"
@@ -20,7 +21,7 @@
 namespace ash {
 namespace {
 
-constexpr base::TimeDelta kBubbleViewDisplayTime = base::Seconds(3);
+constexpr base::TimeDelta kBubbleViewDisplayTime = base::Seconds(2);
 
 // Starting at the time the bubble is shown, events that would normally close
 // the bubble are ignored for this grace period, to prevent the bubble from
@@ -66,6 +67,14 @@ bool ShouldCloseBubbleOnEvent(ui::Event* event) {
   }
 }
 
+// Gets the text direction for the currently focused input field.
+base::i18n::TextDirection GetTextDirection() {
+  if (ui::TextInputClient* client = GetFocusedTextInputClient()) {
+    return client->GetTextDirection();
+  }
+  return base::i18n::TextDirection::UNKNOWN_DIRECTION;
+}
+
 }  // namespace
 
 PickerCapsLockBubbleController::PickerCapsLockBubbleController(
@@ -107,8 +116,8 @@ void PickerCapsLockBubbleController::OnCapsLockChanged(bool enabled) {
   if (GetFocusedTextInputClient() == nullptr) {
     return;
   }
-  bubble_view_ =
-      new PickerCapsLockStateView(GetParentView(), enabled, GetCaretBounds());
+  bubble_view_ = new PickerCapsLockStateView(
+      GetParentView(), enabled, GetCaretBounds(), GetTextDirection());
   bubble_view_->Show();
   bubble_close_timer_.Start(
       FROM_HERE, kBubbleViewDisplayTime,

@@ -19,6 +19,7 @@
 <translation id="115443833402798225">Хангул ахнмате</translation>
 <translation id="1155759005174418845">каталонски</translation>
 <translation id="1168100932582989117">Google сервери назива</translation>
+<translation id="1170788066030116158">Датум снимања</translation>
 <translation id="1172970565351728681">Преостало је око <ph name="REMAINING_TIME" /></translation>
 <translation id="1173894706177603556">Преименуј</translation>
 <translation id="1173916544412572294"><ph name="NETWORK_INDEX" />. мрежа од <ph name="NETWORK_COUNT" />, <ph name="PHONE_NAME" />, <ph name="CONNECTION_STATUS" />, јачина сигнала <ph name="SIGNAL_STRENGTH" />%, батерија телефона <ph name="BATTERY_STATUS" />%, детаљи</translation>
@@ -662,7 +663,7 @@
 <translation id="6096979789310008754">Текст претраге је обрисан, приказују се све датотеке и директоријуми.</translation>
 <translation id="610101264611565198"><ph name="FILE_NAME" /> се премешта у фолдер <ph name="FOLDER_NAME" /></translation>
 <translation id="61118516107968648">CSV текст</translation>
-<translation id="6129953537138746214">Размак</translation>
+<translation id="6129953537138746214">Тастер за размак</translation>
 <translation id="6133173853026656527">Премештање датотеке <ph name="FILE_NAME" />...</translation>
 <translation id="6133877453787250710">Администратор прати:</translation>
 <translation id="613750717151263950">јапански са америчком тастатуром</translation>

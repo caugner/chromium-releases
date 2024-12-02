@@ -171,10 +171,10 @@ void SafetyCheckNotificationClient::OnSceneActiveForegroundBrowserReady(
       return;
     }
 
-    ChromeBrowserState* browser_state = browser->GetBrowserState();
+    ProfileIOS* profile = browser->GetProfile();
 
     IOSChromeSafetyCheckManager* safety_check_manager =
-        IOSChromeSafetyCheckManagerFactory::GetForBrowserState(browser_state);
+        IOSChromeSafetyCheckManagerFactory::GetForProfile(profile);
 
     safety_check_manager->AddObserver(this);
 
@@ -434,14 +434,14 @@ void SafetyCheckNotificationClient::ClearAndRescheduleSafetyCheckNotifications(
   if ([interacted_notification_metadata_ count]) {
     Browser* browser = GetSceneLevelForegroundActiveBrowser();
 
-    CHECK(browser);
-
-    [HandlerForProtocol(browser->GetCommandDispatcher(), ApplicationCommands)
-        prepareToPresentModal:
-            base::CallbackToBlock(base::BindOnce(
-                &SafetyCheckNotificationClient::ShowUIForNotificationMetadata,
-                weak_ptr_factory_.GetWeakPtr(),
-                interacted_notification_metadata_, browser))];
+    if (browser) {
+      [HandlerForProtocol(browser->GetCommandDispatcher(), ApplicationCommands)
+          prepareToPresentModal:
+              base::CallbackToBlock(base::BindOnce(
+                  &SafetyCheckNotificationClient::ShowUIForNotificationMetadata,
+                  weak_ptr_factory_.GetWeakPtr(),
+                  interacted_notification_metadata_, browser))];
+    }
   }
 
   ClearNotifications(
@@ -489,8 +489,7 @@ void SafetyCheckNotificationClient::ShowUIForNotificationMetadata(
   // page even if the original notification data is outdated (by at least
   // 'kSafetyCheckNotificationDefaultDelay').
   IOSChromeSafetyCheckManager* safety_check_manager =
-      IOSChromeSafetyCheckManagerFactory::GetForBrowserState(
-          browser->GetBrowserState());
+      IOSChromeSafetyCheckManagerFactory::GetForProfile(browser->GetProfile());
 
   // If Update Chrome notification, then show the Chrome App Upgrade page.
   if (notification_metadata[kSafetyCheckUpdateChromeNotificationID]) {
