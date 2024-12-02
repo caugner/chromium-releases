@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "net/base/completion_callback.h"
 #include "net/base/load_states.h"
 #include "net/base/net_errors.h"
+#include "net/base/request_priority.h"
 #include "net/socket/client_socket.h"
 #include "net/socket/client_socket_pool.h"
 
@@ -54,15 +55,15 @@ class ClientSocketHandle {
   //
   // Init may be called multiple times.
   //
-  // Profiling information for the request is saved to |load_log| if non-NULL.
+  // Profiling information for the request is saved to |net_log| if non-NULL.
   //
   template <typename SocketParams, typename PoolType>
   int Init(const std::string& group_name,
            const SocketParams& socket_params,
-           int priority,
+           RequestPriority priority,
            CompletionCallback* callback,
-           PoolType* pool,
-           LoadLog* load_log);
+           const scoped_refptr<PoolType>& pool,
+           const BoundNetLog& net_log);
 
   // An initialized handle can be reset, which causes it to return to the
   // un-initialized state.  This releases the underlying socket, which in the
@@ -83,6 +84,9 @@ class ClientSocketHandle {
 
   // Returns the time tick when Init() was called.
   base::TimeTicks init_time() const { return init_time_; }
+
+  // Returns the time between Init() and when is_initialized() becomes true.
+  base::TimeDelta setup_time() const { return setup_time_; }
 
   // Used by ClientSocketPool to initialize the ClientSocketHandle.
   void set_is_reused(bool is_reused) { is_reused_ = is_reused; }
@@ -138,6 +142,7 @@ class ClientSocketHandle {
   CompletionCallback* user_callback_;
   base::TimeDelta idle_time_;
   base::TimeTicks init_time_;
+  base::TimeDelta setup_time_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientSocketHandle);
 };
@@ -146,10 +151,10 @@ class ClientSocketHandle {
 template <typename SocketParams, typename PoolType>
 int ClientSocketHandle::Init(const std::string& group_name,
                              const SocketParams& socket_params,
-                             int priority,
+                             RequestPriority priority,
                              CompletionCallback* callback,
-                             PoolType* pool,
-                             LoadLog* load_log) {
+                             const scoped_refptr<PoolType>& pool,
+                             const BoundNetLog& net_log) {
   CHECK(!group_name.empty());
   // Note that this will result in a link error if the SocketParams has not been
   // registered for the PoolType via REGISTER_SOCKET_PARAMS_FOR_POOL (defined in
@@ -160,7 +165,7 @@ int ClientSocketHandle::Init(const std::string& group_name,
   group_name_ = group_name;
   init_time_ = base::TimeTicks::Now();
   int rv = pool_->RequestSocket(
-      group_name, &socket_params, priority, this, &callback_, load_log);
+      group_name, &socket_params, priority, this, &callback_, net_log);
   if (rv == ERR_IO_PENDING) {
     user_callback_ = callback;
   } else {

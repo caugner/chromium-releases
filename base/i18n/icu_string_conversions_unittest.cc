@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,9 @@
 #include <sstream>
 
 #include "base/basictypes.h"
+#include "base/i18n/icu_string_conversions.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "base/i18n/icu_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
@@ -39,7 +39,7 @@ string16 BuildString16(const wchar_t* s) {
 #endif
 }
 
-static const wchar_t* const kConvertRoundtripCases[] = {
+const wchar_t* const kConvertRoundtripCases[] = {
   L"Google Video",
   // "网页 图片 资讯更多 »"
   L"\x7f51\x9875\x0020\x56fe\x7247\x0020\x8d44\x8baf\x66f4\x591a\x0020\x00bb",
@@ -68,7 +68,7 @@ static const wchar_t* const kConvertRoundtripCases[] = {
 
 }  // namespace
 
-TEST(StringUtilTest, ConvertCodepageUTF8) {
+TEST(ICUStringConversionsTest, ConvertCodepageUTF8) {
   // Make sure WideToCodepage works like WideToUTF8.
   for (size_t i = 0; i < arraysize(kConvertRoundtripCases); ++i) {
     std::string expected(WideToUTF8(kConvertRoundtripCases[i]));
@@ -156,7 +156,7 @@ static const struct {
    true,
 #if defined(WCHAR_T_IS_UTF16)
    L"\xD840\xDC00\x4E00",
-#else
+#elif defined(WCHAR_T_IS_UTF32)
    L"\x20000\x4E00",
 #endif
    L"\xD840\xDC00\x4E00"},
@@ -234,7 +234,7 @@ static const struct {
    NULL},
 };
 
-TEST(StringUtilTest, ConvertBetweenCodepageAndWide) {
+TEST(ICUStringConversionsTest, ConvertBetweenCodepageAndWide) {
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kConvertCodepageCases); ++i) {
     std::wstring wide;
     bool success = CodepageToWide(kConvertCodepageCases[i].encoded,
@@ -296,7 +296,7 @@ TEST(StringUtilTest, ConvertBetweenCodepageAndWide) {
                               OnStringConversionError::SKIP, &encoded));
 }
 
-TEST(StringUtilTest, ConvertBetweenCodepageAndUTF16) {
+TEST(ICUStringConversionsTest, ConvertBetweenCodepageAndUTF16) {
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kConvertCodepageCases); ++i) {
     string16 utf16;
     bool success = CodepageToUTF16(kConvertCodepageCases[i].encoded,

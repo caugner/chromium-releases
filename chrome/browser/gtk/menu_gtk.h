@@ -11,9 +11,13 @@
 #include <vector>
 
 #include "base/task.h"
-#include "chrome/common/owned_widget_gtk.h"
+#include "gfx/point.h"
 
 class SkBitmap;
+
+namespace menus {
+class MenuModel;
+}
 
 struct MenuCreateMaterial;
 
@@ -25,25 +29,29 @@ class MenuGtk {
     virtual ~Delegate() { }
 
     // Returns whether the menu item for this command should be enabled.
-    virtual bool IsCommandEnabled(int command_id) const = 0;
+    virtual bool IsCommandEnabled(int command_id) const { return false; }
 
     // Returns whether this command is checked (for checkbox menu items only).
     virtual bool IsItemChecked(int command_id) const { return false; }
 
-    // Executes the command.
-    virtual void ExecuteCommand(int command_id) = 0;
+    // Gets the label. Only needs to be implemented for custom (dynamic) labels.
+    virtual std::string GetLabel(int command_id) const { return std::string(); }
 
-    // Called when the menu stops showing. This will be called along with
+    // Executes the command.
+    virtual void ExecuteCommandById(int command_id) {}
+
+    // Called before a command is executed. This exists for the case where a
+    // model is handling the actual execution of commands, but the delegate
+    // still needs to know that some command got executed. This is called before
+    // and not after the command is executed because its execution may delete
+    // the menu and/or the delegate.
+    virtual void CommandWillBeExecuted() {}
+
+    // Called when the menu stops showing. This will be called before
     // ExecuteCommand if the user clicks an item, but will also be called when
     // the user clicks away from the menu.
     virtual void StoppedShowing() {}
 
-    // Functions needed for creation of non-static menus.
-    virtual int GetItemCount() const { return 0; }
-    virtual bool IsItemSeparator(int command_id) const { return false; }
-    virtual std::string GetLabel(int command_id) const { return std::string(); }
-    virtual bool HasIcon(int command_id) const { return false; }
-    virtual const SkBitmap* GetIcon(int command_id) const { return NULL; }
     // Return true if we should override the "gtk-menu-images" system setting
     // when showing image menu items for this menu.
     virtual bool AlwaysShowImages() const { return false; }
@@ -51,23 +59,30 @@ class MenuGtk {
 
   // Builds a MenuGtk that uses |delegate| to perform actions and |menu_data|
   // to create the menu.
-  MenuGtk(MenuGtk::Delegate* delegate, const MenuCreateMaterial* menu_data,
-          GtkAccelGroup* accel_group);
+  MenuGtk(MenuGtk::Delegate* delegate, const MenuCreateMaterial* menu_data);
+  // Builds a MenuGtk that uses |delegate| to perform actions and build the
+  // menu.
+  explicit MenuGtk(MenuGtk::Delegate* delegate);
   // Creates a MenuGtk that uses |delegate| to perform actions.  Builds the
-  // menu using |delegate| if |load| is true.
-  MenuGtk(MenuGtk::Delegate* delegate, bool load);
+  // menu using |model_|.
+  MenuGtk(MenuGtk::Delegate* delegate, menus::MenuModel* model);
   ~MenuGtk();
 
   // Initialize GTK signal handlers.
   void ConnectSignalHandlers();
 
-  // These methods are used to build the menu dynamically.
-  void AppendMenuItemWithLabel(int command_id, const std::string& label);
-  void AppendMenuItemWithIcon(int command_id, const std::string& label,
-                              const SkBitmap& icon);
-  void AppendCheckMenuItemWithLabel(int command_id, const std::string& label);
-  void AppendSeparator();
-  void AppendMenuItem(int command_id, GtkWidget* menu_item);
+  // These methods are used to build the menu dynamically. The return value
+  // is the new menu item.
+  GtkWidget* AppendMenuItemWithLabel(int command_id, const std::string& label);
+  GtkWidget* AppendMenuItemWithIcon(int command_id, const std::string& label,
+                                    const SkBitmap& icon);
+  GtkWidget* AppendCheckMenuItemWithLabel(int command_id,
+                                          const std::string& label);
+  GtkWidget* AppendSeparator();
+  GtkWidget* AppendMenuItem(int command_id, GtkWidget* menu_item);
+  GtkWidget* AppendMenuItemToMenu(int command_id,
+                                  GtkWidget* menu_item,
+                                  GtkWidget* menu);
 
   // Displays the menu. |timestamp| is the time of activation. The popup is
   // statically positioned at |widget|.
@@ -79,9 +94,10 @@ class MenuGtk {
 
   // Displays the menu as a context menu, i.e. at the current cursor location.
   // |event_time| is the time of the event that triggered the menu's display.
-  // In the future we may need to modify this to act differently based on the
-  // triggering event (e.g. right mouse click, context menu key, etc.).
   void PopupAsContext(guint32 event_time);
+
+  // Displays the menu at the given coords. |point| is intentionally not const.
+  void PopupAsContextAt(guint32 event_time, gfx::Point point);
 
   // Displays the menu following a keyboard event (such as selecting |widget|
   // and pressing "enter").
@@ -96,31 +112,47 @@ class MenuGtk {
   // button. Otherwise it aligns the right side of the menu with the right side
   // of the button. Public since some menus have odd requirements that don't
   // belong in a public class.
-  static void MenuPositionFunc(GtkMenu* menu,
-                               int* x,
-                               int* y,
-                               gboolean* push_in,
-                               void* void_widget);
+  static void WidgetMenuPositionFunc(GtkMenu* menu,
+                                     int* x,
+                                     int* y,
+                                     gboolean* push_in,
+                                     void* void_widget);
 
-  GtkWidget* widget() const { return menu_.get(); }
+  // Positions the menu to appear at the gfx::Point represented by |userdata|.
+  static void PointMenuPositionFunc(GtkMenu* menu,
+                                    int* x,
+                                    int* y,
+                                    gboolean* push_in,
+                                    gpointer userdata);
+
+  GtkWidget* widget() const { return menu_; }
 
  private:
   // A recursive function that transforms a MenuCreateMaterial tree into a set
   // of GtkMenuItems.
   void BuildMenuIn(GtkWidget* menu,
-                   const MenuCreateMaterial* menu_data,
-                   GtkAccelGroup* accel_group);
+                   const MenuCreateMaterial* menu_data);
 
   // Builds a GtkImageMenuItem.
   GtkWidget* BuildMenuItemWithImage(const std::string& label,
                                     const SkBitmap& icon);
 
-  // A function that creates a GtkMenu from |delegate_|. This function is not
-  // recursive and does not support sub-menus.
-  void BuildMenuFromDelegate();
+  // A function that creates a GtkMenu from |model_|.
+  void BuildMenuFromModel();
+  // Implementation of the above; called recursively.
+  void BuildSubmenuFromModel(menus::MenuModel* model, GtkWidget* menu);
 
   // Contains implementation for OnMenuShow.
   void UpdateMenu();
+
+  // Dispatches to either |model| (if it is non-null) or |delegate_|. The
+  // reason for this awkwardness is that we are in a transitional period where
+  // we support both MenuModel and Delegate as a menu controller.
+  // TODO(estade): remove controller functions from Delegate.
+  // http://crbug.com/31365
+  bool IsCommandEnabled(menus::MenuModel* model, int id);
+  void ExecuteCommand(menus::MenuModel* model, int id);
+  bool IsItemChecked(menus::MenuModel* model, int id);
 
   // Callback for when a menu item is clicked.
   static void OnMenuItemActivated(GtkMenuItem* menuitem, MenuGtk* menu);
@@ -137,6 +169,10 @@ class MenuGtk {
   // Queries this object about the menu state.
   MenuGtk::Delegate* delegate_;
 
+  // If non-NULL, the MenuModel that we use to populate and control the GTK
+  // menu (overriding the delegate as a controller).
+  menus::MenuModel* model_;
+
   // For some menu items, we want to show the accelerator, but not actually
   // explicitly handle it. To this end we connect those menu items' accelerators
   // to this group, but don't attach this group to any top level window.
@@ -144,7 +180,7 @@ class MenuGtk {
 
   // gtk_menu_popup() does not appear to take ownership of popup menus, so
   // MenuGtk explicitly manages the lifetime of the menu.
-  OwnedWidgetGtk menu_;
+  GtkWidget* menu_;
 
   // True when we should ignore "activate" signals.  Used to prevent
   // menu items from getting activated when we are setting up the

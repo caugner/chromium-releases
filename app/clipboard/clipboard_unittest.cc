@@ -1,18 +1,28 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "build/build_config.h"
 
 #include <string>
 
 #include "app/clipboard/clipboard.h"
 #include "app/clipboard/scoped_clipboard_writer.h"
 #include "base/basictypes.h"
-#include "base/gfx/size.h"
-#include "base/message_loop.h"
-#include "base/pickle.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "gfx/size.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
+
+#if defined(OS_WIN)
+#include "app/clipboard/clipboard_util_win.h"
+#include "base/message_loop.h"
+#endif
+
+#if defined(OS_WIN) || (defined(OS_POSIX) && !defined(OS_MACOSX))
+#include "base/pickle.h"
+#endif
 
 #if defined(OS_WIN)
 class ClipboardTest : public PlatformTest {
@@ -29,6 +39,19 @@ class ClipboardTest : public PlatformTest {
 #elif defined(OS_POSIX)
 typedef PlatformTest ClipboardTest;
 #endif  // defined(OS_WIN)
+
+namespace {
+
+bool ClipboardContentsIsExpected(const string16& copied_markup,
+                                 const string16& pasted_markup) {
+#if defined(OS_POSIX)
+  return pasted_markup.find(copied_markup) != string16::npos;
+#else
+  return copied_markup == pasted_markup;
+#endif
+}
+
+}  // namespace
 
 TEST_F(ClipboardTest, ClearTest) {
   Clipboard clipboard;
@@ -85,7 +108,7 @@ TEST_F(ClipboardTest, HTMLTest) {
   EXPECT_TRUE(clipboard.IsFormatAvailable(Clipboard::GetHtmlFormatType(),
                                           Clipboard::BUFFER_STANDARD));
   clipboard.ReadHTML(Clipboard::BUFFER_STANDARD, &markup_result, &url_result);
-  EXPECT_EQ(markup, markup_result);
+  EXPECT_TRUE(ClipboardContentsIsExpected(markup, markup_result));
 #if defined(OS_WIN)
   // TODO(playmobil): It's not clear that non windows clipboards need to support
   // this.
@@ -108,7 +131,7 @@ TEST_F(ClipboardTest, TrickyHTMLTest) {
   EXPECT_TRUE(clipboard.IsFormatAvailable(Clipboard::GetHtmlFormatType(),
                                           Clipboard::BUFFER_STANDARD));
   clipboard.ReadHTML(Clipboard::BUFFER_STANDARD, &markup_result, &url_result);
-  EXPECT_EQ(markup, markup_result);
+  EXPECT_TRUE(ClipboardContentsIsExpected(markup, markup_result));
 #if defined(OS_WIN)
   // TODO(playmobil): It's not clear that non windows clipboards need to support
   // this.
@@ -117,7 +140,7 @@ TEST_F(ClipboardTest, TrickyHTMLTest) {
 }
 
 // TODO(estade): Port the following test (decide what target we use for urls)
-#if !defined(OS_LINUX)
+#if !defined(OS_POSIX) || defined(OS_MACOSX)
 TEST_F(ClipboardTest, BookmarkTest) {
   Clipboard clipboard;
 
@@ -158,7 +181,7 @@ TEST_F(ClipboardTest, MultiFormatTest) {
   EXPECT_TRUE(clipboard.IsFormatAvailable(
       Clipboard::GetPlainTextFormatType(), Clipboard::BUFFER_STANDARD));
   clipboard.ReadHTML(Clipboard::BUFFER_STANDARD, &markup_result, &url_result);
-  EXPECT_EQ(markup, markup_result);
+  EXPECT_TRUE(ClipboardContentsIsExpected(markup, markup_result));
 #if defined(OS_WIN)
   // TODO(playmobil): It's not clear that non windows clipboards need to support
   // this.
@@ -169,63 +192,6 @@ TEST_F(ClipboardTest, MultiFormatTest) {
   clipboard.ReadAsciiText(Clipboard::BUFFER_STANDARD, &ascii_text);
   EXPECT_EQ(UTF16ToUTF8(text), ascii_text);
 }
-
-// TODO(estade): Port the following tests (decide what targets we use for files)
-#if !defined(OS_LINUX)
-// Files for this test don't actually need to exist on the file system, just
-// don't try to use a non-existent file you've retrieved from the clipboard.
-TEST_F(ClipboardTest, FileTest) {
-  Clipboard clipboard;
-#if defined(OS_WIN)
-  FilePath file(L"C:\\Downloads\\My Downloads\\A Special File.txt");
-#elif defined(OS_MACOSX)
-  // OS X will print a warning message if we stick a non-existant file on the
-  // clipboard.
-  FilePath file("/usr/bin/make");
-#endif  // defined(OS_MACOSX)
-
-  {
-    ScopedClipboardWriter clipboard_writer(&clipboard);
-    clipboard_writer.WriteFile(file);
-  }
-
-  FilePath out_file;
-  clipboard.ReadFile(&out_file);
-  EXPECT_EQ(file.value(), out_file.value());
-}
-
-TEST_F(ClipboardTest, MultipleFilesTest) {
-  Clipboard clipboard;
-
-#if defined(OS_WIN)
-  FilePath file1(L"C:\\Downloads\\My Downloads\\File 1.exe");
-  FilePath file2(L"C:\\Downloads\\My Downloads\\File 2.pdf");
-  FilePath file3(L"C:\\Downloads\\My Downloads\\File 3.doc");
-#elif defined(OS_MACOSX)
-  // OS X will print a warning message if we stick a non-existant file on the
-  // clipboard.
-  FilePath file1("/usr/bin/make");
-  FilePath file2("/usr/bin/man");
-  FilePath file3("/usr/bin/perl");
-#endif  // defined(OS_MACOSX)
-  std::vector<FilePath> files;
-  files.push_back(file1);
-  files.push_back(file2);
-  files.push_back(file3);
-
-  {
-    ScopedClipboardWriter clipboard_writer(&clipboard);
-    clipboard_writer.WriteFiles(files);
-  }
-
-  std::vector<FilePath> out_files;
-  clipboard.ReadFiles(&out_files);
-
-  EXPECT_EQ(files.size(), out_files.size());
-  for (size_t i = 0; i < out_files.size(); ++i)
-    EXPECT_EQ(files[i].value(), out_files[i].value());
-}
-#endif  // !defined(OS_LINUX)
 
 TEST_F(ClipboardTest, URLTest) {
   Clipboard clipboard;
@@ -257,23 +223,67 @@ TEST_F(ClipboardTest, URLTest) {
 #endif  // defined(OS_LINUX)
 }
 
-#if defined(OS_WIN) || defined(OS_LINUX)
+TEST_F(ClipboardTest, SharedBitmapTest) {
+  unsigned int fake_bitmap[] = {
+    0x46155189, 0xF6A55C8D, 0x79845674, 0xFA57BD89,
+    0x78FD46AE, 0x87C64F5A, 0x36EDC5AF, 0x4378F568,
+    0x91E9F63A, 0xC31EA14F, 0x69AB32DF, 0x643A3FD1,
+  };
+  gfx::Size fake_bitmap_size(3, 4);
+  uint32 bytes = sizeof(fake_bitmap);
+
+  // Create shared memory region.
+  base::SharedMemory shared_buf;
+  ASSERT_TRUE(shared_buf.Create(L"", false, true, bytes));
+  ASSERT_TRUE(shared_buf.Map(bytes));
+  memcpy(shared_buf.memory(), fake_bitmap, bytes);
+  base::SharedMemoryHandle handle_to_share;
+  base::ProcessHandle current_process = NULL;
+#if defined(OS_WIN)
+  current_process = GetCurrentProcess();
+#endif
+  shared_buf.ShareToProcess(current_process, &handle_to_share);
+  ASSERT_TRUE(shared_buf.Unmap());
+
+  // Setup data for clipboard.
+  Clipboard::ObjectMapParam placeholder_param;
+  Clipboard::ObjectMapParam size_param;
+  const char* size_data = reinterpret_cast<const char*>(&fake_bitmap_size);
+  for (size_t i = 0; i < sizeof(fake_bitmap_size); ++i)
+    size_param.push_back(size_data[i]);
+
+  Clipboard::ObjectMapParams params;
+  params.push_back(placeholder_param);
+  params.push_back(size_param);
+
+  Clipboard::ObjectMap objects;
+  objects[Clipboard::CBF_SMBITMAP] = params;
+  Clipboard::ReplaceSharedMemHandle(&objects, handle_to_share, current_process);
+
+  Clipboard clipboard;
+  clipboard.WriteObjects(objects);
+
+  EXPECT_TRUE(clipboard.IsFormatAvailable(Clipboard::GetBitmapFormatType(),
+                                          Clipboard::BUFFER_STANDARD));
+}
+
+#if defined(OS_WIN) || (defined(OS_POSIX) && !defined(OS_MACOSX))
 TEST_F(ClipboardTest, DataTest) {
   Clipboard clipboard;
-  const char* format = "chromium/x-test-format";
+  const char* kFormat = "chromium/x-test-format";
   std::string payload("test string");
   Pickle write_pickle;
   write_pickle.WriteString(payload);
 
   {
     ScopedClipboardWriter clipboard_writer(&clipboard);
-    clipboard_writer.WritePickledData(write_pickle, format);
+    clipboard_writer.WritePickledData(write_pickle, kFormat);
   }
 
   ASSERT_TRUE(clipboard.IsFormatAvailableByString(
-      format, Clipboard::BUFFER_STANDARD));
+      kFormat, Clipboard::BUFFER_STANDARD));
   std::string output;
-  clipboard.ReadData(format, &output);
+  clipboard.ReadData(kFormat, &output);
   ASSERT_FALSE(output.empty());
 
   Pickle read_pickle(output.data(), output.size());
@@ -288,21 +298,22 @@ TEST_F(ClipboardTest, DataTest) {
 TEST_F(ClipboardTest, HyperlinkTest) {
   Clipboard clipboard;
 
-  std::string title("The Example Company");
-  std::string url("http://www.example.com/"), url_result;
-  std::string html("<a href=\"http://www.example.com/\">"
-                   "The Example Company</a>");
+  const std::string kTitle("The Example Company");
+  const std::string kUrl("http://www.example.com/");
+  const std::string kExpectedHtml("<a href=\"http://www.example.com/\">"
+                                  "The Example Company</a>");
+  std::string url_result;
   string16 html_result;
 
   {
     ScopedClipboardWriter clipboard_writer(&clipboard);
-    clipboard_writer.WriteHyperlink(title, url);
+    clipboard_writer.WriteHyperlink(ASCIIToUTF16(kTitle), kUrl);
   }
 
   EXPECT_TRUE(clipboard.IsFormatAvailable(Clipboard::GetHtmlFormatType(),
                                           Clipboard::BUFFER_STANDARD));
   clipboard.ReadHTML(Clipboard::BUFFER_STANDARD, &html_result, &url_result);
-  EXPECT_EQ(UTF8ToUTF16(html), html_result);
+  EXPECT_EQ(ASCIIToUTF16(kExpectedHtml), html_result);
 }
 
 TEST_F(ClipboardTest, WebSmartPasteTest) {
@@ -334,4 +345,64 @@ TEST_F(ClipboardTest, BitmapTest) {
   EXPECT_TRUE(clipboard.IsFormatAvailable(Clipboard::GetBitmapFormatType(),
                                           Clipboard::BUFFER_STANDARD));
 }
+
+void HtmlTestHelper(const std::string& cf_html,
+                    const std::string& expected_html) {
+  std::string html;
+  ClipboardUtil::CFHtmlToHtml(cf_html, &html, NULL);
+  EXPECT_EQ(html, expected_html);
+}
+
+TEST_F(ClipboardTest, HtmlTest) {
+  // Test converting from CF_HTML format data with <!--StartFragment--> and
+  // <!--EndFragment--> comments, like from MS Word.
+  HtmlTestHelper("Version:1.0\r\n"
+                 "StartHTML:0000000105\r\n"
+                 "EndHTML:0000000199\r\n"
+                 "StartFragment:0000000123\r\n"
+                 "EndFragment:0000000161\r\n"
+                 "\r\n"
+                 "<html>\r\n"
+                 "<body>\r\n"
+                 "<!--StartFragment-->\r\n"
+                 "\r\n"
+                 "<p>Foo</p>\r\n"
+                 "\r\n"
+                 "<!--EndFragment-->\r\n"
+                 "</body>\r\n"
+                 "</html>\r\n\r\n",
+                 "<p>Foo</p>");
+
+  // Test converting from CF_HTML format data without <!--StartFragment--> and
+  // <!--EndFragment--> comments, like from OpenOffice Writer.
+  HtmlTestHelper("Version:1.0\r\n"
+                 "StartHTML:0000000105\r\n"
+                 "EndHTML:0000000151\r\n"
+                 "StartFragment:0000000121\r\n"
+                 "EndFragment:0000000131\r\n"
+                 "<html>\r\n"
+                 "<body>\r\n"
+                 "<p>Foo</p>\r\n"
+                 "</body>\r\n"
+                 "</html>\r\n\r\n",
+                 "<p>Foo</p>");
+}
 #endif  // defined(OS_WIN)
+
+// Test writing all formats we have simultaneously.
+TEST_F(ClipboardTest, WriteEverything) {
+  Clipboard clipboard;
+
+  {
+    ScopedClipboardWriter writer(&clipboard);
+    writer.WriteText(UTF8ToUTF16("foo"));
+    writer.WriteURL(UTF8ToUTF16("foo"));
+    writer.WriteHTML(UTF8ToUTF16("foo"), "bar");
+    writer.WriteBookmark(UTF8ToUTF16("foo"), "bar");
+    writer.WriteHyperlink(ASCIIToUTF16("foo"), "bar");
+    writer.WriteWebSmartPaste();
+    // Left out: WriteFile, WriteFiles, WriteBitmapFromPixels, WritePickledData.
+  }
+
+  // Passes if we don't crash.
+}

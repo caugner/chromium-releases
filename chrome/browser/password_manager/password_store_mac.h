@@ -8,9 +8,9 @@
 #include <vector>
 
 #include "base/scoped_ptr.h"
+#include "chrome/browser/password_manager/login_database.h"
 #include "chrome/browser/password_manager/password_store.h"
 
-class LoginDatabaseMac;
 class MacKeychain;
 
 // Implements PasswordStore on top of the OS X Keychain, with an internal
@@ -22,10 +22,11 @@ class PasswordStoreMac : public PasswordStore {
  public:
   // Takes ownership of |keychain| and |login_db|, both of which must be
   // non-NULL.
-  PasswordStoreMac(MacKeychain* keychain, LoginDatabaseMac* login_db);
-  virtual ~PasswordStoreMac();
+  PasswordStoreMac(MacKeychain* keychain, LoginDatabase* login_db);
 
  private:
+  virtual ~PasswordStoreMac();
+
   void AddLoginImpl(const webkit_glue::PasswordForm& form);
   void UpdateLoginImpl(const webkit_glue::PasswordForm& form);
   void RemoveLoginImpl(const webkit_glue::PasswordForm& form);
@@ -60,7 +61,7 @@ class PasswordStoreMac : public PasswordStore {
       const std::vector<webkit_glue::PasswordForm*>& forms);
 
   scoped_ptr<MacKeychain> keychain_;
-  scoped_ptr<LoginDatabaseMac> login_metadata_db_;
+  scoped_ptr<LoginDatabase> login_metadata_db_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordStoreMac);
 };

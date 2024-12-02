@@ -12,6 +12,7 @@
 #include "base/message_loop.h"
 #include "base/shared_memory.h"
 #include "base/string_util.h"
+#include "chrome/common/extensions/extension_message_filter_peer.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/security_filter_peer.h"
 #include "net/base/net_errors.h"
@@ -20,7 +21,7 @@
 #include "webkit/glue/webkit_glue.h"
 
 // Uncomment to enable logging of request traffic
-//#define LOG_RESOURCE_REQUESTS
+// #define LOG_RESOURCE_REQUESTS
 
 #ifdef LOG_RESOURCE_REQUESTS
 # define RESOURCE_LOG(stuff) LOG(INFO) << stuff
@@ -44,25 +45,18 @@ namespace webkit_glue {
 class IPCResourceLoaderBridge : public ResourceLoaderBridge {
  public:
   IPCResourceLoaderBridge(ResourceDispatcher* dispatcher,
-                          const std::string& method,
-                          const GURL& url,
-                          const GURL& first_party_for_cookies,
-                          const GURL& referrer,
-                          const std::string& frame_origin,
-                          const std::string& main_frame_origin,
-                          const std::string& headers,
-                          int load_flags,
-                          int origin_pid,
-                          ResourceType::Type resource_type,
-                          uint32 request_context,
-                          int appcache_host_id,
-                          int routing_id);
+      const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info,
+      int host_renderer_id,
+      int host_render_view_id);
   virtual ~IPCResourceLoaderBridge();
 
   // ResourceLoaderBridge
   virtual void AppendDataToUpload(const char* data, int data_len);
-  virtual void AppendFileRangeToUpload(const FilePath& path,
-                                       uint64 offset, uint64 length);
+  virtual void AppendFileRangeToUpload(
+      const FilePath& path,
+      uint64 offset,
+      uint64 length,
+      const base::Time& expected_modification_time);
   virtual void SetUploadIdentifier(int64 identifier);
   virtual bool Start(Peer* peer);
   virtual void Cancel();
@@ -94,40 +88,43 @@ class IPCResourceLoaderBridge : public ResourceLoaderBridge {
   // indicates the URL of this resource request for help debugging
   std::string url_;
 #endif
+
+  // The following two members are specified if the request is initiated by
+  // a plugin like Gears.
+
+  // Contains the id of the host renderer.
+  int host_renderer_id_;
+
+  // Contains the id of the host render view.
+  int host_render_view_id_;
 };
 
 IPCResourceLoaderBridge::IPCResourceLoaderBridge(
     ResourceDispatcher* dispatcher,
-    const std::string& method,
-    const GURL& url,
-    const GURL& first_party_for_cookies,
-    const GURL& referrer,
-    const std::string& frame_origin,
-    const std::string& main_frame_origin,
-    const std::string& headers,
-    int load_flags,
-    int origin_child_id,
-    ResourceType::Type resource_type,
-    uint32 request_context,
-    int appcache_host_id,
-    int routing_id)
+    const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info,
+    int host_renderer_id,
+    int host_render_view_id)
     : peer_(NULL),
       dispatcher_(dispatcher),
       request_id_(-1),
-      routing_id_(routing_id) {
+      routing_id_(request_info.routing_id),
+      host_renderer_id_(host_renderer_id),
+      host_render_view_id_(host_render_view_id) {
   DCHECK(dispatcher_) << "no resource dispatcher";
-  request_.method = method;
-  request_.url = url;
-  request_.first_party_for_cookies = first_party_for_cookies;
-  request_.referrer = referrer;
-  request_.frame_origin = frame_origin;
-  request_.main_frame_origin = main_frame_origin;
-  request_.headers = headers;
-  request_.load_flags = load_flags;
-  request_.origin_child_id = origin_child_id;
-  request_.resource_type = resource_type;
-  request_.request_context = request_context;
-  request_.appcache_host_id = appcache_host_id;
+  request_.method = request_info.method;
+  request_.url = request_info.url;
+  request_.first_party_for_cookies = request_info.first_party_for_cookies;
+  request_.referrer = request_info.referrer;
+  request_.frame_origin = request_info.frame_origin;
+  request_.main_frame_origin = request_info.main_frame_origin;
+  request_.headers = request_info.headers;
+  request_.load_flags = request_info.load_flags;
+  request_.origin_child_id = request_info.requestor_pid;
+  request_.resource_type = request_info.request_type;
+  request_.request_context = request_info.request_context;
+  request_.appcache_host_id = request_info.appcache_host_id;
+  request_.host_renderer_id = host_renderer_id_;
+  request_.host_render_view_id = host_render_view_id_;
 
 #ifdef LOG_RESOURCE_REQUESTS
   url_ = url.possibly_invalid_spec();
@@ -158,12 +155,14 @@ void IPCResourceLoaderBridge::AppendDataToUpload(const char* data,
 }
 
 void IPCResourceLoaderBridge::AppendFileRangeToUpload(
-    const FilePath& path, uint64 offset, uint64 length) {
+    const FilePath& path, uint64 offset, uint64 length,
+    const base::Time& expected_modification_time) {
   DCHECK(request_id_ == -1) << "request already started";
 
   if (!request_.upload_data)
     request_.upload_data = new net::UploadData();
-  request_.upload_data->AppendFileRange(path, offset, length);
+  request_.upload_data->AppendFileRange(path, offset, length,
+                                        expected_modification_time);
 }
 
 void IPCResourceLoaderBridge::SetUploadIdentifier(int64 identifier) {
@@ -186,7 +185,8 @@ bool IPCResourceLoaderBridge::Start(Peer* peer) {
   peer_ = peer;
 
   // generate the request ID, and append it to the message
-  request_id_ = dispatcher_->AddPendingRequest(peer_, request_.resource_type);
+  request_id_ = dispatcher_->AddPendingRequest(
+      peer_, request_.resource_type, request_.url);
 
   return dispatcher_->message_sender()->Send(
       new ViewHostMsg_RequestResource(routing_id_, request_id_, request_));
@@ -228,8 +228,9 @@ void IPCResourceLoaderBridge::SyncLoad(SyncLoadResponse* response) {
   request_id_ = MakeRequestID();
 
   SyncLoadResult result;
-  IPC::Message* msg = new ViewHostMsg_SyncLoad(routing_id_, request_id_,
-                                               request_, &result);
+  IPC::SyncMessage* msg = new ViewHostMsg_SyncLoad(routing_id_, request_id_,
+                                                   request_, &result);
+  // NOTE: This may pump events (see RenderThread::Send).
   if (!dispatcher_->message_sender()->Send(msg)) {
     response->status.set_status(URLRequestStatus::FAILED);
     return;
@@ -316,10 +317,10 @@ void ResourceDispatcher::OnUploadProgress(
   PendingRequestInfo& request_info = it->second;
 
   RESOURCE_LOG("Dispatching upload progress for " <<
-               request_info.peer->GetURLForDebugging());
+      request_info.peer->GetURLForDebugging().possibly_invalid_spec());
   request_info.peer->OnUploadProgress(position, size);
 
-  // Acknowlegde reciept
+  // Acknowledge receipt
   message_sender()->Send(
       new ViewHostMsg_UploadProgress_ACK(message.routing_id(), request_id));
 }
@@ -337,21 +338,32 @@ void ResourceDispatcher::OnReceivedResponse(
   PendingRequestInfo& request_info = it->second;
   request_info.filter_policy = response_head.filter_policy;
   webkit_glue::ResourceLoaderBridge::Peer* peer = request_info.peer;
-  if (request_info.filter_policy != FilterPolicy::DONT_FILTER) {
+  webkit_glue::ResourceLoaderBridge::Peer* new_peer = NULL;
+  if (request_info.filter_policy == FilterPolicy::FILTER_EXTENSION_MESSAGES) {
+     new_peer = ExtensionMessageFilterPeer::CreateExtensionMessageFilterPeer(
+        peer,
+        message_sender(),
+        response_head.mime_type,
+        request_info.filter_policy,
+        request_info.url);
+  } else if (request_info.filter_policy != FilterPolicy::DONT_FILTER) {
     // TODO(jcampan): really pass the loader bridge.
-    webkit_glue::ResourceLoaderBridge::Peer* new_peer =
-        SecurityFilterPeer::CreateSecurityFilterPeer(
-            NULL, peer,
-            request_info.resource_type, response_head.mime_type,
-            request_info.filter_policy,
-            net::ERR_INSECURE_RESPONSE);
-    if (new_peer) {
-      request_info.peer = new_peer;
-      peer = new_peer;
-    }
+    new_peer = SecurityFilterPeer::CreateSecurityFilterPeer(
+        NULL,
+        peer,
+        request_info.resource_type,
+        response_head.mime_type,
+        request_info.filter_policy,
+        net::ERR_INSECURE_RESPONSE);
   }
 
-  RESOURCE_LOG("Dispatching response for " << peer->GetURLForDebugging());
+  if (new_peer) {
+    request_info.peer = new_peer;
+    peer = new_peer;
+  }
+
+  RESOURCE_LOG("Dispatching response for " <<
+      peer->GetURLForDebugging().possibly_invalid_spec());
   peer->OnReceivedResponse(response_head, false);
 }
 
@@ -379,7 +391,7 @@ void ResourceDispatcher::OnReceivedData(const IPC::Message& message,
 
   if (data_len > 0 && shared_mem.Map(data_len)) {
     RESOURCE_LOG("Dispatching " << data_len << " bytes for " <<
-                 request_info.peer->GetURLForDebugging());
+        request_info.peer->GetURLForDebugging().possibly_invalid_spec());
     const char* data = static_cast<char*>(shared_mem.memory());
     request_info.peer->OnReceivedData(data, data_len);
   }
@@ -401,11 +413,17 @@ void ResourceDispatcher::OnReceivedRedirect(
   PendingRequestInfo& request_info = it->second;
 
   RESOURCE_LOG("Dispatching redirect for " <<
-               request_info.peer->GetURLForDebugging());
+               request_info.peer->GetURLForDebugging().possibly_invalid_spec());
 
-  if (request_info.peer->OnReceivedRedirect(new_url, info)) {
+  bool has_new_first_party_for_cookies = false;
+  GURL new_first_party_for_cookies;
+  if (request_info.peer->OnReceivedRedirect(new_url, info,
+                                            &has_new_first_party_for_cookies,
+                                            &new_first_party_for_cookies)) {
     message_sender()->Send(
-        new ViewHostMsg_FollowRedirect(message.routing_id(), request_id));
+        new ViewHostMsg_FollowRedirect(message.routing_id(), request_id,
+                                       has_new_first_party_for_cookies,
+                                       new_first_party_for_cookies));
   } else {
     CancelPendingRequest(message.routing_id(), request_id);
   }
@@ -426,7 +444,7 @@ void ResourceDispatcher::OnRequestComplete(int request_id,
   webkit_glue::ResourceLoaderBridge::Peer* peer = request_info.peer;
 
   RESOURCE_LOG("Dispatching complete for " <<
-               request_info.peer->GetURLForDebugging());
+               request_info.peer->GetURLForDebugging().possibly_invalid_spec());
 
   if (status.status() == URLRequestStatus::CANCELED &&
       status.os_error() != net::ERR_ABORTED) {
@@ -452,10 +470,12 @@ void ResourceDispatcher::OnRequestComplete(int request_id,
 
 int ResourceDispatcher::AddPendingRequest(
     webkit_glue::ResourceLoaderBridge::Peer* callback,
-    ResourceType::Type resource_type) {
+    ResourceType::Type resource_type,
+    const GURL& request_url) {
   // Compute a unique request_id for this renderer process.
   int id = MakeRequestID();
-  pending_requests_[id] = PendingRequestInfo(callback, resource_type);
+  pending_requests_[id] =
+      PendingRequestInfo(callback, resource_type, request_url);
   return id;
 }
 
@@ -464,17 +484,10 @@ bool ResourceDispatcher::RemovePendingRequest(int request_id) {
   if (it == pending_requests_.end())
     return false;
 
-  // Iterate through the deferred message queue and clean up the messages.
   PendingRequestInfo& request_info = it->second;
-  MessageQueue& q = request_info.deferred_message_queue;
-  while (!q.empty()) {
-    IPC::Message* m = q.front();
-    ReleaseResourcesInDataMessage(*m);
-    q.pop_front();
-    delete m;
-  }
-
+  ReleaseResourcesInMessageQueue(&request_info.deferred_message_queue);
   pending_requests_.erase(it);
+
   return true;
 }
 
@@ -482,14 +495,14 @@ void ResourceDispatcher::CancelPendingRequest(int routing_id,
                                               int request_id) {
   PendingRequestList::iterator it = pending_requests_.find(request_id);
   if (it == pending_requests_.end()) {
-    DLOG(ERROR) << "unknown request";
+    DLOG(WARNING) << "unknown request";
     return;
   }
+
   PendingRequestInfo& request_info = it->second;
-  // Avoid spamming the host with cancel messages.
-  if (request_info.is_cancelled)
-    return;
-  request_info.is_cancelled = true;
+  ReleaseResourcesInMessageQueue(&request_info.deferred_message_queue);
+  pending_requests_.erase(it);
+
   message_sender()->Send(
       new ViewHostMsg_CancelRequest(routing_id, request_id));
 }
@@ -553,28 +566,12 @@ void ResourceDispatcher::FlushDeferredMessages(int request_id) {
 }
 
 webkit_glue::ResourceLoaderBridge* ResourceDispatcher::CreateBridge(
-    const std::string& method,
-    const GURL& url,
-    const GURL& first_party_for_cookies,
-    const GURL& referrer,
-    const std::string& frame_origin,
-    const std::string& main_frame_origin,
-    const std::string& headers,
-    int flags,
-    int origin_pid,
-    ResourceType::Type resource_type,
-    uint32 request_context,
-    int appcache_host_id,
-    int route_id) {
-  return new webkit_glue::IPCResourceLoaderBridge(this, method, url,
-                                                  first_party_for_cookies,
-                                                  referrer, frame_origin,
-                                                  main_frame_origin, headers,
-                                                  flags, origin_pid,
-                                                  resource_type,
-                                                  request_context,
-                                                  appcache_host_id,
-                                                  route_id);
+    const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info,
+    int host_renderer_id,
+    int host_render_view_id) {
+  return new webkit_glue::IPCResourceLoaderBridge(this, request_info,
+                                                  host_renderer_id,
+                                                  host_render_view_id);
 }
 
 bool ResourceDispatcher::IsResourceDispatcherMessage(
@@ -594,6 +591,7 @@ bool ResourceDispatcher::IsResourceDispatcherMessage(
   return false;
 }
 
+// static
 void ResourceDispatcher::ReleaseResourcesInDataMessage(
     const IPC::Message& message) {
   void* iter = NULL;
@@ -612,5 +610,15 @@ void ResourceDispatcher::ReleaseResourcesInDataMessage(
                                                          &shm_handle)) {
       base::SharedMemory::CloseHandle(shm_handle);
     }
+  }
+}
+
+// static
+void ResourceDispatcher::ReleaseResourcesInMessageQueue(MessageQueue* queue) {
+  while (!queue->empty()) {
+    IPC::Message* message = queue->front();
+    ReleaseResourcesInDataMessage(*message);
+    queue->pop_front();
+    delete message;
   }
 }

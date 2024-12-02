@@ -1,18 +1,20 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "chrome/renderer/extensions/extension_process_bindings.h"
 
 #include <map>
 #include <set>
 #include <string>
 #include <vector>
 
-#include "chrome/renderer/extensions/extension_process_bindings.h"
-
-#include "base/json_reader.h"
+#include "base/command_line.h"
+#include "base/json/json_reader.h"
 #include "base/singleton.h"
+#include "base/string_util.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_message_bundle.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
@@ -20,13 +22,16 @@
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
+#include "chrome/renderer/user_script_slave.h"
 #include "chrome/renderer/render_view.h"
 #include "grit/common_resources.h"
 #include "grit/renderer_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebURL.h"
-#include "webkit/api/public/WebKit.h"
+#include "third_party/skia/include/core/SkColor.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSecurityPolicy.h"
 
 using bindings_utils::GetStringResource;
 using bindings_utils::ContextInfo;
@@ -37,6 +42,7 @@ using bindings_utils::PendingRequest;
 using bindings_utils::PendingRequestMap;
 using bindings_utils::ExtensionBase;
 using WebKit::WebFrame;
+using WebKit::WebSecurityPolicy;
 using WebKit::WebView;
 
 namespace {
@@ -50,12 +56,8 @@ typedef std::map<std::string, bool> PermissionsMap;
 // A map of extension ID to permissions map.
 typedef std::map<std::string, PermissionsMap> ExtensionPermissionsMap;
 
-// A map of message name to message.
-typedef std::map<std::string, std::string> L10nMessagesMap;
-
-// A map of extension ID to l10n message map.
-typedef std::map<std::string, L10nMessagesMap >
-  ExtensionToL10nMessagesMap;
+// A map of extension ID to whether this extension was enabled in incognito.
+typedef std::map<std::string, bool> IncognitoEnabledMap;
 
 const char kExtensionName[] = "chrome/ExtensionProcessBindings";
 const char* kExtensionDeps[] = {
@@ -70,7 +72,7 @@ struct SingletonData {
   std::set<std::string> function_names_;
   PageActionIdMap page_action_ids_;
   ExtensionPermissionsMap permissions_;
-  ExtensionToL10nMessagesMap extension_l10n_messages_map_;
+  IncognitoEnabledMap incognito_enabled_map_;
 };
 
 static std::set<std::string>* GetFunctionNameSet() {
@@ -85,20 +87,23 @@ static PermissionsMap* GetPermissionsMap(const std::string& extension_id) {
   return &Singleton<SingletonData>()->permissions_[extension_id];
 }
 
-static ExtensionToL10nMessagesMap* GetExtensionToL10nMessagesMap() {
-  return &Singleton<SingletonData>()->extension_l10n_messages_map_;
+static std::map<std::string, bool>* GetIncognitoEnabledMap() {
+  return &Singleton<SingletonData>()->incognito_enabled_map_;
 }
 
-static L10nMessagesMap* GetL10nMessagesMap(const std::string extension_id) {
-  ExtensionToL10nMessagesMap::iterator it =
-    Singleton<SingletonData>()->extension_l10n_messages_map_.find(extension_id);
-  if (it != Singleton<SingletonData>()->extension_l10n_messages_map_.end()) {
-    return &(it->second);
-  } else {
-    return NULL;
+static void GetActiveExtensionIDs(std::set<std::string>* extension_ids) {
+  ExtensionPermissionsMap& permissions =
+      Singleton<SingletonData>()->permissions_;
+
+  for (ExtensionPermissionsMap::iterator iter = permissions.begin();
+       iter != permissions.end(); ++iter) {
+    extension_ids->insert(iter->first);
   }
 }
 
+// A RenderViewVisitor class that iterates through the set of available
+// views, looking for a view of the given type, in the given browser window
+// and within the given extension.
 // Used to accumulate the list of views associated with an extension.
 class ExtensionViewAccumulator : public RenderViewVisitor {
  public:
@@ -112,6 +117,8 @@ class ExtensionViewAccumulator : public RenderViewVisitor {
         index_(0) {
   }
 
+  v8::Local<v8::Array> views() { return views_; }
+
   virtual bool Visit(RenderView* render_view) {
     if (!ViewTypeMatches(render_view->view_type(), view_type_))
       return true;
@@ -123,26 +130,46 @@ class ExtensionViewAccumulator : public RenderViewVisitor {
     if (extension_id != extension_id_)
       return true;
 
-    if (browser_window_id_ != -1 &&
-        render_view->browser_window_id() != browser_window_id_)
-      return true;
+    // If we are searching for a pop-up, it may be the case that the pop-up
+    // is not attached to a browser window instance.  (It is hosted in a
+    // ExternalTabContainer.)  If so, then bypass validation of
+    // same-browser-window origin.
+    // TODO(twiz):  The browser window id of the views visited should always
+    // match that of the arguments to the accumulator.
+    // See bug:  http://crbug.com/29646
+    if (!(view_type_ == ViewType::EXTENSION_POPUP &&
+          render_view->browser_window_id() == -1)) {
+      if (browser_window_id_ != -1 &&
+          render_view->browser_window_id() != browser_window_id_) {
+        return true;
+      }
+    }
 
     v8::Local<v8::Context> context =
         render_view->webview()->mainFrame()->mainWorldScriptContext();
     if (!context.IsEmpty()) {
       v8::Local<v8::Value> window = context->Global();
       DCHECK(!window.IsEmpty());
-      views_->Set(v8::Integer::New(index_), window);
-      index_++;
-      if (view_type_ == ViewType::EXTENSION_BACKGROUND_PAGE)
-        return false;  // There can be only one...
+
+      if (!OnMatchedView(window))
+        return false;
     }
     return true;
   }
 
-  v8::Local<v8::Array> views() { return views_; }
-
  private:
+  // Called on each view found matching the search criteria.  Returns false
+  // to terminate the iteration.
+  bool OnMatchedView(const v8::Local<v8::Value>& view_window) {
+    views_->Set(v8::Integer::New(index_), view_window);
+    index_++;
+
+    if (view_type_ == ViewType::EXTENSION_BACKGROUND_PAGE)
+      return false;  // There can be only one...
+
+    return true;
+  }
+
   // Returns true is |type| "isa" |match|.
   static bool ViewTypeMatches(ViewType::Type type, ViewType::Type match) {
     if (type == match)
@@ -187,11 +214,14 @@ class ExtensionImpl : public ExtensionBase {
   // be an extension URL.
   static std::string ExtensionIdForCurrentContext() {
     RenderView* renderview = bindings_utils::GetRenderViewForCurrentContext();
-    DCHECK(renderview);
+    if (!renderview)
+      return std::string();  // this can happen as a tab is closing.
+
     GURL url = renderview->webview()->mainFrame()->url();
-    if (url.SchemeIs(chrome::kExtensionScheme))
-      return url.host();
-    return std::string();
+    if (!url.SchemeIs(chrome::kExtensionScheme))
+      return std::string();
+
+    return url.host();
   }
 
   virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
@@ -210,8 +240,10 @@ class ExtensionImpl : public ExtensionBase {
       return v8::FunctionTemplate::New(StartRequest);
     } else if (name->Equals(v8::String::New("GetRenderViewId"))) {
       return v8::FunctionTemplate::New(GetRenderViewId);
-    } else if (name->Equals(v8::String::New("GetL10nMessage"))) {
-      return v8::FunctionTemplate::New(GetL10nMessage);
+    } else if (name->Equals(v8::String::New("GetPopupView"))) {
+      return v8::FunctionTemplate::New(GetPopupView);
+    } else if (name->Equals(v8::String::New("GetPopupParentWindow"))) {
+      return v8::FunctionTemplate::New(GetPopupParentWindow);
     } else if (name->Equals(v8::String::New("SetExtensionActionIcon"))) {
       return v8::FunctionTemplate::New(SetExtensionActionIcon);
     }
@@ -223,6 +255,57 @@ class ExtensionImpl : public ExtensionBase {
   static v8::Handle<v8::Value> GetExtensionAPIDefinition(
       const v8::Arguments& args) {
     return v8::String::New(GetStringResource<IDR_EXTENSION_API_JSON>());
+  }
+
+  static v8::Handle<v8::Value> PopupViewFinder(
+      const v8::Arguments& args,
+      ViewType::Type viewtype_to_find) {
+    // TODO(twiz)  Correct the logic that ties the ownership of the pop-up view
+    // to the hosting view.  At the moment we assume that there may only be
+    // a single pop-up view for a given extension.  By doing so, we can find
+    // the pop-up view by simply searching for the only pop-up view present.
+    // We also assume that if the current view is a pop-up, we can find the
+    // hosting view by searching for a TOOLSTRIP view.
+    if (args.Length() != 0)
+      return v8::Undefined();
+
+    if (viewtype_to_find != ViewType::EXTENSION_POPUP &&
+        viewtype_to_find != ViewType::EXTENSION_TOOLSTRIP) {
+      NOTREACHED() << L"Requesting invalid view type.";
+    }
+
+    // Disallow searching for a host view if we are a popup view, and likewise
+    // if we are a toolstrip view.
+    RenderView* render_view = bindings_utils::GetRenderViewForCurrentContext();
+    if (!render_view ||
+        render_view->view_type() == viewtype_to_find) {
+      return v8::Undefined();
+    }
+
+    int browser_window_id = render_view->browser_window_id();
+    std::string extension_id = ExtensionIdForCurrentContext();
+    if (extension_id.empty())
+      return v8::Undefined();
+
+    ExtensionViewAccumulator  popup_matcher(extension_id,
+                                            browser_window_id,
+                                            viewtype_to_find);
+    RenderView::ForEach(&popup_matcher);
+
+    if (0 == popup_matcher.views()->Length())
+      return v8::Undefined();
+    DCHECK(popup_matcher.views()->Has(0));
+
+    // Return the first view found.
+    return popup_matcher.views()->Get(v8::Integer::New(0));
+  }
+
+  static v8::Handle<v8::Value> GetPopupView(const v8::Arguments& args) {
+    return PopupViewFinder(args, ViewType::EXTENSION_POPUP);
+  }
+
+  static v8::Handle<v8::Value> GetPopupParentWindow(const v8::Arguments& args) {
+    return PopupViewFinder(args, ViewType::EXTENSION_TOOLSTRIP);
   }
 
   static v8::Handle<v8::Value> GetExtensionViews(const v8::Arguments& args) {
@@ -237,22 +320,33 @@ class ExtensionImpl : public ExtensionBase {
     int browser_window_id = args[0]->Int32Value();
 
     std::string view_type_string = *v8::String::Utf8Value(args[1]->ToString());
+    StringToUpperASCII(&view_type_string);
     // |view_type| == ViewType::INVALID means getting any type of views.
     ViewType::Type view_type = ViewType::INVALID;
-    if (view_type_string == "TOOLSTRIP") {
+    if (view_type_string == ViewType::kToolstrip) {
       view_type = ViewType::EXTENSION_TOOLSTRIP;
-    } else if (view_type_string == "MOLE") {
+    } else if (view_type_string == ViewType::kMole) {
       view_type = ViewType::EXTENSION_MOLE;
-    } else if (view_type_string == "BACKGROUND") {
+    } else if (view_type_string == ViewType::kBackgroundPage) {
       view_type = ViewType::EXTENSION_BACKGROUND_PAGE;
-    } else if (view_type_string == "TAB") {
+    } else if (view_type_string == ViewType::kInfobar) {
+      view_type = ViewType::EXTENSION_INFOBAR;
+    } else if (view_type_string == ViewType::kNotification) {
+      view_type = ViewType::NOTIFICATION;
+    } else if (view_type_string == ViewType::kTabContents) {
       view_type = ViewType::TAB_CONTENTS;
-    } else if (view_type_string != "ALL") {
+    } else if (view_type_string == ViewType::kPopup) {
+      view_type = ViewType::EXTENSION_POPUP;
+    } else if (view_type_string != ViewType::kAll) {
       return v8::Undefined();
     }
 
-    ExtensionViewAccumulator accumulator(
-        ExtensionIdForCurrentContext(), browser_window_id, view_type);
+    std::string extension_id = ExtensionIdForCurrentContext();
+    if (extension_id.empty())
+      return v8::Undefined();
+
+    ExtensionViewAccumulator accumulator(extension_id, browser_window_id,
+                                         view_type);
     RenderView::ForEach(&accumulator);
     return accumulator.views();
   }
@@ -307,50 +401,6 @@ class ExtensionImpl : public ExtensionBase {
     return page_action_vector;
   }
 
-  static v8::Handle<v8::Value> GetL10nMessage(const v8::Arguments& args) {
-    if (args.Length() != 2 || !args[0]->IsString()) {
-      NOTREACHED() << "Bad arguments";
-      return v8::Undefined();
-    }
-
-    L10nMessagesMap* l10n_messages =
-      GetL10nMessagesMap(ExtensionIdForCurrentContext());
-    if (!l10n_messages)
-      return v8::Undefined();
-
-    std::string message_name = *v8::String::AsciiValue(args[0]);
-    std::string message =
-      ExtensionMessageBundle::GetL10nMessage(message_name, *l10n_messages);
-
-    std::vector<string16> substitutions;
-    if (args[1]->IsNull() || args[1]->IsUndefined()) {
-      // chrome.i18n.getMessage("message_name");
-      // chrome.i18n.getMessage("message_name", null);
-      return v8::String::New(message.c_str());
-    } else if (args[1]->IsString()) {
-      // chrome.i18n.getMessage("message_name", "one param");
-      std::string substitute = *v8::String::Utf8Value(args[1]->ToString());
-      substitutions.push_back(UTF8ToUTF16(substitute));
-    } else if (args[1]->IsArray()) {
-      // chrome.i18n.getMessage("message_name", ["more", "params"]);
-      v8::Array* placeholders = static_cast<v8::Array*>(*args[1]);
-      uint32_t count = placeholders->Length();
-      DCHECK(count > 0 && count <= 9);
-      for (uint32_t i = 0; i < count; ++i) {
-        std::string substitute =
-          *v8::String::Utf8Value(
-              placeholders->Get(v8::Integer::New(i))->ToString());
-        substitutions.push_back(UTF8ToUTF16(substitute));
-      }
-    } else {
-      NOTREACHED() << "Couldn't parse second parameter.";
-      return v8::Undefined();
-    }
-
-    return v8::String::New(UTF16ToUTF8(ReplaceStringPlaceholders(
-        UTF8ToUTF16(message), substitutions, NULL)).c_str());
-  }
-
   // Common code for starting an API request to the browser. |value_args|
   // contains the request's arguments.
   static v8::Handle<v8::Value> StartRequestCommon(
@@ -371,6 +421,11 @@ class ExtensionImpl : public ExtensionBase {
       return ExtensionProcessBindings::ThrowPermissionDeniedException(name);
     }
 
+    GURL source_url;
+    WebFrame* webframe = WebFrame::frameForCurrentContext();
+    if (webframe)
+      source_url = webframe->url();
+
     int request_id = args[2]->Int32Value();
     bool has_callback = args[3]->BooleanValue();
 
@@ -385,7 +440,7 @@ class ExtensionImpl : public ExtensionBase {
     GetPendingRequestMap()[request_id].reset(new PendingRequest(
         current_context, name));
 
-    renderview->SendExtensionRequest(name, args_holder,
+    renderview->SendExtensionRequest(name, args_holder, source_url,
                                      request_id, has_callback);
 
     return v8::Undefined();
@@ -395,7 +450,7 @@ class ExtensionImpl : public ExtensionBase {
   // callback will be dispatched to EventBindings::HandleResponse.
   static v8::Handle<v8::Value> StartRequest(const v8::Arguments& args) {
     std::string str_args = *v8::String::Utf8Value(args[1]);
-    JSONReader reader;
+    base::JSONReader reader;
     Value* value_args = reader.JsonToValue(str_args, false, false);
 
     // Since we do the serialization in the v8 extension, we should always get
@@ -411,9 +466,9 @@ class ExtensionImpl : public ExtensionBase {
   // A special request for setting the extension action icon. This function
   // accepts a canvas ImageData object, so it needs to do extra processing
   // before sending the request to the browser.
-  static v8::Handle<v8::Value> SetExtensionActionIcon(const v8::Arguments& args) {
+  static v8::Handle<v8::Value> SetExtensionActionIcon(
+      const v8::Arguments& args) {
     v8::Local<v8::Object> details = args[1]->ToObject();
-    int tab_id = details->Get(v8::String::New("tabId"))->Int32Value();
     v8::Local<v8::Object> image_data =
         details->Get(v8::String::New("imageData"))->ToObject();
     v8::Local<v8::Object> data =
@@ -435,11 +490,11 @@ class ExtensionImpl : public ExtensionBase {
     uint32_t* pixels = bitmap.getAddr32(0, 0);
     for (int t = 0; t < width*height; t++) {
       // |data| is RGBA, pixels is ARGB.
-      pixels[t] =
+      pixels[t] = SkPreMultiplyColor(
           ((data->Get(v8::Integer::New(4*t + 3))->Int32Value() & 0xFF) << 24) |
           ((data->Get(v8::Integer::New(4*t + 0))->Int32Value() & 0xFF) << 16) |
           ((data->Get(v8::Integer::New(4*t + 1))->Int32Value() & 0xFF) << 8) |
-          ((data->Get(v8::Integer::New(4*t + 2))->Int32Value() & 0xFF) << 0);
+          ((data->Get(v8::Integer::New(4*t + 2))->Int32Value() & 0xFF) << 0));
     }
 
     // Construct the Value object.
@@ -450,7 +505,11 @@ class ExtensionImpl : public ExtensionBase {
 
     DictionaryValue* dict = new DictionaryValue();
     dict->Set(L"imageData", bitmap_value);
-    dict->SetInteger(L"tabId", tab_id);
+
+    if (details->Has(v8::String::New("tabId"))) {
+      dict->SetInteger(L"tabId",
+                       details->Get(v8::String::New("tabId"))->Int32Value());
+    }
 
     return StartRequestCommon(args, dict);
   }
@@ -470,9 +529,25 @@ v8::Extension* ExtensionProcessBindings::Get() {
   return extension;
 }
 
+void ExtensionProcessBindings::GetActiveExtensions(
+    std::set<std::string>* extension_ids) {
+  GetActiveExtensionIDs(extension_ids);
+}
+
 void ExtensionProcessBindings::SetFunctionNames(
     const std::vector<std::string>& names) {
   ExtensionImpl::SetFunctionNames(names);
+}
+
+void ExtensionProcessBindings::SetIncognitoEnabled(
+    const std::string& extension_id, bool enabled) {
+  (*GetIncognitoEnabledMap())[extension_id] = enabled;
+}
+
+// static
+bool ExtensionProcessBindings::HasIncognitoEnabled(
+    const std::string& extension_id) {
+  return (!extension_id.empty() && (*GetIncognitoEnabledMap())[extension_id]);
 }
 
 // static
@@ -502,6 +577,8 @@ void ExtensionProcessBindings::HandleResponse(int request_id, bool success,
   }
 #endif
 
+  request->second->context.Dispose();
+  request->second->context.Clear();
   pending_requests.erase(request);
 }
 
@@ -516,15 +593,6 @@ void ExtensionProcessBindings::SetPageActions(
     if (page_action_map.find(extension_id) != page_action_map.end())
       page_action_map.erase(extension_id);
   }
-}
-
-// static
-void ExtensionProcessBindings::SetL10nMessages(
-    const std::string& extension_id,
-    const std::map<std::string, std::string>& l10n_messages) {
-  ExtensionToL10nMessagesMap& l10n_messages_map =
-    *GetExtensionToL10nMessagesMap();
-  l10n_messages_map[extension_id] = l10n_messages;
 }
 
 // static
@@ -545,7 +613,7 @@ void ExtensionProcessBindings::SetHostPermissions(
     const GURL& extension_url,
     const std::vector<URLPattern>& permissions) {
   for (size_t i = 0; i < permissions.size(); ++i) {
-    WebKit::whiteListAccessFromOrigin(
+    WebSecurityPolicy::whiteListAccessFromOrigin(
         extension_url,
         WebKit::WebString::fromUTF8(permissions[i].scheme()),
         WebKit::WebString::fromUTF8(permissions[i].host()),

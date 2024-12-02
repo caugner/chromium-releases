@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <tchar.h>
+
+#include <algorithm>
 #include <vector>
 
 #include "base/base_switches.h"
@@ -16,15 +18,32 @@
 #include "base/registry.h"
 #include "base/string_util.h"
 #include "base/win_util.h"
-#include "chrome/app/google_update_client.h"
+#include "breakpad/src/client/windows/handler/exception_handler.h"
 #include "chrome/app/hard_error_handler_win.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/result_codes.h"
-#include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/google_update_settings.h"
-#include "breakpad/src/client/windows/handler/exception_handler.h"
+#include "chrome/installer/util/install_util.h"
 
 namespace {
+
+// Minidump with stacks, PEB, TEB, and unloaded module list.
+const MINIDUMP_TYPE kSmallDumpType = static_cast<MINIDUMP_TYPE>(
+    MiniDumpWithProcessThreadData |  // Get PEB and TEB.
+    MiniDumpWithUnloadedModules);  // Get unloaded modules when available.
+
+// Minidump with all of the above, plus memory referenced from stack.
+const MINIDUMP_TYPE kLargerDumpType = static_cast<MINIDUMP_TYPE>(
+    MiniDumpWithProcessThreadData |  // Get PEB and TEB.
+    MiniDumpWithUnloadedModules |  // Get unloaded modules when available.
+    MiniDumpWithIndirectlyReferencedMemory);  // Get memory referenced by stack.
+
+// Large dump with all process memory.
+const MINIDUMP_TYPE kFullDumpType = static_cast<MINIDUMP_TYPE>(
+    MiniDumpWithFullMemory |  // Full memory from process.
+    MiniDumpWithProcessThreadData |  // Get PEB and TEB.
+    MiniDumpWithHandleData |  // Get all handle information.
+    MiniDumpWithUnloadedModules);  // Get unloaded modules when available.
 
 const wchar_t kGoogleUpdatePipeName[] = L"\\\\.\\pipe\\GoogleCrashServices\\";
 const wchar_t kChromePipeName[] = L"\\\\.\\pipe\\ChromeCrashServices";
@@ -34,7 +53,13 @@ const wchar_t kSystemPrincipalSid[] =L"S-1-5-18";
 
 google_breakpad::ExceptionHandler* g_breakpad = NULL;
 
-std::vector<wchar_t*>* g_url_chunks = NULL;
+// A pointer to the custom entries that we send in the event of a crash. We need
+// this pointer, along with the offsets into it below, so that we can keep the
+// data updated as the state of the browser changes.
+static std::vector<google_breakpad::CustomInfoEntry>* g_custom_entries = NULL;
+static size_t g_url_chunks_offset;
+static size_t g_extension_ids_offset;
+static size_t g_client_id_offset;
 
 // Dumps the current process memory.
 extern "C" void __declspec(dllexport) __cdecl DumpProcess() {
@@ -53,7 +78,6 @@ std::wstring TrimToBreakpadMax(const std::wstring& str) {
 
 // Returns the custom info structure based on the dll in parameter and the
 // process type.
-static google_breakpad::CustomClientInfo* custom_info = NULL;
 google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& dll_path,
                                                  const std::wstring& type) {
   scoped_ptr<FileVersionInfo>
@@ -72,59 +96,69 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& dll_path,
      version = L"0.0.0.0-devel";
   }
 
-  // Common entries.
-  google_breakpad::CustomInfoEntry ver_entry(L"ver", version.c_str());
-  google_breakpad::CustomInfoEntry prod_entry(L"prod", product.c_str());
-  google_breakpad::CustomInfoEntry plat_entry(L"plat", L"Win32");
-  google_breakpad::CustomInfoEntry type_entry(L"ptype", type.c_str());
+  // We only expect this method to be called once per process.
+  DCHECK(!g_custom_entries);
+  g_custom_entries = new std::vector<google_breakpad::CustomInfoEntry>;
+
+  // Common g_custom_entries.
+  g_custom_entries->push_back(
+      google_breakpad::CustomInfoEntry(L"ver", version.c_str()));
+  g_custom_entries->push_back(
+      google_breakpad::CustomInfoEntry(L"prod", product.c_str()));
+  g_custom_entries->push_back(
+      google_breakpad::CustomInfoEntry(L"plat", L"Win32"));
+  g_custom_entries->push_back(
+      google_breakpad::CustomInfoEntry(L"ptype", type.c_str()));
+
+  g_extension_ids_offset = g_custom_entries->size();
+  for (int i = 0; i < kMaxReportedActiveExtensions; ++i) {
+    g_custom_entries->push_back(google_breakpad::CustomInfoEntry(
+        StringPrintf(L"extension-%i", i + 1).c_str(), L""));
+  }
+
+  // Read the id from registry. If reporting has never been enabled
+  // the result will be empty string. Its OK since when user enables reporting
+  // we will insert the new value at this location.
+  std::wstring guid;
+  GoogleUpdateSettings::GetMetricsId(&guid);
+  g_client_id_offset = g_custom_entries->size();
+  g_custom_entries->push_back(
+      google_breakpad::CustomInfoEntry(L"guid", guid.c_str()));
 
   if (type == L"renderer" || type == L"plugin") {
     // Create entries for the URL. Currently we only allow each chunk to be 64
     // characters, which isn't enough for a URL. As a hack we create 8 entries
-    // and split the URL across the entries.
-    google_breakpad::CustomInfoEntry url1(L"url-chunk-1", L"");
-    google_breakpad::CustomInfoEntry url2(L"url-chunk-2", L"");
-    google_breakpad::CustomInfoEntry url3(L"url-chunk-3", L"");
-    google_breakpad::CustomInfoEntry url4(L"url-chunk-4", L"");
-    google_breakpad::CustomInfoEntry url5(L"url-chunk-5", L"");
-    google_breakpad::CustomInfoEntry url6(L"url-chunk-6", L"");
-    google_breakpad::CustomInfoEntry url7(L"url-chunk-7", L"");
-    google_breakpad::CustomInfoEntry url8(L"url-chunk-8", L"");
+    // and split the URL across the g_custom_entries.
+    g_url_chunks_offset = g_custom_entries->size();
+    for (int i = 0; i < kMaxUrlChunks; ++i) {
+      g_custom_entries->push_back(google_breakpad::CustomInfoEntry(
+          StringPrintf(L"url-chunk-%i", i + 1).c_str(), L""));
+    }
+  } else {
+    // Browser-specific g_custom_entries.
+    google_breakpad::CustomInfoEntry switch1(L"switch-1", L"");
+    google_breakpad::CustomInfoEntry switch2(L"switch-2", L"");
 
-    static google_breakpad::CustomInfoEntry entries[] =
-        { ver_entry, prod_entry, plat_entry, type_entry,
-          url1, url2, url3, url4, url5, url6, url7, url8 };
+    // Get the first two command line switches if they exist. The CommandLine
+    // class does not allow to enumerate the switches so we do it by hand.
+    int num_args = 0;
+    wchar_t** args = ::CommandLineToArgvW(::GetCommandLineW(), &num_args);
+    if (args) {
+      if (num_args > 1)
+        switch1.set_value(TrimToBreakpadMax(args[1]).c_str());
+      if (num_args > 2)
+        switch2.set_value(TrimToBreakpadMax(args[2]).c_str());
+    }
 
-    std::vector<wchar_t*>* tmp_url_chunks = new std::vector<wchar_t*>(8);
-    for (size_t i = 0; i < 8; ++i)
-      (*tmp_url_chunks)[i] = entries[4 + i].value;
-    g_url_chunks = tmp_url_chunks;
-
-    static google_breakpad::CustomClientInfo custom_info_renderer
-        = {entries, arraysize(entries)};
-    return &custom_info_renderer;
+    g_custom_entries->push_back(switch1);
+    g_custom_entries->push_back(switch2);
   }
 
-  // Browser-specific entries.
-  google_breakpad::CustomInfoEntry switch1(L"switch-1", L"");
-  google_breakpad::CustomInfoEntry switch2(L"switch-2", L"");
+  static google_breakpad::CustomClientInfo custom_client_info;
+  custom_client_info.entries = &g_custom_entries->front();
+  custom_client_info.count = g_custom_entries->size();
 
-  // Get the first two command line switches if they exist. The CommandLine
-  // class does not allow to enumerate the switches so we do it by hand.
-  int num_args = 0;
-  wchar_t** args = ::CommandLineToArgvW(::GetCommandLineW(), &num_args);
-  if (args) {
-    if (num_args > 1)
-      switch1.set_value(TrimToBreakpadMax(args[1]).c_str());
-    if (num_args > 2)
-      switch2.set_value(TrimToBreakpadMax(args[2]).c_str());
-  }
-
-  static google_breakpad::CustomInfoEntry entries[] =
-      {ver_entry, prod_entry, plat_entry, type_entry, switch1, switch2};
-  static google_breakpad::CustomClientInfo custom_info_browser =
-      {entries, arraysize(entries)};
-  return &custom_info_browser;
+  return &custom_client_info;
 }
 
 // Contains the information needed by the worker thread.
@@ -133,9 +167,6 @@ struct CrashReporterInfo {
   std::wstring dll_path;
   std::wstring process_type;
 };
-
-// flag to indicate that we are already handling an exception.
-volatile LONG handling_exception = 0;
 
 // This callback is executed when the browser process has crashed, after
 // the crash dump has been created. We need to minimize the amount of work
@@ -146,12 +177,6 @@ volatile LONG handling_exception = 0;
 bool DumpDoneCallback(const wchar_t*, const wchar_t*, void*,
                       EXCEPTION_POINTERS* ex_info,
                       MDRawAssertionInfo*, bool) {
-  // Capture every thread except the first one in the sleep. We don't
-  // want multiple threads to concurrently execute the rest of the code.
-  if (::InterlockedCompareExchange(&handling_exception, 1, 0) == 1) {
-    ::Sleep(INFINITE);
-  }
-
   // If the exception is because there was a problem loading a delay-loaded
   // module, then show the user a dialog explaining the problem and then exit.
   if (DelayLoadFailureExceptionMessageBox(ex_info))
@@ -159,9 +184,11 @@ bool DumpDoneCallback(const wchar_t*, const wchar_t*, void*,
 
   // We set CHROME_CRASHED env var. If the CHROME_RESTART is present.
   // This signals the child process to show the 'chrome has crashed' dialog.
-  if (!::GetEnvironmentVariableW(env_vars::kRestartInfo, NULL, 0))
+  if (!::GetEnvironmentVariableW(ASCIIToWide(env_vars::kRestartInfo).c_str(),
+                                 NULL, 0)) {
     return true;
-  ::SetEnvironmentVariableW(env_vars::kShowRestart, L"1");
+  }
+  ::SetEnvironmentVariableW(ASCIIToWide(env_vars::kShowRestart).c_str(), L"1");
   // Now we just start chrome browser with the same command line.
   STARTUPINFOW si = {sizeof(si)};
   PROCESS_INFORMATION pi;
@@ -172,6 +199,22 @@ bool DumpDoneCallback(const wchar_t*, const wchar_t*, void*,
   }
   // After this return we will be terminated. The actual return value is
   // not used at all.
+  return true;
+}
+
+// flag to indicate that we are already handling an exception.
+volatile LONG handling_exception = 0;
+
+// This callback is executed when the Chrome process has crashed and *before*
+// the crash dump is created. To prevent duplicate crash reports we
+// make every thread calling this method, except the very first one,
+// go to sleep.
+bool FilterCallback(void*, EXCEPTION_POINTERS*, MDRawAssertionInfo*) {
+  // Capture every thread except the first one in the sleep. We don't
+  // want multiple threads to concurrently report exceptions.
+  if (::InterlockedCompareExchange(&handling_exception, 1, 0) == 1) {
+    ::Sleep(INFINITE);
+  }
   return true;
 }
 
@@ -193,30 +236,50 @@ long WINAPI ChromeExceptionFilter(EXCEPTION_POINTERS* info) {
 extern "C" void __declspec(dllexport) __cdecl SetActiveURL(
     const wchar_t* url_cstring) {
   DCHECK(url_cstring);
-  if (!g_url_chunks)
-    return;
 
   std::wstring url(url_cstring);
-  size_t num_chunks = g_url_chunks->size();
   size_t chunk_index = 0;
   size_t url_size = url.size();
 
   // Split the url across all the chunks.
   for (size_t url_offset = 0;
-       chunk_index < num_chunks && url_offset < url_size; ++chunk_index) {
+       chunk_index < kMaxUrlChunks && url_offset < url_size; ++chunk_index) {
     size_t current_chunk_size = std::min(url_size - url_offset,
         static_cast<size_t>(
             google_breakpad::CustomInfoEntry::kValueMaxLength - 1));
-    url._Copy_s((*g_url_chunks)[chunk_index],
+
+    wchar_t* entry_value =
+        (*g_custom_entries)[g_url_chunks_offset + chunk_index].value;
+    url._Copy_s(entry_value,
                 google_breakpad::CustomInfoEntry::kValueMaxLength,
                 current_chunk_size, url_offset);
-    (*g_url_chunks)[chunk_index][current_chunk_size] = L'\0';
+    entry_value[current_chunk_size] = L'\0';
     url_offset += current_chunk_size;
   }
 
   // And null terminate any unneeded chunks.
-  for (; chunk_index < num_chunks; ++chunk_index)
-    (*g_url_chunks)[chunk_index][0] = L'\0';
+  for (; chunk_index < kMaxUrlChunks; ++chunk_index)
+    (*g_custom_entries)[g_url_chunks_offset + chunk_index].value[0] = L'\0';
+}
+
+extern "C" void __declspec(dllexport) __cdecl SetClientId(
+    const wchar_t* client_id) {
+  if (client_id == NULL)
+    return;
+
+  wcscpy_s((*g_custom_entries)[g_client_id_offset].value,
+           google_breakpad::CustomInfoEntry::kValueMaxLength,
+           client_id);
+}
+
+extern "C" void __declspec(dllexport) __cdecl SetExtensionID(
+    int index, const wchar_t* id) {
+  DCHECK(id);
+  DCHECK(index < kMaxReportedActiveExtensions);
+
+  wcscpy_s((*g_custom_entries)[g_extension_ids_offset + index].value,
+           google_breakpad::CustomInfoEntry::kValueMaxLength,
+           id);
 }
 
 }  // namespace
@@ -225,10 +288,13 @@ extern "C" void __declspec(dllexport) __cdecl SetActiveURL(
 // spawned and basically just shows the 'chrome has crashed' dialog if
 // the CHROME_CRASHED environment variable is present.
 bool ShowRestartDialogIfCrashed(bool* exit_now) {
-  if (!::GetEnvironmentVariableW(env_vars::kShowRestart, NULL, 0))
+  if (!::GetEnvironmentVariableW(ASCIIToWide(env_vars::kShowRestart).c_str(),
+                                 NULL, 0)) {
     return false;
+  }
 
-  DWORD len = ::GetEnvironmentVariableW(env_vars::kRestartInfo, NULL, 0);
+  DWORD len = ::GetEnvironmentVariableW(
+      ASCIIToWide(env_vars::kRestartInfo).c_str(), NULL, 0);
   if (!len)
     return true;
 
@@ -239,7 +305,8 @@ bool ShowRestartDialogIfCrashed(bool* exit_now) {
 #pragma warning(disable:4509)  // warning: SEH used but dlg_strings has a dtor.
   __try {
     wchar_t* restart_data = new wchar_t[len + 1];
-    ::GetEnvironmentVariableW(env_vars::kRestartInfo, restart_data, len);
+    ::GetEnvironmentVariableW(ASCIIToWide(env_vars::kRestartInfo).c_str(),
+                              restart_data, len);
     restart_data[len] = 0;
     // The CHROME_RESTART var contains the dialog strings separated by '|'.
     // See PrepareRestartOnCrashEnviroment() function for details.
@@ -252,7 +319,7 @@ bool ShowRestartDialogIfCrashed(bool* exit_now) {
     // If the UI layout is right-to-left, we need to pass the appropriate MB_XXX
     // flags so that an RTL message box is displayed.
     UINT flags = MB_OKCANCEL | MB_ICONWARNING;
-    if (dlg_strings[2] == env_vars::kRtlLocale)
+    if (dlg_strings[2] == ASCIIToWide(env_vars::kRtlLocale))
       flags |= MB_RIGHT | MB_RTLREADING;
 
     // Show the dialog now. It is ok if another chrome is started by the
@@ -284,7 +351,9 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
 
   const CommandLine& command = *CommandLine::ForCurrentProcess();
   bool use_crash_service = command.HasSwitch(switches::kNoErrorDialogs) ||
-                           GetEnvironmentVariable(L"CHROME_HEADLESS", NULL, 0);
+      GetEnvironmentVariable(ASCIIToWide(env_vars::kHeadless).c_str(), NULL, 0);
+  bool is_per_user_install =
+      InstallUtil::IsPerUserInstall(info->dll_path.c_str());
 
   std::wstring pipe_name;
   if (use_crash_service) {
@@ -305,7 +374,7 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
     // System-wide install: "NamedPipe\GoogleCrashServices\S-1-5-18"
     // Per-user install: "NamedPipe\GoogleCrashServices\<user SID>"
     std::wstring user_sid;
-    if (InstallUtil::IsPerUserInstall(info->dll_path.c_str())) {
+    if (is_per_user_install) {
       if (!win_util::GetUserSidString(&user_sid)) {
         if (callback)
           InitDefaultCrashCallback();
@@ -323,16 +392,27 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
   wchar_t temp_dir[MAX_PATH] = {0};
   ::GetTempPathW(MAX_PATH, temp_dir);
 
-  bool full_dump = command.HasSwitch(switches::kFullMemoryCrashReport);
-  MINIDUMP_TYPE dump_type = full_dump ? MiniDumpWithFullMemory : MiniDumpNormal;
+  MINIDUMP_TYPE dump_type = kSmallDumpType;
+  // Capture full memory if explicitly instructed to.
+  if (command.HasSwitch(switches::kFullMemoryCrashReport)) {
+    dump_type = kFullDumpType;
+  } else {
+    // Capture more detail in crash dumps for beta and dev channel builds.
+    string16 channel_string;
+    GoogleUpdateSettings::GetChromeChannel(!is_per_user_install,
+        &channel_string);
+    if (channel_string == L"dev" || channel_string == L"beta")
+      dump_type = kLargerDumpType;
+  }
 
-  g_breakpad = new google_breakpad::ExceptionHandler(temp_dir, NULL, callback,
-                   NULL, google_breakpad::ExceptionHandler::HANDLER_ALL,
+  g_breakpad = new google_breakpad::ExceptionHandler(temp_dir, &FilterCallback,
+                   callback, NULL,
+                   google_breakpad::ExceptionHandler::HANDLER_ALL,
                    dump_type, pipe_name.c_str(), info->custom_info);
 
   if (!g_breakpad->IsOutOfProcess()) {
     // The out-of-process handler is unavailable.
-    ::SetEnvironmentVariable(env_vars::kNoOOBreakpad,
+    ::SetEnvironmentVariable(ASCIIToWide(env_vars::kNoOOBreakpad).c_str(),
                              info->process_type.c_str());
   } else {
     // Tells breakpad to handle breakpoint and single step exceptions.

@@ -41,7 +41,6 @@
 #pragma warning(disable : 4311)
 #endif
 
-#include "Cg/cgGL.h"
 #include <sstream>
 #include "base/cross/std_functional.h"
 #include "core/cross/semantic_manager.h"
@@ -562,7 +561,8 @@ void EffectGL::SetTexturesFromEffect(ParamCacheGL* param_cache_gl) {
     if (param != NULL) {
       Texture *t = param->value();
       if (t) {
-        GLuint handle = reinterpret_cast<GLuint>(t->GetTextureHandle());
+        GLuint handle = static_cast<GLuint>(reinterpret_cast<intptr_t>(
+            t->GetTextureHandle()));
         cgGLSetTextureParameter(cg_param, handle);
         cgGLEnableTextureParameter(cg_param);
       }

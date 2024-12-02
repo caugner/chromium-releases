@@ -9,14 +9,24 @@
 #include <gtk/gtkpagesetupunixdialog.h>
 
 #include "base/file_util.h"
+#include "base/lazy_instance.h"
+#include "base/lock.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 
 namespace {
+
+PrintDialogGtk* g_print_dialog = NULL;
+
+// Used to make accesses to the above thread safe.
+Lock& DialogLock() {
+  static base::LazyInstance<Lock> dialog_lock(base::LINKER_INITIALIZED);
+  return dialog_lock.Get();
+}
 
 // This is a temporary infobar designed to help gauge how many users are trying
 // to print to printers that don't support PDF.
@@ -27,7 +37,7 @@ class PdfUnsupportedInfoBarDelegate : public LinkInfoBarDelegate {
        browser_(browser) {
   }
 
-  ~PdfUnsupportedInfoBarDelegate() {}
+  virtual ~PdfUnsupportedInfoBarDelegate() {}
 
   virtual std::wstring GetMessageTextWithOffset(size_t* link_offset) const {
     std::wstring message(L"Oops! Your printer does not support PDF. Please "
@@ -58,15 +68,29 @@ class PdfUnsupportedInfoBarDelegate : public LinkInfoBarDelegate {
 }  // namespace
 
 // static
-void PrintDialogGtk::CreatePrintDialogForPdf(const FilePath& path,
-                                                MessageLoop* loop) {
-  loop->PostTask(FROM_HERE,
+void PrintDialogGtk::CreatePrintDialogForPdf(const FilePath& path) {
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
       NewRunnableFunction(&PrintDialogGtk::CreateDialogImpl, path));
 }
 
 // static
+bool PrintDialogGtk::DialogShowing() {
+  AutoLock lock(DialogLock());
+  return !!g_print_dialog;
+}
+
+// static
 void PrintDialogGtk::CreateDialogImpl(const FilePath& path) {
-  new PrintDialogGtk(path);
+  // Only show one print dialog at once. This is to prevent a page from
+  // locking up the system with
+  //
+  //   while(true){print();}
+  AutoLock lock(DialogLock());
+  if (g_print_dialog)
+    return;
+
+  g_print_dialog = new PrintDialogGtk(path);
 }
 
 PrintDialogGtk::PrintDialogGtk(const FilePath& path_to_pdf)
@@ -78,10 +102,13 @@ PrintDialogGtk::PrintDialogGtk(const FilePath& path_to_pdf)
   dialog_ = gtk_print_unix_dialog_new(NULL, parent);
   g_signal_connect(dialog_, "response", G_CALLBACK(OnResponseThunk), this);
 
-  gtk_widget_show_all(dialog_);
+  gtk_widget_show(dialog_);
 }
 
 PrintDialogGtk::~PrintDialogGtk() {
+  AutoLock lock(DialogLock());
+  DCHECK_EQ(this, g_print_dialog);
+  g_print_dialog = NULL;
 }
 
 void PrintDialogGtk::OnResponse(gint response_id) {

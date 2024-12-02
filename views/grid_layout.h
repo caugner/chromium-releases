@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,10 @@
 
 #include "views/layout_manager.h"
 #include "views/view.h"
+
+namespace gfx {
+class Insets;
+}
 
 // GridLayout is a LayoutManager that positions child Views in a grid. You
 // define the structure of the Grid first, then add the Views.
@@ -81,7 +85,11 @@ class GridLayout : public LayoutManager {
     TRAILING,
 
     // The view is resized to fill the space.
-    FILL
+    FILL,
+
+    // The view is aligned along the baseline. This is only valid for the
+    // vertical axis.
+    BASELINE
   };
 
   // An enumeration of the possible ways the size of a column may be obtained.
@@ -98,6 +106,7 @@ class GridLayout : public LayoutManager {
 
   // Sets the insets. All views are placed relative to these offsets.
   void SetInsets(int top, int left, int bottom, int right);
+  void SetInsets(const gfx::Insets& insets);
 
   // Creates a new column set with the specified id and returns it.
   // The id is later used when starting a new row.
@@ -244,7 +253,7 @@ class GridLayout : public LayoutManager {
   // Rows.
   std::vector<Row*> rows_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(GridLayout);
+  DISALLOW_COPY_AND_ASSIGN(GridLayout);
 };
 
 // ColumnSet is used to define a set of columns. GridLayout may have any
@@ -266,6 +275,11 @@ class ColumnSet {
   // with no explicit alignment. fixed_width gives a specific width for the
   // column, and is only used if size_type == FIXED. min_width gives the
   // minimum width for the column.
+  //
+  // If none of the columns in a columnset are resizable, the views are only
+  // made as wide as the widest views in each column, even if extra space is
+  // provided. In other words, GridLayout does not automatically resize views
+  // unless the column is marked as resizable.
   void AddColumn(GridLayout::Alignment h_align,
                  GridLayout::Alignment v_align,
                  float resize_percent,
@@ -346,9 +360,9 @@ class ColumnSet {
   // for a description of what the master column is.
   std::vector<Column*> master_columns_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ColumnSet);
+  DISALLOW_COPY_AND_ASSIGN(ColumnSet);
 };
 
 }  // namespace views
 
-#endif // VIEWS_GRID_LAYOUT_H_
+#endif  // VIEWS_GRID_LAYOUT_H_

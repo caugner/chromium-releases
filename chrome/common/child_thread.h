@@ -13,6 +13,11 @@
 #include "ipc/ipc_message.h"
 
 class NotificationService;
+class SocketStreamDispatcher;
+
+namespace IPC {
+class SyncMessageFilter;
+}
 
 // The main thread of a child process derives from this class.
 class ChildThread : public IPC::Channel::Listener,
@@ -21,7 +26,7 @@ class ChildThread : public IPC::Channel::Listener,
   // Creates the thread.
   ChildThread();
   // Used for single-process mode.
-  ChildThread(const std::string& channel_name);
+  explicit ChildThread(const std::string& channel_name);
   virtual ~ChildThread();
 
   // IPC::Message::Sender implementation:
@@ -31,9 +36,26 @@ class ChildThread : public IPC::Channel::Listener,
   void AddRoute(int32 routing_id, IPC::Channel::Listener* listener);
   void RemoveRoute(int32 routing_id);
 
+  IPC::Channel::Listener* ResolveRoute(int32 routing_id);
+
+  // Creates a ResourceLoaderBridge.
+  // Tests can override this method if they want a custom loading behavior.
+  virtual webkit_glue::ResourceLoaderBridge* CreateBridge(
+      const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info,
+      int host_renderer_id,
+      int host_render_view_id);
+
   ResourceDispatcher* resource_dispatcher() {
     return resource_dispatcher_.get();
   }
+
+  SocketStreamDispatcher* socket_stream_dispatcher() {
+    return socket_stream_dispatcher_.get();
+  }
+
+  // Safe to call on any thread, as long as it's guaranteed that the thread's
+  // lifetime is less than the main thread.
+  IPC::SyncMessageFilter* sync_message_filter() { return sync_message_filter_; }
 
   MessageLoop* message_loop() { return message_loop_; }
 
@@ -56,6 +78,10 @@ class ChildThread : public IPC::Channel::Listener,
 
   IPC::SyncChannel* channel() { return channel_.get(); }
 
+  void set_on_channel_error_called(bool on_channel_error_called) {
+    on_channel_error_called_ = on_channel_error_called;
+  }
+
  private:
   void Init();
 
@@ -66,16 +92,26 @@ class ChildThread : public IPC::Channel::Listener,
   std::string channel_name_;
   scoped_ptr<IPC::SyncChannel> channel_;
 
+  // Allows threads other than the main thread to send sync messages.
+  scoped_refptr<IPC::SyncMessageFilter> sync_message_filter_;
+
   // Implements message routing functionality to the consumers of ChildThread.
   MessageRouter router_;
 
   // Handles resource loads for this process.
   scoped_ptr<ResourceDispatcher> resource_dispatcher_;
 
+  // Handles SocketStream for this process.
+  scoped_ptr<SocketStreamDispatcher> socket_stream_dispatcher_;
+
   // If true, checks with the browser process before shutdown.  This avoids race
   // conditions if the process refcount is 0 but there's an IPC message inflight
   // that would addref it.
   bool check_with_browser_before_shutdown_;
+
+  // The OnChannelError() callback was invoked - the channel is dead, don't
+  // attempt to communicate.
+  bool on_channel_error_called_;
 
   MessageLoop* message_loop_;
 

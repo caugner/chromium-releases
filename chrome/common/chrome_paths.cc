@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,16 +18,45 @@
 #include "base/mac_util.h"
 #endif
 
+namespace {
+
+// File name of the internal Flash plugin on different platforms.
+const FilePath::CharType kInternalFlashPluginFileName[] =
+#if defined(OS_MACOSX)
+    FILE_PATH_LITERAL("Flash Player Plugin for Chrome.plugin");
+#elif defined(OS_WIN)
+    FILE_PATH_LITERAL("gcswf32.dll");
+#else  // OS_LINUX, etc.
+    FILE_PATH_LITERAL("libgcflashplayer.so");
+#endif
+
+}  // namespace
+
 namespace chrome {
+
+// Gets the path for internal (or bundled) plugins.
+bool GetInternalPluginsDirectory(FilePath* result) {
+#if defined(OS_MACOSX)
+  // If called from Chrome, get internal plugins from the versioned directory.
+  if (mac_util::AmIBundled()) {
+    *result = chrome::GetVersionedDirectory();
+    DCHECK(!result->empty());
+    return true;
+  }
+  // In tests, just look in the module directory (below).
+#endif
+
+  // The rest of the world expects plugins in the module directory.
+  return PathService::Get(base::DIR_MODULE, result);
+}
 
 bool GetGearsPluginPathFromCommandLine(FilePath* path) {
 #ifndef NDEBUG
   // for debugging, support a cmd line based override
-  std::wstring plugin_path = CommandLine::ForCurrentProcess()->GetSwitchValue(
-      switches::kGearsPluginPathOverride);
-  // TODO(tc): After GetSwitchNativeValue lands, we don't need to use
-  // FromWStringHack.
-  *path = FilePath::FromWStringHack(plugin_path);
+  FilePath plugin_path =
+      CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+          switches::kGearsPluginPathOverride);
+  *path = plugin_path;
   return !plugin_path.empty();
 #else
   return false;
@@ -79,21 +108,19 @@ bool PathProvider(int key, FilePath* result) {
       }
       create_dir = true;
       break;
-    case chrome::DIR_USER_CACHE:
-#if defined(OS_LINUX)
-      if (!GetUserCacheDirectory(&cur))
-        return false;
-      create_dir = true;
-#else
-      // No concept of a separate cache directory on non-Linux systems.
-      return false;
-#endif
-      break;
     case chrome::DIR_USER_DOCUMENTS:
       if (!GetUserDocumentsDirectory(&cur))
         return false;
       create_dir = true;
       break;
+    case chrome::DIR_DEFAULT_DOWNLOADS_SAFE:
+#if defined(OS_WIN)
+      if (!GetUserDownloadsDirectorySafe(&cur))
+        return false;
+      break;
+#else
+      // Fall through for all other platforms.
+#endif
     case chrome::DIR_DEFAULT_DOWNLOADS:
       if (!GetUserDownloadsDirectory(&cur))
         return false;
@@ -114,7 +141,7 @@ bool PathProvider(int key, FilePath* result) {
       if (!GetUserDesktop(&cur))
         return false;
       break;
-    case chrome::DIR_INSPECTOR:
+    case chrome::DIR_RESOURCES:
 #if defined(OS_MACOSX)
       cur = mac_util::MainAppBundlePath();
       cur = cur.Append(FILE_PATH_LITERAL("Resources"));
@@ -123,7 +150,21 @@ bool PathProvider(int key, FilePath* result) {
         return false;
       cur = cur.Append(FILE_PATH_LITERAL("resources"));
 #endif
+      break;
+    case chrome::DIR_BOOKMARK_MANAGER:
+      if (!PathService::Get(chrome::DIR_RESOURCES, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("bookmark_manager"));
+      break;
+    case chrome::DIR_INSPECTOR:
+      if (!PathService::Get(chrome::DIR_RESOURCES, &cur))
+        return false;
       cur = cur.Append(FILE_PATH_LITERAL("inspector"));
+      break;
+    case chrome::DIR_NET_INTERNALS:
+      if (!PathService::Get(chrome::DIR_RESOURCES, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("net_internals"));
       break;
     case chrome::DIR_APP_DICTIONARIES:
 #if defined(OS_LINUX) || defined(OS_MACOSX)
@@ -139,6 +180,10 @@ bool PathProvider(int key, FilePath* result) {
 #endif
       cur = cur.Append(FILE_PATH_LITERAL("Dictionaries"));
       create_dir = true;
+      break;
+    case chrome::DIR_INTERNAL_PLUGINS:
+      if (!GetInternalPluginsDirectory(&cur))
+        return false;
       break;
     case chrome::FILE_LOCAL_STATE:
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
@@ -156,7 +201,7 @@ bool PathProvider(int key, FilePath* result) {
         // Search for gears.dll alongside chrome.dll first.  This new model
         // allows us to package gears.dll with the Chrome installer and update
         // it while Chrome is running.
-        if (!PathService::Get(base::DIR_MODULE, &cur))
+        if (!GetInternalPluginsDirectory(&cur))
           return false;
         cur = cur.Append(FILE_PATH_LITERAL("gears.dll"));
 
@@ -172,6 +217,25 @@ bool PathProvider(int key, FilePath* result) {
         return false;
 #endif
       }
+      break;
+    case chrome::FILE_FLASH_PLUGIN:
+      if (!GetInternalPluginsDirectory(&cur))
+        return false;
+      cur = cur.Append(kInternalFlashPluginFileName);
+      if (!file_util::PathExists(cur))
+        return false;
+      break;
+    case chrome::FILE_PDF_PLUGIN:
+      if (!PathService::Get(base::DIR_MODULE, &cur))
+        return false;
+#if defined(OS_WIN)
+      cur = cur.Append(FILE_PATH_LITERAL("pdf.dll"));
+      if (!file_util::PathExists(cur))
+        return false;
+#else
+      // TODO: port
+      return false;
+#endif
       break;
 #if defined(OS_CHROMEOS)
     case chrome::FILE_CHROMEOS_API:

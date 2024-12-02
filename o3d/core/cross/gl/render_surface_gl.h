@@ -36,6 +36,7 @@
 #ifndef O3D_CORE_CROSS_GL_RENDER_SURFACE_GL_H_
 #define O3D_CORE_CROSS_GL_RENDER_SURFACE_GL_H_
 
+#include "core/cross/gl/gl_headers.h"
 #include "core/cross/render_surface.h"
 #include "core/cross/texture.h"
 
@@ -72,8 +73,8 @@ class RenderSurfaceGL : public RenderSurface {
   }
 
  protected:
-  // The platform specific part of GetBitmap.
-  virtual Bitmap::Ref PlatformSpecificGetBitmap() const;
+  // The platform specific part of GetIntoBitmap.
+  virtual bool PlatformSpecificGetIntoBitmap(Bitmap::Ref bitmap) const;
 
  private:
   GLenum cube_face_;

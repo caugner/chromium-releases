@@ -30,13 +30,14 @@ class Profile;
   // (and Browser*s).
   scoped_ptr<BookmarkMenuBridge> bookmarkMenuBridge_;
   scoped_ptr<HistoryMenuBridge> historyMenuBridge_;
-  scoped_nsobject<PreferencesWindowController> prefsController_;
-  scoped_nsobject<AboutWindowController> aboutController_;
+  PreferencesWindowController* prefsController_;  // Weak.
+  AboutWindowController* aboutController_;  // Weak.
 
-  // URLs that need to be opened when the app is fully initialized. Because it's
-  // only needed during early startup, it points to a valid vector during early
-  // startup and is NULL during the rest of app execution.
-  scoped_ptr<std::vector<GURL> > pendingURLs_;
+  // If we're told to open URLs (in particular, via |-application:openFiles:| by
+  // Launch Services) before we've launched the browser, we queue them up in
+  // |startupUrls_| so that they can go in the first browser window/tab.
+  std::vector<GURL> startupUrls_;
+  BOOL startupComplete_;
 
   // Outlets for the close tab/window menu items so that we can adjust the
   // commmand-key equivalent depending on the kind of window and how many
@@ -44,10 +45,23 @@ class Profile;
   IBOutlet NSMenuItem* closeTabMenuItem_;
   IBOutlet NSMenuItem* closeWindowMenuItem_;
   BOOL fileMenuUpdatePending_;  // ensure we only do this once per notificaion.
+
+  // Outlet for the help menu so we can bless it so Cocoa adds the search item
+  // to it.
+  IBOutlet NSMenu* helpMenu_;
 }
+
+@property(readonly, nonatomic) BOOL startupComplete;
 
 - (void)didEndMainMessageLoop;
 - (Profile*)defaultProfile;
+
+// Try to close all browser windows, and if that succeeds then quit.
+- (BOOL)tryToTerminateApplication:(NSApplication*)app;
+
+// Stop trying to terminate the application. That is, prevent the final browser
+// window closure from causing the application to quit.
+- (void)stopTryingToTerminateApplication:(NSApplication*)app;
 
 // Show the preferences window, or bring it to the front if it's already
 // visible.
@@ -59,6 +73,12 @@ class Profile;
 
 // Delegate method to return the dock menu.
 - (NSMenu*)applicationDockMenu:(NSApplication*)sender;
+
+// Get the URLs that Launch Services expects the browser to open at startup.
+- (const std::vector<GURL>&)startupUrls;
+
+// Clear the list of startup URLs.
+- (void)clearStartupUrls;
 
 @end
 

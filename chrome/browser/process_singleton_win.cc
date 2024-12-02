@@ -8,7 +8,9 @@
 #include "app/win_util.h"
 #include "base/base_paths.h"
 #include "base/command_line.h"
+#include "base/path_service.h"
 #include "base/process_util.h"
+#include "base/scoped_handle.h"
 #include "base/win_util.h"
 #include "chrome/browser/browser_init.h"
 #include "chrome/browser/browser_process.h"
@@ -17,6 +19,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/result_codes.h"
+#include "chrome/installer/util/browser_distribution.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 
@@ -36,12 +39,38 @@ BOOL CALLBACK BrowserWindowEnumeration(HWND window, LPARAM param) {
 // Look for a Chrome instance that uses the same profile directory.
 ProcessSingleton::ProcessSingleton(const FilePath& user_data_dir)
     : window_(NULL), locked_(false), foreground_window_(NULL) {
-  // FindWindoEx and Create() should be one atomic operation in order to not
-  // have a race condition.
-  remote_window_ = FindWindowEx(HWND_MESSAGE, NULL, chrome::kMessageWindowClass,
-                                user_data_dir.ToWStringHack().c_str());
-  if (!remote_window_)
-    Create();
+  std::wstring user_data_dir_str(user_data_dir.ToWStringHack());
+  remote_window_ = FindWindowEx(HWND_MESSAGE, NULL,
+                                chrome::kMessageWindowClass,
+                                user_data_dir_str.c_str());
+  if (!remote_window_) {
+    // Make sure we will be the one and only process creating the window.
+    // We use a named Mutex since we are protecting against multi-process
+    // access. As documented, it's clearer to NOT request ownership on creation
+    // since it isn't guaranteed we will get it. It is better to create it
+    // without ownership and explicitly get the ownership afterward.
+    std::wstring mutex_name(L"Local\\ProcessSingletonStartup!");
+    mutex_name += BrowserDistribution::GetDistribution()->GetAppGuid();
+    ScopedHandle only_me(CreateMutex(NULL, FALSE, mutex_name.c_str()));
+    DCHECK(only_me.Get() != NULL) << "GetLastError = " << GetLastError();
+
+    // This is how we acquire the mutex (as opposed to the initial ownership).
+    DWORD result = WaitForSingleObject(only_me, INFINITE);
+    DCHECK(result == WAIT_OBJECT_0) << "Result = " << result <<
+        "GetLastError = " << GetLastError();
+
+    // We now own the mutex so we are the only process that can create the
+    // window at this time, but we must still check if someone created it
+    // between the time where we looked for it above and the time the mutex
+    // was given to us.
+    remote_window_ = FindWindowEx(HWND_MESSAGE, NULL,
+                                  chrome::kMessageWindowClass,
+                                  user_data_dir_str.c_str());
+    if (!remote_window_)
+      Create();
+    BOOL success = ReleaseMutex(only_me);
+    DCHECK(success) << "GetLastError = " << GetLastError();
+  }
 }
 
 ProcessSingleton::~ProcessSingleton() {
@@ -130,10 +159,10 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
 // For windows, there is no need to call Create() since the call is made in
 // the constructor but to avoid having more platform specific code in
 // browser_main.cc we tolerate a second call which will do nothing.
-void ProcessSingleton::Create() {
+bool ProcessSingleton::Create() {
   DCHECK(!remote_window_);
   if (window_)
-    return;
+    return true;
 
   HINSTANCE hinst = GetModuleHandle(NULL);
 
@@ -156,6 +185,7 @@ void ProcessSingleton::Create() {
   DCHECK(window_);
 
   win_util::SetWindowUserData(window_, this);
+  return true;
 }
 
 void ProcessSingleton::Cleanup() {
@@ -231,15 +261,11 @@ LRESULT ProcessSingleton::OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds) {
     const std::wstring cmd_line =
       msg.substr(second_null + 1, third_null - second_null);
 
-    CommandLine parsed_command_line(L"");
-    parsed_command_line.ParseFromString(cmd_line);
+    CommandLine parsed_command_line = CommandLine::FromString(cmd_line);
     PrefService* prefs = g_browser_process->local_state();
     DCHECK(prefs);
 
-    FilePath user_data_dir;
-    PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
-    ProfileManager* profile_manager = g_browser_process->profile_manager();
-    Profile* profile = profile_manager->GetDefaultProfile(user_data_dir);
+    Profile* profile = ProfileManager::GetDefaultProfile();
     if (!profile) {
       // We should only be able to get here if the profile already exists and
       // has been created.

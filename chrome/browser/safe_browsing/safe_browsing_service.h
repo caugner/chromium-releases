@@ -14,26 +14,27 @@
 #include <vector>
 
 #include "base/hash_tables.h"
+#include "base/lock.h"
 #include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
-#include "base/system_monitor.h"
-#include "base/thread.h"
 #include "base/time.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/glue/resource_type.h"
 
 class BloomFilter;
-class MessageLoop;
 class PrefService;
 class SafeBrowsingBlockingPage;
 class SafeBrowsingDatabase;
 class SafeBrowsingProtocolManager;
+class URLRequestContextGetter;
+
+namespace base {
+class Thread;
+}
 
 // Construction needs to happen on the main thread.
 class SafeBrowsingService
-    : public base::RefCountedThreadSafe<SafeBrowsingService>,
-      public base::SystemMonitor::PowerObserver {
+    : public base::RefCountedThreadSafe<SafeBrowsingService> {
  public:
   // Users of this service implement this interface to be notified
   // asynchronously of the result.
@@ -66,51 +67,6 @@ class SafeBrowsingService
     int render_view_id;
   };
 
-  // Creates the safe browsing service.  Need to initialize before using.
-  SafeBrowsingService();
-  ~SafeBrowsingService();
-
-  // Initializes the service.  io_loop is the message loop that the
-  // caller of this service (ResourceDispatcherHost) wants to be notified on
-  // for check results.
-  void Initialize(MessageLoop* io_loop);
-
-  // Called to initialize objects that are used on the io_thread.
-  void OnIOInitialize(MessageLoop* notify_loop,
-                      const std::string& client_key,
-                      const std::string& wrapped_key);
-
-  // Called to initialize objects that are used on the db_thread.
-  void OnDBInitialize();
-
-  // Called to shutdown operations on the io_thread.
-  void OnIOShutdown();
-
-  // Called on the main thread to let us know that the io_thread is going away.
-  void ShutDown();
-
-  // Called on the IO thread.
-
-  // Returns true if the url's scheme can be checked.
-  bool CanCheckUrl(const GURL& url) const;
-
-  // Checks if the given url is safe or not.  If we can synchronously determine
-  // that the url is safe, CheckUrl returns true.  Otherwise it returns false,
-  // and "client" is called asynchronously with the result when it is ready.
-  bool CheckUrl(const GURL& url, Client* client);
-
-  // Cancels a pending check if the result is no longer needed.
-  void CancelCheck(Client* client);
-
-  // Displays an interstitial page.
-  void DisplayBlockingPage(const GURL& url,
-                           ResourceType::Type resource_type,
-                           UrlCheckResult result,
-                           Client* client,
-                           MessageLoop* ui_loop,
-                           int render_process_host_id,
-                           int render_view_id);
-
   // Bundle of SafeBrowsing state for one URL check.
   struct SafeBrowsingCheck {
     GURL url;
@@ -122,16 +78,48 @@ class SafeBrowsingService
     std::vector<SBFullHashResult> full_hits;
   };
 
-  // API used by the SafeBrowsingProtocolManager to interface with the
-  // SafeBrowsing storage system.
+  // Creates the safe browsing service.  Need to initialize before using.
+  SafeBrowsingService();
+
+  // Called on the UI thread to initialize the service.
+  void Initialize();
+
+  // Called on the main thread to let us know that the io_thread is going away.
+  void ShutDown();
+
+  // Returns true if the url's scheme can be checked.
+  bool CanCheckUrl(const GURL& url) const;
+
+  // Called on the IO thread to check if the given url is safe or not.  If we
+  // can synchronously determine that the url is safe, CheckUrl returns true.
+  // Otherwise it returns false, and "client" is called asynchronously with the
+  // result when it is ready.
+  bool CheckUrl(const GURL& url, Client* client);
+
+  // Called on the IO thread to cancel a pending check if the result is no
+  // longer needed.
+  void CancelCheck(Client* client);
+
+  // Called on the IO thread to display an interstitial page.
+  void DisplayBlockingPage(const GURL& url,
+                           ResourceType::Type resource_type,
+                           UrlCheckResult result,
+                           Client* client,
+                           int render_process_host_id,
+                           int render_view_id);
+
+  // Called on the IO thread when the SafeBrowsingProtocolManager has received
+  // the full hash results for prefix hits detected in the database.
   void HandleGetHashResults(
       SafeBrowsingCheck* check,
       const std::vector<SBFullHashResult>& full_hashes,
       bool can_cache);
-  void HandleChunk(const std::string& list, std::deque<SBChunk>* chunks);
+
+  // Called on the IO thread.
+  void HandleChunk(const std::string& list, SBChunkList* chunks);
   void HandleChunkDelete(std::vector<SBChunkDelete>* chunk_deletes);
 
-  // Update management.
+  // Update management.  Called on the IO thread.
   void UpdateStarted();
   void UpdateFinished(bool update_succeeded);
 
@@ -139,25 +127,28 @@ class SafeBrowsingService
   void OnBlockingPageDone(const std::vector<UnsafeResource>& resources,
                           bool proceed);
 
-  // Called when the SafeBrowsingProtocolManager has received updated MAC keys.
+  // Called on the UI thread when the SafeBrowsingProtocolManager has received
+  // updated MAC keys.
   void OnNewMacKeys(const std::string& client_key,
                     const std::string& wrapped_key);
 
-  // Notification from the advanced options UI.
+  // Notification on the UI thread from the advanced options UI.
   void OnEnable(bool enabled);
+
   bool enabled() const { return enabled_; }
-
-  // Called by the database (on the db thread) when a chunk insertion is
-  // complete.
-  void ChunkInserted();
-
-  // Notification from the database when it's done loading its bloom filter.
-  void DatabaseLoadComplete();
 
   // Preference handling.
   static void RegisterPrefs(PrefService* prefs);
 
-  // The SafeBrowsing system has instructed us to reset our database.
+  // Called on the IO thread to try to close the database, freeing the memory
+  // associated with it.  The database will be automatically reopened as needed.
+  //
+  // NOTE: Actual database closure is asynchronous, and until it happens, the IO
+  // thread is not allowed to access it; may not actually trigger a close if one
+  // is already pending or doing so would cause problems.
+  void CloseDatabase();
+
+  // Called on the IO thread to reset the database.
   void ResetDatabase();
 
   // Log the user perceived delay caused by SafeBrowsing. This delay is the time
@@ -166,24 +157,51 @@ class SafeBrowsingService
   // the current page is 'safe'.
   void LogPauseDelay(base::TimeDelta time);
 
-  // PowerObserver notifications
-  // We defer SafeBrowsing work for a short duration when the computer comes
-  // out of a suspend state to avoid thrashing the disk.
-  void OnResume();
-
-  // Report any pages that contain malware sub-resources to the SafeBrowsing
-  // service.
-  void ReportMalware(const GURL& malware_url,
-                     const GURL& page_url,
-                     const GURL& referrer_url);
-
  private:
+  typedef std::set<SafeBrowsingCheck*> CurrentChecks;
+  typedef std::vector<SafeBrowsingCheck*> GetHashRequestors;
+  typedef base::hash_map<SBPrefix, GetHashRequestors> GetHashRequests;
+
+  // Used for whitelisting a render view when the user ignores our warning.
+  struct WhiteListedEntry {
+    int render_process_host_id;
+    int render_view_id;
+    std::string domain;
+    UrlCheckResult result;
+  };
+
+  // Clients that we've queued up for checking later once the database is ready.
+  struct QueuedCheck {
+    Client* client;
+    GURL url;
+    base::Time start;
+  };
+
+  friend class base::RefCountedThreadSafe<SafeBrowsingService>;
+
+  ~SafeBrowsingService();
+
+  // Called to initialize objects that are used on the io_thread.
+  void OnIOInitialize(const std::string& client_key,
+                      const std::string& wrapped_key,
+                      URLRequestContextGetter* request_context_getter);
+
+  // Called to shutdown operations on the io_thread.
+  void OnIOShutdown();
+
+  // Returns whether |database_| exists and is accessible.
+  bool DatabaseAvailable() const;
+
+  // Called on the IO thread.  If the database does not exist, queues up a call
+  // on the db thread to create it.  Returns whether the database is available.
+  //
+  // Note that this is only needed outside the db thread, since functions on the
+  // db thread can call GetDatabase() directly.
+  bool MakeDatabaseAvailable();
+
   // Should only be called on db thread as SafeBrowsingDatabase is not
   // threadsafe.
   SafeBrowsingDatabase* GetDatabase();
-
-  // Release the final reference to the database on the db thread.
-  void ReleaseDatabase(SafeBrowsingDatabase* database);
 
   // Called on the IO thread with the check result.
   void OnCheckDone(SafeBrowsingCheck* info);
@@ -191,17 +209,23 @@ class SafeBrowsingService
   // Called on the database thread to retrieve chunks.
   void GetAllChunksFromDatabase();
 
-  // Called on the IOthread with the results of all chunks.
+  // Called on the IO thread with the results of all chunks.
   void OnGetAllChunksFromDatabase(const std::vector<SBListChunkRanges>& lists,
                                   bool database_error);
 
   // Called on the IO thread after the database reports that it added a chunk.
   void OnChunkInserted();
 
+  // Notification that the database is done loading its bloom filter.  We may
+  // have had to queue checks until the database is ready, and if so, this
+  // checks them.
+  void DatabaseLoadComplete();
+
   // Called on the database thread to add/remove chunks and host keys.
   // Callee will free the data when it's done.
   void HandleChunkForDatabase(const std::string& list,
-                              std::deque<SBChunk>* chunks);
+                              SBChunkList* chunks);
+
   void DeleteChunks(std::vector<SBChunkDelete>* chunk_deletes);
 
   static UrlCheckResult GetResultFromListname(const std::string& list_name);
@@ -210,15 +234,17 @@ class SafeBrowsingService
 
   void DatabaseUpdateFinished(bool update_succeeded);
 
+  // Start up SafeBrowsing objects. This can be called at browser start, or when
+  // the user checks the "Enable SafeBrowsing" option in the Advanced options
+  // UI.
   void Start();
-  void Stop();
+
+  // Called on the db thread to close the database.  See CloseDatabase().
+  void OnCloseDatabase();
 
   // Runs on the db thread to reset the database. We assume that resetting the
   // database is a synchronous operation.
   void OnResetDatabase();
-
-  // Runs on the io thread when the reset is complete.
-  void OnResetComplete();
 
   // Store in-memory the GetHash response. Runs on the database thread.
   void CacheHashResults(const std::vector<SBPrefix>& prefixes,
@@ -231,44 +257,29 @@ class SafeBrowsingService
   void HandleOneCheck(SafeBrowsingCheck* check,
                       const std::vector<SBFullHashResult>& full_hashes);
 
-  // Runs on the database thread to inform the database we've resumed from a low
-  // power state.
-  void HandleResume();
-
   // Invoked on the UI thread to show the blocking page.
   void DoDisplayBlockingPage(const UnsafeResource& resource);
 
-  // During a reset or the initial load we may have to queue checks until the
-  // database is ready. This method is run once the database has loaded (or if
-  // we shut down SafeBrowsing before the database has finished loading).
-  void RunQueuedClients();
+  // Report any pages that contain malware sub-resources to the SafeBrowsing
+  // service.
+  void ReportMalware(const GURL& malware_url,
+                     const GURL& page_url,
+                     const GURL& referrer_url);
 
-  void OnUpdateComplete(bool update_succeeded);
-
-  MessageLoop* io_loop_;
-
-  typedef std::set<SafeBrowsingCheck*> CurrentChecks;
   CurrentChecks checks_;
 
   // Used for issuing only one GetHash request for a given prefix.
-  typedef std::vector<SafeBrowsingCheck*> GetHashRequestors;
-  typedef base::hash_map<SBPrefix, GetHashRequestors> GetHashRequests;
   GetHashRequests gethash_requests_;
 
   // The sqlite database.  We don't use a scoped_ptr because it needs to be
   // destructed on a different thread than this object.
   SafeBrowsingDatabase* database_;
 
+  // Lock used to prevent possible data races due to compiler optimizations.
+  mutable Lock database_lock_;
+
   // Handles interaction with SafeBrowsing servers.
   SafeBrowsingProtocolManager* protocol_manager_;
-
-  // Used for whitelisting a render view when the user ignores our warning.
-  struct WhiteListedEntry {
-    int render_process_host_id;
-    int render_view_id;
-    std::string domain;
-    UrlCheckResult result;
-  };
 
   std::vector<WhiteListedEntry> white_listed_entries_;
 
@@ -277,23 +288,19 @@ class SafeBrowsingService
   bool enabled_;
 
   // The SafeBrowsing thread that runs database operations.
+  //
+  // Note: Functions that run on this thread should run synchronously and return
+  // to the IO thread, not post additional tasks back to this thread, lest we
+  // cause a race condition at shutdown time that leads to a database leak.
   scoped_ptr<base::Thread> safe_browsing_thread_;
-
-  // Indicates if we are in the process of resetting the database.
-  bool resetting_;
-
-  // Indicates if the database has finished initialization.
-  bool database_loaded_;
 
   // Indicates if we're currently in an update cycle.
   bool update_in_progress_;
 
-  // Clients that we've queued up for checking later once the database is ready.
-  typedef struct {
-    Client* client;
-    GURL url;
-    base::Time start;
-  } QueuedCheck;
+  // Indicates if we're in the midst of trying to close the database.  If this
+  // is true, nothing on the IO thread should access the database.
+  bool closing_database_;
+
   std::deque<QueuedCheck> queued_checks_;
 
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingService);

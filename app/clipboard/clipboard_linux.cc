@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,11 @@
 #include <utility>
 
 #include "base/file_path.h"
-#include "base/gfx/size.h"
+#include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/linux_util.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "gfx/size.h"
 
 namespace {
 
@@ -32,7 +33,7 @@ std::string GdkAtomToString(const GdkAtom& atom) {
 }
 
 GdkAtom StringToGdkAtom(const std::string& str) {
-  return gdk_atom_intern(str.c_str(), false);
+  return gdk_atom_intern(str.c_str(), FALSE);
 }
 
 // GtkClipboardGetFunc callback.
@@ -67,11 +68,13 @@ void GetData(GtkClipboard* clipboard,
 
 // GtkClipboardClearFunc callback.
 // We are guaranteed this will be called exactly once for each call to
-// gtk_clipboard_set_with_data
+// gtk_clipboard_set_with_data.
 void ClearData(GtkClipboard* clipboard,
                gpointer user_data) {
   Clipboard::TargetMap* map =
       reinterpret_cast<Clipboard::TargetMap*>(user_data);
+  // The same data may be inserted under multiple keys, so use a set to
+  // uniq them.
   std::set<char*> ptrs;
 
   for (Clipboard::TargetMap::iterator iter = map->begin();
@@ -135,12 +138,9 @@ void Clipboard::SetGtkClipboard() {
   int i = 0;
   for (Clipboard::TargetMap::iterator iter = clipboard_data_->begin();
        iter != clipboard_data_->end(); ++iter, ++i) {
-    targets[i].target = static_cast<gchar*>(malloc(iter->first.size() + 1));
-    memcpy(targets[i].target, iter->first.data(), iter->first.size());
-    targets[i].target[iter->first.size()] = '\0';
-
+    targets[i].target = const_cast<char*>(iter->first.c_str());
     targets[i].flags = 0;
-    targets[i].info = i;
+    targets[i].info = 0;
   }
 
   gtk_clipboard_set_with_data(clipboard_, targets.get(),
@@ -148,13 +148,14 @@ void Clipboard::SetGtkClipboard() {
                               GetData, ClearData,
                               clipboard_data_);
 
-  for (size_t i = 0; i < clipboard_data_->size(); i++)
-    free(targets[i].target);
+  // clipboard_data_ now owned by the GtkClipboard.
+  clipboard_data_ = NULL;
 }
 
 void Clipboard::WriteText(const char* text_data, size_t text_len) {
-  char* data = new char[text_len];
+  char* data = new char[text_len + 1];
   memcpy(data, text_data, text_len);
+  data[text_len] = '\0';
 
   InsertMapping(kMimeText, data, text_len);
   InsertMapping("TEXT", data, text_len);
@@ -167,11 +168,18 @@ void Clipboard::WriteHTML(const char* markup_data,
                           size_t markup_len,
                           const char* url_data,
                           size_t url_len) {
-  // TODO(estade): might not want to ignore |url_data|
-  char* data = new char[markup_len];
-  memcpy(data, markup_data, markup_len);
+  // TODO(estade): We need to expand relative links with |url_data|.
+  static const char* html_prefix = "<meta http-equiv=\"content-type\" "
+                                   "content=\"text/html; charset=utf-8\">";
+  size_t html_prefix_len = strlen(html_prefix);
+  size_t total_len = html_prefix_len + markup_len + 1;
 
-  InsertMapping(kMimeHtml, data, markup_len);
+  char* data = new char[total_len];
+  snprintf(data, total_len, "%s", html_prefix);
+  memcpy(data + html_prefix_len, markup_data, markup_len);
+  data[total_len - 1] = '\0';
+
+  InsertMapping(kMimeHtml, data, total_len);
 }
 
 // Write an extra flavor that signifies WebKit was the last to modify the
@@ -198,9 +206,6 @@ void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
 
 void Clipboard::WriteBookmark(const char* title_data, size_t title_len,
                               const char* url_data, size_t url_len) {
-  // Write as plain text.
-  WriteText(url_data, url_len);
-
   // Write as a URI.
   char* data = new char[url_len + 1];
   memcpy(data, url_data, url_len);
@@ -208,15 +213,15 @@ void Clipboard::WriteBookmark(const char* title_data, size_t title_len,
   InsertMapping(kMimeURI, data, url_len + 1);
 }
 
-void Clipboard::WriteFiles(const char* file_data, size_t file_len) {
-  NOTIMPLEMENTED();
-}
-
 void Clipboard::WriteData(const char* format_name, size_t format_len,
                           const char* data_data, size_t data_len) {
   char* data = new char[data_len];
   memcpy(data, data_data, data_len);
   std::string format(format_name, format_len);
+  // We assume that certain mapping types are only written by trusted code.
+  // Therefore we must upkeep their integrity.
+  if (format == kMimeBmp || format == kMimeURI)
+    return;
   InsertMapping(format.c_str(), data, data_len);
 }
 
@@ -334,12 +339,22 @@ void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
   if (!data)
     return;
 
-  UTF8ToUTF16(reinterpret_cast<char*>(data->data), data->length, markup);
+  // If the data starts with 0xFEFF, i.e., Byte Order Mark, assume it is
+  // UTF-16, otherwise assume UTF-8.
+  if (data->length >= 2 &&
+      reinterpret_cast<uint16_t*>(data->data)[0] == 0xFEFF) {
+    markup->assign(reinterpret_cast<uint16_t*>(data->data) + 1,
+                   (data->length / 2) - 1);
+  } else {
+    UTF8ToUTF16(reinterpret_cast<char*>(data->data), data->length, markup);
+  }
+
   gtk_selection_data_free(data);
 }
 
 void Clipboard::ReadBookmark(string16* title, std::string* url) const {
   // TODO(estade): implement this.
+  NOTIMPLEMENTED();
 }
 
 void Clipboard::ReadData(const std::string& format, std::string* result) {
@@ -367,44 +382,30 @@ Clipboard::FormatType Clipboard::GetHtmlFormatType() {
 }
 
 // static
+Clipboard::FormatType Clipboard::GetBitmapFormatType() {
+  return std::string(kMimeBmp);
+}
+
+// static
 Clipboard::FormatType Clipboard::GetWebKitSmartPasteFormatType() {
   return std::string(kMimeWebkitSmartPaste);
 }
 
-// Insert the key/value pair in the clipboard_data structure. If
-// the mapping already exists, it frees the associated data. Don't worry
-// about double freeing because if the same key is inserted into the
-// map twice, it must have come from different Write* functions and the
-// data pointer cannot be the same.
 void Clipboard::InsertMapping(const char* key,
                               char* data,
                               size_t data_len) {
-  TargetMap::iterator iter = clipboard_data_->find(key);
-
-  if (iter != clipboard_data_->end()) {
-    if (strcmp(kMimeBmp, key) == 0)
-      g_object_unref(reinterpret_cast<GdkPixbuf*>(iter->second.first));
-    else
-      delete[] iter->second.first;
-  }
-
+  DCHECK(clipboard_data_->find(key) == clipboard_data_->end());
   (*clipboard_data_)[key] = std::make_pair(data, data_len);
 }
 
 GtkClipboard* Clipboard::LookupBackingClipboard(Buffer clipboard) const {
-  GtkClipboard* result;
-
   switch (clipboard) {
     case BUFFER_STANDARD:
-      result = clipboard_;
-      break;
+      return clipboard_;
     case BUFFER_SELECTION:
-      result = primary_selection_;
-      break;
+      return primary_selection_;
     default:
       NOTREACHED();
-      result = NULL;
-      break;
+      return NULL;
   }
-  return result;
 }

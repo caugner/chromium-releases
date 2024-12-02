@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,70 +7,40 @@
 
 #include <vector>
 
-#include "base/ref_counted.h"
+#include "app/menus/simple_menu_model.h"
 #include "base/scoped_ptr.h"
+#include "chrome/browser/app_menu_model.h"
+#include "chrome/browser/back_forward_menu_model.h"
 #include "chrome/browser/bubble_positioner.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/user_data_manager.h"
+#include "chrome/browser/page_menu_model.h"
+#include "chrome/browser/pref_member.h"
+#include "chrome/browser/views/accessible_toolbar_view.h"
 #include "chrome/browser/views/go_button.h"
 #include "chrome/browser/views/location_bar_view.h"
-#include "chrome/common/pref_member.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/menu/menu.h"
-#include "views/controls/menu/simple_menu_model.h"
+#include "views/controls/menu/menu_wrapper.h"
 #include "views/controls/menu/view_menu_delegate.h"
 #include "views/view.h"
 
-class BackForwardMenuModelViews;
 class BrowserActionsContainer;
 class Browser;
 class Profile;
 class ToolbarStarToggle;
+
 namespace views {
-class SimpleMenuModel;
+class Menu2;
 }
 
-// A menu model that builds the contents of an encoding menu.
-class EncodingMenuModel : public views::SimpleMenuModel,
-                          public views::SimpleMenuModel::Delegate {
- public:
-  explicit EncodingMenuModel(Browser* browser);
-  virtual ~EncodingMenuModel() {}
-
-  // Overridden from views::SimpleMenuModel::Delegate:
-  virtual bool IsCommandIdChecked(int command_id) const;
-  virtual bool IsCommandIdEnabled(int command_id) const;
-  virtual bool GetAcceleratorForCommandId(int command_id,
-                                          views::Accelerator* accelerator);
-  virtual void ExecuteCommand(int command_id);
-
- private:
-  void Build();
-
-  Browser* browser_;
-
-  DISALLOW_COPY_AND_ASSIGN(EncodingMenuModel);
-};
-
-class ZoomMenuModel : public views::SimpleMenuModel {
- public:
-  explicit ZoomMenuModel(views::SimpleMenuModel::Delegate* delegate);
-  virtual ~ZoomMenuModel() {}
-
- private:
-  void Build();
-
-  DISALLOW_COPY_AND_ASSIGN(ZoomMenuModel);
-};
-
-// The Browser Window's toolbar. Used within BrowserView.
-class ToolbarView : public views::View,
+// The Browser Window's toolbar.
+class ToolbarView : public AccessibleToolbarView,
                     public views::ViewMenuDelegate,
                     public views::DragController,
-                    public views::SimpleMenuModel::Delegate,
+                    public views::FocusChangeListener,
+                    public menus::SimpleMenuModel::Delegate,
                     public LocationBarView::Delegate,
                     public NotificationObserver,
-                    public GetProfilesHelper::Delegate,
                     public CommandUpdater::CommandObserver,
                     public views::ButtonListener,
                     public BubblePositioner {
@@ -91,15 +61,27 @@ class ToolbarView : public views::View,
   // (such as user editing) as well.
   void Update(TabContents* tab, bool should_restore_state);
 
-  // Returns the index of the next view of the toolbar, starting from the given
-  // view index (skipping the location bar), in the given navigation direction
-  // (nav_left true means navigation right to left, and vice versa). -1 finds
-  // first accessible child, based on the above policy.
-  int GetNextAccessibleViewIndex(int view_index, bool nav_left);
+  // Sets the app menu model.
+  void SetAppMenuModel(AppMenuModel* model);
 
-  void set_acc_focused_view(views::View* acc_focused_view) {
-    acc_focused_view_ = acc_focused_view;
-  }
+  // Focuses the page menu and enters a special mode where the page
+  // and app menus are focusable and allow for keyboard navigation just
+  // like a normal menu bar. As soon as focus leaves one of the menus,
+  // the special mode is exited.
+  //
+  // Pass it the storage id of the view where focus should be returned
+  // if the user escapes, and the menu button to focus initially. If
+  // |menu_to_focus| is NULL, it will focus the page menu by default.
+  //
+  // Not used on the Mac, which has a "normal" menu bar.
+  void EnterMenuBarEmulationMode(int last_focused_view_storage_id,
+                                 views::MenuButton* menu_to_focus);
+
+  // Add a listener to receive a callback when the menu opens.
+  void AddMenuListener(views::MenuListener* listener);
+
+  // Remove a menu listener.
+  void RemoveMenuListener(views::MenuListener* listener);
 
   // Accessors...
   Browser* browser() const { return browser_; }
@@ -110,14 +92,18 @@ class ToolbarView : public views::View,
   views::MenuButton* page_menu() const { return page_menu_; }
   views::MenuButton* app_menu() const { return app_menu_; }
 
+  // Overridden from views::FocusChangeListener:
+  virtual void FocusWillChange(views::View* focused_before,
+                               views::View* focused_now);
+
+  // Overridden from AccessibleToolbarView:
+  virtual bool IsAccessibleViewTraversable(views::View* view);
+
   // Overridden from Menu::BaseControllerDelegate:
-  virtual bool GetAcceleratorInfo(int id, views::Accelerator* accel);
+  virtual bool GetAcceleratorInfo(int id, menus::Accelerator* accel);
 
   // Overridden from views::MenuDelegate:
   virtual void RunMenu(views::View* source, const gfx::Point& pt);
-
-  // Overridden from GetProfilesHelper::Delegate:
-  virtual void OnGetProfilesDone(const std::vector<std::wstring>& profiles);
 
   // Overridden from LocationBarView::Delegate:
   virtual TabContents* GetTabContents();
@@ -137,36 +123,31 @@ class ToolbarView : public views::View,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // Overridden from views::SimpleMenuModel::Delegate:
+  // Overridden from menus::SimpleMenuModel::Delegate:
   virtual bool IsCommandIdChecked(int command_id) const;
   virtual bool IsCommandIdEnabled(int command_id) const;
   virtual bool GetAcceleratorForCommandId(int command_id,
-                                          views::Accelerator* accelerator);
+                                          menus::Accelerator* accelerator);
   virtual void ExecuteCommand(int command_id);
 
   // Overridden from views::View:
+  virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
   virtual gfx::Size GetPreferredSize();
   virtual void Layout();
   virtual void Paint(gfx::Canvas* canvas);
   virtual void ThemeChanged();
-  virtual void ShowContextMenu(int x, int y, bool is_mouse_gesture);
-  virtual void DidGainFocus();
-  virtual void WillLoseFocus();
-  virtual void RequestFocus();
-  virtual bool OnKeyPressed(const views::KeyEvent& e);
-  virtual bool OnKeyReleased(const views::KeyEvent& e);
-  virtual bool GetAccessibleName(std::wstring* name);
-  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
-  virtual void SetAccessibleName(const std::wstring& name);
-  virtual View* GetAccFocusedChildView() { return acc_focused_view_; }
 
  private:
   // Overridden from views::DragController:
   virtual void WriteDragData(View* sender,
-                             int press_x,
-                             int press_y,
+                             const gfx::Point& press_pt,
                              OSExchangeData* data);
-  virtual int GetDragOperations(View* sender, int x, int y);
+  virtual int GetDragOperations(View* sender, const gfx::Point& p);
+  virtual bool CanStartDrag(View* sender,
+                            const gfx::Point& press_pt,
+                            const gfx::Point& p) {
+    return true;
+  }
 
   // Returns the number of pixels above the location bar in non-normal display.
   int PopupTopSpacing() const;
@@ -183,13 +164,12 @@ class ToolbarView : public views::View,
   void RunPageMenu(const gfx::Point& pt);
   void RunAppMenu(const gfx::Point& pt);
 
-  void CreatePageMenu();
-  void CreateZoomMenuContents();
-  void CreateEncodingMenuContents();
-#if defined(OS_WIN)
-  void CreateDevToolsMenuContents();
-#endif
-  void CreateAppMenu();
+  // Check if the menu exited with a code indicating the user wants to
+  // switch to the other menu, and then switch to that other menu.
+  void SwitchToOtherMenuIfNeeded(views::Menu2* previous_menu,
+                                 views::MenuButton* next_menu_button);
+
+  void ActivateMenuButton(views::MenuButton* menu_button);
 
   // Types of display mode this toolbar can have.
   enum DisplayMode {
@@ -201,17 +181,19 @@ class ToolbarView : public views::View,
     return display_mode_ == DISPLAYMODE_NORMAL;
   }
 
-  scoped_ptr<BackForwardMenuModelViews> back_menu_model_;
-  scoped_ptr<BackForwardMenuModelViews> forward_menu_model_;
+  // Take the menus out of the focus traversal, unregister accelerators,
+  // and stop listening to focus change events.
+  void ExitMenuBarEmulationMode();
+
+  // Restore the view that was focused before EnterMenuBarEmulationMode
+  // was called.
+  void RestoreLastFocusedView();
+
+  scoped_ptr<BackForwardMenuModel> back_menu_model_;
+  scoped_ptr<BackForwardMenuModel> forward_menu_model_;
 
   // The model that contains the security level, text, icon to display...
   ToolbarModel* model_;
-
-  // Storage of strings needed for accessibility.
-  std::wstring accessible_name_;
-  // Child view currently having MSAA focus (location bar excluded from arrow
-  // navigation).
-  views::View* acc_focused_view_;
 
   // Controls
   views::ImageButton* back_;
@@ -230,10 +212,7 @@ class ToolbarView : public views::View,
   Browser* browser_;
 
   // Contents of the profiles menu to populate with profile names.
-  scoped_ptr<views::SimpleMenuModel> profiles_menu_contents_;
-
-  // Helper class to enumerate profiles information on the file thread.
-  scoped_refptr<GetProfilesHelper> profiles_helper_;
+  scoped_ptr<menus::SimpleMenuModel> profiles_menu_contents_;
 
   // Controls whether or not a home button should be shown on the toolbar.
   BooleanPrefMember show_home_button_;
@@ -242,15 +221,30 @@ class ToolbarView : public views::View,
   DisplayMode display_mode_;
 
   // The contents of the various menus.
-  scoped_ptr<views::SimpleMenuModel> page_menu_contents_;
-  scoped_ptr<ZoomMenuModel> zoom_menu_contents_;
-  scoped_ptr<EncodingMenuModel> encoding_menu_contents_;
-  scoped_ptr<views::SimpleMenuModel> devtools_menu_contents_;
-  scoped_ptr<views::SimpleMenuModel> app_menu_contents_;
+  scoped_ptr<PageMenuModel> page_menu_model_;
+  scoped_ptr<AppMenuModel> app_menu_model_;
 
   // TODO(beng): build these into MenuButton.
   scoped_ptr<views::Menu2> page_menu_menu_;
   scoped_ptr<views::Menu2> app_menu_menu_;
+
+  // Save the focus manager rather than calling GetFocusManager(),
+  // so that we can remove focus listeners in the destructor.
+  views::FocusManager* focus_manager_;
+
+  // Storage id for the last view that was focused before focus
+  // was given to one of the toolbar views.
+  int last_focused_view_storage_id_;
+
+  // Vector of listeners to receive callbacks when the menu opens.
+  std::vector<views::MenuListener*> menu_listeners_;
+
+  // Are we in the menu bar emulation mode, where the app and page menu
+  // are temporarily focusable?
+  bool menu_bar_emulation_mode_;
+
+  // Used to post tasks to switch to the next/previous menu.
+  ScopedRunnableMethodFactory<ToolbarView> method_factory_;
 };
 
 #endif  // CHROME_BROWSER_VIEWS_TOOLBAR_VIEW_H_

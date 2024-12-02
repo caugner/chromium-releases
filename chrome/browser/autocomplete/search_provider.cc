@@ -1,23 +1,26 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/autocomplete/search_provider.h"
 
+#include <algorithm>
+
 #include "app/l10n_util.h"
+#include "base/callback.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google_util.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/url_util.h"
 #include "grit/generated_resources.h"
@@ -97,13 +100,13 @@ void SearchProvider::Start(const AutocompleteInput& input,
     if (default_provider) {
       AutocompleteMatch match(this, 0, false,
                               AutocompleteMatch::SEARCH_WHAT_YOU_TYPED);
-      static const std::wstring kNoQueryInput(
-          l10n_util::GetString(IDS_AUTOCOMPLETE_NO_QUERY));
-      match.contents.assign(l10n_util::GetStringF(
-          IDS_AUTOCOMPLETE_SEARCH_CONTENTS,
-          default_provider->AdjustedShortNameForLocaleDirection(),
-          kNoQueryInput));
+      match.contents.assign(l10n_util::GetString(IDS_EMPTY_KEYWORD_VALUE));
       match.contents_class.push_back(
+          ACMatchClassification(0, ACMatchClassification::NONE));
+      match.description.assign(l10n_util::GetStringF(
+          IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION,
+          default_provider->AdjustedShortNameForLocaleDirection()));
+      match.description_class.push_back(
           ACMatchClassification(0, ACMatchClassification::DIM));
       matches_.push_back(match);
     }
@@ -137,7 +140,7 @@ void SearchProvider::Run() {
   }
   // We should only get here if we have a suggest url for the keyword or default
   // providers.
-  DCHECK(suggest_results_pending_ > 0);
+  DCHECK_GT(suggest_results_pending_, 0);
 }
 
 void SearchProvider::Stop() {
@@ -154,7 +157,7 @@ void SearchProvider::OnURLFetchComplete(const URLFetcher* source,
                                         const std::string& data) {
   DCHECK(!done_);
   suggest_results_pending_--;
-  DCHECK(suggest_results_pending_ >= 0);  // Should never go negative.
+  DCHECK_GE(suggest_results_pending_, 0);  // Should never go negative.
   const net::HttpResponseHeaders* const response_headers =
       source->response_headers();
   std::string json_data(data);
@@ -180,7 +183,7 @@ void SearchProvider::OnURLFetchComplete(const URLFetcher* source,
   if (status.is_success() && response_code == 200) {
     JSONStringValueSerializer deserializer(json_data);
     deserializer.set_allow_trailing_comma(true);
-    scoped_ptr<Value> root_val(deserializer.Deserialize(NULL));
+    scoped_ptr<Value> root_val(deserializer.Deserialize(NULL, NULL));
     const std::wstring& input_text =
         is_keyword_results ? keyword_input_text_ : input_.text();
     have_suggest_results_ =
@@ -672,7 +675,7 @@ void SearchProvider::AddMatchToMap(const std::wstring& query_string,
         ACMatchClassification(0, ACMatchClassification::NONE));
     match.description.assign(l10n_util::GetStringF(
         IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION,
-        provider.short_name()));
+        provider.AdjustedShortNameForLocaleDirection()));
     match.description_class.push_back(
         ACMatchClassification(0, ACMatchClassification::DIM));
   }
@@ -690,8 +693,7 @@ void SearchProvider::AddMatchToMap(const std::wstring& query_string,
     match.template_url = &providers_.keyword_provider();
   }
   match.fill_into_edit.append(query_string);
-  // NOTE: All Google suggestions currently start with the original input, but
-  // not all Yahoo! suggestions do.
+  // Not all suggestions start with the original input.
   if (!input_.prevent_inline_autocomplete() &&
       !match.fill_into_edit.compare(search_start, input_text.length(),
                                    input_text))

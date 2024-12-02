@@ -8,13 +8,13 @@
 #include <list>
 
 #include "base/ref_counted.h"
-#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/browser/renderer_host/resource_queue.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/notification_registrar.h"
 
 class Extension;
-class MessageLoop;
 class URLRequest;
+struct GlobalRequestID;
 
 // This class handles delaying of resource loads that depend on unloaded user
 // scripts. For each request that comes in, we check if it depends on a user
@@ -25,21 +25,28 @@ class URLRequest;
 // updates to loaded extensions.
 class UserScriptListener
     : public base::RefCountedThreadSafe<UserScriptListener>,
+      public ResourceQueueDelegate,
       public NotificationObserver {
  public:
-  UserScriptListener(MessageLoop* ui_loop,
-                     MessageLoop* io_loop,
-                     ResourceDispatcherHost* rdh);
+  explicit UserScriptListener(ResourceQueue* resource_queue);
 
-  void OnResourceDispatcherHostGone() { resource_dispatcher_host_ = NULL; }
+  // Call this to do necessary cleanup on the main thread before the object
+  // is deleted.
+  void ShutdownMainThread();
 
-  // Returns true if we're ready to service the request. Otherwise, if the
-  // request URL depends on any user scripts that haven't been loaded yet, we
-  // will delay the request until we're ready.
-  bool ShouldStartRequest(URLRequest* request);
+  // ResourceQueueDelegate:
+  virtual bool ShouldDelayRequest(
+      URLRequest* request,
+      const ResourceDispatcherHostRequestInfo& request_info,
+      const GlobalRequestID& request_id);
+  virtual void WillShutdownResourceQueue();
 
  private:
+  friend class base::RefCountedThreadSafe<UserScriptListener>;
+
   typedef std::list<URLPattern> URLPatterns;
+
+  ~UserScriptListener() {}
 
   // Resume any requests that we delayed in order to wait for user scripts.
   void StartDelayedRequests();
@@ -52,13 +59,11 @@ class UserScriptListener
   // deleted, so user_scripts_ready_ remains unchanged.
   void ReplaceURLPatterns(const URLPatterns& patterns);
 
-  MessageLoop* ui_loop_;
-  MessageLoop* io_loop_;
-  ResourceDispatcherHost* resource_dispatcher_host_;
+  ResourceQueue* resource_queue_;
 
   // A list of every request that we delayed. Will be flushed when user scripts
   // are ready.
-  typedef std::list<ResourceDispatcherHost::GlobalRequestID> DelayedRequests;
+  typedef std::list<GlobalRequestID> DelayedRequests;
   DelayedRequests delayed_request_ids_;
 
   // TODO(mpcomplete): the rest of this stuff should really be per-profile, but
@@ -84,7 +89,7 @@ class UserScriptListener
 
   NotificationRegistrar registrar_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(UserScriptListener);
+  DISALLOW_COPY_AND_ASSIGN(UserScriptListener);
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_USER_SCRIPT_LISTENER_H_

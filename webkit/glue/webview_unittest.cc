@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/api/public/WebView.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/tools/test_shell/test_shell_test.h"
 
 using WebKit::WebView;
@@ -11,7 +11,7 @@ using WebKit::WebView;
 class WebViewTest : public TestShellTest {
 };
 
-TEST_F(WebViewTest, GetContentAsPlainText) {
+TEST_F(WebViewTest, ActiveState) {
   WebView* view = test_shell_->webView();
   ASSERT_TRUE(view != 0);
 

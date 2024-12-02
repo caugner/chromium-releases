@@ -4,8 +4,8 @@
 
 #include "webkit/tools/test_shell/drag_delegate.h"
 
-#include "webkit/api/public/WebPoint.h"
-#include "webkit/api/public/WebView.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPoint.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 
 using WebKit::WebPoint;
 using WebKit::WebView;
@@ -38,11 +38,4 @@ void TestDragDelegate::OnDragSourceDrop() {
   GetCursorPositions(source_hwnd_, &client, &screen);
   webview_->dragSourceEndedAt(client, screen, WebKit::WebDragOperationCopy);
   // TODO(snej): Pass the real drag operation instead
-}
-
-void TestDragDelegate::OnDragSourceMove() {
-  gfx::Point client;
-  gfx::Point screen;
-  GetCursorPositions(source_hwnd_, &client, &screen);
-  webview_->dragSourceMovedTo(client, screen);
 }

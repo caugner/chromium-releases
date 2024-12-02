@@ -36,6 +36,15 @@ Linux:
 --strict: if a test fails, we continue happily.  --strict will cause
   us to die immediately.
 
+--trim=False: by default we trim away tests known to be problematic on
+  specific platforms.  If set to false we do NOT trim out tests.
+
+--xvfb=True: By default we use Xvfb to make sure DISPLAY is valid
+  (Linux only).  if set to False, do not use Xvfb.  TODO(jrg): convert
+  this script from the compile stage of a builder to a
+  RunPythonCommandInBuildDir() command to avoid the need for this
+  step.
+
 Strings after all options are considered tests to run.  Test names
 have all text before a ':' stripped to help with gyp compatibility.
 For example, ../base/base.gyp:base_unittests is interpreted as a test
@@ -49,6 +58,9 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+import traceback
+
 
 class Coverage(object):
   """Doitall class for code coverage."""
@@ -72,6 +84,7 @@ class Coverage(object):
     self.FindPrograms()
     self.ConfirmPlatformAndPaths()
     self.tests = []
+    self.xvfb_pid = 0
 
   def FindInPath(self, program):
     """Find program in our path.  Return abs path to it, or None."""
@@ -95,6 +108,10 @@ class Coverage(object):
       self.genhtml = os.path.join(self.lcov_directory, 'genhtml')
       self.programs = [self.lcov, self.mcov, self.genhtml]
     else:
+      # Hack to get the buildbot working.
+      os.environ['PATH'] += r';c:\coverage\coverage_analyzer'
+      os.environ['PATH'] += r';c:\coverage\performance_tools'
+      # (end hack)
       commands = ['vsperfcmd.exe', 'vsinstr.exe', 'coverage_analyzer.exe']
       self.perf = self.FindInPath('vsperfcmd.exe')
       self.instrument = self.FindInPath('vsinstr.exe')
@@ -135,17 +152,33 @@ class Coverage(object):
         if not test.endswith('.exe') and os.path.exists(test_exe):
           self.tests[ind] = test_exe
 
-    # Temporarily make Windows quick for bringup by filtering
-    # out all except base_unittests.  Easier than a chrome.cyp change.
-    # TODO(jrg): remove this
+  def TrimTests(self):
+    """Trim specific tests for each platform."""
     if self.IsWindows():
-      t2 = []
+      return
+      # TODO(jrg): remove when not needed
+      inclusion = ['unit_tests']
+      keep = []
       for test in self.tests:
-        if 'base_unittests' in test:
-          t2.append(test)
-      self.tests = t2
-
-
+        for i in inclusion:
+          if i in test:
+            keep.append(test)
+      self.tests = keep
+      logging.info('After trimming tests we have ' + ' '.join(self.tests))
+      return
+    if self.IsLinux():
+      # self.tests = filter(lambda t: t.endswith('base_unittests'), self.tests)
+      return
+    if self.IsMac():
+      exclusion = ['automated_ui_tests']
+      punted = []
+      for test in self.tests:
+        for e in exclusion:
+          if test.endswith(e):
+            punted.append(test)
+      self.tests = filter(lambda t: t not in punted, self.tests)
+      if punted:
+        logging.info('Tests trimmed out: ' + str(punted))
 
   def ConfirmPlatformAndPaths(self):
     """Confirm OS and paths (e.g. lcov)."""
@@ -184,16 +217,17 @@ class Coverage(object):
     return sys.platform in ('win32', 'cygwin')
 
   def ClearData(self):
-    """Clear old gcda files"""
-    if not self.IsPosix():
-      return
-    subprocess.call([self.lcov,
-                     '--directory', self.directory_parent,
-                     '--zerocounters'])
-    shutil.rmtree(os.path.join(self.directory, 'coverage'))
+    """Clear old gcda files and old coverage info files."""
+    if os.path.exists(self.coverage_info_file):
+      os.remove(self.coverage_info_file)
+    if self.IsPosix():
+      subprocess.call([self.lcov,
+                       '--directory', self.directory_parent,
+                       '--zerocounters'])
+      shutil.rmtree(os.path.join(self.directory, 'coverage'))
 
-  def BeforeRunTests(self):
-    """Do things before running tests."""
+  def BeforeRunOneTest(self, testname):
+    """Do things before running each test."""
     if not self.IsWindows():
       return
     # Stop old counters if needed
@@ -202,38 +236,58 @@ class Coverage(object):
     # Instrument binaries
     for fulltest in self.tests:
       if os.path.exists(fulltest):
-        cmdlist = [self.instrument, '/COVERAGE', fulltest]
+        # See http://support.microsoft.com/kb/939818 for details on args
+        cmdlist = [self.instrument, '/d:ignorecverr', '/COVERAGE', fulltest]
         self.Run(cmdlist, ignore_retcode=4,
                  explanation='OK with a multiple-instrument')
     # Start new counters
     cmdlist = [self.perf, '-start:coverage', '-output:' + self.vsts_output]
     self.Run(cmdlist)
 
+  def BeforeRunAllTests(self):
+    """Called right before we run all tests."""
+    if self.IsLinux() and self.options.xvfb:
+      self.StartXvfb()
+
   def RunTests(self):
-    """Run all unit tests."""
+    """Run all unit tests and generate appropriate lcov files."""
+    self.BeforeRunAllTests()
     for fulltest in self.tests:
       if not os.path.exists(fulltest):
-        logging.fatal(fulltest + ' does not exist')
+        logging.info(fulltest + ' does not exist')
         if self.options.strict:
           sys.exit(2)
-      # TODO(jrg): add timeout?
-      print >>sys.stderr, 'Running test: ' + fulltest
+      else:
+        logging.info('%s path exists' % fulltest)
       cmdlist = [fulltest, '--gtest_print_time']
 
       # If asked, make this REAL fast for testing.
       if self.options.fast_test:
+        logging.info('Running as a FAST test for testing')
         # cmdlist.append('--gtest_filter=RenderWidgetHost*')
-        cmdlist.append('--gtest_filter=CommandLine*')
+        # cmdlist.append('--gtest_filter=CommandLine*')
+        cmdlist.append('--gtest_filter=C*')
 
-      retcode = subprocess.call(cmdlist)
+      self.BeforeRunOneTest(fulltest)
+      logging.info('Running test ' + str(cmdlist))
+      try:
+        retcode = subprocess.call(cmdlist)
+      except:  # can't "except WindowsError" since script runs on non-Windows
+        logging.info('EXCEPTION while running a unit test')
+        logging.info(traceback.format_exc())
+        retcode = 999
+      self.AfterRunOneTest(fulltest)
+
       if retcode:
-        logging.fatal('COVERAGE: test %s failed; return code: %d' %
+        logging.info('COVERAGE: test %s failed; return code: %d.' %
                       (fulltest, retcode))
         if self.options.strict:
+          logging.fatal('Test failure is fatal.')
           sys.exit(retcode)
+    self.AfterRunAllTests()
 
-  def AfterRunTests(self):
-    """Do things right after running tests."""
+  def AfterRunOneTest(self, testname):
+    """Do things right after running each test."""
     if not self.IsWindows():
       return
     # Stop counters
@@ -241,22 +295,85 @@ class Coverage(object):
     self.Run(cmdlist)
     full_output = self.vsts_output + '.coverage'
     shutil.move(full_output, self.vsts_output)
+    # generate lcov!
+    self.GenerateLcovWindows(testname)
+
+  def AfterRunAllTests(self):
+    """Do things right after running ALL tests."""
+    # On POSIX we can do it all at once without running out of memory.
+    # This contrasts with Windows where we must do it after each test.
+    if self.IsPosix():
+      self.GenerateLcovPosix()
+    # Only on Linux do we have the Xvfb step.
+    if self.IsLinux() and self.options.xvfb:
+      self.StopXvfb()
+
+  def StartXvfb(self):
+    """Start Xvfb and set an appropriate DISPLAY environment.  Linux only.
+
+    Copied from http://src.chromium.org/viewvc/chrome/trunk/tools/buildbot/
+      scripts/slave/slave_utils.py?view=markup
+    with some simplifications (e.g. no need to use xdisplaycheck, save
+    pid in var not file, etc)
+    """
+    logging.info('Xvfb: starting')
+    proc = subprocess.Popen(["Xvfb", ":9", "-screen", "0", "1024x768x24",
+                             "-ac"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    self.xvfb_pid = proc.pid
+    if not self.xvfb_pid:
+      logging.info('Could not start Xvfb')
+      return
+    os.environ['DISPLAY'] = ":9"
+    # Now confirm, giving a chance for it to start if needed.
+    logging.info('Xvfb: confirming')
+    for test in range(10):
+      proc = subprocess.Popen('xdpyinfo >/dev/null', shell=True)
+      pid, retcode = os.waitpid(proc.pid, 0)
+      if retcode == 0:
+        break
+      time.sleep(0.5)
+    if retcode != 0:
+      logging.info('Warning: could not confirm Xvfb happiness')
+    else:
+      logging.info('Xvfb: OK')
+
+  def StopXvfb(self):
+    """Stop Xvfb if needed.  Linux only."""
+    if self.xvfb_pid:
+      logging.info('Xvfb: killing')
+      try:
+        os.kill(self.xvfb_pid, signal.SIGKILL)
+      except:
+        pass
+      del os.environ['DISPLAY']
+      self.xvfb_pid = 0
+
 
   def GenerateLcovPosix(self):
-    """Convert profile data to lcov."""
+    """Convert profile data to lcov on Mac or Linux."""
+    if self.IsLinux():
+      # With Linux/make the current directory for this command is
+      # .../src/chrome but we need to be in .../src for the relative
+      # path of source files to be correct.  On Mac source files are
+      # compiled with abs paths so this isn't a problem.
+      start_dir = os.getcwd()
+      os.chdir('..')
     command = [self.mcov,
                '--directory', self.directory_parent,
                '--output', self.coverage_info_file]
-    print >>sys.stderr, 'Assembly command: ' + ' '.join(command)
+    logging.info('Assembly command: ' + ' '.join(command))
     retcode = subprocess.call(command)
     if retcode:
       logging.fatal('COVERAGE: %s failed; return code: %d' %
                     (command[0], retcode))
       if self.options.strict:
         sys.exit(retcode)
+    if self.IsLinux():
+      os.chdir(start_dir)
 
-  def GenerateLcovWindows(self):
-    """Convert VSTS format to lcov."""
+  def GenerateLcovWindows(self, testname=None):
+    """Convert VSTS format to lcov.  Appends coverage data to sum file."""
     lcov_file = self.vsts_output + '.lcov'
     if os.path.exists(lcov_file):
       os.remove(lcov_file)
@@ -270,18 +387,19 @@ class Coverage(object):
     if not os.path.exists(lcov_file):
       logging.fatal('Output file %s not created' % lcov_file)
       sys.exit(1)
-    # So we name it appropriately
+    logging.info('Appending lcov for test %s to %s' %
+                 (testname, self.coverage_info_file))
+    size_before = 0
     if os.path.exists(self.coverage_info_file):
-      os.remove(self.coverage_info_file)
-    logging.info('Renaming LCOV file to %s to be consistent' %
-                 self.coverage_info_file)
-    shutil.move(self.vsts_output + '.lcov', self.coverage_info_file)
-
-  def GenerateLcov(self):
-    if self.IsPosix():
-      self.GenerateLcovPosix()
-    else:
-      self.GenerateLcovWindows()
+      size_before = os.stat(self.coverage_info_file).st_size
+    src = open(lcov_file, 'r')
+    dst = open(self.coverage_info_file, 'a')
+    dst.write(src.read())
+    src.close()
+    dst.close()
+    size_after = os.stat(self.coverage_info_file).st_size
+    logging.info('Lcov file growth for %s: %d --> %d' %
+                 (self.coverage_info_file, size_before, size_after))
 
   def GenerateHtml(self):
     """Convert lcov to html."""
@@ -334,16 +452,25 @@ def main():
                     dest='src_root',
                     default='.',
                     help='Source root (only used on Windows)')
+  parser.add_option('-t',
+                    '--trim',
+                    dest='trim',
+                    default=True,
+                    help='Trim out tests?  Default True.')
+  parser.add_option('-x',
+                    '--xvfb',
+                    dest='xvfb',
+                    default=True,
+                    help='Use Xvfb for tests?  Default True.')
   (options, args) = parser.parse_args()
   if not options.directory:
     parser.error('Directory not specified')
   coverage = Coverage(options.directory, options, args)
   coverage.ClearData()
   coverage.FindTests()
-  coverage.BeforeRunTests()
+  if options.trim:
+    coverage.TrimTests()
   coverage.RunTests()
-  coverage.AfterRunTests()
-  coverage.GenerateLcov()
   if options.genhtml:
     coverage.GenerateHtml()
   return 0

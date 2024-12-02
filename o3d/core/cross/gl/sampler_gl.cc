@@ -32,7 +32,7 @@
 
 // This file contains the implementation for SamplerGL.
 
-// Precompiled header comes before everything else.
+#include "core/cross/gl/gl_headers.h"
 #include "core/cross/error.h"
 #include "core/cross/gl/renderer_gl.h"
 #include "core/cross/gl/sampler_gl.h"
@@ -76,6 +76,8 @@ unsigned int GLAddressMode(Sampler::AddressMode o3d_mode,
 unsigned int GLMinFilter(Sampler::FilterType o3d_filter,
                          Sampler::FilterType mip_filter) {
   switch (o3d_filter) {
+    case Sampler::NONE:
+      return GL_NEAREST;
     case Sampler::POINT:
       if (mip_filter == Sampler::NONE)
         return GL_NEAREST;
@@ -83,9 +85,8 @@ unsigned int GLMinFilter(Sampler::FilterType o3d_filter,
         return GL_NEAREST_MIPMAP_NEAREST;
       else if (mip_filter == Sampler::LINEAR)
         return GL_NEAREST_MIPMAP_LINEAR;
-    default:
-      DLOG(ERROR) << "Unknown filter " << static_cast<int>(o3d_filter);
-      // fall through
+      else if (mip_filter == Sampler::ANISOTROPIC)
+        return GL_NEAREST_MIPMAP_LINEAR;
     case Sampler::ANISOTROPIC:  // Anisotropy is handled in SetTextureAndStates
     case Sampler::LINEAR:
       if (mip_filter == Sampler::NONE)
@@ -94,16 +95,22 @@ unsigned int GLMinFilter(Sampler::FilterType o3d_filter,
         return GL_LINEAR_MIPMAP_NEAREST;
       else if (mip_filter == Sampler::LINEAR)
         return GL_LINEAR_MIPMAP_LINEAR;
+      else if (mip_filter == Sampler::ANISOTROPIC)
+        return GL_LINEAR_MIPMAP_LINEAR;
   }
+  // fall through
+  DLOG(ERROR) << "Unknown filter " << static_cast<int>(o3d_filter);
   DCHECK(false);
   return GL_NONE;
 }
 
 unsigned int GLMagFilter(Sampler::FilterType o3d_filter) {
   switch (o3d_filter) {
+    case Sampler::NONE:
     case Sampler::POINT:
       return GL_NEAREST;
     case Sampler::LINEAR:
+    case Sampler::ANISOTROPIC:
       return GL_LINEAR;
     default:
       DLOG(ERROR) << "Unknown filter " << static_cast<int>(o3d_filter);
@@ -137,7 +144,15 @@ void SamplerGL::SetTextureAndStates(CGparameter cg_param) {
     }
   }
 
-  GLuint handle = reinterpret_cast<GLuint>(texture_object->GetTextureHandle());
+  if (!renderer_->SafeToBindTexture(texture_object)) {
+    O3D_ERROR(renderer_->service_locator())
+        << "Attempt to bind texture, " << texture_object->name()
+        << " when drawing to same texture as a RenderSurface";
+    texture_object = renderer_->error_texture();
+  }
+
+  GLuint handle = static_cast<GLuint>(reinterpret_cast<intptr_t>(
+      texture_object->GetTextureHandle()));
   if (handle) {
     cgGLSetTextureParameter(cg_param, handle);
     cgGLEnableTextureParameter(cg_param);

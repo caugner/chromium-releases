@@ -1,16 +1,16 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved. Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "views/controls/menu/native_menu_win.h"
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/font.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/stl_util-inl.h"
+#include "gfx/canvas.h"
+#include "gfx/font.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "views/accelerator.h"
 #include "views/controls/menu/menu_2.h"
@@ -122,7 +122,7 @@ class NativeMenuWin::MenuHostWindow {
   // Called when the user selects a specific item.
   void OnMenuCommand(int position, HMENU menu) {
     NativeMenuWin* intergoat = GetNativeMenuWinFromHMENU(menu);
-    Menu2Model* model = intergoat->model_;
+    menus::MenuModel* model = intergoat->model_;
     model->ActivatedAt(position);
   }
 
@@ -300,13 +300,14 @@ const wchar_t* NativeMenuWin::MenuHostWindow::kMenuHostWindowKey =
 ////////////////////////////////////////////////////////////////////////////////
 // NativeMenuWin, public:
 
-NativeMenuWin::NativeMenuWin(Menu2Model* model, HWND system_menu_for)
+NativeMenuWin::NativeMenuWin(menus::MenuModel* model, HWND system_menu_for)
     : model_(model),
       menu_(NULL),
       owner_draw_(l10n_util::NeedOverrideDefaultUIFont(NULL, NULL) &&
                   !system_menu_for),
       system_menu_for_(system_menu_for),
-      first_item_index_(0) {
+      first_item_index_(0),
+      menu_action_(MENU_ACTION_NONE) {
 }
 
 NativeMenuWin::~NativeMenuWin() {
@@ -322,10 +323,28 @@ void NativeMenuWin::RunMenuAt(const gfx::Point& point, int alignment) {
   UpdateStates();
   UINT flags = TPM_LEFTBUTTON | TPM_RECURSE;
   flags |= GetAlignmentFlags(alignment);
+  menu_action_ = MENU_ACTION_NONE;
+
+  // Set a hook function so we can listen for keyboard events while the
+  // menu is open, and store a pointer to this object in a static
+  // variable so the hook has access to it (ugly, but it's the
+  // only way).
+  open_native_menu_win_ = this;
+  HHOOK hhook = SetWindowsHookEx(WH_MSGFILTER, MenuMessageHook,
+                                 GetModuleHandle(NULL), ::GetCurrentThreadId());
+
+  // Mark that any registered listeners have not been called for this particular
+  // opening of the menu.
+  listeners_called_ = false;
+
   // Command dispatch is done through WM_MENUCOMMAND, handled by the host
   // window.
+  HWND hwnd = host_window_->hwnd();
   TrackPopupMenuEx(menu_, flags, point.x(), point.y(), host_window_->hwnd(),
                    NULL);
+
+  UnhookWindowsHookEx(hhook);
+  open_native_menu_win_ = NULL;
 }
 
 void NativeMenuWin::CancelMenu() {
@@ -334,12 +353,14 @@ void NativeMenuWin::CancelMenu() {
 
 void NativeMenuWin::Rebuild() {
   ResetNativeMenu();
+  items_.clear();
+
   owner_draw_ = model_->HasIcons() || owner_draw_;
   first_item_index_ = model_->GetFirstItemIndex(GetNativeMenu());
   for (int menu_index = first_item_index_;
         menu_index < first_item_index_ + model_->GetItemCount(); ++menu_index) {
     int model_index = menu_index - first_item_index_;
-    if (model_->GetTypeAt(model_index) == Menu2Model::TYPE_SEPARATOR)
+    if (model_->GetTypeAt(model_index) == menus::MenuModel::TYPE_SEPARATOR)
       AddSeparatorItemAt(menu_index, model_index);
     else
       AddMenuItemAt(menu_index, model_index);
@@ -368,8 +389,81 @@ gfx::NativeMenu NativeMenuWin::GetNativeMenu() const {
   return menu_;
 }
 
+NativeMenuWin::MenuAction NativeMenuWin::GetMenuAction() const {
+  return menu_action_;
+}
+
+void NativeMenuWin::AddMenuListener(MenuListener* listener) {
+  listeners_.push_back(listener);
+}
+
+void NativeMenuWin::RemoveMenuListener(MenuListener* listener) {
+  for (std::vector<MenuListener*>::iterator iter = listeners_.begin();
+    iter != listeners_.end();
+    ++iter) {
+      if (*iter == listener) {
+        listeners_.erase(iter);
+        return;
+      }
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // NativeMenuWin, private:
+
+// static
+NativeMenuWin* NativeMenuWin::open_native_menu_win_ = NULL;
+
+// static
+bool NativeMenuWin::GetHighlightedMenuItemInfo(
+    HMENU menu, bool* has_parent, bool* has_submenu) {
+  for (int i = 0; i < ::GetMenuItemCount(menu); i++) {
+    UINT state = ::GetMenuState(menu, i, MF_BYPOSITION);
+    if (state & MF_HILITE) {
+      if (state & MF_POPUP) {
+        HMENU submenu = GetSubMenu(menu, i);
+        if (GetHighlightedMenuItemInfo(submenu, has_parent, has_submenu))
+          *has_parent = true;
+        else
+          *has_submenu = true;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+// static
+LRESULT CALLBACK NativeMenuWin::MenuMessageHook(
+    int n_code, WPARAM w_param, LPARAM l_param) {
+  LRESULT result = CallNextHookEx(NULL, n_code, w_param, l_param);
+
+  NativeMenuWin* this_ptr = open_native_menu_win_;
+  // The first time this hook is called, that means the menu has successfully
+  // opened, so call the callback function on all of our listeners.
+  if (!this_ptr->listeners_called_) {
+    for (unsigned int i = 0; i < this_ptr->listeners_.size(); ++i) {
+      this_ptr->listeners_[i]->OnMenuOpened();
+    }
+    this_ptr->listeners_called_ = true;
+  }
+
+  MSG* msg = reinterpret_cast<MSG*>(l_param);
+  if (msg->message == WM_KEYDOWN) {
+    bool has_parent = false;
+    bool has_submenu = false;
+    GetHighlightedMenuItemInfo(this_ptr->menu_, &has_parent, &has_submenu);
+    if (msg->wParam == VK_LEFT && !has_parent) {
+      this_ptr->menu_action_ = MENU_ACTION_PREVIOUS;
+      ::EndMenu();
+    } else if (msg->wParam == VK_RIGHT && !has_parent && !has_submenu) {
+      this_ptr->menu_action_ = MENU_ACTION_NEXT;
+      ::EndMenu();
+    }
+  }
+
+  return result;
+}
 
 bool NativeMenuWin::IsSeparatorItemAt(int menu_index) const {
   MENUITEMINFO mii = {0};
@@ -390,13 +484,13 @@ void NativeMenuWin::AddMenuItemAt(int menu_index, int model_index) {
 
   ItemData* item_data = new ItemData;
   item_data->label = std::wstring();
-  Menu2Model::ItemType type = model_->GetTypeAt(model_index);
-  if (type == Menu2Model::TYPE_SUBMENU) {
+  menus::MenuModel::ItemType type = model_->GetTypeAt(model_index);
+  if (type == menus::MenuModel::TYPE_SUBMENU) {
     item_data->submenu.reset(new Menu2(model_->GetSubmenuModelAt(model_index)));
     mii.fMask |= MIIM_SUBMENU;
     mii.hSubMenu = item_data->submenu->GetNativeMenu();
   } else {
-    if (type == Menu2Model::TYPE_RADIO)
+    if (type == menus::MenuModel::TYPE_RADIO)
       mii.fType |= MFT_RADIOCHECK;
     mii.wID = model_->GetCommandIdAt(model_index);
   }
@@ -456,8 +550,8 @@ void NativeMenuWin::UpdateMenuItemInfoForString(
     int model_index,
     const std::wstring& label) {
   std::wstring formatted = label;
-  Menu2Model::ItemType type = model_->GetTypeAt(model_index);
-  if (type != Menu2Model::TYPE_SUBMENU) {
+  menus::MenuModel::ItemType type = model_->GetTypeAt(model_index);
+  if (type != menus::MenuModel::TYPE_SUBMENU) {
     // Add accelerator details to the label if provided.
     views::Accelerator accelerator(base::VKEY_UNKNOWN, false, false, false);
     if (model_->GetAcceleratorAt(model_index, &accelerator)) {
@@ -480,7 +574,6 @@ void NativeMenuWin::UpdateMenuItemInfoForString(
 }
 
 UINT NativeMenuWin::GetAlignmentFlags(int alignment) const {
-  bool rtl = l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT;
   UINT alignment_flags = TPM_TOPALIGN;
   if (alignment == Menu2::ALIGN_TOPLEFT)
     alignment_flags |= TPM_LEFTALIGN;
@@ -521,7 +614,7 @@ void NativeMenuWin::CreateHostWindow() {
 ////////////////////////////////////////////////////////////////////////////////
 // SystemMenuModel:
 
-SystemMenuModel::SystemMenuModel(SimpleMenuModel::Delegate* delegate)
+SystemMenuModel::SystemMenuModel(menus::SimpleMenuModel::Delegate* delegate)
     : SimpleMenuModel(delegate) {
 }
 

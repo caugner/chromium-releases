@@ -15,6 +15,7 @@
 #include "base/path_service.h"
 #include "base/platform_thread.h"
 #include "base/string_util.h"
+#include "base/test/test_file_util.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/net/url_request_mock_http_job.h"
 #include "chrome/browser/net/url_request_slow_download_job.h"
@@ -55,11 +56,10 @@ class DownloadTest : public UITest {
  protected:
   DownloadTest() : UITest() {}
 
-  void CleanUpDownload(const FilePath& client_filename,
+  void CheckDownload(const FilePath& client_filename,
                        const FilePath& server_filename) {
     // Find the path on the client.
     FilePath file_on_client = download_prefix_.Append(client_filename);
-    EXPECT_TRUE(file_util::PathExists(file_on_client));
 
     // Find the path on the server.
     FilePath file_on_server;
@@ -68,9 +68,8 @@ class DownloadTest : public UITest {
     file_on_server = file_on_server.Append(server_filename);
     ASSERT_TRUE(file_util::PathExists(file_on_server));
 
-    // Check that we downloaded the file correctly.
-    EXPECT_TRUE(file_util::ContentsEqual(file_on_server,
-                                         file_on_client));
+    WaitForGeneratedFileAndCheck(file_on_client, file_on_server,
+                                 true, true, false);
 
 #if defined(OS_WIN)
     // Check if the Zone Identifier is correctly set.
@@ -82,8 +81,8 @@ class DownloadTest : public UITest {
     EXPECT_TRUE(file_util::Delete(file_on_client, false));
   }
 
-  void CleanUpDownload(const FilePath& file) {
-    CleanUpDownload(file, file);
+  void CheckDownload(const FilePath& file) {
+    CheckDownload(file, file);
   }
 
   virtual void SetUp() {
@@ -106,6 +105,7 @@ class DownloadTest : public UITest {
       // Complete sending the request.  We do this by loading a second URL in a
       // separate tab.
       scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
+      ASSERT_TRUE(window.get());
       EXPECT_TRUE(window->AppendTab(GURL(
           URLRequestSlowDownloadJob::kFinishDownloadUrl)));
       EXPECT_EQ(2, GetTabCount());
@@ -122,11 +122,7 @@ class DownloadTest : public UITest {
     EXPECT_TRUE(file_util::PathExists(download_path));
 
     // Delete the file we just downloaded.
-    for (int i = 0; i < 10; ++i) {
-      if (file_util::Delete(download_path, false))
-        break;
-      PlatformThread::Sleep(action_max_timeout_ms() / 10);
-    }
+    EXPECT_TRUE(file_util::DieFileDie(download_path, true));
     EXPECT_FALSE(file_util::PathExists(download_path));
   }
 
@@ -176,7 +172,8 @@ class DownloadTest : public UITest {
 
 // Download a file with non-viewable content, verify that the
 // download tab opened and the file exists.
-// This test is flaky. See bug 24889.
+// All download tests are flaky on all platforms, http://crbug.com/35275.
+// Additionally, there is Windows-specific flake, http://crbug.com/20809.
 TEST_F(DownloadTest, FLAKY_DownloadMimeType) {
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
 
@@ -186,10 +183,7 @@ TEST_F(DownloadTest, FLAKY_DownloadMimeType) {
   // No new tabs created, downloads appear in the current tab's download shelf.
   WaitUntilTabCount(1);
 
-  // Wait until the file is downloaded.
-  PlatformThread::Sleep(action_timeout_ms());
-
-  CleanUpDownload(file);
+  CheckDownload(file);
 
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
@@ -198,20 +192,20 @@ TEST_F(DownloadTest, FLAKY_DownloadMimeType) {
 
 // Access a file with a viewable mime-type, verify that a download
 // did not initiate.
-TEST_F(DownloadTest, NoDownload) {
+// All download tests are flaky on all platforms, http://crbug.com/35275.
+// Additionally, there is Windows-specific flake, http://crbug.com/20809.
+TEST_F(DownloadTest, FLAKY_NoDownload) {
   FilePath file(FILE_PATH_LITERAL("download-test2.html"));
   FilePath file_path = download_prefix_.Append(file);
 
   if (file_util::PathExists(file_path))
     ASSERT_TRUE(file_util::Delete(file_path, false));
 
-  EXPECT_EQ(1, GetTabCount());
-
   NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
   WaitUntilTabCount(1);
 
   // Wait to see if the file will be downloaded.
-  PlatformThread::Sleep(action_timeout_ms());
+  PlatformThread::Sleep(sleep_timeout_ms());
 
   EXPECT_FALSE(file_util::PathExists(file_path));
   if (file_util::PathExists(file_path))
@@ -225,20 +219,16 @@ TEST_F(DownloadTest, NoDownload) {
 // Download a 0-size file with a content-disposition header, verify that the
 // download tab opened and the file exists as the filename specified in the
 // header.  This also ensures we properly handle empty file downloads.
-// See bug http://crbug.com/20809
+// All download tests are flaky on all platforms, http://crbug.com/35275.
+// Additionally, there is Windows-specific flake, http://crbug.com/20809.
 TEST_F(DownloadTest, FLAKY_ContentDisposition) {
   FilePath file(FILE_PATH_LITERAL("download-test3.gif"));
   FilePath download_file(FILE_PATH_LITERAL("download-test3-attachment.gif"));
 
-  EXPECT_EQ(1, GetTabCount());
-
   NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
   WaitUntilTabCount(1);
 
-  // Wait until the file is downloaded.
-  PlatformThread::Sleep(action_timeout_ms());
-
-  CleanUpDownload(download_file, file);
+  CheckDownload(download_file, file);
 
   // Ensure the download shelf is visible on the window.
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
@@ -249,19 +239,17 @@ TEST_F(DownloadTest, FLAKY_ContentDisposition) {
 // Test that the download shelf is per-window by starting a download in one
 // tab, opening a second tab, closing the shelf, going back to the first tab,
 // and checking that the shelf is closed.
-TEST_F(DownloadTest, PerWindowShelf) {
+// See bug http://crbug.com/26325
+// All download tests are flaky on all platforms, http://crbug.com/35275.
+// Additionally, there is Windows-specific flake, http://crbug.com/20809.
+TEST_F(DownloadTest, FLAKY_PerWindowShelf) {
   FilePath file(FILE_PATH_LITERAL("download-test3.gif"));
   FilePath download_file(FILE_PATH_LITERAL("download-test3-attachment.gif"));
-
-  EXPECT_EQ(1, GetTabCount());
 
   NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
   WaitUntilTabCount(1);
 
-  // Wait until the file is downloaded.
-  PlatformThread::Sleep(action_timeout_ms());
-
-  CleanUpDownload(download_file, file);
+  CheckDownload(download_file, file);
 
   // Ensure the download shelf is visible on the window.
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
@@ -269,11 +257,11 @@ TEST_F(DownloadTest, PerWindowShelf) {
   EXPECT_TRUE(WaitForDownloadShelfVisible(browser.get()));
 
   // Open a second tab
-  browser->AppendTab(GURL());
+  ASSERT_TRUE(browser->AppendTab(GURL()));
   WaitUntilTabCount(2);
 
   // Hide shelf
-  browser->SetShelfVisible(false);
+  EXPECT_TRUE(browser->SetShelfVisible(false));
   EXPECT_TRUE(WaitForDownloadShelfInvisible(browser.get()));
 
   // Go to first tab
@@ -293,8 +281,9 @@ TEST_F(DownloadTest, PerWindowShelf) {
 // The test will first attempt to download a file; but the server will "pause"
 // in the middle until the server receives a second request for
 // "download-finish.  At that time, the download will finish.
-// Flaky on Linux: http://code.google.com/p/chromium/issues/detail?id=14746
-TEST_F(DownloadTest, UnknownSize) {
+// All download tests are flaky on all platforms, http://crbug.com/35275.
+// Additionally, there is Windows-specific flake, http://crbug.com/20809.
+TEST_F(DownloadTest, FLAKY_UnknownSize) {
   GURL url(URLRequestSlowDownloadJob::kUnknownSizeUrl);
   FilePath filename;
   net::FileURLToFilePath(url, &filename);
@@ -315,31 +304,33 @@ TEST_F(DownloadTest, DISABLED_KnownSize) {
 
 // Test that when downloading an item in Incognito mode, we don't crash when
 // closing the last Incognito window (http://crbug.com/13983).
-// This test is flaky. See bug 24684.
+// All download tests are flaky on all platforms, http://crbug.com/35275.
+// Additionally, there is Windows-specific flake, http://crbug.com/20809.
 TEST_F(DownloadTest, FLAKY_IncognitoDownload) {
   // Open a regular window and sanity check default values for window / tab
   // count and shelf visibility.
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
   int window_count = 0;
   ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
   ASSERT_EQ(1, window_count);
   EXPECT_EQ(1, GetTabCount());
   bool is_shelf_visible;
-  browser->IsShelfVisible(&is_shelf_visible);
+  EXPECT_TRUE(browser->IsShelfVisible(&is_shelf_visible));
   EXPECT_FALSE(is_shelf_visible);
 
   // Open an Incognito window.
   ASSERT_TRUE(browser->RunCommand(IDC_NEW_INCOGNITO_WINDOW));
-  scoped_refptr<BrowserProxy> incognito(automation()->GetBrowserWindow(1));
-  scoped_refptr<TabProxy> tab(incognito->GetTab(0));
   ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
   ASSERT_EQ(2, window_count);
+  scoped_refptr<BrowserProxy> incognito(automation()->GetBrowserWindow(1));
+  ASSERT_TRUE(incognito.get());
 
   // Download something.
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
-  //PlatformThread::Sleep(1000);
+  scoped_refptr<TabProxy> tab(incognito->GetTab(0));
+  ASSERT_TRUE(tab.get());
   ASSERT_TRUE(tab->NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file)));
-  PlatformThread::Sleep(action_timeout_ms());
 
   // Verify that the download shelf is showing for the Incognito window.
   EXPECT_TRUE(WaitForDownloadShelfVisible(incognito.get()));
@@ -350,10 +341,10 @@ TEST_F(DownloadTest, FLAKY_IncognitoDownload) {
   ASSERT_EQ(1, window_count);
 
   // Verify that the regular window does not have a download shelf.
-  browser->IsShelfVisible(&is_shelf_visible);
+  EXPECT_TRUE(browser->IsShelfVisible(&is_shelf_visible));
   EXPECT_FALSE(is_shelf_visible);
 
-  CleanUpDownload(file);
+  CheckDownload(file);
 }
 
 }  // namespace

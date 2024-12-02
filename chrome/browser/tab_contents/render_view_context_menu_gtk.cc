@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <gtk/gtk.h>
 
 #include "base/string_util.h"
-#include "chrome/browser/renderer_host/render_widget_host_view.h"
+#include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "webkit/glue/context_menu.h"
 
@@ -25,13 +25,19 @@ RenderViewContextMenuGtk::~RenderViewContextMenuGtk() {
 
 void RenderViewContextMenuGtk::DoInit() {
   DoneMakingMenu(&menu_);
-  gtk_menu_.reset(new MenuGtk(this, menu_.data(), NULL));
+  gtk_menu_.reset(new MenuGtk(this, menu_.data()));
+
+  RenderWidgetHostViewGtk* rwhv = static_cast<RenderWidgetHostViewGtk*>(
+      source_tab_contents_->GetRenderWidgetHostView());
+  if (rwhv)
+    rwhv->AppendInputMethodsContextMenu(gtk_menu_.get());
 }
 
-void RenderViewContextMenuGtk::Popup() {
-  if (source_tab_contents_->render_widget_host_view())
-    source_tab_contents_->render_widget_host_view()->ShowingContextMenu(true);
-  gtk_menu_->PopupAsContext(triggering_event_time_);
+void RenderViewContextMenuGtk::Popup(const gfx::Point& point) {
+  RenderWidgetHostView* rwhv = source_tab_contents_->GetRenderWidgetHostView();
+  if (rwhv)
+    rwhv->ShowingContextMenu(true);
+  gtk_menu_->PopupAsContextAt(triggering_event_time_, point);
 }
 
 bool RenderViewContextMenuGtk::IsCommandEnabled(int id) const {
@@ -42,7 +48,7 @@ bool RenderViewContextMenuGtk::IsItemChecked(int id) const {
   return ItemIsChecked(id);
 }
 
-void RenderViewContextMenuGtk::ExecuteCommand(int id) {
+void RenderViewContextMenuGtk::ExecuteCommandById(int id) {
   ExecuteItemCommand(id);
 }
 
@@ -56,8 +62,9 @@ std::string RenderViewContextMenuGtk::GetLabel(int id) const {
 }
 
 void RenderViewContextMenuGtk::StoppedShowing() {
-  if (source_tab_contents_->render_widget_host_view())
-    source_tab_contents_->render_widget_host_view()->ShowingContextMenu(false);
+  RenderWidgetHostView* rwhv = source_tab_contents_->GetRenderWidgetHostView();
+  if (rwhv)
+    rwhv->ShowingContextMenu(false);
 }
 
 void RenderViewContextMenuGtk::AppendMenuItem(int id) {

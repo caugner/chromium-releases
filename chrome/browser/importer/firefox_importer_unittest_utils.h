@@ -38,13 +38,13 @@ class FFUnitTestDecryptorProxy {
 
   // This match the parallel functions in NSSDecryptor.
   bool DecryptorInit(const std::wstring& dll_path, const std::wstring& db_path);
-  std::wstring Decrypt(const std::string& crypt);
+  string16 Decrypt(const std::string& crypt);
 
  private:
 #if defined(OS_MACOSX)
   // Blocks until either a timeout is reached, or until the client process
   // responds to an IPC message.
-  // Returns true if a reply was recieved successfully and false if the
+  // Returns true if a reply was received successfully and false if the
   // the operation timed out.
   bool WaitForClientResponse();
 
@@ -76,7 +76,7 @@ bool FFUnitTestDecryptorProxy::DecryptorInit(const std::wstring& dll_path,
   return decryptor_.Init(dll_path, db_path);
 }
 
-std::wstring FFUnitTestDecryptorProxy::Decrypt(const std::string& crypt) {
+string16 FFUnitTestDecryptorProxy::Decrypt(const std::string& crypt) {
   return decryptor_.Decrypt(crypt);
 }
 #endif  // !OS_MACOSX

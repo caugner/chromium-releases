@@ -1,10 +1,15 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "debug.h"
 #include "sandbox_impl.h"
 
 namespace playground {
 
 int Sandbox::sandbox_exit(int status) {
-  Debug::syscall(__NR_exit, "Executing handler");
+  long long tm;
+  Debug::syscall(&tm, __NR_exit, "Executing handler");
   struct {
     int       sysnum;
     long long cookie;
@@ -22,10 +27,11 @@ int Sandbox::sandbox_exit(int status) {
   }
 }
 
-bool Sandbox::process_exit(int parentProc, int sandboxFd, int threadFdPub,
+bool Sandbox::process_exit(int parentMapsFd, int sandboxFd, int threadFdPub,
                            int threadFd, SecureMem::Args* mem) {
-  SecureMem::lockSystemCall(parentProc, mem);
-  SecureMem::sendSystemCall(threadFdPub, true, parentProc, mem, __NR_exit, 0);
+  SecureMem::lockSystemCall(parentMapsFd, mem);
+  SecureMem::sendSystemCall(threadFdPub, true, parentMapsFd, mem,
+                            __NR_exit, 0);
   return true;
 }
 

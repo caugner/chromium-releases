@@ -1,21 +1,25 @@
-// Copyright (c) 2008-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/glue/webmediaplayer_impl.h"
 
+#include "base/callback.h"
 #include "base/command_line.h"
-#include "googleurl/src/gurl.h"
+#include "media/base/limits.h"
 #include "media/base/media_format.h"
+#include "media/base/media_switches.h"
 #include "media/filters/ffmpeg_audio_decoder.h"
 #include "media/filters/ffmpeg_demuxer.h"
 #include "media/filters/ffmpeg_video_decoder.h"
 #include "media/filters/null_audio_renderer.h"
+#include "media/filters/omx_video_decoder.h"
 #include "skia/ext/platform_canvas.h"
-#include "webkit/api/public/WebRect.h"
-#include "webkit/api/public/WebSize.h"
-#include "webkit/api/public/WebURL.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 #include "webkit/glue/media/video_renderer_impl.h"
+#include "webkit/glue/media/web_video_renderer.h"
 
 using WebKit::WebCanvas;
 using WebKit::WebRect;
@@ -78,7 +82,7 @@ void WebMediaPlayerImpl::Proxy::Repaint() {
 }
 
 void WebMediaPlayerImpl::Proxy::SetVideoRenderer(
-    VideoRendererImpl* video_renderer) {
+    WebVideoRenderer* video_renderer) {
   video_renderer_ = video_renderer;
 }
 
@@ -179,7 +183,9 @@ void WebMediaPlayerImpl::Proxy::NetworkEventTask() {
 // WebMediaPlayerImpl implementation
 
 WebMediaPlayerImpl::WebMediaPlayerImpl(WebKit::WebMediaPlayerClient* client,
-                                       media::FilterFactoryCollection* factory)
+                                       media::FilterFactoryCollection* factory,
+                                       WebVideoRendererFactoryFactory*
+                                           video_renderer_factory)
     : network_state_(WebKit::WebMediaPlayer::Empty),
       ready_state_(WebKit::WebMediaPlayer::HaveNothing),
       main_loop_(NULL),
@@ -191,6 +197,10 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(WebKit::WebMediaPlayerClient* client,
   // Saves the current message loop.
   DCHECK(!main_loop_);
   main_loop_ = MessageLoop::current();
+
+  // Make sure this gets deleted.
+  scoped_ptr<WebVideoRendererFactoryFactory>
+      scoped_video_renderer_factory(video_renderer_factory);
 
   // Create the pipeline and its thread.
   if (!pipeline_thread_.Start()) {
@@ -217,9 +227,13 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(WebKit::WebMediaPlayerClient* client,
   // Add in the default filter factories.
   filter_factory_->AddFactory(media::FFmpegDemuxer::CreateFilterFactory());
   filter_factory_->AddFactory(media::FFmpegAudioDecoder::CreateFactory());
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableOpenMax)) {
+    filter_factory_->AddFactory(media::OmxVideoDecoder::CreateFactory());
+  }
   filter_factory_->AddFactory(media::FFmpegVideoDecoder::CreateFactory());
   filter_factory_->AddFactory(media::NullAudioRenderer::CreateFilterFactory());
-  filter_factory_->AddFactory(VideoRendererImpl::CreateFactory(proxy_));
+  filter_factory_->AddFactory(video_renderer_factory->CreateFactory(proxy_));
 }
 
 WebMediaPlayerImpl::~WebMediaPlayerImpl() {
@@ -262,6 +276,7 @@ void WebMediaPlayerImpl::pause() {
 
   paused_ = true;
   pipeline_->SetPlaybackRate(0.0f);
+  paused_time_ = pipeline_->GetCurrentTime();
 }
 
 bool WebMediaPlayerImpl::supportsFullscreen() const {
@@ -289,11 +304,24 @@ void WebMediaPlayerImpl::seek(float seconds) {
     return;
   }
 
+  // Drop our ready state if the media file isn't fully loaded.
+  if (!pipeline_->IsLoaded()) {
+    SetReadyState(WebKit::WebMediaPlayer::HaveMetadata);
+  }
+
   // Try to preserve as much accuracy as possible.
   float microseconds = seconds * base::Time::kMicrosecondsPerSecond;
-  SetReadyState(WebKit::WebMediaPlayer::HaveMetadata);
+  base::TimeDelta seek_time =
+      base::TimeDelta::FromMicroseconds(static_cast<int64>(microseconds));
+
+  // Update our paused time.
+  if (paused_) {
+    paused_time_ = seek_time;
+  }
+
+  // Kick off the asynchronous seek!
   pipeline_->Seek(
-      base::TimeDelta::FromMicroseconds(static_cast<int64>(microseconds)),
+      seek_time,
       NewCallback(proxy_.get(),
                   &WebMediaPlayerImpl::Proxy::PipelineSeekCallback));
 }
@@ -390,12 +418,15 @@ bool WebMediaPlayerImpl::seeking() const {
 float WebMediaPlayerImpl::duration() const {
   DCHECK(MessageLoop::current() == main_loop_);
 
-  return static_cast<float>(pipeline_->GetDuration().InSecondsF());
+  return static_cast<float>(pipeline_->GetMediaDuration().InSecondsF());
 }
 
 float WebMediaPlayerImpl::currentTime() const {
   DCHECK(MessageLoop::current() == main_loop_);
 
+  if (paused_) {
+    return static_cast<float>(paused_time_.InSecondsF());
+  }
   return static_cast<float>(pipeline_->GetCurrentTime().InSecondsF());
 }
 
@@ -421,7 +452,7 @@ float WebMediaPlayerImpl::maxTimeSeekable() const {
   // TODO(hclam): We need to update this when we have better caching.
   if (pipeline_->IsStreaming())
     return 0.0f;
-  return static_cast<float>(pipeline_->GetDuration().InSecondsF());
+  return static_cast<float>(pipeline_->GetMediaDuration().InSecondsF());
 }
 
 unsigned long long WebMediaPlayerImpl::bytesLoaded() const {
@@ -451,17 +482,34 @@ void WebMediaPlayerImpl::paint(WebCanvas* canvas,
 #if WEBKIT_USING_SKIA
   proxy_->Paint(canvas, rect);
 #elif WEBKIT_USING_CG
+  // Get the current scaling in X and Y.
+  CGAffineTransform mat = CGContextGetCTM(canvas);
+  float scale_x = sqrt(mat.a * mat.a + mat.b * mat.b);
+  float scale_y = sqrt(mat.c * mat.c + mat.d * mat.d);
+  float inverse_scale_x = SkScalarNearlyZero(scale_x) ? 0.0f : 1.0f / scale_x;
+  float inverse_scale_y = SkScalarNearlyZero(scale_y) ? 0.0f : 1.0f / scale_y;
+  int scaled_width = static_cast<int>(rect.width * fabs(scale_x));
+  int scaled_height = static_cast<int>(rect.height * fabs(scale_y));
+
+  // Make sure we don't create a huge canvas.
+  // TODO(hclam): Respect the aspect ratio.
+  if (scaled_width > static_cast<int>(media::Limits::kMaxCanvas))
+    scaled_width = media::Limits::kMaxCanvas;
+  if (scaled_height > static_cast<int>(media::Limits::kMaxCanvas))
+    scaled_height = media::Limits::kMaxCanvas;
+
   // If there is no preexisting platform canvas, or if the size has
   // changed, recreate the canvas.  This is to avoid recreating the bitmap
   // buffer over and over for each frame of video.
   if (!skia_canvas_.get() ||
-      skia_canvas_->getDevice()->width() != rect.width ||
-      skia_canvas_->getDevice()->height() != rect.height) {
-    skia_canvas_.reset(new skia::PlatformCanvas(rect.width, rect.height, true));
+      skia_canvas_->getDevice()->width() != scaled_width ||
+      skia_canvas_->getDevice()->height() != scaled_height) {
+    skia_canvas_.reset(
+        new skia::PlatformCanvas(scaled_width, scaled_height, true));
   }
 
   // Draw to our temporary skia canvas.
-  gfx::Rect normalized_rect(rect.width, rect.height);
+  gfx::Rect normalized_rect(scaled_width, scaled_height);
   proxy_->Paint(skia_canvas_.get(), normalized_rect);
 
   // The mac coordinate system is flipped vertical from the normal skia
@@ -470,7 +518,7 @@ void WebMediaPlayerImpl::paint(WebCanvas* canvas,
   // start at 0,0.
   CGContextSaveGState(canvas);
   CGContextTranslateCTM(canvas, rect.x, rect.height + rect.y);
-  CGContextScaleCTM(canvas, 1.0, -1.0);
+  CGContextScaleCTM(canvas, inverse_scale_x, -inverse_scale_y);
 
   // We need a local variable CGRect version for DrawToContext.
   CGRect normalized_cgrect =
@@ -489,8 +537,10 @@ void WebMediaPlayerImpl::paint(WebCanvas* canvas,
 }
 
 bool WebMediaPlayerImpl::hasSingleSecurityOrigin() const {
-  // TODO(hclam): Implement this.
-  return false;
+  // TODO(scherkus): we'll need to do something smarter here if/when we start to
+  // support formats that contain references to external resources (i.e., MP4s
+  // containing links to other MP4s).  See http://crbug.com/25432
+  return true;
 }
 
 WebKit::WebMediaPlayer::MovieLoadType
@@ -522,17 +572,16 @@ void WebMediaPlayerImpl::OnPipelineInitialize() {
     WebKit::WebTimeRanges new_buffered(static_cast<size_t>(1));
     new_buffered[0].start = 0.0f;
     new_buffered[0].end =
-        static_cast<float>(pipeline_->GetDuration().InSecondsF());
+        static_cast<float>(pipeline_->GetMediaDuration().InSecondsF());
     buffered_.swap(new_buffered);
 
-    // Since we have initialized the pipeline, say we have everything.
+    // Since we have initialized the pipeline, say we have everything otherwise
+    // we'll remain either loading/idle.
     // TODO(hclam): change this to report the correct status.
     SetReadyState(WebKit::WebMediaPlayer::HaveMetadata);
     SetReadyState(WebKit::WebMediaPlayer::HaveEnoughData);
     if (pipeline_->IsLoaded()) {
       SetNetworkState(WebKit::WebMediaPlayer::Loaded);
-    } else {
-      SetNetworkState(WebKit::WebMediaPlayer::Loading);
     }
   } else {
     // TODO(hclam): should use pipeline_->GetError() to determine the state
@@ -550,6 +599,11 @@ void WebMediaPlayerImpl::OnPipelineInitialize() {
 void WebMediaPlayerImpl::OnPipelineSeek() {
   DCHECK(MessageLoop::current() == main_loop_);
   if (pipeline_->GetError() == media::PIPELINE_OK) {
+    // Update our paused time.
+    if (paused_) {
+      paused_time_ = pipeline_->GetCurrentTime();
+    }
+
     SetReadyState(WebKit::WebMediaPlayer::HaveEnoughData);
     GetClient()->timeChanged();
   }

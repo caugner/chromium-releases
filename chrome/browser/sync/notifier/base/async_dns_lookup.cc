@@ -9,18 +9,24 @@
 #if defined(OS_POSIX)
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <netinet/in_systm.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #endif  // defined(OS_POSIX)
 
+// Apparently, inet_aton() is available for Windows, but just not
+// declared anywhere.  We'd use inet_pton(), but it's Vista-only.
+#if defined(OS_WIN)
+int inet_aton(const char* cp, struct in_addr* inp);
+#endif  // defined(OS_WIN)
+
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "chrome/browser/sync/notifier/base/nethelpers.h"
-#include "chrome/browser/sync/notifier/gaia_auth/inet_aton.h"
 #include "talk/base/byteorder.h"
 #include "talk/base/common.h"
 #include "talk/base/socketaddress.h"

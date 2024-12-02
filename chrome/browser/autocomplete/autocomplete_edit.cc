@@ -7,16 +7,19 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
+#include "chrome/browser/command_updater.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/net/dns_global.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_versus_navigate_classifier.h"
 #include "chrome/common/notification_service.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_util.h"
@@ -24,14 +27,6 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 // AutocompleteEditModel
-
-// A single AutocompleteController used solely for making synchronous calls.  We
-// avoid using the popup's controller here because we don't want to interrupt
-// in-progress queries or modify the popup state.  We don't need a controller
-// for every edit because this will always be accessed on the main thread, so we
-// won't have thread-safety problems.
-static AutocompleteController* synchronous_controller = NULL;
-static int synchronous_controller_refcount = 0;
 
 AutocompleteEditModel::AutocompleteEditModel(
     AutocompleteEditView* view,
@@ -52,16 +47,6 @@ AutocompleteEditModel::AutocompleteEditModel(
       show_search_hint_(true),
       paste_and_go_transition_(PageTransition::TYPED),
       profile_(profile) {
-  if (++synchronous_controller_refcount == 1) {
-    // We don't have a controller yet, so create one.  No profile is set since
-    // we'll set this before each call to the controller.
-    synchronous_controller = new AutocompleteController(NULL);
-  }
-}
-
-AutocompleteEditModel::~AutocompleteEditModel() {
-  if (--synchronous_controller_refcount == 0)
-    delete synchronous_controller;
 }
 
 void AutocompleteEditModel::SetPopupModel(AutocompletePopupModel* popup_model) {
@@ -203,28 +188,16 @@ void AutocompleteEditModel::StartAutocomplete(
 }
 
 bool AutocompleteEditModel::CanPasteAndGo(const std::wstring& text) const {
-  // Reset local state.
+  if (!view_->GetCommandUpdater()->IsCommandEnabled(IDC_OPEN_CURRENT_URL))
+    return false;
+
   paste_and_go_url_ = GURL();
   paste_and_go_transition_ = PageTransition::TYPED;
   paste_and_go_alternate_nav_url_ = GURL();
 
-  // Ask the controller what do do with this input.
-  // Setting the profile is cheap, and since there's one synchronous_controller
-  // for many tabs which may all have different profiles, it ensures we're
-  // always using the right one.
-  synchronous_controller->SetProfile(profile_);
-  synchronous_controller->Start(text, std::wstring(), true, false, true);
-  DCHECK(synchronous_controller->done());
-  const AutocompleteResult& result = synchronous_controller->result();
-  if (result.empty())
-    return false;
-
-  // Set local state based on the default action for this input.
-  const AutocompleteResult::const_iterator match(result.default_match());
-  DCHECK(match != result.end());
-  paste_and_go_url_ = match->destination_url;
-  paste_and_go_transition_ = match->transition;
-  paste_and_go_alternate_nav_url_ = result.alternate_nav_url();
+  profile_->GetSearchVersusNavigateClassifier()->Classify(text, std::wstring(),
+      NULL, &paste_and_go_url_, &paste_and_go_transition_, NULL,
+      &paste_and_go_alternate_nav_url_);
 
   return paste_and_go_url_.is_valid();
 }
@@ -293,7 +266,7 @@ void AutocompleteEditModel::SendOpenNotification(size_t selected_line,
   const TemplateURL* const template_url =
       template_url_model->GetTemplateURLForKeyword(keyword);
   if (template_url) {
-    UserMetrics::RecordAction(L"AcceptedKeyword", profile_);
+    UserMetrics::RecordAction(UserMetricsAction("AcceptedKeyword"), profile_);
     template_url_model->IncrementUsageCount(template_url);
   }
 
@@ -311,7 +284,7 @@ void AutocompleteEditModel::AcceptKeyword() {
                                // since the edit contents have disappeared.  It
                                // doesn't really matter, but we clear it to be
                                // consistent.
-  UserMetrics::RecordAction(L"AcceptedKeywordHint", profile_);
+  UserMetrics::RecordAction(UserMetricsAction("AcceptedKeywordHint"), profile_);
 }
 
 void AutocompleteEditModel::ClearKeyword(const std::wstring& visible_text) {
@@ -375,14 +348,21 @@ bool AutocompleteEditModel::OnEscapeKeyPressed() {
 
   view_->RevertAll();
   view_->SelectAll(true);
-  return false;
+  return true;
 }
 
 void AutocompleteEditModel::OnControlKeyChanged(bool pressed) {
   // Don't change anything unless the key state is actually toggling.
   if (pressed == (control_key_state_ == UP)) {
+    ControlKeyState old_state = control_key_state_;
     control_key_state_ = pressed ? DOWN_WITHOUT_CHANGE : UP;
-    if (popup_->IsOpen()) {
+    if ((control_key_state_ == DOWN_WITHOUT_CHANGE) && has_temporary_text_) {
+      // Arrowing down and then hitting control accepts the temporary text as
+      // the input text.
+      InternalSetUserText(UserTextFromDisplayText(view_->GetText()));
+      has_temporary_text_ = false;
+    }
+    if ((old_state != DOWN_WITH_CHANGE) && popup_->IsOpen()) {
       // Autocomplete history provider results may change, so refresh the
       // popup.  This will force user_input_in_progress_ to true, but if the
       // popup is open, that should have already been the case.
@@ -455,6 +435,16 @@ void AutocompleteEditModel::OnPopupDataChanged(
       has_temporary_text_ = true;
       original_url_ = popup_->URLsForCurrentSelection(NULL, NULL, NULL);
       original_keyword_ui_state_ = keyword_ui_state_;
+    }
+    if (control_key_state_ == DOWN_WITHOUT_CHANGE) {
+      // Arrowing around the popup cancels control-enter.
+      control_key_state_ = DOWN_WITH_CHANGE;
+      // Now things are a bit screwy: the desired_tld has changed, but if we
+      // update the popup, the new order of entries won't match the old, so the
+      // user's selection gets screwy; and if we don't update the popup, and the
+      // user reverts, then the selected item will be as if control is still
+      // pressed, even though maybe it isn't any more.  There is no obvious
+      // right answer here :(
     }
     view_->OnTemporaryTextMaybeChanged(DisplayTextFromUserText(text),
                                        save_original_selection);
@@ -600,38 +590,16 @@ GURL AutocompleteEditModel::GetURLForCurrentText(
     PageTransition::Type* transition,
     bool* is_history_what_you_typed_match,
     GURL* alternate_nav_url) const {
-  return (popup_->IsOpen() || query_in_progress()) ?
-      popup_->URLsForCurrentSelection(transition,
-                                      is_history_what_you_typed_match,
-                                      alternate_nav_url) :
-      URLsForDefaultMatch(transition, is_history_what_you_typed_match,
-                          alternate_nav_url);
-}
+  if (popup_->IsOpen() || query_in_progress()) {
+    return popup_->URLsForCurrentSelection(transition,
+                                           is_history_what_you_typed_match,
+                                           alternate_nav_url);
+  }
 
-GURL AutocompleteEditModel::URLsForDefaultMatch(
-    PageTransition::Type* transition,
-    bool* is_history_what_you_typed_match,
-    GURL* alternate_nav_url) const {
-  // Ask the controller what do do with this input.
-  // Setting the profile is cheap, and since there's one synchronous_controller
-  // for many tabs which may all have different profiles, it ensures we're
-  // always using the right one.
-  synchronous_controller->SetProfile(profile_);
-  synchronous_controller->Start(UserTextFromDisplayText(view_->GetText()),
-                                GetDesiredTLD(), true, false, true);
-  CHECK(synchronous_controller->done());
-
-  const AutocompleteResult& result = synchronous_controller->result();
-  if (result.empty())
-    return GURL();
-
-  // Get the URLs for the default match.
-  const AutocompleteResult::const_iterator match = result.default_match();
-  if (transition)
-    *transition = match->transition;
-  if (is_history_what_you_typed_match)
-    *is_history_what_you_typed_match = match->is_history_what_you_typed_match;
-  if (alternate_nav_url)
-    *alternate_nav_url = result.alternate_nav_url();
-  return match->destination_url;
+  GURL destination_url;
+  profile_->GetSearchVersusNavigateClassifier()->Classify(
+      UserTextFromDisplayText(view_->GetText()), GetDesiredTLD(), NULL,
+      &destination_url, transition, is_history_what_you_typed_match,
+      alternate_nav_url);
+  return destination_url;
 }

@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "app/gfx/native_widget_types.h"
 #include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
+#include "base/test/test_file_util.h"
 #include "base/values.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/common/chrome_switches.h"
@@ -16,55 +17,15 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
-#include "net/base/net_util.h"
-#include "net/url_request/url_request_unittest.h"
+#include "gfx/native_widget_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "net/base/net_util.h"
+#include "net/url_request/url_request_unittest.h"
 
 namespace {
 
-// Delay to let the browser shut down before trying more brutal methods.
-static const int kWaitForTerminateMsec = 30000;
-
 class BrowserTest : public UITest {
-
- protected:
-  void TerminateBrowser() {
-#if defined(OS_WIN)
-    scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
-    ASSERT_TRUE(browser->TerminateSession());
-#elif defined(OS_POSIX)
-    // There's nothing to do here if the browser is not running.
-    if (IsBrowserRunning()) {
-      automation()->SetFilteredInet(false);
-
-      int window_count = 0;
-      EXPECT_TRUE(automation()->GetBrowserWindowCount(&window_count));
-
-      // Now, drop the automation IPC channel so that the automation provider in
-      // the browser notices and drops its reference to the browser process.
-      automation()->Disconnect();
-
-      EXPECT_EQ(kill(process_, SIGTERM), 0);
-
-      // Wait for the browser process to quit. It should have quit when it got
-      // SIGTERM.
-      int timeout = kWaitForTerminateMsec;
-#ifdef WAIT_FOR_DEBUGGER_ON_OPEN
-      timeout = 500000;
-#endif
-      if (!base::WaitForSingleProcess(process_, timeout)) {
-        // We need to force the browser to quit because it didn't quit fast
-        // enough. Take no chance and kill every chrome processes.
-        CleanupAppProcesses();
-      }
-
-      // Don't forget to close the handle
-      base::CloseProcessHandle(process_);
-      process_ = NULL;
-    }
-#endif  // OS_POSIX
-  }
 };
 
 class VisibleBrowserTest : public UITest {
@@ -79,18 +40,14 @@ class VisibleBrowserTest : public UITest {
 TEST_F(BrowserTest, WindowsSessionEnd) {
 #elif defined(OS_POSIX)
 // The browser should quit gracefully and quickly if it receives a SIGTERM.
-TEST_F(BrowserTest, PosixSessionEnd) {
+// http://code.google.com/p/chromium/issues/detail?id=39500
+TEST_F(BrowserTest, FLAKY_PosixSessionEnd) {
 #endif
-#if defined(OS_WIN) || defined(OS_POSIX)
   FilePath test_file(test_data_directory_);
   test_file = test_file.AppendASCII("title1.html");
 
   NavigateToURL(net::FilePathToFileURL(test_file));
-  PlatformThread::Sleep(action_timeout_ms());
-
   TerminateBrowser();
-
-  PlatformThread::Sleep(action_timeout_ms());
   ASSERT_FALSE(IsBrowserRunning());
 
   // Make sure the UMA metrics say we didn't crash.
@@ -114,7 +71,6 @@ TEST_F(BrowserTest, PosixSessionEnd) {
                                         &exited_cleanly));
   ASSERT_TRUE(exited_cleanly);
 }
-#endif  // OS_WIN || OS_POSIX
 
 // Test that scripts can fork a new renderer process for a tab in a particular
 // case (which matches following a link in Gmail).  The script must open a new
@@ -134,6 +90,7 @@ TEST_F(BrowserTest, NullOpenerRedirectForksProcess) {
   ASSERT_TRUE(NULL != server.get());
   FilePath test_file(test_data_directory_);
   scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(window.get());
   scoped_refptr<TabProxy> tab(window->GetActiveTab());
   ASSERT_TRUE(tab.get());
 
@@ -154,19 +111,26 @@ TEST_F(BrowserTest, NullOpenerRedirectForksProcess) {
   // Make sure that a new tab has been created and that we have a new renderer
   // process for it.
   ASSERT_TRUE(tab->NavigateToURLAsync(fork_url));
-  PlatformThread::Sleep(action_timeout_ms());
+  PlatformThread::Sleep(sleep_timeout_ms());
   ASSERT_EQ(orig_process_count + 1, GetBrowserProcessCount());
   int new_tab_count = -1;
   ASSERT_TRUE(window->GetTabCount(&new_tab_count));
   ASSERT_EQ(orig_tab_count + 1, new_tab_count);
 }
+#endif  // CHROME_V8
+
+// This test fails on ChromeOS (it has never been known to work on it).
+// Currently flaky on Windows - it has crashed a couple of times.
+// http://crbug.com/32799
+#if defined(OS_CHROMEOS)
+#define MAYBE_OtherRedirectsDontForkProcess DISABLED_OtherRedirectsDontForkProcess
+#else
+#define MAYBE_OtherRedirectsDontForkProcess FLAKY_OtherRedirectsDontForkProcess
 #endif
 
-#if !defined(OS_LINUX)
-// TODO(port): This passes on linux locally, but fails on the try bot.
 // Tests that non-Gmail-like script redirects (i.e., non-null window.opener) or
 // a same-page-redirect) will not fork a new process.
-TEST_F(BrowserTest, OtherRedirectsDontForkProcess) {
+TEST_F(BrowserTest, MAYBE_OtherRedirectsDontForkProcess) {
   // This test only works in multi-process mode
   if (in_process_renderer())
     return;
@@ -177,12 +141,14 @@ TEST_F(BrowserTest, OtherRedirectsDontForkProcess) {
   ASSERT_TRUE(NULL != server.get());
   FilePath test_file(test_data_directory_);
   scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(window.get());
   scoped_refptr<TabProxy> tab(window->GetActiveTab());
   ASSERT_TRUE(tab.get());
 
   // Start with a file:// url
   test_file = test_file.AppendASCII("title2.html");
-  tab->NavigateToURL(net::FilePathToFileURL(test_file));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
+            tab->NavigateToURL(net::FilePathToFileURL(test_file)));
   int orig_tab_count = -1;
   ASSERT_TRUE(window->GetTabCount(&orig_tab_count));
   int orig_process_count = GetBrowserProcessCount();
@@ -196,7 +162,7 @@ TEST_F(BrowserTest, OtherRedirectsDontForkProcess) {
 
   // Make sure that a new tab but not new process has been created.
   ASSERT_TRUE(tab->NavigateToURLAsync(dont_fork_url));
-  PlatformThread::Sleep(action_timeout_ms());
+  PlatformThread::Sleep(sleep_timeout_ms());
   ASSERT_EQ(orig_process_count, GetBrowserProcessCount());
   int new_tab_count = -1;
   ASSERT_TRUE(window->GetTabCount(&new_tab_count));
@@ -208,33 +174,18 @@ TEST_F(BrowserTest, OtherRedirectsDontForkProcess) {
 
   // Make sure that no new process has been created.
   ASSERT_TRUE(tab->NavigateToURLAsync(dont_fork_url2));
-  PlatformThread::Sleep(action_timeout_ms());
+  PlatformThread::Sleep(sleep_timeout_ms());
   ASSERT_EQ(orig_process_count, GetBrowserProcessCount());
 }
-#endif
 
-#if defined(OS_WIN)
-// TODO(estade): need to port GetActiveTabTitle().
 TEST_F(VisibleBrowserTest, WindowOpenClose) {
   FilePath test_file(test_data_directory_);
   test_file = test_file.AppendASCII("window.close.html");
 
-  NavigateToURL(net::FilePathToFileURL(test_file));
-
-  int i;
-  for (i = 0; i < 10; ++i) {
-    PlatformThread::Sleep(action_max_timeout_ms() / 10);
-    std::wstring title = GetActiveTabTitle();
-    if (title == L"PASSED") {
-      // Success, bail out.
-      break;
-    }
-  }
-
-  if (i == 10)
-    FAIL() << "failed to get error page title";
+  NavigateToURLBlockUntilNavigationsComplete(
+      net::FilePathToFileURL(test_file), 2);
+  EXPECT_EQ(L"Title Of Awesomeness", GetActiveTabTitle());
 }
-#endif
 
 class ShowModalDialogTest : public UITest {
  public:
@@ -243,7 +194,8 @@ class ShowModalDialogTest : public UITest {
   }
 };
 
-TEST_F(ShowModalDialogTest, BasicTest) {
+// Flakiness returned. Re-opened crbug.com/17806
+TEST_F(ShowModalDialogTest, FLAKY_BasicTest) {
   FilePath test_file(test_data_directory_);
   test_file = test_file.AppendASCII("showmodaldialog.html");
 
@@ -267,9 +219,6 @@ TEST_F(ShowModalDialogTest, BasicTest) {
 }
 
 class SecurityTest : public UITest {
- protected:
-  static const int kTestIntervalMs = 250;
-  static const int kTestWaitTimeoutMs = 60 * 1000;
 };
 
 TEST_F(SecurityTest, DisallowFileUrlUniversalAccessTest) {
@@ -283,8 +232,74 @@ TEST_F(SecurityTest, DisallowFileUrlUniversalAccessTest) {
   ASSERT_TRUE(tab->NavigateToURL(url));
 
   std::string value = WaitUntilCookieNonEmpty(tab.get(), url,
-        "status", kTestIntervalMs, kTestWaitTimeoutMs);
+        "status", action_max_timeout_ms());
   ASSERT_STREQ("Disallowed", value.c_str());
 }
+
+#if !defined(OS_MACOSX)
+class KioskModeTest : public UITest {
+ public:
+  KioskModeTest() {
+    launch_arguments_.AppendSwitch(switches::kKioskMode);
+  }
+};
+
+TEST_F(KioskModeTest, EnableKioskModeTest) {
+  // Load a dummy url.
+  FilePath test_file(test_data_directory_);
+  test_file = test_file.AppendASCII("title1.html");
+
+  // Verify that the window is present.
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+
+  // Check if browser is in fullscreen mode.
+  bool is_visible;
+  ASSERT_TRUE(browser->IsFullscreen(&is_visible));
+  EXPECT_TRUE(is_visible);
+  ASSERT_TRUE(browser->IsFullscreenBubbleVisible(&is_visible));
+  EXPECT_FALSE(is_visible);
+}
+#endif  // !defined(OS_MACOSX)
+
+#if defined(OS_WIN)
+// This test verifies that Chrome can be launched with a user-data-dir path
+// which contains non ASCII characters.
+class LaunchBrowserWithNonAsciiUserDatadir : public UITest {
+public:
+  void SetUp() {
+    PathService::Get(base::DIR_TEMP, &tmp_profile_);
+    tmp_profile_ = tmp_profile_.AppendASCII("tmp_profile");
+    tmp_profile_ = tmp_profile_.Append(L"Test Chrome Géraldine");
+
+    // Create a fresh, empty copy of this directory.
+    file_util::Delete(tmp_profile_, true);
+    file_util::CreateDirectory(tmp_profile_);
+
+    launch_arguments_.AppendSwitchWithValue(switches::kUserDataDir,
+                                            tmp_profile_.ToWStringHack());
+  }
+
+  bool LaunchAppWithProfile() {
+    UITest::SetUp();
+    return true;
+  }
+
+  void TearDown() {
+    UITest::TearDown();
+    EXPECT_TRUE(file_util::DieFileDie(tmp_profile_, true));
+  }
+
+public:
+  FilePath tmp_profile_;
+};
+
+TEST_F(LaunchBrowserWithNonAsciiUserDatadir, TestNonAsciiUserDataDir) {
+  ASSERT_TRUE(LaunchAppWithProfile());
+  // Verify that the window is present.
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+}
+#endif  // defined(OS_WIN)
 
 }  // namespace

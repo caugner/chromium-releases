@@ -10,13 +10,13 @@
 
 #include "base/ref_counted.h"
 #include "resource.h"
-#include "grit/chrome_frame_resources.h"
+#include "grit/generated_resources.h"
 
 class ChromeFrameAutomationClient;
 
 class CFFindDialog : public CDialogImpl<CFFindDialog> {
  public:
-  enum { IDD = IDD_FIND_DIALOG };
+  enum { IDD = IDD_CHROME_FRAME_FIND_DIALOG };
 
   BEGIN_MSG_MAP(CFFindDialog)
     MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
@@ -48,7 +48,7 @@ class CFFindDialog : public CDialogImpl<CFFindDialog> {
   static HHOOK msg_hook_;
 
   // We don't own these, and they must exist at least as long as we do.
-  ChromeFrameAutomationClient* automation_client_;
+  scoped_refptr<ChromeFrameAutomationClient> automation_client_;
 };
 
 #endif  // CHROME_FRAME_FIND_DIALOG_H_

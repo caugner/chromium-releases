@@ -5,9 +5,12 @@
 #ifndef VIEWS_CONTROLS_TABLE_TABLE_VIEW_OBSERVER_H_
 #define VIEWS_CONTROLS_TABLE_TABLE_VIEW_OBSERVER_H_
 
+#include "base/keyboard_codes.h"
+
 namespace views {
 
 class TableView;
+class TableView2;
 
 // TableViewObserver is notified about the TableView selection.
 class TableViewObserver {
@@ -28,6 +31,9 @@ class TableViewObserver {
 
   // Invoked when the user presses the delete key.
   virtual void OnTableViewDelete(TableView* table_view) {}
+
+  // Invoked when the user presses the delete key.
+  virtual void OnTableView2Delete(TableView2* table_view) {}
 };
 
 }  // namespace views

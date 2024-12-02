@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,12 @@
 
 #include <vector>
 
-#include "app/gfx/native_widget_types.h"
+#include "app/surface/transport_dib.h"
+#include "chrome/common/content_settings.h"
+#include "chrome/common/geoposition.h"
+#include "chrome/common/page_zoom.h"
 #include "chrome/common/thumbnail_score.h"
-#include "chrome/common/transport_dib.h"
+#include "gfx/native_widget_types.h"
 #include "ipc/ipc_message_utils.h"
 #include "net/base/upload_data.h"
 #include "net/url_request/url_request_status.h"
@@ -87,17 +90,100 @@ struct ParamTraits<gfx::Size> {
 };
 
 template <>
+struct ParamTraits<ContentSetting> {
+  typedef ContentSetting param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, static_cast<int>(p));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    int value;
+    if (!ReadParam(m, iter, &value))
+      return false;
+    if (value < 0 || value >= static_cast<int>(CONTENT_SETTING_NUM_SETTINGS))
+      return false;
+    *r = static_cast<param_type>(value);
+    return true;
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    LogParam(static_cast<int>(p), l);
+  }
+};
+
+template <>
+struct ParamTraits<ContentSettingsType> {
+  typedef ContentSettingsType param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, static_cast<int>(p));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    int value;
+    if (!ReadParam(m, iter, &value))
+      return false;
+    if (value < 0 || value >= static_cast<int>(CONTENT_SETTINGS_NUM_TYPES))
+      return false;
+    *r = static_cast<param_type>(value);
+    return true;
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    LogParam(static_cast<int>(p), l);
+  }
+};
+
+template <>
+struct ParamTraits<ContentSettings> {
+  typedef ContentSettings param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::wstring* l);
+};
+
+template <>
 struct ParamTraits<gfx::NativeWindow> {
   typedef gfx::NativeWindow param_type;
   static void Write(Message* m, const param_type& p) {
-    m->WriteIntPtr(reinterpret_cast<intptr_t>(p));
+#if defined(OS_WIN)
+    // HWNDs are always 32 bits on Windows, even on 64 bit systems.
+    m->WriteUInt32(reinterpret_cast<uint32>(p));
+#else
+    m->WriteData(reinterpret_cast<const char*>(&p), sizeof(p));
+#endif
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
-    DCHECK_EQ(sizeof(param_type), sizeof(intptr_t));
-    return m->ReadIntPtr(iter, reinterpret_cast<intptr_t*>(r));
+#if defined(OS_WIN)
+    return m->ReadUInt32(iter, reinterpret_cast<uint32*>(r));
+#else
+    const char *data;
+    int data_size = 0;
+    bool result = m->ReadData(iter, &data, &data_size);
+    if (result && data_size == sizeof(gfx::NativeWindow)) {
+      memcpy(r, data, sizeof(gfx::NativeWindow));
+    } else {
+      result = false;
+      NOTREACHED();
+    }
+    return result;
+#endif
   }
   static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"0x%X", p));
+    l->append(L"<gfx::NativeWindow>");
+  }
+};
+
+template <>
+struct ParamTraits<PageZoom::Function> {
+  typedef PageZoom::Function param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, static_cast<int>(p));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    int value;
+    if (!ReadParam(m, iter, &value))
+      return false;
+    *r = static_cast<param_type>(value);
+    return true;
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    LogParam(static_cast<int>(p), l);
   }
 };
 
@@ -106,16 +192,17 @@ template <>
 struct ParamTraits<WindowOpenDisposition> {
   typedef WindowOpenDisposition param_type;
   static void Write(Message* m, const param_type& p) {
-    m->WriteInt(p);
+    WriteParam(m, static_cast<int>(p));
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
-    int temp;
-    bool res = m->ReadInt(iter, &temp);
-    *r = static_cast<WindowOpenDisposition>(temp);
-    return res;
+    int value;
+    if (!ReadParam(m, iter, &value))
+      return false;
+    *r = static_cast<param_type>(value);
+    return true;
   }
   static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"%d", p));
+    LogParam(static_cast<int>(p), l);
   }
 };
 
@@ -231,6 +318,7 @@ struct ParamTraits<net::UploadData::Element> {
       WriteParam(m, p.file_path());
       WriteParam(m, p.file_range_offset());
       WriteParam(m, p.file_range_length());
+      WriteParam(m, p.expected_file_modification_time());
     }
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
@@ -247,13 +335,17 @@ struct ParamTraits<net::UploadData::Element> {
       DCHECK(type == net::UploadData::TYPE_FILE);
       FilePath file_path;
       uint64 offset, length;
+      base::Time expected_modification_time;
       if (!ReadParam(m, iter, &file_path))
         return false;
       if (!ReadParam(m, iter, &offset))
         return false;
       if (!ReadParam(m, iter, &length))
         return false;
-      r->SetToFilePathRange(file_path, offset, length);
+      if (!ReadParam(m, iter, &expected_modification_time))
+        return false;
+      r->SetToFilePathRange(file_path, offset, length,
+                            expected_modification_time);
     }
     return true;
   }
@@ -269,7 +361,7 @@ struct ParamTraits<scoped_refptr<net::UploadData> > {
   static void Write(Message* m, const param_type& p) {
     WriteParam(m, p.get() != NULL);
     if (p) {
-      WriteParam(m, p->elements());
+      WriteParam(m, *p->elements());
       WriteParam(m, p->identifier());
     }
   }
@@ -282,7 +374,7 @@ struct ParamTraits<scoped_refptr<net::UploadData> > {
     std::vector<net::UploadData::Element> elements;
     if (!ReadParam(m, iter, &elements))
       return false;
-    int identifier;
+    int64 identifier;
     if (!ReadParam(m, iter, &identifier))
       return false;
     *r = new net::UploadData;
@@ -324,6 +416,22 @@ struct ParamTraits<ThumbnailScore> {
     l->append(StringPrintf(L"(%f, %d, %d)",
                            p.boring_score, p.good_clipping, p.at_top));
   }
+};
+
+template <>
+struct ParamTraits<Geoposition> {
+  typedef Geoposition param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* p);
+  static void Log(const param_type& p, std::wstring* l);
+};
+
+template <>
+struct ParamTraits<Geoposition::ErrorCode> {
+  typedef Geoposition::ErrorCode param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* p);
+  static void Log(const param_type& p, std::wstring* l);
 };
 
 }  // namespace IPC

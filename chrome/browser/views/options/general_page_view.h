@@ -5,10 +5,10 @@
 #ifndef CHROME_BROWSER_VIEWS_OPTIONS_GENERAL_PAGE_VIEW_H_
 #define CHROME_BROWSER_VIEWS_OPTIONS_GENERAL_PAGE_VIEW_H_
 
+#include "chrome/browser/pref_member.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/views/options/options_page_view.h"
 #include "chrome/browser/views/url_picker.h"
-#include "chrome/common/pref_member.h"
 #include "views/controls/combobox/combobox.h"
 #include "views/controls/button/button.h"
 #include "views/controls/table/table_view_observer.h"
@@ -70,6 +70,10 @@ class GeneralPageView : public OptionsPageView,
   // Updates the UI state to reflect the current default browser state.
   virtual void SetDefaultBrowserUIState(
       ShellIntegration::DefaultBrowserUIState state);
+
+  // For Side by Side installs, this will disable the Default Browser setting
+  // and display an explanitory message.
+  void SetDefaultBrowserUIStateForSxS();
 
   // Init all the dialog controls
   void InitStartupGroup();

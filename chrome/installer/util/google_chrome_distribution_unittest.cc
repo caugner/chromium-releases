@@ -46,7 +46,9 @@ class GoogleChromeDistributionTest : public testing::Test {
   std::wstring GetApKeyPath() {
     std::wstring reg_key(google_update::kRegPathClientState);
     reg_key.append(L"\\");
-    reg_key.append(google_update::kChromeGuid);
+
+    BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+    reg_key.append(dist->GetAppGuid());
     return reg_key;
   }
 
@@ -215,7 +217,7 @@ TEST_F(GoogleChromeDistributionTest, TestExtractUninstallMetrics) {
   JSONStringValueSerializer json_deserializer(pref_string);
   std::string error_message;
 
-  scoped_ptr<Value> root(json_deserializer.Deserialize(&error_message));
+  scoped_ptr<Value> root(json_deserializer.Deserialize(NULL, &error_message));
   ASSERT_TRUE(root.get());
 
   std::wstring uninstall_metrics_string;

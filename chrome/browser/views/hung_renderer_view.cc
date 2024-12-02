@@ -1,12 +1,12 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/hung_renderer_dialog.h"
 
-#include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/i18n/rtl.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
@@ -14,6 +14,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/result_codes.h"
+#include "gfx/canvas.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -72,7 +73,7 @@ HungPagesTableModel::~HungPagesTableModel() {
 void HungPagesTableModel::InitForTabContents(TabContents* hung_contents) {
   tab_contentses_.clear();
   for (TabContentsIterator it; !it.done(); ++it) {
-    if (it->process() == hung_contents->process())
+    if (it->GetRenderProcessHost() == hung_contents->GetRenderProcessHost())
       tab_contentses_.push_back(*it);
   }
   // The world is different.
@@ -89,13 +90,13 @@ int HungPagesTableModel::RowCount() {
 
 std::wstring HungPagesTableModel::GetText(int row, int column_id) {
   DCHECK(row >= 0 && row < RowCount());
-  std::wstring title = UTF16ToWideHack(tab_contentses_.at(row)->GetTitle());
+  std::wstring title = UTF16ToWideHack(tab_contentses_[row]->GetTitle());
   if (title.empty())
-    title = l10n_util::GetString(IDS_TAB_UNTITLED_TITLE);
+    title = UTF16ToWideHack(TabContents::GetDefaultTitle());
   // TODO(xji): Consider adding a special case if the title text is a URL,
   // since those should always have LTR directionality. Please refer to
   // http://crbug.com/6726 for more information.
-  l10n_util::AdjustStringForLocaleDirection(title, &title);
+  base::i18n::AdjustStringForLocaleDirection(title, &title);
   return title;
 }
 
@@ -253,7 +254,8 @@ void HungRendererDialogView::ShowForTabContents(TabContents* contents) {
 
 void HungRendererDialogView::EndForTabContents(TabContents* contents) {
   DCHECK(contents);
-  if (contents_ && contents_->process() == contents->process()) {
+  if (contents_ && contents_->GetRenderProcessHost() ==
+      contents->GetRenderProcessHost()) {
     window()->Close();
     // Since we're closing, we no longer need this TabContents.
     contents_ = NULL;
@@ -316,8 +318,8 @@ void HungRendererDialogView::ButtonPressed(
     views::Button* sender, const views::Event& event) {
   if (sender == kill_button_) {
     // Kill the process.
-    HANDLE process = contents_->process()->process().handle();
-    TerminateProcess(process, ResultCodes::HUNG);
+    TerminateProcess(contents_->GetRenderProcessHost()->GetHandle(),
+                     ResultCodes::HUNG);
   }
 }
 
@@ -439,8 +441,9 @@ static HungRendererDialogView* CreateHungRendererDialogView() {
   return cv;
 }
 
-// static
-void HungRendererDialog::ShowForTabContents(TabContents* contents) {
+namespace hung_renderer_dialog {
+
+void ShowForTabContents(TabContents* contents) {
   if (!logging::DialogsAreSuppressed()) {
     if (!g_instance)
       g_instance = CreateHungRendererDialogView();
@@ -449,7 +452,10 @@ void HungRendererDialog::ShowForTabContents(TabContents* contents) {
 }
 
 // static
-void HungRendererDialog::HideForTabContents(TabContents* contents) {
+void HideForTabContents(TabContents* contents) {
   if (!logging::DialogsAreSuppressed() && g_instance)
     g_instance->EndForTabContents(contents);
 }
+
+}  // namespace hung_renderer_dialog
+

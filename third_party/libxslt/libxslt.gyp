@@ -5,7 +5,9 @@
 {
   'variables': {
     'conditions': [
-      ['OS=="linux" or OS=="freebsd"', {'os_include': 'linux'}],
+      ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
+        'os_include': 'linux'
+      }],
       ['OS=="mac"', {'os_include': 'mac'}],
       ['OS=="win"', {'os_include': 'win32'}],
     ],
@@ -74,6 +76,8 @@
             'libxslt/xsltconfig.h',
             'libxslt/xsltexports.h',
             'libxslt/xsltInternals.h',
+            'libxslt/xsltlocale.c',
+            'libxslt/xsltlocale.h',
             'libxslt/xsltutils.c',
             'libxslt/xsltutils.h',
             'libxslt/xsltwin32config.h',

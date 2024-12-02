@@ -33,6 +33,7 @@
 // Implementations of the abstract Texture2D and TextureCUBE classes using
 // the OpenGL graphics API.
 
+#include "core/cross/gl/gl_headers.h"
 #include "core/cross/error.h"
 #include "core/cross/types.h"
 #include "core/cross/pointer_utils.h"
@@ -277,6 +278,7 @@ Texture2DGL* Texture2DGL::Create(ServiceLocator* service_locator,
                                  bool enable_render_surfaces) {
   DLOG(INFO) << "Texture2DGL Create";
   DCHECK_NE(format, Texture::UNKNOWN_FORMAT);
+  DCHECK_GE(levels, 0);
   RendererGL *renderer = static_cast<RendererGL *>(
       service_locator->GetService<Renderer>());
   renderer->MakeCurrentLazy();

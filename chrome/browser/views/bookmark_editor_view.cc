@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,10 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -25,6 +25,7 @@
 #include "views/grid_layout.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/label.h"
+#include "views/controls/menu/menu_2.h"
 #include "views/standard_layout.h"
 #include "views/widget/widget.h"
 #include "views/window/window.h"
@@ -43,7 +44,7 @@ static const SkColor kErrorColor = SkColorSetRGB(0xFF, 0xBC, 0xBC);
 static const int kTreeWidth = 300;
 
 // ID for various children.
-static const int kNewGroupButtonID             = 1002;
+static const int kNewGroupButtonID = 1002;
 
 // static
 void BookmarkEditor::Show(HWND parent_hwnd,
@@ -67,6 +68,8 @@ BookmarkEditorView::BookmarkEditorView(
     : profile_(profile),
       tree_view_(NULL),
       new_group_button_(NULL),
+      url_label_(NULL),
+      title_label_(NULL),
       parent_(parent),
       details_(details),
       running_menu_for_root_(false),
@@ -203,7 +206,7 @@ bool BookmarkEditorView::IsCommandIdEnabled(int command_id) const {
 
 bool BookmarkEditorView::GetAcceleratorForCommandId(
     int command_id,
-    views::Accelerator* accelerator) {
+    menus::Accelerator* accelerator) {
   return GetWidget()->GetAccelerator(command_id, accelerator);
 }
 
@@ -235,8 +238,7 @@ void BookmarkEditorView::Close() {
 }
 
 void BookmarkEditorView::ShowContextMenu(View* source,
-                                         int x,
-                                         int y,
+                                         const gfx::Point& p,
                                          bool is_mouse_gesture) {
   DCHECK(source == tree_view_);
   if (!tree_view_->GetSelectedNode())
@@ -245,14 +247,14 @@ void BookmarkEditorView::ShowContextMenu(View* source,
       (tree_model_->GetParent(tree_view_->GetSelectedNode()) ==
        tree_model_->GetRoot());
   if (!context_menu_contents_.get()) {
-    context_menu_contents_.reset(new views::SimpleMenuModel(this));
+    context_menu_contents_.reset(new menus::SimpleMenuModel(this));
     context_menu_contents_->AddItemWithStringId(IDS_EDIT, IDS_EDIT);
     context_menu_contents_->AddItemWithStringId(
         IDS_BOOMARK_EDITOR_NEW_FOLDER_MENU_ITEM,
         IDS_BOOMARK_EDITOR_NEW_FOLDER_MENU_ITEM);
     context_menu_.reset(new views::Menu2(context_menu_contents_.get()));
   }
-  context_menu_->RunContextMenuAt(gfx::Point(x, y));
+  context_menu_->RunContextMenuAt(p);
 }
 
 void BookmarkEditorView::Init() {
@@ -260,8 +262,8 @@ void BookmarkEditorView::Init() {
   DCHECK(bb_model_);
   bb_model_->AddObserver(this);
 
-  url_tf_.SetParentOwned(false);
-  title_tf_.SetParentOwned(false);
+  url_tf_.set_parent_owned(false);
+  title_tf_.set_parent_owned(false);
 
   std::wstring title;
   if (details_.type == EditDetails::EXISTING_NODE)
@@ -271,6 +273,10 @@ void BookmarkEditorView::Init() {
   title_tf_.SetText(title);
   title_tf_.SetController(this);
 
+  title_label_ = new views::Label(
+      l10n_util::GetString(IDS_BOOMARK_EDITOR_NAME_LABEL));
+  title_tf_.SetAccessibleName(title_label_->GetText());
+
   std::wstring url_text;
   if (details_.type == EditDetails::EXISTING_NODE) {
     std::wstring languages = profile_
@@ -278,18 +284,21 @@ void BookmarkEditorView::Init() {
         : std::wstring();
     // The following URL is user-editable.  We specify omit_username_password=
     // false and unescape=false to show the original URL except IDN.
-    url_text =
-        net::FormatUrl(details_.existing_node->GetURL(), languages, false,
-                       UnescapeRule::NONE, NULL, NULL);
+    url_text = net::FormatUrl(details_.existing_node->GetURL(), languages,
+                              false, UnescapeRule::NONE, NULL, NULL, NULL);
   }
   url_tf_.SetText(url_text);
   url_tf_.SetController(this);
+
+  url_label_ = new views::Label(
+      l10n_util::GetString(IDS_BOOMARK_EDITOR_URL_LABEL));
+  url_tf_.SetAccessibleName(url_label_->GetText());
 
   if (show_tree_) {
     tree_view_ = new views::TreeView();
     new_group_button_.reset(new views::NativeButton(
         this, l10n_util::GetString(IDS_BOOMARK_EDITOR_NEW_FOLDER_BUTTON)));
-    new_group_button_->SetParentOwned(false);
+    new_group_button_->set_parent_owned(false);
     tree_view_->SetContextMenuController(this);
 
     tree_view_->SetRootShown(false);
@@ -328,16 +337,15 @@ void BookmarkEditorView::Init() {
   column_set->LinkColumnSizes(0, 2, 4, -1);
 
   layout->StartRow(0, labels_column_set_id);
-  layout->AddView(
-      new Label(l10n_util::GetString(IDS_BOOMARK_EDITOR_NAME_LABEL)));
+
+  layout->AddView(title_label_);
   layout->AddView(&title_tf_);
 
   if (details_.type != EditDetails::NEW_FOLDER) {
     layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 
     layout->StartRow(0, labels_column_set_id);
-    layout->AddView(
-        new Label(l10n_util::GetString(IDS_BOOMARK_EDITOR_URL_LABEL)));
+    layout->AddView(url_label_);
     layout->AddView(&url_tf_);
   }
 
@@ -414,8 +422,7 @@ void BookmarkEditorView::Reset() {
   }
 }
 GURL BookmarkEditorView::GetInputURL() const {
-  std::wstring input = URLFixerUpper::FixupURL(url_tf_.text(), L"");
-  return GURL(input);
+  return GURL(URLFixerUpper::FixupURL(UTF16ToUTF8(url_tf_.text()), ""));
 }
 
 std::wstring BookmarkEditorView::GetInputTitle() const {

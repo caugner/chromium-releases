@@ -1,14 +1,15 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_VIEWS_OPTIONS_CONTENT_PAGE_VIEW_H_
 #define CHROME_BROWSER_VIEWS_OPTIONS_CONTENT_PAGE_VIEW_H_
 
+#include "chrome/browser/autofill/personal_data_manager.h"
+#include "chrome/browser/pref_member.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/views/options/options_page_view.h"
 #include "chrome/browser/views/confirm_message_box_dialog.h"
-#include "chrome/common/pref_member.h"
 #include "views/controls/button/button.h"
 #include "views/controls/link.h"
 #include "views/view.h"
@@ -27,10 +28,8 @@ class PrefService;
 // ContentPageView
 
 class ContentPageView : public OptionsPageView,
-#if defined(BROWSER_SYNC)
                         public views::LinkController,
                         public ProfileSyncServiceObserver,
-#endif
                         public views::ButtonListener,
                         public ConfirmMessageBoxObserver {
  public:
@@ -46,10 +45,8 @@ class ContentPageView : public OptionsPageView,
   // ConfirmMessageBoxObserver implementation.
   virtual void OnConfirmMessageAccept();
 
-#if defined(BROWSER_SYNC)
   // ProfileSyncServiceObserver method.
   virtual void OnStateChanged();
-#endif
 
  protected:
   // OptionsPageView implementation:
@@ -60,7 +57,6 @@ class ContentPageView : public OptionsPageView,
   virtual void Layout();
 
  private:
-#if defined(BROWSER_SYNC)
   // Updates various sync controls based on the current sync state.
   void UpdateSyncControls();
 
@@ -71,27 +67,25 @@ class ContentPageView : public OptionsPageView,
     // are already initialized or not.
     return sync_group_ != NULL;
   }
-#endif
 
   // Init all the dialog controls.
   void InitPasswordSavingGroup();
   void InitFormAutofillGroup();
   void InitBrowsingDataGroup();
   void InitThemesGroup();
-#if defined(BROWSER_SYNC)
   void InitSyncGroup();
-#endif
 
   // Controls for the Password Saving group
-  views::NativeButton* passwords_exceptions_button_;
+  views::NativeButton* show_passwords_button_;
   OptionsGroupView* passwords_group_;
   views::RadioButton* passwords_asktosave_radio_;
   views::RadioButton* passwords_neversave_radio_;
 
   // Controls for the Form Autofill group
+  views::NativeButton* change_autofill_settings_button_;
   OptionsGroupView* form_autofill_group_;
-  views::RadioButton* form_autofill_asktosave_radio_;
-  views::RadioButton* form_autofill_neversave_radio_;
+  views::RadioButton* form_autofill_enable_radio_;
+  views::RadioButton* form_autofill_disable_radio_;
 
   // Controls for the Themes group
   OptionsGroupView* themes_group_;
@@ -100,27 +94,22 @@ class ContentPageView : public OptionsPageView,
 
   // Controls for the browsing data group.
   OptionsGroupView* browsing_data_group_;
-  views::Label* browsing_data_label_;
   views::NativeButton* import_button_;
-  views::NativeButton* clear_data_button_;
 
-#if defined(BROWSER_SYNC)
   // Controls for the Sync group.
   OptionsGroupView* sync_group_;
   views::Label* sync_status_label_;
   views::Link* sync_action_link_;
   views::NativeButton* sync_start_stop_button_;
-#endif
+  views::NativeButton* sync_customize_button_;
 
   BooleanPrefMember ask_to_save_passwords_;
   BooleanPrefMember ask_to_save_form_autofill_;
   StringPrefMember is_using_default_theme_;
 
-#if defined(BROWSER_SYNC)
   // Cached pointer to ProfileSyncService, if it exists. Kept up to date
   // and NULL-ed out on destruction.
   ProfileSyncService* sync_service_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(ContentPageView);
 };

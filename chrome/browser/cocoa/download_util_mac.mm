@@ -6,20 +6,34 @@
 
 #include "chrome/browser/cocoa/download_util_mac.h"
 
-#include "app/gfx/native_widget_types.h"
 #include "base/sys_string_conversions.h"
+#import "chrome/browser/cocoa/dock_icon.h"
 #include "chrome/browser/download/download_manager.h"
+#include "gfx/native_widget_types.h"
 #include "skia/ext/skia_utils_mac.h"
 
 namespace download_util {
 
 void AddFileToPasteboard(NSPasteboard* pasteboard, const FilePath& path) {
   // Write information about the file being dragged to the pasteboard.
-  NSString* file = base::SysWideToNSString(path.ToWStringHack());
+  NSString* file = base::SysUTF8ToNSString(path.value());
   NSArray* fileList = [NSArray arrayWithObject:file];
   [pasteboard declareTypes:[NSArray arrayWithObject:NSFilenamesPboardType]
                      owner:nil];
   [pasteboard setPropertyList:fileList forType:NSFilenamesPboardType];
+}
+
+void NotifySystemOfDownloadComplete(const FilePath& path) {
+  NSString* filePath = base::SysUTF8ToNSString(path.value());
+  [[NSDistributedNotificationCenter defaultCenter]
+      postNotificationName:@"com.apple.DownloadFileFinished"
+                    object:filePath];
+
+  NSString* parentPath = [filePath stringByDeletingLastPathComponent];
+  FNNotifyByPath(
+      reinterpret_cast<const UInt8*>([parentPath fileSystemRepresentation]),
+      kFNDirectoryModifiedMessage,
+      kNilOptions);
 }
 
 void DragDownload(const DownloadItem* download,
@@ -53,6 +67,16 @@ void DragDownload(const DownloadItem* download,
                 pasteboard:pasteboard
                     source:view
                  slideBack:YES];
+}
+
+void UpdateAppIconDownloadProgress(int download_count,
+                                   bool progress_known,
+                                   float progress) {
+  DockIcon* dock_icon = [DockIcon sharedDockIcon];
+  [dock_icon setDownloads:download_count];
+  [dock_icon setIndeterminate:!progress_known];
+  [dock_icon setProgress:progress];
+  [dock_icon updateIcon];
 }
 
 }  // namespace download_util

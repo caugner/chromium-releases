@@ -15,6 +15,7 @@ static const char* kValidSchemes[] = {
   chrome::kHttpsScheme,
   chrome::kFileScheme,
   chrome::kFtpScheme,
+  chrome::kChromeUIScheme,
 };
 
 static const char kPathSeparator[] = "/";
@@ -131,7 +132,7 @@ bool URLPattern::MatchesPath(const GURL& test) const {
     ReplaceSubstringsAfterOffset(&path_escaped_, 0, "?", "\\?");
   }
 
-  if (!MatchPattern(test.PathForRequest(), path_escaped_))
+  if (!MatchPatternASCII(test.PathForRequest(), path_escaped_))
     return false;
 
   return true;

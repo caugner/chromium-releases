@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -11,9 +11,12 @@
 #include <windows.h>
 #include <process.h>
 
-#include "base/file_util.h"
+#include <algorithm>
+
+#include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/string_util.h"
 #include "base/task.h"
 #include "base/thread.h"
 #include "chrome/browser/browser_process.h"
@@ -58,20 +61,20 @@ typedef bool (*GetAccessPointRlzFn)(RLZTracker::AccessPoint point,
 typedef bool (*ClearAllProductEventsFn)(RLZTracker::Product product,
                                         void* reserved);
 
-typedef bool (*SendFinancialPingFn)(RLZTracker::Product product,
-                                    RLZTracker::AccessPoint* access_points,
-                                    const WCHAR* product_signature,
-                                    const WCHAR* product_brand,
-                                    const WCHAR* product_id,
-                                    const WCHAR* product_lang,
-                                    bool exclude_id,
-                                    void* reserved);
+typedef bool (*SendFinancialPingNoDelayFn)(RLZTracker::Product product,
+                                           RLZTracker::AccessPoint* access_points,
+                                           const WCHAR* product_signature,
+                                           const WCHAR* product_brand,
+                                           const WCHAR* product_id,
+                                           const WCHAR* product_lang,
+                                           bool exclude_id,
+                                           void* reserved);
 }  // extern "C".
 
 RecordProductEventFn record_event = NULL;
 GetAccessPointRlzFn get_access_point = NULL;
 ClearAllProductEventsFn clear_all_events = NULL;
-SendFinancialPingFn send_ping = NULL;
+SendFinancialPingNoDelayFn send_ping_no_delay = NULL;
 
 template <typename FuncT>
 FuncT WireExport(HMODULE module, const char* export_name) {
@@ -103,9 +106,11 @@ bool LoadRLZLibrary(int directory_key) {
         WireExport<GetAccessPointRlzFn>(rlz_dll, "GetAccessPointRlz");
     clear_all_events =
         WireExport<ClearAllProductEventsFn>(rlz_dll, "ClearAllProductEvents");
-    send_ping =
-        WireExport<SendFinancialPingFn>(rlz_dll, "SendFinancialPing");
-    return (record_event && get_access_point && clear_all_events && send_ping);
+    send_ping_no_delay =
+        WireExport<SendFinancialPingNoDelayFn>(rlz_dll,
+                                               "SendFinancialPingNoDelay");
+    return (record_event && get_access_point && clear_all_events &&
+            send_ping_no_delay);
   }
   return false;
 }
@@ -115,10 +120,10 @@ bool SendFinancialPing(const wchar_t* brand, const wchar_t* lang,
   RLZTracker::AccessPoint points[] = {RLZTracker::CHROME_OMNIBOX,
                                       RLZTracker::CHROME_HOME_PAGE,
                                       RLZTracker::NO_ACCESS_POINT};
-  if (!send_ping)
+  if (!send_ping_no_delay)
     return false;
-  return send_ping(RLZTracker::CHROME, points, L"chrome", brand, referral, lang,
-                   exclude_id, NULL);
+  return send_ping_no_delay(RLZTracker::CHROME, points, L"chrome", brand,
+                            referral, lang, exclude_id, NULL);
 }
 
 // This class leverages the AutocompleteEditModel notification to know when
@@ -187,8 +192,7 @@ class DailyPingTask : public Task {
   }
 
  private:
-  // Causes a ping to the server using WinInet. There is logic inside RLZ dll
-  // that throttles it to a maximum of one ping per day.
+  // Causes a ping to the server using WinInet.
   static void _cdecl PingNow(void*) {
     std::wstring lang;
     GoogleUpdateSettings::GetLanguage(&lang);
@@ -206,8 +210,8 @@ class DailyPingTask : public Task {
   }
 
   // Organic brands all start with GG, such as GGCM.
-  static bool is_organic(const std::wstring brand) {
-    return (brand.size() < 2) ? false : (brand.substr(0,2) == L"GG");
+  static bool is_organic(const std::wstring& brand) {
+    return (brand.size() < 2) ? false : (brand.substr(0, 2) == L"GG");
   }
 };
 
@@ -223,8 +227,17 @@ class DelayedInitTask : public Task {
   virtual void Run() {
     // For non-interactive tests we don't do the rest of the initialization
     // because sometimes the very act of loading the dll causes QEMU to crash.
-    if (::GetEnvironmentVariableW(env_vars::kHeadless, NULL, 0))
+    if (::GetEnvironmentVariableW(ASCIIToWide(env_vars::kHeadless).c_str(),
+                                  NULL, 0)) {
       return;
+    }
+    // For organic brandcodes do not use rlz at all. Empty brandcode usually
+    // means a chromium install. This is ok.
+    std::wstring brand;
+    GoogleUpdateSettings::GetBrand(&brand);
+    if (is_strict_organic(brand))
+      return;
+
     if (!LoadRLZLibrary(directory_key_))
       return;
     // Do the initial event recording if is the first run or if we have an
@@ -246,12 +259,13 @@ class DelayedInitTask : public Task {
                                        RLZTracker::CHROME_OMNIBOX,
                                        RLZTracker::SET_TO_GOOGLE);
       }
-      // Record first user interaction with the omnibox.
-      if (OmniBoxUsageObserver::used()) {
-        RLZTracker::RecordProductEvent(RLZTracker::CHROME,
-                                       RLZTracker::CHROME_OMNIBOX,
-                                       RLZTracker::FIRST_SEARCH);
-      }
+    }
+    // Record first user interaction with the omnibox. We call this all the
+    // time but the rlz lib should ingore all but the first one.
+    if (OmniBoxUsageObserver::used()) {
+      RLZTracker::RecordProductEvent(RLZTracker::CHROME,
+                                     RLZTracker::CHROME_OMNIBOX,
+                                     RLZTracker::FIRST_SEARCH);
     }
     // Schedule the daily RLZ ping.
     base::Thread* thread = g_browser_process->file_thread();
@@ -278,6 +292,23 @@ class DelayedInitTask : public Task {
     if (!urlref)
       return false;
     return urlref->HasGoogleBaseURLs();
+  }
+
+  static bool is_strict_organic(const std::wstring& brand) {
+    static const wchar_t* kBrands[] = {
+        L"CHFO", L"CHFT", L"CHMA", L"CHMB", L"CHME", L"CHMF", L"CHMG", L"CHMH",
+        L"CHMI", L"CHMQ", L"CHMV", L"CHNB", L"CHNC", L"CHNG", L"CHNH", L"CHNI",
+        L"CHOA", L"CHOB", L"CHOC", L"CHON", L"CHOO", L"CHOP", L"CHOQ", L"CHOR",
+        L"CHOS", L"CHOT", L"CHOU", L"CHOX", L"CHOY", L"CHOZ", L"CHPD", L"CHPE",
+        L"CHPF", L"CHPG", L"EUBB", L"EUBC", L"GGLA", L"GGLS" };
+    const wchar_t** end = &kBrands[arraysize(kBrands)];
+    const wchar_t** found = std::find(&kBrands[0], end, brand);
+    if (found != end)
+      return true;
+    if (StartsWith(brand, L"EUB", true) || StartsWith(brand, L"EUC", true) ||
+        StartsWith(brand, L"GGR", true))
+      return true;
+    return false;
   }
 
   int directory_key_;

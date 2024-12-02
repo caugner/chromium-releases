@@ -1,25 +1,24 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_TEMPLATE_URL_MODEL_H__
-#define CHROME_BROWSER_TEMPLATE_URL_MODEL_H__
+#ifndef CHROME_BROWSER_SEARCH_ENGINES_TEMPLATE_URL_MODEL_H_
+#define CHROME_BROWSER_SEARCH_ENGINES_TEMPLATE_URL_MODEL_H_
 
-#include <map>
-#include <string>
-#include <vector>
+#include <set>
 
 #include "base/observer_list.h"
-#include "chrome/browser/history/history_notifications.h"
-#include "chrome/browser/history/history_types.h"
+#include "base/scoped_ptr.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/notification_registrar.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 
-class GURL;
 class PrefService;
 class Profile;
-class TemplateURL;
-class TemplateURLModelTest;
+
+namespace history {
+struct URLVisitedDetails;
+}
 
 // TemplateURLModel is the backend for keywords. It's used by
 // KeywordAutocomplete.
@@ -213,6 +212,7 @@ class TemplateURLModel : public WebDataServiceConsumer,
   FRIEND_TEST(TemplateURLModelTest, UpdateKeywordSearchTermsForURL);
   FRIEND_TEST(TemplateURLModelTest, DontUpdateKeywordSearchForNonReplaceable);
   FRIEND_TEST(TemplateURLModelTest, ChangeGoogleBaseValue);
+  FRIEND_TEST(TemplateURLModelTest, MergeDeletesUnusedProviders);
   friend class TemplateURLModelTest;
 
   typedef std::map<std::wstring, const TemplateURL*> KeywordToTemplateMap;
@@ -320,6 +320,9 @@ class TemplateURLModel : public WebDataServiceConsumer,
   // Whether the keywords have been loaded.
   bool loaded_;
 
+  // Did loading fail? This is only valid if loaded_ is true.
+  bool load_failed_;
+
   // If non-zero, we're waiting on a load.
   WebDataService::Handle load_handle_;
 
@@ -340,8 +343,8 @@ class TemplateURLModel : public WebDataServiceConsumer,
   const TemplateURL* default_search_provider_;
 
   // The default search provider from preferences. This is only valid if
-  // GetDefaultSearchProvider is invoked and we haven't been loaded. Once loaded
-  // this is not used.
+  // GetDefaultSearchProvider is invoked and we haven't been loaded or loading
+  // failed. If loading was successful this is not used.
   scoped_ptr<TemplateURL> prefs_default_search_provider_;
 
   // ID assigned to next TemplateURL added to this model. This is an ever
@@ -351,4 +354,4 @@ class TemplateURLModel : public WebDataServiceConsumer,
   DISALLOW_EVIL_CONSTRUCTORS(TemplateURLModel);
 };
 
-#endif  // CHROME_BROWSER_TEMPLATE_URL_MODEL_H__
+#endif  // CHROME_BROWSER_SEARCH_ENGINES_TEMPLATE_URL_MODEL_H_

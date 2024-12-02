@@ -17,7 +17,9 @@
 // information.
 class ChildProcessSecurityPolicy::SecurityState {
  public:
-  SecurityState() : enabled_bindings_(0) { }
+  SecurityState()
+    : enabled_bindings_(0),
+      can_read_raw_cookies_(false) { }
   ~SecurityState() {
     scheme_policy_.clear();
   }
@@ -39,6 +41,14 @@ class ChildProcessSecurityPolicy::SecurityState {
 
   void GrantBindings(int bindings) {
     enabled_bindings_ |= bindings;
+  }
+
+  void GrantReadRawCookies() {
+    can_read_raw_cookies_ = true;
+  }
+
+  void RevokeReadRawCookies() {
+    can_read_raw_cookies_ = false;
   }
 
   // Determine whether permission has been granted to request url.
@@ -66,6 +76,10 @@ class ChildProcessSecurityPolicy::SecurityState {
     return BindingsPolicy::is_extension_enabled(enabled_bindings_);
   }
 
+  bool can_read_raw_cookies() const {
+    return can_read_raw_cookies_;
+  }
+
  private:
   typedef std::map<std::string, bool> SchemeMap;
   typedef std::set<FilePath> FileSet;
@@ -82,6 +96,8 @@ class ChildProcessSecurityPolicy::SecurityState {
 
   int enabled_bindings_;
 
+  bool can_read_raw_cookies_;
+
   DISALLOW_COPY_AND_ASSIGN(SecurityState);
 };
 
@@ -92,7 +108,7 @@ ChildProcessSecurityPolicy::ChildProcessSecurityPolicy() {
   RegisterWebSafeScheme(chrome::kFtpScheme);
   RegisterWebSafeScheme(chrome::kDataScheme);
   RegisterWebSafeScheme("feed");
-  RegisterWebSafeScheme("chrome-extension");
+  RegisterWebSafeScheme(chrome::kExtensionScheme);
 
   // We know about the following psuedo schemes and treat them specially.
   RegisterPseudoScheme(chrome::kAboutScheme);
@@ -211,16 +227,21 @@ void ChildProcessSecurityPolicy::GrantUploadFile(int renderer_id,
   state->second->GrantUploadFile(file);
 }
 
-void ChildProcessSecurityPolicy::GrantInspectElement(int renderer_id) {
+void ChildProcessSecurityPolicy::GrantScheme(int renderer_id,
+                                             const std::string& scheme) {
   AutoLock lock(lock_);
 
   SecurityStateMap::iterator state = security_state_.find(renderer_id);
   if (state == security_state_.end())
     return;
 
+  state->second->GrantScheme(scheme);
+}
+
+void ChildProcessSecurityPolicy::GrantInspectElement(int renderer_id) {
   // The inspector is served from a chrome: URL.  In order to run the
   // inspector, the renderer needs to be able to load chrome: URLs.
-  state->second->GrantScheme(chrome::kChromeUIScheme);
+  GrantScheme(renderer_id, chrome::kChromeUIScheme);
 }
 
 void ChildProcessSecurityPolicy::GrantDOMUIBindings(int renderer_id) {
@@ -252,6 +273,26 @@ void ChildProcessSecurityPolicy::GrantExtensionBindings(int renderer_id) {
   state->second->GrantBindings(BindingsPolicy::EXTENSION);
 }
 
+void ChildProcessSecurityPolicy::GrantReadRawCookies(int renderer_id) {
+  AutoLock lock(lock_);
+
+  SecurityStateMap::iterator state = security_state_.find(renderer_id);
+  if (state == security_state_.end())
+    return;
+
+  state->second->GrantReadRawCookies();
+}
+
+void ChildProcessSecurityPolicy::RevokeReadRawCookies(int renderer_id) {
+  AutoLock lock(lock_);
+
+  SecurityStateMap::iterator state = security_state_.find(renderer_id);
+  if (state == security_state_.end())
+    return;
+
+  state->second->RevokeReadRawCookies();
+}
+
 bool ChildProcessSecurityPolicy::CanRequestURL(
     int renderer_id, const GURL& url) {
   if (!url.is_valid())
@@ -266,8 +307,14 @@ bool ChildProcessSecurityPolicy::CanRequestURL(
     if (url.SchemeIs(chrome::kViewSourceScheme) ||
         url.SchemeIs(chrome::kPrintScheme)) {
       // View-source and print URL's are allowed if the renderer is permitted
-      // to request the embedded URL.
-      return CanRequestURL(renderer_id, GURL(url.path()));
+      // to request the embedded URL. Careful to avoid pointless recursion.
+      GURL child_url(url.path());
+      if (child_url.SchemeIs(chrome::kPrintScheme) ||
+          (child_url.SchemeIs(chrome::kViewSourceScheme) &&
+           url.SchemeIs(chrome::kViewSourceScheme)))
+          return false;
+
+      return CanRequestURL(renderer_id, child_url);
     }
 
     if (LowerCaseEqualsASCII(url.spec(), chrome::kAboutBlankURL))
@@ -324,4 +371,14 @@ bool ChildProcessSecurityPolicy::HasExtensionBindings(int renderer_id) {
     return false;
 
   return state->second->has_extension_bindings();
+}
+
+bool ChildProcessSecurityPolicy::CanReadRawCookies(int renderer_id) {
+  AutoLock lock(lock_);
+
+  SecurityStateMap::iterator state = security_state_.find(renderer_id);
+  if (state == security_state_.end())
+    return false;
+
+  return state->second->can_read_raw_cookies();
 }

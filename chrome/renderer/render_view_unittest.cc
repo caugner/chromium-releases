@@ -1,20 +1,21 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "app/gfx/codec/jpeg_codec.h"
 #include "base/file_util.h"
 #include "base/shared_memory.h"
+#include "chrome/common/content_settings.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/print_web_view_helper.h"
 #include "chrome/test/render_view_test.h"
+#include "gfx/codec/jpeg_codec.h"
 #include "net/base/net_errors.h"
 #include "printing/image.h"
 #include "printing/native_metafile.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/api/public/WebString.h"
-#include "webkit/api/public/WebURLError.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLError.h"
 
 using WebKit::WebCompositionCommand;
 using WebKit::WebFrame;
@@ -35,31 +36,12 @@ static WebCompositionCommand ToCompositionCommand(int string_type) {
   }
 }
 
-TEST_F(RenderViewTest, OnLoadAlternateHTMLText) {
-  // Test a new navigation.
-  GURL test_url("http://www.google.com/some_test_url");
-  view_->OnLoadAlternateHTMLText("<html></html>", true, test_url,
-                                 std::string());
-
-  // We should have gotten two different types of start messages in the
-  // following order.
-  ASSERT_EQ((size_t)2, render_thread_.sink().message_count());
-  const IPC::Message* msg = render_thread_.sink().GetMessageAt(0);
-  EXPECT_EQ(ViewHostMsg_DidStartLoading::ID, msg->type());
-
-  msg = render_thread_.sink().GetMessageAt(1);
-  EXPECT_EQ(ViewHostMsg_DidStartProvisionalLoadForFrame::ID, msg->type());
-  ViewHostMsg_DidStartProvisionalLoadForFrame::Param start_params;
-  ViewHostMsg_DidStartProvisionalLoadForFrame::Read(msg, &start_params);
-  EXPECT_EQ(GURL("chrome://chromewebdata/"), start_params.b);
-}
-
 // Test that we get form state change notifications when input fields change.
 TEST_F(RenderViewTest, OnNavStateChanged) {
   // Don't want any delay for form state sync changes. This will still post a
   // message so updates will get coalesced, but as soon as we spin the message
   // loop, it will generate an update.
-  view_->set_delay_seconds_for_form_state_sync(0);
+  view_->set_send_content_state_immediately(true);
 
   LoadHTML("<input type=\"text\" id=\"elt_text\"></input>");
 
@@ -83,7 +65,7 @@ TEST_F(RenderViewTest, OnImeStateChanged) {
   view_->OnImeSetInputMode(true);
 
   // Load an HTML page consisting of two input fields.
-  view_->set_delay_seconds_for_form_state_sync(0);
+  view_->set_send_content_state_immediately(true);
   LoadHTML("<html>"
            "<head>"
            "</head>"
@@ -211,7 +193,7 @@ TEST_F(RenderViewTest, ImeComposition) {
         // and move the input focus to the <div> element, where we can use
         // IMEs.
         view_->OnImeSetInputMode(ime_message->enable);
-        view_->set_delay_seconds_for_form_state_sync(0);
+        view_->set_send_content_state_immediately(true);
         LoadHTML("<html>"
                 "<head>"
                 "</head>"
@@ -266,7 +248,7 @@ TEST_F(RenderViewTest, OnSetTextDirection) {
   // This test changes the text direction of the <textarea> element, and
   // writes the values of its 'dir' attribute and its 'direction' property to
   // verify that the text direction is changed.
-  view_->set_delay_seconds_for_form_state_sync(0);
+  view_->set_send_content_state_immediately(true);
   LoadHTML("<html>"
            "<head>"
            "</head>"
@@ -530,7 +512,7 @@ TEST_F(RenderViewTest, OnPrintPageAsBitmap) {
                                      gfx::JPEGCodec::FORMAT_RGBA,
                                      &decoded, &w, &h));
 
-  // Check if its not 100% white.
+  // Check if it's not 100% white.
   bool is_white = true;
   for (int y = 0; y < h; y++) {
     for (int x = 0; x < w; x++) {
@@ -549,7 +531,7 @@ TEST_F(RenderViewTest, OnPrintPageAsBitmap) {
 
 // Test that we can receive correct DOM events when we send input events
 // through the RenderWidget::OnHandleInputEvent() function.
-TEST_F(RenderViewTest, OnHandleKeyboardEvent) {
+TEST_F(RenderViewTest, FLAKY_OnHandleKeyboardEvent) {
 #if defined(OS_WIN)
   // Load an HTML page consisting of one <input> element and three
   // contentediable <div> elements.
@@ -559,7 +541,7 @@ TEST_F(RenderViewTest, OnHandleKeyboardEvent) {
   // TODO(hbono): <http://crbug.com/2215> Our WebKit port set |ev.metaKey| to
   // true when pressing an alt key, i.e. the |ev.metaKey| value is not
   // trustworthy. We will check the |ev.metaKey| value when this issue is fixed.
-  view_->set_delay_seconds_for_form_state_sync(0);
+  view_->set_send_content_state_immediately(true);
   LoadHTML("<html>"
            "<head>"
            "<title></title>"
@@ -818,7 +800,7 @@ TEST_F(RenderViewTest, InsertCharacters) {
     // This <div> element is used by the EditorClientImpl class to insert
     // characters received through the RenderWidget::OnHandleInputEvent()
     // function.
-    view_->set_delay_seconds_for_form_state_sync(0);
+    view_->set_send_content_state_immediately(true);
     LoadHTML("<html>"
              "<head>"
              "<title></title>"
@@ -918,4 +900,54 @@ TEST_F(RenderViewTest, DidFailProvisionalLoadWithErrorForCancellation) {
   view_->didFailProvisionalLoad(web_frame, error);
   // Frame should stay in view-source mode.
   EXPECT_TRUE(web_frame->isViewSourceModeEnabled());
+}
+
+// Regression test for http://crbug.com/35011
+TEST_F(RenderViewTest, JSBlockSentAfterPageLoad) {
+  // 1. Load page with JS.
+  std::string html = "<html>"
+           "<head>"
+           "<script>document.createElement('div');</script>"
+           "</head>"
+           "<body>"
+           "</body>"
+           "</html>";
+  render_thread_.sink().ClearMessages();
+  LoadHTML(html.c_str());
+
+  // 2. Block JavaScript.
+  ContentSettings settings;
+  for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i)
+    settings.settings[i] = CONTENT_SETTING_ALLOW;
+  settings.settings[CONTENT_SETTINGS_TYPE_JAVASCRIPT] = CONTENT_SETTING_BLOCK;
+  view_->SetContentSettings(settings);
+
+  // Make sure no pending messages are in the queue.
+  ProcessPendingMessages();
+  render_thread_.sink().ClearMessages();
+
+  // 3. Reload page.
+  ViewMsg_Navigate_Params params = { 0 };
+  std::string url_str = "data:text/html;charset=utf-8,";
+  url_str.append(html);
+  GURL url(url_str);
+  params.url = url;
+  params.navigation_type = ViewMsg_Navigate_Params::RELOAD;
+  view_->OnNavigate(params);
+  ProcessPendingMessages();
+
+  // 4. Verify that the notification that javascript was blocked is sent after
+  //    the navigation notifiction is sent.
+  int navigation_index = -1;
+  int block_index = -1;
+  for (size_t i = 0; i < render_thread_.sink().message_count(); ++i) {
+    const IPC::Message* msg = render_thread_.sink().GetMessageAt(i);
+    if (msg->type() == ViewHostMsg_FrameNavigate::ID)
+      navigation_index = i;
+    if (msg->type() == ViewHostMsg_ContentBlocked::ID)
+      block_index = i;
+  }
+  EXPECT_NE(-1, navigation_index);
+  EXPECT_NE(-1, block_index);
+  EXPECT_LT(navigation_index, block_index);
 }

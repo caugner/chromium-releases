@@ -5,11 +5,12 @@
 #include "chrome/browser/views/options/passwords_page_view.h"
 
 #include "app/l10n_util.h"
+#include "base/i18n/rtl.h"
 #include "base/string_util.h"
 #include "chrome/browser/password_manager/password_store.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "grit/generated_resources.h"
 #include "views/background.h"
 #include "views/controls/button/native_button.h"
@@ -71,16 +72,16 @@ std::wstring PasswordsTableModel::GetText(int row,
     case IDS_PASSWORDS_PAGE_VIEW_SITE_COLUMN: {  // Site.
       const std::wstring& url = saved_signons_[row]->display_url.display_url();
       // Force URL to have LTR directionality.
-      if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
+      if (base::i18n::IsRTL()) {
         std::wstring localized_url = url;
-        l10n_util::WrapStringWithLTRFormatting(&localized_url);
+        base::i18n::WrapStringWithLTRFormatting(&localized_url);
         return localized_url;
       }
       return url;
     }
     case IDS_PASSWORDS_PAGE_VIEW_USERNAME_COLUMN: {  // Username.
       std::wstring username = GetPasswordFormAt(row)->username_value;
-      l10n_util::AdjustStringForLocaleDirection(username, &username);
+      base::i18n::AdjustStringForLocaleDirection(username, &username);
       return username;
     }
     default:
@@ -186,6 +187,12 @@ PasswordsPageView::PasswordsPageView(Profile* profile)
       table_model_(profile),
       table_view_(NULL),
       current_selected_password_(NULL) {
+}
+
+PasswordsPageView::~PasswordsPageView() {
+  // The model is going away, prevent the table from accessing it.
+  if (table_view_)
+    table_view_->SetModel(NULL);
 }
 
 void PasswordsPageView::OnSelectionChanged() {
@@ -301,16 +308,16 @@ void PasswordsPageView::InitControlLayout() {
 // PasswordsPageView, private
 void PasswordsPageView::SetupButtonsAndLabels() {
   // Disable all buttons in the first place.
-  show_button_.SetParentOwned(false);
+  show_button_.set_parent_owned(false);
   show_button_.SetEnabled(false);
 
-  remove_button_.SetParentOwned(false);
+  remove_button_.set_parent_owned(false);
   remove_button_.SetEnabled(false);
 
-  remove_all_button_.SetParentOwned(false);
+  remove_all_button_.set_parent_owned(false);
   remove_all_button_.SetEnabled(false);
 
-  password_label_.SetParentOwned(false);
+  password_label_.set_parent_owned(false);
 }
 
 void PasswordsPageView::SetupTable() {

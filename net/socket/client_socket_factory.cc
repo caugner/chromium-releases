@@ -8,7 +8,7 @@
 #include "build/build_config.h"
 #if defined(OS_WIN)
 #include "net/socket/ssl_client_socket_win.h"
-#elif defined(OS_LINUX)
+#elif defined(USE_NSS)
 #include "net/socket/ssl_client_socket_nss.h"
 #elif defined(OS_MACOSX)
 #include "net/socket/ssl_client_socket_mac.h"
@@ -16,6 +16,26 @@
 #include "net/socket/tcp_client_socket.h"
 
 namespace net {
+
+namespace {
+
+SSLClientSocket* DefaultSSLClientSocketFactory(
+    ClientSocket* transport_socket,
+    const std::string& hostname,
+    const SSLConfig& ssl_config) {
+#if defined(OS_WIN)
+  return new SSLClientSocketWin(transport_socket, hostname, ssl_config);
+#elif defined(USE_NSS)
+  return new SSLClientSocketNSS(transport_socket, hostname, ssl_config);
+#elif defined(OS_MACOSX)
+  return new SSLClientSocketMac(transport_socket, hostname, ssl_config);
+#else
+  NOTIMPLEMENTED();
+  return NULL;
+#endif
+}
+
+SSLClientSocketFactory g_ssl_factory = DefaultSSLClientSocketFactory;
 
 class DefaultClientSocketFactory : public ClientSocketFactory {
  public:
@@ -28,22 +48,21 @@ class DefaultClientSocketFactory : public ClientSocketFactory {
       ClientSocket* transport_socket,
       const std::string& hostname,
       const SSLConfig& ssl_config) {
-#if defined(OS_WIN)
-    return new SSLClientSocketWin(transport_socket, hostname, ssl_config);
-#elif defined(OS_LINUX)
-    return new SSLClientSocketNSS(transport_socket, hostname, ssl_config);
-#elif defined(OS_MACOSX)
-    return new SSLClientSocketMac(transport_socket, hostname, ssl_config);
-#else
-    NOTIMPLEMENTED();
-    return NULL;
-#endif
+    return g_ssl_factory(transport_socket, hostname, ssl_config);
   }
 };
+
+}  // namespace
 
 // static
 ClientSocketFactory* ClientSocketFactory::GetDefaultFactory() {
   return Singleton<DefaultClientSocketFactory>::get();
+}
+
+// static
+void ClientSocketFactory::SetSSLClientSocketFactory(
+    SSLClientSocketFactory factory) {
+  g_ssl_factory = factory;
 }
 
 }  // namespace net

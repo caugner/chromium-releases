@@ -8,7 +8,7 @@
 
 #include "base/time.h"
 #include "chrome/renderer/navigation_state.h"
-#include "webkit/api/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "v8/include/v8.h"
 
 using WebKit::WebDataSource;
@@ -95,7 +95,7 @@ class LoadTimesExtensionWrapper : public v8::Extension {
   }
 
   static v8::Handle<v8::Value> GetLoadTimes(const v8::Arguments& args) {
-    WebFrame* frame = WebFrame::frameForEnteredContext();
+    WebFrame* frame = WebFrame::frameForCurrentContext();
     if (frame) {
       WebDataSource* data_source = frame->dataSource();
       if (data_source) {
@@ -128,7 +128,9 @@ class LoadTimesExtensionWrapper : public v8::Extension {
         load_times->Set(
             v8::String::New("navigationType"),
             v8::String::New(GetNavigationType(data_source->navigationType())));
-
+        load_times->Set(
+            v8::String::New("wasFetchedViaSpdy"),
+            v8::Boolean::New(navigation_state->was_fetched_via_spdy()));
         return load_times;
       }
     }
@@ -136,7 +138,7 @@ class LoadTimesExtensionWrapper : public v8::Extension {
   }
 
   static v8::Handle<v8::Value> GetCSI(const v8::Arguments& args) {
-    WebFrame* frame = WebFrame::frameForEnteredContext();
+    WebFrame* frame = WebFrame::frameForCurrentContext();
     if (frame) {
       WebDataSource* data_source = frame->dataSource();
       if (data_source) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,9 @@
 #include "base/pickle.h"
 #include "base/string_util.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#if defined(OS_MACOSX)
+#include "chrome/browser/bookmarks/bookmark_pasteboard_helper_mac.h"
+#endif
 #include "chrome/browser/profile.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/browser/browser_process.h"
@@ -20,7 +23,7 @@ const char* BookmarkDragData::kClipboardFormatString =
 BookmarkDragData::Element::Element(const BookmarkNode* node)
     : is_url(node->is_url()),
       url(node->GetURL()),
-      title(node->GetTitle()),
+      title(node->GetTitleAsString16()),
       id_(node->id()) {
   for (int i = 0; i < node->GetChildCount(); ++i)
     children.push_back(Element(node->GetChild(i)));
@@ -29,7 +32,7 @@ BookmarkDragData::Element::Element(const BookmarkNode* node)
 void BookmarkDragData::Element::WriteToPickle(Pickle* pickle) const {
   pickle->WriteBool(is_url);
   pickle->WriteString(url.spec());
-  pickle->WriteWString(title);
+  pickle->WriteString16(title);
   pickle->WriteInt64(id_);
   if (!is_url) {
     pickle->WriteSize(children.size());
@@ -45,7 +48,7 @@ bool BookmarkDragData::Element::ReadFromPickle(Pickle* pickle,
   std::string url_spec;
   if (!pickle->ReadBool(iterator, &is_url) ||
       !pickle->ReadString(iterator, &url_spec) ||
-      !pickle->ReadWString(iterator, &title) ||
+      !pickle->ReadString16(iterator, &title) ||
       !pickle->ReadInt64(iterator, &id_)) {
     return false;
   }
@@ -86,8 +89,36 @@ BookmarkDragData::BookmarkDragData(const BookmarkNode* node) {
 
 BookmarkDragData::BookmarkDragData(
     const std::vector<const BookmarkNode*>& nodes) {
+  ReadFromVector(nodes);
+}
+
+bool BookmarkDragData::ReadFromVector(
+    const std::vector<const BookmarkNode*>& nodes) {
+  Clear();
+
+  if (nodes.empty())
+    return false;
+
   for (size_t i = 0; i < nodes.size(); ++i)
     elements.push_back(Element(nodes[i]));
+
+  return true;
+}
+
+bool BookmarkDragData::ReadFromTuple(const GURL& url, const string16& title) {
+  Clear();
+
+  if (!url.is_valid())
+    return false;
+
+  Element element;
+  element.title = title;
+  element.url = url;
+  element.is_url = true;
+
+  elements.push_back(element);
+
+  return true;
 }
 
 #if !defined(OS_MACOSX)
@@ -97,11 +128,15 @@ void BookmarkDragData::WriteToClipboard(Profile* profile) const {
   // If there is only one element and it is a URL, write the URL to the
   // clipboard.
   if (elements.size() == 1 && elements[0].is_url) {
-    string16 title = WideToUTF16Hack(elements[0].title);
-    std::string url = elements[0].url.spec();
+    const string16& title = elements[0].title;
+    const std::string url = elements[0].url.spec();
 
     scw.WriteBookmark(title, url);
-    scw.WriteHyperlink(EscapeForHTML(UTF16ToUTF8(title)), url);
+    scw.WriteHyperlink(EscapeForHTML(title), url);
+
+    // Also write the URL to the clipboard as text so that it can be pasted
+    // into text fields
+    scw.WriteURL(UTF8ToUTF16(url));
   }
 
   Pickle pickle;
@@ -127,7 +162,7 @@ bool BookmarkDragData::ReadFromClipboard() {
     Element element;
     element.is_url = true;
     element.url = GURL(url);
-    element.title = UTF16ToWideHack(title);
+    element.title = title;
 
     elements.clear();
     elements.push_back(element);
@@ -135,6 +170,29 @@ bool BookmarkDragData::ReadFromClipboard() {
   }
 
   return false;
+}
+
+bool BookmarkDragData::ClipboardContainsBookmarks() {
+  return g_browser_process->clipboard()->IsFormatAvailableByString(
+      BookmarkDragData::kClipboardFormatString, Clipboard::BUFFER_STANDARD);
+}
+#else
+void BookmarkDragData::WriteToClipboard(Profile* profile) const {
+  bookmark_pasteboard_helper_mac::WriteToClipboard(elements, profile_path_);
+}
+
+bool BookmarkDragData::ReadFromClipboard() {
+  return bookmark_pasteboard_helper_mac::ReadFromClipboard(elements,
+                                                           &profile_path_);
+}
+
+bool BookmarkDragData::ReadFromDragClipboard() {
+  return bookmark_pasteboard_helper_mac::ReadFromDragClipboard(elements,
+                                                               &profile_path_);
+}
+
+bool BookmarkDragData::ClipboardContainsBookmarks() {
+  return bookmark_pasteboard_helper_mac::ClipboardContainsBookmarks();
 }
 #endif  // !defined(OS_MACOSX)
 
@@ -148,7 +206,7 @@ void BookmarkDragData::Write(Profile* profile, OSExchangeData* data) const {
     if (elements[0].url.SchemeIs(chrome::kJavaScriptScheme)) {
       data->SetString(ASCIIToWide(elements[0].url.spec()));
     } else {
-      data->SetURL(elements[0].url, elements[0].title);
+      data->SetURL(elements[0].url, UTF16ToWide(elements[0].title));
     }
   }
 
@@ -172,11 +230,10 @@ bool BookmarkDragData::Read(const OSExchangeData& data) {
   } else {
     // See if there is a URL on the clipboard.
     Element element;
-    if (data.GetURLAndTitle(&element.url, &element.title) &&
-        element.url.is_valid()) {
-      element.is_url = true;
-      elements.push_back(element);
-    }
+    GURL url;
+    std::wstring title;
+    if (data.GetURLAndTitle(&url, &title))
+      ReadFromTuple(url, WideToUTF16(title));
   }
 
   return is_valid();
@@ -184,16 +241,8 @@ bool BookmarkDragData::Read(const OSExchangeData& data) {
 #endif
 
 void BookmarkDragData::WriteToPickle(Profile* profile, Pickle* pickle) const {
-#if defined(WCHAR_T_IS_UTF16)
-  pickle->WriteWString(
-      profile ? profile->GetPath().ToWStringHack() : std::wstring());
-#elif defined(WCHAR_T_IS_UTF32)
-  pickle->WriteString(
-      profile ? profile->GetPath().value() : std::string());
-#else
-  NOTIMPLEMENTED() << "Impossible encoding situation!";
-#endif
-
+  FilePath path = profile ? profile->GetPath() : FilePath();
+  FilePath::WriteStringTypeToPickle(pickle, path.value());
   pickle->WriteSize(elements.size());
 
   for (size_t i = 0; i < elements.size(); ++i)
@@ -203,14 +252,8 @@ void BookmarkDragData::WriteToPickle(Profile* profile, Pickle* pickle) const {
 bool BookmarkDragData::ReadFromPickle(Pickle* pickle) {
   void* data_iterator = NULL;
   size_t element_count;
-#if defined(WCHAR_T_IS_UTF16)
-  if (pickle->ReadWString(&data_iterator, &profile_path_) &&
-#elif defined(WCHAR_T_IS_UTF32)
-  if (pickle->ReadString(&data_iterator, &profile_path_) &&
-#else
-  NOTIMPLEMENTED() << "Impossible encoding situation!";
-  if (false &&
-#endif
+  if (FilePath::ReadStringTypeFromPickle(pickle, &data_iterator,
+                                         &profile_path_) &&
       pickle->ReadSize(&data_iterator, &element_count)) {
     std::vector<Element> tmp_elements;
     tmp_elements.resize(element_count);
@@ -249,12 +292,19 @@ const BookmarkNode* BookmarkDragData::GetFirstNode(Profile* profile) const {
   return nodes.size() == 1 ? nodes[0] : NULL;
 }
 
+void BookmarkDragData::Clear() {
+  profile_path_.clear();
+  elements.clear();
+}
+
+void BookmarkDragData::SetOriginatingProfile(Profile* profile) {
+  DCHECK(profile_path_.empty());
+
+  if (profile)
+    profile_path_ = profile->GetPath().value();
+}
+
 bool BookmarkDragData::IsFromProfile(Profile* profile) const {
   // An empty path means the data is not associated with any profile.
-  return (!profile_path_.empty() &&
-#if defined(WCHAR_T_IS_UTF16)
-      profile->GetPath().ToWStringHack() == profile_path_);
-#elif defined(WCHAR_T_IS_UTF32)
-      profile->GetPath().value() == profile_path_);
-#endif
+  return !profile_path_.empty() && profile_path_ == profile->GetPath().value();
 }

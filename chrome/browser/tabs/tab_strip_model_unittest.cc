@@ -2,10 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "app/system_monitor.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/stl_util-inl.h"
+#include "base/string_util.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
@@ -15,6 +18,7 @@
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/tabs/tab_strip_model_order_controller.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/property_bag.h"
 #include "chrome/common/url_constants.h"
@@ -92,7 +96,8 @@ class TabStripModelTest : public RenderViewHostTestHarness {
     TabContents* retval = new TabContents(profile(),
         tab_contents->render_view_host()->site_instance(), MSG_ROUTING_NONE,
         NULL);
-    EXPECT_EQ(retval->process(), tab_contents->process());
+    EXPECT_EQ(retval->GetRenderProcessHost(),
+              tab_contents->GetRenderProcessHost());
     return retval;
   }
 
@@ -136,10 +141,30 @@ class TabStripModelTest : public RenderViewHostTestHarness {
 
       actual += IntToString(GetID(model.GetTabContentsAt(i)));
 
+      if (model.IsAppTab(i))
+        actual += "a";
+
       if (model.IsTabPinned(i))
         actual += "p";
+
+      if (model.IsPhantomTab(i))
+        actual += "h";
     }
     return actual;
+  }
+
+  std::string GetIndicesClosedByCommandAsString(
+      const TabStripModel& model,
+      int index,
+      TabStripModel::ContextMenuCommand id) const {
+    std::vector<int> indices = model.GetIndicesClosedByCommand(index, id);
+    std::string result;
+    for (size_t i = 0; i < indices.size(); ++i) {
+      if (i != 0)
+        result += " ";
+      result += IntToString(indices[i]);
+    }
+    return result;
   }
 
  private:
@@ -151,6 +176,10 @@ class TabStripModelTest : public RenderViewHostTestHarness {
   std::wstring test_dir_;
   std::wstring profile_path_;
   std::map<TabContents*, int> foo_;
+
+  // ProfileManager requires a SystemMonitor.
+  SystemMonitor system_monitor;
+
   ProfileManager pm_;
 };
 
@@ -168,7 +197,8 @@ class MockTabStripModelObserver : public TabStripModelObserver {
     SELECT,
     MOVE,
     CHANGE,
-    PINNED
+    PINNED,
+    REPLACED
   };
 
   struct State {
@@ -181,7 +211,6 @@ class MockTabStripModelObserver : public TabStripModelObserver {
           dst_index(a_dst_index),
           user_gesture(false),
           foreground(false),
-          pinned_state_changed(false),
           action(a_action) {
     }
 
@@ -191,7 +220,6 @@ class MockTabStripModelObserver : public TabStripModelObserver {
     int dst_index;
     bool user_gesture;
     bool foreground;
-    bool pinned_state_changed;
     TabStripModelObserverAction action;
   };
 
@@ -206,21 +234,19 @@ class MockTabStripModelObserver : public TabStripModelObserver {
 
   bool StateEquals(int index, const State& state) {
     State* s = GetStateAt(index);
-    EXPECT_EQ(s->src_contents, state.src_contents);
-    EXPECT_EQ(s->dst_contents, state.dst_contents);
-    EXPECT_EQ(s->src_index, state.src_index);
-    EXPECT_EQ(s->dst_index, state.dst_index);
-    EXPECT_EQ(s->user_gesture, state.user_gesture);
-    EXPECT_EQ(s->foreground, state.foreground);
-    EXPECT_EQ(s->pinned_state_changed, state.pinned_state_changed);
-    EXPECT_EQ(s->action, state.action);
+    EXPECT_EQ(state.src_contents, s->src_contents);
+    EXPECT_EQ(state.dst_contents, s->dst_contents);
+    EXPECT_EQ(state.src_index, s->src_index);
+    EXPECT_EQ(state.dst_index, s->dst_index);
+    EXPECT_EQ(state.user_gesture, s->user_gesture);
+    EXPECT_EQ(state.foreground, s->foreground);
+    EXPECT_EQ(state.action, s->action);
     return (s->src_contents == state.src_contents &&
             s->dst_contents == state.dst_contents &&
             s->src_index == state.src_index &&
             s->dst_index == state.dst_index &&
             s->user_gesture == state.user_gesture &&
             s->foreground == state.foreground &&
-            s->pinned_state_changed == state.pinned_state_changed &&
             s->action == state.action);
   }
 
@@ -243,11 +269,9 @@ class MockTabStripModelObserver : public TabStripModelObserver {
     states_.push_back(s);
   }
   virtual void TabMoved(
-      TabContents* contents, int from_index, int to_index,
-      bool pinned_state_changed) {
+      TabContents* contents, int from_index, int to_index) {
     State* s = new State(contents, to_index, MOVE);
     s->src_index = from_index;
-    s->pinned_state_changed = pinned_state_changed;
     states_.push_back(s);
   }
 
@@ -258,8 +282,14 @@ class MockTabStripModelObserver : public TabStripModelObserver {
     states_.push_back(new State(contents, index, DETACH));
   }
   virtual void TabChangedAt(TabContents* contents, int index,
-                            bool loading_only) {
+                            TabChangeType change_type) {
     states_.push_back(new State(contents, index, CHANGE));
+  }
+  virtual void TabReplacedAt(TabContents* old_contents,
+                             TabContents* new_contents, int index) {
+    State* s = new State(new_contents, index, REPLACED);
+    s ->src_contents = old_contents;
+    states_.push_back(s);
   }
   virtual void TabPinnedStateChanged(TabContents* contents, int index) {
     states_.push_back(new State(contents, index, PINNED));
@@ -441,7 +471,7 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
 
   // Test UpdateTabContentsStateAt
   {
-    tabstrip.UpdateTabContentsStateAt(0, false);
+    tabstrip.UpdateTabContentsStateAt(0, TabStripModelObserver::ALL);
     EXPECT_EQ(1, observer.GetStateCount());
     State s1(contents2, 0, MockTabStripModelObserver::CHANGE);
     EXPECT_TRUE(observer.StateEquals(0, s1));
@@ -788,6 +818,82 @@ TEST_F(TabStripModelTest, TestContextMenuCloseCommands) {
                                      TabStripModel::CommandCloseOtherTabs);
   EXPECT_EQ(1, tabstrip.count());
   EXPECT_EQ(dummy_contents, tabstrip.GetSelectedTabContents());
+
+  tabstrip.CloseAllTabs();
+  EXPECT_TRUE(tabstrip.empty());
+}
+
+// Tests GetIndicesClosedByCommand.
+TEST_F(TabStripModelTest, GetIndicesClosedByCommand) {
+  TabStripDummyDelegate delegate(NULL);
+  TabStripModel tabstrip(&delegate, profile());
+  EXPECT_TRUE(tabstrip.empty());
+
+  TabContents* contents1 = CreateTabContents();
+  TabContents* contents2 = CreateTabContents();
+  TabContents* contents3 = CreateTabContents();
+  TabContents* contents4 = CreateTabContents();
+  TabContents* contents5 = CreateTabContents();
+
+  tabstrip.AppendTabContents(contents1, true);
+  tabstrip.AppendTabContents(contents2, true);
+  tabstrip.AppendTabContents(contents3, true);
+  tabstrip.AppendTabContents(contents4, true);
+  tabstrip.AppendTabContents(contents5, true);
+
+  EXPECT_EQ("4 3 2 1", GetIndicesClosedByCommandAsString(
+                tabstrip, 0, TabStripModel::CommandCloseTabsToRight));
+  EXPECT_EQ("4 3 2", GetIndicesClosedByCommandAsString(
+                tabstrip, 1, TabStripModel::CommandCloseTabsToRight));
+
+  EXPECT_EQ("4 3 2 1", GetIndicesClosedByCommandAsString(
+                tabstrip, 0, TabStripModel::CommandCloseOtherTabs));
+  EXPECT_EQ("4 3 2 0", GetIndicesClosedByCommandAsString(
+                tabstrip, 1, TabStripModel::CommandCloseOtherTabs));
+
+  // Pin the first two tabs. Pinned tabs shouldn't be closed by the close other
+  // commands.
+  tabstrip.SetTabPinned(0, true);
+  tabstrip.SetTabPinned(1, true);
+
+  EXPECT_EQ("4 3 2", GetIndicesClosedByCommandAsString(
+                tabstrip, 0, TabStripModel::CommandCloseTabsToRight));
+  EXPECT_EQ("4 3", GetIndicesClosedByCommandAsString(
+                tabstrip, 2, TabStripModel::CommandCloseTabsToRight));
+
+  EXPECT_EQ("4 3 2", GetIndicesClosedByCommandAsString(
+                tabstrip, 0, TabStripModel::CommandCloseOtherTabs));
+  EXPECT_EQ("4 3", GetIndicesClosedByCommandAsString(
+                tabstrip, 2, TabStripModel::CommandCloseOtherTabs));
+
+  tabstrip.CloseAllTabs();
+  EXPECT_TRUE(tabstrip.empty());
+}
+
+// Tests GetIndicesClosedByCommand.
+TEST_F(TabStripModelTest, GetIndicesClosedByCommandWithOpener) {
+  TabStripDummyDelegate delegate(NULL);
+  TabStripModel tabstrip(&delegate, profile());
+  EXPECT_TRUE(tabstrip.empty());
+
+  TabContents* contents1 = CreateTabContents();
+  TabContents* contents2 = CreateTabContents();
+  TabContents* contents3 = CreateTabContents();
+  TabContents* contents4 = CreateTabContents();
+
+  tabstrip.AppendTabContents(contents1, true);
+  InsertTabContentses(&tabstrip, contents2, contents3, contents4);
+
+  EXPECT_EQ("3 2 1", GetIndicesClosedByCommandAsString(
+                tabstrip, 0, TabStripModel::CommandCloseTabsOpenedBy));
+
+  // Pin the first two tabs and make sure the index isn't returned when asking
+  // for the openner.
+  tabstrip.SetTabPinned(0, true);
+  tabstrip.SetTabPinned(1, true);
+
+  EXPECT_EQ("3 2", GetIndicesClosedByCommandAsString(
+                tabstrip, 0, TabStripModel::CommandCloseTabsOpenedBy));
 
   tabstrip.CloseAllTabs();
   EXPECT_TRUE(tabstrip.empty());
@@ -1273,6 +1379,188 @@ TEST_F(TabStripModelTest, NavigationForgettingDoesntAffectNewTab) {
   strip.CloseAllTabs();
 }
 
+// Tests that fast shutdown is attempted appropriately.
+TEST_F(TabStripModelTest, FastShutdown) {
+  TabStripDummyDelegate delegate(NULL);
+  TabStripModel tabstrip(&delegate, profile());
+  MockTabStripModelObserver observer;
+  tabstrip.AddObserver(&observer);
+
+  EXPECT_TRUE(tabstrip.empty());
+
+  // Make sure fast shutdown is attempted when tabs that share a RPH are shut
+  // down.
+  {
+    TabContents* contents1 = CreateTabContents();
+    TabContents* contents2 = CreateTabContentsWithSharedRPH(contents1);
+
+    SetID(contents1, 1);
+    SetID(contents2, 2);
+
+    tabstrip.AppendTabContents(contents1, true);
+    tabstrip.AppendTabContents(contents2, true);
+
+    // Turn on the fake unload listener so the tabs don't actually get shut
+    // down when we call CloseAllTabs()---we need to be able to check that
+    // fast shutdown was attempted.
+    delegate.set_run_unload_listener(true);
+    tabstrip.CloseAllTabs();
+    // On a mock RPH this checks whether we *attempted* fast shutdown.
+    // A real RPH would reject our attempt since there is an unload handler.
+    EXPECT_TRUE(contents1->GetRenderProcessHost()->fast_shutdown_started());
+    EXPECT_EQ(2, tabstrip.count());
+
+    delegate.set_run_unload_listener(false);
+    tabstrip.CloseAllTabs();
+    EXPECT_TRUE(tabstrip.empty());
+  }
+
+  // Make sure fast shutdown is not attempted when only some tabs that share a
+  // RPH are shut down.
+  {
+    TabContents* contents1 = CreateTabContents();
+    TabContents* contents2 = CreateTabContentsWithSharedRPH(contents1);
+
+    SetID(contents1, 1);
+    SetID(contents2, 2);
+
+    tabstrip.AppendTabContents(contents1, true);
+    tabstrip.AppendTabContents(contents2, true);
+
+    tabstrip.CloseTabContentsAt(1);
+    EXPECT_FALSE(contents1->GetRenderProcessHost()->fast_shutdown_started());
+    EXPECT_EQ(1, tabstrip.count());
+
+    tabstrip.CloseAllTabs();
+    EXPECT_TRUE(tabstrip.empty());
+  }
+}
+
+// Tests various permutations of apps.
+TEST_F(TabStripModelTest, Apps) {
+  TabStripDummyDelegate delegate(NULL);
+  TabStripModel tabstrip(&delegate, profile());
+  MockTabStripModelObserver observer;
+  tabstrip.AddObserver(&observer);
+
+  EXPECT_TRUE(tabstrip.empty());
+
+  typedef MockTabStripModelObserver::State State;
+
+#if defined(OS_WIN)
+  FilePath path(FILE_PATH_LITERAL("c:\\foo"));
+#elif defined(OS_POSIX)
+  FilePath path(FILE_PATH_LITERAL("/foo"));
+#endif
+  Extension app_extension(path);
+  app_extension.launch_web_url_ = "http://www.google.com";
+  TabContents* contents1 = CreateTabContents();
+  contents1->SetAppExtension(&app_extension);
+  TabContents* contents2 = CreateTabContents();
+  contents2->SetAppExtension(&app_extension);
+  TabContents* contents3 = CreateTabContents();
+
+  SetID(contents1, 1);
+  SetID(contents2, 2);
+  SetID(contents3, 3);
+
+  // Note! The ordering of these tests is important, each subsequent test
+  // builds on the state established in the previous. This is important if you
+  // ever insert tests rather than append.
+
+  // Initial state, tab3 only and selected.
+  tabstrip.AppendTabContents(contents3, true);
+
+  observer.ClearStates();
+
+  // Attempt to insert tab1 (an app tab) at position 1. This isn't a legal
+  // position and tab1 should end up at position 0.
+  {
+    tabstrip.InsertTabContentsAt(1, contents1, false, false);
+
+    ASSERT_EQ(1, observer.GetStateCount());
+    State state(contents1, 0, MockTabStripModelObserver::INSERT);
+    EXPECT_TRUE(observer.StateEquals(0, state));
+
+    // And verify the state.
+    EXPECT_EQ("1a 3", GetPinnedState(tabstrip));
+
+    observer.ClearStates();
+  }
+
+  // Insert tab 2 at position 1.
+  {
+    tabstrip.InsertTabContentsAt(1, contents2, false, false);
+
+    ASSERT_EQ(1, observer.GetStateCount());
+    State state(contents2, 1, MockTabStripModelObserver::INSERT);
+    EXPECT_TRUE(observer.StateEquals(0, state));
+
+    // And verify the state.
+    EXPECT_EQ("1a 2a 3", GetPinnedState(tabstrip));
+
+    observer.ClearStates();
+  }
+
+  // Try to move tab 3 to position 0. This isn't legal and should be ignored.
+  {
+    tabstrip.MoveTabContentsAt(2, 0, false);
+
+    ASSERT_EQ(0, observer.GetStateCount());
+
+    // And verify the state didn't change.
+    EXPECT_EQ("1a 2a 3", GetPinnedState(tabstrip));
+
+    observer.ClearStates();
+  }
+
+  // Try to move tab 0 to position 3. This isn't legal and should be ignored.
+  {
+    tabstrip.MoveTabContentsAt(0, 2, false);
+
+    ASSERT_EQ(0, observer.GetStateCount());
+
+    // And verify the state didn't change.
+    EXPECT_EQ("1a 2a 3", GetPinnedState(tabstrip));
+
+    observer.ClearStates();
+  }
+
+  // Try to move tab 0 to position 1. This is a legal move.
+  {
+    tabstrip.MoveTabContentsAt(0, 1, false);
+
+    ASSERT_EQ(1, observer.GetStateCount());
+    State state(contents1, 1, MockTabStripModelObserver::MOVE);
+    state.src_index = 0;
+    EXPECT_TRUE(observer.StateEquals(0, state));
+
+    // And verify the state didn't change.
+    EXPECT_EQ("2a 1a 3", GetPinnedState(tabstrip));
+
+    observer.ClearStates();
+  }
+
+  // Remove tab3 and insert at position 0. It should be forced to position 2.
+  {
+    tabstrip.DetachTabContentsAt(2);
+    observer.ClearStates();
+
+    tabstrip.InsertTabContentsAt(0, contents3, false, false);
+
+    ASSERT_EQ(1, observer.GetStateCount());
+    State state(contents3, 2, MockTabStripModelObserver::INSERT);
+    EXPECT_TRUE(observer.StateEquals(0, state));
+
+    // And verify the state didn't change.
+    EXPECT_EQ("2a 1a 3", GetPinnedState(tabstrip));
+
+    observer.ClearStates();
+  }
+
+  tabstrip.CloseAllTabs();
+}
+
 // Tests various permutations of pinning tabs.
 TEST_F(TabStripModelTest, Pinning) {
   TabStripDummyDelegate delegate(NULL);
@@ -1341,7 +1629,6 @@ TEST_F(TabStripModelTest, Pinning) {
     ASSERT_EQ(1, observer.GetStateCount());
     State state(contents3, 0, MockTabStripModelObserver::MOVE);
     state.src_index = 2;
-    state.pinned_state_changed = true;
     EXPECT_TRUE(observer.StateEquals(0, state));
 
     // And verify the state.
@@ -1365,32 +1652,12 @@ TEST_F(TabStripModelTest, Pinning) {
     observer.ClearStates();
   }
 
-  // Move tab "2" to the front, which should pin it.
+  // Try to move tab "2" to the front, it should be ignored.
   {
     tabstrip.MoveTabContentsAt(2, 0, false);
 
     // As the order didn't change, we should get a pinned notification.
-    ASSERT_EQ(1, observer.GetStateCount());
-    State state(contents2, 0, MockTabStripModelObserver::MOVE);
-    state.src_index = 2;
-    state.pinned_state_changed = true;
-    EXPECT_TRUE(observer.StateEquals(0, state));
-
-    // And verify the state.
-    EXPECT_EQ("2p 3p 1p", GetPinnedState(tabstrip));
-
-    observer.ClearStates();
-  }
-
-  // Unpin tab "2", which implicitly moves it to the end.
-  {
-    tabstrip.SetTabPinned(0, false);
-
-    ASSERT_EQ(1, observer.GetStateCount());
-    State state(contents2, 2, MockTabStripModelObserver::MOVE);
-    state.src_index = 0;
-    state.pinned_state_changed = true;
-    EXPECT_TRUE(observer.StateEquals(0, state));
+    ASSERT_EQ(0, observer.GetStateCount());
 
     // And verify the state.
     EXPECT_EQ("3p 1p 2", GetPinnedState(tabstrip));
@@ -1398,9 +1665,9 @@ TEST_F(TabStripModelTest, Pinning) {
     observer.ClearStates();
   }
 
-  // Drag tab "3" to after "1', which should not change the pinned state.
+  // Unpin tab "3", which implicitly moves it to the end.
   {
-    tabstrip.MoveTabContentsAt(0, 1, false);
+    tabstrip.SetTabPinned(0, false);
 
     ASSERT_EQ(1, observer.GetStateCount());
     State state(contents3, 1, MockTabStripModelObserver::MOVE);
@@ -1408,47 +1675,20 @@ TEST_F(TabStripModelTest, Pinning) {
     EXPECT_TRUE(observer.StateEquals(0, state));
 
     // And verify the state.
-    EXPECT_EQ("1p 3p 2", GetPinnedState(tabstrip));
+    EXPECT_EQ("1p 3 2", GetPinnedState(tabstrip));
 
     observer.ClearStates();
   }
 
-  // Unpin tab "1".
+  // Unpin tab "3", nothing should happen.
   {
-    tabstrip.SetTabPinned(0, false);
-
-    ASSERT_EQ(1, observer.GetStateCount());
-    State state(contents1, 1, MockTabStripModelObserver::MOVE);
-    state.src_index = 0;
-    state.pinned_state_changed = true;
-    EXPECT_TRUE(observer.StateEquals(0, state));
-
-    // And verify the state.
-    EXPECT_EQ("3p 1 2", GetPinnedState(tabstrip));
-
-    observer.ClearStates();
-  }
-
-  // Unpin tab "3".
-  {
-    tabstrip.SetTabPinned(0, false);
-
-    ASSERT_EQ(1, observer.GetStateCount());
-    State state(contents3, 0, MockTabStripModelObserver::PINNED);
-    EXPECT_TRUE(observer.StateEquals(0, state));
-
-    EXPECT_EQ("3 1 2", GetPinnedState(tabstrip));
-
-    observer.ClearStates();
-  }
-
-  // Unpin tab "3" again, as it's unpinned nothing should change.
-  {
-    tabstrip.SetTabPinned(0, false);
+    tabstrip.SetTabPinned(1, false);
 
     ASSERT_EQ(0, observer.GetStateCount());
 
-    EXPECT_EQ("3 1 2", GetPinnedState(tabstrip));
+    EXPECT_EQ("1p 3 2", GetPinnedState(tabstrip));
+
+    observer.ClearStates();
   }
 
   // Pin "3" and "1".
@@ -1456,7 +1696,7 @@ TEST_F(TabStripModelTest, Pinning) {
     tabstrip.SetTabPinned(0, true);
     tabstrip.SetTabPinned(1, true);
 
-    EXPECT_EQ("3p 1p 2", GetPinnedState(tabstrip));
+    EXPECT_EQ("1p 3p 2", GetPinnedState(tabstrip));
 
     observer.ClearStates();
   }
@@ -1464,23 +1704,23 @@ TEST_F(TabStripModelTest, Pinning) {
   TabContents* contents4 = CreateTabContents();
   SetID(contents4, 4);
 
-  // Insert "4" between "3" and "1". As "3" and "1" are pinned, "4" should
-  // be pinned too.
+  // Insert "4" between "1" and "3". As "1" and "4" are pinned, "4" should end
+  // up after them.
   {
     tabstrip.InsertTabContentsAt(1, contents4, false, false);
 
     ASSERT_EQ(1, observer.GetStateCount());
-    State state(contents4, 1, MockTabStripModelObserver::INSERT);
+    State state(contents4, 2, MockTabStripModelObserver::INSERT);
     EXPECT_TRUE(observer.StateEquals(0, state));
 
-    EXPECT_EQ("3p 4p 1p 2", GetPinnedState(tabstrip));
+    EXPECT_EQ("1p 3p 4 2", GetPinnedState(tabstrip));
   }
 
   tabstrip.CloseAllTabs();
 }
 
-// Tests that fast shutdown is attempted appropriately.
-TEST_F(TabStripModelTest, FastShutdown) {
+// Tests various permutations of making a tab phantom.
+TEST_F(TabStripModelTest, Phantom) {
   TabStripDummyDelegate delegate(NULL);
   TabStripModel tabstrip(&delegate, profile());
   MockTabStripModelObserver observer;
@@ -1488,50 +1728,116 @@ TEST_F(TabStripModelTest, FastShutdown) {
 
   EXPECT_TRUE(tabstrip.empty());
 
-  // Make sure fast shutdown is attempted when tabs that share a RPH are shut
-  // down.
+  typedef MockTabStripModelObserver::State State;
+
+  TabContents* contents1 = CreateTabContents();
+  TabContents* contents2 = CreateTabContents();
+  TabContents* contents3 = CreateTabContents();
+
+  SetID(contents1, 1);
+  SetID(contents2, 2);
+  SetID(contents3, 3);
+
+  // Note! The ordering of these tests is important, each subsequent test
+  // builds on the state established in the previous. This is important if you
+  // ever insert tests rather than append.
+
+  // Initial state, three tabs, first selected.
+  tabstrip.AppendTabContents(contents1, true);
+  tabstrip.AppendTabContents(contents2, false);
+  tabstrip.AppendTabContents(contents3, false);
+
+  observer.ClearStates();
+
+  // Pin the first tab, and make it phantom.
   {
-    TabContents* contents1 = CreateTabContents();
-    TabContents* contents2 = CreateTabContentsWithSharedRPH(contents1);
+    tabstrip.SetTabPinned(0, true);
 
+    observer.ClearStates();
+
+    tabstrip.CloseTabContentsAt(0);
+
+    // The tabcontents should have changed.
+    TabContents* old_contents1 = contents1;
+    TabContents* new_contents1 = tabstrip.GetTabContentsAt(0);
+    ASSERT_TRUE(new_contents1 != contents1);
+    contents1 = new_contents1;
     SetID(contents1, 1);
-    SetID(contents2, 2);
 
-    tabstrip.AppendTabContents(contents1, true);
-    tabstrip.AppendTabContents(contents2, true);
+    // Verify the state.
+    EXPECT_EQ("1ph 2 3", GetPinnedState(tabstrip));
 
-    // Turn on the fake unload listener so the tabs don't actually get shut
-    // down when we call CloseAllTabs()---we need to be able to check that
-    // fast shutdown was attempted.
-    delegate.set_run_unload_listener(true);
-    tabstrip.CloseAllTabs();
-    // On a mock RPH this checks whether we *attempted* fast shutdown.
-    // A real RPH would reject our attempt since there is an unload handler.
-    EXPECT_TRUE(contents1->process()->fast_shutdown_started());
-    EXPECT_EQ(2, tabstrip.count());
+    // We should have gotten notification of the following:
+    // . tab closing.
+    // . selection changed.
+    // . tab replaced.
+    ASSERT_EQ(3, observer.GetStateCount());
+    State state(old_contents1, 0, MockTabStripModelObserver::CLOSE);
+    EXPECT_TRUE(observer.StateEquals(0, state));
+    state = State(contents1, 0, MockTabStripModelObserver::REPLACED);
+    state.src_contents = old_contents1;
+    EXPECT_TRUE(observer.StateEquals(1, state));
+    state = State(contents2, 1, MockTabStripModelObserver::SELECT);
+    state.src_contents = contents1;
+    state.user_gesture = true;
+    EXPECT_TRUE(observer.StateEquals(2, state));
 
-    delegate.set_run_unload_listener(false);
-    tabstrip.CloseAllTabs();
-    EXPECT_TRUE(tabstrip.empty());
+    observer.ClearStates();
   }
 
-  // Make sure fast shutdown is not attempted when only some tabs that share a
-  // RPH are shut down.
   {
-    TabContents* contents1 = CreateTabContents();
-    TabContents* contents2 = CreateTabContentsWithSharedRPH(contents1);
+    tabstrip.SetTabPinned(1, true);
+    observer.ClearStates();
 
-    SetID(contents1, 1);
-    SetID(contents2, 2);
-
-    tabstrip.AppendTabContents(contents1, true);
-    tabstrip.AppendTabContents(contents2, true);
-
+    // Close the second tab, which should make it phantom.
     tabstrip.CloseTabContentsAt(1);
-    EXPECT_FALSE(contents1->process()->fast_shutdown_started());
-    EXPECT_EQ(1, tabstrip.count());
 
-    tabstrip.CloseAllTabs();
-    EXPECT_TRUE(tabstrip.empty());
+    // The tabcontents should have changed.
+    TabContents* new_contents2 = tabstrip.GetTabContentsAt(1);
+    ASSERT_TRUE(new_contents2 != contents2);
+    contents2 = new_contents2;
+    SetID(contents2, 2);
+
+    EXPECT_EQ("1ph 2ph 3", GetPinnedState(tabstrip));
+
+    EXPECT_EQ(2, tabstrip.selected_index());
+
+    contents2 = tabstrip.GetTabContentsAt(1);
+
+    observer.ClearStates();
   }
+
+  {
+    tabstrip.SetTabPinned(2, true);
+    observer.ClearStates();
+
+    // Close the last tab, we should get a tabstrip empty notification.
+    tabstrip.CloseTabContentsAt(2);
+
+    // The tabcontents should have changed.
+    TabContents* old_contents3 = contents3;
+    TabContents* new_contents3 = tabstrip.GetTabContentsAt(2);
+    ASSERT_TRUE(new_contents3 != contents3);
+    contents3 = new_contents3;
+    SetID(contents3, 3);
+
+    EXPECT_EQ("1ph 2ph 3ph", GetPinnedState(tabstrip));
+
+    // We should have gotten notification of the following:
+    // . tab closing.
+    // . tab replaced.
+    // . tabstrip empty.
+    ASSERT_EQ(2, observer.GetStateCount());
+    State state(old_contents3, 2, MockTabStripModelObserver::CLOSE);
+    EXPECT_TRUE(observer.StateEquals(0, state));
+    state = State(contents3, 2, MockTabStripModelObserver::REPLACED);
+    state.src_contents = old_contents3;
+    EXPECT_TRUE(observer.StateEquals(1, state));
+    EXPECT_TRUE(observer.empty());
+
+    observer.ClearStates();
+  }
+
+  // Clean up the phantom tabs.
+  tabstrip.CloseAllTabs();
 }

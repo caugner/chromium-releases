@@ -8,34 +8,64 @@
 #include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "chrome/common/page_transition_types.h"
-#include "webkit/api/public/WebDataSource.h"
+#include "chrome/renderer/user_script_idle_scheduler.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDataSource.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
 #include "webkit/glue/alt_error_page_resource_fetcher.h"
 #include "webkit/glue/password_form.h"
-#include "webkit/glue/searchable_form_data.h"
 
 // The RenderView stores an instance of this class in the "extra data" of each
 // WebDataSource (see RenderView::DidCreateDataSource).
 class NavigationState : public WebKit::WebDataSource::ExtraData {
  public:
+  enum LoadType {
+    UNDEFINED_LOAD,            // Not yet initialized.
+    RELOAD,                    // User pressed reload.
+    HISTORY_LOAD,              // Back or forward.
+    NORMAL_LOAD,               // User entered URL, or omnibox search.
+    LINK_LOAD,                 // (deprecated) Included next 4 categories.
+    LINK_LOAD_NORMAL,          // Commonly following of link.
+    LINK_LOAD_RELOAD,          // JS/link directed reload.
+    LINK_LOAD_CACHE_STALE_OK,  // back/forward or encoding change.
+    LINK_LOAD_CACHE_ONLY,      // Allow stale data (avoid doing a re-post)
+    kLoadTypeMax               // Bounding value for this enum.
+  };
+
   static NavigationState* CreateBrowserInitiated(
       int32 pending_page_id,
+      int pending_history_list_offset,
       PageTransition::Type transition_type,
       base::Time request_time) {
     return new NavigationState(transition_type, request_time, false,
-                               pending_page_id);
+                               pending_page_id,
+                               pending_history_list_offset);
   }
 
   static NavigationState* CreateContentInitiated() {
     // We assume navigations initiated by content are link clicks.
-    return new NavigationState(PageTransition::LINK, base::Time(), true, -1);
+    return new NavigationState(PageTransition::LINK, base::Time(), true, -1,
+                               -1);
   }
 
   static NavigationState* FromDataSource(WebKit::WebDataSource* ds) {
     return static_cast<NavigationState*>(ds->extraData());
   }
 
+  UserScriptIdleScheduler* user_script_idle_scheduler() {
+    return user_script_idle_scheduler_.get();
+  }
+  void set_user_script_idle_scheduler(UserScriptIdleScheduler* scheduler) {
+    user_script_idle_scheduler_.reset(scheduler);
+  }
+
   // Contains the page_id for this navigation or -1 if there is none yet.
   int32 pending_page_id() const { return pending_page_id_; }
+
+  // If pending_page_id() is not -1, then this contains the corresponding
+  // offset of the page in the back/forward history list.
+  int pending_history_list_offset() const {
+    return pending_history_list_offset_;
+  }
 
   // Contains the transition type that the browser specified when it
   // initiated the load.
@@ -43,6 +73,10 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
   void set_transition_type(PageTransition::Type type) {
     transition_type_ = type;
   }
+
+  // Record the nature of this load, for use when histogramming page load times.
+  LoadType load_type() const { return load_type_; }
+  void set_load_type(LoadType load_type) { load_type_ = load_type; }
 
   // The time that this navigation was requested.
   const base::Time& request_time() const {
@@ -116,11 +150,13 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
   // True if this navigation was not initiated via WebFrame::LoadRequest.
   bool is_content_initiated() const { return is_content_initiated_; }
 
-  webkit_glue::SearchableFormData* searchable_form_data() const {
-    return searchable_form_data_.get();
+  const GURL& searchable_form_url() const { return searchable_form_url_; }
+  void set_searchable_form_url(const GURL& url) { searchable_form_url_ = url; }
+  const std::string& searchable_form_encoding() const {
+    return searchable_form_encoding_;
   }
-  void set_searchable_form_data(webkit_glue::SearchableFormData* data) {
-    searchable_form_data_.reset(data);
+  void set_searchable_form_encoding(const std::string& encoding) {
+    searchable_form_encoding_ = encoding;
   }
 
   webkit_glue::PasswordForm* password_form_data() const {
@@ -161,21 +197,57 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     return postponed_data_;
   }
 
+  // Sets the cache policy. The cache policy is only used if explicitly set and
+  // by default is not set. You can mark a NavigationState as not having a cache
+  // state by way of clear_cache_policy_override.
+  void set_cache_policy_override(
+      WebKit::WebURLRequest::CachePolicy cache_policy) {
+    cache_policy_override_ = cache_policy;
+    cache_policy_override_set_ = true;
+  }
+  WebKit::WebURLRequest::CachePolicy cache_policy_override() const {
+    return cache_policy_override_;
+  }
+  void clear_cache_policy_override() {
+    cache_policy_override_set_ = false;
+    cache_policy_override_ = WebKit::WebURLRequest::UseProtocolCachePolicy;
+  }
+  bool is_cache_policy_override_set() const {
+    return cache_policy_override_set_;
+  }
+
+  // Indicator if SPDY was used as part of this page load.
+  void set_was_fetched_via_spdy(bool value) { was_fetched_via_spdy_ = value; }
+  bool was_fetched_via_spdy() const { return was_fetched_via_spdy_; }
+
+  // Whether the frame text contents was translated to a different language.
+  void set_was_translated(bool value) { was_translated_ = value; }
+  bool was_translated() const { return was_translated_; }
+
  private:
   NavigationState(PageTransition::Type transition_type,
                   const base::Time& request_time,
                   bool is_content_initiated,
-                  int32 pending_page_id)
+                  int32 pending_page_id,
+                  int pending_history_list_offset)
       : transition_type_(transition_type),
+        load_type_(UNDEFINED_LOAD),
         request_time_(request_time),
         load_histograms_recorded_(false),
         request_committed_(false),
         is_content_initiated_(is_content_initiated),
         pending_page_id_(pending_page_id),
-        postpone_loading_data_(false) {
+        pending_history_list_offset_(pending_history_list_offset),
+        postpone_loading_data_(false),
+        cache_policy_override_set_(false),
+        cache_policy_override_(WebKit::WebURLRequest::UseProtocolCachePolicy),
+        user_script_idle_scheduler_(NULL),
+        was_fetched_via_spdy_(false),
+        was_translated_(false) {
   }
 
   PageTransition::Type transition_type_;
+  LoadType load_type_;
   base::Time request_time_;
   base::Time start_load_time_;
   base::Time commit_load_time_;
@@ -187,12 +259,23 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
   bool request_committed_;
   bool is_content_initiated_;
   int32 pending_page_id_;
-  scoped_ptr<webkit_glue::SearchableFormData> searchable_form_data_;
+  int pending_history_list_offset_;
+  GURL searchable_form_url_;
+  std::string searchable_form_encoding_;
   scoped_ptr<webkit_glue::PasswordForm> password_form_data_;
   scoped_ptr<webkit_glue::AltErrorPageResourceFetcher> alt_error_page_fetcher_;
   std::string security_info_;
   bool postpone_loading_data_;
   std::string postponed_data_;
+
+  bool cache_policy_override_set_;
+  WebKit::WebURLRequest::CachePolicy cache_policy_override_;
+
+  scoped_ptr<UserScriptIdleScheduler> user_script_idle_scheduler_;
+
+  bool was_fetched_via_spdy_;
+
+  bool was_translated_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigationState);
 };

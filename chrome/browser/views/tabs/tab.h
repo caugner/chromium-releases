@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,6 @@ namespace gfx {
 class Path;
 class Point;
 }
-class TabContents;
-class Profile;
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -34,6 +32,9 @@ class Tab : public TabRenderer,
    public:
     // Returns true if the specified Tab is selected.
     virtual bool IsTabSelected(const Tab* tab) const = 0;
+
+    // Returns true if the specified Tab is pinned.
+    virtual bool IsTabPinned(const Tab* tab) const = 0;
 
     // Selects the specified Tab.
     virtual void SelectTab(Tab* tab) = 0;
@@ -96,16 +97,14 @@ class Tab : public TabRenderer,
   virtual bool OnMouseDragged(const views::MouseEvent& event);
   virtual void OnMouseReleased(const views::MouseEvent& event,
                                bool canceled);
-  virtual bool GetTooltipText(int x, int y, std::wstring* tooltip);
-  virtual bool GetTooltipTextOrigin(int x, int y, gfx::Point* origin);
+  virtual bool GetTooltipText(const gfx::Point& p, std::wstring* tooltip);
+  virtual bool GetTooltipTextOrigin(const gfx::Point& p, gfx::Point* origin);
   virtual std::string GetClassName() const { return kTabClassName; }
   virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
-  virtual bool GetAccessibleName(std::wstring* name);
 
   // views::ContextMenuController overrides:
   virtual void ShowContextMenu(views::View* source,
-                               int x,
-                               int y,
+                               const gfx::Point& p,
                                bool is_mouse_gesture);
 
   // views::ButtonListener overrides:

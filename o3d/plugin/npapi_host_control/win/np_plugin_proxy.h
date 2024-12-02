@@ -37,7 +37,7 @@
 #define O3D_PLUGIN_NPAPI_HOST_CONTROL_WIN_NP_PLUGIN_PROXY_H_
 
 #include <vector>
-#include "third_party/npapi/include/npupp.h"
+#include "third_party/npapi/include/npfunctions.h"
 
 class NPBrowserProxy;
 struct INPObjectProxy;
@@ -146,6 +146,9 @@ class NPPluginProxy {
   // The set of currently pending/downloading streaming operations spawned
   // by the plugin.
   StreamOpArray active_stream_ops_;
+
+  // Whether this plugin instance is in an initialized state.
+  bool initialized_;
 
   // Global count of the number of currently live plugin instances.  Used
   // to ensure that NP_Initialize and NP_Shutdown are called only once

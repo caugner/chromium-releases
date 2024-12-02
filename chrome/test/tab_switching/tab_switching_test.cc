@@ -1,14 +1,17 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/path_service.h"
 #include "base/platform_thread.h"
+#include "base/time.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/env_vars.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
@@ -16,7 +19,7 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 
-#define NUMBER_OF_ITERATIONS 5
+using base::TimeDelta;
 
 namespace {
 
@@ -25,7 +28,6 @@ namespace {
 // time taken for each switch. It then prints out the times on the console,
 // with the aim that the page cycler parser can interpret these numbers to
 // draw graphs for page cycler Tab Switching Performance.
-// Usage Flags: -enable-logging -dump-histograms-on-exit -log-level=0
 class TabSwitchingUITest : public UITest {
  public:
   TabSwitchingUITest() {
@@ -36,77 +38,107 @@ class TabSwitchingUITest : public UITest {
     show_window_ = true;
   }
 
-  void RunTabSwitchingUITest() {
-    // Create a browser proxy.
-    browser_proxy_ = automation()->GetBrowserWindow(0);
+  void SetUp() {
+    // Set the log_file_name_ path according to the selected browser_directory_.
+    log_file_name_ = browser_directory_.AppendASCII("chrome_debug.log");
 
-    // Open all the tabs.
-    int initial_tab_count = 0;
-    ASSERT_TRUE(browser_proxy_->GetTabCount(&initial_tab_count));
-    int new_tab_count = OpenTabs();
-    ASSERT_TRUE(browser_proxy_->WaitForTabCountToBecome(
-        initial_tab_count + new_tab_count, 10000));
+    // Set the log file path for the browser test.
+#if defined(OS_WIN)
+    SetEnvironmentVariable(UTF8ToWide(env_vars::kLogFileName).c_str(),
+                           log_file_name_.value().c_str());
+#else
+    setenv(env_vars::kLogFileName,
+           log_file_name_.value().c_str(), 1);
+#endif
 
-    // Switch linearly between tabs.
-    browser_proxy_->ActivateTab(0);
-    int final_tab_count = 0;
-    ASSERT_TRUE(browser_proxy_->GetTabCount(&final_tab_count));
-    for (int i = initial_tab_count; i < final_tab_count; ++i) {
-      browser_proxy_->ActivateTab(i);
-      ASSERT_TRUE(browser_proxy_->WaitForTabToBecomeActive(i, 10000));
-    }
+    // Add the necessary arguments to Chrome's launch command for these tests.
+    AddLaunchArguments();
 
-    // Close the browser to force a dump of log.
-    bool application_closed = false;
-    EXPECT_TRUE(CloseBrowser(browser_proxy_.get(), &application_closed));
+    // Run the rest of the UITest initialization.
+    UITest::SetUp();
+  }
 
-    // Now open the corresponding log file and collect average and std dev from
-    // the histogram stats generated for RenderWidgetHostHWND_WhiteoutDuration
-    FilePath log_file_name;
-    ASSERT_TRUE(PathService::Get(chrome::DIR_LOGS, &log_file_name));
-    log_file_name = log_file_name.AppendASCII("chrome_debug.log");
+  static const int kNumCycles = 5;
 
-    bool log_has_been_dumped = false;
-    std::string contents;
-    int max_tries = 20;
-    do {
-      log_has_been_dumped = file_util::ReadFileToString(log_file_name,
-                                                        &contents);
-      if (!log_has_been_dumped)
-        PlatformThread::Sleep(100);
-    } while (!log_has_been_dumped && max_tries--);
-    ASSERT_TRUE(log_has_been_dumped) << "Failed to read the log file";
+  void PrintTimings(const char* label, TimeDelta timings[kNumCycles],
+    bool important) {
+      std::string times;
+      for (int i = 0; i < kNumCycles; ++i)
+        StringAppendF(&times, "%.2f,", timings[i].InMillisecondsF());
+      PrintResultList("times", "", label, times, "ms", important);
+  }
 
-    // Parse the contents to get average and std deviation.
-    std::string average("0.0"), std_dev("0.0");
-    const std::string average_str("average = ");
-    const std::string std_dev_str("standard deviation = ");
-    std::string::size_type pos = contents.find(
-        "Histogram: MPArch.RWHH_WhiteoutDuration", 0);
-    std::string::size_type comma_pos;
-    std::string::size_type number_length;
-    if (pos != std::string::npos) {
+  void RunTabSwitchingUITest(const char* label, bool important) {
+    // Shut down from window UITest sets up automatically.
+    UITest::TearDown();
+
+    TimeDelta timings[kNumCycles];
+    for (int i = 0; i < kNumCycles; ++i) {
+      // Prepare for this test run.
+      SetUp();
+
+      // Create a browser proxy.
+      browser_proxy_ = automation()->GetBrowserWindow(0);
+
+      // Open all the tabs.
+      int initial_tab_count = 0;
+      ASSERT_TRUE(browser_proxy_->GetTabCount(&initial_tab_count));
+      int new_tab_count = OpenTabs();
+      ASSERT_TRUE(browser_proxy_->WaitForTabCountToBecome(
+          initial_tab_count + new_tab_count, 10000));
+
+      // Switch linearly between tabs.
+      ASSERT_TRUE(browser_proxy_->ActivateTab(0));
+      int final_tab_count = 0;
+      ASSERT_TRUE(browser_proxy_->GetTabCount(&final_tab_count));
+      for (int j = initial_tab_count; j < final_tab_count; ++j) {
+        ASSERT_TRUE(browser_proxy_->ActivateTab(j));
+        ASSERT_TRUE(browser_proxy_->WaitForTabToBecomeActive(j, 10000));
+      }
+
+      // Close the browser to force a dump of log.
+      bool application_closed = false;
+      EXPECT_TRUE(CloseBrowser(browser_proxy_.get(), &application_closed));
+
+      // Open the corresponding log file and collect average from the
+      // histogram stats generated for RenderWidgetHost_TabSwitchPaintDuration.
+      bool log_has_been_dumped = false;
+      std::string contents;
+      int max_tries = 20;
+      do {
+        log_has_been_dumped = file_util::ReadFileToString(log_file_name_,
+                                                          &contents);
+        if (!log_has_been_dumped)
+          PlatformThread::Sleep(100);
+      } while (!log_has_been_dumped && max_tries--);
+      ASSERT_TRUE(log_has_been_dumped) << "Failed to read the log file";
+
+      // Parse the contents to get average.
+      int64 average = 0;
+      const std::string average_str("average = ");
+      std::string::size_type pos = contents.find(
+          "Histogram: MPArch.RWH_TabSwitchPaintDuration", 0);
+      std::string::size_type comma_pos;
+      std::string::size_type number_length;
+
+      ASSERT_NE(pos, std::string::npos) <<
+        "Histogram: MPArch.RWH_TabSwitchPaintDuration wasn't found\n" <<
+        contents;
+
       // Get the average.
       pos = contents.find(average_str, pos);
       comma_pos = contents.find(",", pos);
       pos += average_str.length();
       number_length = comma_pos - pos;
-      average = contents.substr(pos, number_length);
+      average = atoi(contents.substr(pos, number_length).c_str());
 
-      // Get the std dev.
-      pos = contents.find(std_dev_str, pos);
-      pos += std_dev_str.length();
-      comma_pos = contents.find(" ", pos);
-      number_length = comma_pos - pos;
-      std_dev = contents.substr(pos, number_length);
-    } else {
-      LOG(WARNING) << "Histogram: MPArch.RWHH_WhiteoutDuration wasn't found";
+      // Print the average and standard deviation.
+      timings[i] = TimeDelta::FromMilliseconds(average);
+
+      // Clean up from the test run.
+      UITest::TearDown();
     }
-
-    // Print the average and standard deviation.
-    PrintResultMeanAndError("tab_switch", "", "t",
-                            average + ", " + std_dev, "ms",
-                            true /* important */);
+    PrintTimings(label, timings, important);
   }
 
  protected:
@@ -124,22 +156,37 @@ class TabSwitchingUITest : public UITest {
       file_name = path_prefix_;
       file_name = file_name.AppendASCII(files[i]);
       file_name = file_name.AppendASCII("index.html");
-      browser_proxy_->AppendTab(net::FilePathToFileURL(file_name));
-      number_of_new_tabs_opened++;
+      bool success =
+          browser_proxy_->AppendTab(net::FilePathToFileURL(file_name));
+      EXPECT_TRUE(success);
+      if (success)
+        number_of_new_tabs_opened++;
     }
 
     return number_of_new_tabs_opened;
   }
 
   FilePath path_prefix_;
+  FilePath log_file_name_;
   scoped_refptr<BrowserProxy> browser_proxy_;
 
  private:
+  void AddLaunchArguments() {
+    launch_arguments_.AppendSwitch(switches::kEnableLogging);
+    launch_arguments_.AppendSwitch(switches::kDumpHistogramsOnExit);
+    launch_arguments_.AppendSwitchWithValue(switches::kLoggingLevel, "0");
+  }
+
   DISALLOW_COPY_AND_ASSIGN(TabSwitchingUITest);
 };
 
-TEST_F(TabSwitchingUITest, GenerateTabSwitchStats) {
-  RunTabSwitchingUITest();
+TEST_F(TabSwitchingUITest, TabSwitch) {
+  RunTabSwitchingUITest("t", true);
+}
+
+TEST_F(TabSwitchingUITest, TabSwitchRef) {
+  UseReferenceBuild();
+  RunTabSwitchingUITest("t_ref", true);
 }
 
 }  // namespace

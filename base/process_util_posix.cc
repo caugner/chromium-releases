@@ -16,19 +16,98 @@
 #include <limits>
 #include <set>
 
-#include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "base/debug_util.h"
+#include "base/dir_reader_posix.h"
 #include "base/eintr_wrapper.h"
 #include "base/logging.h"
 #include "base/platform_thread.h"
 #include "base/process_util.h"
+#include "base/rand_util.h"
 #include "base/scoped_ptr.h"
 #include "base/sys_info.h"
 #include "base/time.h"
 #include "base/waitable_event.h"
 
-const int kMicrosecondsPerSecond = 1000000;
+#if defined(OS_MACOSX)
+#include <crt_externs.h>
+#define environ (*_NSGetEnviron())
+#include "base/mach_ipc_mac.h"
+#else
+extern char** environ;
+#endif
 
 namespace base {
+
+namespace {
+
+int WaitpidWithTimeout(ProcessHandle handle, int64 wait_milliseconds,
+                       bool* success) {
+  // This POSIX version of this function only guarantees that we wait no less
+  // than |wait_milliseconds| for the process to exit.  The child process may
+  // exit sometime before the timeout has ended but we may still block for up
+  // to 256 milliseconds after the fact.
+  //
+  // waitpid() has no direct support on POSIX for specifying a timeout, you can
+  // either ask it to block indefinitely or return immediately (WNOHANG).
+  // When a child process terminates a SIGCHLD signal is sent to the parent.
+  // Catching this signal would involve installing a signal handler which may
+  // affect other parts of the application and would be difficult to debug.
+  //
+  // Our strategy is to call waitpid() once up front to check if the process
+  // has already exited, otherwise to loop for wait_milliseconds, sleeping for
+  // at most 256 milliseconds each time using usleep() and then calling
+  // waitpid().  The amount of time we sleep starts out at 1 milliseconds, and
+  // we double it every 4 sleep cycles.
+  //
+  // usleep() is speced to exit if a signal is received for which a handler
+  // has been installed.  This means that when a SIGCHLD is sent, it will exit
+  // depending on behavior external to this function.
+  //
+  // This function is used primarily for unit tests, if we want to use it in
+  // the application itself it would probably be best to examine other routes.
+  int status = -1;
+  pid_t ret_pid = HANDLE_EINTR(waitpid(handle, &status, WNOHANG));
+  static const int64 kMaxSleepInMicroseconds = 1 << 18;  // ~256 milliseconds.
+  int64 max_sleep_time_usecs = 1 << 10;  // ~1 milliseconds.
+  int64 double_sleep_time = 0;
+
+  // If the process hasn't exited yet, then sleep and try again.
+  Time wakeup_time = Time::Now() +
+      TimeDelta::FromMilliseconds(wait_milliseconds);
+  while (ret_pid == 0) {
+    Time now = Time::Now();
+    if (now > wakeup_time)
+      break;
+    // Guaranteed to be non-negative!
+    int64 sleep_time_usecs = (wakeup_time - now).InMicroseconds();
+    // Sleep for a bit while we wait for the process to finish.
+    if (sleep_time_usecs > max_sleep_time_usecs)
+      sleep_time_usecs = max_sleep_time_usecs;
+
+    // usleep() will return 0 and set errno to EINTR on receipt of a signal
+    // such as SIGCHLD.
+    usleep(sleep_time_usecs);
+    ret_pid = HANDLE_EINTR(waitpid(handle, &status, WNOHANG));
+
+    if ((max_sleep_time_usecs < kMaxSleepInMicroseconds) &&
+        (double_sleep_time++ % 4 == 0)) {
+      max_sleep_time_usecs *= 2;
+    }
+  }
+
+  if (success)
+    *success = (ret_pid != -1);
+
+  return status;
+}
+
+void StackDumpSignalHandler(int signal) {
+  StackTrace().PrintBacktrace();
+  _exit(1);
+}
+
+}  // anonymous namespace
 
 ProcessId GetCurrentProcId() {
   return getpid();
@@ -64,11 +143,9 @@ ProcessId GetProcId(ProcessHandle process) {
 // entry structure.  Ignores specified exit_code; posix can't force that.
 // Returns true if this is successful, false otherwise.
 bool KillProcess(ProcessHandle process_id, int exit_code, bool wait) {
-  DCHECK(process_id > 1);
-  if (process_id <= 1) {
-    LOG(ERROR) << "tried to kill process_id " << process_id;
+  DCHECK_GT(process_id, 1) << " tried to kill invalid process_id";
+  if (process_id <= 1)
     return false;
-  }
 
   bool result = kill(process_id, SIGTERM) == 0;
 
@@ -77,7 +154,7 @@ bool KillProcess(ProcessHandle process_id, int exit_code, bool wait) {
     // The process may not end immediately due to pending I/O
     bool exited = false;
     while (tries-- > 0) {
-      int pid = HANDLE_EINTR(waitpid(process_id, NULL, WNOHANG));
+      pid_t pid = HANDLE_EINTR(waitpid(process_id, NULL, WNOHANG));
       if (pid == process_id) {
         exited = true;
         break;
@@ -86,15 +163,12 @@ bool KillProcess(ProcessHandle process_id, int exit_code, bool wait) {
       sleep(1);
     }
 
-    if (!exited) {
+    if (!exited)
       result = kill(process_id, SIGKILL) == 0;
-    }
   }
 
-  if (!result) {
-    DLOG(ERROR) << "Unable to terminate process " << process_id << "; error "
-                << errno;
-  }
+  if (!result)
+    DPLOG(ERROR) << "Unable to terminate process " << process_id;
 
   return result;
 }
@@ -110,18 +184,26 @@ class ScopedDIRClose {
 };
 typedef scoped_ptr_malloc<DIR, ScopedDIRClose> ScopedDIR;
 
-void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
 #if defined(OS_LINUX)
   static const rlim_t kSystemDefaultMaxFds = 8192;
-  static const char fd_dir[] = "/proc/self/fd";
+  static const char kFDDir[] = "/proc/self/fd";
 #elif defined(OS_MACOSX)
   static const rlim_t kSystemDefaultMaxFds = 256;
-  static const char fd_dir[] = "/dev/fd";
+  static const char kFDDir[] = "/dev/fd";
+#elif defined(OS_SOLARIS)
+  static const rlim_t kSystemDefaultMaxFds = 8192;
+  static const char kFDDir[] = "/dev/fd";
 #elif defined(OS_FREEBSD)
   static const rlim_t kSystemDefaultMaxFds = 8192;
-  static const char fd_dir[] = "/dev/fd";
+  static const char kFDDir[] = "/dev/fd";
+#elif defined(OS_OPENBSD)
+  static const rlim_t kSystemDefaultMaxFds = 256;
+  static const char kFDDir[] = "/dev/fd";
 #endif
-  std::set<int> saved_fds;
+
+void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
+  // DANGER: no calls to malloc are allowed from now on:
+  // http://crbug.com/36678
 
   // Get the maximum number of FDs possible.
   struct rlimit nofile;
@@ -137,45 +219,49 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
   if (max_fds > INT_MAX)
     max_fds = INT_MAX;
 
-  // Don't close stdin, stdout and stderr
-  saved_fds.insert(STDIN_FILENO);
-  saved_fds.insert(STDOUT_FILENO);
-  saved_fds.insert(STDERR_FILENO);
+  DirReaderPosix fd_dir(kFDDir);
 
-  for (base::InjectiveMultimap::const_iterator
-       i = saved_mapping.begin(); i != saved_mapping.end(); ++i) {
-    saved_fds.insert(i->dest);
-  }
-
-  ScopedDIR dir_closer(opendir(fd_dir));
-  DIR *dir = dir_closer.get();
-  if (NULL == dir) {
-    DLOG(ERROR) << "Unable to open " << fd_dir;
-
+  if (!fd_dir.IsValid()) {
     // Fallback case: Try every possible fd.
     for (rlim_t i = 0; i < max_fds; ++i) {
       const int fd = static_cast<int>(i);
-      if (saved_fds.find(fd) != saved_fds.end())
+      if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
+        continue;
+      InjectiveMultimap::const_iterator j;
+      for (j = saved_mapping.begin(); j != saved_mapping.end(); j++) {
+        if (fd == j->dest)
+          break;
+      }
+      if (j != saved_mapping.end())
         continue;
 
-      HANDLE_EINTR(close(fd));
+      // Since we're just trying to close anything we can find,
+      // ignore any error return values of close().
+      int unused ALLOW_UNUSED = HANDLE_EINTR(close(fd));
     }
     return;
   }
-  int dir_fd = dirfd(dir);
 
-  struct dirent *ent;
-  while ((ent = readdir(dir))) {
+  const int dir_fd = fd_dir.fd();
+
+  for ( ; fd_dir.Next(); ) {
     // Skip . and .. entries.
-    if (ent->d_name[0] == '.')
+    if (fd_dir.name()[0] == '.')
       continue;
 
     char *endptr;
     errno = 0;
-    const long int fd = strtol(ent->d_name, &endptr, 10);
-    if (ent->d_name[0] == 0 || *endptr || fd < 0 || errno)
+    const long int fd = strtol(fd_dir.name(), &endptr, 10);
+    if (fd_dir.name()[0] == 0 || *endptr || fd < 0 || errno)
       continue;
-    if (saved_fds.find(fd) != saved_fds.end())
+    if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
+      continue;
+    InjectiveMultimap::const_iterator i;
+    for (i = saved_mapping.begin(); i != saved_mapping.end(); i++) {
+      if (fd == i->dest)
+        break;
+    }
+    if (i != saved_mapping.end())
       continue;
     if (fd == dir_fd)
       continue;
@@ -184,50 +270,237 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
     // own use and will complain if we try to close them.  All of
     // these FDs are >= |max_fds|, so we can check against that here
     // before closing.  See https://bugs.kde.org/show_bug.cgi?id=191758
-    if (fd < static_cast<int>(max_fds))
-      HANDLE_EINTR(close(fd));
-  }
-}
-
-// Sets all file descriptors to close on exec except for stdin, stdout
-// and stderr.
-// TODO(agl): Remove this function. It's fundamentally broken for multithreaded
-// apps.
-void SetAllFDsToCloseOnExec() {
-#if defined(OS_LINUX)
-  const char fd_dir[] = "/proc/self/fd";
-#elif defined(OS_MACOSX) || defined(OS_FREEBSD)
-  const char fd_dir[] = "/dev/fd";
-#endif
-  ScopedDIR dir_closer(opendir(fd_dir));
-  DIR *dir = dir_closer.get();
-  if (NULL == dir) {
-    DLOG(ERROR) << "Unable to open " << fd_dir;
-    return;
-  }
-
-  struct dirent *ent;
-  while ((ent = readdir(dir))) {
-    // Skip . and .. entries.
-    if (ent->d_name[0] == '.')
-      continue;
-    int i = atoi(ent->d_name);
-    // We don't close stdin, stdout or stderr.
-    if (i <= STDERR_FILENO)
-      continue;
-
-    int flags = fcntl(i, F_GETFD);
-    if ((flags == -1) || (fcntl(i, F_SETFD, flags | FD_CLOEXEC) == -1)) {
-      DLOG(ERROR) << "fcntl failure.";
+    if (fd < static_cast<int>(max_fds)) {
+      int ret = HANDLE_EINTR(close(fd));
+      DPCHECK(ret == 0);
     }
   }
 }
 
+#if defined(OS_MACOSX)
+static std::string MachErrorCode(kern_return_t err) {
+  return StringPrintf("0x%x %s", err, mach_error_string(err));
+}
+
+// Forks the current process and returns the child's |task_t| in the parent
+// process.
+static pid_t fork_and_get_task(task_t* child_task) {
+  const int kTimeoutMs = 100;
+  kern_return_t err;
+
+  // Put a random number into the channel name, so that a compromised renderer
+  // can't pretend being the child that's forked off.
+  std::string mach_connection_name = StringPrintf(
+      "com.google.Chrome.samplingfork.%p.%d",
+      child_task, base::RandInt(0, std::numeric_limits<int>::max()));
+  ReceivePort parent_recv_port(mach_connection_name.c_str());
+
+  // Error handling philosophy: If Mach IPC fails, don't touch |child_task| but
+  // return a valid pid. If IPC fails in the child, the parent will have to wait
+  // until kTimeoutMs is over. This is not optimal, but I've never seen it
+  // happen, and stuff should still mostly work.
+  pid_t pid = fork();
+  switch (pid) {
+    case -1:
+      return pid;
+    case 0: {  // child
+      MachSendMessage child_message(/* id= */0);
+      if (!child_message.AddDescriptor(mach_task_self())) {
+        LOG(ERROR) << "child AddDescriptor(mach_task_self()) failed.";
+        return pid;
+      }
+
+      MachPortSender child_sender(mach_connection_name.c_str());
+      err = child_sender.SendMessage(child_message, kTimeoutMs);
+      if (err != KERN_SUCCESS) {
+        LOG(ERROR) << "child SendMessage() failed: " << MachErrorCode(err);
+        return pid;
+      }
+      break;
+    }
+    default: {  // parent
+      MachReceiveMessage child_message;
+      err = parent_recv_port.WaitForMessage(&child_message, kTimeoutMs);
+      if (err != KERN_SUCCESS) {
+        LOG(ERROR) << "parent WaitForMessage() failed: " << MachErrorCode(err);
+        return pid;
+      }
+
+      if (child_message.GetTranslatedPort(0) == MACH_PORT_NULL) {
+        LOG(ERROR) << "parent GetTranslatedPort(0) failed.";
+        return pid;
+      }
+      *child_task = child_message.GetTranslatedPort(0);
+      break;
+    }
+  }
+  return pid;
+}
+
 bool LaunchApp(const std::vector<std::string>& argv,
-               const environment_vector& environ,
+               const environment_vector& env_changes,
                const file_handle_mapping_vector& fds_to_remap,
                bool wait, ProcessHandle* process_handle) {
-  pid_t pid = fork();
+  return LaunchAppAndGetTask(
+      argv, env_changes, fds_to_remap, wait, NULL, process_handle);
+}
+#endif  // defined(OS_MACOSX)
+
+char** AlterEnvironment(const environment_vector& changes,
+                        const char* const* const env) {
+  unsigned count = 0;
+  unsigned size = 0;
+
+  // First assume that all of the current environment will be included.
+  for (unsigned i = 0; env[i]; i++) {
+    const char *const pair = env[i];
+    count++;
+    size += strlen(pair) + 1 /* terminating NUL */;
+  }
+
+  for (environment_vector::const_iterator
+       j = changes.begin(); j != changes.end(); j++) {
+    bool found = false;
+    const char *pair;
+
+    for (unsigned i = 0; env[i]; i++) {
+      pair = env[i];
+      const char *const equals = strchr(pair, '=');
+      if (!equals)
+        continue;
+      const unsigned keylen = equals - pair;
+      if (keylen == j->first.size() &&
+          memcmp(pair, j->first.data(), keylen) == 0) {
+        found = true;
+        break;
+      }
+    }
+
+    // if found, we'll either be deleting or replacing this element.
+    if (found) {
+      count--;
+      size -= strlen(pair) + 1;
+      if (j->second.size())
+        found = false;
+    }
+
+    // if !found, then we have a new element to add.
+    if (!found && j->second.size() > 0) {
+      count++;
+      size += j->first.size() + 1 /* '=' */ + j->second.size() + 1 /* NUL */;
+    }
+  }
+
+  count++;  // for the final NULL
+  uint8_t *buffer = new uint8_t[sizeof(char*) * count + size];
+  char **const ret = reinterpret_cast<char**>(buffer);
+  unsigned k = 0;
+  char *scratch = reinterpret_cast<char*>(buffer + sizeof(char*) * count);
+
+  for (unsigned i = 0; env[i]; i++) {
+    const char *const pair = env[i];
+    const char *const equals = strchr(pair, '=');
+    if (!equals) {
+      const unsigned len = strlen(pair);
+      ret[k++] = scratch;
+      memcpy(scratch, pair, len + 1);
+      scratch += len + 1;
+      continue;
+    }
+    const unsigned keylen = equals - pair;
+    bool handled = false;
+    for (environment_vector::const_iterator
+         j = changes.begin(); j != changes.end(); j++) {
+      if (j->first.size() == keylen &&
+          memcmp(j->first.data(), pair, keylen) == 0) {
+        if (!j->second.empty()) {
+          ret[k++] = scratch;
+          memcpy(scratch, pair, keylen + 1);
+          scratch += keylen + 1;
+          memcpy(scratch, j->second.c_str(), j->second.size() + 1);
+          scratch += j->second.size() + 1;
+        }
+        handled = true;
+        break;
+      }
+    }
+
+    if (!handled) {
+      const unsigned len = strlen(pair);
+      ret[k++] = scratch;
+      memcpy(scratch, pair, len + 1);
+      scratch += len + 1;
+    }
+  }
+
+  // Now handle new elements
+  for (environment_vector::const_iterator
+       j = changes.begin(); j != changes.end(); j++) {
+    if (j->second.size() == 0)
+      continue;
+
+    bool found = false;
+    for (unsigned i = 0; env[i]; i++) {
+      const char *const pair = env[i];
+      const char *const equals = strchr(pair, '=');
+      if (!equals)
+        continue;
+      const unsigned keylen = equals - pair;
+      if (keylen == j->first.size() &&
+          memcmp(pair, j->first.data(), keylen) == 0) {
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      ret[k++] = scratch;
+      memcpy(scratch, j->first.data(), j->first.size());
+      scratch += j->first.size();
+      *scratch++ = '=';
+      memcpy(scratch, j->second.c_str(), j->second.size() + 1);
+      scratch += j->second.size() + 1;
+     }
+  }
+
+  ret[k] = NULL;
+  return ret;
+}
+
+#if defined(OS_MACOSX)
+bool LaunchAppAndGetTask(
+#else
+bool LaunchApp(
+#endif
+    const std::vector<std::string>& argv,
+    const environment_vector& env_changes,
+    const file_handle_mapping_vector& fds_to_remap,
+    bool wait,
+#if defined(OS_MACOSX)
+    task_t* task_handle,
+#endif
+    ProcessHandle* process_handle) {
+  pid_t pid;
+  InjectiveMultimap fd_shuffle1, fd_shuffle2;
+  fd_shuffle1.reserve(fds_to_remap.size());
+  fd_shuffle2.reserve(fds_to_remap.size());
+  scoped_array<char*> argv_cstr(new char*[argv.size() + 1]);
+  scoped_array<char*> new_environ(AlterEnvironment(env_changes, environ));
+
+#if defined(OS_MACOSX)
+  if (task_handle == NULL) {
+    pid = fork();
+  } else {
+    // On OS X, the task_t for a process is needed for several reasons. Sadly,
+    // the function task_for_pid() requires privileges a normal user doesn't
+    // have. Instead, a short-lived Mach IPC connection is opened between parent
+    // and child, and the child sends its task_t to the parent at fork time.
+    *task_handle = MACH_PORT_NULL;
+    pid = fork_and_get_task(task_handle);
+  }
+#else
+  pid = fork();
+#endif
   if (pid < 0)
     return false;
 
@@ -237,49 +510,51 @@ bool LaunchApp(const std::vector<std::string>& argv,
     RestoreDefaultExceptionHandler();
 #endif
 
-    InjectiveMultimap fd_shuffle;
+#if 0
+    // When debugging it can be helpful to check that we really aren't making
+    // any hidden calls to malloc.
+    void *malloc_thunk =
+        reinterpret_cast<void*>(reinterpret_cast<intptr_t>(malloc) & ~4095);
+    mprotect(malloc_thunk, 4096, PROT_READ | PROT_WRITE | PROT_EXEC);
+    memset(reinterpret_cast<void*>(malloc), 0xff, 8);
+#endif
+
+    // DANGER: no calls to malloc are allowed from now on:
+    // http://crbug.com/36678
+
     for (file_handle_mapping_vector::const_iterator
         it = fds_to_remap.begin(); it != fds_to_remap.end(); ++it) {
-      fd_shuffle.push_back(InjectionArc(it->first, it->second, false));
+      fd_shuffle1.push_back(InjectionArc(it->first, it->second, false));
+      fd_shuffle2.push_back(InjectionArc(it->first, it->second, false));
     }
 
-    for (environment_vector::const_iterator it = environ.begin();
-         it != environ.end(); ++it) {
-      if (it->first) {
-        if (it->second) {
-          setenv(it->first, it->second, 1);
-        } else {
-          unsetenv(it->first);
-        }
-      }
-    }
+    environ = new_environ.get();
 
     // Obscure fork() rule: in the child, if you don't end up doing exec*(),
     // you call _exit() instead of exit(). This is because _exit() does not
     // call any previously-registered (in the parent) exit handlers, which
     // might do things like block waiting for threads that don't even exist
     // in the child.
-    if (!ShuffleFileDescriptors(fd_shuffle))
+
+    // fd_shuffle1 is mutated by this call because it cannot malloc.
+    if (!ShuffleFileDescriptors(&fd_shuffle1))
       _exit(127);
 
-    // If we are using the SUID sandbox, it sets a magic environment variable
-    // ("SBX_D"), so we remove that variable from the environment here on the
-    // off chance that it's already set.
-    unsetenv("SBX_D");
+    CloseSuperfluousFds(fd_shuffle2);
 
-    CloseSuperfluousFds(fd_shuffle);
-
-    scoped_array<char*> argv_cstr(new char*[argv.size() + 1]);
     for (size_t i = 0; i < argv.size(); i++)
       argv_cstr[i] = const_cast<char*>(argv[i].c_str());
     argv_cstr[argv.size()] = NULL;
     execvp(argv_cstr[0], argv_cstr.get());
-    PLOG(ERROR) << "LaunchApp: execvp(" << argv_cstr[0] << ") failed";
+    RAW_LOG(ERROR, "LaunchApp: failed to execvp:");
+    RAW_LOG(ERROR, argv_cstr[0]);
     _exit(127);
   } else {
     // Parent process
-    if (wait)
-      HANDLE_EINTR(waitpid(pid, 0, 0));
+    if (wait) {
+      pid_t ret = HANDLE_EINTR(waitpid(pid, 0, 0));
+      DPCHECK(ret > 0);
+    }
 
     if (process_handle)
       *process_handle = pid;
@@ -302,25 +577,64 @@ bool LaunchApp(const CommandLine& cl,
   return LaunchApp(cl.argv(), no_files, wait, process_handle);
 }
 
-ProcessMetrics::ProcessMetrics(ProcessHandle process) : process_(process),
-                                                        last_time_(0),
-                                                        last_system_time_(0)
-#if defined(OS_LINUX)
-                                                      , last_cpu_(0)
+#if !defined(OS_MACOSX)
+ProcessMetrics::ProcessMetrics(ProcessHandle process)
+#else
+ProcessMetrics::ProcessMetrics(ProcessHandle process,
+                               ProcessMetrics::PortProvider* port_provider)
+#endif
+    : process_(process),
+      last_time_(0),
+      last_system_time_(0)
+#if defined(OS_MACOSX)
+      , port_provider_(port_provider)
+#elif defined(OS_POSIX)
+      , last_cpu_(0)
 #endif
 {
   processor_count_ = base::SysInfo::NumberOfProcessors();
 }
 
 // static
+#if !defined(OS_MACOSX)
 ProcessMetrics* ProcessMetrics::CreateProcessMetrics(ProcessHandle process) {
   return new ProcessMetrics(process);
 }
+#else
+ProcessMetrics* ProcessMetrics::CreateProcessMetrics(
+    ProcessHandle process,
+    ProcessMetrics::PortProvider* port_provider) {
+  return new ProcessMetrics(process, port_provider);
+}
+#endif
 
 ProcessMetrics::~ProcessMetrics() { }
 
 void EnableTerminationOnHeapCorruption() {
   // On POSIX, there nothing to do AFAIK.
+}
+
+bool EnableInProcessStackDumping() {
+  // When running in an application, our code typically expects SIGPIPE
+  // to be ignored.  Therefore, when testing that same code, it should run
+  // with SIGPIPE ignored as well.
+  struct sigaction action;
+  action.sa_handler = SIG_IGN;
+  action.sa_flags = 0;
+  sigemptyset(&action.sa_mask);
+  bool success = (sigaction(SIGPIPE, &action, NULL) == 0);
+
+  // TODO(phajdan.jr): Catch other crashy signals, like SIGABRT.
+  success &= (signal(SIGSEGV, &StackDumpSignalHandler) != SIG_ERR);
+  success &= (signal(SIGILL, &StackDumpSignalHandler) != SIG_ERR);
+  success &= (signal(SIGBUS, &StackDumpSignalHandler) != SIG_ERR);
+  success &= (signal(SIGFPE, &StackDumpSignalHandler) != SIG_ERR);
+  return success;
+}
+
+void AttachToConsole() {
+  // On POSIX, there nothing to do AFAIK. Maybe create a new console if none
+  // exist?
 }
 
 void RaiseProcessToHighPriority() {
@@ -330,7 +644,7 @@ void RaiseProcessToHighPriority() {
 
 bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
   int status;
-  const int result = HANDLE_EINTR(waitpid(handle, &status, WNOHANG));
+  const pid_t result = HANDLE_EINTR(waitpid(handle, &status, WNOHANG));
   if (result == -1) {
     PLOG(ERROR) << "waitpid(" << handle << ")";
     if (child_exited)
@@ -347,7 +661,7 @@ bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
     *child_exited = true;
 
   if (WIFSIGNALED(status)) {
-    switch(WTERMSIG(status)) {
+    switch (WTERMSIG(status)) {
       case SIGSEGV:
       case SIGILL:
       case SIGABRT:
@@ -381,62 +695,24 @@ bool WaitForExitCode(ProcessHandle handle, int* exit_code) {
   return false;
 }
 
-namespace {
-
-int WaitpidWithTimeout(ProcessHandle handle, int64 wait_milliseconds,
-                       bool* success) {
-  // This POSIX version of this function only guarantees that we wait no less
-  // than |wait_milliseconds| for the proces to exit.  The child process may
-  // exit sometime before the timeout has ended but we may still block for
-  // up to 0.25 seconds after the fact.
-  //
-  // waitpid() has no direct support on POSIX for specifying a timeout, you can
-  // either ask it to block indefinitely or return immediately (WNOHANG).
-  // When a child process terminates a SIGCHLD signal is sent to the parent.
-  // Catching this signal would involve installing a signal handler which may
-  // affect other parts of the application and would be difficult to debug.
-  //
-  // Our strategy is to call waitpid() once up front to check if the process
-  // has already exited, otherwise to loop for wait_milliseconds, sleeping for
-  // at most 0.25 secs each time using usleep() and then calling waitpid().
-  //
-  // usleep() is speced to exit if a signal is received for which a handler
-  // has been installed.  This means that when a SIGCHLD is sent, it will exit
-  // depending on behavior external to this function.
-  //
-  // This function is used primarily for unit tests, if we want to use it in
-  // the application itself it would probably be best to examine other routes.
-  int status = -1;
-  pid_t ret_pid = HANDLE_EINTR(waitpid(handle, &status, WNOHANG));
-  static const int64 kQuarterSecondInMicroseconds = kMicrosecondsPerSecond/4;
-
-  // If the process hasn't exited yet, then sleep and try again.
-  Time wakeup_time = Time::Now() + TimeDelta::FromMilliseconds(
-      wait_milliseconds);
-  while (ret_pid == 0) {
-    Time now = Time::Now();
-    if (now > wakeup_time)
-      break;
-    // Guaranteed to be non-negative!
-    int64 sleep_time_usecs = (wakeup_time - now).InMicroseconds();
-    // Don't sleep for more than 0.25 secs at a time.
-    if (sleep_time_usecs > kQuarterSecondInMicroseconds) {
-      sleep_time_usecs = kQuarterSecondInMicroseconds;
-    }
-
-    // usleep() will return 0 and set errno to EINTR on receipt of a signal
-    // such as SIGCHLD.
-    usleep(sleep_time_usecs);
-    ret_pid = HANDLE_EINTR(waitpid(handle, &status, WNOHANG));
+bool WaitForExitCodeWithTimeout(ProcessHandle handle, int* exit_code,
+                                int64 timeout_milliseconds) {
+  bool waitpid_success = false;
+  int status = WaitpidWithTimeout(handle, timeout_milliseconds,
+                                  &waitpid_success);
+  if (status == -1)
+    return false;
+  if (!waitpid_success)
+    return false;
+  if (!WIFEXITED(status))
+    return false;
+  if (WIFSIGNALED(status)) {
+    *exit_code = -1;
+    return true;
   }
-
-  if (success)
-    *success = (ret_pid != -1);
-
-  return status;
+  *exit_code = WEXITSTATUS(status);
+  return true;
 }
-
-}  // namespace
 
 bool WaitForSingleProcess(ProcessHandle handle, int64 wait_milliseconds) {
   bool waitpid_success;
@@ -467,55 +743,36 @@ bool CrashAwareSleep(ProcessHandle handle, int64 wait_milliseconds) {
 }
 
 int64 TimeValToMicroseconds(const struct timeval& tv) {
-  return tv.tv_sec * kMicrosecondsPerSecond + tv.tv_usec;
+  static const int kMicrosecondsPerSecond = 1000000;
+  int64 ret = tv.tv_sec;  // Avoid (int * int) integer overflow.
+  ret *= kMicrosecondsPerSecond;
+  ret += tv.tv_usec;
+  return ret;
 }
 
-#if defined(OS_MACOSX)
-// TODO(port): this function only returns the *current* CPU's usage;
-// we want to return this->process_'s CPU usage.
-int ProcessMetrics::GetCPUUsage() {
-  struct timeval now;
-  struct rusage usage;
-
-  int retval = gettimeofday(&now, NULL);
-  if (retval)
-    return 0;
-  retval = getrusage(RUSAGE_SELF, &usage);
-  if (retval)
-    return 0;
-
-  int64 system_time = (TimeValToMicroseconds(usage.ru_stime) +
-                       TimeValToMicroseconds(usage.ru_utime)) /
-                        processor_count_;
-  int64 time = TimeValToMicroseconds(now);
-
-  if ((last_system_time_ == 0) || (last_time_ == 0)) {
-    // First call, just set the last values.
-    last_system_time_ = system_time;
-    last_time_ = time;
-    return 0;
-  }
-
-  int64 system_time_delta = system_time - last_system_time_;
-  int64 time_delta = time - last_time_;
-  DCHECK(time_delta != 0);
-  if (time_delta == 0)
-    return 0;
-
-  // We add time_delta / 2 so the result is rounded.
-  int cpu = static_cast<int>((system_time_delta * 100 + time_delta / 2) /
-                             time_delta);
-
-  last_system_time_ = system_time;
-  last_time_ = time;
-
-  return cpu;
-}
-#endif
-
-bool GetAppOutput(const CommandLine& cl, std::string* output) {
+// Executes the application specified by |cl| and wait for it to exit. Stores
+// the output (stdout) in |output|. If |do_search_path| is set, it searches the
+// path for the application; in that case, |envp| must be null, and it will use
+// the current environment. If |do_search_path| is false, |cl| should fully
+// specify the path of the application, and |envp| will be used as the
+// environment. Redirects stderr to /dev/null. Returns true on success
+// (application launched and exited cleanly, with exit code indicating success).
+// |output| is modified only when the function finished successfully.
+static bool GetAppOutputInternal(const CommandLine& cl, char* const envp[],
+                                 std::string* output, size_t max_output,
+                                 bool do_search_path) {
   int pipe_fd[2];
   pid_t pid;
+  InjectiveMultimap fd_shuffle1, fd_shuffle2;
+  const std::vector<std::string>& argv = cl.argv();
+  scoped_array<char*> argv_cstr(new char*[argv.size() + 1]);
+
+  fd_shuffle1.reserve(3);
+  fd_shuffle2.reserve(3);
+
+  // Either |do_search_path| should be false or |envp| should be null, but not
+  // both.
+  DCHECK(!do_search_path ^ !envp);
 
   if (pipe(pipe_fd) < 0)
     return false;
@@ -530,6 +787,8 @@ bool GetAppOutput(const CommandLine& cl, std::string* output) {
 #if defined(OS_MACOSX)
         RestoreDefaultExceptionHandler();
 #endif
+        // DANGER: no calls to malloc are allowed from now on:
+        // http://crbug.com/36678
 
         // Obscure fork() rule: in the child, if you don't end up doing exec*(),
         // you call _exit() instead of exit(). This is because _exit() does not
@@ -540,22 +799,27 @@ bool GetAppOutput(const CommandLine& cl, std::string* output) {
         if (dev_null < 0)
           _exit(127);
 
-        InjectiveMultimap fd_shuffle;
-        fd_shuffle.push_back(InjectionArc(pipe_fd[1], STDOUT_FILENO, true));
-        fd_shuffle.push_back(InjectionArc(dev_null, STDERR_FILENO, true));
-        fd_shuffle.push_back(InjectionArc(dev_null, STDIN_FILENO, true));
+        fd_shuffle1.push_back(InjectionArc(pipe_fd[1], STDOUT_FILENO, true));
+        fd_shuffle1.push_back(InjectionArc(dev_null, STDERR_FILENO, true));
+        fd_shuffle1.push_back(InjectionArc(dev_null, STDIN_FILENO, true));
+        // Adding another element here? Remeber to increase the argument to
+        // reserve(), above.
 
-        if (!ShuffleFileDescriptors(fd_shuffle))
+        std::copy(fd_shuffle1.begin(), fd_shuffle1.end(),
+                  std::back_inserter(fd_shuffle2));
+
+        if (!ShuffleFileDescriptors(&fd_shuffle1))
           _exit(127);
 
-        CloseSuperfluousFds(fd_shuffle);
+        CloseSuperfluousFds(fd_shuffle2);
 
-        const std::vector<std::string> argv = cl.argv();
-        scoped_array<char*> argv_cstr(new char*[argv.size() + 1]);
         for (size_t i = 0; i < argv.size(); i++)
           argv_cstr[i] = const_cast<char*>(argv[i].c_str());
         argv_cstr[argv.size()] = NULL;
-        execvp(argv_cstr[0], argv_cstr.get());
+        if (do_search_path)
+          execvp(argv_cstr[0], argv_cstr.get());
+        else
+          execve(argv_cstr[0], argv_cstr.get(), envp);
         _exit(127);
       }
     default:  // parent
@@ -566,26 +830,51 @@ bool GetAppOutput(const CommandLine& cl, std::string* output) {
         close(pipe_fd[1]);
 
         char buffer[256];
-        std::string buf_output;
+        std::string output_buf;
+        size_t output_buf_left = max_output;
+        ssize_t bytes_read = 1;  // A lie to properly handle |max_output == 0|
+                                 // case in the logic below.
 
-        while (true) {
-          ssize_t bytes_read =
-              HANDLE_EINTR(read(pipe_fd[0], buffer, sizeof(buffer)));
+        while (output_buf_left > 0) {
+          bytes_read = HANDLE_EINTR(read(pipe_fd[0], buffer,
+                                    std::min(output_buf_left, sizeof(buffer))));
           if (bytes_read <= 0)
             break;
-          buf_output.append(buffer, bytes_read);
+          output_buf.append(buffer, bytes_read);
+          output_buf_left -= static_cast<size_t>(bytes_read);
         }
         close(pipe_fd[0]);
 
+        // Always wait for exit code (even if we know we'll declare success).
         int exit_code = EXIT_FAILURE;
         bool success = WaitForExitCode(pid, &exit_code);
-        if (!success || exit_code != EXIT_SUCCESS)
-          return false;
 
-        output->swap(buf_output);
+        // If we stopped because we read as much as we wanted, we always declare
+        // success (because the child may exit due to |SIGPIPE|).
+        if (output_buf_left || bytes_read <= 0) {
+          if (!success || exit_code != EXIT_SUCCESS)
+            return false;
+        }
+
+        output->swap(output_buf);
         return true;
       }
   }
+}
+
+bool GetAppOutput(const CommandLine& cl, std::string* output) {
+  // Run |execve()| with the current environment and store "unlimited" data.
+  return GetAppOutputInternal(cl, NULL, output,
+                              std::numeric_limits<std::size_t>::max(), true);
+}
+
+// TODO(viettrungluu): Conceivably, we should have a timeout as well, so we
+// don't hang if what we're calling hangs.
+bool GetAppOutputRestricted(const CommandLine& cl,
+                            std::string* output, size_t max_output) {
+  // Run |execve()| with the empty environment.
+  char* const empty_environ = NULL;
+  return GetAppOutputInternal(cl, &empty_environ, output, max_output, false);
 }
 
 int GetProcessCount(const std::wstring& executable_name,

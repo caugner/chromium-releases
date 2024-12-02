@@ -14,23 +14,12 @@
         'tcmalloc/src',
         '../..',
       ],
+      'defines': [
+        'NO_TCMALLOC_SAMPLES',
+      ],
       'direct_dependent_settings': {
         'configurations': {
-          # TODO(bradnelson): find a way to make this more graceful in gyp.
-          #    Ideally configurations should be able to have some sort of
-          #    inheritance hierarchy. So that Purify no-tcmalloc could be
-          #    be derived from Release.
-          'Debug': {
-            'msvs_settings': {
-              'VCLinkerTool': {
-                'IgnoreDefaultLibraryNames': ['libcmtd.lib', 'libcmt.lib'],
-                'AdditionalDependencies': [
-                  '<(SHARED_INTERMEDIATE_DIR)/tcmalloc/libcmt.lib'
-                ],
-              },
-            },
-          },
-          'Release': {
+          'Common_Base': {
             'msvs_settings': {
               'VCLinkerTool': {
                 'IgnoreDefaultLibraryNames': ['libcmtd.lib', 'libcmt.lib'],
@@ -102,6 +91,8 @@
         'tcmalloc/src/google/tcmalloc.h',
         'tcmalloc/src/maybe_threads.cc',
         'tcmalloc/src/maybe_threads.h',
+        'tcmalloc/src/symbolize.cc',
+        'tcmalloc/src/symbolize.h',
         'tcmalloc/src/system-alloc.cc',
         'tcmalloc/src/system-alloc.h',
         'tcmalloc/src/tcmalloc.cc',
@@ -128,11 +119,11 @@
         'page_heap.cc',
         'page_heap.h',
         'port.cc',
+        'symbolize_linux.cc',
         'system-alloc.h',
         'tcmalloc.cc',
+        'tcmalloc_linux.cc',
         'win_allocator.cc',        
-
-        'malloc_hook.cc',
 
         # jemalloc files
         'jemalloc/jemalloc.c',
@@ -150,16 +141,16 @@
       'msvs_settings': {
         # TODO(sgk):  merge this with build/common.gypi settings
         'VCLibrarianTool=': {
-          'AdditionalOptions': '/ignore:4006,4221',
+          'AdditionalOptions': ['/ignore:4006,4221'],
           'AdditionalLibraryDirectories':
-            ['<(DEPTH)/third_party/platformsdk_win2008_6_1/files/Lib'],
+            ['<(DEPTH)/third_party/platformsdk_win7/files/Lib'],
         },
         'VCLinkerTool': {
-          'AdditionalOptions': '/ignore:4006',
+          'AdditionalOptions': ['/ignore:4006'],
         },
       },
       'configurations': {
-        'Debug': {
+        'Debug_Base': {
           'msvs_settings': {
             'VCCLCompilerTool': {
               'RuntimeLibrary': '0',
@@ -185,6 +176,8 @@
             'tcmalloc/src/base/vdso_support.h',
             'tcmalloc/src/maybe_threads.cc',
             'tcmalloc/src/maybe_threads.h',
+            'tcmalloc/src/symbolize.cc',
+            'tcmalloc/src/symbolize.h',
             'tcmalloc/src/system-alloc.cc',
             'tcmalloc/src/system-alloc.h',
 
@@ -192,6 +185,10 @@
             'tcmalloc/src/tcmalloc.cc',
             'tcmalloc/src/page_heap.cc',
             'tcmalloc/src/page_heap.h',
+
+            # don't use linux forked version
+            'symbolize_linux.cc',
+            'tcmalloc_linux.cc',
 
             # heap-profiler/checker/cpuprofiler
             'tcmalloc/src/base/thread_lister.c',
@@ -206,9 +203,6 @@
             'tcmalloc/src/profile-handler.cc',
             'tcmalloc/src/profile-handler.h',
             'tcmalloc/src/profiler.cc',
-
-            # don't use linux forked versions
-            'malloc_hook.cc',
           ],
         }],
         ['OS=="linux"', {
@@ -217,6 +211,10 @@
             'port.cc',
             'system-alloc.h',
             'win_allocator.cc',        
+
+            # TODO(willchan): unfork this
+            'tcmalloc/src/tcmalloc.cc',
+            'tcmalloc/src/symbolize.cc',
 
             # TODO(willchan): Support allocator shim later on.
             'allocator_shim.cc',
@@ -228,15 +226,18 @@
             'jemalloc/ql.h',
             'jemalloc/qr.h',
             'jemalloc/rb.h',
-
-            # TODO(willchan): Unfork linux.
-            'tcmalloc/src/malloc_hook.cc',
+          ],
+          'cflags!': [
+            '-fvisibility=hidden',
           ],
           'link_settings': {
             'ldflags': [
               # Don't let linker rip this symbol out, otherwise the heap&cpu
               # profilers will not initialize properly on startup.
               '-Wl,-uIsHeapProfilerRunning,-uProfilerStart',
+              # Do the same for heap leak checker.
+              '-Wl,-u_Z21InitialMallocHook_NewPKvj,-u_Z22InitialMallocHook_MMapPKvS0_jiiix,-u_Z22InitialMallocHook_SbrkPKvi',
+              '-Wl,-u_Z21InitialMallocHook_NewPKvm,-u_Z22InitialMallocHook_MMapPKvS0_miiil,-u_Z22InitialMallocHook_SbrkPKvl',
             ],
           },
         }],

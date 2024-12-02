@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,9 +52,6 @@ class RootView : public View,
 
   // Convenience to schedule the whole view
   virtual void SchedulePaint();
-
-  // Convenience to schedule a paint given some ints
-  virtual void SchedulePaint(int x, int y, int w, int h);
 
   // Paint this RootView and its child Views.
   virtual void ProcessPaint(gfx::Canvas* canvas);
@@ -152,6 +149,10 @@ class RootView : public View,
   // Used to set the View parent after the view has been created.
   virtual void SetFocusTraversableParentView(View* view);
 
+  // Called when parent of the host changed.
+  void NotifyNativeViewHierarchyChanged(bool attached,
+                                        gfx::NativeView native_view);
+
   // Returns the name of this class: views/RootView
   virtual std::string GetClassName() const;
 
@@ -176,8 +177,6 @@ class RootView : public View,
 
   // Accessibility accessors/mutators, overridden from View.
   virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
-  virtual bool GetAccessibleName(std::wstring* name);
-  virtual void SetAccessibleName(const std::wstring& name);
 
  protected:
 
@@ -194,7 +193,6 @@ class RootView : public View,
   friend class PaintTask;
 
   RootView();
-  DISALLOW_EVIL_CONSTRUCTORS(RootView);
 
   // Convert a point to our current mouse handler. Returns false if the
   // mouse handler is not connected to a Widget. In that case, the
@@ -330,8 +328,10 @@ class RootView : public View,
   // True if we're currently processing paint.
   bool is_processing_paint_;
 #endif
+
+  DISALLOW_COPY_AND_ASSIGN(RootView);
 };
 
 }  // namespace views
 
-#endif // VIEWS_WIDGET_ROOT_VIEW_H_
+#endif  // VIEWS_WIDGET_ROOT_VIEW_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,12 @@
 
 #include "app/l10n_util.h"
 #include "chrome/browser/chrome_thread.h"
-#include "chrome/browser/extensions/crx_installer.h"
-#include "chrome/browser/extensions/extension_file_util.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
@@ -25,54 +24,35 @@ class ExtensionDisabledDialogDelegate
   ExtensionDisabledDialogDelegate(Profile* profile,
                                   ExtensionsService* service,
                                   Extension* extension)
-        : profile_(profile), service_(service), extension_(extension),
-          ui_loop_(MessageLoop::current()) {
-    AddRef();  // balanced in ContinueInstall or AbortInstall.
+        : service_(service), extension_(extension) {
+    AddRef();  // Balanced in Proceed or Abort.
 
-    // Do this now because we can't touch extension on the file loop.
-    install_icon_resource_ =
-        extension_->GetIconPath(Extension::EXTENSION_ICON_LARGE);
-
-    ChromeThread::GetMessageLoop(ChromeThread::FILE)->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &ExtensionDisabledDialogDelegate::Start));
-  }
-
-  virtual ~ExtensionDisabledDialogDelegate() {
+    install_ui_.reset(new ExtensionInstallUI(profile));
+    install_ui_->ConfirmInstall(this, extension_);
   }
 
   // ExtensionInstallUI::Delegate
-  virtual void ContinueInstall() {
+  virtual void InstallUIProceed(bool create_app_shortcut) {
+    ExtensionPrefs* prefs = service_->extension_prefs();
+    prefs->SetDidExtensionEscalatePermissions(extension_, false);
     service_->EnableExtension(extension_->id());
     Release();
   }
-  virtual void AbortInstall() {
+  virtual void InstallUIAbort() {
     // Do nothing. The extension will remain disabled.
     Release();
   }
 
  private:
-  void Start() {
-    // We start on the file thread so we can decode the install icon.
-    FilePath install_icon_path = install_icon_resource_.GetFilePath();
-    CrxInstaller::DecodeInstallIcon(install_icon_path, &install_icon_);
-    // Then we display the UI on the UI thread.
-    ui_loop_->PostTask(FROM_HERE,
-        NewRunnableMethod(this,
-                          &ExtensionDisabledDialogDelegate::ConfirmInstall));
-  }
+  friend class base::RefCountedThreadSafe<ExtensionDisabledDialogDelegate>;
 
-  void ConfirmInstall() {
-    DCHECK(MessageLoop::current() == ui_loop_);
-    ExtensionInstallUI ui(profile_);
-    ui.ConfirmInstall(this, extension_, install_icon_.get());
-  }
+  virtual ~ExtensionDisabledDialogDelegate() {}
 
-  Profile* profile_;
+  // The UI for showing the install dialog when enabling.
+  scoped_ptr<ExtensionInstallUI> install_ui_;
+
   ExtensionsService* service_;
   Extension* extension_;
-  ExtensionResource install_icon_resource_;
-  scoped_ptr<SkBitmap> install_icon_;
-  MessageLoop* ui_loop_;
 };
 
 class ExtensionDisabledInfobarDelegate
@@ -88,9 +68,9 @@ class ExtensionDisabledInfobarDelegate
         extension_(extension) {
     // The user might re-enable the extension in other ways, so watch for that.
     registrar_.Add(this, NotificationType::EXTENSION_LOADED,
-                   Source<ExtensionsService>(service));
+                   Source<Profile>(service->profile()));
     registrar_.Add(this, NotificationType::EXTENSION_UNLOADED_DISABLED,
-                   Source<ExtensionsService>(service));
+                   Source<Profile>(service->profile()));
   }
   virtual ~ExtensionDisabledInfobarDelegate() {
   }
@@ -113,6 +93,9 @@ class ExtensionDisabledInfobarDelegate
     new ExtensionDisabledDialogDelegate(tab_contents_->profile(),
                                         service_, extension_);
     return true;
+  }
+  virtual void InfoBarClosed() {
+    delete this;
   }
 
   virtual void Observe(NotificationType type,
@@ -152,4 +135,10 @@ void ShowExtensionDisabledUI(ExtensionsService* service, Profile* profile,
 
   tab_contents->AddInfoBar(new ExtensionDisabledInfobarDelegate(
       tab_contents, service, extension));
+}
+
+void ShowExtensionDisabledDialog(ExtensionsService* service, Profile* profile,
+                                 Extension* extension) {
+  // This object manages its own lifetime.
+  new ExtensionDisabledDialogDelegate(profile, service, extension);
 }

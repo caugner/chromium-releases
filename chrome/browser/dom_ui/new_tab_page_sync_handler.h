@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if defined(BROWSER_SYNC)
-
 #ifndef CHROME_BROWSER_DOM_UI_NEW_TAB_PAGE_SYNC_HANDLER_H_
 #define CHROME_BROWSER_DOM_UI_NEW_TAB_PAGE_SYNC_HANDLER_H_
 
@@ -11,7 +9,7 @@
 
 #include "chrome/browser/dom_ui/dom_ui.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/sync_status_ui_helper.h"
+#include "chrome/browser/sync/sync_ui_util.h"
 
 class Value;
 
@@ -38,7 +36,6 @@ class NewTabPageSyncHandler : public DOMMessageHandler,
  private:
   enum MessageType {
     HIDE,
-    PROMOTION,
     SYNC_ERROR,
   };
   // Helper to invoke the |syncMessageChanged| JS function on the new tab page.
@@ -55,7 +52,7 @@ class NewTabPageSyncHandler : public DOMMessageHandler,
 
   // Helper to convert from a sync status message type to an NTP specific one.
   static MessageType FromSyncStatusMessageType(
-      SyncStatusUIHelper::MessageType type);
+      sync_ui_util::MessageType type);
 
   // Cached pointer to ProfileSyncService.
   ProfileSyncService* sync_service_;
@@ -68,4 +65,3 @@ class NewTabPageSyncHandler : public DOMMessageHandler,
 };
 
 #endif  // CHROME_BROWSER_DOM_UI_NEW_TAB_PAGE_SYNC_HANDLER_H_
-#endif  // defined(BROWSER_SYNC)

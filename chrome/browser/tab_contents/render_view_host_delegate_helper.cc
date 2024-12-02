@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/string_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/character_encoding.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
@@ -16,11 +17,11 @@
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
+#include "chrome/browser/user_style_sheet_watcher.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 
-void RenderViewHostDelegateViewHelper::CreateNewWindow(
+TabContents* RenderViewHostDelegateViewHelper::CreateNewWindow(
     int route_id,
     Profile* profile,
     SiteInstance* site,
@@ -42,15 +43,17 @@ void RenderViewHostDelegateViewHelper::CreateNewWindow(
 
   // Save the created window associated with the route so we can show it later.
   pending_contents_[route_id] = new_contents;
+  return new_contents;
 }
 
 RenderWidgetHostView* RenderViewHostDelegateViewHelper::CreateNewWidget(
-    int route_id, bool activatable, RenderProcessHost* process) {
+    int route_id, WebKit::WebPopupType popup_type, RenderProcessHost* process) {
   RenderWidgetHost* widget_host =
       new RenderWidgetHost(process, route_id);
   RenderWidgetHostView* widget_view =
       RenderWidgetHostView::CreateViewForWidget(widget_host);
-  widget_view->set_activatable(activatable);
+  // Popups should not get activated.
+  widget_view->set_popup_type(popup_type);
   // Save the created widget associated with the route so we can show it later.
   pending_widget_views_[route_id] = widget_view;
   return widget_view;
@@ -67,7 +70,7 @@ TabContents* RenderViewHostDelegateViewHelper::GetCreatedWindow(int route_id) {
   pending_contents_.erase(route_id);
 
   if (!new_tab_contents->render_view_host()->view() ||
-      !new_tab_contents->process()->HasConnection()) {
+      !new_tab_contents->GetRenderProcessHost()->HasConnection()) {
     // The view has gone away or the renderer crashed. Nothing to do.
     return NULL;
   }
@@ -111,8 +114,8 @@ void RenderViewHostDelegateViewHelper::RenderWidgetHostDestroyed(
 
 // static
 WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
-    PrefService* prefs, bool is_dom_ui) {
-
+    Profile* profile, bool is_dom_ui) {
+  PrefService* prefs = profile->GetPrefs();
   WebPreferences web_prefs;
 
   web_prefs.fixed_font_family =
@@ -168,36 +171,41 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
         !command_line.HasSwitch(switches::kDisableJava) &&
         prefs->GetBoolean(prefs::kWebKitJavaEnabled);
     web_prefs.loads_images_automatically =
-        !command_line.HasSwitch(switches::kDisableImages) &&
         prefs->GetBoolean(prefs::kWebKitLoadsImagesAutomatically);
     web_prefs.uses_page_cache =
         command_line.HasSwitch(switches::kEnableFastback);
     web_prefs.remote_fonts_enabled =
-        command_line.HasSwitch(switches::kEnableRemoteFonts);
+        !command_line.HasSwitch(switches::kDisableRemoteFonts);
     web_prefs.xss_auditor_enabled =
-        !command_line.HasSwitch(switches::kDisableXSSAuditor);
+        command_line.HasSwitch(switches::kEnableXSSAuditor);
     web_prefs.application_cache_enabled =
-        command_line.HasSwitch(switches::kEnableApplicationCache);
+        !command_line.HasSwitch(switches::kDisableApplicationCache);
 
     web_prefs.local_storage_enabled =
-      command_line.HasSwitch(switches::kEnableLocalStorage);
+        !command_line.HasSwitch(switches::kDisableLocalStorage);
     web_prefs.databases_enabled =
-      command_line.HasSwitch(switches::kEnableDatabases);
-    web_prefs.session_storage_enabled =
-      command_line.HasSwitch(switches::kEnableSessionStorage);
+        !command_line.HasSwitch(switches::kDisableDatabases);
     web_prefs.experimental_webgl_enabled =
-      command_line.HasSwitch(switches::kEnableExperimentalWebGL);
-    web_prefs.experimental_notifications_enabled =
-      command_line.HasSwitch(switches::kEnableDesktopNotifications);
+        command_line.HasSwitch(switches::kEnableExperimentalWebGL);
+    web_prefs.site_specific_quirks_enabled =
+        !command_line.HasSwitch(switches::kDisableSiteSpecificQuirks);
+    web_prefs.allow_file_access_from_file_urls =
+        command_line.HasSwitch(switches::kAllowFileAccessFromFiles);
+    web_prefs.show_composited_layer_borders =
+        command_line.HasSwitch(switches::kShowCompositedLayerBorders);
+    web_prefs.user_style_sheet_enabled =
+        command_line.HasSwitch(switches::kEnableUserStyleSheet);
+    if (web_prefs.user_style_sheet_enabled) {
+      web_prefs.user_style_sheet_location =
+          profile->GetUserStyleSheetWatcher()->user_style_sheet();
+    }
+
   }
 
   web_prefs.uses_universal_detector =
       prefs->GetBoolean(prefs::kWebKitUsesUniversalDetector);
   web_prefs.text_areas_are_resizable =
       prefs->GetBoolean(prefs::kWebKitTextAreasAreResizable);
-
-  // User CSS is currently disabled because it crashes chrome.  See
-  // webkit/glue/webpreferences.h for more details.
 
   // Make sure we will set the default_encoding with canonical encoding name.
   web_prefs.default_encoding =

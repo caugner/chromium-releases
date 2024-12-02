@@ -2,15 +2,32 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import "base/scoped_nsobject.h"
 #include "chrome/browser/cocoa/gradient_button_cell.h"
-#import "third_party/GTM/AppKit/GTMTheme.h"
+
+#include "base/logging.h"
+#import "base/scoped_nsobject.h"
+#import "chrome/browser/browser_theme_provider.h"
+#import "chrome/browser/cocoa/themed_window.h"
+#include "grit/theme_resources.h"
 #import "third_party/GTM/AppKit/GTMNSColor+Luminance.h"
 
 @interface GradientButtonCell (Private)
 - (void)sharedInit;
 - (void)drawUnderlayImageWithFrame:(NSRect)cellFrame
                             inView:(NSView*)controlView;
+
+// Get drawing parameters for a given cell frame in a given view. The inner
+// frame is the one required by |-drawInteriorWithFrame:inView:|. The inner and
+// outer paths are the ones required by |-drawBorderAndFillForTheme:...|. The
+// outer path also gives the area in which to clip. Any of the |return...|
+// arguments may be NULL (in which case the given parameter won't be returned).
+// If |returnInnerPath| or |returnOuterPath|, |*returnInnerPath| or
+// |*returnOuterPath| should be nil, respectively.
+- (void)getDrawParamsForFrame:(NSRect)cellFrame
+                       inView:(NSView*)controlView
+                   innerFrame:(NSRect*)returnInnerFrame
+                    innerPath:(NSBezierPath**)returnInnerPath
+                     clipPath:(NSBezierPath**)returnClipPath;
 @end
 
 static const NSTimeInterval kAnimationShowDuration = 0.2;
@@ -72,8 +89,8 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
   return self;
 }
 
-- (NSGradient *)gradientForHoverAlpha:(CGFloat)hoverAlpha
-                             isThemed:(BOOL)themed {
+- (NSGradient*)gradientForHoverAlpha:(CGFloat)hoverAlpha
+                            isThemed:(BOOL)themed {
   CGFloat startAlpha = 0.6 + 0.3 * hoverAlpha;
   CGFloat endAlpha = 0.333 * hoverAlpha;
 
@@ -88,7 +105,7 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
   NSColor* endColor =
       [NSColor colorWithCalibratedWhite:1.0 - 0.15 * hoverAlpha
                                   alpha:endAlpha];
-  NSGradient *gradient = [[NSGradient alloc] initWithColorsAndLocations:
+  NSGradient* gradient = [[NSGradient alloc] initWithColorsAndLocations:
                           startColor, hoverAlpha * 0.33,
                           endColor, 1.0, nil];
 
@@ -115,15 +132,16 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
 }
 
 - (NSBackgroundStyle)interiorBackgroundStyle {
-  return [self isHighlighted] ?
-      NSBackgroundStyleLowered : NSBackgroundStyleRaised;
+  // Never lower the interior, since that just leads to a weird shadow which can
+  // often interact badly with the theme.
+  return NSBackgroundStyleRaised;
 }
 
-- (void)mouseEntered:(NSEvent *)theEvent {
+- (void)mouseEntered:(NSEvent*)theEvent {
   [self setMouseInside:YES animate:YES];
 }
 
-- (void)mouseExited:(NSEvent *)theEvent {
+- (void)mouseExited:(NSEvent*)theEvent {
   [self setMouseInside:NO animate:YES];
 }
 
@@ -157,37 +175,74 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
   }
 }
 
-- (void)drawBorderAndFillForTheme:(GTMTheme*)theme
+// TODO(viettrungluu): clean up/reorganize.
+- (void)drawBorderAndFillForTheme:(ThemeProvider*)themeProvider
                       controlView:(NSView*)controlView
-                        outerPath:(NSBezierPath*)outerPath
                         innerPath:(NSBezierPath*)innerPath
               showClickedGradient:(BOOL)showClickedGradient
             showHighlightGradient:(BOOL)showHighlightGradient
                        hoverAlpha:(CGFloat)hoverAlpha
                            active:(BOOL)active
-                        cellFrame:(NSRect)cellFrame {
-  NSImage* backgroundImage =
-      [theme backgroundImageForStyle:GTMThemeStyleToolBarButton state:YES];
+                        cellFrame:(NSRect)cellFrame
+                  defaultGradient:(NSGradient*)defaultGradient {
+  BOOL isFlatButton = [self showsBorderOnlyWhileMouseInside];
 
-  if (backgroundImage) {
-    NSColor* patternColor = [NSColor colorWithPatternImage:backgroundImage];
-    [patternColor set];
+  // For flat (unbordered when not hovered) buttons, never use the toolbar
+  // button background image, but the modest gradient used for themed buttons.
+  // To make things even more modest, scale the hover alpha down by 40 percent
+  // unless clicked.
+  NSColor* backgroundImageColor;
+  BOOL useThemeGradient;
+  if (isFlatButton) {
+    backgroundImageColor = nil;
+    useThemeGradient = YES;
+    if (!showClickedGradient)
+      hoverAlpha *= 0.6;
+  } else {
+    backgroundImageColor =
+        themeProvider ?
+          themeProvider->GetNSImageColorNamed(IDR_THEME_BUTTON_BACKGROUND,
+                                              false) :
+          nil;
+    useThemeGradient = backgroundImageColor ? YES : NO;
+  }
+
+  // The basic gradient shown inside; see above.
+  NSGradient* gradient;
+  if (hoverAlpha == 0 && !useThemeGradient) {
+    gradient = defaultGradient ? defaultGradient
+                               : gradient_;
+  } else {
+    gradient = [self gradientForHoverAlpha:hoverAlpha
+                                  isThemed:useThemeGradient];
+  }
+
+  // If we're drawing a background image, show that; else possibly show the
+  // clicked gradient.
+  if (backgroundImageColor) {
+    [backgroundImageColor set];
     // Set the phase to match window.
-    NSRect trueRect = [controlView convertRectToBase:cellFrame];
+    NSRect trueRect = [controlView convertRect:cellFrame toView:nil];
     [[NSGraphicsContext currentContext]
         setPatternPhase:NSMakePoint(NSMinX(trueRect), NSMaxY(trueRect))];
     [innerPath fill];
   } else {
     if (showClickedGradient) {
-      NSGradient* gradient =
-          [theme gradientForStyle:GTMThemeStyleToolBarButtonPressed
-                            state:active];
-      [gradient drawInBezierPath:innerPath angle:90.0];
+      NSGradient* clickedGradient;
+      if (isFlatButton) {
+        clickedGradient = gradient;
+      } else {
+        clickedGradient = themeProvider ? themeProvider->GetNSGradient(
+            active ?
+              BrowserThemeProvider::GRADIENT_TOOLBAR_BUTTON_PRESSED :
+              BrowserThemeProvider::GRADIENT_TOOLBAR_BUTTON_PRESSED_INACTIVE) :
+            nil;
+      }
+      [clickedGradient drawInBezierPath:innerPath angle:90.0];
     }
   }
 
-  BOOL isCustomTheme = backgroundImage != nil;
-
+  // Visually indicate unclicked, enabled buttons.
   if (!showClickedGradient && [self isEnabled]) {
     [NSGraphicsContext saveGraphicsState];
     [innerPath addClip];
@@ -207,35 +262,41 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
     [[NSColor colorWithCalibratedWhite:1.0 alpha:0.2] setStroke];
     [highlightPath stroke];
 
-    NSGradient *gradient = nil;
-    if (hoverAlpha == 0 && !isCustomTheme) {
-      gradient = gradient_;
-    } else {
-      gradient = [self gradientForHoverAlpha:hoverAlpha isThemed:isCustomTheme];
-    }
+    // Draw the gradient inside.
     [gradient drawInBezierPath:innerPath angle:90.0];
 
     [NSGraphicsContext restoreGraphicsState];
   }
 
-  // Draw the outer stroke
-  NSColor* stroke = [theme strokeColorForStyle:GTMThemeStyleToolBarButton
-                                         state:active];
-
+  // Draw the outer stroke.
+  NSColor* strokeColor = nil;
   if (showClickedGradient) {
-    stroke = [NSColor colorWithCalibratedWhite:0.0 alpha:0.3];
+    strokeColor = [NSColor colorWithCalibratedWhite:0.0 alpha:0.3];
+  } else {
+    strokeColor = themeProvider ? themeProvider->GetNSColor(
+        active ? BrowserThemeProvider::COLOR_TOOLBAR_BUTTON_STROKE :
+                 BrowserThemeProvider::COLOR_TOOLBAR_BUTTON_STROKE_INACTIVE,
+        true) : [NSColor colorWithCalibratedWhite:0.0 alpha:0.6];
   }
-  [stroke setStroke];
+  [strokeColor setStroke];
 
   [innerPath setLineWidth:1];
   [innerPath stroke];
 }
 
-- (void)drawWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
+// TODO(viettrungluu): clean this up.
+// (Private)
+- (void)getDrawParamsForFrame:(NSRect)cellFrame
+                       inView:(NSView*)controlView
+                   innerFrame:(NSRect*)returnInnerFrame
+                    innerPath:(NSBezierPath**)returnInnerPath
+                     clipPath:(NSBezierPath**)returnClipPath {
   // Constants from Cole.  Will kConstant them once the feedback loop
   // is complete.
   NSRect drawFrame = NSInsetRect(cellFrame, 1.5, 1.5);
   NSRect innerFrame = NSInsetRect(cellFrame, 2, 1);
+  const CGFloat radius = 3.5;
+
   ButtonType type = [[(NSControl*)controlView cell] tag];
   switch (type) {
     case kMiddleButtonType:
@@ -253,22 +314,41 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
     default:
       break;
   }
+  if (type == kLeftButtonWithShadowType)
+    innerFrame.size.width -= 1.0;
 
-  const float radius = 3.5;
+  // Return results if |return...| not null.
+  if (returnInnerFrame)
+    *returnInnerFrame = innerFrame;
+  if (returnInnerPath) {
+    DCHECK(*returnInnerPath == nil);
+    *returnInnerPath = [NSBezierPath bezierPathWithRoundedRect:drawFrame
+                                                       xRadius:radius
+                                                       yRadius:radius];
+  }
+  if (returnClipPath) {
+    DCHECK(*returnClipPath == nil);
+    NSRect clipPathRect = NSInsetRect(drawFrame, -0.5, -0.5);
+    *returnClipPath = [NSBezierPath bezierPathWithRoundedRect:clipPathRect
+                                                      xRadius:radius + 0.5
+                                                      yRadius:radius + 0.5];
+  }
+}
+
+// TODO(viettrungluu): clean this up.
+- (void)drawWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
+  NSRect innerFrame;
+  NSBezierPath* innerPath = nil;
+  [self getDrawParamsForFrame:cellFrame
+                       inView:controlView
+                   innerFrame:&innerFrame
+                    innerPath:&innerPath
+                     clipPath:NULL];
+
   BOOL pressed = [self isHighlighted];
   NSWindow* window = [controlView window];
+  ThemeProvider* themeProvider = [window themeProvider];
   BOOL active = [window isKeyWindow] || [window isMainWindow];
-
-  GTMTheme *theme = [controlView gtm_theme];
-
-  NSBezierPath* innerPath =
-      [NSBezierPath bezierPathWithRoundedRect:drawFrame
-                                      xRadius:radius
-                                      yRadius:radius];
-  NSBezierPath* outerPath =
-      [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(drawFrame, -1, -1)
-                                      xRadius:radius + 1
-                                      yRadius:radius + 1];
 
   // Stroke the borders and appropriate fill gradient. If we're borderless,
   // the only time we want to draw the inner gradient is if we're highlighted.
@@ -276,34 +356,35 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
       pressed ||
       [self isMouseInside]) {
 
-    [self drawBorderAndFillForTheme:theme
+    [self drawBorderAndFillForTheme:themeProvider
                         controlView:controlView
-                          outerPath:outerPath
                           innerPath:innerPath
                 showClickedGradient:pressed
               showHighlightGradient:[self isHighlighted]
                          hoverAlpha:[self hoverAlpha]
                              active:active
-                          cellFrame:cellFrame];
+                          cellFrame:cellFrame
+                    defaultGradient:nil];
   }
 
   // If this is the left side of a segmented button, draw a slight shadow.
+  ButtonType type = [[(NSControl*)controlView cell] tag];
   if (type == kLeftButtonWithShadowType) {
     NSRect borderRect, contentRect;
     NSDivideRect(cellFrame, &borderRect, &contentRect, 1.0, NSMaxXEdge);
-    NSColor* stroke = [theme strokeColorForStyle:GTMThemeStyleToolBarButton
-                                           state:active];
+    NSColor* stroke = themeProvider ? themeProvider->GetNSColor(
+        active ? BrowserThemeProvider::COLOR_TOOLBAR_BUTTON_STROKE :
+                 BrowserThemeProvider::COLOR_TOOLBAR_BUTTON_STROKE_INACTIVE,
+        true) : [NSColor blackColor];
+
     [[stroke colorWithAlphaComponent:0.2] set];
     NSRectFillUsingOperation(NSInsetRect(borderRect, 0, 2),
                              NSCompositeSourceOver);
-    innerFrame.size.width -= 1.0;
   }
   [self drawInteriorWithFrame:innerFrame inView:controlView];
 }
 
 - (void)drawInteriorWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
-  GTMTheme* theme = [controlView gtm_theme];
-
   if (shouldTheme_) {
     BOOL isTemplate = [[self image] isTemplate];
 
@@ -312,12 +393,15 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
     CGContextRef context =
         (CGContextRef)([[NSGraphicsContext currentContext] graphicsPort]);
 
-    NSColor* color = [theme iconColorForStyle:GTMThemeStyleToolBarButton
-                                        state:YES];
+    ThemeProvider* themeProvider = [[controlView window] themeProvider];
+    NSColor* color = themeProvider ?
+        themeProvider->GetNSColorTint(BrowserThemeProvider::TINT_BUTTONS,
+                                      true) :
+        [NSColor blackColor];
 
     if (isTemplate) {
       scoped_nsobject<NSShadow> shadow([[NSShadow alloc] init]);
-      NSColor *shadowColor = [color gtm_legibleTextColor];
+      NSColor* shadowColor = [color gtm_legibleTextColor];
       shadowColor = [shadowColor colorWithAlphaComponent:0.25];
       [shadow.get() setShadowColor:shadowColor];
       [shadow.get() setShadowOffset:NSMakeSize(0, -1.0)];
@@ -366,6 +450,17 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
                      operation:NSCompositeSourceOver
                       fraction:[self isEnabled] ? 1.0 : 0.5];
   }
+}
+
+- (NSBezierPath*)clipPathForFrame:(NSRect)cellFrame
+                           inView:(NSView*)controlView {
+  NSBezierPath* boundingPath = nil;
+  [self getDrawParamsForFrame:cellFrame
+                       inView:controlView
+                   innerFrame:NULL
+                    innerPath:NULL
+                     clipPath:&boundingPath];
+  return boundingPath;
 }
 
 @end

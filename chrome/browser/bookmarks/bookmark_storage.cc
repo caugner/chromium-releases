@@ -7,13 +7,10 @@
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/histogram.h"
-#include "base/json_writer.h"
-#include "base/message_loop.h"
-#include "base/thread.h"
 #include "base/time.h"
 #include "chrome/browser/bookmarks/bookmark_codec.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/json_value_serializer.h"
@@ -66,11 +63,9 @@ class FileDeleteTask : public Task {
 class BookmarkStorage::LoadTask : public Task {
  public:
   LoadTask(const FilePath& path,
-           MessageLoop* loop,
            BookmarkStorage* storage,
-           LoadDetails* details)
+           BookmarkLoadDetails* details)
       : path_(path),
-        loop_(loop),
         storage_(storage),
         details_(details) {
   }
@@ -79,10 +74,10 @@ class BookmarkStorage::LoadTask : public Task {
     bool bookmark_file_exists = file_util::PathExists(path_);
     if (bookmark_file_exists) {
       JSONFileValueSerializer serializer(path_);
-      scoped_ptr<Value> root(serializer.Deserialize(NULL));
+      scoped_ptr<Value> root(serializer.Deserialize(NULL, NULL));
 
       if (root.get()) {
-        // Building the index cane take a while, so we do it on the background
+        // Building the index can take a while, so we do it on the background
         // thread.
         int64 max_node_id = 0;
         BookmarkCodec codec;
@@ -104,20 +99,19 @@ class BookmarkStorage::LoadTask : public Task {
       }
     }
 
-    if (loop_) {
-      loop_->PostTask(FROM_HERE, NewRunnableMethod(
-          storage_.get(), &BookmarkStorage::OnLoadFinished,
-          bookmark_file_exists, path_));
-    } else {
-      storage_->OnLoadFinished(bookmark_file_exists, path_);
-    }
+    ChromeThread::PostTask(
+        ChromeThread::UI, FROM_HERE,
+        NewRunnableMethod(
+            storage_.get(), &BookmarkStorage::OnLoadFinished,
+            bookmark_file_exists, path_));
   }
 
  private:
   // Adds node to the model's index, recursing through all children as well.
   void AddBookmarksToIndex(BookmarkNode* node) {
     if (node->is_url()) {
-      details_->index()->Add(node);
+      if (node->GetURL().is_valid())
+        details_->index()->Add(node);
     } else {
       for (int i = 0; i < node->GetChildCount(); ++i)
         AddBookmarksToIndex(node->GetChild(i));
@@ -125,9 +119,8 @@ class BookmarkStorage::LoadTask : public Task {
   }
 
   const FilePath path_;
-  MessageLoop* loop_;
   scoped_refptr<BookmarkStorage> storage_;
-  LoadDetails* details_;
+  BookmarkLoadDetails* details_;
 
   DISALLOW_COPY_AND_ASSIGN(LoadTask);
 };
@@ -137,13 +130,12 @@ class BookmarkStorage::LoadTask : public Task {
 BookmarkStorage::BookmarkStorage(Profile* profile, BookmarkModel* model)
     : profile_(profile),
       model_(model),
-      backend_thread_(g_browser_process->file_thread()),
-      writer_(profile->GetPath().Append(chrome::kBookmarksFileName),
-              backend_thread_),
+      writer_(profile->GetPath().Append(chrome::kBookmarksFileName)),
       tmp_history_path_(
           profile->GetPath().Append(chrome::kHistoryBookmarksFileName)) {
   writer_.set_commit_interval(base::TimeDelta::FromMilliseconds(kSaveDelayMS));
-  RunTaskOnBackendThread(new BackupTask(writer_.path()));
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE, new BackupTask(writer_.path()));
 }
 
 BookmarkStorage::~BookmarkStorage() {
@@ -151,7 +143,7 @@ BookmarkStorage::~BookmarkStorage() {
     writer_.DoScheduledWrite();
 }
 
-void BookmarkStorage::LoadBookmarks(LoadDetails* details) {
+void BookmarkStorage::LoadBookmarks(BookmarkLoadDetails* details) {
   DCHECK(!details_.get());
   DCHECK(details);
   details_.reset(details);
@@ -159,11 +151,8 @@ void BookmarkStorage::LoadBookmarks(LoadDetails* details) {
 }
 
 void BookmarkStorage::DoLoadBookmarks(const FilePath& path) {
-  Task* task = new LoadTask(path,
-                            backend_thread() ? MessageLoop::current() : NULL,
-                            this,
-                            details_.get());
-  RunTaskOnBackendThread(task);
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE, new LoadTask(path, this, details_.get()));
 }
 
 void BookmarkStorage::MigrateFromHistory() {
@@ -238,7 +227,8 @@ void BookmarkStorage::OnLoadFinished(bool file_exists, const FilePath& path) {
     SaveNow();
 
     // Clean up after migration from history.
-    RunTaskOnBackendThread(new FileDeleteTask(tmp_history_path_));
+    ChromeThread::PostTask(
+        ChromeThread::FILE, FROM_HERE, new FileDeleteTask(tmp_history_path_));
   }
 }
 
@@ -269,13 +259,4 @@ bool BookmarkStorage::SaveNow() {
     return false;
   writer_.WriteNow(data);
   return true;
-}
-
-void BookmarkStorage::RunTaskOnBackendThread(Task* task) const {
-  if (backend_thread()) {
-    backend_thread()->message_loop()->PostTask(FROM_HERE, task);
-  } else {
-    task->Run();
-    delete task;
-  }
 }

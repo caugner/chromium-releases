@@ -7,9 +7,9 @@
 
 #include <string>
 
-#include "chrome/browser/views/options/options_page_view.h"
+#include "chrome/browser/pref_member.h"
 #include "chrome/browser/shell_dialogs.h"
-#include "chrome/common/pref_member.h"
+#include "chrome/browser/views/options/options_page_view.h"
 #include "views/controls/combobox/combobox.h"
 #include "views/controls/button/button.h"
 #include "views/view.h"
@@ -34,7 +34,6 @@ class FontsPageView : public OptionsPageView,
                       public views::ButtonListener {
  public:
   explicit FontsPageView(Profile* profile);
-  virtual ~FontsPageView();
 
   // views::ButtonListener implementation:
   virtual void ButtonPressed(views::Button* sender, const views::Event& event);
@@ -64,6 +63,8 @@ class FontsPageView : public OptionsPageView,
     SANS_SERIF,
     FIXED_WIDTH
   };
+
+  virtual ~FontsPageView();
 
   // Init Dialog controls.
   void InitFontLayout();

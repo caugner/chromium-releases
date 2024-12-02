@@ -10,11 +10,6 @@
 
 namespace {
 
-class ShadowingAtExitManager : public base::AtExitManager {
- public:
-  ShadowingAtExitManager() : AtExitManager(true) { }
-};
-
 base::AtomicSequenceNumber constructed_seq_(base::LINKER_INITIALIZED);
 base::AtomicSequenceNumber destructed_seq_(base::LINKER_INITIALIZED);
 
@@ -46,7 +41,9 @@ int SlowConstructor::constructed = 0;
 
 class SlowDelegate : public base::DelegateSimpleThread::Delegate {
  public:
-  SlowDelegate(base::LazyInstance<SlowConstructor>* lazy) : lazy_(lazy) { }
+  explicit SlowDelegate(base::LazyInstance<SlowConstructor>* lazy)
+      : lazy_(lazy) {}
+
   virtual void Run() {
     EXPECT_EQ(12, lazy_->Get().some_int());
     EXPECT_EQ(12, lazy_->Pointer()->some_int());
@@ -63,7 +60,7 @@ static base::LazyInstance<ConstructAndDestructLogger> lazy_logger(
 
 TEST(LazyInstanceTest, Basic) {
   {
-    ShadowingAtExitManager shadow;
+    base::ShadowingAtExitManager shadow;
 
     EXPECT_EQ(0, constructed_seq_.GetNext());
     EXPECT_EQ(0, destructed_seq_.GetNext());
@@ -84,7 +81,7 @@ static base::LazyInstance<SlowConstructor> lazy_slow(base::LINKER_INITIALIZED);
 
 TEST(LazyInstanceTest, ConstructorThreadSafety) {
   {
-    ShadowingAtExitManager shadow;
+    base::ShadowingAtExitManager shadow;
 
     SlowDelegate delegate(&lazy_slow);
     EXPECT_EQ(0, SlowConstructor::constructed);

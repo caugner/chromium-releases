@@ -23,7 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "webkit/glue/plugins/nphostapi.h"
+#include "third_party/npapi/bindings/nphostapi.h"
 
 extern NPNetscapeFuncs *browser;
 
@@ -36,6 +36,9 @@ typedef struct {
     NPBool returnErrorFromNewStream;
     NPObject* testObject;
     NPStream* stream;
+    NPBool testWindowOpen;
+    NPBool testDocumentOpenInDestroyStream;
+    NPBool testKeyboardFocusForPlugins;
     char* onStreamLoad;
     char* onStreamDestroy;
     char* onURLNotify;
@@ -49,3 +52,6 @@ extern NPClass *getPluginClass(void);
 extern void handleCallback(PluginObject* object, const char *url, NPReason reason, void *notifyData);
 extern void notifyStream(PluginObject* object, const char *url, const char *headers);
 extern void testNPRuntime(NPP npp);
+extern bool testDocumentOpen(NPP npp);
+extern bool testWindowOpen(NPP npp);
+extern void log(NPP instance, const char* format, ...);

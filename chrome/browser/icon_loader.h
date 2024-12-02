@@ -43,16 +43,21 @@ class IconLoader : public base::RefCountedThreadSafe<IconLoader> {
     // icon has been successfully loaded, result is non-null. This method must
     // return true if it is taking ownership of the returned bitmap.
     virtual bool OnBitmapLoaded(IconLoader* source, SkBitmap* result) = 0;
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   IconLoader(const IconGroupID& group, IconSize size, Delegate* delegate);
-
-  virtual ~IconLoader();
 
   // Start reading the icon on the file thread.
   void Start();
 
  private:
+  friend class base::RefCountedThreadSafe<IconLoader>;
+
+  virtual ~IconLoader();
+
   void ReadIcon();
 
   void NotifyDelegate();
@@ -68,8 +73,8 @@ class IconLoader : public base::RefCountedThreadSafe<IconLoader> {
 
   Delegate* delegate_;
 
-#if defined(OS_LINUX)
-  // On Linux we use gdk's pixbuf loader, which has to execute on the UI
+#if defined(TOOLKIT_USES_GTK)
+  // On X11 we use gdk's pixbuf loader, which has to execute on the UI
   // thread, so we only read the file on the background thread and parse it
   // on the main thread.
   void ParseIcon();

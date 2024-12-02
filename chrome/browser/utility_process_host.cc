@@ -4,30 +4,22 @@
 
 #include "chrome/browser/utility_process_host.h"
 
+#include "app/app_switches.h"
+#include "app/l10n_util.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
-#include "base/path_service.h"
-#include "base/process_util.h"
-#include "base/string_util.h"
-#include "base/task.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/render_messages.h"
+#include "chrome/common/utility_messages.h"
 #include "ipc/ipc_switches.h"
-
-#if defined(OS_WIN)
-#include "chrome/browser/sandbox_policy.h"
-#elif defined(OS_POSIX)
-#include "base/global_descriptors_posix.h"
-#include "ipc/ipc_descriptors.h"
-#endif
 
 UtilityProcessHost::UtilityProcessHost(ResourceDispatcherHost* rdh,
                                        Client* client,
-                                       MessageLoop* client_loop)
+                                       ChromeThread::ID client_thread_id)
     : ChildProcessHost(UTILITY_PROCESS, rdh),
       client_(client),
-      client_loop_(client_loop) {
+      client_thread_id_(client_thread_id) {
 }
 
 UtilityProcessHost::~UtilityProcessHost() {
@@ -60,17 +52,10 @@ bool UtilityProcessHost::StartUpdateManifestParse(const std::string& xml) {
 }
 
 FilePath UtilityProcessHost::GetUtilityProcessCmd() {
-  return GetChildPath();
+  return GetChildPath(true);
 }
 
 bool UtilityProcessHost::StartProcess(const FilePath& exposed_dir) {
-#if defined(OS_POSIX)
-  // TODO(port): We should not reach here on linux (crbug.com/22703) or
-  // MacOS (crbug.com/8102) until problems related to autoupdate are fixed.
-  NOTREACHED();
-  return false;
-#endif
-
   // Name must be set or metrics_service will crash in any test which
   // launches a UtilityProcessHost.
   set_name(L"utility process");
@@ -84,66 +69,66 @@ bool UtilityProcessHost::StartProcess(const FilePath& exposed_dir) {
     return false;
   }
 
-  CommandLine cmd_line(exe_path);
-  cmd_line.AppendSwitchWithValue(switches::kProcessType,
-                                 switches::kUtilityProcess);
-  cmd_line.AppendSwitchWithValue(switches::kProcessChannelID,
-                                 ASCIIToWide(channel_id()));
-  SetCrashReporterCommandLine(&cmd_line);
+  CommandLine* cmd_line = new CommandLine(exe_path);
+  cmd_line->AppendSwitchWithValue(switches::kProcessType,
+                                  switches::kUtilityProcess);
+  cmd_line->AppendSwitchWithValue(switches::kProcessChannelID,
+                                  ASCIIToWide(channel_id()));
+  std::string locale = g_browser_process->GetApplicationLocale();
+  cmd_line->AppendSwitchWithValue(switches::kLang, locale);
 
-  base::ProcessHandle process;
-#if defined(OS_WIN)
-  if (!UseSandbox()) {
-    // Don't use the sandbox during unit tests.
-    base::LaunchApp(cmd_line, false, false, &process);
-  } else if (exposed_dir.empty()) {
-    process = sandbox::StartProcess(&cmd_line);
-  } else {
-    process = sandbox::StartProcessWithAccess(&cmd_line, exposed_dir);
-  }
-#else
-  // TODO(port): Sandbox this on Linux/Mac.  Also, zygote this to work with
-  // Linux updating.
+  SetCrashReporterCommandLine(cmd_line);
+
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
+  if (browser_command_line.HasSwitch(switches::kChromeFrame))
+    cmd_line->AppendSwitch(switches::kChromeFrame);
+
+  if (browser_command_line.HasSwitch(switches::kEnableExtensionApps))
+    cmd_line->AppendSwitch(switches::kEnableExtensionApps);
+
+  if (browser_command_line.HasSwitch(
+      switches::kEnableExperimentalExtensionApis)) {
+    cmd_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
+  }
+
+#if defined(OS_POSIX)
+  // TODO(port): Sandbox this on Linux.  Also, zygote this to work with
+  // Linux updating.
   bool has_cmd_prefix = browser_command_line.HasSwitch(
       switches::kUtilityCmdPrefix);
   if (has_cmd_prefix) {
     // launch the utility child process with some prefix (usually "xterm -e gdb
     // --args").
-    cmd_line.PrependWrapper(browser_command_line.GetSwitchValue(
+    cmd_line->PrependWrapper(browser_command_line.GetSwitchValue(
         switches::kUtilityCmdPrefix));
   }
 
-  // This code is duplicated with browser_render_process_host.cc and
-  // plugin_process_host.cc, but there's not a good place to de-duplicate it.
-  // Maybe we can merge this into sandbox::StartProcess which will set up
-  // everything before calling LaunchApp?
-  base::file_handle_mapping_vector fds_to_map;
-  const int ipcfd = channel().GetClientFileDescriptor();
-  if (ipcfd > -1)
-    fds_to_map.push_back(std::pair<int, int>(
-        ipcfd, kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor));
-  base::LaunchApp(cmd_line.argv(), fds_to_map, false, &process);
+  cmd_line->AppendSwitchWithValue(switches::kUtilityProcessAllowedDir,
+                                  exposed_dir.value().c_str());
 #endif
-  if (!process)
-    return false;
-  SetHandle(process);
+
+  Launch(
+#if defined(OS_WIN)
+      exposed_dir,
+#elif defined(OS_POSIX)
+      false,
+      base::environment_vector(),
+#endif
+      cmd_line);
 
   return true;
 }
 
 void UtilityProcessHost::OnMessageReceived(const IPC::Message& message) {
-  client_loop_->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      client_thread_id_, FROM_HERE,
       NewRunnableMethod(client_.get(), &Client::OnMessageReceived, message));
 }
 
-void UtilityProcessHost::OnChannelError() {
-  bool child_exited;
-  bool did_crash = base::DidProcessCrash(&child_exited, handle());
-  if (did_crash) {
-    client_loop_->PostTask(FROM_HERE,
-        NewRunnableMethod(client_.get(), &Client::OnProcessCrashed));
-  }
+void UtilityProcessHost::OnProcessCrashed() {
+  ChromeThread::PostTask(
+      client_thread_id_, FROM_HERE,
+      NewRunnableMethod(client_.get(), &Client::OnProcessCrashed));
 }
 
 void UtilityProcessHost::Client::OnMessageReceived(

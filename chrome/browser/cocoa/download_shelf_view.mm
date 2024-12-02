@@ -5,36 +5,44 @@
 #import "chrome/browser/cocoa/download_shelf_view.h"
 
 #include "base/scoped_nsobject.h"
-#import "third_party/GTM/AppKit/GTMTheme.h"
+#include "chrome/browser/browser_theme_provider.h"
+#import "chrome/browser/cocoa/themed_window.h"
+#include "grit/theme_resources.h"
 
 @implementation DownloadShelfView
 
 - (NSColor*)strokeColor {
-  return [[self gtm_theme] strokeColorForStyle:GTMThemeStyleToolBar
-                                         state:[[self window] isKeyWindow]];
+  BOOL isKey = [[self window] isKeyWindow];
+  ThemeProvider* themeProvider = [[self window] themeProvider];
+  return themeProvider ? themeProvider->GetNSColor(
+      isKey ? BrowserThemeProvider::COLOR_TOOLBAR_STROKE :
+              BrowserThemeProvider::COLOR_TOOLBAR_STROKE_INACTIVE, true) :
+      [NSColor blackColor];
 }
 
 - (void)drawRect:(NSRect)rect {
   BOOL isKey = [[self window] isKeyWindow];
+  ThemeProvider* themeProvider = [[self window] themeProvider];
+  if (!themeProvider)
+    return;
 
-  GTMTheme* theme = [self gtm_theme];
-
-  NSImage* backgroundImage = [theme backgroundImageForStyle:GTMThemeStyleToolBar
-                                               state:GTMThemeStateActiveWindow];
-  if (backgroundImage) {
+  NSColor* backgroundImageColor =
+      themeProvider->GetNSImageColorNamed(IDR_THEME_TOOLBAR, false);
+  if (backgroundImageColor) {
     // We want our backgrounds for the shelf to be phased from the upper
     // left hand corner of the view.
     NSPoint phase = NSMakePoint(0, NSHeight([self bounds]));
     [[NSGraphicsContext currentContext] setPatternPhase:phase];
-    NSColor* color = [NSColor colorWithPatternImage:backgroundImage];
-    [color set];
+    [backgroundImageColor set];
     NSRectFill([self bounds]);
   } else {
-    NSGradient* gradient = [theme gradientForStyle:GTMThemeStyleToolBar
-                                             state:isKey];
-    NSPoint startPoint = [self convertPointFromBase:NSMakePoint(0, 0)];
-    NSPoint endPoint = [self convertPointFromBase:
-        NSMakePoint(0, [self frame].size.height)];
+    NSGradient* gradient = themeProvider->GetNSGradient(
+        isKey ? BrowserThemeProvider::GRADIENT_TOOLBAR :
+                BrowserThemeProvider::GRADIENT_TOOLBAR_INACTIVE);
+    NSPoint startPoint = [self convertPoint:NSMakePoint(0, 0) fromView:nil];
+    NSPoint endPoint =
+        [self convertPoint:NSMakePoint(0, [self frame].size.height)
+                  fromView:nil];
 
     [gradient drawFromPoint:startPoint
                     toPoint:endPoint

@@ -7,12 +7,7 @@
 
 #include "base/basictypes.h"
 
-#if defined(OS_LINUX)
-typedef struct _GtkWidget GtkWidget;
-typedef struct _GtkWindow GtkWindow;
-#else
 class SyncSetupFlowContainer;
-#endif
 
 class ProfileSyncService;
 
@@ -25,8 +20,6 @@ class SyncSetupWizard {
     // cause a transition to DONE, or to wait for an explicit transition (via
     // Step) to the next state.
     GAIA_SUCCESS,
-    // The user needs to accept a merge and sync warning to proceed.
-    MERGE_AND_SYNC,
     // The panic switch.  Something went terribly wrong during setup and we
     // can't recover.
     FATAL_ERROR,
@@ -53,10 +46,6 @@ class SyncSetupWizard {
   // if various buttons in the UI should be enabled or disabled.
   bool IsVisible() const;
 
-#if defined(OS_LINUX)
-  void SetVisible(bool visible) { visible_ = visible; }
-#endif
-
  private:
   // If we just need to pop open an individual dialog, say to collect
   // gaia credentials in the event of a steady-state auth failure, this is
@@ -69,14 +58,12 @@ class SyncSetupWizard {
 
   ProfileSyncService* service_;
 
-#if defined(OS_LINUX)
-  bool visible_;
-#else
+  // The use of ShowHtmlDialog and SyncSetupFlowContainer is disabled on Linux
+  // until BrowserShowHtmlDialog() is implemented.
+  // See: http://code.google.com/p/chromium/issues/detail?id=25260
   SyncSetupFlowContainer* flow_container_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(SyncSetupWizard);
 };
 
 #endif  // CHROME_BROWSER_SYNC_SYNC_SETUP_WIZARD_H_
-

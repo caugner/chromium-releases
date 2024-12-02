@@ -11,4 +11,6 @@ namespace switches {
 const char kAlsaDevice[] = "alsa-device";
 #endif
 
+const char kEnableOpenMax[] = "enable-openmax";
+
 }  // namespace switches

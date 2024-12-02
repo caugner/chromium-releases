@@ -102,10 +102,10 @@
     return;
   }
 
-  // FIXME(viettrungluu): We have some fudge factors below to make things line
-  // up (approximately). I wish I knew how to get rid of them. (Note that our
-  // view is flipped, and that frame should be in our coordinates.) The y/height
-  // is very odd, since it doesn't seem to respond to changes the way that it
+  // TODO(viettrungluu): We have some fudge factors below to make things line up
+  // (approximately). I wish I knew how to get rid of them. (Note that our view
+  // is flipped, and that frame should be in our coordinates.) The y/height is
+  // very odd, since it doesn't seem to respond to changes the way that it
   // should. I don't understand it.
   NSRect frame = [self convertRect:[self frame]
                           fromView:[self superview]];
@@ -118,16 +118,20 @@
   // However, using a pulldown has the benefit that Cocoa automatically places
   // the menu correctly even when we're at the edge of the screen (including
   // "dragging upwards" when the button is close to the bottom of the screen).
-  scoped_nsobject<NSPopUpButtonCell> popUpCell(
-      [[NSPopUpButtonCell alloc] initTextCell:@""
-                                    pullsDown:YES]);
-  DCHECK(popUpCell.get());
-  [popUpCell setMenu:attachedMenu_];
-  [popUpCell selectItem:nil];
-  [popUpCell attachPopUpWithFrame:frame
-                           inView:self];
-  [popUpCell performClickWithFrame:frame
+  // A |scoped_nsobject| local variable cannot be used here because
+  // Accessibility on 10.5 grabs the NSPopUpButtonCell without retaining it, and
+  // uses it later. (This is fixed in 10.6.)
+  if (!popUpCell_.get()) {
+    popUpCell_.reset([[NSPopUpButtonCell alloc] initTextCell:@""
+                                                   pullsDown:YES]);
+  }
+  DCHECK(popUpCell_.get());
+  [popUpCell_ setMenu:attachedMenu_];
+  [popUpCell_ selectItem:nil];
+  [popUpCell_ attachPopUpWithFrame:frame
                             inView:self];
+  [popUpCell_ performClickWithFrame:frame
+                             inView:self];
 }
 
 @end  // @implementation DelayedMenuButton (Private)

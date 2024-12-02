@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,12 @@
 #include <string>
 #include <vector>
 
-#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
 #include "chrome/browser/browser_process_impl.h"
+#include "chrome/browser/importer/importer.h"
+#include "chrome/common/result_codes.h"
+#include "gfx/native_widget_types.h"
+#include "googleurl/src/gurl.h"
 
 class CommandLine;
 class FilePath;
@@ -28,28 +31,37 @@ class ProcessSingleton;
 // install work for this user. After that the sentinel file is created.
 class FirstRun {
  public:
-  // Returns true if this is the first time chrome is run for this user.
-  static bool IsChromeFirstRun();
+  // There are three types of possible first run bubbles:
+  typedef enum {
+    LARGEBUBBLE = 0,  // The normal bubble, with search engine choice
+    OEMBUBBLE,        // Smaller bubble for OEM builds
+    MINIMALBUBBLE     // Minimal bubble shown after search engine dialog
+  } BubbleType;
+  // See ProcessMasterPreferences for more info about this structure.
+  struct MasterPrefs {
+    int ping_delay;
+    bool homepage_defined;
+    int do_import_items;
+    int dont_import_items;
+    bool run_search_engine_experiment;
+    std::vector<GURL> new_tabs;
+    std::vector<GURL> bookmarks;
+  };
+#if defined(OS_WIN)
   // Creates the desktop shortcut to chrome for the current user. Returns
   // false if it fails. It will overwrite the shortcut if it exists.
   static bool CreateChromeDesktopShortcut();
   // Creates the quick launch shortcut to chrome for the current user. Returns
   // false if it fails. It will overwrite the shortcut if it exists.
   static bool CreateChromeQuickLaunchShortcut();
-  // Creates the sentinel file that signals that chrome has been configured.
-  static bool CreateSentinel();
-  // Removes the sentinel file created in ConfigDone(). Returns false if the
-  // sentinel file could not be removed.
-  static bool RemoveSentinel();
-  // Imports settings in a separate process. It spawns a second dedicated
-  // browser process that just does the import with the import progress UI.
-  static bool ImportSettings(Profile* profile, int browser_type,
-                             int items_to_import,
-                             gfx::NativeView parent_window);
-  // Import browser items in this process. The browser and the items to
-  // import are encoded int the command line. This function is paired with
-  // FirstRun::ImportSettings(). This function might or might not show
-  // a visible UI depending on the cmdline parameters.
+  // Returns true if we are being run in a locale in which search experiments
+  // are allowed.
+  static bool InSearchExperimentLocale();
+#endif  // OS_WIN
+  // Import bookmarks and/or browser items (depending on platform support)
+  // in this process. This function is paired with FirstRun::ImportSettings().
+  // This function might or might not show a visible UI depending on the
+  // cmdline parameters.
   static int ImportNow(Profile* profile, const CommandLine& cmdline);
 
   // The master preferences is a JSON file with the same entries as the
@@ -69,11 +81,20 @@ class FirstRun {
   // 'master_preferences' file.
   static bool ProcessMasterPreferences(const FilePath& user_data_dir,
                                        const FilePath& master_prefs_path,
-                                       std::vector<std::wstring>* new_tabs,
-                                       int* ping_delay,
-                                       bool* homepage_defined,
-                                       int* do_import_items,
-                                       int* dont_import_items);
+                                       MasterPrefs* out_prefs);
+
+  // Returns true if this is the first time chrome is run for this user.
+  static bool IsChromeFirstRun();
+  // Creates the sentinel file that signals that chrome has been configured.
+  static bool CreateSentinel();
+  // Removes the sentinel file created in ConfigDone(). Returns false if the
+  // sentinel file could not be removed.
+  static bool RemoveSentinel();
+  // Imports settings in a separate process. It spawns a second dedicated
+  // browser process that just does the import with the import progress UI.
+  static bool ImportSettings(Profile* profile, int browser_type,
+                             int items_to_import,
+                             gfx::NativeView parent_window);
 
   // Sets the kShouldShowFirstRunBubble local state pref so that the browser
   // shows the bubble once the main message loop gets going. Returns false if
@@ -85,20 +106,36 @@ class FirstRun {
   // gets going. Returns false if the pref could not be set.
   static bool SetOEMFirstRunBubblePref();
 
+  // Sets the kShouldUseMinimalFirstRunBubble local state pref so that the
+  // browser shows the minimal first run bubble once the main message loop
+  // gets going. Returns false if the pref could not be set.
+  static bool SetMinimalFirstRunBubblePref();
+
   // Sets the kShouldShowWelcomePage local state pref so that the browser
   // loads the welcome tab once the message loop gets going. Returns false
   // if the pref could not be set.
   static bool SetShowWelcomePagePref();
 
  private:
+#if defined(OS_WIN)
+  // Imports settings in a separate process. It is the implementation of the
+  // public version.
+  static bool ImportSettings(Profile* profile, int browser_type,
+                             int items_to_import,
+                             const std::wstring& import_path,
+                             gfx::NativeView parent_window);
+  // Import browser items in this process. The browser and the items to
+  // import are encoded int the command line.
+  static int ImportFromBrowser(Profile* profile, const CommandLine& cmdline);
+#endif  // OS_WIN
+  // Import bookmarks from an html file. The path to the file is provided in
+  // the command line.
+  static int ImportFromFile(Profile* profile, const CommandLine& cmdline);
   // This class is for scoping purposes.
   DISALLOW_IMPLICIT_CONSTRUCTORS(FirstRun);
 };
 
-#if !defined(OS_LINUX) || defined(TOOLKIT_VIEWS)
-// TODO(port): remove on Mac and Linux+views as well.
-// http://code.google.com/p/chromium/issues/detail?id=9295
-
+#if defined(OS_WIN)
 // This class contains the actions that need to be performed when an upgrade
 // is required. This involves mainly swapping the chrome exe and relaunching
 // the new browser.
@@ -129,6 +166,15 @@ class Upgrade {
   // is no new_chrome.exe or the swap fails the return is false;
   static bool SwapNewChromeExeIfPresent();
 
+  // Combines the two methods above to perform the rename and relaunch of
+  // the browser. Note that relaunch does NOT exit the existing browser process.
+  // If this is called before message loop is executed, simply exit the main
+  // function. If browser is already running, you will need to exit it.
+  static bool DoUpgradeTasks(const CommandLine& command_line);
+
+  // Checks if chrome_new.exe is present in the current instance's install.
+  static bool IsUpdatePendingRestart();
+
   // Shows a modal dialog asking the user to give chrome another try. See
   // above for the possible outcomes of the function. This is an experimental,
   // non-localized dialog.
@@ -137,20 +183,45 @@ class Upgrade {
 };
 #endif
 
-// A subclass of BrowserProcessImpl that does not have a GoogleURLTracker
-// so we don't fetch as we have no IO thread (see bug #1292702).
+// A subclass of BrowserProcessImpl that does not have a GoogleURLTracker or
+// IntranetRedirectDetector so we don't do any URL fetches (as we have no IO
+// thread to fetch on).
 class FirstRunBrowserProcess : public BrowserProcessImpl {
  public:
-  FirstRunBrowserProcess(const CommandLine& command_line)
+  explicit FirstRunBrowserProcess(const CommandLine& command_line)
       : BrowserProcessImpl(command_line) {
   }
   virtual ~FirstRunBrowserProcess() { }
 
   virtual GoogleURLTracker* google_url_tracker() { return NULL; }
+  virtual IntranetRedirectDetector* intranet_redirect_detector() {
+    return NULL;
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FirstRunBrowserProcess);
 };
+
+// This class is used by FirstRun::ImportNow to get notified of the outcome of
+// the import operation. It differs from ImportProcessRunner in that this
+// class executes in the context of importing child process.
+// The values that it handles are meant to be used as the process exit code.
+class FirstRunImportObserver : public ImportObserver {
+ public:
+  FirstRunImportObserver()
+      : loop_running_(false), import_result_(ResultCodes::NORMAL_EXIT) {
+  }
+  int import_result() const;
+  virtual void ImportCanceled();
+  virtual void ImportComplete();
+  void RunLoop();
+ private:
+  void Finish();
+  bool loop_running_;
+  int import_result_;
+  DISALLOW_COPY_AND_ASSIGN(FirstRunImportObserver);
+};
+
 
 // Show the First Run UI to the user, allowing them to create shortcuts for
 // the app, import their bookmarks and other data from another browser into
@@ -163,12 +234,15 @@ class FirstRunBrowserProcess : public BrowserProcessImpl {
 // preferences and will override default behavior of importer.
 // |dont_import_items| specifies the items *not* to import, specified in master
 // preferences and will override default behavior of importer.
+// |search_engine_experiment| indicates whether the experimental search engine
+// window should be shown.
 // Returns true if the user clicked "Start", false if the user pressed "Cancel"
 // or closed the dialog.
 bool OpenFirstRunDialog(Profile* profile,
                         bool homepage_defined,
                         int import_items,
                         int dont_import_items,
+                        bool search_engine_experiment,
                         ProcessSingleton* process_singleton);
 
 #endif  // CHROME_BROWSER_FIRST_RUN_H_

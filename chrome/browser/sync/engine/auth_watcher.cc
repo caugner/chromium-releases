@@ -13,7 +13,6 @@
 #include "chrome/browser/sync/notifier/listener/talk_mediator.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/util/character_set_converters.h"
 #include "chrome/browser/sync/util/event_sys-inl.h"
 #include "chrome/browser/sync/util/user_settings.h"
 
@@ -93,6 +92,49 @@ void AuthWatcher::PersistCredentials() {
   }
 }
 
+// TODO(chron): Full integration test suite needed. http://crbug.com/35429
+void AuthWatcher::RenewAuthToken(const std::string& updated_token) {
+  message_loop()->PostTask(FROM_HERE, NewRunnableMethod(this,
+      &AuthWatcher::DoRenewAuthToken, updated_token));
+}
+
+void AuthWatcher::DoRenewAuthToken(const std::string& updated_token) {
+  DCHECK_EQ(MessageLoop::current(), message_loop());
+  // TODO(chron): We should probably only store auth token in one place.
+  if (scm_->auth_token() == updated_token) {
+    return;  // This thread is the only one writing to the SCM's auth token.
+  }
+  LOG(INFO) << "Updating auth token:" << updated_token;
+  scm_->set_auth_token(updated_token);
+  gaia_->RenewAuthToken(updated_token);  // Must be on AuthWatcher thread
+  talk_mediator_->SetAuthToken(user_settings_->email(), updated_token);
+  user_settings_->SetAuthTokenForService(user_settings_->email(),
+                                         SYNC_SERVICE_NAME,
+                                         updated_token);
+
+  AuthWatcherEvent event = { AuthWatcherEvent::AUTH_RENEWED };
+  NotifyListeners(&event);
+}
+
+void AuthWatcher::AuthenticateWithLsid(const std::string& lsid) {
+  message_loop()->PostTask(FROM_HERE, NewRunnableMethod(this,
+      &AuthWatcher::DoAuthenticateWithLsid, lsid));
+}
+
+void AuthWatcher::DoAuthenticateWithLsid(const std::string& lsid) {
+  DCHECK_EQ(MessageLoop::current(), message_loop());
+
+  AuthWatcherEvent event = { AuthWatcherEvent::AUTHENTICATION_ATTEMPT_START };
+  NotifyListeners(&event);
+
+  if (gaia_->AuthenticateWithLsid(lsid, true)) {
+    PersistCredentials();
+    DoAuthenticateWithToken(gaia_->email(), gaia_->auth_token());
+  } else {
+    ProcessGaiaAuthFailure();
+  }
+}
+
 const char kAuthWatcher[] = "AuthWatcher";
 
 void AuthWatcher::AuthenticateWithToken(const std::string& gaia_email,
@@ -122,16 +164,18 @@ void AuthWatcher::DoAuthenticateWithToken(const std::string& gaia_email,
     case Authenticator::SUCCESS:
       {
         status_ = GAIA_AUTHENTICATED;
-        PathString share_name;
-        CHECK(AppendUTF8ToPathString(email.data(), email.size(), &share_name));
+        const std::string& share_name = email;
         user_settings_->SwitchUser(email);
 
         // Set the authentication token for notifications
         talk_mediator_->SetAuthToken(email, auth_token);
         scm_->set_auth_token(auth_token);
 
-        if (!was_authenticated)
-          LoadDirectoryListAndOpen(share_name);
+        if (!was_authenticated) {
+          LOG(INFO) << "Opening DB for AuthenticateWithToken ("
+                    << share_name << ")";
+          dirman_->Open(share_name);
+        }
         NotifyAuthSucceeded(email);
         return;
       }
@@ -165,9 +209,8 @@ bool AuthWatcher::AuthenticateLocally(string email) {
     gaia_->SetUsername(email);
     status_ = LOCALLY_AUTHENTICATED;
     user_settings_->SwitchUser(email);
-    PathString share_name;
-    CHECK(AppendUTF8ToPathString(email.data(), email.size(), &share_name));
-    LoadDirectoryListAndOpen(share_name);
+    LOG(INFO) << "Opening DB for AuthenticateLocally (" << email << ")";
+    dirman_->Open(email);
     NotifyAuthSucceeded(email);
     return true;
   } else {
@@ -220,11 +263,19 @@ void AuthWatcher::DoAuthenticate(const AuthRequest& request) {
   SignIn const signin = user_settings_->
       RecallSigninType(request.email, GMAIL_SIGNIN);
 
+  // We let the caller be lazy and try using the last captcha token seen by
+  // the gaia authenticator if they haven't provided a token but have sent
+  // a challenge response. Of course, if the captcha token is specified,
+  // we use that one instead.
+  std::string captcha_token(request.captcha_token);
+  if (!request.captcha_value.empty() && captcha_token.empty())
+    captcha_token = gaia_->captcha_token();
+
   if (!request.password.empty()) {
     bool authenticated = false;
-    if (!request.captcha_token.empty() && !request.captcha_value.empty()) {
+    if (!captcha_token.empty()) {
       authenticated = gaia_->Authenticate(request.email, request.password,
-                                          save, request.captcha_token,
+                                          save, captcha_token,
                                           request.captcha_value, signin);
     } else {
       authenticated = gaia_->Authenticate(request.email, request.password,
@@ -237,7 +288,7 @@ void AuthWatcher::DoAuthenticate(const AuthRequest& request) {
       ProcessGaiaAuthFailure();
     }
   } else if (!request.auth_token.empty()) {
-      DoAuthenticateWithToken(request.email, request.auth_token);
+    DoAuthenticateWithToken(request.email, request.auth_token);
   } else {
       LOG(ERROR) << "Attempt to authenticate with no credentials.";
   }
@@ -282,20 +333,6 @@ void AuthWatcher::DoHandleServerConnectionEvent(
                             AuthWatcherEvent::EXPIRED_CREDENTIALS };
     DoAuthenticate(request);
   }
-}
-
-bool AuthWatcher::LoadDirectoryListAndOpen(const PathString& login) {
-  DCHECK_EQ(MessageLoop::current(), message_loop());
-  LOG(INFO) << "LoadDirectoryListAndOpen(" << login << ")";
-  bool initial_sync_ended = false;
-
-  dirman_->Open(login);
-  syncable::ScopedDirLookup dir(dirman_, login);
-  if (dir.good() && dir->initial_sync_ended())
-    initial_sync_ended = true;
-
-  LOG(INFO) << "LoadDirectoryListAndOpen returning " << initial_sync_ended;
-  return initial_sync_ended;
 }
 
 AuthWatcher::~AuthWatcher() {

@@ -80,6 +80,9 @@ Client::Client(ServiceLocator* service_locator)
       evaluation_counter_(service_locator),
       render_tree_called_(false),
       render_mode_(RENDERMODE_CONTINUOUS),
+#ifdef O3D_PLUGIN_SUPPORT_SET_MAX_FPS
+      texture_on_hold_(false),
+#endif  // O3D_PLUGIN_SUPPORT_SET_MAX_FPS
       event_manager_(),
       last_tick_time_(0),
       root_(NULL),
@@ -188,10 +191,11 @@ bool Client::Tick() {
   // Processes any incoming message found in the message queue.  Note that this
   // call does not block if no new messages are found.
   bool message_check_ok = true;
+  bool has_new_texture = false;
 
   if (message_queue_.get()) {
     profiler_->ProfileStart("CheckForNewMessages");
-    message_check_ok = message_queue_->CheckForNewMessages();
+    message_check_ok = message_queue_->CheckForNewMessages(&has_new_texture);
     profiler_->ProfileStop("CheckForNewMessages");
   }
 
@@ -201,6 +205,19 @@ bool Client::Tick() {
   event_manager_.ProcessQueue();
 
   last_tick_time_ = timer.GetElapsedTimeAndReset();
+
+#ifdef O3D_PLUGIN_SUPPORT_SET_MAX_FPS
+  texture_on_hold_ |= has_new_texture;
+  int max_fps = renderer_->max_fps();
+  if (max_fps > 0 &&
+      texture_on_hold_ &&
+      render_mode() == RENDERMODE_ON_DEMAND &&
+      render_elapsed_time_timer_.GetElapsedTimeWithoutClearing()
+        > 1.0/max_fps) {
+    renderer_->set_need_to_render(true);
+    texture_on_hold_ = false;
+  }
+#endif  // O3D_PLUGIN_SUPPORT_SET_MAX_FPS
 
   return message_check_ok;
 }
@@ -304,7 +321,25 @@ void Client::RenderClient(bool send_callback) {
   if (!renderer_.IsAvailable())
     return;
 
-  RenderClientInner(true, send_callback);
+  bool have_offscreen_surfaces =
+      !(offscreen_render_surface_.IsNull() ||
+        offscreen_depth_render_surface_.IsNull());
+
+  if (have_offscreen_surfaces) {
+    if (!renderer_->StartRendering()) {
+      return;
+    }
+    renderer_->SetRenderSurfaces(offscreen_render_surface_,
+                                 offscreen_depth_render_surface_,
+                                 true);
+  }
+
+  RenderClientInner(!have_offscreen_surfaces, send_callback);
+
+  if (have_offscreen_surfaces) {
+    renderer_->SetRenderSurfaces(NULL, NULL, false);
+    renderer_->FinishRendering();
+  }
 }
 
 // Executes draw calls for all visible shapes in a subtree
@@ -501,6 +536,13 @@ String Client::GetMessageQueueAddress() const {
     O3D_ERROR(service_locator_) << "Message queue not initialized";
     return String("");
   }
+}
+
+void Client::SetOffscreenRenderingSurfaces(
+    RenderSurface::Ref surface,
+    RenderDepthStencilSurface::Ref depth_surface) {
+  offscreen_render_surface_ = surface;
+  offscreen_depth_render_surface_ = depth_surface;
 }
 
 // Error Related methods -------------------------------------------------------

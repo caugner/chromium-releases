@@ -153,13 +153,6 @@ void SetMinLogLevel(int level);
 // Gets the current log level.
 int GetMinLogLevel();
 
-#if defined(OS_LINUX)
-// Get the file descriptor used for logging.
-// Returns -1 if none open.
-// Needed by ZygoteManager.
-int GetLoggingFileDescriptor();
-#endif
-
 // Sets the log filter prefix.  Any log message below LOG_ERROR severity that
 // doesn't start with this prefix with be silently ignored.  The filter defaults
 // to NULL (everything is logged) if this function is not called.  Messages
@@ -185,6 +178,13 @@ void SetLogAssertHandler(LogAssertHandlerFunction handler);
 // own handling.
 typedef void (*LogReportHandlerFunction)(const std::string& str);
 void SetLogReportHandler(LogReportHandlerFunction handler);
+
+// Sets the Log Message Handler that gets passed every log message before
+// it's sent to other log destinations (if any).
+// Returns true to signal that it handled the message and the message
+// should not be sent to other log destinations.
+typedef bool (*LogMessageHandlerFunction)(int severity, const std::string& str);
+void SetLogMessageHandler(LogMessageHandlerFunction handler);
 
 typedef int LogSeverity;
 const LogSeverity LOG_INFO = 0;
@@ -325,6 +325,55 @@ std::string* MakeCheckOpString(const int& v1,
   return MakeCheckOpStringIntInt(v1, v2, names);
 }
 
+// Helper macro for binary operators.
+// Don't use this macro directly in your code, use CHECK_EQ et al below.
+#define CHECK_OP(name, op, val1, val2)  \
+  if (logging::CheckOpString _result = \
+      logging::Check##name##Impl((val1), (val2), #val1 " " #op " " #val2)) \
+    logging::LogMessage(__FILE__, __LINE__, _result).stream()
+
+// Helper functions for string comparisons.
+// To avoid bloat, the definitions are in logging.cc.
+#define DECLARE_CHECK_STROP_IMPL(func, expected) \
+  std::string* Check##func##expected##Impl(const char* s1, \
+                                           const char* s2, \
+                                           const char* names);
+DECLARE_CHECK_STROP_IMPL(strcmp, true)
+DECLARE_CHECK_STROP_IMPL(strcmp, false)
+DECLARE_CHECK_STROP_IMPL(_stricmp, true)
+DECLARE_CHECK_STROP_IMPL(_stricmp, false)
+#undef DECLARE_CHECK_STROP_IMPL
+
+// Helper macro for string comparisons.
+// Don't use this macro directly in your code, use CHECK_STREQ et al below.
+#define CHECK_STROP(func, op, expected, s1, s2) \
+  while (CheckOpString _result = \
+      logging::Check##func##expected##Impl((s1), (s2), \
+                                           #s1 " " #op " " #s2)) \
+    LOG(FATAL) << *_result.str_
+
+// String (char*) equality/inequality checks.
+// CASE versions are case-insensitive.
+//
+// Note that "s1" and "s2" may be temporary strings which are destroyed
+// by the compiler at the end of the current "full expression"
+// (e.g. CHECK_STREQ(Foo().c_str(), Bar().c_str())).
+
+#define CHECK_STREQ(s1, s2) CHECK_STROP(strcmp, ==, true, s1, s2)
+#define CHECK_STRNE(s1, s2) CHECK_STROP(strcmp, !=, false, s1, s2)
+#define CHECK_STRCASEEQ(s1, s2) CHECK_STROP(_stricmp, ==, true, s1, s2)
+#define CHECK_STRCASENE(s1, s2) CHECK_STROP(_stricmp, !=, false, s1, s2)
+
+#define CHECK_INDEX(I,A) CHECK(I < (sizeof(A)/sizeof(A[0])))
+#define CHECK_BOUND(B,A) CHECK(B <= (sizeof(A)/sizeof(A[0])))
+
+#define CHECK_EQ(val1, val2) CHECK_OP(EQ, ==, val1, val2)
+#define CHECK_NE(val1, val2) CHECK_OP(NE, !=, val1, val2)
+#define CHECK_LE(val1, val2) CHECK_OP(LE, <=, val1, val2)
+#define CHECK_LT(val1, val2) CHECK_OP(LT, < , val1, val2)
+#define CHECK_GE(val1, val2) CHECK_OP(GE, >=, val1, val2)
+#define CHECK_GT(val1, val2) CHECK_OP(GT, > , val1, val2)
+
 // Plus some debug-logging macros that get compiled to nothing for production
 //
 // DEBUG_MODE is for uses like
@@ -437,11 +486,8 @@ enum { DEBUG_MODE = 0 };
 
 // debug-only checking.  not executed in NDEBUG mode.
 enum { DEBUG_MODE = 1 };
-#define DCHECK(condition) \
-  LOG_IF(FATAL, !(condition)) << "Check failed: " #condition ". "
-
-#define DPCHECK(condition) \
-  PLOG_IF(FATAL, !(condition)) << "Check failed: " #condition ". "
+#define DCHECK(condition) CHECK(condition)
+#define DPCHECK(condition) PCHECK(condition)
 
 // Helper macro for binary operators.
 // Don't use this macro directly in your code, use DCHECK_EQ et al below.
@@ -449,18 +495,6 @@ enum { DEBUG_MODE = 1 };
   if (logging::CheckOpString _result = \
       logging::Check##name##Impl((val1), (val2), #val1 " " #op " " #val2)) \
     logging::LogMessage(__FILE__, __LINE__, _result).stream()
-
-// Helper functions for string comparisons.
-// To avoid bloat, the definitions are in logging.cc.
-#define DECLARE_DCHECK_STROP_IMPL(func, expected) \
-  std::string* Check##func##expected##Impl(const char* s1, \
-                                           const char* s2, \
-                                           const char* names);
-DECLARE_DCHECK_STROP_IMPL(strcmp, true)
-DECLARE_DCHECK_STROP_IMPL(strcmp, false)
-DECLARE_DCHECK_STROP_IMPL(_stricmp, true)
-DECLARE_DCHECK_STROP_IMPL(_stricmp, false)
-#undef DECLARE_DCHECK_STROP_IMPL
 
 // Helper macro for string comparisons.
 // Don't use this macro directly in your code, use CHECK_STREQ et al below.
@@ -553,29 +587,6 @@ extern bool g_enable_dcheck;
 
 #endif  // NDEBUG
 
-// Helper functions for DCHECK_OP macro.
-// The (int, int) specialization works around the issue that the compiler
-// will not instantiate the template version of the function on values of
-// unnamed enum type - see comment below.
-#define DEFINE_DCHECK_OP_IMPL(name, op) \
-  template <class t1, class t2> \
-  inline std::string* Check##name##Impl(const t1& v1, const t2& v2, \
-                                        const char* names) { \
-    if (v1 op v2) return NULL; \
-    else return MakeCheckOpString(v1, v2, names); \
-  } \
-  inline std::string* Check##name##Impl(int v1, int v2, const char* names) { \
-    if (v1 op v2) return NULL; \
-    else return MakeCheckOpString(v1, v2, names); \
-  }
-DEFINE_DCHECK_OP_IMPL(EQ, ==)
-DEFINE_DCHECK_OP_IMPL(NE, !=)
-DEFINE_DCHECK_OP_IMPL(LE, <=)
-DEFINE_DCHECK_OP_IMPL(LT, < )
-DEFINE_DCHECK_OP_IMPL(GE, >=)
-DEFINE_DCHECK_OP_IMPL(GT, > )
-#undef DEFINE_DCHECK_OP_IMPL
-
 // Equality/Inequality checks - compare two values, and log a LOG_FATAL message
 // including the two values when the result is not as expected.  The values
 // must have operator<<(ostream, ...) defined.
@@ -603,6 +614,30 @@ DEFINE_DCHECK_OP_IMPL(GT, > )
 
 #endif  // OMIT_DLOG_AND_DCHECK
 #undef OMIT_DLOG_AND_DCHECK
+
+
+// Helper functions for CHECK_OP macro.
+// The (int, int) specialization works around the issue that the compiler
+// will not instantiate the template version of the function on values of
+// unnamed enum type - see comment below.
+#define DEFINE_CHECK_OP_IMPL(name, op) \
+  template <class t1, class t2> \
+  inline std::string* Check##name##Impl(const t1& v1, const t2& v2, \
+                                        const char* names) { \
+    if (v1 op v2) return NULL; \
+    else return MakeCheckOpString(v1, v2, names); \
+  } \
+  inline std::string* Check##name##Impl(int v1, int v2, const char* names) { \
+    if (v1 op v2) return NULL; \
+    else return MakeCheckOpString(v1, v2, names); \
+  }
+DEFINE_CHECK_OP_IMPL(EQ, ==)
+DEFINE_CHECK_OP_IMPL(NE, !=)
+DEFINE_CHECK_OP_IMPL(LE, <=)
+DEFINE_CHECK_OP_IMPL(LT, < )
+DEFINE_CHECK_OP_IMPL(GE, >=)
+DEFINE_CHECK_OP_IMPL(GT, > )
+#undef DEFINE_CHECK_OP_IMPL
 
 #define NOTREACHED() DCHECK(false)
 
@@ -764,6 +799,17 @@ class ErrnoLogMessage {
 //       statements, there's no guarantee that it will stay closed
 //       after this call.
 void CloseLogFile();
+
+// Async signal safe logging mechanism.
+void RawLog(int level, const char* message);
+
+#define RAW_LOG(level, message) logging::RawLog(logging::LOG_ ## level, message)
+
+#define RAW_CHECK(condition)                                                   \
+  do {                                                                         \
+    if (!(condition))                                                          \
+      logging::RawLog(logging::LOG_FATAL, "Check failed: " #condition "\n");   \
+  } while (0)
 
 }  // namespace logging
 

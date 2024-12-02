@@ -10,10 +10,6 @@
 class CommandLine;
 class MetricsService;
 
-// Displays a warning message if the user is running chrome on windows 2000.
-// Returns true if the OS is win2000, false otherwise.
-bool CheckForWin2000();
-
 // Handle uninstallation when given the appropriate the command-line switch.
 // If |chrome_still_running| is true a modal dialog will be shown asking the
 // user to close the other chrome instance.
@@ -36,8 +32,5 @@ int HandleIconsCommands(const CommandLine &parsed_command_line);
 // allow the user level Chrome to run. So we notify the user and uninstall
 // user level Chrome.
 bool CheckMachineLevelInstall();
-
-// Handle upgrades if Chromium was upgraded while it was last running.
-bool DoUpgradeTasks(const CommandLine& command_line);
 
 #endif  // CHROME_BROWSER_BROWSER_MAIN_WIN_H_

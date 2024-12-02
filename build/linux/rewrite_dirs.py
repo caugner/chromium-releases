@@ -1,4 +1,7 @@
 #!/usr/bin/python
+# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
 
 """Rewrites paths in -I, -L and other option to be relative to a sysroot."""
 
@@ -17,7 +20,7 @@ REWRITE_PREFIX = ['-I',
 
 def RewritePath(path, sysroot):
   """Rewrites a path by prefixing it with the sysroot if it is absolute."""
-  if os.path.isabs(path):
+  if os.path.isabs(path) and not path.startswith(sysroot):
     path = path.lstrip('/')
     return os.path.join(sysroot, path)
   else:

@@ -1,18 +1,63 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "net/proxy/proxy_resolver_v8.h"
 
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "googleurl/src/gurl.h"
-#include "net/base/load_log.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_log.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_resolver_js_bindings.h"
 #include "net/proxy/proxy_resolver_script.h"
 #include "v8/include/v8.h"
+
+// Notes on the javascript environment:
+//
+// For the majority of the PAC utility functions, we use the same code
+// as Firefox. See the javascript library that proxy_resolver_scipt.h
+// pulls in.
+//
+// In addition, we implement a subset of Microsoft's extensions to PAC.
+// TODO(eroman): Implement the rest.
+//
+//   - myIpAddressEx()
+//   - dnsResolveEx()
+//   - isResolvableEx()
+//
+// It is worth noting that the original PAC specification does not describe
+// the return values on failure. Consequently, there are compatibility
+// differences between browsers on what to return on failure, which are
+// illustrated below:
+//
+// ----------------+-------------+-------------------+--------------
+//                 | Firefox3    | InternetExplorer8 |  --> Us <---
+// ----------------+-------------+-------------------+--------------
+// myIpAddress()   | "127.0.0.1" |  ???              |  "127.0.0.1"
+// dnsResolve()    | null        |  false            |  null
+// myIpAddressEx() | N/A         |  ""               |  ""
+// dnsResolveEx()  | N/A         |  ""               |  ""
+// ----------------+-------------+-------------------+--------------
+//
+// TODO(eroman): The cell above reading ??? means I didn't test it.
+//
+// Another difference is in how dnsResolve() and myIpAddress() are
+// implemented -- whether they should restrict to IPv4 results, or
+// include both IPv4 and IPv6. The following table illustrates the
+// differences:
+//
+// -----------------+-------------+-------------------+--------------
+//                  | Firefox3    | InternetExplorer8 |  --> Us <---
+// -----------------+-------------+-------------------+--------------
+// myIpAddress()    | IPv4/IPv6   |  IPv4             |  IPv4
+// dnsResolve()     | IPv4/IPv6   |  IPv4             |  IPv4
+// isResolvable()   | IPv4/IPv6   |  IPv4             |  IPv4
+// myIpAddressEx()  | N/A         |  IPv4/IPv6        |  IPv4/IPv6
+// dnsResolveEx()   | N/A         |  IPv4/IPv6        |  IPv4/IPv6
+// isResolvableEx() | N/A         |  IPv4/IPv6        |  IPv4/IPv6
+// -----------------+-------------+-------------------+--------------
 
 namespace net {
 
@@ -57,7 +102,7 @@ bool V8ObjectToString(v8::Handle<v8::Value> object, std::string* result) {
 class ProxyResolverV8::Context {
  public:
   explicit Context(ProxyResolverJSBindings* js_bindings)
-      : js_bindings_(js_bindings), current_request_load_log_(NULL) {
+      : js_bindings_(js_bindings), current_request_net_log_(NULL) {
     DCHECK(js_bindings != NULL);
   }
 
@@ -128,13 +173,28 @@ class ProxyResolverV8::Context {
     global_template->Set(v8::String::New("dnsResolve"),
         dns_resolve_template);
 
+    // Microsoft's PAC extensions (incomplete):
+
+    v8::Local<v8::FunctionTemplate> dns_resolve_ex_template =
+        v8::FunctionTemplate::New(&DnsResolveExCallback, v8_this_);
+    global_template->Set(v8::String::New("dnsResolveEx"),
+                         dns_resolve_ex_template);
+
+    v8::Local<v8::FunctionTemplate> my_ip_address_ex_template =
+        v8::FunctionTemplate::New(&MyIpAddressExCallback, v8_this_);
+    global_template->Set(v8::String::New("myIpAddressEx"),
+                         my_ip_address_ex_template);
+
     v8_context_ = v8::Context::New(NULL, global_template);
 
     v8::Context::Scope ctx(v8_context_);
 
     // Add the PAC utility functions to the environment.
     // (This script should never fail, as it is a string literal!)
-    int rv = RunScript(PROXY_RESOLVER_SCRIPT, kPacUtilityResourceName);
+    // Note that the two string literals are concatenated.
+    int rv = RunScript(PROXY_RESOLVER_SCRIPT
+                       PROXY_RESOLVER_SCRIPT_EX,
+                       kPacUtilityResourceName);
     if (rv != OK) {
       NOTREACHED();
       return rv;
@@ -154,8 +214,8 @@ class ProxyResolverV8::Context {
     return OK;
   }
 
-  void SetCurrentRequestLoadLog(LoadLog* load_log) {
-    current_request_load_log_ = load_log;
+  void SetCurrentRequestNetLog(const BoundNetLog& net_log) {
+    current_request_net_log_ = net_log;
   }
 
   void PurgeMemory() {
@@ -233,18 +293,37 @@ class ProxyResolverV8::Context {
     Context* context =
         static_cast<Context*>(v8::External::Cast(*args.Data())->Value());
 
-    LoadLog::BeginEvent(context->current_request_load_log_,
-                        LoadLog::TYPE_PROXY_RESOLVER_V8_MY_IP_ADDRESS);
+    context->current_request_net_log_.BeginEvent(
+        NetLog::TYPE_PROXY_RESOLVER_V8_MY_IP_ADDRESS);
 
     // We shouldn't be called with any arguments, but will not complain if
     // we are.
     std::string result = context->js_bindings_->MyIpAddress();
 
-    LoadLog::EndEvent(context->current_request_load_log_,
-                      LoadLog::TYPE_PROXY_RESOLVER_V8_MY_IP_ADDRESS);
+    context->current_request_net_log_.EndEvent(
+        NetLog::TYPE_PROXY_RESOLVER_V8_MY_IP_ADDRESS);
 
     if (result.empty())
       result = "127.0.0.1";
+    return StdStringToV8String(result);
+  }
+
+  // V8 callback for when "myIpAddressEx()" is invoked by the PAC script.
+  static v8::Handle<v8::Value> MyIpAddressExCallback(
+      const v8::Arguments& args) {
+    Context* context =
+        static_cast<Context*>(v8::External::Cast(*args.Data())->Value());
+
+    context->current_request_net_log_.BeginEvent(
+        NetLog::TYPE_PROXY_RESOLVER_V8_MY_IP_ADDRESS_EX);
+
+    // We shouldn't be called with any arguments, but will not complain if
+    // we are.
+    std::string result = context->js_bindings_->MyIpAddressEx();
+
+    context->current_request_net_log_.EndEvent(
+        NetLog::TYPE_PROXY_RESOLVER_V8_MY_IP_ADDRESS_EX);
+
     return StdStringToV8String(result);
   }
 
@@ -262,20 +341,45 @@ class ProxyResolverV8::Context {
         return v8::Undefined();
     }
 
-    LoadLog::BeginEvent(context->current_request_load_log_,
-                        LoadLog::TYPE_PROXY_RESOLVER_V8_DNS_RESOLVE);
+    context->current_request_net_log_.BeginEvent(
+        NetLog::TYPE_PROXY_RESOLVER_V8_DNS_RESOLVE);
 
     std::string result = context->js_bindings_->DnsResolve(host);
 
-    LoadLog::EndEvent(context->current_request_load_log_,
-                      LoadLog::TYPE_PROXY_RESOLVER_V8_DNS_RESOLVE);
+    context->current_request_net_log_.EndEvent(
+        NetLog::TYPE_PROXY_RESOLVER_V8_DNS_RESOLVE);
 
-    // DoDnsResolve() returns empty string on failure.
+    // DnsResolve() returns empty string on failure.
     return result.empty() ? v8::Null() : StdStringToV8String(result);
   }
 
+  // V8 callback for when "dnsResolveEx()" is invoked by the PAC script.
+  static v8::Handle<v8::Value> DnsResolveExCallback(const v8::Arguments& args) {
+    Context* context =
+        static_cast<Context*>(v8::External::Cast(*args.Data())->Value());
+
+    // We need at least one argument.
+    std::string host;
+    if (args.Length() == 0) {
+      host = "undefined";
+    } else {
+      if (!V8ObjectToString(args[0], &host))
+        return v8::Undefined();
+    }
+
+    context->current_request_net_log_.BeginEvent(
+        NetLog::TYPE_PROXY_RESOLVER_V8_DNS_RESOLVE_EX);
+
+    std::string result = context->js_bindings_->DnsResolveEx(host);
+
+    context->current_request_net_log_.EndEvent(
+        NetLog::TYPE_PROXY_RESOLVER_V8_DNS_RESOLVE_EX);
+
+    return StdStringToV8String(result);
+  }
+
   ProxyResolverJSBindings* js_bindings_;
-  LoadLog* current_request_load_log_;
+  BoundNetLog current_request_net_log_;
   v8::Persistent<v8::External> v8_this_;
   v8::Persistent<v8::Context> v8_context_;
 };
@@ -294,16 +398,16 @@ int ProxyResolverV8::GetProxyForURL(const GURL& query_url,
                                     ProxyInfo* results,
                                     CompletionCallback* /*callback*/,
                                     RequestHandle* /*request*/,
-                                    LoadLog* load_log) {
+                                    const BoundNetLog& net_log) {
   // If the V8 instance has not been initialized (either because
   // SetPacScript() wasn't called yet, or because it failed.
   if (!context_.get())
     return ERR_FAILED;
 
   // Otherwise call into V8.
-  context_->SetCurrentRequestLoadLog(load_log);
+  context_->SetCurrentRequestNetLog(net_log);
   int rv = context_->ResolveProxy(query_url, results);
-  context_->SetCurrentRequestLoadLog(NULL);
+  context_->SetCurrentRequestNetLog(BoundNetLog());
 
   return rv;
 }

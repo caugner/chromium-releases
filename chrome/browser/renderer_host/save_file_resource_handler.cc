@@ -7,8 +7,10 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/download/save_file_manager.h"
 #include "net/base/io_buffer.h"
+#include "net/url_request/url_request_status.h"
 
 SaveFileResourceHandler::SaveFileResourceHandler(int render_process_host_id,
                                                  int render_view_id,
@@ -20,6 +22,12 @@ SaveFileResourceHandler::SaveFileResourceHandler(int render_process_host_id,
       url_(url),
       content_length_(0),
       save_manager_(manager) {
+}
+
+bool SaveFileResourceHandler::OnUploadProgress(int request_id,
+                                               uint64 position,
+                                               uint64 size) {
+  return true;
 }
 
 bool SaveFileResourceHandler::OnRequestRedirected(int request_id,
@@ -44,10 +52,17 @@ bool SaveFileResourceHandler::OnResponseStarted(int request_id,
   info->request_id = request_id;
   info->content_disposition = content_disposition_;
   info->save_source = SaveFileCreateInfo::SAVE_FILE_FROM_NET;
-  save_manager_->file_loop()->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
       NewRunnableMethod(save_manager_,
                         &SaveFileManager::StartSave,
                         info));
+  return true;
+}
+
+bool SaveFileResourceHandler::OnWillStart(int request_id,
+                                          const GURL& url,
+                                          bool* defer) {
   return true;
 }
 
@@ -69,7 +84,8 @@ bool SaveFileResourceHandler::OnReadCompleted(int request_id, int* bytes_read) {
   // We are passing ownership of this buffer to the save file manager.
   net::IOBuffer* buffer = NULL;
   read_buffer_.swap(&buffer);
-  save_manager_->file_loop()->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
       NewRunnableMethod(save_manager_,
                         &SaveFileManager::UpdateSaveProgress,
                         save_id_,
@@ -82,7 +98,8 @@ bool SaveFileResourceHandler::OnResponseCompleted(
     int request_id,
     const URLRequestStatus& status,
     const std::string& security_info) {
-  save_manager_->file_loop()->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
       NewRunnableMethod(save_manager_,
                         &SaveFileManager::SaveFinished,
                         save_id_,
@@ -91,6 +108,9 @@ bool SaveFileResourceHandler::OnResponseCompleted(
                         status.is_success() && !status.is_io_pending()));
   read_buffer_ = NULL;
   return true;
+}
+
+void SaveFileResourceHandler::OnRequestClosed() {
 }
 
 void SaveFileResourceHandler::set_content_length(

@@ -17,6 +17,8 @@
 #include "chrome_frame/npapi_url_request.h"
 
 class MessageLoop;
+class nsICookieService;
+class nsIURI;
 
 // ChromeFrameNPAPI: Implementation of the NPAPI plugin, which is responsible
 // for hosting a chrome frame, i.e. an iframe like widget which hosts the the
@@ -63,8 +65,11 @@ class ChromeFrameNPAPI
 
   bool SetWindow(NPWindow* window_info);
   void UrlNotify(const char* url, NPReason reason, void* notify_data);
-  bool NewStream(NPMIMEType type, NPStream* stream, NPBool seekable,
-                 uint16* stream_type);
+  NPError NewStream(NPMIMEType type, NPStream* stream, NPBool seekable,
+                    uint16* stream_type);
+  int32 WriteReady(NPStream* stream);
+  int32 Write(NPStream* stream, int32 offset, int32 len, void* buffer);
+  NPError DestroyStream(NPStream* stream, NPReason reason);
 
   void Print(NPPrint* print_info);
 
@@ -99,10 +104,6 @@ class ChromeFrameNPAPI
   // which represents our plugin class.
   static ChromeFrameNPAPI* ChromeFrameInstanceFromNPObject(void* object);
 
-  // Return a UrlRequest instance associated with the given instance and
-  // stream combination.
-  static NPAPIUrlRequest* ValidateRequest(NPP instance, void* notify_data);
-
 BEGIN_MSG_MAP(ChromeFrameNPAPI)
   MESSAGE_HANDLER(WM_SETFOCUS, OnSetFocus)
   CHAIN_MSG_MAP(Base)
@@ -125,7 +126,7 @@ END_MSG_MAP()
   // Initialize string->identifier mapping, public to allow unittesting.
   static void InitializeIdentifiers();
 
-  bool HandleContextMenuCommand(UINT cmd);
+  bool HandleContextMenuCommand(UINT cmd, const IPC::ContextMenuParams& params);
  protected:
   // Handler for accelerator messages passed on from the hosted chrome
   // instance.
@@ -137,20 +138,16 @@ END_MSG_MAP()
                                         const std::string& message,
                                         const std::string& origin,
                                         const std::string& target);
-  virtual void OnRequestStart(int tab_handle, int request_id,
-                              const IPC::AutomationURLRequest& request);
-  virtual void OnRequestRead(int tab_handle, int request_id,
-                             int bytes_to_read);
-  virtual void OnRequestEnd(int tab_handle, int request_id,
-                            const URLRequestStatus& status);
-  virtual void OnSetCookieAsync(int tab_handle, const GURL& url,
-                                const std::string& cookie);
-
   // ChromeFrameDelegate overrides
   virtual void OnLoadFailed(int error_code, const std::string& url);
   virtual void OnAutomationServerReady();
   virtual void OnAutomationServerLaunchFailed(
       AutomationLaunchResult reason, const std::string& server_version);
+  virtual void OnExtensionInstalled(const FilePath& path,
+      void* user_data, AutomationMsg_ExtensionResponseValues response);
+  virtual void OnGetEnabledExtensionsComplete(
+      void* user_data,
+      const std::vector<FilePath>& extension_directories);
 
  private:
   void SubscribeToFocusEvents();
@@ -195,6 +192,22 @@ END_MSG_MAP()
   // This method is only available when the control is in privileged mode.
   bool postPrivateMessage(NPObject* npobject, const NPVariant* args,
                           uint32_t arg_count, NPVariant* result);
+
+  // This method is only available when the control is in privileged mode.
+  bool installExtension(NPObject* npobject, const NPVariant* args,
+                        uint32_t arg_count, NPVariant* result);
+
+  // This method is only available when the control is in privileged mode.
+  bool loadExtension(NPObject* npobject, const NPVariant* args,
+                     uint32_t arg_count, NPVariant* result);
+
+  // This method is only available when the control is in privileged mode.
+  bool enableExtensionAutomation(NPObject* npobject, const NPVariant* args,
+                                 uint32_t arg_count, NPVariant* result);
+
+  // This method is only available when the control is in privileged mode.
+  bool getEnabledExtensions(NPObject* npobject, const NPVariant* args,
+                            uint32_t arg_count, NPVariant* result);
 
   // Pointers to method implementations.
   static PluginMethod plugin_methods_[];
@@ -269,9 +282,6 @@ END_MSG_MAP()
   // Host function to compile-time asserts over members of this class.
   static void CompileAsserts();
 
-  // Get request from the stream notify data
-  NPAPIUrlRequest* RequestFromNotifyData(void* notify_data) const;
-
   static LRESULT CALLBACK DropKillFocusHook(int code, WPARAM wparam,
                                             LPARAM lparam);  // NO_LINT
 
@@ -328,6 +338,8 @@ END_MSG_MAP()
 
   // The value of src property keeping the current URL.
   std::string src_;
+  // Used to fetch network resources when host network stack is in use.
+  NPAPIUrlRequestManager url_fetcher_;
 };
 
 #endif  // CHROME_FRAME_CHROME_FRAME_NPAPI_H_

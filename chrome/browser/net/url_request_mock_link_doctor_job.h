@@ -11,13 +11,15 @@
 
 class URLRequestMockLinkDoctorJob : public URLRequestMockHTTPJob {
  public:
-  URLRequestMockLinkDoctorJob(URLRequest* request);
-  virtual ~URLRequestMockLinkDoctorJob() { }
+  explicit URLRequestMockLinkDoctorJob(URLRequest* request);
 
   static URLRequest::ProtocolFactory Factory;
 
   // Adds the testing URLs to the URLRequestFilter.
   static void AddUrlHandler();
+
+ private:
+  ~URLRequestMockLinkDoctorJob() {}
 };
 
-# endif  // CHROME_BROWSER_NET_URL_REQUEST_MOCK_LINK_DOCTOR_JOB_H_
+#endif  // CHROME_BROWSER_NET_URL_REQUEST_MOCK_LINK_DOCTOR_JOB_H_

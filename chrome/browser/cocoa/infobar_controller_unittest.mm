@@ -8,6 +8,7 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #import "chrome/browser/cocoa/cocoa_test_helper.h"
+#import "chrome/browser/cocoa/infobar_container_controller.h"
 #import "chrome/browser/cocoa/infobar_controller.h"
 #include "chrome/browser/cocoa/infobar_test_helper.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
@@ -15,12 +16,47 @@
 #include "testing/platform_test.h"
 
 @interface InfoBarController (ExposedForTesting)
-- (NSTextField*)label;
+- (NSString*)labelString;
+- (NSRect)labelFrame;
 @end
 
 @implementation InfoBarController (ExposedForTesting)
-- (NSTextField*)label {
-  return label_;
+- (NSString*)labelString {
+  return [label_.get() string];
+}
+- (NSRect)labelFrame {
+  return [label_.get() frame];
+}
+@end
+
+
+// Calls to removeDelegate: normally start an animation, which removes the
+// infobar completely when finished.  For unittesting purposes, we create a mock
+// container which calls close: immediately, rather than kicking off an
+// animation.
+@interface InfoBarContainerTest : NSObject <InfoBarContainer> {
+  InfoBarController* controller_;
+}
+- (id)initWithController:(InfoBarController*)controller;
+- (void)removeDelegate:(InfoBarDelegate*)delegate;
+- (void)removeController:(InfoBarController*)controller;
+@end
+
+@implementation InfoBarContainerTest
+- (id)initWithController:(InfoBarController*)controller {
+  if ((self = [super init])) {
+    controller_ = controller;
+  }
+  return self;
+}
+
+- (void)removeDelegate:(InfoBarDelegate*)delegate {
+  [controller_ close];
+}
+
+- (void)removeController:(InfoBarController*)controller {
+  DCHECK(controller_ == controller);
+  controller_ = nil;
 }
 @end
 
@@ -29,57 +65,68 @@ namespace {
 ///////////////////////////////////////////////////////////////////////////
 // Test fixtures
 
-class AlertInfoBarControllerTest : public PlatformTest {
+class AlertInfoBarControllerTest : public CocoaTest {
  public:
   virtual void SetUp() {
-    PlatformTest::SetUp();
+    CocoaTest::SetUp();
 
     controller_.reset(
         [[AlertInfoBarController alloc] initWithDelegate:&delegate_]);
-    [helper_.contentView() addSubview:[controller_ view]];
+    container_.reset(
+        [[InfoBarContainerTest alloc] initWithController:controller_]);
+    [controller_ setContainerController:container_];
+    [[test_window() contentView] addSubview:[controller_ view]];
   }
 
  protected:
-  CocoaTestHelper helper_;
   MockAlertInfoBarDelegate delegate_;
+  scoped_nsobject<id> container_;
   scoped_nsobject<AlertInfoBarController> controller_;
 };
 
-class LinkInfoBarControllerTest : public PlatformTest {
+class LinkInfoBarControllerTest : public CocoaTest {
  public:
   virtual void SetUp() {
-    PlatformTest::SetUp();
+    CocoaTest::SetUp();
 
     controller_.reset(
         [[LinkInfoBarController alloc] initWithDelegate:&delegate_]);
-    [helper_.contentView() addSubview:[controller_ view]];
+    container_.reset(
+        [[InfoBarContainerTest alloc] initWithController:controller_]);
+    [controller_ setContainerController:container_];
+    [[test_window() contentView] addSubview:[controller_ view]];
   }
 
  protected:
-  CocoaTestHelper helper_;
   MockLinkInfoBarDelegate delegate_;
+  scoped_nsobject<id> container_;
   scoped_nsobject<LinkInfoBarController> controller_;
 };
 
-class ConfirmInfoBarControllerTest : public PlatformTest {
+class ConfirmInfoBarControllerTest : public CocoaTest {
  public:
   virtual void SetUp() {
-    PlatformTest::SetUp();
+    CocoaTest::SetUp();
 
     controller_.reset(
         [[ConfirmInfoBarController alloc] initWithDelegate:&delegate_]);
-    [helper_.contentView() addSubview:[controller_ view]];
+    container_.reset(
+        [[InfoBarContainerTest alloc] initWithController:controller_]);
+    [controller_ setContainerController:container_];
+    [[test_window() contentView] addSubview:[controller_ view]];
   }
 
  protected:
-  CocoaTestHelper helper_;
   MockConfirmInfoBarDelegate delegate_;
+  scoped_nsobject<id> container_;
   scoped_nsobject<ConfirmInfoBarController> controller_;
 };
 
 
 ////////////////////////////////////////////////////////////////////////////
 // Tests
+
+TEST_VIEW(AlertInfoBarControllerTest, [controller_ view]);
 
 TEST_F(AlertInfoBarControllerTest, ShowAndDismiss) {
   // Make sure someone looked at the message and icon.
@@ -88,7 +135,7 @@ TEST_F(AlertInfoBarControllerTest, ShowAndDismiss) {
 
   // Check to make sure the infobar message was set properly.
   EXPECT_EQ(std::wstring(kMockAlertInfoBarMessage),
-            base::SysNSStringToWide([[controller_.get() label] stringValue]));
+            base::SysNSStringToWide([controller_.get() labelString]));
 
   // Check that dismissing the infobar calls InfoBarClosed() on the delegate.
   [controller_ dismiss:nil];
@@ -101,6 +148,22 @@ TEST_F(AlertInfoBarControllerTest, DeallocController) {
   controller_.reset(nil);
   EXPECT_FALSE(delegate_.closed);
 }
+
+TEST_F(AlertInfoBarControllerTest, ResizeView) {
+  NSRect originalLabelFrame = [controller_ labelFrame];
+
+  // Expand the view by 20 pixels and make sure the label frame changes
+  // accordingly.
+  const CGFloat width = 20;
+  NSRect newViewFrame = [[controller_ view] frame];
+  newViewFrame.size.width += width;
+  [[controller_ view] setFrame:newViewFrame];
+
+  NSRect newLabelFrame = [controller_ labelFrame];
+  EXPECT_EQ(NSWidth(newLabelFrame), NSWidth(originalLabelFrame) + width);
+}
+
+TEST_VIEW(LinkInfoBarControllerTest, [controller_ view]);
 
 TEST_F(LinkInfoBarControllerTest, ShowAndDismiss) {
   // Make sure someone looked at the message, link, and icon.
@@ -132,19 +195,23 @@ TEST_F(LinkInfoBarControllerTest, ShowAndClickLinkWithoutClosing) {
   EXPECT_FALSE(delegate_.closed);
 }
 
+TEST_VIEW(ConfirmInfoBarControllerTest, [controller_ view]);
+
 TEST_F(ConfirmInfoBarControllerTest, ShowAndDismiss) {
-  // Make sure someone looked at the message and icon.
+  // Make sure someone looked at the message, link, and icon.
   EXPECT_TRUE(delegate_.message_text_accessed);
+  EXPECT_TRUE(delegate_.link_text_accessed);
   EXPECT_TRUE(delegate_.icon_accessed);
 
   // Check to make sure the infobar message was set properly.
   EXPECT_EQ(std::wstring(kMockConfirmInfoBarMessage),
-            base::SysNSStringToWide([[controller_.get() label] stringValue]));
+            base::SysNSStringToWide([controller_.get() labelString]));
 
   // Check that dismissing the infobar calls InfoBarClosed() on the delegate.
   [controller_ dismiss:nil];
   EXPECT_FALSE(delegate_.ok_clicked);
   EXPECT_FALSE(delegate_.cancel_clicked);
+  EXPECT_FALSE(delegate_.link_clicked);
   EXPECT_TRUE(delegate_.closed);
 }
 
@@ -154,6 +221,7 @@ TEST_F(ConfirmInfoBarControllerTest, ShowAndClickOK) {
   [controller_ ok:nil];
   EXPECT_TRUE(delegate_.ok_clicked);
   EXPECT_FALSE(delegate_.cancel_clicked);
+  EXPECT_FALSE(delegate_.link_clicked);
   EXPECT_TRUE(delegate_.closed);
 }
 
@@ -165,6 +233,7 @@ TEST_F(ConfirmInfoBarControllerTest, ShowAndClickOKWithoutClosing) {
   [controller_ ok:nil];
   EXPECT_TRUE(delegate_.ok_clicked);
   EXPECT_FALSE(delegate_.cancel_clicked);
+  EXPECT_FALSE(delegate_.link_clicked);
   EXPECT_FALSE(delegate_.closed);
 }
 
@@ -174,6 +243,7 @@ TEST_F(ConfirmInfoBarControllerTest, ShowAndClickCancel) {
   [controller_ cancel:nil];
   EXPECT_FALSE(delegate_.ok_clicked);
   EXPECT_TRUE(delegate_.cancel_clicked);
+  EXPECT_FALSE(delegate_.link_clicked);
   EXPECT_TRUE(delegate_.closed);
 }
 
@@ -185,6 +255,29 @@ TEST_F(ConfirmInfoBarControllerTest, ShowAndClickCancelWithoutClosing) {
   [controller_ cancel:nil];
   EXPECT_FALSE(delegate_.ok_clicked);
   EXPECT_TRUE(delegate_.cancel_clicked);
+  EXPECT_FALSE(delegate_.link_clicked);
+  EXPECT_FALSE(delegate_.closed);
+}
+
+TEST_F(ConfirmInfoBarControllerTest, ShowAndClickLink) {
+  // Check that clicking on the link calls LinkClicked() on the
+  // delegate.  It should also close the infobar.
+  [controller_ linkClicked];
+  EXPECT_FALSE(delegate_.ok_clicked);
+  EXPECT_FALSE(delegate_.cancel_clicked);
+  EXPECT_TRUE(delegate_.link_clicked);
+  EXPECT_TRUE(delegate_.closed);
+}
+
+TEST_F(ConfirmInfoBarControllerTest, ShowAndClickLinkWithoutClosing) {
+  delegate_.closes_on_action = false;
+
+  // Check that clicking on the link calls LinkClicked() on the
+  // delegate.  It should not close the infobar.
+  [controller_ linkClicked];
+  EXPECT_FALSE(delegate_.ok_clicked);
+  EXPECT_FALSE(delegate_.cancel_clicked);
+  EXPECT_TRUE(delegate_.link_clicked);
   EXPECT_FALSE(delegate_.closed);
 }
 

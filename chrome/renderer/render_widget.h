@@ -7,21 +7,23 @@
 
 #include <vector>
 
-#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/point.h"
-#include "base/gfx/rect.h"
-#include "base/gfx/size.h"
 #include "base/ref_counted.h"
 #include "base/shared_memory.h"
+#include "chrome/renderer/paint_aggregator.h"
 #include "chrome/renderer/render_process.h"
+#include "gfx/native_widget_types.h"
+#include "gfx/point.h"
+#include "gfx/rect.h"
+#include "gfx/size.h"
 #include "ipc/ipc_channel.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "webkit/api/public/WebCompositionCommand.h"
-#include "webkit/api/public/WebRect.h"
-#include "webkit/api/public/WebTextDirection.h"
-#include "webkit/api/public/WebWidgetClient.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCompositionCommand.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebTextDirection.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebWidgetClient.h"
 #include "webkit/glue/webcursor.h"
 
 class RenderThreadBase;
@@ -47,7 +49,7 @@ class RenderWidget : public IPC::Channel::Listener,
   // RenderThreadBase implementation, mostly commonly RenderThread::current().
   static RenderWidget* Create(int32 opener_id,
                               RenderThreadBase* render_thread,
-                              bool activatable);
+                              WebKit::WebPopupType popup_type);
 
   // Called after Create to configure a RenderWidget to be rendered by the host
   // as a popup menu with the given data.
@@ -63,6 +65,10 @@ class RenderWidget : public IPC::Channel::Listener,
   // May return NULL when the window is closing.
   WebKit::WebWidget* webwidget() const {
     return webwidget_;
+  }
+
+  gfx::NativeViewId host_window() const {
+    return host_window_;
   }
 
   // IPC::Channel::Listener
@@ -105,7 +111,8 @@ class RenderWidget : public IPC::Channel::Listener,
   // without ref-counting is an error.
   friend class base::RefCounted<RenderWidget>;
 
-  RenderWidget(RenderThreadBase* render_thread, bool activatable);
+  RenderWidget(RenderThreadBase* render_thread,
+               WebKit::WebPopupType popup_type);
   virtual ~RenderWidget();
 
   // Initializes this view with the given opener.  CompleteInit must be called
@@ -118,12 +125,14 @@ class RenderWidget : public IPC::Channel::Listener,
   // Paints the given rectangular region of the WebWidget into canvas (a
   // shared memory segment returned by AllocPaintBuf on Windows). The caller
   // must ensure that the given rect fits within the bounds of the WebWidget.
-  void PaintRect(const gfx::Rect& rect, skia::PlatformCanvas* canvas);
+  void PaintRect(const gfx::Rect& rect, const gfx::Point& canvas_origin,
+                 skia::PlatformCanvas* canvas);
 
-  void CallDoDeferredPaint();
-  void DoDeferredPaint();
-  void CallDoDeferredScroll();
-  void DoDeferredScroll();
+  // Paints a border at the given rect for debugging purposes.
+  void PaintDebugBorder(const gfx::Rect& rect, skia::PlatformCanvas* canvas);
+
+  void CallDoDeferredUpdate();
+  void DoDeferredUpdate();
   void DoDeferredClose();
   void DoDeferredSetWindowRect(const WebKit::WebRect& pos);
 
@@ -137,14 +146,15 @@ class RenderWidget : public IPC::Channel::Listener,
   void OnCreatingNewAck(gfx::NativeViewId parent);
   virtual void OnResize(const gfx::Size& new_size,
                         const gfx::Rect& resizer_rect);
-  void OnWasHidden();
-  void OnWasRestored(bool needs_repainting);
-  void OnPaintRectAck();
-  void OnScrollRectAck();
+  virtual void OnWasHidden();
+  virtual void OnWasRestored(bool needs_repainting);
+  void OnUpdateRectAck();
+  void OnCreateVideoAck(int32 video_id);
+  void OnUpdateVideoAck(int32 video_id);
   void OnRequestMoveAck();
   void OnHandleInputEvent(const IPC::Message& message);
   void OnMouseCaptureLost();
-  void OnSetFocus(bool enable);
+  virtual void OnSetFocus(bool enable);
   void OnImeSetInputMode(bool is_active);
   void OnImeSetComposition(WebKit::WebCompositionCommand command,
                            int cursor_position,
@@ -153,23 +163,23 @@ class RenderWidget : public IPC::Channel::Listener,
   void OnMsgRepaint(const gfx::Size& size_to_paint);
   void OnSetTextDirection(WebKit::WebTextDirection direction);
 
-  // Override point to notify that a paint has happened. This fires after the
-  // browser side has updated the screen for a newly painted region.
-  virtual void DidPaint() {}
+  // Override point to notify derived classes that a paint has happened.
+  // DidInitiatePaint happens when we've generated a new bitmap and sent it to
+  // the browser. DidFlushPaint happens once we've received the ACK that the
+  // screen has actually been updated.
+  virtual void DidInitiatePaint() {}
+  virtual void DidFlushPaint() {}
 
   // Sets the "hidden" state of this widget.  All accesses to is_hidden_ should
   // use this method so that we can properly inform the RenderThread of our
   // state.
   void SetHidden(bool hidden);
 
-  // True if a PaintRect_ACK message is pending.
-  bool paint_reply_pending() const {
-    return paint_reply_pending_;
-  }
+  bool is_hidden() const { return is_hidden_; }
 
-  // True if a ScrollRect_ACK message is pending.
-  bool scroll_reply_pending() const {
-    return current_scroll_buf_ != NULL;
+  // True if an UpdateRect_ACK message is pending.
+  bool update_reply_pending() const {
+    return update_reply_pending_;
   }
 
   bool next_paint_is_resize_ack() const;
@@ -233,31 +243,20 @@ class RenderWidget : public IPC::Channel::Listener,
   // The size of the RenderWidget.
   gfx::Size size_;
 
-  // Transport DIBs that are currently in use to transfer an image to the
-  // browser.
+  // The TransportDIB that is being used to transfer an image to the browser.
   TransportDIB* current_paint_buf_;
-  TransportDIB* current_scroll_buf_;
 
-  // The smallest bounding rectangle that needs to be re-painted.  This is non-
-  // empty if a paint event is pending.
-  gfx::Rect paint_rect_;
-
-  // The clip rect for the pending scroll event.  This is non-empty if a
-  // scroll event is pending.
-  gfx::Rect scroll_rect_;
+  PaintAggregator paint_aggregator_;
 
   // The area that must be reserved for drawing the resize corner.
   gfx::Rect resizer_rect_;
 
-  // The scroll delta for a pending scroll event.
-  gfx::Point scroll_delta_;
-
-  // Flags for the next ViewHostMsg_PaintRect message.
+  // Flags for the next ViewHostMsg_UpdateRect message.
   int next_paint_flags_;
 
-  // True if we are expecting a PaintRect_ACK message (i.e., that a PaintRect
-  // message has been sent).
-  bool paint_reply_pending_;
+  // True if we are expecting an UpdateRect_ACK message (i.e., that a
+  // UpdateRect message has been sent).
+  bool update_reply_pending_;
 
   // Set to true if we should ignore RenderWidget::Show calls.
   bool did_show_;
@@ -301,8 +300,8 @@ class RenderWidget : public IPC::Channel::Listener,
   bool ime_control_updated_;
   bool ime_control_busy_;
 
-  // Whether the window for this RenderWidget can be activated.
-  bool activatable_;
+  // The kind of popup this widget represents, NONE if not a popup.
+  WebKit::WebPopupType popup_type_;
 
   // Holds all the needed plugin window moves for a scroll.
   typedef std::vector<webkit_glue::WebPluginGeometry> WebPluginGeometryVector;
@@ -319,6 +318,9 @@ class RenderWidget : public IPC::Channel::Listener,
   scoped_ptr<ViewHostMsg_ShowPopup_Params> popup_params_;
 
   scoped_ptr<IPC::Message> pending_input_event_ack_;
+
+  // Indicates if the next sequence of Char events should be suppressed or not.
+  bool suppress_next_char_events_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };

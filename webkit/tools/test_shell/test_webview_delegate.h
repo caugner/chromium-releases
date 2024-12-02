@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,33 +16,41 @@
 #endif
 
 #include <map>
+#include <set>
+#include <string>
 
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
 #include <gdk/gdkcursor.h>
 #endif
 
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "base/weak_ptr.h"
-#include "webkit/api/public/WebContextMenuData.h"
-#include "webkit/api/public/WebFrameClient.h"
-#include "webkit/api/public/WebRect.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebContextMenuData.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrameClient.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
 #if defined(OS_MACOSX)
-#include "webkit/api/public/WebPopupMenuInfo.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPopupMenuInfo.h"
 #endif
-#include "webkit/api/public/WebViewClient.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebViewClient.h"
 #include "webkit/glue/webcursor.h"
-#include "webkit/glue/webplugin_page_delegate.h"
+#include "webkit/glue/plugins/webplugin_page_delegate.h"
 #if defined(OS_WIN)
 #include "webkit/tools/test_shell/drag_delegate.h"
 #include "webkit/tools/test_shell/drop_delegate.h"
 #endif
+#include "webkit/tools/test_shell/mock_spellcheck.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 
 struct WebPreferences;
 class GURL;
 class TestShell;
 class WebWidgetHost;
+
+namespace WebKit {
+class WebStorageNamespace;
+}
 
 class TestWebViewDelegate : public WebKit::WebViewClient,
                             public WebKit::WebFrameClient,
@@ -67,18 +75,15 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
 
   // WebKit::WebViewClient
   virtual WebKit::WebView* createView(WebKit::WebFrame* creator);
-  virtual WebKit::WebWidget* createPopupMenu(bool activatable);
+  virtual WebKit::WebWidget* createPopupMenu(WebKit::WebPopupType popup_type);
   virtual WebKit::WebWidget* createPopupMenu(
       const WebKit::WebPopupMenuInfo& info);
+  virtual WebKit::WebStorageNamespace* createSessionStorageNamespace();
   virtual void didAddMessageToConsole(
       const WebKit::WebConsoleMessage& message,
       const WebKit::WebString& source_name, unsigned source_line);
-  virtual void printPage(WebKit::WebFrame* frame) {}
-  virtual WebKit::WebNotificationPresenter* notificationPresenter() {
-    return NULL;
-  }
-  virtual void didStartLoading() {}
-  virtual void didStopLoading() {}
+  virtual void didStartLoading();
+  virtual void didStopLoading();
   virtual bool shouldBeginEditing(const WebKit::WebRange& range);
   virtual bool shouldEndEditing(const WebKit::WebRange& range);
   virtual bool shouldInsertNode(
@@ -95,25 +100,16 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
       const WebKit::WebString& style, const WebKit::WebRange& range);
   virtual bool isSmartInsertDeleteEnabled();
   virtual bool isSelectTrailingWhitespaceEnabled();
-  virtual void setInputMethodEnabled(bool enabled) {}
   virtual void didBeginEditing();
   virtual void didChangeSelection(bool is_selection_empty);
   virtual void didChangeContents();
-  virtual void didExecuteCommand(const WebKit::WebString& command_name) {}
   virtual void didEndEditing();
-  virtual bool handleCurrentKeyboardEvent() { return false; }
+  virtual bool handleCurrentKeyboardEvent();
   virtual void spellCheck(
-      const WebKit::WebString& text, int& offset, int& length) {}
+      const WebKit::WebString& text, int& misspelledOffset,
+      int& misspelledLength);
   virtual WebKit::WebString autoCorrectWord(
       const WebKit::WebString& misspelled_word);
-  virtual void showSpellingUI(bool show) {}
-  virtual bool isShowingSpellingUI() { return false; }
-  virtual void updateSpellingUIWithMisspelledWord(
-      const WebKit::WebString& word) {}
-  virtual bool runFileChooser(
-      bool multi_select, const WebKit::WebString& title,
-      const WebKit::WebString& initial_value,
-      WebKit::WebFileChooserCompletion* chooser_completion){ return false; }
   virtual void runModalAlertDialog(
       WebKit::WebFrame* frame, const WebKit::WebString& message);
   virtual bool runModalConfirmDialog(
@@ -126,30 +122,17 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   virtual void showContextMenu(
       WebKit::WebFrame* frame, const WebKit::WebContextMenuData& data);
   virtual void setStatusText(const WebKit::WebString& text);
-  virtual void setMouseOverURL(const WebKit::WebURL& url) {}
-  virtual void setToolTipText(
-      const WebKit::WebString& text, WebKit::WebTextDirection hint) {}
   virtual void startDragging(
       const WebKit::WebPoint& from, const WebKit::WebDragData& data,
       WebKit::WebDragOperationsMask mask);
-  virtual bool acceptsLoadDrops() { return true; }
-  virtual void focusNext() {}
-  virtual void focusPrevious() {}
+  virtual void startDragging(
+      const WebKit::WebDragData& data, WebKit::WebDragOperationsMask mask,
+      const WebKit::WebImage& image, const WebKit::WebPoint& offset);
   virtual void navigateBackForwardSoon(int offset);
   virtual int historyBackListCount();
   virtual int historyForwardListCount();
-  virtual void didAddHistoryItem() {}
   virtual void focusAccessibilityObject(
       const WebKit::WebAccessibilityObject& object);
-  virtual void didUpdateInspectorSettings() {}
-  virtual WebKit::WebDevToolsAgentClient* devToolsAgentClient() {
-    return NULL;
-  }
-  virtual void queryAutofillSuggestions(
-      const WebKit::WebNode&, const WebKit::WebString& name,
-      const WebKit::WebString& value) {}
-  virtual void removeAutofillSuggestions(
-      const WebKit::WebString& name, const WebKit::WebString& value) {}
 
   // WebKit::WebWidgetClient
   virtual void didInvalidateRect(const WebKit::WebRect& rect);
@@ -174,7 +157,10 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
       WebKit::WebFrame*, WebKit::WebWorkerClient*);
   virtual WebKit::WebMediaPlayer* createMediaPlayer(
       WebKit::WebFrame*, WebKit::WebMediaPlayerClient*);
-  virtual void willClose(WebKit::WebFrame*) {}
+  virtual WebKit::WebApplicationCacheHost* createApplicationCacheHost(
+      WebKit::WebFrame*, WebKit::WebApplicationCacheHostClient*);
+  virtual bool allowPlugins(WebKit::WebFrame* frame, bool enabled_per_settings);
+  virtual bool allowImages(WebKit::WebFrame* frame, bool enabled_per_settings);
   virtual void loadURLExternally(
       WebKit::WebFrame*, const WebKit::WebURLRequest&,
       WebKit::WebNavigationPolicy);
@@ -182,31 +168,27 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
       WebKit::WebFrame*, const WebKit::WebURLRequest&,
       WebKit::WebNavigationType, const WebKit::WebNode&,
       WebKit::WebNavigationPolicy default_policy, bool isRedirect);
-  virtual bool canHandleRequest(const WebKit::WebURLRequest&);
-  virtual WebKit::WebURLError cannotShowURLError(
-      const WebKit::WebURLRequest& request);
+  virtual bool canHandleRequest(
+      WebKit::WebFrame*, const WebKit::WebURLRequest&);
+  virtual WebKit::WebURLError cannotHandleRequestError(
+      WebKit::WebFrame*, const WebKit::WebURLRequest& request);
+  virtual WebKit::WebURLError cancelledError(
+      WebKit::WebFrame*, const WebKit::WebURLRequest& request);
   virtual void unableToImplementPolicyWithError(
       WebKit::WebFrame*, const WebKit::WebURLError&);
-  virtual void willSubmitForm(WebKit::WebFrame*, const WebKit::WebForm&) {}
   virtual void willPerformClientRedirect(
       WebKit::WebFrame*, const WebKit::WebURL& from, const WebKit::WebURL& to,
       double interval, double fire_time);
   virtual void didCancelClientRedirect(WebKit::WebFrame*);
-  virtual void didCompleteClientRedirect(
-      WebKit::WebFrame*, const WebKit::WebURL& from) {}
   virtual void didCreateDataSource(
       WebKit::WebFrame*, WebKit::WebDataSource*);
   virtual void didStartProvisionalLoad(WebKit::WebFrame*);
   virtual void didReceiveServerRedirectForProvisionalLoad(WebKit::WebFrame*);
   virtual void didFailProvisionalLoad(
       WebKit::WebFrame*, const WebKit::WebURLError&);
-  virtual void didReceiveDocumentData(
-      WebKit::WebFrame*, const char* data, size_t length,
-      bool& preventDefault) {}
   virtual void didCommitProvisionalLoad(
       WebKit::WebFrame*, bool is_new_navigation);
   virtual void didClearWindowObject(WebKit::WebFrame*);
-  virtual void didCreateDocumentElement(WebKit::WebFrame*) {}
   virtual void didReceiveTitle(
       WebKit::WebFrame*, const WebKit::WebString& title);
   virtual void didFinishDocumentLoad(WebKit::WebFrame*);
@@ -214,9 +196,10 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   virtual void didFailLoad(
       WebKit::WebFrame*, const WebKit::WebURLError&);
   virtual void didFinishLoad(WebKit::WebFrame*);
+  virtual void didNavigateWithinPage(
+      WebKit::WebFrame*, bool is_new_navigation);
   virtual void didChangeLocationWithinPage(
-      WebKit::WebFrame*, bool isNewNavigation);
-  virtual void didUpdateCurrentHistoryItem(WebKit::WebFrame*) {}
+      WebKit::WebFrame*);
   virtual void assignIdentifierToRequest(
       WebKit::WebFrame*, unsigned identifier, const WebKit::WebURLRequest&);
   virtual void willSendRequest(
@@ -228,22 +211,10 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
       WebKit::WebFrame*, unsigned identifier);
   virtual void didFailResourceLoad(
       WebKit::WebFrame*, unsigned identifier, const WebKit::WebURLError&);
-  virtual void didLoadResourceFromMemoryCache(
-      WebKit::WebFrame*, const WebKit::WebURLRequest&,
-      const WebKit::WebURLResponse&) {}
   virtual void didDisplayInsecureContent(WebKit::WebFrame* frame);
   virtual void didRunInsecureContent(
       WebKit::WebFrame* frame, const WebKit::WebSecurityOrigin& origin);
-  virtual void didExhaustMemoryAvailableForScript(WebKit::WebFrame*) {}
-  virtual void didCreateScriptContext(WebKit::WebFrame* frame) {}
-  virtual void didDestroyScriptContext(WebKit::WebFrame* frame) {}
-  virtual void didCreateIsolatedScriptContext(WebKit::WebFrame* frame) {}
-  virtual void didChangeContentsSize(
-      WebKit::WebFrame*, const WebKit::WebSize&) {}
-  virtual void reportFindInPageMatchCount(
-      int identifier, int count, bool final_update) {}
-  virtual void reportFindInPageSelection(
-      int identifier, int ordinal, const WebKit::WebRect& selection) {}
+  virtual bool allowScript(WebKit::WebFrame* frame, bool enabled_per_settings);
 
   // webkit_glue::WebPluginPageDelegate
   virtual webkit_glue::WebPluginDelegate* CreatePluginDelegate(
@@ -263,6 +234,7 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
       const gfx::Size& size,
       const std::string& json_arguments,
       std::string* json_retval) {}
+  virtual WebKit::WebCookieJar* GetCookieJar();
 
   TestWebViewDelegate(TestShell* shell);
   ~TestWebViewDelegate();
@@ -301,11 +273,35 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   void SetCustomPolicyDelegate(bool is_custom, bool is_permissive);
   void WaitForPolicyDelegate();
 
+  void set_clear_header(const std::string& header) {
+    clear_headers_.insert(header);
+  }
+  const std::set<std::string>& clear_headers() {
+    return clear_headers_;
+  }
+
   void set_block_redirects(bool block_redirects) {
     block_redirects_ = block_redirects;
   }
   bool block_redirects() const {
     return block_redirects_;
+  }
+
+  void set_request_return_null(bool request_return_null) {
+    request_return_null_ = request_return_null;
+  }
+  bool request_return_null() const {
+    return request_return_null_;
+  }
+
+  void SetEditCommand(const std::string& name, const std::string& value) {
+    edit_command_name_ = name;
+    edit_command_value_ = value;
+  }
+
+  void ClearEditCommand() {
+    edit_command_name_.clear();
+    edit_command_value_.clear();
   }
 
  private:
@@ -394,7 +390,7 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   scoped_refptr<TestDropDelegate> drop_delegate_;
 #endif
 
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
   // The type of cursor the window is currently using.
   // Used for judging whether a new SetCursor call is actually changing the
   // cursor.
@@ -412,8 +408,21 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   // true if we want to enable selection of trailing whitespaces
   bool select_trailing_whitespace_enabled_;
 
+  // Set of headers to clear in willSendRequest.
+  std::set<std::string> clear_headers_;
+
   // true if we should block any redirects
   bool block_redirects_;
+
+  // true if we should block (set an empty request for) any requests
+  bool request_return_null_;
+
+  // Edit command associated to the current keyboard event.
+  std::string edit_command_name_;
+  std::string edit_command_value_;
+
+  // The mock spellchecker used in TestWebViewDelegate::spellCheck().
+  MockSpellCheck mock_spellcheck_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWebViewDelegate);
 };

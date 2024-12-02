@@ -11,6 +11,7 @@
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
+#include "chrome/test/ui_test_utils.h"
 
 static const FilePath::CharType* kTestDir = FILE_PATH_LITERAL("encoding_tests");
 
@@ -23,9 +24,8 @@ class BrowserEncodingTest : public UITest {
   void CheckFile(const FilePath& generated_file,
                  const FilePath& expected_result_file,
                  bool check_equal) {
-    FilePath expected_result_filepath = UITest::GetTestFilePath(
-        FilePath(kTestDir).ToWStringHack(),
-        expected_result_file.ToWStringHack());
+    FilePath expected_result_filepath = ui_test_utils::GetTestFilePath(
+        FilePath(kTestDir), expected_result_file);
 
     ASSERT_TRUE(file_util::PathExists(expected_result_filepath));
     WaitForGeneratedFileAndCheck(generated_file,
@@ -92,18 +92,16 @@ TEST_F(BrowserEncodingTest, TestEncodingAliasMapping) {
   };
   const char* const kAliasTestDir = "alias_mapping";
 
+  scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
+  ASSERT_TRUE(tab_proxy.get());
+
   FilePath test_dir_path = FilePath(kTestDir).AppendASCII(kAliasTestDir);
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kEncodingTestDatas); ++i) {
     FilePath test_file_path(test_dir_path);
     test_file_path = test_file_path.AppendASCII(
         kEncodingTestDatas[i].file_name);
-    GURL url =
-        URLRequestMockHTTPJob::GetMockUrl(test_file_path);
 
-    scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
-    ASSERT_TRUE(tab_proxy.get());
-    ASSERT_TRUE(tab_proxy->NavigateToURL(url));
-    WaitUntilTabCount(1);
+    NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(test_file_path));
 
     std::string encoding;
     EXPECT_TRUE(tab_proxy->GetPageCurrentEncoding(&encoding));
@@ -242,7 +240,8 @@ TEST_F(BrowserEncodingTest, TestEncodingAutoDetect) {
   // Set the default charset to one of encodings not supported by the current
   // auto-detector (Please refer to the above comments) to make sure we
   // incorrectly decode the page. Now we use ISO-8859-4.
-  browser->SetStringPreference(prefs::kDefaultCharset, L"ISO-8859-4");
+  ASSERT_TRUE(browser->SetStringPreference(prefs::kDefaultCharset,
+                                           L"ISO-8859-4"));
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
 
@@ -252,7 +251,6 @@ TEST_F(BrowserEncodingTest, TestEncodingAutoDetect) {
     GURL url =
         URLRequestMockHTTPJob::GetMockUrl(test_file_path);
     ASSERT_TRUE(tab->NavigateToURL(url));
-    WaitUntilTabCount(1);
 
     // Disable auto detect if it is on.
     EXPECT_TRUE(

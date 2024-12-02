@@ -4,8 +4,10 @@
 
 #include <limits>
 
-#include "base/values.h"
 #include "base/scoped_ptr.h"
+#include "base/string_util.h"
+#include "base/string16.h"
+#include "base/values.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class ValuesTest: public testing::Test {
@@ -20,9 +22,9 @@ TEST(ValuesTest, Basic) {
   ASSERT_EQ(std::wstring(L"http://google.com"), homepage);
 
   ASSERT_FALSE(settings.Get(L"global", NULL));
-  ASSERT_TRUE(settings.Set(L"global", Value::CreateBooleanValue(true)));
+  settings.Set(L"global", Value::CreateBooleanValue(true));
   ASSERT_TRUE(settings.Get(L"global", NULL));
-  ASSERT_TRUE(settings.SetString(L"global.homepage", L"http://scurvy.com"));
+  settings.SetString(L"global.homepage", L"http://scurvy.com");
   ASSERT_TRUE(settings.Get(L"global", NULL));
   homepage = L"http://google.com";
   ASSERT_TRUE(settings.GetString(L"global.homepage", &homepage));
@@ -132,25 +134,42 @@ TEST(ValuesTest, StringValue) {
   scoped_ptr<Value> wide_value(Value::CreateStringValue(L"wide"));
   ASSERT_TRUE(wide_value.get());
   ASSERT_TRUE(wide_value->IsType(Value::TYPE_STRING));
+  scoped_ptr<Value> utf16_value(
+      Value::CreateStringValueFromUTF16(ASCIIToUTF16("utf16")));
+  ASSERT_TRUE(utf16_value.get());
+  ASSERT_TRUE(utf16_value->IsType(Value::TYPE_STRING));
 
   // Test overloaded GetString.
   std::string narrow = "http://google.com";
   std::wstring wide = L"http://google.com";
+  string16 utf16 = ASCIIToUTF16("http://google.com");
   ASSERT_TRUE(narrow_value->GetAsString(&narrow));
   ASSERT_TRUE(narrow_value->GetAsString(&wide));
+  ASSERT_TRUE(narrow_value->GetAsUTF16(&utf16));
   ASSERT_EQ(std::string("narrow"), narrow);
   ASSERT_EQ(std::wstring(L"narrow"), wide);
+  ASSERT_EQ(ASCIIToUTF16("narrow"), utf16);
+
   ASSERT_TRUE(wide_value->GetAsString(&narrow));
   ASSERT_TRUE(wide_value->GetAsString(&wide));
+  ASSERT_TRUE(wide_value->GetAsUTF16(&utf16));
   ASSERT_EQ(std::string("wide"), narrow);
   ASSERT_EQ(std::wstring(L"wide"), wide);
+  ASSERT_EQ(ASCIIToUTF16("wide"), utf16);
+
+  ASSERT_TRUE(utf16_value->GetAsString(&narrow));
+  ASSERT_TRUE(utf16_value->GetAsString(&wide));
+  ASSERT_TRUE(utf16_value->GetAsUTF16(&utf16));
+  ASSERT_EQ(std::string("utf16"), narrow);
+  ASSERT_EQ(std::wstring(L"utf16"), wide);
+  ASSERT_EQ(ASCIIToUTF16("utf16"), utf16);
 }
 
 // This is a Value object that allows us to tell if it's been
 // properly deleted by modifying the value of external flag on destruction.
 class DeletionTestValue : public Value {
  public:
-  DeletionTestValue(bool* deletion_flag) : Value(TYPE_NULL) {
+  explicit DeletionTestValue(bool* deletion_flag) : Value(TYPE_NULL) {
     Init(deletion_flag);  // Separate function so that we can use ASSERT_*
   }
 
@@ -224,6 +243,16 @@ TEST(ValuesTest, ListRemoval) {
     EXPECT_TRUE(deletion_flag);
     EXPECT_EQ(0U, list.GetSize());
   }
+
+  {
+    ListValue list;
+    DeletionTestValue* value = new DeletionTestValue(&deletion_flag);
+    list.Append(value);
+    EXPECT_FALSE(deletion_flag);
+    EXPECT_EQ(0, list.Remove(*value));
+    EXPECT_TRUE(deletion_flag);
+    EXPECT_EQ(0U, list.GetSize());
+  }
 }
 
 TEST(ValuesTest, DictionaryDeletion) {
@@ -285,6 +314,28 @@ TEST(ValuesTest, DictionaryRemoval) {
   }
 }
 
+TEST(ValuesTest, DictionaryWithoutPathExpansion) {
+  DictionaryValue dict;
+  dict.Set(L"this.is.expanded", Value::CreateNullValue());
+  dict.SetWithoutPathExpansion(L"this.isnt.expanded", Value::CreateNullValue());
+
+  EXPECT_FALSE(dict.HasKey(L"this.is.expanded"));
+  EXPECT_TRUE(dict.HasKey(L"this"));
+  Value* value1;
+  EXPECT_TRUE(dict.Get(L"this", &value1));
+  DictionaryValue* value2;
+  ASSERT_TRUE(dict.GetDictionaryWithoutPathExpansion(L"this", &value2));
+  EXPECT_EQ(value1, value2);
+  EXPECT_EQ(1U, value2->size());
+
+  EXPECT_TRUE(dict.HasKey(L"this.isnt.expanded"));
+  Value* value3;
+  EXPECT_FALSE(dict.Get(L"this.isnt.expanded", &value3));
+  Value* value4;
+  ASSERT_TRUE(dict.GetWithoutPathExpansion(L"this.isnt.expanded", &value4));
+  EXPECT_EQ(Value::TYPE_NULL, value4->GetType());
+}
+
 TEST(ValuesTest, DeepCopy) {
   DictionaryValue original_dict;
   Value* original_null = Value::CreateNullValue();
@@ -299,6 +350,9 @@ TEST(ValuesTest, DeepCopy) {
   original_dict.Set(L"string", original_string);
   Value* original_wstring = Value::CreateStringValue(L"peek-a-boo");
   original_dict.Set(L"wstring", original_wstring);
+  Value* original_utf16 =
+      Value::CreateStringValueFromUTF16(ASCIIToUTF16("hello16"));
+  original_dict.Set(L"utf16", original_utf16);
 
   char* original_buffer = new char[42];
   memset(original_buffer, '!', 42);
@@ -357,10 +411,13 @@ TEST(ValuesTest, DeepCopy) {
   ASSERT_TRUE(copy_string->IsType(Value::TYPE_STRING));
   std::string copy_string_value;
   std::wstring copy_wstring_value;
+  string16 copy_utf16_value;
   ASSERT_TRUE(copy_string->GetAsString(&copy_string_value));
   ASSERT_TRUE(copy_string->GetAsString(&copy_wstring_value));
+  ASSERT_TRUE(copy_string->GetAsUTF16(&copy_utf16_value));
   ASSERT_EQ(std::string("hello"), copy_string_value);
   ASSERT_EQ(std::wstring(L"hello"), copy_wstring_value);
+  ASSERT_EQ(ASCIIToUTF16("hello"), copy_utf16_value);
 
   Value* copy_wstring = NULL;
   ASSERT_TRUE(copy_dict->Get(L"wstring", &copy_wstring));
@@ -369,8 +426,22 @@ TEST(ValuesTest, DeepCopy) {
   ASSERT_TRUE(copy_wstring->IsType(Value::TYPE_STRING));
   ASSERT_TRUE(copy_wstring->GetAsString(&copy_string_value));
   ASSERT_TRUE(copy_wstring->GetAsString(&copy_wstring_value));
+  ASSERT_TRUE(copy_wstring->GetAsUTF16(&copy_utf16_value));
   ASSERT_EQ(std::string("peek-a-boo"), copy_string_value);
   ASSERT_EQ(std::wstring(L"peek-a-boo"), copy_wstring_value);
+  ASSERT_EQ(ASCIIToUTF16("peek-a-boo"), copy_utf16_value);
+
+  Value* copy_utf16 = NULL;
+  ASSERT_TRUE(copy_dict->Get(L"utf16", &copy_utf16));
+  ASSERT_TRUE(copy_utf16);
+  ASSERT_NE(copy_utf16, original_utf16);
+  ASSERT_TRUE(copy_utf16->IsType(Value::TYPE_STRING));
+  ASSERT_TRUE(copy_utf16->GetAsString(&copy_string_value));
+  ASSERT_TRUE(copy_utf16->GetAsString(&copy_wstring_value));
+  ASSERT_TRUE(copy_utf16->GetAsUTF16(&copy_utf16_value));
+  ASSERT_EQ(std::string("hello16"), copy_string_value);
+  ASSERT_EQ(std::wstring(L"hello16"), copy_wstring_value);
+  ASSERT_EQ(ASCIIToUTF16("hello16"), copy_utf16_value);
 
   Value* copy_binary = NULL;
   ASSERT_TRUE(copy_dict->Get(L"binary", &copy_binary));
@@ -445,4 +516,79 @@ TEST(ValuesTest, Equals) {
   list->Append(Value::CreateBooleanValue(true));
   EXPECT_FALSE(dv.Equals(copy));
   delete copy;
+}
+
+TEST(ValuesTest, RemoveEmptyChildren) {
+  scoped_ptr<DictionaryValue> root(new DictionaryValue);
+  // Remove empty lists and dictionaries.
+  root->Set(L"empty_dict", new DictionaryValue);
+  root->Set(L"empty_list", new ListValue);
+  root->SetWithoutPathExpansion(L"a.b.c.d.e", new DictionaryValue);
+  root.reset(root->DeepCopyWithoutEmptyChildren());
+  EXPECT_TRUE(root->empty());
+
+  // Make sure we don't prune too much.
+  root->SetBoolean(L"bool", true);
+  root->Set(L"empty_dict", new DictionaryValue);
+  root->SetString(L"empty_string", "");
+  root.reset(root->DeepCopyWithoutEmptyChildren());
+  EXPECT_EQ(2U, root->size());
+
+  // Should do nothing.
+  root.reset(root->DeepCopyWithoutEmptyChildren());
+  EXPECT_EQ(2U, root->size());
+
+  // Nested test cases.  These should all reduce back to the bool and string
+  // set above.
+  {
+    root->Set(L"a.b.c.d.e", new DictionaryValue);
+    root.reset(root->DeepCopyWithoutEmptyChildren());
+    EXPECT_EQ(2U, root->size());
+  }
+  {
+    DictionaryValue* inner = new DictionaryValue;
+    root->Set(L"dict_with_emtpy_children", inner);
+    inner->Set(L"empty_dict", new DictionaryValue);
+    inner->Set(L"empty_list", new ListValue);
+    root.reset(root->DeepCopyWithoutEmptyChildren());
+    EXPECT_EQ(2U, root->size());
+  }
+  {
+    ListValue* inner = new ListValue;
+    root->Set(L"list_with_empty_children", inner);
+    inner->Append(new DictionaryValue);
+    inner->Append(new ListValue);
+    root.reset(root->DeepCopyWithoutEmptyChildren());
+    EXPECT_EQ(2U, root->size());
+  }
+
+  // Nested with siblings.
+  {
+    ListValue* inner = new ListValue;
+    root->Set(L"list_with_empty_children", inner);
+    inner->Append(new DictionaryValue);
+    inner->Append(new ListValue);
+    DictionaryValue* inner2 = new DictionaryValue;
+    root->Set(L"dict_with_empty_children", inner2);
+    inner2->Set(L"empty_dict", new DictionaryValue);
+    inner2->Set(L"empty_list", new ListValue);
+    root.reset(root->DeepCopyWithoutEmptyChildren());
+    EXPECT_EQ(2U, root->size());
+  }
+
+  // Make sure nested values don't get pruned.
+  {
+    ListValue* inner = new ListValue;
+    root->Set(L"list_with_empty_children", inner);
+    ListValue* inner2 = new ListValue;
+    inner->Append(new DictionaryValue);
+    inner->Append(inner2);
+    inner2->Append(Value::CreateStringValue("hello"));
+    root.reset(root->DeepCopyWithoutEmptyChildren());
+    EXPECT_EQ(3U, root->size());
+    EXPECT_TRUE(root->GetList(L"list_with_empty_children", &inner));
+    EXPECT_EQ(1U, inner->GetSize());  // Dictionary was pruned.
+    EXPECT_TRUE(inner->GetList(0, &inner2));
+    EXPECT_EQ(1U, inner2->GetSize());
+  }
 }

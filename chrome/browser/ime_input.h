@@ -10,7 +10,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/gfx/rect.h"
+#include "gfx/rect.h"
 
 // This header file defines a struct and a class used for encapsulating IMM32
 // APIs, controls IMEs attached to a window, and enables the 'on-the-spot'
@@ -303,4 +303,4 @@ class ImeInput {
   DISALLOW_EVIL_CONSTRUCTORS(ImeInput);
 };
 
-#endif  // #ifndef CHROME_BROWSER_IME_INPUT_H_
+#endif  // CHROME_BROWSER_IME_INPUT_H_

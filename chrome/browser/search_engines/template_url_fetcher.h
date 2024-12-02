@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_TEMPLATE_URL_FETCHER_H_
-#define CHROME_BROWSER_TEMPLATE_URL_FETCHER_H_
+#ifndef CHROME_BROWSER_SEARCH_ENGINES_TEMPLATE_URL_FETCHER_H_
+#define CHROME_BROWSER_SEARCH_ENGINES_TEMPLATE_URL_FETCHER_H_
 
-#include "app/gfx/native_widget_types.h"
 #include "base/scoped_vector.h"
+#include "gfx/native_widget_types.h"
 
 class GURL;
 class Profile;
@@ -52,4 +52,4 @@ class TemplateURLFetcher {
   DISALLOW_COPY_AND_ASSIGN(TemplateURLFetcher);
 };
 
-#endif  // CHROME_BROWSER_OSDD_FETCHER_H_
+#endif  // CHROME_BROWSER_SEARCH_ENGINES_TEMPLATE_URL_FETCHER_H_

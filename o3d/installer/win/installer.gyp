@@ -44,11 +44,22 @@
       'sources': [
         'custom_actions.cc',
       ],
+      'dependencies': [
+        '../../../base/base.gyp:base',
+        '../../build/libs.gyp:cg_libs',
+        '../../build/libs.gyp:gl_libs',
+        '../../plugin/plugin.gyp:o3dPluginLogging',
+        '../../statsreport/statsreport.gyp:o3dStatsReport',
+      ],
       'include_dirs': [
-        '$(DXSDK_DIR)/Include',
         '../..',
         '../../..',
+        '../../<(glewdir)/include',
+        '../../<(cgdir)/include',
         '<(INTERMEDIATE_DIR)',
+      ],
+      'msvs_system_include_dirs': [
+        '$(DXSDK_DIR)/Include',
       ],
       'defines': [
         'NOMINMAX',
@@ -127,6 +138,8 @@
         '../../plugin/plugin.gyp:npo3dautoplugin',
         '../../plugin/plugin.gyp:o3d_host',
         '../../samples/samples.gyp:samples',
+        '../../build/libs.gyp:cg_libs',
+        '../../build/libs.gyp:gl_libs',
         'cactions',
       ],
       'rules': [

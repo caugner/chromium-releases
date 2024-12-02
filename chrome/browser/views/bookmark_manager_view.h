@@ -1,10 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_VIEWS_BOOKMARK_MANAGER_VIEW_H_
 #define CHROME_BROWSER_VIEWS_BOOKMARK_MANAGER_VIEW_H_
 
+#include "base/keyboard_codes.h"
 #include "base/ref_counted.h"
 #include "base/task.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
@@ -43,10 +44,8 @@ class BookmarkManagerView : public views::View,
                             public views::TreeViewController,
                             public views::ViewMenuDelegate,
                             public views::WindowDelegate,
-#if defined(BROWSER_SYNC)
                             public views::ButtonListener,
                             public ProfileSyncServiceObserver,
-#endif
                             public BookmarkModelObserver,
                             public SelectFileDialog::Listener {
  public:
@@ -90,14 +89,12 @@ class BookmarkManagerView : public views::View,
   virtual std::wstring GetWindowName() const;
   virtual View* GetContentsView() { return this; }
   // TODO(sky): implement these when we have an icon.
-  //virtual SkBitmap GetWindowIcon();
-  //virtual bool ShouldShowWindowIcon() const { return true; }
+  // virtual SkBitmap GetWindowIcon();
+  // virtual bool ShouldShowWindowIcon() const { return true; }
   virtual void WindowClosing();
 
-#if defined(BROWSER_SYNC)
   // ProfileSyncServiceObserver method.
   virtual void OnStateChanged();
-#endif
 
   Profile* profile() const { return profile_; }
 
@@ -112,16 +109,14 @@ class BookmarkManagerView : public views::View,
   virtual void OnDoubleClick();
   virtual void OnMiddleClick();
   virtual void OnTableViewDelete(views::TableView* table);
-  virtual void OnKeyDown(unsigned short virtual_keycode);
+  virtual void OnKeyDown(base::KeyboardCode keycode);
 
   // TreeViewController methods.
   virtual void OnTreeViewSelectionChanged(views::TreeView* tree_view);
-  virtual void OnTreeViewKeyDown(unsigned short virtual_keycode);
+  virtual void OnTreeViewKeyDown(base::KeyboardCode keycode);
 
-#if defined(BROWSER_SYNC)
   // views::ButtonListener method.
   virtual void ButtonPressed(views::Button* sender, const views::Event& event);
-#endif
 
   // BookmarkModelObserver. We're only installed as an observer until the
   // bookmarks are loaded.
@@ -156,8 +151,7 @@ class BookmarkManagerView : public views::View,
 
   // ContextMenuController.
   virtual void ShowContextMenu(views::View* source,
-                               int x,
-                               int y,
+                               const gfx::Point& p,
                                bool is_mouse_gesture);
 
   // ViewMenuDelegate.
@@ -198,25 +192,22 @@ class BookmarkManagerView : public views::View,
 
   // Shows the menu. This is invoked to show the context menu for table/tree
   // as well as to show the menu from the organize button.
-  void ShowMenu(int x, int y,
-                BookmarkContextMenuController::ConfigurationType config);
+  void ShowMenu(const gfx::Point& p,
+                BookmarkContextMenuControllerViews::ConfigurationType config);
 
   // Invoked to handle cut/copy/paste from the table or tree. If |from_table|
   // is true the source is the table.
   void OnCutCopyPaste(CutCopyPasteType type, bool from_table);
 
   // Shows the tools menu.
-  void ShowToolsMenu(int x, int y);
+  void ShowToolsMenu(const gfx::Point& p);
 
   // Shows the import/export file chooser. These invoke
   // FileSelected/FileSelectionCanceled when done.
   void ShowImportBookmarksFileChooser();
   void ShowExportBookmarksFileChooser();
 
-#if defined(BROWSER_SYNC)
   void UpdateSyncStatus();
-  void OpenSyncMyBookmarksDialog();
-#endif
 
   Profile* profile_;
   BookmarkTableView* table_view_;
@@ -229,14 +220,16 @@ class BookmarkManagerView : public views::View,
   // Import/export file dialog.
   scoped_refptr<SelectFileDialog> select_file_dialog_;
 
-#if defined(BROWSER_SYNC)
   // The sync status button that notifies the user about the current status of
   // bookmarks synchronization.
   views::TextButton* sync_status_button_;
 
   // A pointer to the ProfileSyncService instance if one exists.
   ProfileSyncService* sync_service_;
-#endif
+
+  // True if the cached credentials have expired and we need to prompt the
+  // user to re-enter their password.
+  bool sync_relogin_required_;
 
   // Factory used for delaying search.
   ScopedRunnableMethodFactory<BookmarkManagerView> search_factory_;

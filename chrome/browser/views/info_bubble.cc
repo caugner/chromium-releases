@@ -1,19 +1,24 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/info_bubble.h"
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/color_utils.h"
-#include "app/gfx/path.h"
 #include "base/keyboard_codes.h"
+#include "chrome/browser/views/bubble_border.h"
 #include "chrome/browser/window_sizer.h"
 #include "chrome/common/notification_service.h"
+#include "gfx/canvas.h"
+#include "gfx/color_utils.h"
+#include "gfx/path.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "views/fill_layout.h"
 #include "views/widget/root_view.h"
 #include "views/window/window.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/wm_ipc.h"
+#endif
 
 // Background color of the bubble.
 #if defined(OS_WIN)
@@ -35,17 +40,16 @@ class BorderContents : public views::View {
   // Given the size of the contents and the rect to point at, initializes the
   // bubble and returns the bounds of both the border
   // and the contents inside the bubble.
-  // |is_rtl| is true if the UI is RTL and thus the arrow should default to the
-  // right side of the bubble; otherwise it defaults to the left top corner, and
-  // then is moved as necessary to try and fit the whole bubble on the same
-  // monitor as the rect being pointed to.
+  // |prefer_arrow_on_right| specifies the preferred location for the arrow
+  // anchor. If the bubble does not fit on the monitor, the arrow location may
+  // changed so it can.
   //
   // TODO(pkasting): Maybe this should use mirroring transformations instead,
   // which would hopefully simplify this code.
   void InitAndGetBounds(
       const gfx::Rect& position_relative_to,  // In screen coordinates
       const gfx::Size& contents_size,
-      bool is_rtl,
+      bool prefer_arrow_on_right,
       gfx::Rect* contents_bounds,             // Returned in window coordinates
       gfx::Rect* window_bounds);              // Returned in screen coordinates
 
@@ -61,7 +65,7 @@ class BorderContents : public views::View {
 void BorderContents::InitAndGetBounds(
     const gfx::Rect& position_relative_to,
     const gfx::Size& contents_size,
-    bool is_rtl,
+    bool prefer_arrow_on_right,
     gfx::Rect* contents_bounds,
     gfx::Rect* window_bounds) {
   // Margins between the contents and the inside of the border, in pixels.
@@ -80,8 +84,9 @@ void BorderContents::InitAndGetBounds(
   local_contents_size.Enlarge(kLeftMargin + kRightMargin,
                               kTopMargin + kBottomMargin);
 
-  // Try putting the arrow in its default location, and calculating the bounds.
-  BubbleBorder::ArrowLocation arrow_location(is_rtl ?
+  // Try putting the arrow in its initial location, and calculating the
+  // bounds.
+  BubbleBorder::ArrowLocation arrow_location(prefer_arrow_on_right ?
       BubbleBorder::TOP_RIGHT : BubbleBorder::TOP_LEFT);
   bubble_border->set_arrow_location(arrow_location);
   *window_bounds =
@@ -94,9 +99,9 @@ void BorderContents::InitAndGetBounds(
       monitor_provider->GetMonitorWorkAreaMatching(position_relative_to));
   if (!monitor_bounds.IsEmpty() && !monitor_bounds.Contains(*window_bounds)) {
     // The bounds don't fit.  Move the arrow to try and improve things.
-    bool arrow_on_left =
-        (is_rtl ? (window_bounds->x() < monitor_bounds.x()) :
-                  (window_bounds->right() <= monitor_bounds.right()));
+    bool arrow_on_left = prefer_arrow_on_right ?
+        (window_bounds->x() < monitor_bounds.x()) :
+        (window_bounds->right() <= monitor_bounds.right());
     if (window_bounds->bottom() > monitor_bounds.bottom()) {
       arrow_location = arrow_on_left ?
           BubbleBorder::BOTTOM_LEFT : BubbleBorder::BOTTOM_RIGHT;
@@ -155,13 +160,14 @@ gfx::Rect BorderWidget::InitAndGetBounds(
     HWND owner,
     const gfx::Rect& position_relative_to,
     const gfx::Size& contents_size,
-    bool is_rtl) {
+    bool prefer_arrow_on_right) {
   // Set up the border view and ask it to calculate our bounds (and our
   // contents').
   BorderContents* border_contents = new BorderContents;
   gfx::Rect contents_bounds, window_bounds;
-  border_contents->InitAndGetBounds(position_relative_to, contents_size, is_rtl,
-                                    &contents_bounds, &window_bounds);
+  border_contents->InitAndGetBounds(position_relative_to, contents_size,
+                                    prefer_arrow_on_right, &contents_bounds,
+                                    &window_bounds);
 
   // Initialize ourselves.
   WidgetWin::Init(GetAncestor(owner, GA_ROOT), window_bounds);
@@ -235,24 +241,38 @@ void InfoBubble::Init(views::Window* parent,
   MakeTransparent();
   make_transient_to_parent();
   WidgetGtk::Init(GTK_WIDGET(parent->GetNativeWindow()), gfx::Rect());
+#if defined(OS_CHROMEOS)
+  chromeos::WmIpc::instance()->SetWindowType(
+      GetNativeView(),
+      chromeos::WmIpc::WINDOW_TYPE_CHROME_INFO_BUBBLE,
+      NULL);
+#endif
 #endif
 
   // Create a View to hold the contents of the main window.
   views::View* contents_view = new views::View;
+  // We add |contents_view| to ourselves before the AddChildView() call below so
+  // that when |contents| gets added, it will already have a widget, and thus
+  // any NativeButtons it creates in ViewHierarchyChanged() will be functional
+  // (e.g. calling SetChecked() on checkboxes is safe).
+  SetContentsView(contents_view);
   // Adding |contents| as a child has to be done before we call
   // contents->GetPreferredSize() below, since some supplied views don't
   // actually initialize themselves until they're added to a hierarchy.
   contents_view->AddChildView(contents);
-  SetContentsView(contents_view);
 
   // Calculate and set the bounds for all windows and views.
   gfx::Rect window_bounds;
+
+  bool prefer_arrow_on_right = delegate &&
+      (contents->UILayoutIsRightToLeft() == delegate->PreferOriginSideAnchor());
+
 #if defined(OS_WIN)
   border_.reset(new BorderWidget);
   // Initialize and position the border window.
   window_bounds = border_->InitAndGetBounds(GetNativeView(),
       position_relative_to, contents->GetPreferredSize(),
-      contents->UILayoutIsRightToLeft());
+      prefer_arrow_on_right);
 
   // Make |contents| take up the entire contents view.
   contents_view->SetLayoutManager(new views::FillLayout);
@@ -265,7 +285,7 @@ void InfoBubble::Init(views::Window* parent,
   BorderContents* border_contents = new BorderContents;
   gfx::Rect contents_bounds;
   border_contents->InitAndGetBounds(position_relative_to,
-      contents->GetPreferredSize(), contents->UILayoutIsRightToLeft(),
+      contents->GetPreferredSize(), prefer_arrow_on_right,
       &contents_bounds, &window_bounds);
   // This new view must be added before |contents| so it will paint under it.
   contents_view->AddChildView(0, border_contents);

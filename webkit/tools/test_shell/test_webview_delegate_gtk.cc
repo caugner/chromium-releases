@@ -1,4 +1,4 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,22 +9,22 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 
-#include "app/gfx/gtk_util.h"
-#include "base/gfx/point.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "chrome/common/page_transition_types.h"
-#include "webkit/api/public/WebCString.h"
-#include "webkit/api/public/WebCursorInfo.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebRect.h"
-#include "webkit/api/public/WebString.h"
-#include "webkit/api/public/WebView.h"
+#include "gfx/gtk_util.h"
+#include "gfx/point.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCursorInfo.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "webkit/glue/plugins/webplugin.h"
 #include "webkit/glue/webcursor.h"
 #include "webkit/glue/webdropdata.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/webplugin.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/plugins/gtk_plugin_container_manager.h"
 #include "webkit/glue/plugins/plugin_list.h"
@@ -114,7 +114,8 @@ void TestWebViewDelegate::closeWidgetSoon() {
 
 void TestWebViewDelegate::didChangeCursor(const WebCursorInfo& cursor_info) {
   current_cursor_.InitFromCursorInfo(cursor_info);
-  GdkCursorType cursor_type = current_cursor_.GetCursorType();
+  GdkCursorType cursor_type =
+      static_cast<GdkCursorType>(current_cursor_.GetCursorType());
   GdkCursor* gdk_cursor;
   if (cursor_type == GDK_CURSOR_IS_PIXMAP) {
     // TODO(port): WebKit bug https://bugs.webkit.org/show_bug.cgi?id=16388 is

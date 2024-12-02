@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/basictypes.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
@@ -15,20 +16,24 @@
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/load_states.h"
+#include "net/base/net_log.h"
 #include "net/base/ssl_config_service.h"
+#include "net/http/http_alternate_protocols.h"
 #include "net/http/http_auth.h"
 #include "net/http/http_auth_handler.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_transaction.h"
 #include "net/proxy/proxy_service.h"
-#include "net/socket/client_socket_handle.h"
 #include "net/socket/client_socket_pool.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
 namespace net {
 
 class ClientSocketFactory;
+class ClientSocketHandle;
+class SpdyStream;
 class HttpNetworkSession;
+class HttpRequestHeaders;
 class HttpStream;
 
 class HttpNetworkTransaction : public HttpTransaction {
@@ -37,10 +42,17 @@ class HttpNetworkTransaction : public HttpTransaction {
 
   virtual ~HttpNetworkTransaction();
 
+  // Sets the next protocol negotiation value used during the SSL handshake.
+  static void SetNextProtos(const std::string& next_protos);
+
+  // Sets the HttpNetworkTransaction into a mode where it can ignore
+  // certificate errors.  This is for testing.
+  static void IgnoreCertificateErrors(bool enabled);
+
   // HttpTransaction methods:
   virtual int Start(const HttpRequestInfo* request_info,
                     CompletionCallback* callback,
-                    LoadLog* load_log);
+                    const BoundNetLog& net_log);
   virtual int RestartIgnoringLastError(CompletionCallback* callback);
   virtual int RestartWithCertificate(X509Certificate* client_cert,
                                      CompletionCallback* callback);
@@ -53,6 +65,7 @@ class HttpNetworkTransaction : public HttpTransaction {
   }
 
   virtual int Read(IOBuffer* buf, int buf_len, CompletionCallback* callback);
+  virtual void StopCaching() {}
   virtual const HttpResponseInfo* GetResponseInfo() const;
   virtual LoadState GetLoadState() const;
   virtual uint64 GetUploadProgress() const;
@@ -65,18 +78,24 @@ class HttpNetworkTransaction : public HttpTransaction {
     STATE_RESOLVE_PROXY_COMPLETE,
     STATE_INIT_CONNECTION,
     STATE_INIT_CONNECTION_COMPLETE,
-    STATE_SOCKS_CONNECT,
-    STATE_SOCKS_CONNECT_COMPLETE,
     STATE_SSL_CONNECT,
     STATE_SSL_CONNECT_COMPLETE,
     STATE_SEND_REQUEST,
     STATE_SEND_REQUEST_COMPLETE,
     STATE_READ_HEADERS,
     STATE_READ_HEADERS_COMPLETE,
+    STATE_RESOLVE_CANONICAL_NAME,
+    STATE_RESOLVE_CANONICAL_NAME_COMPLETE,
     STATE_READ_BODY,
     STATE_READ_BODY_COMPLETE,
     STATE_DRAIN_BODY_FOR_AUTH_RESTART,
     STATE_DRAIN_BODY_FOR_AUTH_RESTART_COMPLETE,
+    STATE_SPDY_SEND_REQUEST,
+    STATE_SPDY_SEND_REQUEST_COMPLETE,
+    STATE_SPDY_READ_HEADERS,
+    STATE_SPDY_READ_HEADERS_COMPLETE,
+    STATE_SPDY_READ_BODY,
+    STATE_SPDY_READ_BODY_COMPLETE,
     STATE_NONE
   };
 
@@ -85,6 +104,12 @@ class HttpNetworkTransaction : public HttpTransaction {
     kHTTPProxy,  // If using a proxy for HTTP (not HTTPS)
     kHTTPProxyUsingTunnel,  // If using a tunnel for HTTPS
     kSOCKSProxy,  // If using a SOCKS proxy
+  };
+
+  enum AlternateProtocolMode {
+    kUnspecified,  // Unspecified, check HttpAlternateProtocols
+    kUsingAlternateProtocol,  // Using an alternate protocol
+    kDoNotUseAlternateProtocol,  // Failed to connect once, do not try again.
   };
 
   void DoCallback(int result);
@@ -101,21 +126,27 @@ class HttpNetworkTransaction : public HttpTransaction {
   int DoResolveProxyComplete(int result);
   int DoInitConnection();
   int DoInitConnectionComplete(int result);
-  int DoSOCKSConnect();
-  int DoSOCKSConnectComplete(int result);
   int DoSSLConnect();
   int DoSSLConnectComplete(int result);
   int DoSendRequest();
   int DoSendRequestComplete(int result);
   int DoReadHeaders();
   int DoReadHeadersComplete(int result);
+  int DoResolveCanonicalName();
+  int DoResolveCanonicalNameComplete(int result);
   int DoReadBody();
   int DoReadBodyComplete(int result);
   int DoDrainBodyForAuthRestart();
   int DoDrainBodyForAuthRestartComplete(int result);
+  int DoSpdySendRequest();
+  int DoSpdySendRequestComplete(int result);
+  int DoSpdyReadHeaders();
+  int DoSpdyReadHeadersComplete(int result);
+  int DoSpdyReadBody();
+  int DoSpdyReadBodyComplete(int result);
 
   // Record histograms of latency until Connect() completes.
-  static void LogTCPConnectedMetrics(const ClientSocketHandle& handle);
+  static void LogHttpConnectedMetrics(const ClientSocketHandle& handle);
 
   // Record histogram of time until first byte of header is received.
   void LogTransactionConnectedMetrics() const;
@@ -188,9 +219,10 @@ class HttpNetworkTransaction : public HttpTransaction {
   // Returns true if we should try to add an Authorization header.
   bool ShouldApplyServerAuth() const;
 
-  // Builds either the proxy auth header, or the origin server auth header,
+  // Adds either the proxy auth header, or the origin server auth header,
   // as specified by |target|.
-  std::string BuildAuthorizationHeader(HttpAuth::Target target) const;
+  void AddAuthorizationHeader(
+      HttpAuth::Target target, HttpRequestHeaders* authorization_headers) const;
 
   // Returns a log message for all the response headers related to the auth
   // challenge.
@@ -234,9 +266,13 @@ class HttpNetworkTransaction : public HttpTransaction {
   // For proxy authentication the path is always empty string.
   std::string AuthPath(HttpAuth::Target target) const;
 
+  void MarkBrokenAlternateProtocolAndFallback();
+
   // Returns a string representation of a HttpAuth::Target value that can be
   // used in log messages.
   static std::string AuthTargetString(HttpAuth::Target target);
+
+  static bool g_ignore_certificate_errors;
 
   // The following three auth members are arrays of size two -- index 0 is
   // for the proxy server, and index 1 is for the origin server.
@@ -262,14 +298,16 @@ class HttpNetworkTransaction : public HttpTransaction {
 
   scoped_refptr<HttpNetworkSession> session_;
 
-  scoped_refptr<LoadLog> load_log_;
+  BoundNetLog net_log_;
   const HttpRequestInfo* request_;
+  HttpResponseInfo response_;
 
   ProxyService::PacRequest* pac_request_;
   ProxyInfo proxy_info_;
 
-  ClientSocketHandle connection_;
+  scoped_ptr<ClientSocketHandle> connection_;
   scoped_ptr<HttpStream> http_stream_;
+  scoped_refptr<SpdyStream> spdy_stream_;
   bool reused_socket_;
 
   // True if we've validated the headers that the stream parser has returned.
@@ -290,10 +328,22 @@ class HttpNetworkTransaction : public HttpTransaction {
   // the real request/response of the transaction.
   bool establishing_tunnel_;
 
+  // True if this network transaction is using SPDY instead of HTTP.
+  bool using_spdy_;
+
+  AlternateProtocolMode alternate_protocol_mode_;
+
+  // Only valid if |alternate_protocol_mode_| == kUsingAlternateProtocol.
+  HttpAlternateProtocols::Protocol alternate_protocol_;
+
   // True if we've used the username/password embedded in the URL.  This
   // makes sure we use the embedded identity only once for the transaction,
   // preventing an infinite auth restart loop.
   bool embedded_identity_used_;
+
+  // True if default credentials have already been tried for this transaction
+  // in response to an HTTP authentication challenge.
+  bool default_credentials_used_;
 
   SSLConfig ssl_config_;
 

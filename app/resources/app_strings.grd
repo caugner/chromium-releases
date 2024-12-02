@@ -50,7 +50,6 @@ need to be translated for each locale.-->
     <!-- The translation console uses 'no' for Norwegian Bokmål. It should
          be 'nb'. -->
     <output filename="app_strings_nb.rc" type="rc_all" lang="no" />
-    <output filename="app_strings_or.rc" type="rc_all" lang="or" />
     <output filename="app_strings_pl.rc" type="rc_all" lang="pl" />
     <output filename="app_strings_pt-BR.rc" type="rc_all" lang="pt-BR" />
     <output filename="app_strings_pt-PT.rc" type="rc_all" lang="pt-PT" />
@@ -105,7 +104,6 @@ need to be translated for each locale.-->
     <!-- The translation console uses 'no' for Norwegian Bokmål. It should
          be 'nb'. -->
     <output filename="app_strings_nb.pak" type="data_package" lang="no" />
-    <output filename="app_strings_or.pak" type="data_package" lang="or" />
     <output filename="app_strings_pl.pak" type="data_package" lang="pl" />
     <output filename="app_strings_pt-BR.pak" type="data_package" lang="pt-BR" />
     <output filename="app_strings_pt-PT.pak" type="data_package" lang="pt-PT" />
@@ -143,12 +141,13 @@ need to be translated for each locale.-->
     <file path="app_strings_fil.xtb" lang="fil" />
     <file path="app_strings_fr.xtb" lang="fr" />
     <file path="app_strings_gu.xtb" lang="gu" />
-    <file path="app_strings_he.xtb" lang="he" />
     <file path="app_strings_hi.xtb" lang="hi" />
     <file path="app_strings_hr.xtb" lang="hr" />
     <file path="app_strings_hu.xtb" lang="hu" />
     <file path="app_strings_id.xtb" lang="id" />
     <file path="app_strings_it.xtb" lang="it" />
+    <!-- The translation console uses 'iw' for Hebrew, but we use 'he'. -->
+    <file path="app_strings_iw.xtb" lang="he" />
     <file path="app_strings_ja.xtb" lang="ja" />
     <file path="app_strings_kn.xtb" lang="kn" />
     <file path="app_strings_ko.xtb" lang="ko" />
@@ -158,7 +157,6 @@ need to be translated for each locale.-->
     <file path="app_strings_mr.xtb" lang="mr" />
     <file path="app_strings_nl.xtb" lang="nl" />
     <file path="app_strings_no.xtb" lang="no" />
-    <file path="app_strings_or.xtb" lang="or" />
     <file path="app_strings_pl.xtb" lang="pl" />
     <file path="app_strings_pt-BR.xtb" lang="pt-BR" />
     <file path="app_strings_pt-PT.xtb" lang="pt-PT" />
@@ -200,6 +198,18 @@ need to be translated for each locale.-->
       <!--Accessible name/action strings-->
       <message name="IDS_APP_ACCACTION_PRESS" desc="The accessible default action for a button.">
         Press
+      </message>
+      <message name="IDS_APP_ACCNAME_CLOSE" desc="The accessible name for the Close button.">
+        Close
+      </message>
+      <message name="IDS_APP_ACCNAME_MINIMIZE" desc="The accessible name for the Minimize button.">
+        Minimize
+      </message>
+      <message name="IDS_APP_ACCNAME_MAXIMIZE" desc="The accessible name for the Maximize button.">
+        Maximize
+      </message>
+      <message name="IDS_APP_ACCNAME_RESTORE" desc="The accessible name for the Restore button.">
+        Restore
       </message>
 
       <!-- Scroll Bar Context Menu Labels -->

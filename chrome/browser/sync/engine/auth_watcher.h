@@ -40,6 +40,7 @@ struct AuthWatcherEvent {
   enum WhatHappened {
     AUTHENTICATION_ATTEMPT_START,
     AUTHWATCHER_DESTROYED,
+    AUTH_RENEWED,  // Currently only used in testing.
     AUTH_SUCCEEDED,
     GAIA_AUTH_FAILED,
     SERVICE_USER_NOT_SIGNED_UP,
@@ -94,10 +95,6 @@ class AuthWatcher : public base::RefCountedThreadSafe<AuthWatcher> {
               TalkMediator* talk_mediator);
   ~AuthWatcher();
 
-  // Returns true if the open share has gotten zero updates from the sync
-  // server (initial sync complete).
-  bool LoadDirectoryListAndOpen(const PathString& login);
-
   typedef EventChannel<AuthWatcherEvent, Lock> Channel;
 
   inline Channel* channel() const {
@@ -106,6 +103,10 @@ class AuthWatcher : public base::RefCountedThreadSafe<AuthWatcher> {
 
   // The following 3 flavors of authentication routines are asynchronous and can
   // be called from any thread.
+  // If |captcha_value| is specified but |captcha_token| is not, this will
+  // attempt authentication using the last observed captcha token out of
+  // convenience in the common case so the token doesn't have to be plumbed
+  // everywhere.
   void Authenticate(const std::string& email, const std::string& password,
       const std::string& captcha_token, const std::string& captcha_value,
       bool persist_creds_to_disk);
@@ -114,6 +115,14 @@ class AuthWatcher : public base::RefCountedThreadSafe<AuthWatcher> {
       bool persist_creds_to_disk) {
     Authenticate(email, password, "", "", persist_creds_to_disk);
   }
+
+  // Use this to update only the token of the current email address.
+  void RenewAuthToken(const std::string& updated_token);
+  void DoRenewAuthToken(const std::string& updated_token);
+
+  // Use this version when you don't need the gaia authentication step because
+  // you already have a valid LSID cookie for |gaia_email|.
+  void AuthenticateWithLsid(const std::string& lsid);
 
   // Use this version when you don't need the gaia authentication step because
   // you already have a valid token for |gaia_email|.
@@ -171,18 +180,19 @@ class AuthWatcher : public base::RefCountedThreadSafe<AuthWatcher> {
   // A struct to marshal various data across to the auth_backend_thread_ on
   // Authenticate() and AuthenticateWithToken calls.
   struct AuthRequest {
-      std::string email;
-      std::string password;
-      std::string auth_token;
-      std::string captcha_token;
-      std::string captcha_value;
-      bool persist_creds_to_disk;
-      AuthWatcherEvent::AuthenticationTrigger trigger;
+    std::string email;
+    std::string password;
+    std::string auth_token;
+    std::string captcha_token;
+    std::string captcha_value;
+    bool persist_creds_to_disk;
+    AuthWatcherEvent::AuthenticationTrigger trigger;
   };
 
   // The public interface Authenticate methods are proxies to these, which
   // can only be called from |auth_backend_thread_|.
   void DoAuthenticate(const AuthRequest& request);
+  void DoAuthenticateWithLsid(const std::string& lsid);
   void DoAuthenticateWithToken(const std::string& email,
                                const std::string& auth_token);
 

@@ -50,7 +50,7 @@ class BugReportView : public views::View,
 
   // views::Textfield::Controller implementation:
   virtual void ContentsChanged(views::Textfield* sender,
-                               const std::wstring& new_contents);
+                               const string16& new_contents);
   virtual bool HandleKeystroke(views::Textfield* sender,
                                const views::Textfield::Keystroke& key);
 
@@ -104,8 +104,6 @@ class BugReportView : public views::View,
 
   std::wstring version_;
   scoped_ptr< std::vector<unsigned char> > png_data_;
-
-  GURL post_url_;
 
   TabContents* tab_;
 

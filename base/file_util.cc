@@ -209,6 +209,14 @@ bool GetFileSize(const FilePath& file_path, int64* file_size) {
   return true;
 }
 
+bool IsDot(const FilePath& path) {
+  return FILE_PATH_LITERAL(".") == path.BaseName().value();
+}
+
+bool IsDotDot(const FilePath& path) {
+  return FILE_PATH_LITERAL("..") == path.BaseName().value();
+}
+
 bool CloseFile(FILE* file) {
   if (file == NULL)
     return true;
@@ -260,11 +268,42 @@ bool ContainsPath(const FilePath &parent, const FilePath& child) {
   return true;
 }
 
+int64 ComputeDirectorySize(const FilePath& root_path) {
+  int64 running_size = 0;
+  FileEnumerator file_iter(root_path, true, FileEnumerator::FILES);
+  for (FilePath current = file_iter.Next(); !current.empty();
+       current = file_iter.Next()) {
+    FileEnumerator::FindInfo info;
+    file_iter.GetFindInfo(&info);
+#if defined(OS_WIN)
+    LARGE_INTEGER li = { info.nFileSizeLow, info.nFileSizeHigh };
+    running_size += li.QuadPart;
+#else
+    running_size += info.stat.st_size;
+#endif
+  }
+  return running_size;
+}
+
 ///////////////////////////////////////////////
 // MemoryMappedFile
 
 MemoryMappedFile::~MemoryMappedFile() {
   CloseHandles();
+}
+
+bool MemoryMappedFile::Initialize(base::PlatformFile file) {
+  if (IsValid())
+    return false;
+
+  file_ = file;
+
+  if (!MapFileToMemoryInternal()) {
+    CloseHandles();
+    return false;
+  }
+
+  return true;
 }
 
 bool MemoryMappedFile::Initialize(const FilePath& file_name) {
@@ -277,6 +316,19 @@ bool MemoryMappedFile::Initialize(const FilePath& file_name) {
   }
 
   return true;
+}
+
+bool MemoryMappedFile::MapFileToMemory(const FilePath& file_name) {
+  file_ = base::CreatePlatformFile(file_name,
+      base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ,
+      NULL);
+
+  if (file_ == base::kInvalidPlatformFileValue) {
+    LOG(ERROR) << "Couldn't open " << file_name.value();
+    return false;
+  }
+
+  return MapFileToMemoryInternal();
 }
 
 bool MemoryMappedFile::IsValid() {
@@ -296,48 +348,29 @@ bool AbsolutePath(std::wstring* path_str) {
   *path_str = path.ToWStringHack();
   return true;
 }
+
+#if defined(OS_WIN)
+// This function is deprecated; see file_util_deprecated.h for details.
 void AppendToPath(std::wstring* path, const std::wstring& new_ending) {
   if (!path) {
     NOTREACHED();
     return;  // Don't crash in this function in release builds.
   }
 
-  if (!EndsWithSeparator(path))
+  if (!EndsWithSeparator(*path))
     path->push_back(FilePath::kSeparators[0]);
   path->append(new_ending);
 }
+#endif
+
 bool CopyDirectory(const std::wstring& from_path, const std::wstring& to_path,
                    bool recursive) {
   return CopyDirectory(FilePath::FromWStringHack(from_path),
                        FilePath::FromWStringHack(to_path),
                        recursive);
 }
-bool ContentsEqual(const std::wstring& filename1,
-                   const std::wstring& filename2) {
-  return ContentsEqual(FilePath::FromWStringHack(filename1),
-                       FilePath::FromWStringHack(filename2));
-}
-bool CreateDirectory(const std::wstring& full_path) {
-  return CreateDirectory(FilePath::FromWStringHack(full_path));
-}
-bool CreateNewTempDirectory(const std::wstring& prefix,
-                            std::wstring* new_temp_path) {
-#if defined(OS_WIN)
-  FilePath::StringType dir_prefix(prefix);
-#elif defined(OS_POSIX)
-  FilePath::StringType dir_prefix = WideToUTF8(prefix);
-#endif
-  FilePath temp_path;
-  if (!CreateNewTempDirectory(dir_prefix, &temp_path))
-    return false;
-  *new_temp_path = temp_path.ToWStringHack();
-  return true;
-}
 bool Delete(const std::wstring& path, bool recursive) {
   return Delete(FilePath::FromWStringHack(path), recursive);
-}
-bool EndsWithSeparator(std::wstring* path) {
-  return EndsWithSeparator(FilePath::FromWStringHack(*path));
 }
 bool EndsWithSeparator(const std::wstring& path) {
   return EndsWithSeparator(FilePath::FromWStringHack(path));
@@ -383,9 +416,6 @@ FILE* OpenFile(const std::wstring& filename, const char* mode) {
 int ReadFile(const std::wstring& filename, char* data, int size) {
   return ReadFile(FilePath::FromWStringHack(filename), data, size);
 }
-bool SetCurrentDirectory(const std::wstring& directory) {
-  return SetCurrentDirectory(FilePath::FromWStringHack(directory));
-}
 void UpOneDirectory(std::wstring* dir) {
   FilePath path = FilePath::FromWStringHack(*dir);
   FilePath directory = path.DirName();
@@ -416,14 +446,6 @@ int WriteFile(const std::wstring& filename, const char* data, int size) {
 bool FileEnumerator::ShouldSkip(const FilePath& path) {
   FilePath::StringType basename = path.BaseName().value();
   return IsDot(path) || (IsDotDot(path) && !(INCLUDE_DOT_DOT & file_type_));
-}
-
-bool FileEnumerator::IsDot(const FilePath& path) {
-  return FILE_PATH_LITERAL(".") == path.BaseName().value();
-}
-
-bool FileEnumerator::IsDotDot(const FilePath& path) {
-  return FILE_PATH_LITERAL("..") == path.BaseName().value();
 }
 
 }  // namespace

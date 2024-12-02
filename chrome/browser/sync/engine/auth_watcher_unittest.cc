@@ -1,6 +1,6 @@
 // Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE entry.
+// found in the LICENSE file.
 
 #include "base/scoped_ptr.h"
 #include "base/scoped_temp_dir.h"
@@ -43,6 +43,10 @@ class GaiaAuthMockForAuthWatcher : public browser_sync::GaiaAuthenticator {
 
   void SendBadAuthTokenForNextRequest() { use_bad_auth_token_ = true; }
 
+  std::string renewed_token() {
+    return renewed_token_;
+  }
+
  protected:
   bool PerformGaiaRequest(const AuthParams& params, AuthResults* results) {
     if (params.password == kWrongPassword) {
@@ -66,9 +70,14 @@ class GaiaAuthMockForAuthWatcher : public browser_sync::GaiaAuthenticator {
     return true;
   }
 
+  void RenewAuthToken(const std::string& auth_token) {
+    renewed_token_ = auth_token;
+  }
+
  private:
   // Whether we should send an invalid auth token on the next request.
   bool use_bad_auth_token_;
+  std::string renewed_token_;
 };
 
 class AuthWatcherTest : public testing::Test {
@@ -86,10 +95,11 @@ class AuthWatcherTest : public testing::Test {
     allstatus_.reset(new AllStatus());
     user_settings_.reset(new UserSettings());
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    PathString user_settings_path = temp_dir_.path().value() + kUserSettingsDB;
+    FilePath user_settings_path = temp_dir_.path().Append(kUserSettingsDB);
     user_settings_->Init(user_settings_path);
     gaia_auth_ = new GaiaAuthMockForAuthWatcher();
-    talk_mediator_.reset(new TalkMediatorImpl());
+    talk_mediator_.reset(new TalkMediatorImpl(
+        browser_sync::kDefaultNotificationMethod, false));
     auth_watcher_ = new AuthWatcher(metadb_.manager(), connection_.get(),
         allstatus_.get(), kTestUserAgent, kTestServiceId, kTestGaiaURL,
         user_settings_.get(), gaia_auth_, talk_mediator_.get());
@@ -206,6 +216,19 @@ TEST_F(AuthWatcherTest, AuthenticateWithTokenSuccess) {
   auth_watcher()->AuthenticateWithToken(kTestEmail, kValidAuthToken);
   EXPECT_EQ(AuthWatcherEvent::AUTH_SUCCEEDED, ConsumeNextEvent());
   EXPECT_EQ(kUserDisplayEmail, user_email());
+}
+
+// Just check that the thread task was properly issued.
+TEST_F(AuthWatcherTest, RenewAuthToken) {
+  auth_watcher()->Authenticate(kTestEmail, kCorrectPassword, std::string(),
+      std::string(), false);
+  EXPECT_EQ(AuthWatcherEvent::AUTHENTICATION_ATTEMPT_START, ConsumeNextEvent());
+  EXPECT_EQ(AuthWatcherEvent::AUTH_SUCCEEDED, ConsumeNextEvent());
+
+  auth_watcher()->RenewAuthToken("updated_token");
+  EXPECT_EQ(AuthWatcherEvent::AUTH_RENEWED, ConsumeNextEvent());
+  EXPECT_EQ(gaia_auth()->renewed_token(), "updated_token");
+  EXPECT_EQ(connection()->auth_token(), "updated_token");
 }
 
 }  // namespace browser_sync

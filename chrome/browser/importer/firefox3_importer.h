@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,14 @@
 #define CHROME_BROWSER_IMPORTER_FIREFOX3_IMPORTER_H_
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "chrome/browser/importer/importer.h"
+#include "chrome/browser/importer/importer_data_types.h"
 #include "googleurl/src/gurl.h"
 
 struct sqlite3;
@@ -21,15 +24,16 @@ struct sqlite3;
 class Firefox3Importer : public Importer {
  public:
   Firefox3Importer() { }
-  virtual ~Firefox3Importer() { }
 
   // Importer methods.
-  virtual void StartImport(ProfileInfo profile_info,
+  virtual void StartImport(importer::ProfileInfo profile_info,
                            uint16 items,
                            ImporterBridge* bridge);
 
  private:
   typedef std::map<int64, std::set<GURL> > FaviconMap;
+
+  virtual ~Firefox3Importer() { }
 
   void ImportBookmarks();
   void ImportPasswords();
@@ -38,7 +42,7 @@ class Firefox3Importer : public Importer {
   // Import the user's home page, unless it is set to default home page as
   // defined in browserconfig.properties.
   void ImportHomepage();
-  void GetSearchEnginesXMLFiles(std::vector<std::wstring>* files);
+  void GetSearchEnginesXMLFiles(std::vector<FilePath>* files);
 
   // The struct stores the information about a bookmark item.
   struct BookmarkItem {
@@ -74,8 +78,8 @@ class Firefox3Importer : public Importer {
                     const FaviconMap& favicon_map,
                     std::vector<history::ImportedFavIconUsage>* favicons);
 
-  std::wstring source_path_;
-  std::wstring app_path_;
+  FilePath source_path_;
+  FilePath app_path_;
 
   DISALLOW_COPY_AND_ASSIGN(Firefox3Importer);
 };

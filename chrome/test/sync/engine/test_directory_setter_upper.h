@@ -30,7 +30,10 @@
 #ifndef CHROME_TEST_SYNC_ENGINE_TEST_DIRECTORY_SETTER_UPPER_H_
 #define CHROME_TEST_SYNC_ENGINE_TEST_DIRECTORY_SETTER_UPPER_H_
 
+#include <string>
+
 #include "base/scoped_ptr.h"
+#include "base/scoped_temp_dir.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/util/sync_types.h"
 
@@ -56,19 +59,20 @@ class TestDirectorySetterUpper {
   virtual void TearDown();
 
   syncable::DirectoryManager* manager() const { return manager_.get(); }
-  const PathString& name() const { return name_; }
+  const std::string& name() const { return name_; }
 
  protected:
   // Subclasses may want to use a different directory name.
-  explicit TestDirectorySetterUpper(const PathString& name);
+  explicit TestDirectorySetterUpper(const std::string& name);
   virtual void Init();
 
  private:
   void RunInvariantCheck(const syncable::ScopedDirLookup& dir);
 
   scoped_ptr<syncable::DirectoryManager> manager_;
-  const PathString name_;
-  PathString file_path_;
+  const std::string name_;
+  FilePath file_path_;
+  ScopedTempDir temp_dir_;
 };
 
 // A variant of the above where SetUp does not actually open the directory.
@@ -91,7 +95,7 @@ class TriggeredOpenTestDirectorySetterUpper : public TestDirectorySetterUpper {
   // A triggered open is typically in response to a successful auth event just
   // as in "real life".  In this case, the name that will be used should be
   // deterministically known at construction, and is passed in |name|.
-  TriggeredOpenTestDirectorySetterUpper(const std::string& name);
+  explicit TriggeredOpenTestDirectorySetterUpper(const std::string& name);
   virtual void SetUp();
   virtual void TearDown();
 };

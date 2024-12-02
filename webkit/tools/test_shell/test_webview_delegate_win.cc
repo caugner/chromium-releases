@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,20 +12,20 @@
 #include <shlobj.h>
 #include <shlwapi.h>
 
-#include "app/gfx/gdi_util.h"
-#include "app/gfx/native_widget_types.h"
-#include "base/gfx/point.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
 #include "base/trace_event.h"
+#include "base/utf_string_conversions.h"
+#include "gfx/native_widget_types.h"
+#include "gfx/gdi_util.h"
+#include "gfx/point.h"
 #include "net/base/net_errors.h"
-#include "webkit/api/public/WebCursorInfo.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebRect.h"
-#include "webkit/api/public/WebView.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCursorInfo.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "webkit/glue/plugins/webplugin.h"
 #include "webkit/glue/webdropdata.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/webplugin.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"

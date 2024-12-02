@@ -12,9 +12,8 @@
 #include <string>
 #include <vector>
 
-#include "app/gfx/codec/png_codec.h"
-#include "app/gfx/icon_util.h"
 #include "app/l10n_util.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
@@ -22,18 +21,23 @@
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/win_util.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/favicon_service.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
+#include "chrome/browser/shell_integration.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "gfx/codec/png_codec.h"
+#include "gfx/icon_util.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 
 namespace {
@@ -239,13 +243,13 @@ HRESULT AddShellLink(ScopedComPtr<IObjectCollection> collection,
 
 // Creates a temporary icon file to be shown in JumpList.
 bool CreateIconFile(const SkBitmap& bitmap,
-                    const std::wstring& icon_dir,
-                    std::wstring* icon_path) {
+                    const FilePath& icon_dir,
+                    FilePath* icon_path) {
   // Retrieve the path to a temporary file.
   // We don't have to care about the extension of this temporary file because
   // JumpList does not care about it.
   FilePath path;
-  if (!file_util::CreateTemporaryFileInDir(FilePath(icon_dir), &path))
+  if (!file_util::CreateTemporaryFileInDir(icon_dir, &path))
     return false;
 
   // Create an icon file from the favicon attached to the given |page|, and
@@ -255,7 +259,7 @@ bool CreateIconFile(const SkBitmap& bitmap,
 
   // Add this icon file to the list and return its absolute path.
   // The IShellLink::SetIcon() function needs the absolute path to an icon.
-  icon_path->assign(path.value());
+  *icon_path = path;
   return true;
 }
 
@@ -280,11 +284,12 @@ HRESULT UpdateCategory(ScopedComPtr<ICustomDestinationList> list,
                        int category_id,
                        const std::wstring& application,
                        const std::wstring& switches,
-                       const ShellLinkItemList& data) {
+                       const ShellLinkItemList& data,
+                       int max_slots) {
   // Exit this function when the given vector does not contain any items
   // because an ICustomDestinationList::AppendCategory() call fails in this
   // case.
-  if (data.empty())
+  if (data.empty() || !max_slots)
     return S_OK;
 
   std::wstring category = l10n_util::GetString(category_id);
@@ -299,7 +304,7 @@ HRESULT UpdateCategory(ScopedComPtr<ICustomDestinationList> list,
     return false;
 
   for (ShellLinkItemList::const_iterator item = data.begin();
-       item != data.end(); ++item) {
+       item != data.end() && max_slots > 0; ++item, --max_slots) {
     scoped_refptr<ShellLinkItem> link(*item);
     AddShellLink(collection, application, switches, link);
   }
@@ -378,7 +383,8 @@ HRESULT UpdateTaskCategory(ScopedComPtr<ICustomDestinationList> list,
 // * Creating an ICustomDestinationList instance;
 // * Updating the categories of the ICustomDestinationList instance, and;
 // * Sending it to Taskbar of Windows 7.
-bool UpdateJumpList(const ShellLinkItemList& most_visited_pages,
+bool UpdateJumpList(const wchar_t* app_id,
+                    const ShellLinkItemList& most_visited_pages,
                     const ShellLinkItemList& recently_closed_pages) {
   // JumpList is implemented only on Windows 7 or later.
   // So, we should return now when this function is called on earlier versions
@@ -392,6 +398,9 @@ bool UpdateJumpList(const ShellLinkItemList& most_visited_pages,
                                                    CLSCTX_INPROC_SERVER);
   if (FAILED(result))
     return false;
+
+  // Set the App ID for this JumpList.
+  destination_list->SetAppID(app_id);
 
   // Start a transaction that updates the JumpList of this application.
   // This implementation just replaces the all items in this JumpList, so
@@ -411,19 +420,41 @@ bool UpdateJumpList(const ShellLinkItemList& most_visited_pages,
     return false;
 
   // Retrieve the command-line switches of this process.
-  std::wstring chrome_switches;
+  CommandLine command_line(CommandLine::ARGUMENTS_ONLY);
+  std::wstring user_data_dir = CommandLine::ForCurrentProcess()->
+      GetSwitchValue(switches::kUserDataDir);
+  if (!user_data_dir.empty())
+    command_line.AppendSwitchWithValue(switches::kUserDataDir, user_data_dir);
+
+  std::wstring chrome_switches = command_line.command_line_string();
+
+  // We allocate 60% of the given JumpList slots to "most-visited" items
+  // and 40% to "recently-closed" items, respectively.
+  // Nevertheless, if there are not so many items in |recently_closed_pages|,
+  // we give the remaining slots to "most-visited" items.
+  const int kMostVisited = 60;
+  const int kRecentlyClosed = 40;
+  const int kTotal = kMostVisited + kRecentlyClosed;
+  size_t most_visited_items = MulDiv(max_slots, kMostVisited, kTotal);
+  size_t recently_closed_items = max_slots - most_visited_items;
+  if (recently_closed_pages.size() < recently_closed_items) {
+    most_visited_items += recently_closed_items - recently_closed_pages.size();
+    recently_closed_items = recently_closed_pages.size();
+  }
 
   // Update the "Most Visited" category of the JumpList.
   // This update request is applied into the JumpList when we commit this
   // transaction.
   result = UpdateCategory(destination_list, IDS_NEW_TAB_MOST_VISITED,
-                          chrome_path, chrome_switches, most_visited_pages);
+                          chrome_path, chrome_switches, most_visited_pages,
+                          most_visited_items);
   if (FAILED(result))
     return false;
 
   // Update the "Recently Closed" category of the JumpList.
   result = UpdateCategory(destination_list, IDS_NEW_TAB_RECENTLY_CLOSED,
-                          chrome_path, chrome_switches, recently_closed_pages);
+                          chrome_path, chrome_switches, recently_closed_pages,
+                          recently_closed_items);
   if (FAILED(result))
     return false;
 
@@ -458,10 +489,12 @@ bool UpdateJumpList(const ShellLinkItemList& most_visited_pages,
 // 3. Post this task to the file thread.
 class JumpListUpdateTask : public Task {
  public:
-  JumpListUpdateTask(const std::wstring& icon_dir,
+  JumpListUpdateTask(const wchar_t* app_id,
+                     const FilePath& icon_dir,
                      const ShellLinkItemList& most_visited_pages,
                      const ShellLinkItemList& recently_closed_pages)
-    : icon_dir_(icon_dir),
+    : app_id_(app_id),
+      icon_dir_(icon_dir),
       most_visited_pages_(most_visited_pages),
       recently_closed_pages_(recently_closed_pages) {
   }
@@ -471,8 +504,11 @@ class JumpListUpdateTask : public Task {
   // When we post this task to a file thread, the thread calls this function.
   void Run();
 
+  // App id to associate with the jump list.
+  std::wstring app_id_;
+
   // The directory which contains JumpList icons.
-  std::wstring icon_dir_;
+  FilePath icon_dir_;
 
   // Items in the "Most Visited" category of the application JumpList.
   ShellLinkItemList most_visited_pages_;
@@ -485,11 +521,10 @@ void JumpListUpdateTask::Run() {
   // Delete the directory which contains old icon files, rename the current
   // icon directory, and create a new directory which contains new JumpList
   // icon files.
-  std::wstring icon_dir_old(icon_dir_ + L"Old");
-  if (file_util::PathExists(FilePath::FromWStringHack(icon_dir_old)))
+  FilePath icon_dir_old(icon_dir_.value() + L"Old");
+  if (file_util::PathExists(icon_dir_old))
     file_util::Delete(icon_dir_old, true);
-  file_util::Move(FilePath::FromWStringHack(icon_dir_),
-                  FilePath::FromWStringHack(icon_dir_old));
+  file_util::Move(icon_dir_, icon_dir_old);
   file_util::CreateDirectory(icon_dir_);
 
   // Create temporary icon files for shortcuts in the "Most Visited" category.
@@ -497,10 +532,12 @@ void JumpListUpdateTask::Run() {
        item != most_visited_pages_.end(); ++item) {
     SkBitmap icon_bitmap;
     if ((*item)->data().get() &&
-        gfx::PNGCodec::Decode(&(*item)->data()->data, &icon_bitmap)) {
-      std::wstring icon_path;
+        gfx::PNGCodec::Decode((*item)->data()->front(),
+                              (*item)->data()->size(),
+                              &icon_bitmap)) {
+      FilePath icon_path;
       if (CreateIconFile(icon_bitmap, icon_dir_, &icon_path))
-        (*item)->SetIcon(icon_path, 0, true);
+        (*item)->SetIcon(icon_path.value(), 0, true);
     }
   }
 
@@ -510,17 +547,19 @@ void JumpListUpdateTask::Run() {
        item != recently_closed_pages_.end(); ++item) {
     SkBitmap icon_bitmap;
     if ((*item)->data().get() &&
-        gfx::PNGCodec::Decode(&(*item)->data()->data, &icon_bitmap)) {
-      std::wstring icon_path;
+        gfx::PNGCodec::Decode((*item)->data()->front(),
+                              (*item)->data()->size(),
+                              &icon_bitmap)) {
+      FilePath icon_path;
       if (CreateIconFile(icon_bitmap, icon_dir_, &icon_path))
-        (*item)->SetIcon(icon_path, 0, true);
+        (*item)->SetIcon(icon_path.value(), 0, true);
     }
   }
 
   // We finished collecting all resources needed for updating an appliation
   // JumpList. So, create a new JumpList and replace the current JumpList
   // with it.
-  UpdateJumpList(most_visited_pages_, recently_closed_pages_);
+  UpdateJumpList(app_id_.c_str(), most_visited_pages_, recently_closed_pages_);
 
   // Delete all items in these lists now since we don't need the ShellLinkItem
   // objects in these lists.
@@ -557,7 +596,8 @@ bool JumpList::AddObserver(Profile* profile) {
   if (!tab_restore_service)
     return false;
 
-  icon_dir_ = profile->GetPath().Append(chrome::kJumpListIconDirname).value();
+  app_id_ = ShellIntegration::GetChromiumAppId(profile->GetPath());
+  icon_dir_ = profile->GetPath().Append(chrome::kJumpListIconDirname);
   profile_ = profile;
   tab_restore_service->AddObserver(this);
   return true;
@@ -687,6 +727,7 @@ void JumpList::OnSegmentUsageAvailable(
   //   An empty string. This value is to be updated in OnFavIconDataAvailable().
   // This code is copied from
   // RecentlyClosedTabsHandler::TabRestoreServiceChanged() to emulate it.
+  const int kRecentlyClosedCount = 4;
   recently_closed_pages_.clear();
   TabRestoreService* tab_restore_service = profile_->GetTabRestoreService();
   const TabRestoreService::Entries& entries = tab_restore_service->entries();
@@ -695,10 +736,10 @@ void JumpList::OnSegmentUsageAvailable(
     const TabRestoreService::Entry* entry = *it;
     if (entry->type == TabRestoreService::TAB) {
       AddTab(static_cast<const TabRestoreService::Tab*>(entry),
-             &recently_closed_pages_, 3);
+             &recently_closed_pages_, kRecentlyClosedCount);
     } else if (entry->type == TabRestoreService::WINDOW) {
       AddWindow(static_cast<const TabRestoreService::Window*>(entry),
-                &recently_closed_pages_, 3);
+                &recently_closed_pages_, kRecentlyClosedCount);
     }
   }
 
@@ -709,12 +750,12 @@ void JumpList::OnSegmentUsageAvailable(
 void JumpList::OnFavIconDataAvailable(
     FaviconService::Handle handle,
     bool know_favicon,
-    scoped_refptr<RefCountedBytes> data,
+    scoped_refptr<RefCountedMemory> data,
     bool expired,
     GURL icon_url) {
   // Attach the received data to the ShellLinkItem object.
   // This data will be decoded by JumpListUpdateTask.
-  if (know_favicon && data.get() && !data->data.empty()) {
+  if (know_favicon && data.get() && data->size()) {
     if (!icon_urls_.empty() && icon_urls_.front().second)
       icon_urls_.front().second->SetIconData(data);
   }
@@ -728,12 +769,10 @@ void JumpList::OnFavIconDataAvailable(
   // Finished Loading all fav icons needed by the application JumpList.
   // We create a JumpListUpdateTask that creates icon files, and we post it to
   // the file thread.
-  Task* icon_task = new JumpListUpdateTask(icon_dir_,
-                                           most_visited_pages_,
-                                           recently_closed_pages_);
-  MessageLoop* file_loop = g_browser_process->file_thread()->message_loop();
-  if (file_loop)
-    file_loop->PostTask(FROM_HERE, icon_task);
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
+      new JumpListUpdateTask(app_id_.c_str(), icon_dir_, most_visited_pages_,
+                             recently_closed_pages_));
 
   // Delete all items in these lists since we don't need these lists any longer.
   most_visited_pages_.clear();

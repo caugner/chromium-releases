@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,15 @@ class TabContents;
 class InfoBarContainer : public views::View,
                          public NotificationObserver {
  public:
-  explicit InfoBarContainer(BrowserView* browser_view);
+  // Implement this interface when you want to receive notifications from the
+  // InfoBarContainer
+  class Delegate {
+   public:
+    virtual ~Delegate() {}
+    virtual void InfoBarSizeChanged(bool is_animating) = 0;
+  };
+
+  explicit InfoBarContainer(Delegate* delegate);
   virtual ~InfoBarContainer();
 
   // Changes the TabContents for which this container is showing InfoBars. Can
@@ -36,9 +44,7 @@ class InfoBarContainer : public views::View,
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize();
   virtual void Layout();
-  virtual bool GetAccessibleName(std::wstring* name);
   virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
-  virtual void SetAccessibleName(const std::wstring& name);
 
  protected:
   virtual void ViewHierarchyChanged(bool is_add,
@@ -73,8 +79,8 @@ class InfoBarContainer : public views::View,
 
   NotificationRegistrar registrar_;
 
-  // The BrowserView that hosts this InfoBarContainer.
-  BrowserView* browser_view_;
+  // The Delegate which receives notifications from the InfoBarContainer.
+  Delegate* delegate_;
 
   // The TabContents for which we are currently showing InfoBars.
   TabContents* tab_contents_;
@@ -85,4 +91,4 @@ class InfoBarContainer : public views::View,
   DISALLOW_COPY_AND_ASSIGN(InfoBarContainer);
 };
 
-#endif  // #ifndef CHROME_BROWSER_VIEWS_INFOBARS_INFOBAR_CONTAINER_H_
+#endif  // CHROME_BROWSER_VIEWS_INFOBARS_INFOBAR_CONTAINER_H_

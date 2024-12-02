@@ -15,6 +15,7 @@
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 
+class FilePath;
 class Profile;
 class PageUsageData;
 
@@ -40,14 +41,11 @@ class ShellLinkItem : public base::RefCountedThreadSafe<ShellLinkItem> {
   ShellLinkItem() : index_(0), favicon_(false) {
   }
 
-  ~ShellLinkItem() {
-  }
-
   const std::wstring& arguments() const { return arguments_; }
   const std::wstring& title() const { return title_; }
   const std::wstring& icon() const { return icon_; }
   int index() const { return index_; }
-  scoped_refptr<RefCountedBytes> data() const { return data_; }
+  scoped_refptr<RefCountedMemory> data() const { return data_; }
 
   void SetArguments(const std::wstring& arguments) {
     arguments_ = arguments;
@@ -63,15 +61,19 @@ class ShellLinkItem : public base::RefCountedThreadSafe<ShellLinkItem> {
     favicon_ = favicon;
   }
 
-  void SetIconData(scoped_refptr<RefCountedBytes> data) {
+  void SetIconData(scoped_refptr<RefCountedMemory> data) {
     data_ = data;
   }
 
  private:
+  friend class base::RefCountedThreadSafe<ShellLinkItem>;
+
+  ~ShellLinkItem() {}
+
   std::wstring arguments_;
   std::wstring title_;
   std::wstring icon_;
-  scoped_refptr<RefCountedBytes> data_;
+  scoped_refptr<RefCountedMemory> data_;
   int index_;
   bool favicon_;
 
@@ -157,7 +159,7 @@ class JumpList : public TabRestoreService::Observer {
   // decompresses collected fav icons and updates a JumpList.
   void OnFavIconDataAvailable(HistoryService::Handle handle,
                               bool know_favicon,
-                              scoped_refptr<RefCountedBytes> data,
+                              scoped_refptr<RefCountedMemory> data,
                               bool expired,
                               GURL icon_url);
 
@@ -169,8 +171,11 @@ class JumpList : public TabRestoreService::Observer {
   // The Profile object used for listening its events.
   Profile* profile_;
 
+  // App id to associate with the jump list.
+  std::wstring app_id_;
+
   // The directory which contains JumpList icons.
-  std::wstring icon_dir_;
+  FilePath icon_dir_;
 
   // Items in the "Most Visited" category of the application JumpList.
   ShellLinkItemList most_visited_pages_;

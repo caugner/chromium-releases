@@ -1,12 +1,15 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/glue/plugins/plugin_list.h"
 
+#include <algorithm>
+
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/time.h"
 #include "net/base/mime_util.h"
 #include "webkit/default_plugin/plugin_main.h"
@@ -29,9 +32,9 @@ bool PluginList::PluginsLoaded() {
   return plugins_loaded_;
 }
 
-void PluginList::ResetPluginsLoaded() {
+void PluginList::RefreshPlugins() {
   AutoLock lock(lock_);
-  plugins_loaded_ = false;
+  plugins_need_refresh_ = true;
 }
 
 void PluginList::AddExtraPluginPath(const FilePath& plugin_path) {
@@ -58,7 +61,18 @@ void PluginList::RegisterInternalPlugin(const PluginVersionInfo& info) {
   internal_plugins_.push_back(info);
 }
 
-bool PluginList::ReadPluginInfo(const FilePath &filename,
+void PluginList::UnregisterInternalPlugin(const FilePath& path) {
+  AutoLock lock(lock_);
+  for (size_t i = 0; i < internal_plugins_.size(); i++) {
+    if (internal_plugins_[i].path == path) {
+      internal_plugins_.erase(internal_plugins_.begin() + i);
+      return;
+    }
+  }
+  NOTREACHED();
+}
+
+bool PluginList::ReadPluginInfo(const FilePath& filename,
                                 WebPluginInfo* info,
                                 const PluginEntryPoints** entry_points) {
   {
@@ -94,6 +108,7 @@ bool PluginList::CreateWebPluginInfo(const PluginVersionInfo& pvi,
   info->desc = pvi.file_description;
   info->version = pvi.file_version;
   info->path = pvi.path;
+  info->enabled = true;
 
   for (size_t i = 0; i < mime_types.size(); ++i) {
     WebPluginMimeType mime_type;
@@ -122,7 +137,8 @@ bool PluginList::CreateWebPluginInfo(const PluginVersionInfo& pvi,
   return true;
 }
 
-PluginList::PluginList() : plugins_loaded_(false) {
+PluginList::PluginList()
+    : plugins_loaded_(false), plugins_need_refresh_(false) {
   PlatformInit();
 
 #if defined(OS_WIN)
@@ -153,9 +169,12 @@ void PluginList::LoadPlugins(bool refresh) {
   std::vector<PluginVersionInfo> internal_plugins;
   {
     AutoLock lock(lock_);
-    if (plugins_loaded_ && !refresh)
+    if (plugins_loaded_ && !refresh && !plugins_need_refresh_)
       return;
 
+    // Clear the refresh bit now, because it might get set again before we
+    // reach the end of the method.
+    plugins_need_refresh_ = false;
     extra_plugin_paths = extra_plugin_paths_;
     extra_plugin_dirs = extra_plugin_dirs_;
     internal_plugins = internal_plugins_;
@@ -164,6 +183,7 @@ void PluginList::LoadPlugins(bool refresh) {
   base::TimeTicks start_time = base::TimeTicks::Now();
 
   std::vector<WebPluginInfo> new_plugins;
+  std::set<FilePath> visited_plugins;
 
   std::vector<FilePath> directories_to_scan;
   GetPluginDirectories(&directories_to_scan);
@@ -177,16 +197,25 @@ void PluginList::LoadPlugins(bool refresh) {
     LoadPlugin(internal_plugins[i].path, &new_plugins);
   }
 
-  for (size_t i = 0; i < extra_plugin_paths.size(); ++i)
-    LoadPlugin(extra_plugin_paths[i], &new_plugins);
+  for (size_t i = 0; i < extra_plugin_paths.size(); ++i) {
+    const FilePath& path = extra_plugin_paths[i];
+    if (visited_plugins.find(path) != visited_plugins.end())
+      continue;
+    LoadPlugin(path, &new_plugins);
+    visited_plugins.insert(path);
+  }
 
   for (size_t i = 0; i < extra_plugin_dirs.size(); ++i) {
-    LoadPluginsFromDir(extra_plugin_dirs[i], &new_plugins);
+    LoadPluginsFromDir(extra_plugin_dirs[i], &new_plugins, &visited_plugins);
   }
 
   for (size_t i = 0; i < directories_to_scan.size(); ++i) {
-    LoadPluginsFromDir(directories_to_scan[i], &new_plugins);
+    LoadPluginsFromDir(directories_to_scan[i], &new_plugins, &visited_plugins);
   }
+
+#if defined OS_WIN
+  LoadPluginsFromRegistry(&new_plugins, &visited_plugins);
+#endif
 
   // Load the default plugin last.
   if (webkit_glue::IsDefaultPluginEnabled())
@@ -196,12 +225,22 @@ void PluginList::LoadPlugins(bool refresh) {
   base::TimeDelta elapsed = end_time - start_time;
   DLOG(INFO) << "Loaded plugin list in " << elapsed.InMilliseconds() << " ms.";
 
+  // Only update the data now since loading plugins can take a while.
   AutoLock lock(lock_);
+
+  // Go through and mark new plugins in the disabled list as, well, disabled.
+  for (std::vector<WebPluginInfo>::iterator it = new_plugins.begin();
+       it != new_plugins.end();
+       ++it) {
+    if (disabled_plugins_.find(it->path) != disabled_plugins_.end())
+      it->enabled = false;
+  }
+
   plugins_ = new_plugins;
   plugins_loaded_ = true;
 }
 
-void PluginList::LoadPlugin(const FilePath &path,
+void PluginList::LoadPlugin(const FilePath& path,
                             std::vector<WebPluginInfo>* plugins) {
   WebPluginInfo plugin_info;
   const PluginEntryPoints* entry_points;
@@ -238,7 +277,26 @@ bool PluginList::FindPlugin(const std::string& mime_type,
   LoadPlugins(false);
   AutoLock lock(lock_);
   for (size_t i = 0; i < plugins_.size(); ++i) {
-    if (SupportsType(plugins_[i], mime_type, allow_wildcard)) {
+    if (plugins_[i].enabled &&
+        SupportsType(plugins_[i], mime_type, allow_wildcard)) {
+      *info = plugins_[i];
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool PluginList::FindDisabledPlugin(const std::string& mime_type,
+                                    bool allow_wildcard,
+                                    WebPluginInfo* info) {
+  DCHECK(mime_type == StringToLowerASCII(mime_type));
+
+  LoadPlugins(false);
+  AutoLock lock(lock_);
+  for (size_t i = 0; i < plugins_.size(); ++i) {
+    if (!plugins_[i].enabled &&
+        SupportsType(plugins_[i], mime_type, allow_wildcard)) {
       *info = plugins_[i];
       return true;
     }
@@ -260,7 +318,8 @@ bool PluginList::FindPlugin(const GURL &url,
   std::string extension = StringToLowerASCII(std::string(path, last_dot+1));
 
   for (size_t i = 0; i < plugins_.size(); ++i) {
-    if (SupportsExtension(plugins_[i], extension, actual_mime_type)) {
+    if (plugins_[i].enabled &&
+        SupportsExtension(plugins_[i], extension, actual_mime_type)) {
       *info = plugins_[i];
       return true;
     }
@@ -313,6 +372,20 @@ void PluginList::GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
   *plugins = plugins_;
 }
 
+void PluginList::GetEnabledPlugins(bool refresh,
+                                   std::vector<WebPluginInfo>* plugins) {
+  LoadPlugins(refresh);
+
+  plugins->clear();
+  AutoLock lock(lock_);
+  for (std::vector<WebPluginInfo>::const_iterator it = plugins_.begin();
+       it != plugins_.end();
+       ++it) {
+    if (it->enabled)
+      plugins->push_back(*it);
+  }
+}
+
 bool PluginList::GetPluginInfo(const GURL& url,
                                const std::string& mime_type,
                                bool allow_wildcard,
@@ -324,6 +397,8 @@ bool PluginList::GetPluginInfo(const GURL& url,
     if (FindPlugin(url, actual_mime_type, &info2)) {
       found = true;
       *info = info2;
+    } else if (FindDisabledPlugin(mime_type, allow_wildcard, &info2)) {
+      found = false;
     }
   }
 
@@ -344,8 +419,57 @@ bool PluginList::GetPluginInfoByPath(const FilePath& plugin_path,
   return false;
 }
 
+bool PluginList::EnablePlugin(const FilePath& filename) {
+  AutoLock lock(lock_);
+
+  bool did_enable = false;
+
+  std::set<FilePath>::iterator entry = disabled_plugins_.find(filename);
+  if (entry == disabled_plugins_.end())
+    return did_enable;  // Early exit if plugin not in disabled list.
+
+  disabled_plugins_.erase(entry);  // Remove from disabled list.
+
+  // Set enabled flags if necessary.
+  for (std::vector<WebPluginInfo>::iterator it = plugins_.begin();
+       it != plugins_.end();
+       ++it) {
+    if (it->path == filename) {
+      DCHECK(!it->enabled);  // Should have been disabled.
+      it->enabled = true;
+      did_enable = true;
+    }
+  }
+
+  return did_enable;
+}
+
+bool PluginList::DisablePlugin(const FilePath& filename) {
+  AutoLock lock(lock_);
+
+  bool did_disable = false;
+
+  if (disabled_plugins_.find(filename) != disabled_plugins_.end())
+    return did_disable;  // Early exit if plugin already in disabled list.
+
+  disabled_plugins_.insert(filename);  // Add to disabled list.
+
+  // Unset enabled flags if necessary.
+  for (std::vector<WebPluginInfo>::iterator it = plugins_.begin();
+       it != plugins_.end();
+       ++it) {
+    if (it->path == filename) {
+      DCHECK(it->enabled);  // Should have been enabled.
+      it->enabled = false;
+      did_disable = true;
+    }
+  }
+
+  return did_disable;
+}
+
 void PluginList::Shutdown() {
   // TODO
 }
 
-} // namespace NPAPI
+}  // namespace NPAPI

@@ -5,6 +5,9 @@
   "enabled": true,
   "description": "",
   "permissions": [],
+  "allow_reload": false,
+  "order": 2,
+  "enabledIncognito": false,
   "content_scripts": [],
   "views": [
     {
@@ -17,5 +20,6 @@
       "render_proess_id": 0,
       "render_view_id": 0
     }
-  ]
+  ],
+  "hasPopupAction": false
 }

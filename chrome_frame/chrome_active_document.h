@@ -8,8 +8,10 @@
 #include <atlbase.h>
 #include <atlcom.h>
 #include <atlctl.h>
+#include <htiframe.h>
 #include <map>
 #include <mshtmcid.h>
+#include <perhist.h>
 
 #include "base/scoped_ptr.h"
 #include "base/scoped_comptr_win.h"
@@ -18,10 +20,13 @@
 #include "chrome_frame/chrome_frame_activex_base.h"
 #include "chrome_frame/com_type_info_holder.h"
 #include "chrome_frame/find_dialog.h"
+#include "chrome_frame/html_private_window_impl.h"
+#include "chrome_frame/html_window_impl.h"
 #include "chrome_frame/in_place_menu.h"
 #include "chrome_frame/ole_document_impl.h"
 #include "chrome_frame/resource.h"
 #include "chrome_frame/extra_system_apis.h"
+#include "chrome_frame/utils.h"
 
 class Thread;
 class TabProxy;
@@ -44,7 +49,63 @@ class ChromeActiveDocument;
 // current travel log entry
 #define INTERNAL_CMDID_REPLACE_CURRENT_TRAVEL_LOG_ENTRY_URL (40)
 
-#define INTERNAL_IE_CONTEXTMENU_VIEWSOURCE    (2139)
+// The following macro is to define the mapping of IE encoding menu item to
+// corresponding available encoding name in Chrome. For each encoding
+// definition, there are three fields.
+// The first one is the definition name of encoding menu item in IE.
+// The second one is execution id of the encoding menu item in IE, starting
+// from 3609(IDM_MIMECSET__FIRST__) to 3699(IDM_MIMECSET__LAST__) end. For
+// the details, please refer to mshtmcid.h.
+// The last one is the available encoding name of the IE encoding menu item
+// in Chrome. If the encoding menu item does not have corresponding encoding
+// in Chrome, it will be "unknown".
+// So far we don't support the encoding auto detect since we can not control
+// the status of encoding menu, such as toggle status of encoding auto detect
+// item on the encoding menu.
+#define INTERNAL_IE_ENCODINGMENU_IDS(V) \
+  V(INTERNAL_IE_ENCODINGMENU_ARABIC_ASMO708, 3609, "unknown") \
+  V(INTERNAL_IE_ENCODINGMENU_ARABIC_DOS, 3610, "unknown") \
+  V(INTERNAL_IE_ENCODINGMENU_ARABIC_ISO, 3611, "ISO-8859-6") \
+  V(INTERNAL_IE_ENCODINGMENU_ARABIC_WINDOWS, 3612, "windows-1256") \
+  V(INTERNAL_IE_ENCODINGMENU_BALTIC_ISO, 3614, "ISO-8859-4") \
+  V(INTERNAL_IE_ENCODINGMENU_BALTIC_WINDOWS, 3615, "windows-1257") \
+  V(INTERNAL_IE_ENCODINGMENU_CENTRAL_EUROPEAN_DOS, 3616, "unknown") \
+  V(INTERNAL_IE_ENCODINGMENU_CENTRAL_EUROPEAN_ISO, 3617, "ISO-8859-2") \
+  V(INTERNAL_IE_ENCODINGMENU_CENTRAL_EUROPEAN_WINDOWS, 3618, "windows-1250") \
+  V(INTERNAL_IE_ENCODINGMENU_CHINESE_SIMP_GB18030, 3619, "gb18030") \
+  V(INTERNAL_IE_ENCODINGMENU_CHINESE_SIMP_GB2312, 3620, "GBK") \
+  V(INTERNAL_IE_ENCODINGMENU_CHINESE_SIMP_HZ, 3621, "unknown") \
+  V(INTERNAL_IE_ENCODINGMENU_CHINESE_TRAD_BIG5, 3622, "Big5") \
+  V(INTERNAL_IE_ENCODINGMENU_CYRILLIC_DOS, 3623, "unknown") \
+  V(INTERNAL_IE_ENCODINGMENU_CYRILLIC_ISO, 3624, "ISO-8859-5") \
+  V(INTERNAL_IE_ENCODINGMENU_CYRILLIC_KOI8R, 3625, "KOI8-R") \
+  V(INTERNAL_IE_ENCODINGMENU_CYRILLIC_KOI8U, 3626, "KOI8-U") \
+  V(INTERNAL_IE_ENCODINGMENU_CYRILLIC_WINDOWS, 3627, "windows-1251") \
+  V(INTERNAL_IE_ENCODINGMENU_GREEK_ISO, 3628, "ISO-8859-7") \
+  V(INTERNAL_IE_ENCODINGMENU_GREEK_WINDOWS, 3629, "windows-1253") \
+  V(INTERNAL_IE_ENCODINGMENU_HEBREW_DOS, 3630, "unknown") \
+  V(INTERNAL_IE_ENCODINGMENU_HEBREW_ISO_LOGICAL, 3631, "ISO-8859-8-I") \
+  V(INTERNAL_IE_ENCODINGMENU_HEBREW_ISO_VISUAL, 3632, "ISO-8859-8") \
+  V(INTERNAL_IE_ENCODINGMENU_HEBREW_WINDOWS, 3633, "windows-1255") \
+  V(INTERNAL_IE_ENCODINGMENU_JAPAN_AUTOSELECT, 3634, "ISO-2022-JP") \
+  V(INTERNAL_IE_ENCODINGMENU_JAPAN_EUC, 3635, "EUC-JP") \
+  V(INTERNAL_IE_ENCODINGMENU_JAPAN_SHIFT_JIS, 3636, "Shift_JIS") \
+  V(INTERNAL_IE_ENCODINGMENU_KOREA, 3637, "windows-949") \
+  V(INTERNAL_IE_ENCODINGMENU_THAI, 3638, "windows-874") \
+  V(INTERNAL_IE_ENCODINGMENU_TURKISH_ISO, 3639, "windows-1254") \
+  V(INTERNAL_IE_ENCODINGMENU_TURKISH_WINDOWS, 3640, "windows-1254") \
+  V(INTERNAL_IE_ENCODINGMENU_UTF8, 3641, "UTF-8") \
+  V(INTERNAL_IE_ENCODINGMENU_USERDEFINED, 3642, "windows-1252") \
+  V(INTERNAL_IE_ENCODINGMENU_VIETNAMESE, 3643, "windows-1258") \
+  V(INTERNAL_IE_ENCODINGMENU_WEST_EUROPEAN_ISO8859_1, 3644, "ISO-8859-1") \
+  V(INTERNAL_IE_ENCODINGMENU_WEST_EUROPEAN_WINDOWS, 3645, "windows-1252") \
+  V(INTERNAL_IE_ENCODINGMENU_AUTODETECT, 3699, "unknown")
+
+#define DEFINE_ENCODING_ID(encoding_name, id, chrome_name) \
+    const DWORD encoding_name = id;
+  INTERNAL_IE_ENCODINGMENU_IDS(DEFINE_ENCODING_ID)
+#undef DEFINE_ENCODING_ID
+extern const DWORD kIEEncodingIdArray[];
 
 #ifndef SBCMDID_MIXEDZONE
 // This command is sent by the frame to allow the document to return the URL
@@ -54,6 +115,19 @@ class ChromeActiveDocument;
 #define SBCMDID_MIXEDZONE                   39
 #endif  // SBCMDID_MIXEDZONE
 
+// From MSDN:
+// Controlling Navigation: The fact that a document can navigate on its own
+// implies that it will also take care of updating the navigation history.
+// In Internet Explorer 6 and later, the DocObject can indicate to the client
+// site that it can navigate using CGID_DocHostCmdPriv (a privately defined
+// command group GUID) and the DOCHOST_DOCCANNAVIGATE command. A pointer to
+// the object that implements the IHTMLWindow2 interface is passed with the
+// command in the VARIANTARG* parameter pvaIn. (Set pvaIn to NULL if the
+// document cannot perform its own navigation.)
+#define DOCHOST_DOCCANNAVIGATE                      (0)
+
+#define DOCHOST_DISPLAY_PRIVACY                      (75)
+
 // This macro should be defined in the public section of the class.
 #define BEGIN_EXEC_COMMAND_MAP(theClass) \
   public: \
@@ -61,34 +135,57 @@ class ChromeActiveDocument;
                               DWORD cmd_exec_opt, VARIANT* in_args, \
                               VARIANT* out_args) { \
    HRESULT hr = OLECMDERR_E_NOTSUPPORTED; \
-   switch (command_id) {
+   do {
 
-
-#define EXEC_COMMAND_HANDLER(id, handler) \
-  case id: { \
+#define EXEC_COMMAND_HANDLER(group, id, handler)                              \
+  if ((id == command_id) && ((group != NULL && cmd_group_guid != NULL && \
+       IsEqualGUID(*(GUID*)group,*cmd_group_guid)) || \
+       (group == NULL && cmd_group_guid == NULL))) {  \
     hr = S_OK;  \
     handler(cmd_group_guid, command_id, cmd_exec_opt, in_args, out_args);  \
     break;  \
   }
 
-#define EXEC_COMMAND_HANDLER_NO_ARGS(id, handler) \
-  case id: { \
+#define EXEC_COMMAND_HANDLER_NO_ARGS(group, id, handler) \
+  if ((id == command_id) && ((group != NULL && cmd_group_guid != NULL && \
+       IsEqualGUID(*(GUID*)group,*cmd_group_guid)) || \
+       (group == NULL && cmd_group_guid == NULL))) {  \
     hr = S_OK;  \
     handler();  \
     break;  \
   }
 
-#define EXEC_COMMAND_HANDLER_GENERIC(id, code) \
-  case id: { \
+#define EXEC_COMMAND_HANDLER_GENERIC(group, id, code) \
+  if ((id == command_id) && ((group != NULL && cmd_group_guid != NULL && \
+       IsEqualGUID(*(GUID*)group,*cmd_group_guid)) || \
+       (group == NULL && cmd_group_guid == NULL))) {  \
     hr = S_OK;  \
     code;  \
     break;  \
   }
 
-#define END_EXEC_COMMAND_MAP()  \
-    default: \
+#define EXEC_GROUP_COMMANDS_HANDLER(group, group_commands, handler) \
+  do { \
+    const DWORD* commands = group_commands; \
+    bool id_in_group_commands = false; \
+    while (*commands) { \
+      if (*commands == command_id) { \
+        id_in_group_commands = true; \
+        break; \
+      } \
+      commands++; \
+    } \
+    if (id_in_group_commands && ((group != NULL && cmd_group_guid != NULL && \
+        IsEqualGUID(*(GUID*)group,*cmd_group_guid)) || \
+        (group == NULL && cmd_group_guid == NULL))) { \
+      hr = S_OK; \
+      handler(cmd_group_guid, command_id, cmd_exec_opt, in_args, out_args); \
       break; \
-  } \
+    } \
+  } while (0);
+
+#define END_EXEC_COMMAND_MAP()  \
+  } while (0); \
   return hr; \
 }
 
@@ -97,17 +194,22 @@ class ChromeActiveDocument;
 // Chrome.exe (via the Chrome IPC-based automation mechanism) for the actual
 // rendering
 class ATL_NO_VTABLE ChromeActiveDocument
-     : public ChromeFrameActivexBase<ChromeActiveDocument,
-                                     CLSID_ChromeActiveDocument>,
-       public IOleDocumentImpl<ChromeActiveDocument>,
-       public IOleDocumentViewImpl<ChromeActiveDocument>,
-       public IPersistMoniker,
-       public IOleCommandTarget,
-       public InPlaceMenu<ChromeActiveDocument>,
-       public IWebBrowserEventsUrlService {
+    : public ChromeFrameActivexBase<ChromeActiveDocument,
+                                    CLSID_ChromeActiveDocument>,
+      public IOleDocumentImpl<ChromeActiveDocument>,
+      public IOleDocumentViewImpl<ChromeActiveDocument>,
+      public IPersistMoniker,
+      public IOleCommandTarget,
+      public InPlaceMenu<ChromeActiveDocument>,
+      public IWebBrowserEventsUrlService,
+      public IPersistHistory,
+      public IEnumPrivacyRecords,
+      public HTMLWindowImpl<IHTMLWindow2>,
+      public HTMLPrivateWindowImpl<IHTMLPrivateWindow> {
  public:
   typedef ChromeFrameActivexBase<ChromeActiveDocument,
-      CLSID_ChromeActiveDocument> Base;
+      CLSID_ChromeActiveDocument> BaseActiveX;
+
   ChromeActiveDocument();
   ~ChromeActiveDocument();
 
@@ -119,35 +221,54 @@ BEGIN_COM_MAP(ChromeActiveDocument)
   COM_INTERFACE_ENTRY(IPersistMoniker)
   COM_INTERFACE_ENTRY(IOleCommandTarget)
   COM_INTERFACE_ENTRY(IWebBrowserEventsUrlService)
-  COM_INTERFACE_ENTRY_CHAIN(Base)
+  COM_INTERFACE_ENTRY(IPersist)
+  COM_INTERFACE_ENTRY(IPersistHistory)
+  COM_INTERFACE_ENTRY(IHTMLFramesCollection2)
+  COM_INTERFACE_ENTRY(IHTMLWindow2)
+  COM_INTERFACE_ENTRY(IHTMLPrivateWindow)
+  COM_INTERFACE_ENTRY(IEnumPrivacyRecords)
+  COM_INTERFACE_ENTRY_CHAIN(BaseActiveX)
 END_COM_MAP()
 
 BEGIN_MSG_MAP(ChromeActiveDocument)
-  CHAIN_MSG_MAP(Base)
+  MESSAGE_HANDLER(WM_FIRE_PRIVACY_CHANGE_NOTIFICATION, OnFirePrivacyChange)
+  COMMAND_ID_HANDLER(IDC_FORWARD, OnForward)
+  COMMAND_ID_HANDLER(IDC_BACK, OnBack)
+  CHAIN_MSG_MAP(BaseActiveX)
 END_MSG_MAP()
 
   HRESULT FinalConstruct();
 
-#define FORWARD_TAB_COMMAND(id, command) \
-  EXEC_COMMAND_HANDLER_GENERIC(id, GetTabProxy() ? GetTabProxy()->command() : 1)
+#define FORWARD_TAB_COMMAND(group, id, command) \
+  EXEC_COMMAND_HANDLER_GENERIC(group, id, GetTabProxy() ? \
+    GetTabProxy()->command() : 1)
 
 BEGIN_EXEC_COMMAND_MAP(ChromeActiveDocument)
-  EXEC_COMMAND_HANDLER_GENERIC(OLECMDID_PRINT, automation_client_->PrintTab())
-  EXEC_COMMAND_HANDLER_NO_ARGS(OLECMDID_FIND, OnFindInPage)
-  EXEC_COMMAND_HANDLER_NO_ARGS(IDM_FIND, OnFindInPage)
-  EXEC_COMMAND_HANDLER_NO_ARGS(INTERNAL_IE_CONTEXTMENU_VIEWSOURCE, OnViewSource)
-  FORWARD_TAB_COMMAND(OLECMDID_SELECTALL, SelectAll)
-  FORWARD_TAB_COMMAND(OLECMDID_CUT, Cut)
-  FORWARD_TAB_COMMAND(OLECMDID_COPY, Copy)
-  FORWARD_TAB_COMMAND(OLECMDID_PASTE, Paste)
-  FORWARD_TAB_COMMAND(OLECMDID_REFRESH, ReloadAsync)
-  FORWARD_TAB_COMMAND(OLECMDID_STOP, StopAsync)
-  EXEC_COMMAND_HANDLER(SBCMDID_MIXEDZONE, OnDetermineSecurityZone)
-  EXEC_COMMAND_HANDLER(IDM_BASELINEFONT1, SetPageFontSize)
-  EXEC_COMMAND_HANDLER(IDM_BASELINEFONT2, SetPageFontSize)
-  EXEC_COMMAND_HANDLER(IDM_BASELINEFONT3, SetPageFontSize)
-  EXEC_COMMAND_HANDLER(IDM_BASELINEFONT4, SetPageFontSize)
-  EXEC_COMMAND_HANDLER(IDM_BASELINEFONT5, SetPageFontSize)
+  EXEC_COMMAND_HANDLER_GENERIC(NULL, OLECMDID_PRINT,
+                               automation_client_->PrintTab())
+  EXEC_COMMAND_HANDLER_NO_ARGS(NULL, OLECMDID_FIND, OnFindInPage)
+  EXEC_COMMAND_HANDLER_NO_ARGS(&CGID_MSHTML, IDM_FIND, OnFindInPage)
+  EXEC_COMMAND_HANDLER_NO_ARGS(&CGID_MSHTML, IDM_VIEWSOURCE, OnViewSource)
+  FORWARD_TAB_COMMAND(NULL, OLECMDID_SELECTALL, SelectAll)
+  FORWARD_TAB_COMMAND(NULL, OLECMDID_CUT, Cut)
+  FORWARD_TAB_COMMAND(NULL, OLECMDID_COPY, Copy)
+  FORWARD_TAB_COMMAND(NULL, OLECMDID_PASTE, Paste)
+  FORWARD_TAB_COMMAND(NULL, OLECMDID_STOP, StopAsync)
+  FORWARD_TAB_COMMAND(NULL, OLECMDID_SAVEAS, SaveAsAsync)
+  EXEC_COMMAND_HANDLER(NULL, OLECMDID_REFRESH, OnRefreshPage)
+  EXEC_COMMAND_HANDLER(&CGID_Explorer, SBCMDID_MIXEDZONE,
+                       OnDetermineSecurityZone)
+  EXEC_COMMAND_HANDLER(&CGID_MSHTML, IDM_BASELINEFONT1, SetPageFontSize)
+  EXEC_COMMAND_HANDLER(&CGID_MSHTML, IDM_BASELINEFONT2, SetPageFontSize)
+  EXEC_COMMAND_HANDLER(&CGID_MSHTML, IDM_BASELINEFONT3, SetPageFontSize)
+  EXEC_COMMAND_HANDLER(&CGID_MSHTML, IDM_BASELINEFONT4, SetPageFontSize)
+  EXEC_COMMAND_HANDLER(&CGID_MSHTML, IDM_BASELINEFONT5, SetPageFontSize)
+
+  EXEC_GROUP_COMMANDS_HANDLER(&CGID_MSHTML, kIEEncodingIdArray,
+                              OnEncodingChange)
+
+  EXEC_COMMAND_HANDLER_NO_ARGS(&CGID_ShellDocView, DOCHOST_DISPLAY_PRIVACY,
+                               OnDisplayPrivacyInfo)
 END_EXEC_COMMAND_MAP()
 
   // IPCs from automation server.
@@ -166,7 +287,6 @@ END_EXEC_COMMAND_MAP()
                     LONG index,
                     HWND parent_window,
                     LPCRECT pos);
-  STDMETHOD(InPlaceDeactivate)(void);
 
   // Override IOleInPlaceActiveObjectImpl::OnDocWindowActivate
   STDMETHOD(OnDocWindowActivate)(BOOL activate);
@@ -196,8 +316,17 @@ END_EXEC_COMMAND_MAP()
                   VARIANT* in_args,
                   VARIANT* out_args);
 
+  // IPersistHistory
+  STDMETHOD(LoadHistory)(IStream* stream, IBindCtx* bind_context);
+  STDMETHOD(SaveHistory)(IStream* stream);
+  STDMETHOD(SetPositionCookie)(DWORD position_cookie);
+  STDMETHOD(GetPositionCookie)(DWORD* position_cookie);
+
   // IWebBrowserEventsUrlService methods
   STDMETHOD(GetUrlForEvents)(BSTR* url);
+
+  // IHTMLPrivateWindow methods
+  STDMETHOD(GetAddressBarUrl)(BSTR* url);
 
   // ChromeFrameActivexBase overrides
   HRESULT IOleObject_SetClientSite(IOleClientSite* client_site);
@@ -206,18 +335,24 @@ END_EXEC_COMMAND_MAP()
 
   // Callbacks from ChromeFramePlugin<T>
   bool PreProcessContextMenu(HMENU menu);
-  bool HandleContextMenuCommand(UINT cmd);
+  bool HandleContextMenuCommand(UINT cmd, const IPC::ContextMenuParams& params);
 
-  // Should connections initiated by this class try to block
-  // responses served with the X-Frame-Options header?
-  bool is_frame_busting_enabled();
+  // ChromeFramePlugin overrides.
+  virtual void OnAutomationServerReady();
+
+  // IEnumPrivacyRecords
+  STDMETHOD(Reset)();
+  STDMETHOD(GetSize)(unsigned long* size);
+  STDMETHOD(GetPrivacyImpacted)(BOOL* privacy_impacted);
+  STDMETHOD(Next)(BSTR* url, BSTR* policy, long* reserved,
+                  unsigned long* flags);
 
  protected:
   // ChromeFrameActivexBase overrides
   virtual void OnOpenURL(int tab_handle, const GURL& url_to_open,
                          const GURL& referrer, int open_disposition);
-
-  virtual void OnLoad(int tab_handle, const GURL& url);
+  virtual void OnAttachExternalTab(int tab_handle,
+      const IPC::AttachExternalTabParams& params);
   virtual void OnGoToHistoryEntryOffset(int tab_handle, int offset);
 
   // A helper method that updates our internal navigation state
@@ -237,12 +372,13 @@ END_EXEC_COMMAND_MAP()
   void OnDetermineSecurityZone(const GUID* cmd_group_guid, DWORD command_id,
                                DWORD cmd_exec_opt, VARIANT* in_args,
                                VARIANT* out_args);
+  void OnDisplayPrivacyInfo();
 
   // Call exec on our site's command target
   HRESULT IEExec(const GUID* cmd_group_guid, DWORD command_id,
                  DWORD cmd_exec_opt, VARIANT* in_args, VARIANT* out_args);
 
-  bool IsUrlZoneRestricted(const std::wstring& url);
+  unsigned long MapUrlToZone(const wchar_t* url);
 
   // Parses the URL and returns information whether it is a new navigation and
   // the actual url after stripping out the cf: prefix if any.
@@ -262,6 +398,26 @@ END_EXEC_COMMAND_MAP()
                           DWORD cmd_exec_opt,
                           VARIANT* in_args,
                           VARIANT* out_args);
+
+  // IOleCommandTarget handler for page refresh command
+  HRESULT OnRefreshPage(const GUID* cmd_group_guid, DWORD command_id,
+      DWORD cmd_exec_opt, VARIANT* in_args, VARIANT* out_args);
+
+  // Handler to set the page encoding info in Chrome.
+  HRESULT OnEncodingChange(const GUID* cmd_group_guid, DWORD command_id,
+                           DWORD cmd_exec_opt, VARIANT* in_args,
+                           VARIANT* out_args);
+
+  // Get the travel log from the client site
+  HRESULT GetBrowserServiceAndTravelLog(IBrowserService** browser_service,
+                                        ITravelLog** travel_log);
+  LRESULT OnForward(WORD notify_code, WORD id, HWND control_window,
+                    BOOL& bHandled);
+  LRESULT OnBack(WORD notify_code, WORD id, HWND control_window,
+                 BOOL& bHandled);
+
+  LRESULT OnFirePrivacyChange(UINT message, WPARAM wparam, LPARAM lparam,
+                              BOOL& handled);
 
  protected:
   typedef std::map<int, bool> EnabledCommandsMap;
@@ -286,12 +442,20 @@ END_EXEC_COMMAND_MAP()
   bool is_automation_client_reused_;
 
   ScopedComPtr<IInternetSecurityManager> security_manager_;
+  ScopedComPtr<INewWindowManager> popup_manager_;
+  bool popup_allowed_;
+  HACCEL accelerator_table_;
+
+  // Contains privacy data retrieved from the UrlmonUrlRequestManager. This
+  // is used to return privacy data in response to the View->Privacy policy
+  // command.
+  UrlmonUrlRequestManager::PrivacyInfo privacy_info_;
+  UrlmonUrlRequestManager::PrivacyInfo::PrivacyRecords::iterator
+      next_privacy_record_;
 
  public:
   ScopedComPtr<IOleInPlaceFrame> in_place_frame_;
   OLEINPLACEFRAMEINFO frame_info_;
 };
-
-OBJECT_ENTRY_AUTO(__uuidof(ChromeActiveDocument), ChromeActiveDocument)
 
 #endif  // CHROME_FRAME_CHROME_ACTIVE_DOCUMENT_H_

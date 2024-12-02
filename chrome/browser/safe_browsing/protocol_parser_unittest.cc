@@ -17,7 +17,7 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddChunk) {
   // Run the parse.
   SafeBrowsingProtocolParser parser;
   bool re_key = false;
-  std::deque<SBChunk> chunks;
+  SBChunkList chunks;
   bool result = parser.ParseChunk(add_chunk.data(),
                                   static_cast<int>(add_chunk.length()),
                                   "", "",  &re_key, &chunks);
@@ -29,12 +29,14 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddChunk) {
 
   EXPECT_EQ(chunks[0].hosts[0].host, 0x61616161);
   SBEntry* entry = chunks[0].hosts[0].entry;
-  EXPECT_EQ(entry->type(), SBEntry::ADD_PREFIX);
+  EXPECT_TRUE(entry->IsAdd());
+  EXPECT_TRUE(entry->IsPrefix());
   EXPECT_EQ(entry->prefix_count(), 0);
 
   EXPECT_EQ(chunks[0].hosts[1].host, 0x31313131);
   entry = chunks[0].hosts[1].entry;
-  EXPECT_EQ(entry->type(), SBEntry::ADD_PREFIX);
+  EXPECT_TRUE(entry->IsAdd());
+  EXPECT_TRUE(entry->IsPrefix());
   EXPECT_EQ(entry->prefix_count(), 3);
   EXPECT_EQ(entry->PrefixAt(0), 0x32323232);
   EXPECT_EQ(entry->PrefixAt(1), 0x33333333);
@@ -42,12 +44,11 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddChunk) {
 
   EXPECT_EQ(chunks[0].hosts[2].host, 0x37373737);
   entry = chunks[0].hosts[2].entry;
-  EXPECT_EQ(entry->type(), SBEntry::ADD_PREFIX);
+  EXPECT_TRUE(entry->IsAdd());
+  EXPECT_TRUE(entry->IsPrefix());
   EXPECT_EQ(entry->prefix_count(), 2);
   EXPECT_EQ(entry->PrefixAt(0), 0x38383838);
   EXPECT_EQ(entry->PrefixAt(1), 0x39393939);
-
-  safe_browsing_util::FreeChunks(&chunks);
 }
 
 // Test parsing one add chunk with full hashes.
@@ -67,7 +68,7 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddFullChunk) {
   // Run the parse.
   SafeBrowsingProtocolParser parser;
   bool re_key = false;
-  std::deque<SBChunk> chunks;
+  SBChunkList chunks;
   bool result = parser.ParseChunk(add_chunk.data(),
                                   static_cast<int>(add_chunk.length()),
                                   "", "", &re_key, &chunks);
@@ -79,12 +80,11 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddFullChunk) {
 
   EXPECT_EQ(chunks[0].hosts[0].host, 0x61616161);
   SBEntry* entry = chunks[0].hosts[0].entry;
-  EXPECT_EQ(entry->type(), SBEntry::ADD_FULL_HASH);
+  EXPECT_TRUE(entry->IsAdd());
+  EXPECT_FALSE(entry->IsPrefix());
   EXPECT_EQ(entry->prefix_count(), 2);
   EXPECT_TRUE(entry->FullHashAt(0) == full_hash1);
   EXPECT_TRUE(entry->FullHashAt(1) == full_hash2);
-
-  safe_browsing_util::FreeChunks(&chunks);
 }
 
 // Test parsing multiple add chunks. We'll use the same chunk as above, and add
@@ -97,7 +97,7 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddChunks) {
   // Run the parse.
   SafeBrowsingProtocolParser parser;
   bool re_key = false;
-  std::deque<SBChunk> chunks;
+  SBChunkList chunks;
   bool result = parser.ParseChunk(add_chunk.data(),
                                   static_cast<int>(add_chunk.length()),
                                   "", "", &re_key, &chunks);
@@ -109,12 +109,14 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddChunks) {
 
   EXPECT_EQ(chunks[0].hosts[0].host, 0x61616161);
   SBEntry* entry = chunks[0].hosts[0].entry;
-  EXPECT_EQ(entry->type(), SBEntry::ADD_PREFIX);
+  EXPECT_TRUE(entry->IsAdd());
+  EXPECT_TRUE(entry->IsPrefix());
   EXPECT_EQ(entry->prefix_count(), 0);
 
   EXPECT_EQ(chunks[0].hosts[1].host, 0x31313131);
   entry = chunks[0].hosts[1].entry;
-  EXPECT_EQ(entry->type(), SBEntry::ADD_PREFIX);
+  EXPECT_TRUE(entry->IsAdd());
+  EXPECT_TRUE(entry->IsPrefix());
   EXPECT_EQ(entry->prefix_count(), 3);
   EXPECT_EQ(entry->PrefixAt(0), 0x32323232);
   EXPECT_EQ(entry->PrefixAt(1), 0x33333333);
@@ -122,7 +124,8 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddChunks) {
 
   EXPECT_EQ(chunks[0].hosts[2].host, 0x37373737);
   entry = chunks[0].hosts[2].entry;
-  EXPECT_EQ(entry->type(), SBEntry::ADD_PREFIX);
+  EXPECT_TRUE(entry->IsAdd());
+  EXPECT_TRUE(entry->IsPrefix());
   EXPECT_EQ(entry->prefix_count(), 2);
   EXPECT_EQ(entry->PrefixAt(0), 0x38383838);
   EXPECT_EQ(entry->PrefixAt(1), 0x39393939);
@@ -133,12 +136,11 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddChunks) {
 
   EXPECT_EQ(chunks[1].hosts[0].host, 0x35353535);
   entry = chunks[1].hosts[0].entry;
-  EXPECT_EQ(entry->type(), SBEntry::ADD_PREFIX);
+  EXPECT_TRUE(entry->IsAdd());
+  EXPECT_TRUE(entry->IsPrefix());
   EXPECT_EQ(entry->prefix_count(), 2);
   EXPECT_EQ(entry->PrefixAt(0), 0x70707070);
   EXPECT_EQ(entry->PrefixAt(1), 0x67676767);
-
-  safe_browsing_util::FreeChunks(&chunks);
 }
 
 // Test parsing one add chunk where a hostkey spans several entries.
@@ -155,7 +157,7 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddBigChunk) {
 
   SafeBrowsingProtocolParser parser;
   bool re_key = false;
-  std::deque<SBChunk> chunks;
+  SBChunkList chunks;
   bool result = parser.ParseChunk(add_chunk.data(),
                                   static_cast<int>(add_chunk.length()),
                                   "", "", &re_key, &chunks);
@@ -169,8 +171,6 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddBigChunk) {
   const SBChunkHost& host = chunks[0].hosts[0];
   EXPECT_EQ(host.host, 0x61616161);
   EXPECT_EQ(host.entry->prefix_count(), 260);
-
-  safe_browsing_util::FreeChunks(&chunks);
 }
 
 // Test parsing one sub chunk.
@@ -183,7 +183,7 @@ TEST(SafeBrowsingProtocolParsingTest, TestSubChunk) {
   // Run the parse.
   SafeBrowsingProtocolParser parser;
   bool re_key = false;
-  std::deque<SBChunk> chunks;
+  SBChunkList chunks;
   bool result = parser.ParseChunk(sub_chunk.data(),
                                   static_cast<int>(sub_chunk.length()),
                                   "", "", &re_key, &chunks);
@@ -195,13 +195,15 @@ TEST(SafeBrowsingProtocolParsingTest, TestSubChunk) {
 
   EXPECT_EQ(chunks[0].hosts[0].host, 0x61616161);
   SBEntry* entry = chunks[0].hosts[0].entry;
-  EXPECT_EQ(entry->type(), SBEntry::SUB_PREFIX);
+  EXPECT_TRUE(entry->IsSub());
+  EXPECT_TRUE(entry->IsPrefix());
   EXPECT_EQ(entry->chunk_id(), 0x6b6b6b6b);
   EXPECT_EQ(entry->prefix_count(), 0);
 
   EXPECT_EQ(chunks[0].hosts[1].host, 0x31313131);
   entry = chunks[0].hosts[1].entry;
-  EXPECT_EQ(entry->type(), SBEntry::SUB_PREFIX);
+  EXPECT_TRUE(entry->IsSub());
+  EXPECT_TRUE(entry->IsPrefix());
   EXPECT_EQ(entry->prefix_count(), 3);
   EXPECT_EQ(entry->ChunkIdAtPrefix(0), 0x7a7a7a7a);
   EXPECT_EQ(entry->PrefixAt(0), 0x32323232);
@@ -212,14 +214,13 @@ TEST(SafeBrowsingProtocolParsingTest, TestSubChunk) {
 
   EXPECT_EQ(chunks[0].hosts[2].host, 0x37373737);
   entry = chunks[0].hosts[2].entry;
-  EXPECT_EQ(entry->type(), SBEntry::SUB_PREFIX);
+  EXPECT_TRUE(entry->IsSub());
+  EXPECT_TRUE(entry->IsPrefix());
   EXPECT_EQ(entry->prefix_count(), 2);
   EXPECT_EQ(entry->ChunkIdAtPrefix(0), 0x79797979);
   EXPECT_EQ(entry->PrefixAt(0), 0x38383838);
   EXPECT_EQ(entry->ChunkIdAtPrefix(1), 0x79797979);
   EXPECT_EQ(entry->PrefixAt(1), 0x39393939);
-
-  safe_browsing_util::FreeChunks(&chunks);
 }
 
 // Test parsing one sub chunk with full hashes.
@@ -241,7 +242,7 @@ TEST(SafeBrowsingProtocolParsingTest, TestSubFullChunk) {
   // Run the parse.
   SafeBrowsingProtocolParser parser;
   bool re_key = false;
-  std::deque<SBChunk> chunks;
+  SBChunkList chunks;
   bool result = parser.ParseChunk(sub_chunk.data(),
                                   static_cast<int>(sub_chunk.length()),
                                   "", "", &re_key, &chunks);
@@ -253,14 +254,13 @@ TEST(SafeBrowsingProtocolParsingTest, TestSubFullChunk) {
 
   EXPECT_EQ(chunks[0].hosts[0].host, 0x61616161);
   SBEntry* entry = chunks[0].hosts[0].entry;
-  EXPECT_EQ(entry->type(), SBEntry::SUB_FULL_HASH);
+  EXPECT_TRUE(entry->IsSub());
+  EXPECT_FALSE(entry->IsPrefix());
   EXPECT_EQ(entry->prefix_count(), 2);
   EXPECT_EQ(entry->ChunkIdAtPrefix(0), 0x79797979);
   EXPECT_TRUE(entry->FullHashAt(0) == full_hash1);
   EXPECT_EQ(entry->ChunkIdAtPrefix(1), 0x7a7a7a7a);
   EXPECT_TRUE(entry->FullHashAt(1) == full_hash2);
-
-  safe_browsing_util::FreeChunks(&chunks);
 }
 
 // Test parsing the SafeBrowsing update response.
@@ -468,7 +468,7 @@ TEST(SafeBrowsingProtocolParsingTest, TestGetHashWithMac) {
     0xf9, 0x44, 0x4f, 0x28, 0xb4, 0xeb, 0x45
   };
 
-  const unsigned char hash_result [] = {
+  const unsigned char hash_result[] = {
     0x17, 0x7f, 0x03, 0x42, 0x28, 0x1c, 0x31, 0xb9,
     0x0b, 0x1c, 0x7b, 0x9d, 0xaf, 0x7b, 0x43, 0x99,
     0x10, 0xc1, 0xab, 0xe3, 0x1b, 0x35, 0x80, 0x38,
@@ -597,7 +597,7 @@ TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeAddChunk) {
   std::string add_chunk("a:1:4:0\n");
   SafeBrowsingProtocolParser parser;
   bool re_key = false;
-  std::deque<SBChunk> chunks;
+  SBChunkList chunks;
 
   bool result = parser.ParseChunk(add_chunk.data(),
                                   static_cast<int>(add_chunk.length()),
@@ -606,8 +606,6 @@ TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeAddChunk) {
   EXPECT_EQ(chunks.size(), static_cast<size_t>(1));
   EXPECT_EQ(chunks[0].chunk_number, 1);
   EXPECT_EQ(chunks[0].hosts.size(), static_cast<size_t>(0));
-
-  safe_browsing_util::FreeChunks(&chunks);
 
   // Now test a zero size chunk in between normal chunks.
   chunks.clear();
@@ -635,8 +633,6 @@ TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeAddChunk) {
   EXPECT_EQ(chunks[2].hosts.size(), static_cast<size_t>(1));
   EXPECT_EQ(chunks[2].hosts[0].host, 0x65666163);
   EXPECT_EQ(chunks[2].hosts[0].entry->PrefixAt(0), 0x66656562);
-
-  safe_browsing_util::FreeChunks(&chunks);
 }
 
 // Test parsing a zero sized sub chunk.
@@ -644,7 +640,7 @@ TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeSubChunk) {
   std::string sub_chunk("s:9:4:0\n");
   SafeBrowsingProtocolParser parser;
   bool re_key = false;
-  std::deque<SBChunk> chunks;
+  SBChunkList chunks;
 
   bool result = parser.ParseChunk(sub_chunk.data(),
                                   static_cast<int>(sub_chunk.length()),
@@ -653,8 +649,6 @@ TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeSubChunk) {
   EXPECT_EQ(chunks.size(), static_cast<size_t>(1));
   EXPECT_EQ(chunks[0].chunk_number, 9);
   EXPECT_EQ(chunks[0].hosts.size(), static_cast<size_t>(0));
-
-  safe_browsing_util::FreeChunks(&chunks);
   chunks.clear();
 
   // Test parsing a zero sized sub chunk mixed in with content carrying chunks.
@@ -686,8 +680,6 @@ TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeSubChunk) {
   EXPECT_EQ(chunks[2].hosts[1].entry->prefix_count(), 1);
   EXPECT_EQ(chunks[2].hosts[1].entry->PrefixAt(0), 0x6f6e6d6c);
   EXPECT_EQ(chunks[2].hosts[1].entry->ChunkIdAtPrefix(0), 0x35363738);
-
-  safe_browsing_util::FreeChunks(&chunks);
 }
 
 TEST(SafeBrowsingProtocolParsingTest, TestVerifyUpdateMac) {
@@ -753,7 +745,7 @@ TEST(SafeBrowsingProtocolParsingTest, TestVerifyChunkMac) {
   };
 
   bool re_key = false;
-  std::deque<SBChunk> chunks;
+  SBChunkList chunks;
   const std::string key("v_aDSz6jI92WeHCOoZ07QA==");
   const std::string mac("W9Xp2fUcQ9V66If6Cvsrstpa4Kk=");
 
@@ -761,6 +753,4 @@ TEST(SafeBrowsingProtocolParsingTest, TestVerifyChunkMac) {
                                 sizeof(chunk), key, mac,
                                 &re_key, &chunks));
   EXPECT_FALSE(re_key);
-
-  safe_browsing_util::FreeChunks(&chunks);
 }

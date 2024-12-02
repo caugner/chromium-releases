@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,9 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/string_util.h"
 #include "base/time.h"
+#include "net/base/net_log.h"
 #include "net/base/net_errors.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
@@ -31,15 +33,14 @@ static const int kTCPConnectJobTimeoutInSeconds = 240; // 4 minutes.
 
 TCPConnectJob::TCPConnectJob(
     const std::string& group_name,
-    const HostResolver::RequestInfo& resolve_info,
-    const ClientSocketHandle* handle,
+    const TCPSocketParams& params,
     base::TimeDelta timeout_duration,
     ClientSocketFactory* client_socket_factory,
     HostResolver* host_resolver,
     Delegate* delegate,
-    LoadLog* load_log)
-    : ConnectJob(group_name, handle, timeout_duration, delegate, load_log),
-      resolve_info_(resolve_info),
+    const BoundNetLog& net_log)
+    : ConnectJob(group_name, timeout_duration, delegate, net_log),
+      params_(params),
       client_socket_factory_(client_socket_factory),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           callback_(this,
@@ -67,6 +68,7 @@ LoadState TCPConnectJob::GetLoadState() const {
 
 int TCPConnectJob::ConnectInternal() {
   next_state_ = kStateResolveHost;
+  start_time_ = base::TimeTicks::Now();
   return DoLoop(OK);
 }
 
@@ -110,7 +112,8 @@ int TCPConnectJob::DoLoop(int result) {
 
 int TCPConnectJob::DoResolveHost() {
   next_state_ = kStateResolveHostComplete;
-  return resolver_.Resolve(resolve_info_, &addresses_, &callback_, load_log());
+  return resolver_.Resolve(params_.destination(), &addresses_, &callback_,
+                           net_log());
 }
 
 int TCPConnectJob::DoResolveHostComplete(int result) {
@@ -123,17 +126,24 @@ int TCPConnectJob::DoTCPConnect() {
   next_state_ = kStateTCPConnectComplete;
   set_socket(client_socket_factory_->CreateTCPClientSocket(addresses_));
   connect_start_time_ = base::TimeTicks::Now();
-  // TODO(eroman): Socket::Connect() should take a LoadLog.
-  return socket()->Connect(&callback_);
+  return socket()->Connect(&callback_, net_log());
 }
 
 int TCPConnectJob::DoTCPConnectComplete(int result) {
   if (result == OK) {
     DCHECK(connect_start_time_ != base::TimeTicks());
-    base::TimeDelta connect_duration =
-        base::TimeTicks::Now() - connect_start_time_;
+    DCHECK(start_time_ != base::TimeTicks());
+    base::TimeTicks now = base::TimeTicks::Now();
+    base::TimeDelta total_duration = now - start_time_;
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        "Net.DNS_Resolution_And_TCP_Connection_Latency2",
+        total_duration,
+        base::TimeDelta::FromMilliseconds(1),
+        base::TimeDelta::FromMinutes(10),
+        100);
 
-    UMA_HISTOGRAM_CLIPPED_TIMES("Net.TCP_Connection_Latency",
+    base::TimeDelta connect_duration = now - connect_start_time_;
+    UMA_HISTOGRAM_CUSTOM_TIMES("Net.TCP_Connection_Latency",
         connect_duration,
         base::TimeDelta::FromMilliseconds(1),
         base::TimeDelta::FromMinutes(10),
@@ -150,36 +160,52 @@ ConnectJob* TCPClientSocketPool::TCPConnectJobFactory::NewConnectJob(
     const std::string& group_name,
     const PoolBase::Request& request,
     ConnectJob::Delegate* delegate,
-    LoadLog* load_log) const {
-  return new TCPConnectJob(
-      group_name, request.params(), request.handle(),
-      base::TimeDelta::FromSeconds(kTCPConnectJobTimeoutInSeconds),
-      client_socket_factory_, host_resolver_, delegate, load_log);
+    const BoundNetLog& net_log) const {
+  return new TCPConnectJob(group_name, request.params(), ConnectionTimeout(),
+                           client_socket_factory_, host_resolver_, delegate,
+                           net_log);
+}
+
+base::TimeDelta
+    TCPClientSocketPool::TCPConnectJobFactory::ConnectionTimeout() const {
+  return base::TimeDelta::FromSeconds(kTCPConnectJobTimeoutInSeconds);
 }
 
 TCPClientSocketPool::TCPClientSocketPool(
     int max_sockets,
     int max_sockets_per_group,
+    const std::string& name,
     HostResolver* host_resolver,
-    ClientSocketFactory* client_socket_factory)
-    : base_(max_sockets, max_sockets_per_group,
+    ClientSocketFactory* client_socket_factory,
+    NetworkChangeNotifier* network_change_notifier)
+    : base_(max_sockets, max_sockets_per_group, name,
             base::TimeDelta::FromSeconds(kUnusedIdleSocketTimeout),
             base::TimeDelta::FromSeconds(kUsedIdleSocketTimeout),
-            new TCPConnectJobFactory(client_socket_factory, host_resolver)) {}
+            new TCPConnectJobFactory(client_socket_factory, host_resolver),
+            network_change_notifier) {
+  base_.enable_backup_jobs();
+}
 
 TCPClientSocketPool::~TCPClientSocketPool() {}
 
 int TCPClientSocketPool::RequestSocket(
     const std::string& group_name,
-    const void* resolve_info,
-    int priority,
+    const void* params,
+    RequestPriority priority,
     ClientSocketHandle* handle,
     CompletionCallback* callback,
-    LoadLog* load_log) {
-  const HostResolver::RequestInfo* casted_resolve_info =
-      static_cast<const HostResolver::RequestInfo*>(resolve_info);
-  return base_.RequestSocket(
-      group_name, *casted_resolve_info, priority, handle, callback, load_log);
+    const BoundNetLog& net_log) {
+  const TCPSocketParams* casted_params =
+      static_cast<const TCPSocketParams*>(params);
+
+  if (net_log.HasListener()) {
+    net_log.AddString(StringPrintf("Requested TCP socket to: %s [port %d]",
+                      casted_params->destination().hostname().c_str(),
+                      casted_params->destination().port()));
+  }
+
+  return base_.RequestSocket(group_name, *casted_params, priority, handle,
+                             callback, net_log);
 }
 
 void TCPClientSocketPool::CancelRequest(

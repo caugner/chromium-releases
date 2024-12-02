@@ -4,7 +4,14 @@
 
 {
   'variables': {
-    'use_system_libpng%': 0,
+    'conditions': [
+      [ 'OS=="linux"', {
+        # Link to system .so since we already use it due to GTK.
+        'use_system_libpng%': 1,
+      }, {  # OS!="linux"
+        'use_system_libpng%': 0,
+      }],
+    ],
   },
   'conditions': [
     ['use_system_libpng==0', {
@@ -60,6 +67,17 @@
         },
       ]
     }, {
+      'conditions': [
+        ['sysroot!=""', {
+          'variables': {
+            'pkg-config': '../../build/linux/pkg-config-wrapper "<(sysroot)"',
+          },
+        }, {
+          'variables': {
+            'pkg-config': 'pkg-config'
+          },
+        }],
+      ],
       'targets': [
         {
           'target_name': 'libpng',
@@ -69,7 +87,7 @@
           ],
           'direct_dependent_settings': {
             'cflags': [
-              '<!@(pkg-config --cflags libpng)',
+              '<!@(<(pkg-config) --cflags libpng)',
             ],
             'defines': [
               'USE_SYSTEM_LIBPNG',
@@ -77,10 +95,10 @@
           },
           'link_settings': {
             'ldflags': [
-              '<!@(pkg-config --libs-only-L --libs-only-other libpng)',
+              '<!@(<(pkg-config) --libs-only-L --libs-only-other libpng)',
             ],
             'libraries': [
-              '<!@(pkg-config --libs-only-l libpng)',
+              '<!@(<(pkg-config) --libs-only-l libpng)',
             ],
           },
         },

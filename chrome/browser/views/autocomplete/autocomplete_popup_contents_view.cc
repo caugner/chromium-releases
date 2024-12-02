@@ -1,21 +1,23 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved. Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "chrome/browser/views/autocomplete/autocomplete_popup_contents_view.h"
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/color_utils.h"
-#include "app/gfx/insets.h"
-#include "app/gfx/path.h"
+#include "app/bidi_line_iterator.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "app/theme_provider.h"
 #include "base/compiler_specific.h"
+#include "base/i18n/rtl.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/bubble_positioner.h"
 #include "chrome/browser/views/bubble_border.h"
+#include "gfx/canvas.h"
+#include "gfx/color_utils.h"
+#include "gfx/insets.h"
+#include "gfx/path.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkShader.h"
@@ -98,7 +100,12 @@ const int kRowRightPadding = 3;
 const int kIconTextSpacing = 9;
 // The size delta between the font used for the edit and the result rows. Passed
 // to gfx::Font::DeriveFont.
+#if !defined(OS_CHROMEOS)
 const int kEditFontAdjust = -1;
+#else
+// Don't adjust font on chromeos as it becomes too small.
+const int kEditFontAdjust = 0;
+#endif
 
 }
 
@@ -118,12 +125,6 @@ class AutocompleteResultView : public views::View {
   virtual void Paint(gfx::Canvas* canvas);
   virtual void Layout();
   virtual gfx::Size GetPreferredSize();
-  virtual void OnMouseEntered(const views::MouseEvent& event);
-  virtual void OnMouseMoved(const views::MouseEvent& event);
-  virtual void OnMouseExited(const views::MouseEvent& event);
-  virtual bool OnMousePressed(const views::MouseEvent& event);
-  virtual void OnMouseReleased(const views::MouseEvent& event, bool canceled);
-  virtual bool OnMouseDragged(const views::MouseEvent& event);
 
  private:
   ResultViewState GetState() const;
@@ -147,7 +148,8 @@ class AutocompleteResultView : public views::View {
                          const std::wstring& text,
                          int style,
                          int x,
-                         int y);
+                         int y,
+                         bool force_rtl_directionality);
 
   // Gets the font and text color for a fragment with the specified style.
   gfx::Font GetFragmentFont(int style) const;
@@ -379,44 +381,6 @@ gfx::Size AutocompleteResultView::GetPreferredSize() {
   return gfx::Size(0, std::max(icon_height, text_height));
 }
 
-void AutocompleteResultView::OnMouseEntered(const views::MouseEvent& event) {
-  model_->SetHoveredLine(model_index_);
-}
-
-void AutocompleteResultView::OnMouseMoved(const views::MouseEvent& event) {
-  model_->SetHoveredLine(model_index_);
-  if (event.IsLeftMouseButton())
-    model_->SetSelectedLine(model_index_, false);
-}
-
-void AutocompleteResultView::OnMouseExited(const views::MouseEvent& event) {
-  model_->SetHoveredLine(AutocompletePopupModel::kNoMatch);
-}
-
-bool AutocompleteResultView::OnMousePressed(const views::MouseEvent& event) {
-  if (event.IsLeftMouseButton() || event.IsMiddleMouseButton()) {
-    model_->SetHoveredLine(model_index_);
-    if (event.IsLeftMouseButton())
-      model_->SetSelectedLine(model_index_, false);
-  }
-  return true;
-}
-
-void AutocompleteResultView::OnMouseReleased(const views::MouseEvent& event,
-                                             bool canceled) {
-  if (canceled)
-    return;
-  if (event.IsOnlyMiddleMouseButton())
-    model_->OpenIndex(model_index_, NEW_BACKGROUND_TAB);
-  else if (event.IsOnlyLeftMouseButton())
-    model_->OpenIndex(model_index_, CURRENT_TAB);
-}
-
-bool AutocompleteResultView::OnMouseDragged(const views::MouseEvent& event) {
-  // TODO(beng): move all message handling into the contents view and override
-  //             GetViewForPoint.
-  return false;
-}
 
 ResultViewState AutocompleteResultView::GetState() const {
   if (model_->IsSelectedIndex(model_index_))
@@ -463,7 +427,7 @@ int AutocompleteResultView::DrawString(
   // Initialize a bidirectional line iterator of ICU and split the text into
   // visual runs. (A visual run is consecutive characters which have the same
   // display direction and should be displayed at once.)
-  l10n_util::BiDiLineIterator bidi_line;
+  BiDiLineIterator bidi_line;
   if (!bidi_line.Open(text, mirroring_context_->mirrored(), false))
     return x;
   const int runs = bidi_line.CountRuns();
@@ -513,10 +477,20 @@ int AutocompleteResultView::DrawString(
       int style = classifications[i].style;
       if (force_dim)
         style |= ACMatchClassification::DIM;
+
+      // We specify RTL directionlity explicitly only if the run is an RTL run
+      // and we can't specify the string directionlaity using an LRE/PDF pair.
+      // Note that URLs are always displayed using LTR directionality
+      // (regardless of the locale) and therefore they are excluded.
+      const bool force_rtl_directionality =
+           !(classifications[i].style & ACMatchClassification::URL) &&
+           (run_direction == UBIDI_RTL) &&
+           !base::i18n::IsRTL();
+
       if (text_start < text_end) {
         x += DrawStringFragment(canvas,
                                 text.substr(text_start, text_end - text_start),
-                                style, x, y);
+                                style, x, y, force_rtl_directionality);
       }
     }
   }
@@ -528,16 +502,19 @@ int AutocompleteResultView::DrawStringFragment(
     const std::wstring& text,
     int style,
     int x,
-    int y) {
+    int y,
+    bool force_rtl_directionality) {
   gfx::Font display_font = GetFragmentFont(style);
   // Clamp text width to the available width within the popup so we elide if
   // necessary.
   int string_width = std::min(display_font.GetStringWidth(text),
                               width() - kRowRightPadding - x);
   int string_left = mirroring_context_->GetLeft(x, x + string_width);
+  const int flags = force_rtl_directionality ?
+      gfx::Canvas::FORCE_RTL_DIRECTIONALITY : 0;
   canvas->DrawStringInt(text, GetFragmentFont(style),
                         GetFragmentTextColor(style), string_left, y,
-                        string_width, display_font.height());
+                        string_width, display_font.height(), flags);
   return string_width;
 }
 
@@ -582,21 +559,23 @@ AutocompletePopupContentsView::AutocompletePopupContentsView(
     AutocompleteEditModel* edit_model,
     Profile* profile,
     const BubblePositioner* bubble_positioner)
-#if defined(OS_WIN)
-    : popup_(new AutocompletePopupWin(this)),
-#else
-    : popup_(new AutocompletePopupGtk(this)),
-#endif
-      model_(new AutocompletePopupModel(this, edit_model, profile)),
+    : model_(new AutocompletePopupModel(this, edit_model, profile)),
       edit_view_(edit_view),
       bubble_positioner_(bubble_positioner),
       result_font_(font.DeriveFont(kEditFontAdjust)),
+      ignore_mouse_drag_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(size_animation_(this)) {
   // The following little dance is required because set_border() requires a
   // pointer to a non-const object.
   BubbleBorder* bubble_border = new BubbleBorder;
   bubble_border_ = bubble_border;
   set_border(bubble_border);
+}
+
+AutocompletePopupContentsView::~AutocompletePopupContentsView() {
+  // We don't need to do anything with |popup_| here.  The OS either has already
+  // closed the window, in which case it's been deleted, or it will soon, in
+  // which case there's nothing we need to do.
 }
 
 gfx::Rect AutocompletePopupContentsView::GetPopupBounds() const {
@@ -619,7 +598,7 @@ gfx::Rect AutocompletePopupContentsView::GetPopupBounds() const {
 // AutocompletePopupContentsView, AutocompletePopupView overrides:
 
 bool AutocompletePopupContentsView::IsOpen() const {
-  return popup_->IsOpen();
+  return (popup_ != NULL);
 }
 
 void AutocompletePopupContentsView::InvalidateLine(size_t line) {
@@ -629,9 +608,14 @@ void AutocompletePopupContentsView::InvalidateLine(size_t line) {
 void AutocompletePopupContentsView::UpdatePopupAppearance() {
   if (model_->result().empty()) {
     // No matches, close any existing popup.
-    if (popup_->IsCreated()) {
+    if (popup_ != NULL) {
       size_animation_.Stop();
-      popup_->Hide();
+      // NOTE: Do NOT use CloseNow() here, as we may be deep in a callstack
+      // triggered by the popup receiving a message (e.g. LBUTTONUP), and
+      // destroying the popup would cause us to read garbage when we unwind back
+      // to that level.
+      popup_->Close();  // This will eventually delete the popup.
+      popup_.reset();
     }
     return;
   }
@@ -666,20 +650,18 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
     size_animation_.Reset();
   target_bounds_ = new_target_bounds;
 
-  if (!popup_->IsCreated()) {
-    // If we've never been shown, we need to create the window.
-    popup_->Init(edit_view_, this);
+  if (popup_ == NULL) {
+    // If the popup is currently closed, we need to create it.
+    popup_ = (new AutocompletePopupClass(edit_view_, this))->AsWeakPtr();
   } else {
-    // Animate the popup shrinking, but don't animate growing larger (or
-    // appearing for the first time) since that would make the popup feel less
-    // responsive.
+    // Animate the popup shrinking, but don't animate growing larger since that
+    // would make the popup feel less responsive.
     GetWidget()->GetBounds(&start_bounds_, true);
-    if (popup_->IsVisible() &&
-        (target_bounds_.height() < start_bounds_.height()))
+    if (target_bounds_.height() < start_bounds_.height())
       size_animation_.Show();
     else
       start_bounds_ = target_bounds_;
-    popup_->Show();
+    popup_->SetBounds(GetPopupBounds());
   }
 
   SchedulePaint();
@@ -687,6 +669,10 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
 
 void AutocompletePopupContentsView::PaintUpdatesNow() {
   // TODO(beng): remove this from the interface.
+}
+
+void AutocompletePopupContentsView::OnDragCanceled() {
+  ignore_mouse_drag_ = true;
 }
 
 AutocompletePopupModel* AutocompletePopupContentsView::GetModel() {
@@ -704,40 +690,14 @@ bool AutocompletePopupContentsView::IsHoveredIndex(size_t index) const {
   return HasMatchAt(index) ? index == model_->hovered_line() : false;
 }
 
-void AutocompletePopupContentsView::OpenIndex(
-    size_t index,
-    WindowOpenDisposition disposition) {
-  if (!HasMatchAt(index))
-    return;
-
-  const AutocompleteMatch& match = model_->result().match_at(index);
-  // OpenURL() may close the popup, which will clear the result set and, by
-  // extension, |match| and its contents.  So copy the relevant strings out to
-  // make sure they stay alive until the call completes.
-  const GURL url(match.destination_url);
-  std::wstring keyword;
-  const bool is_keyword_hint = model_->GetKeywordForMatch(match, &keyword);
-  edit_view_->OpenURL(url, disposition, match.transition, GURL(), index,
-                      is_keyword_hint ? std::wstring() : keyword);
-}
-
-void AutocompletePopupContentsView::SetHoveredLine(size_t index) {
-  if (HasMatchAt(index))
-    model_->SetHoveredLine(index);
-}
-
-void AutocompletePopupContentsView::SetSelectedLine(size_t index,
-                                                    bool revert_to_default) {
-  if (HasMatchAt(index))
-    model_->SetSelectedLine(index, revert_to_default);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // AutocompletePopupContentsView, AnimationDelegate implementation:
 
 void AutocompletePopupContentsView::AnimationProgressed(
     const Animation* animation) {
-  popup_->Show();
+  // We should only be running the animation when the popup is already visible.
+  DCHECK(popup_ != NULL);
+  popup_->SetBounds(GetPopupBounds());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -803,6 +763,68 @@ void AutocompletePopupContentsView::Layout() {
   SchedulePaint();
 }
 
+
+void AutocompletePopupContentsView::OnMouseEntered(
+    const views::MouseEvent& event) {
+  model_->SetHoveredLine(GetIndexForPoint(event.location()));
+}
+
+void AutocompletePopupContentsView::OnMouseMoved(
+    const views::MouseEvent& event) {
+  model_->SetHoveredLine(GetIndexForPoint(event.location()));
+}
+
+void AutocompletePopupContentsView::OnMouseExited(
+    const views::MouseEvent& event) {
+  model_->SetHoveredLine(AutocompletePopupModel::kNoMatch);
+}
+
+bool AutocompletePopupContentsView::OnMousePressed(
+    const views::MouseEvent& event) {
+  ignore_mouse_drag_ = false;  // See comment on |ignore_mouse_drag_| in header.
+  if (event.IsLeftMouseButton() || event.IsMiddleMouseButton()) {
+    size_t index = GetIndexForPoint(event.location());
+    model_->SetHoveredLine(index);
+    if (HasMatchAt(index) && event.IsLeftMouseButton())
+      model_->SetSelectedLine(index, false);
+  }
+  return true;
+}
+
+void AutocompletePopupContentsView::OnMouseReleased(
+    const views::MouseEvent& event,
+    bool canceled) {
+  if (canceled || ignore_mouse_drag_) {
+    ignore_mouse_drag_ = false;
+    return;
+  }
+
+  size_t index = GetIndexForPoint(event.location());
+  if (event.IsOnlyMiddleMouseButton())
+    OpenIndex(index, NEW_BACKGROUND_TAB);
+  else if (event.IsOnlyLeftMouseButton())
+    OpenIndex(index, CURRENT_TAB);
+}
+
+bool AutocompletePopupContentsView::OnMouseDragged(
+    const views::MouseEvent& event) {
+  if (event.IsLeftMouseButton() || event.IsMiddleMouseButton()) {
+    size_t index = GetIndexForPoint(event.location());
+    model_->SetHoveredLine(index);
+    if (!ignore_mouse_drag_ && HasMatchAt(index) && event.IsLeftMouseButton())
+      model_->SetSelectedLine(index, false);
+  }
+  return true;
+}
+
+views::View* AutocompletePopupContentsView::GetViewForPoint(
+    const gfx::Point& /*point*/) {
+  // This View takes control of the mouse events, so it should be considered the
+  // active view for any point inside of it.
+  return this;
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // AutocompletePopupContentsView, private:
 
@@ -850,7 +872,7 @@ void AutocompletePopupContentsView::UpdateBlurRegion() {
   gfx::Path contents_path;
   MakeContentsPath(&contents_path, contents_rect);
   ScopedGDIObject<HRGN> popup_region;
-  popup_region.Set(contents_path.CreateHRGN());
+  popup_region.Set(contents_path.CreateNativeRegion());
   bb.hRgnBlur = popup_region.Get();
   DwmEnableBlurBehindWindow(GetWidget()->GetNativeView(), &bb);
 #endif
@@ -863,6 +885,40 @@ void AutocompletePopupContentsView::MakeCanvasTransparent(
       kGlassPopupAlpha : kOpaquePopupAlpha;
   canvas->drawColor(SkColorSetA(GetColor(NORMAL, BACKGROUND), alpha),
                     SkXfermode::kDstIn_Mode);
+}
+
+void AutocompletePopupContentsView::OpenIndex(
+    size_t index,
+    WindowOpenDisposition disposition) {
+  if (!HasMatchAt(index))
+    return;
+
+  const AutocompleteMatch& match = model_->result().match_at(index);
+  // OpenURL() may close the popup, which will clear the result set and, by
+  // extension, |match| and its contents.  So copy the relevant strings out to
+  // make sure they stay alive until the call completes.
+  const GURL url(match.destination_url);
+  std::wstring keyword;
+  const bool is_keyword_hint = model_->GetKeywordForMatch(match, &keyword);
+  edit_view_->OpenURL(url, disposition, match.transition, GURL(), index,
+                      is_keyword_hint ? std::wstring() : keyword);
+}
+
+size_t AutocompletePopupContentsView::GetIndexForPoint(
+    const gfx::Point& point) {
+  if (!HitTest(point))
+    return AutocompletePopupModel::kNoMatch;
+
+  int nb_match = model_->result().size();
+  DCHECK(nb_match <= GetChildViewCount());
+  for (int i = 0; i < nb_match; ++i) {
+    views::View* child = GetChildViewAt(i);
+    gfx::Point point_in_child_coords(point);
+    View::ConvertPointToView(this, child, &point_in_child_coords);
+    if (child->HitTest(point_in_child_coords))
+      return i;
+  }
+  return AutocompletePopupModel::kNoMatch;
 }
 
 // static

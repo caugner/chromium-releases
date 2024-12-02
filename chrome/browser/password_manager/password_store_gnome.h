@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_GNOME
-#define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_GNOME
+#ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_GNOME_H_
+#define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_GNOME_H_
 
 extern "C" {
 #include <gnome-keyring.h>
@@ -19,11 +19,12 @@ class Task;
 class PasswordStoreGnome : public PasswordStore {
  public:
   PasswordStoreGnome();
-  virtual ~PasswordStoreGnome();
 
   virtual bool Init();
 
  private:
+  virtual ~PasswordStoreGnome();
+
   void AddLoginImpl(const PasswordForm& form);
   void UpdateLoginImpl(const PasswordForm& form);
   void RemoveLoginImpl(const PasswordForm& form);
@@ -37,4 +38,4 @@ class PasswordStoreGnome : public PasswordStore {
   DISALLOW_COPY_AND_ASSIGN(PasswordStoreGnome);
 };
 
-#endif  // CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_GNOME
+#endif  // CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_GNOME_H_

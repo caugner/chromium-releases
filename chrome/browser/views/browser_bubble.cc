@@ -6,17 +6,48 @@
 
 #include "app/l10n_util.h"
 #include "chrome/browser/views/frame/browser_view.h"
+#if defined(OS_WIN)
+#include "chrome/browser/external_tab_container.h"
+#endif
 #include "views/widget/root_view.h"
 #include "views/window/window.h"
 
+namespace {
+
+BrowserBubbleHost* GetBubbleHostFromFrame(views::Widget* frame) {
+  if (!frame)
+    return NULL;
+
+  BrowserBubbleHost* bubble_host = NULL;
+  views::Window* window = frame->GetWindow();
+  if (window) {
+    bubble_host = BrowserView::GetBrowserViewForNativeWindow(
+        window->GetNativeWindow());
+    DCHECK(bubble_host);
+  }
+#if defined(OS_WIN)
+  // The frame may also be an ExternalTabContainer, which is also capable of
+  // hosting BrowserBubbles.
+  gfx::NativeView native_view = frame->GetNativeView();
+  if (!bubble_host) {
+    bubble_host =
+        ExternalTabContainer::GetExternalContainerFromNativeWindow(native_view);
+  }
+#endif
+  return bubble_host;
+}
+
+}  // namespace
+
 BrowserBubble::BrowserBubble(views::View* view, views::Widget* frame,
-                             const gfx::Point& origin)
+                             const gfx::Point& origin, bool drop_shadow)
     : frame_(frame),
       view_(view),
       visible_(false),
       delegate_(NULL),
-      attached_(false) {
-  frame_native_view_ = frame_->GetNativeView();
+      attached_(false),
+      drop_shadow_enabled_(drop_shadow),
+      bubble_host_(GetBubbleHostFromFrame(frame)) {
   gfx::Size size = view->GetPreferredSize();
   bounds_.SetRect(origin.x(), origin.y(), size.width(), size.height());
   InitPopup();
@@ -39,23 +70,20 @@ void BrowserBubble::DetachFromBrowser() {
   if (!attached_)
     return;
   attached_ = false;
-  BrowserView* browser_view = BrowserView::GetBrowserViewForNativeWindow(
-      frame_->GetWindow()->GetNativeWindow());
-  if (browser_view)
-    browser_view->DetachBrowserBubble(this);
+
+  if (bubble_host_)
+    bubble_host_->DetachBrowserBubble(this);
 }
 
 void BrowserBubble::AttachToBrowser() {
   DCHECK(!attached_);
   if (attached_)
     return;
-  BrowserView* browser_view = BrowserView::GetBrowserViewForNativeWindow(
-      frame_->GetWindow()->GetNativeWindow());
-  DCHECK(browser_view);
-  if (browser_view) {
-    browser_view->AttachBrowserBubble(this);
-    attached_ = true;
-  }
+
+  if (bubble_host_)
+    bubble_host_->AttachBrowserBubble(this);
+
+  attached_ = true;
 }
 
 void BrowserBubble::BrowserWindowMoved() {
@@ -95,6 +123,5 @@ void BrowserBubble::Reposition() {
 }
 
 void BrowserBubble::ResizeToView() {
-  gfx::Size size = view_->GetPreferredSize();
-  SetBounds(bounds_.x(), bounds_.y(), size.width(), size.height());
+  SetBounds(bounds_.x(), bounds_.y(), view_->width(), view_->height());
 }

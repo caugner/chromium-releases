@@ -12,6 +12,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome_frame/chrome_frame_automation.h"
+#include "chrome_frame/chrome_frame_reporting.h"
 
 namespace chrome_launcher {
 
@@ -21,19 +22,21 @@ const wchar_t kLauncherExeBaseName[] = L"chrome_launcher.exe";
 // safe-for-Low-Integrity version of the Chrome command line.
 const char* kAllowedSwitches[] = {
   switches::kAutomationClientChannelID,
-  switches::kDisableMetrics,
+  switches::kChromeFrame,
+  switches::kEnableRendererAccessibility,
+  switches::kEnableExperimentalExtensionApis,
+  switches::kNoErrorDialogs,
   switches::kNoFirstRun,
   switches::kUserDataDir,
-  switches::kLoadExtension,
-  switches::kEnableRendererAccessibility,
-  switches::kNoErrorDialogs,
+  switches::kDisablePopupBlocking,
+  switches::kFullMemoryCrashReport,
 };
 
 CommandLine* CreateLaunchCommandLine() {
   // TODO(joi) As optimization, could launch Chrome directly when running at
   // medium integrity.  (Requires bringing in code to read SIDs, etc.)
 
-  // The launcher EXE will be in the same directory as the npchrome_tab DLL,
+  // The launcher EXE will be in the same directory as the Chrome Frame DLL,
   // so create a full path to it based on this assumption.  Since our unit
   // tests also use this function, and live in the directory above, we test
   // existence of the file and try the path that includes the /servers/
@@ -43,13 +46,13 @@ CommandLine* CreateLaunchCommandLine() {
     FilePath current_dir = module_path.DirName();
     FilePath same_dir_path = current_dir.Append(kLauncherExeBaseName);
     if (file_util::PathExists(same_dir_path)) {
-      return new CommandLine(same_dir_path.ToWStringHack());
+      return new CommandLine(same_dir_path);
     } else {
       FilePath servers_path =
           current_dir.Append(L"servers").Append(kLauncherExeBaseName);
       DCHECK(file_util::PathExists(servers_path)) <<
           "What module is this? It's not in 'servers' or main output dir.";
-      return new CommandLine(servers_path.ToWStringHack());
+      return new CommandLine(servers_path);
     }
   } else {
     NOTREACHED();
@@ -81,10 +84,12 @@ void SanitizeCommandLine(const CommandLine& original, CommandLine* sanitized) {
 bool SanitizeAndLaunchChrome(const wchar_t* command_line) {
   std::wstring command_line_with_program(L"dummy.exe ");
   command_line_with_program += command_line;
-  CommandLine original(L"");
-  original.ParseFromString(command_line_with_program);
+  CommandLine original = CommandLine::FromString(command_line_with_program);
   CommandLine sanitized(GetChromeExecutablePath());
   SanitizeCommandLine(original, &sanitized);
+
+  DLOG(INFO) << sanitized.command_line_string();
+  sanitized.AppendSwitchWithValue("log-level", "0");
 
   return base::LaunchApp(sanitized.command_line_string(), false, false, NULL);
 }
@@ -110,11 +115,17 @@ FilePath GetChromeExecutablePath() {
 
 // Entrypoint that implements the logic of chrome_launcher.exe.
 int CALLBACK CfLaunchChrome() {
+  int result = ERROR_OPEN_FAILED;
+
   if (chrome_launcher::SanitizeAndLaunchChrome(::GetCommandLine())) {
-    return ERROR_SUCCESS;
-  } else {
-    return ERROR_OPEN_FAILED;
+    result = ERROR_SUCCESS;
   }
+
+  // Regardless of what just happened, shut down crash reporting now to avoid a
+  // hang when we are unloaded.
+  ShutdownCrashReporting();
+
+  return result;
 }
 
 // Compile-time check to see that the type CfLaunchChromeProc is correct.

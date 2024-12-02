@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/callback.h"
 #include "media/base/filter_host.h"
 #include "media/filters/audio_renderer_algorithm_ola.h"
 
@@ -131,6 +132,13 @@ void AudioRendererBase::OnReadComplete(Buffer* buffer_in) {
   DCHECK_GT(pending_reads_, 0u);
   --pending_reads_;
 
+  // TODO(scherkus): this happens due to a race, primarily because Stop() is a
+  // synchronous call when it should be asynchronous and accept a callback.
+  // Refer to http://crbug.com/16059
+  if (state_ == kStopped) {
+    return;
+  }
+
   // Don't enqueue an end-of-stream buffer because it has no data.
   if (buffer_in->IsEndOfStream()) {
     recieved_end_of_stream_ = true;
@@ -158,8 +166,8 @@ void AudioRendererBase::OnReadComplete(Buffer* buffer_in) {
   }
 }
 
-size_t AudioRendererBase::FillBuffer(uint8* dest,
-                                     size_t dest_len,
+uint32 AudioRendererBase::FillBuffer(uint8* dest,
+                                     uint32 dest_len,
                                      const base::TimeDelta& playback_delay) {
   // The timestamp of the last buffer written during the last call to
   // FillBuffer().
@@ -174,7 +182,7 @@ size_t AudioRendererBase::FillBuffer(uint8* dest,
       // zeros.  This gets around the tricky situation of pausing and resuming
       // the audio IPC layer in Chrome.  Ideally, we should return zero and then
       // the subclass can restart the conversation.
-      const size_t kZeroLength = 8192;
+      const uint32 kZeroLength = 8192;
       dest_written = std::min(kZeroLength, dest_len);
       memset(dest, 0, dest_written);
       return dest_written;
@@ -184,8 +192,10 @@ size_t AudioRendererBase::FillBuffer(uint8* dest,
     last_fill_buffer_time = last_fill_buffer_time_;
     last_fill_buffer_time_ = base::TimeDelta();
 
-    // Check if we finally reached end of stream by emptying |algorithm_|.
-    if (algorithm_->IsQueueEmpty()) {
+    // Use two conditions to determine the end of playback:
+    // 1. Algorithm has no audio data.
+    // 2. Browser process has no audio data.
+    if (algorithm_->IsQueueEmpty() && !playback_delay.ToInternalValue()) {
       if (recieved_end_of_stream_ && !rendered_end_of_stream_) {
         rendered_end_of_stream_ = true;
         host()->NotifyEnded();

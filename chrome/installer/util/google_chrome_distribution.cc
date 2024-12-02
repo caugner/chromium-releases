@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -7,8 +7,8 @@
 
 #include "chrome/installer/util/google_chrome_distribution.h"
 
-#include <atlbase.h>
 #include <windows.h>
+#include <wtsapi32.h>
 #include <msi.h>
 
 #include "base/file_path.h"
@@ -31,37 +31,55 @@
 
 #include "installer_util_strings.h"
 
+#pragma comment(lib, "wtsapi32.lib")
+
 namespace {
+const wchar_t kChromeGuid[] = L"{8A69D345-D564-463c-AFF1-A69D9E530F96}";
+
 // The following strings are the possible outcomes of the toast experiment
 // as recorded in the  |client| field. Previously the groups used "TSxx" but
 // the data captured is not valid.
-const wchar_t kToastExpQualifyGroup[] =      L"T%lc01";
+const wchar_t kToastExpControlGroup[] =      L"T%lc01";
 const wchar_t kToastExpCancelGroup[] =       L"T%lc02";
 const wchar_t kToastExpUninstallGroup[] =    L"T%lc04";
 const wchar_t kToastExpTriesOkGroup[] =      L"T%lc18";
 const wchar_t kToastExpTriesErrorGroup[] =   L"T%lc28";
+const wchar_t kToastActiveGroup[] =          L"T%lc40";
+const wchar_t kToastUDDirFailure[] =         L"T%lc40";
 const wchar_t kToastExpBaseGroup[] =         L"T%lc80";
 
-// Generates the actual group that gets written in the registry.
-// |group| is a printf style string with a single %c replacement and |value|
-// is a number between 0 and 19.
+// Generates the actual group string that gets written in the registry.
+// |group| is one of the above kToast* strings and |flavor| is a number
+// between 0 and 5.
+//
+// The big experiment in Dec 2009 used TGxx and THxx.
+// The big experiment in Feb 2010 uses TKxx and TLxx.
+// The big experiment in Apr 2010 uses TMxx and TNxx.
 std::wstring GetExperimentGroup(const wchar_t* group, int flavor) {
-  wchar_t c = flavor < 20 ? L'A' + flavor : L'X';
+  wchar_t c = flavor < 5 ? L'M' + flavor : L'X';
   return StringPrintf(group, c);
 }
 
 // Substitute the locale parameter in uninstall URL with whatever
 // Google Update tells us is the locale. In case we fail to find
 // the locale, we use US English.
-std::wstring GetUninstallSurveyUrl() {
-  std::wstring kSurveyUrl = L"http://www.google.com/support/chrome/bin/"
-                            L"request.py?hl=$1&contact_type=uninstall";
-
+std::wstring LocalizeUrl(const wchar_t* url) {
   std::wstring language;
   if (!GoogleUpdateSettings::GetLanguage(&language))
     language = L"en-US";  // Default to US English.
+  return ReplaceStringPlaceholders(url, language.c_str(), NULL);
+}
 
-  return ReplaceStringPlaceholders(kSurveyUrl.c_str(), language.c_str(), NULL);
+std::wstring GetUninstallSurveyUrl() {
+  const wchar_t kSurveyUrl[] = L"http://www.google.com/support/chrome/bin/"
+                               L"request.py?hl=$1&contact_type=uninstall";
+  return LocalizeUrl(kSurveyUrl);
+}
+
+std::wstring GetWelcomeBackUrl() {
+  const wchar_t kWelcomeUrl[] = L"http://www.google.com/chrome/intl/$1/"
+                                L"welcomeback-new.html";
+  return LocalizeUrl(kWelcomeUrl);
 }
 
 // Converts FILETIME to hours. FILETIME times are absolute times in
@@ -102,31 +120,67 @@ int GetDirectoryWriteAgeInHours(const wchar_t* path) {
   return (now_time - dir_time);
 }
 
-// Launches again this same process with a single switch --|flag|=|value|.
+// Launches again this same process with switch --|flag|=|value|.
+// If system_level_toast is true, appends --system-level-toast.
 // Does not wait for the process to terminate.
-bool RelaunchSetup(const std::wstring& flag, int value) {
-  CommandLine cmd_line(CommandLine::ForCurrentProcess()->program());
-  // TODO: make switches into ASCII.
+bool RelaunchSetup(const std::wstring& flag, int value,
+                   bool system_level_toast) {
+  CommandLine cmd_line(CommandLine::ForCurrentProcess()->GetProgram());
   cmd_line.AppendSwitchWithValue(WideToASCII(flag), IntToWString(value));
+  if (system_level_toast)
+    cmd_line.AppendSwitch(
+      WideToASCII(installer_util::switches::kSystemLevelToast));
   return base::LaunchApp(cmd_line, false, false, NULL);
+}
+
+// This function launches setup as the currently logged-in interactive
+// user that is the user whose logon session is attached to winsta0\default.
+// It assumes that currently we are running as SYSTEM in a non-interactive
+// windowstation.
+// The function fails if there is no interactive session active, basically
+// the computer is on but nobody has logged in locally.
+// Remote Desktop sessions do not count as interactive sessions; running this
+// method as a user logged in via remote desktop will do nothing.
+bool RelaunchSetupAsConsoleUser(const std::wstring& flag) {
+  CommandLine cmd_line(CommandLine::ForCurrentProcess()->GetProgram());
+  cmd_line.AppendSwitch(WideToASCII(flag));
+
+  DWORD console_id = ::WTSGetActiveConsoleSessionId();
+  if (console_id == 0xFFFFFFFF)
+    return false;
+  HANDLE user_token;
+  if (!::WTSQueryUserToken(console_id, &user_token))
+    return false;
+  bool launched = base::LaunchAppAsUser(user_token,
+                                        cmd_line.command_line_string(),
+                                        false, NULL, true);
+  ::CloseHandle(user_token);
+  return launched;
 }
 
 }  // namespace
 
+GoogleChromeDistribution::GoogleChromeDistribution()
+    : product_guid_(kChromeGuid) {
+}
+
+// The functions below are not used by the 64-bit Windows binary -
+// see the comment in google_chrome_distribution_dummy.cc
+#ifndef _WIN64
 bool GoogleChromeDistribution::BuildUninstallMetricsString(
     DictionaryValue* uninstall_metrics_dict, std::wstring* metrics) {
   DCHECK(NULL != metrics);
   bool has_values = false;
 
-  DictionaryValue::key_iterator iter(uninstall_metrics_dict->begin_keys());
-  for (; iter != uninstall_metrics_dict->end_keys(); ++iter) {
+  for (DictionaryValue::key_iterator iter(uninstall_metrics_dict->begin_keys());
+       iter != uninstall_metrics_dict->end_keys(); ++iter) {
     has_values = true;
     metrics->append(L"&");
     metrics->append(*iter);
     metrics->append(L"=");
 
     std::wstring value;
-    uninstall_metrics_dict->GetString(*iter, &value);
+    uninstall_metrics_dict->GetStringWithoutPathExpansion(*iter, &value);
     metrics->append(value);
   }
 
@@ -139,7 +193,7 @@ bool GoogleChromeDistribution::ExtractUninstallMetricsFromFile(
   JSONFileValueSerializer json_serializer(FilePath::FromWStringHack(file_path));
 
   std::string json_error_string;
-  scoped_ptr<Value> root(json_serializer.Deserialize(NULL));
+  scoped_ptr<Value> root(json_serializer.Deserialize(NULL, NULL));
   if (!root.get())
     return false;
 
@@ -176,6 +230,7 @@ bool GoogleChromeDistribution::ExtractUninstallMetrics(
 
   return true;
 }
+#endif
 
 void GoogleChromeDistribution::DoPostUninstallOperations(
     const installer::Version& version, const std::wstring& local_data_path,
@@ -229,6 +284,10 @@ void GoogleChromeDistribution::DoPostUninstallOperations(
   WMIProcessUtil::Launch(command, &pid);
 }
 
+std::wstring GoogleChromeDistribution::GetAppGuid() {
+  return product_guid();
+}
+
 std::wstring GoogleChromeDistribution::GetApplicationName() {
   const std::wstring& product_name =
       installer_util::GetLocalizedString(IDS_PRODUCT_NAME_BASE);
@@ -242,7 +301,10 @@ std::wstring GoogleChromeDistribution::GetAlternateApplicationName() {
 }
 
 std::wstring GoogleChromeDistribution::GetInstallSubDir() {
-  return L"Google\\Chrome";
+  std::wstring sub_dir(installer_util::kGoogleChromeInstallSubDir1);
+  sub_dir.append(L"\\");
+  sub_dir.append(installer_util::kGoogleChromeInstallSubDir2);
+  return sub_dir;
 }
 
 std::wstring GoogleChromeDistribution::GetNewGoogleUpdateApKey(
@@ -283,30 +345,21 @@ std::wstring GoogleChromeDistribution::GetAppDescription() {
   return app_description;
 }
 
-int GoogleChromeDistribution::GetInstallReturnCode(
-    installer_util::InstallStatus status) {
-  switch (status) {
-    case installer_util::FIRST_INSTALL_SUCCESS:
-    case installer_util::INSTALL_REPAIRED:
-    case installer_util::NEW_VERSION_UPDATED:
-    case installer_util::HIGHER_VERSION_EXISTS:
-      return 0;  // For Google Update's benefit we need to return 0 for success
-    default:
-      return status;
-  }
+std::string GoogleChromeDistribution::GetSafeBrowsingName() {
+  return "googlechrome";
 }
 
 std::wstring GoogleChromeDistribution::GetStateKey() {
   std::wstring key(google_update::kRegPathClientState);
   key.append(L"\\");
-  key.append(google_update::kChromeGuid);
+  key.append(product_guid());
   return key;
 }
 
 std::wstring GoogleChromeDistribution::GetStateMediumKey() {
   std::wstring key(google_update::kRegPathClientStateMedium);
   key.append(L"\\");
-  key.append(google_update::kChromeGuid);
+  key.append(product_guid());
   return key;
 }
 
@@ -318,7 +371,7 @@ std::wstring GoogleChromeDistribution::GetDistributionData(RegKey* key) {
   DCHECK(NULL != key);
   std::wstring sub_key(google_update::kRegPathClientState);
   sub_key.append(L"\\");
-  sub_key.append(google_update::kChromeGuid);
+  sub_key.append(product_guid());
 
   RegKey client_state_key(key->Handle(), sub_key.c_str());
   std::wstring result;
@@ -365,7 +418,7 @@ std::wstring GoogleChromeDistribution::GetUninstallRegPath() {
 std::wstring GoogleChromeDistribution::GetVersionKey() {
   std::wstring key(google_update::kRegPathClients);
   key.append(L"\\");
-  key.append(google_update::kChromeGuid);
+  key.append(product_guid());
   return key;
 }
 
@@ -385,7 +438,7 @@ void GoogleChromeDistribution::UpdateDiffInstallStatus(bool system_install,
   std::wstring ap_key_value;
   std::wstring reg_key(google_update::kRegPathClientState);
   reg_key.append(L"\\");
-  reg_key.append(google_update::kChromeGuid);
+  reg_key.append(product_guid());
   if (!key.Open(reg_root, reg_key.c_str(), KEY_ALL_ACCESS) ||
       !key.ReadValue(google_update::kRegApField, &ap_key_value)) {
     LOG(INFO) << "Application key not found.";
@@ -396,7 +449,7 @@ void GoogleChromeDistribution::UpdateDiffInstallStatus(bool system_install,
     } else if (!key.Valid()) {
       reg_key.assign(google_update::kRegPathClientState);
       if (!key.Open(reg_root, reg_key.c_str(), KEY_ALL_ACCESS) ||
-          !key.CreateKey(google_update::kChromeGuid, KEY_ALL_ACCESS)) {
+          !key.CreateKey(product_guid().c_str(), KEY_ALL_ACCESS)) {
         LOG(ERROR) << "Failed to create application key.";
         key.Close();
         return;
@@ -414,70 +467,96 @@ void GoogleChromeDistribution::UpdateDiffInstallStatus(bool system_install,
   key.Close();
 }
 
+// The functions below are not used by the 64-bit Windows binary -
+// see the comment in google_chrome_distribution_dummy.cc
+#ifndef _WIN64
 // Currently we only have one experiment: the inactive user toast. Which only
-// applies for users doing upgrades and non-systemwide install.
+// applies for users doing upgrades.
+//
+// There are three scenarios when this function is called:
+// 1- Is a per-user-install and it updated: perform the experiment
+// 2- Is a system-install and it updated : relaunch as the interactive user
+// 3- It has been re-launched from the #2 case. In this case we enter
+//    this function with |system_install| true and a REENTRY_SYS_UPDATE status.
 void GoogleChromeDistribution::LaunchUserExperiment(
     installer_util::InstallStatus status, const installer::Version& version,
     bool system_install) {
-  if ((installer_util::NEW_VERSION_UPDATED != status) || system_install)
-    return;
 
-  // If user has not opted-in for usage stats  we don't do the experiments.
-  if (!GoogleUpdateSettings::GetCollectStatsConsent())
-    return;
-
-  std::wstring brand;
-  int flavor = base::RandInt(0, 3);
-
-  if (GoogleUpdateSettings::GetBrand(&brand) && (brand == L"CHXX")) {
-    // The user automatically qualifies for the experiment.
-    LOG(INFO) << "Experiment qualification bypass";
-  } else {
-    // Time to verify the conditions for the experiment.
-    std::wstring client_info;
-    if (GoogleUpdateSettings::GetClient(&client_info)) {
-      // The user might be participating on another experiment. The only
-      // users eligible for this experiment are that have no client info.
+  if (system_install) {
+    if (installer_util::NEW_VERSION_UPDATED == status) {
+      // We need to relaunch as the interactive user.
+      RelaunchSetupAsConsoleUser(installer_util::switches::kSystemLevelToast);
       return;
     }
-    // User must be in the Great Britain as defined by googe_update language.
-    std::wstring lang;
-    if (!GoogleUpdateSettings::GetLanguage(&lang) || (lang != L"en-GB"))
-      return;
-    LOG(INFO) << "User in experiment locale";
-    // Check browser usage inactivity by the age of the last-write time of the
-    // chrome user data directory. Ninety days is our trigger.
-    std::wstring user_data_dir = installer::GetChromeUserDataPath();
-    const int kSixtyDays = 60 * 24;
-    int dir_age_hours = GetDirectoryWriteAgeInHours(user_data_dir.c_str());
-    if (dir_age_hours < kSixtyDays)
-      return;
-    // At this point the user qualifies for the experiment, however we need to
-    // tag a control group, which is at random 50% of the population.
-    if (base::RandDouble() > 0.5) {
-      // We tag the user, but it wont participate in the experiment.
-      GoogleUpdateSettings::SetClient(
-          GetExperimentGroup(kToastExpQualifyGroup, flavor));
-      LOG(INFO) << "User is toast experiment control group";
+  } else {
+    if ((installer_util::NEW_VERSION_UPDATED != status) &&
+        (installer_util::REENTRY_SYS_UPDATE != status)) {
+      // We are not updating or in re-launch. Exit.
       return;
     }
   }
-  LOG(INFO) << "User drafted for toast experiment";
-  if (!GoogleUpdateSettings::SetClient(
-      GetExperimentGroup(kToastExpBaseGroup, flavor)))
-    return;
+
+  // currently only two equal experiment groups. 90% get the welcome back url.
+  int flavor = (base::RandDouble() > 0.1) ? 0 : 1;
+
+  std::wstring brand;
+  if (GoogleUpdateSettings::GetBrand(&brand) && (brand == L"CHXX")) {
+    // Testing only: the user automatically qualifies for the experiment.
+    LOG(INFO) << "Experiment qualification bypass";
+  } else {
+    // Check browser usage inactivity by the age of the last-write time of the
+    // chrome user data directory.
+    std::wstring user_data_dir = installer::GetChromeUserDataPath();
+    // TODO(cpu): re-enable experiment.
+    const int kThirtyDays = 3000 * 24;
+    int dir_age_hours = GetDirectoryWriteAgeInHours(user_data_dir.c_str());
+    if (dir_age_hours < 0) {
+      // This means that we failed to find the user data dir. The most likey
+      // cause is that this user has not ever used chrome at all which can
+      // happen in a system-level install.
+      GoogleUpdateSettings::SetClient(
+          GetExperimentGroup(kToastUDDirFailure, flavor));
+      return;
+    } else if (dir_age_hours < kThirtyDays) {
+      // An active user, so it does not qualify.
+      LOG(INFO) << "Chrome used in last " << dir_age_hours << " hours";
+      GoogleUpdateSettings::SetClient(
+          GetExperimentGroup(kToastActiveGroup, flavor));
+      return;
+    }
+    // 1% are in the control group that qualifies but does not get drafted.
+    if (base::RandDouble() > 0.99) {
+      GoogleUpdateSettings::SetClient(
+          GetExperimentGroup(kToastExpControlGroup, flavor));
+      LOG(INFO) << "User is control group";
+      return;
+    }
+  }
+  LOG(INFO) << "User drafted for toast experiment " << flavor;
+  GoogleUpdateSettings::SetClient(
+      GetExperimentGroup(kToastExpBaseGroup, flavor));
   // The experiment needs to be performed in a different process because
   // google_update expects the upgrade process to be quick and nimble.
-  RelaunchSetup(installer_util::switches::kInactiveUserToast, flavor);
+  RelaunchSetup(installer_util::switches::kInactiveUserToast, flavor,
+                system_install);
 }
 
-void GoogleChromeDistribution::InactiveUserToastExperiment(int flavor) {
-  // User qualifies for the experiment. Launch chrome with --try-chrome. Before
-  // that we need to change the client so we can track the progress.
+// User qualifies for the experiment. Launch chrome with --try-chrome=flavor.
+void GoogleChromeDistribution::InactiveUserToastExperiment(int flavor,
+    bool system_install) {
+  bool has_welcome_url = (flavor == 0);
+  // Possibly add a url to launch depending on the experiment flavor.
+  std::wstring options(StringPrintf(L"--%ls=%d",
+      ASCIIToUTF16(switches::kTryChromeAgain).c_str(), flavor));
+  if (has_welcome_url) {
+    const std::wstring url(GetWelcomeBackUrl());
+    options.append(L" -- ");
+    options.append(url);
+  }
+  // Launch chrome now. It will show the toast UI.
   int32 exit_code = 0;
-  std::wstring option(
-      StringPrintf(L"--%ls=%d", switches::kTryChromeAgain, flavor));
-  if (!installer::LaunchChromeAndWaitForResult(false, option, &exit_code))
+  if (!installer::LaunchChromeAndWaitForResult(system_install,
+                                               options, &exit_code))
     return;
   // The chrome process has exited, figure out what happened.
   const wchar_t* outcome = NULL;
@@ -485,7 +564,7 @@ void GoogleChromeDistribution::InactiveUserToastExperiment(int flavor) {
     case ResultCodes::NORMAL_EXIT:
       outcome = kToastExpTriesOkGroup;
       break;
-    case ResultCodes::NORMAL_EXIT_EXP1:
+    case ResultCodes::NORMAL_EXIT_CANCEL:
       outcome = kToastExpCancelGroup;
       break;
     case ResultCodes::NORMAL_EXIT_EXP2:
@@ -500,6 +579,7 @@ void GoogleChromeDistribution::InactiveUserToastExperiment(int flavor) {
   // The user wants to uninstall. This is a best effort operation. Note that
   // we waited for chrome to exit so the uninstall would not detect chrome
   // running.
-  base::LaunchApp(InstallUtil::GetChromeUninstallCmd(false),
+  base::LaunchApp(InstallUtil::GetChromeUninstallCmd(system_install),
                   false, false, NULL);
 }
+#endif

@@ -7,12 +7,23 @@
 #include <string>
 
 #include "app/l10n_util.h"
+#include "base/message_loop.h"
 #include "base/process_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 namespace {
+
+#if defined(OS_MACOSX)
+// From task_manager.cc:
+// Activity Monitor shows %cpu with one decimal digit -- be
+// consistent with that.
+const wchar_t *kZeroCPUUsage = L"0.0";
+#else
+const wchar_t *kZeroCPUUsage = L"0";
+#endif
 
 class TestResource : public TaskManager::Resource {
  public:
@@ -58,7 +69,7 @@ TEST_F(TaskManagerTest, Resources) {
   EXPECT_STREQ(L"test title", model->GetResourceTitle(0).c_str());
   EXPECT_STREQ(l10n_util::GetString(IDS_TASK_MANAGER_NA_CELL_TEXT).c_str(),
                model->GetResourceNetworkUsage(0).c_str());
-  EXPECT_STREQ(L"0", model->GetResourceCPUUsage(0).c_str());
+  EXPECT_STREQ(kZeroCPUUsage, model->GetResourceCPUUsage(0).c_str());
 
   task_manager.AddResource(&resource2);  // Will be in the same group.
   ASSERT_EQ(2, model->ResourceCount());
@@ -67,7 +78,7 @@ TEST_F(TaskManagerTest, Resources) {
   EXPECT_STREQ(L"test title", model->GetResourceTitle(1).c_str());
   EXPECT_STREQ(l10n_util::GetString(IDS_TASK_MANAGER_NA_CELL_TEXT).c_str(),
                model->GetResourceNetworkUsage(1).c_str());
-  EXPECT_STREQ(L"0", model->GetResourceCPUUsage(1).c_str());
+  EXPECT_STREQ(kZeroCPUUsage, model->GetResourceCPUUsage(1).c_str());
 
   task_manager.RemoveResource(&resource1);
   // Now resource2 will be first in group.
@@ -76,7 +87,7 @@ TEST_F(TaskManagerTest, Resources) {
   EXPECT_STREQ(L"test title", model->GetResourceTitle(0).c_str());
   EXPECT_STREQ(l10n_util::GetString(IDS_TASK_MANAGER_NA_CELL_TEXT).c_str(),
                model->GetResourceNetworkUsage(0).c_str());
-  EXPECT_STREQ(L"0", model->GetResourceCPUUsage(0).c_str());
+  EXPECT_STREQ(kZeroCPUUsage, model->GetResourceCPUUsage(0).c_str());
 
   task_manager.RemoveResource(&resource2);
   EXPECT_EQ(0, model->ResourceCount());

@@ -5,11 +5,11 @@
 #include "webkit/tools/test_shell/test_webview_delegate.h"
 
 #import <Cocoa/Cocoa.h>
-#include "base/string_util.h"
 #include "base/sys_string_conversions.h"
-#include "webkit/api/public/WebCursorInfo.h"
-#include "webkit/api/public/WebPopupMenu.h"
-#include "webkit/api/public/WebView.h"
+#include "base/utf_string_conversions.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCursorInfo.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPopupMenu.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webcursor.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"
@@ -46,6 +46,7 @@ void TestWebViewDelegate::show(WebNavigationPolicy policy) {
     items.push_back(popup_menu_info_->items[i]);
 
   int item_height = popup_menu_info_->itemHeight;
+  double font_size = popup_menu_info_->itemFontSize;
   int selected_index = popup_menu_info_->selectedIndex;
   popup_menu_info_.reset();  // No longer needed.
 
@@ -60,7 +61,8 @@ void TestWebViewDelegate::show(WebNavigationPolicy policy) {
 
   // Display the menu.
   scoped_nsobject<WebMenuRunner> menu_runner;
-  menu_runner.reset([[WebMenuRunner alloc] initWithItems:items]);
+  menu_runner.reset([[WebMenuRunner alloc] initWithItems:items
+                                                fontSize:font_size]);
 
   [menu_runner runMenuInView:shell_->webViewWnd()
                   withBounds:position
@@ -171,7 +173,7 @@ webkit_glue::WebPluginDelegate* TestWebViewDelegate::CreatePluginDelegate(
   WebWidgetHost *host = GetWidgetHost();
   if (!host)
     return NULL;
-  gfx::NativeView view = host->view_handle();
+  gfx::PluginWindowHandle containing_view = NULL;
 
   bool allow_wildcard = true;
   WebPluginInfo info;
@@ -181,9 +183,11 @@ webkit_glue::WebPluginDelegate* TestWebViewDelegate::CreatePluginDelegate(
   }
 
   if (actual_mime_type && !actual_mime_type->empty())
-    return WebPluginDelegateImpl::Create(info.path, *actual_mime_type, view);
+    return WebPluginDelegateImpl::Create(info.path, *actual_mime_type,
+                                         containing_view);
   else
-    return WebPluginDelegateImpl::Create(info.path, mime_type, view);
+    return WebPluginDelegateImpl::Create(info.path, mime_type,
+                                         containing_view);
 }
 
 void TestWebViewDelegate::CreatedPluginWindow(

@@ -5,10 +5,10 @@
 #ifndef CHROME_BROWSER_ZYGOTE_HOST_LINUX_H_
 #define CHROME_BROWSER_ZYGOTE_HOST_LINUX_H_
 
+#include <unistd.h>
+
 #include <string>
 #include <vector>
-
-#include <unistd.h>
 
 #include "base/global_descriptors_posix.h"
 #include "base/process.h"
@@ -16,14 +16,18 @@
 template<typename Type>
 struct DefaultSingletonTraits;
 
+static const char kZygoteMagic[] = "ZYGOTE_OK";
+
 // http://code.google.com/p/chromium/wiki/LinuxZygote
 
 // The zygote host is the interface, in the browser process, to the zygote
 // process.
 class ZygoteHost {
  public:
-  ~ZygoteHost();
+  void Init(const std::string& sandbox_cmd);
 
+  // Tries to start a renderer process.  Returns its pid on success, otherwise
+  // base::kNullProcessHandle;
   pid_t ForkRenderer(const std::vector<std::string>& command_line,
                      const base::GlobalDescriptors::Mapping& mapping);
   void EnsureProcessTerminated(pid_t process);
@@ -46,10 +50,13 @@ class ZygoteHost {
  private:
   friend struct DefaultSingletonTraits<ZygoteHost>;
   ZygoteHost();
-  void LaunchZygoteProcess();
+  ~ZygoteHost();
 
   int control_fd_;  // the socket to the zygote
   pid_t pid_;
+  bool init_;
+  bool using_suid_sandbox_;
+  std::string sandbox_binary_;
 };
 
 #endif  // CHROME_BROWSER_ZYGOTE_HOST_LINUX_H_

@@ -26,6 +26,9 @@ void AddChannelSocket(const std::string& name, int socket);
 // Remove the channel name mapping, and close the corresponding socket.
 void RemoveAndCloseChannelSocket(const std::string& name);
 
+// Returns true if a channel named |name| is available.
+bool ChannelSocketExists(const std::string& name);
+
 // Construct a socket pair appropriate for IPC: UNIX domain, nonblocking.
 // Returns false on error.
 bool SocketPair(int* fd1, int* fd2);
@@ -125,11 +128,6 @@ class Channel::ChannelImpl : public MessageLoopForIO::Watcher {
   // can begin reading.  We make use of the input_state_ when performing
   // the connect operation in overlapped mode.
   bool waiting_connect_;
-
-  // This flag is set when processing incoming messages.  It is used to
-  // avoid recursing through ProcessIncomingMessages, which could cause
-  // problems.  TODO(darin): make this unnecessary
-  bool processing_incoming_;
 
   ScopedRunnableMethodFactory<ChannelImpl> factory_;
 

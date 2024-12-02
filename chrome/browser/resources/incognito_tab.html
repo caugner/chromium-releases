@@ -16,13 +16,27 @@ html[dir="rtl"] .icon {
   margin:0 3px 0 6px;
 }
 .content {
-  -webkit-border-radius: 5px 5px;
+  border-radius: 5px 5px;
   background-color:#eee;
   color:black;
   padding:10px 10px 10px 10px;
   max-width:600px;
   margin-left:auto;
   margin-right:auto;
+  margin-top:66px;
+}
+.extensionsmessage {
+  color:black;
+  padding:10px 10px 10px 10px;
+  max-width:600px;
+  margin-left:auto;
+  margin-right:auto;
+  margin-top:5px;
+}
+.extensionicon {
+  float:left;
+  margin:10px 5px 0 0px;
+  width:30px;
 }
 </style>
 <script>
@@ -36,6 +50,10 @@ document.write('<link id="incognitothemecss" rel="stylesheet" ' +
 <div class="content" i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
   <img src="../../app/theme/otr_icon_standalone.png" class="icon" />
   <span i18n-values=".innerHTML:content"></span>
+</div>
+<div class="extensionsmessage" i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
+  <img src="../../app/theme/extensions_section.png" class="extensionicon" />
+  <span i18n-values=".innerHTML:extensionsmessage"></span>
 </div>
 </body>
 <script>

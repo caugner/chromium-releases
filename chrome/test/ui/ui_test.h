@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,21 +17,19 @@
 // Tests which need to launch the browser with a particular set of command-line
 // arguments should set the value of launch_arguments_ in their constructors.
 
-#include "build/build_config.h"
-
 #include <string>
 
 #include "base/command_line.h"
 #include "base/message_loop.h"
-#include "base/path_service.h"
 #include "base/process.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
+#include "build/build_config.h"
 // TODO(evanm): we should be able to just forward-declare
 // AutomationProxy here, but many files that #include this one don't
 // themselves #include automation_proxy.h.
 #include "chrome/test/automation/automation_proxy.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
 
 class AutomationProxy;
 class BrowserProxy;
@@ -40,14 +38,22 @@ class FilePath;
 class GURL;
 class TabProxy;
 
-class UITest : public testing::Test {
+// Base class for UI Tests. This implements the core of the functions.
+// This base class decouples all automation functionality from testing
+// infrastructure, for use without gtest.
+// If using gtest, you probably want to inherit from UITest (declared below)
+// rather than UITestBase.
+class UITestBase {
  protected:
   // String to display when a test fails because the crash service isn't
   // running.
   static const wchar_t kFailedNoCrashService[];
 
   // Constructor
-  UITest();
+  UITestBase();
+  explicit UITestBase(MessageLoop::Type msg_loop_type);
+
+  virtual ~UITestBase();
 
   // Starts the browser using the arguments in launch_arguments_, and
   // sets up member variables.
@@ -59,6 +65,7 @@ class UITest : public testing::Test {
   // Set up the test time out values.
   virtual void InitializeTimeouts();
 
+ public:
   // ********* Utility functions *********
 
   // Launches the browser and IPC testing server.
@@ -82,6 +89,9 @@ class UITest : public testing::Test {
   // Exits out browser instance.
   void QuitBrowser();
 
+  // Terminates the browser, simulates end of session.
+  void TerminateBrowser();
+
   // Tells the browser to navigato to the givne URL in the active tab
   // of the first app window.
   // Does not wait for the navigation to complete to return.
@@ -92,12 +102,19 @@ class UITest : public testing::Test {
   // This method doesn't return until the navigation is complete.
   void NavigateToURL(const GURL& url);
 
+  // Same as above, except in the given tab and window.
+  void NavigateToURL(const GURL& url, int window_index, int tab_index);
+
   // Tells the browser to navigate to the given URL in the active tab
   // of the first app window.
   // This method doesn't return until the |number_of_navigations| navigations
   // complete.
   void NavigateToURLBlockUntilNavigationsComplete(const GURL& url,
                                                   int number_of_navigations);
+
+  // Same as above, except in the given tab and window.
+  void NavigateToURLBlockUntilNavigationsComplete(const GURL& url,
+      int number_of_navigations, int tab_index, int window_index);
 
   // Returns the URL of the currently active tab. Only looks in the first
   // window, for backward compatibility. If there is no active tab, or some
@@ -135,6 +152,9 @@ class UITest : public testing::Test {
   // causes a test failure and returns 0.
   int GetTabCount();
 
+  // Same as GetTabCount(), except with the window at the given index.
+  int GetTabCount(int window_index);
+
   // Polls the tab for the cookie_name cookie and returns once one of the
   // following conditions hold true:
   // - The cookie is of expected_value.
@@ -142,7 +162,6 @@ class UITest : public testing::Test {
   // - The time_out value has been exceeded.
   bool WaitUntilCookieValue(TabProxy* tab, const GURL& url,
                             const char* cookie_name,
-                            int interval_ms,
                             int time_out_ms,
                             const char* expected_value);
   // Polls the tab for the cookie_name cookie and returns once one of the
@@ -153,7 +172,6 @@ class UITest : public testing::Test {
   std::string WaitUntilCookieNonEmpty(TabProxy* tab,
                                       const GURL& url,
                                       const char* cookie_name,
-                                      int interval_ms,
                                       int time_out_ms);
 
   // Polls the tab for a JavaScript condition and returns once one of the
@@ -167,7 +185,6 @@ class UITest : public testing::Test {
   bool WaitUntilJavaScriptCondition(TabProxy* tab,
                                     const std::wstring& frame_xpath,
                                     const std::wstring& jscript,
-                                    int interval_ms,
                                     int time_out_ms);
 
   // Polls up to kWaitForActionMaxMsec ms to attain a specific tab count. Will
@@ -388,12 +405,19 @@ class UITest : public testing::Test {
   // UITest::SetUp().
   FilePath user_data_dir() const { return user_data_dir_; }
 
+  // Return the process id of the browser process (-1 on error).
+  base::ProcessId browser_process_id() const { return process_id_; }
+
   // Timeout accessors.
-  int command_execution_timeout_ms() const {
-    return command_execution_timeout_ms_;
+  void set_command_execution_timeout_ms(int timeout) {
+    command_execution_timeout_ms_ = timeout;
   }
 
   int action_timeout_ms() const { return action_timeout_ms_; }
+
+  void set_action_timeout_ms(int timeout) {
+    action_timeout_ms_ = timeout;
+  }
 
   int action_max_timeout_ms() const { return action_max_timeout_ms_; }
 
@@ -401,10 +425,37 @@ class UITest : public testing::Test {
 
   std::wstring ui_test_name() const { return ui_test_name_; }
 
-  // Count the number of active browser processes.  This function only counts
-  // browser processes that share the same profile directory as the current
-  // process.  The count includes browser sub-processes.
-  static int GetBrowserProcessCount();
+  void set_ui_test_name(const std::wstring& name) {
+    ui_test_name_ = name;
+  }
+
+  // Sets clear_profile_. Should be called before launching browser to have
+  // any effect.
+  void set_clear_profile(bool clear_profile) {
+    clear_profile_ = clear_profile;
+  }
+
+  // Sets homepage_. Should be called before launching browser to have
+  // any effect.
+  void set_homepage(const std::wstring& homepage) {
+    homepage_ = homepage;
+  }
+
+  // Different ways to quit the browser.
+  typedef enum {
+    WINDOW_CLOSE,
+    USER_QUIT,
+    SESSION_ENDING,
+  } ShutdownType;
+
+  // Sets the shutdown type, which defaults to WINDOW_CLOSE.
+  void set_shutdown_type(ShutdownType value) {
+    shutdown_type_ = value;
+  }
+
+  // Count the number of active browser processes launched by this test.
+  // The count includes browser sub-processes.
+  int GetBrowserProcessCount();
 
   // Returns a copy of local state preferences. The caller is responsible for
   // deleting the returned object. Returns NULL if there is an error.
@@ -414,20 +465,6 @@ class UITest : public testing::Test {
   // responsible for deleting the returned object. Returns NULL if there is an
   // error.
   DictionaryValue* GetDefaultProfilePreferences();
-
-  // Generate the file path for testing a particular test.
-  // The file for the tests is all located in
-  // test_root_directory\test_directory\<testcase>
-  // The returned path is FilePath format.
-  static FilePath GetTestFilePath(const std::wstring& test_directory,
-                                  const std::wstring& test_case);
-
-  // Generate the URL for testing a particular test.
-  // HTML for the tests is all located in
-  // test_root_directory\test_directory\<testcase>
-  // The returned path is GURL format.
-  static GURL GetTestUrl(const std::wstring& test_directory,
-                         const std::wstring &test_case);
 
   // Waits for the test case to finish.
   // ASSERTS if there are test failures.
@@ -452,6 +489,23 @@ class UITest : public testing::Test {
                                const std::wstring& port);
   void StopHttpServer();
 
+  // Prints IO performance data for use by perf graphs.
+  void PrintIOPerfInfo(const char* test_name);
+
+  // Prints memory usage data for use by perf graphs.
+  void PrintMemoryUsageInfo(const char* test_name);
+
+  // Prints memory commit charge stats for use by perf graphs.
+  void PrintSystemCommitCharge(const char* test_name,
+                               size_t charge,
+                               bool important);
+
+  // Configures the test to use the reference build.
+  void UseReferenceBuild();
+
+  // Use Chromium binaries from the given directory.
+  void SetBrowserDirectory(const FilePath& dir);
+
  private:
   // Check that no processes related to Chrome exist, displaying
   // the given message if any do.
@@ -471,6 +525,10 @@ class UITest : public testing::Test {
   AutomationProxy* automation() {
     EXPECT_TRUE(server_.get());
     return server_.get();
+  }
+
+  virtual bool ShouldFilterInet() {
+    return true;
   }
 
   // Wait a certain amount of time for all the app processes to exit,
@@ -501,6 +559,7 @@ class UITest : public testing::Test {
   bool wait_for_initial_loads_;         // Wait for initial loads to complete
                                         // in SetUp() before running test body.
   base::TimeTicks browser_launch_time_; // Time when the browser was run.
+  base::TimeDelta browser_quit_time_;   // How long the shutdown took.
   bool dom_automation_enabled_;         // This can be set to true to have the
                                         // test run the dom automation case.
   FilePath template_user_data_;         // See set_template_user_data().
@@ -520,6 +579,9 @@ class UITest : public testing::Test {
   bool enable_file_cookies_;            // Enable file cookies, default is true.
   ProfileType profile_type_;            // Are we using a profile with a
                                         // complex theme?
+  FilePath websocket_pid_file_;         // PID file for websocket server.
+  ShutdownType shutdown_type_;          // The method for shutting down
+                                        // the browser. Used in ShutdownTest.
 
  private:
   bool LaunchBrowserHelper(const CommandLine& arguments,
@@ -554,8 +616,6 @@ class UITest : public testing::Test {
 
   scoped_ptr<AutomationProxy> server_;
 
-  MessageLoop message_loop_;            // Enables PostTask to main thread.
-
   int command_execution_timeout_ms_;
   int action_timeout_ms_;
   int action_max_timeout_ms_;
@@ -563,6 +623,19 @@ class UITest : public testing::Test {
   int terminate_timeout_ms_;
 
   std::wstring ui_test_name_;
+};
+
+class UITest : public UITestBase, public PlatformTest {
+ protected:
+  UITest() {}
+  explicit UITest(MessageLoop::Type msg_loop_type)
+    : UITestBase(), PlatformTest(), message_loop_(msg_loop_type) {
+  }
+  virtual void SetUp();
+  virtual void TearDown();
+
+ private:
+  MessageLoop message_loop_;  // Enables PostTask to main thread.
 };
 
 // These exist only to support the gTest assertion macros, and

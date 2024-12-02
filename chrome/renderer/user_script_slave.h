@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_EXTENSIONS_USER_SCRIPT_SLAVE_H_
-#define CHROME_BROWSER_EXTENSIONS_USER_SCRIPT_SLAVE_H_
+#ifndef CHROME_RENDERER_USER_SCRIPT_SLAVE_H_
+#define CHROME_RENDERER_USER_SCRIPT_SLAVE_H_
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -14,7 +15,7 @@
 #include "base/stl_util-inl.h"
 #include "base/string_piece.h"
 #include "chrome/common/extensions/user_script.h"
-#include "webkit/api/public/WebScriptSource.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebScriptSource.h"
 
 namespace WebKit {
 class WebFrame;
@@ -26,6 +27,9 @@ using WebKit::WebScriptSource;
 class UserScriptSlave {
  public:
   UserScriptSlave();
+
+  // Returns the unique set of extension IDs this UserScriptSlave knows about.
+  void GetActiveExtensions(std::set<std::string>* extension_ids);
 
   // Update the parsed scripts from shared memory.
   bool UpdateScripts(base::SharedMemoryHandle shared_memory);
@@ -50,12 +54,7 @@ class UserScriptSlave {
   // Greasemonkey API source that is injected with the scripts.
   base::StringPiece api_js_;
 
-  // The line number of the first line of the user script among all of the
-  // injected javascript.  This is used to make reported errors correspond with
-  // the proper line in the user script.
-  int user_script_start_line_;
-
   DISALLOW_COPY_AND_ASSIGN(UserScriptSlave);
 };
 
-#endif  // CHROME_BROWSER_EXTENSIONS_USER_SCRIPT_SLAVE_H_
+#endif  // CHROME_RENDERER_USER_SCRIPT_SLAVE_H_

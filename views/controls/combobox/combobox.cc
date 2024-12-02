@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "views/controls/combobox/native_combobox_wrapper.h"
+#include "views/controls/native/native_view_host.h"
 
 namespace views {
 
@@ -79,6 +80,25 @@ bool Combobox::SkipDefaultKeyEventProcessing(const KeyEvent& e) {
   return native_wrapper_ && native_wrapper_->IsDropdownOpen();
 }
 
+void Combobox::PaintFocusBorder(gfx::Canvas* canvas) {
+  if (NativeViewHost::kRenderNativeControlFocus)
+    View::PaintFocusBorder(canvas);
+}
+
+bool Combobox::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  DCHECK(role);
+
+  *role = AccessibilityTypes::ROLE_COMBOBOX;
+  return true;
+}
+
+bool Combobox::GetAccessibleValue(std::wstring* value) {
+  DCHECK(value);
+
+  *value = model_->GetItemAt(selected_item_);
+  return true;
+}
+
 void Combobox::Focus() {
   // Forward the focus to the wrapper.
   if (native_wrapper_)
@@ -92,8 +112,6 @@ void Combobox::ViewHierarchyChanged(bool is_add, View* parent,
                                     View* child) {
   if (is_add && !native_wrapper_ && GetWidget()) {
     native_wrapper_ = NativeComboboxWrapper::CreateWrapper(this);
-    native_wrapper_->UpdateFromModel();
-    native_wrapper_->UpdateEnabled();
     AddChildView(native_wrapper_->GetView());
   }
 }

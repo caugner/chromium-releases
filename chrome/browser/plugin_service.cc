@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,29 @@
 #include "chrome/browser/plugin_service.h"
 
 #include "base/command_line.h"
+#include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/thread.h"
+#include "base/values.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_plugin_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/plugin_process_host.h"
+#include "chrome/browser/pref_service.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/common/chrome_plugin_lib.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/gpu_plugin.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/notification_service.h"
+#include "chrome/common/plugin_messages.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #ifndef DISABLE_NACL
 #include "native_client/src/trusted/plugin/nacl_entry_points.h"
@@ -29,9 +37,74 @@
 #include "webkit/glue/plugins/plugin_constants_win.h"
 #include "webkit/glue/plugins/plugin_list.h"
 
+#if defined(OS_MACOSX)
+static void NotifyPluginsOfActivation() {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+
+  for (ChildProcessHost::Iterator iter(ChildProcessInfo::PLUGIN_PROCESS);
+       !iter.Done(); ++iter) {
+    PluginProcessHost* plugin = static_cast<PluginProcessHost*>(*iter);
+    plugin->OnAppActivation();
+  }
+}
+#endif
+
+// static
+bool PluginService::enable_chrome_plugins_ = true;
+
+// static
+void PluginService::InitGlobalInstance(Profile* profile) {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+
+  bool update_internal_dir = false;
+  FilePath last_internal_dir =
+      profile->GetPrefs()->GetFilePath(prefs::kPluginsLastInternalDirectory);
+  FilePath cur_internal_dir;
+  if (PathService::Get(chrome::DIR_INTERNAL_PLUGINS, &cur_internal_dir))
+    update_internal_dir = (cur_internal_dir != last_internal_dir);
+
+  // Disable plugins listed as disabled in prefs.
+  if (const ListValue* saved_plugins_list =
+          profile->GetPrefs()->GetList(prefs::kPluginsPluginsList)) {
+    for (ListValue::const_iterator it = saved_plugins_list->begin();
+         it != saved_plugins_list->end();
+         ++it) {
+      if (!(*it)->IsType(Value::TYPE_DICTIONARY)) {
+        LOG(WARNING) << "Invalid entry in " << prefs::kPluginsPluginsList;
+        continue;  // Oops, don't know what to do with this item.
+      }
+
+      DictionaryValue* plugin = static_cast<DictionaryValue*>(*it);
+      FilePath::StringType path;
+      bool enabled = true;
+      plugin->GetBoolean(L"enabled", &enabled);
+      if (!enabled && plugin->GetString(L"path", &path)) {
+        FilePath plugin_path(path);
+        NPAPI::PluginList::Singleton()->DisablePlugin(plugin_path);
+
+        // If the internal plugin directory has changed and if the plugin looks
+        // internal, also disable it in the current internal plugins directory.
+        if (update_internal_dir &&
+            plugin_path.DirName() == last_internal_dir) {
+          NPAPI::PluginList::Singleton()->DisablePlugin(
+              cur_internal_dir.Append(plugin_path.BaseName()));
+        }
+      }
+    }
+  }
+
+  // Have Chrome plugins write their data to the profile directory.
+  GetInstance()->SetChromePluginDataDir(profile->GetPath());
+}
+
 // static
 PluginService* PluginService::GetInstance() {
   return Singleton<PluginService>::get();
+}
+
+// static
+void PluginService::EnableChromePlugins(bool enable) {
+  enable_chrome_plugins_ = enable;
 }
 
 PluginService::PluginService()
@@ -42,15 +115,23 @@ PluginService::PluginService()
   ChromePluginLib::RegisterPluginsWithNPAPI();
   // Load the one specified on the command line as well.
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  std::wstring path = command_line->GetSwitchValue(switches::kLoadPlugin);
+  FilePath path = command_line->GetSwitchValuePath(switches::kLoadPlugin);
   if (!path.empty()) {
-    NPAPI::PluginList::Singleton()->AddExtraPluginPath(
-        FilePath::FromWStringHack(path));
+    NPAPI::PluginList::Singleton()->AddExtraPluginPath(path);
   }
+
+  FilePath pdf;
+  if (command_line->HasSwitch(switches::kInternalPDF) &&
+      PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf)) {
+    NPAPI::PluginList::Singleton()->AddExtraPluginPath(pdf);
+  }
+
 #ifndef DISABLE_NACL
   if (command_line->HasSwitch(switches::kInternalNaCl))
     RegisterInternalNaClPlugin();
 #endif
+
+  chrome::RegisterInternalGPUPlugin();
 
 #if defined(OS_WIN)
   hkcu_key_.Create(
@@ -66,12 +147,26 @@ PluginService::PluginService()
     hklm_event_.reset(new base::WaitableEvent(hklm_key_.watch_event()));
     hklm_watcher_.StartWatching(hklm_event_.get(), this);
   }
+#elif defined(OS_POSIX) && !defined(OS_MACOSX)
+  // Also find plugins in a user-specific plugins dir,
+  // e.g. ~/.config/chromium/Plugins.
+  FilePath user_data_dir;
+  if (PathService::Get(chrome::DIR_USER_DATA, &user_data_dir)) {
+    NPAPI::PluginList::Singleton()->AddExtraPluginDir(
+        user_data_dir.Append("Plugins"));
+  }
 #endif
 
   registrar_.Add(this, NotificationType::EXTENSION_LOADED,
                  NotificationService::AllSources());
   registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
                  NotificationService::AllSources());
+#if defined(OS_MACOSX)
+  // We need to know when the browser comes forward so we can bring modal plugin
+  // windows forward too.
+  registrar_.Add(this, NotificationType::APP_ACTIVATED,
+                 NotificationService::AllSources());
+#endif
 }
 
 PluginService::~PluginService() {
@@ -86,6 +181,9 @@ PluginService::~PluginService() {
 
 void PluginService::LoadChromePlugins(
     ResourceDispatcherHost* resource_dispatcher_host) {
+  if (!enable_chrome_plugins_)
+    return;
+
   resource_dispatcher_host_ = resource_dispatcher_host;
   ChromePluginLib::LoadChromePlugins(GetCPBrowserFuncsForBrowser());
 }
@@ -104,8 +202,7 @@ const std::wstring& PluginService::GetUILocale() {
 
 PluginProcessHost* PluginService::FindPluginProcess(
     const FilePath& plugin_path) {
-  DCHECK(MessageLoop::current() ==
-         ChromeThread::GetMessageLoop(ChromeThread::IO));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   if (plugin_path.value().empty()) {
     NOTREACHED() << "should only be called if we have a plugin to load";
@@ -124,8 +221,7 @@ PluginProcessHost* PluginService::FindPluginProcess(
 
 PluginProcessHost* PluginService::FindOrStartPluginProcess(
     const FilePath& plugin_path) {
-  DCHECK(MessageLoop::current() ==
-         ChromeThread::GetMessageLoop(ChromeThread::IO));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   PluginProcessHost *plugin_host = FindPluginProcess(plugin_path);
   if (plugin_host)
@@ -155,8 +251,7 @@ void PluginService::OpenChannelToPlugin(
     const std::string& mime_type,
     const std::wstring& locale,
     IPC::Message* reply_msg) {
-  DCHECK(MessageLoop::current() ==
-         ChromeThread::GetMessageLoop(ChromeThread::IO));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   // We don't need a policy URL here because that was already checked by a
   // previous call to GetPluginPath.
   GURL policy_url;
@@ -201,9 +296,16 @@ void PluginService::OnWaitableEventSignaled(
     hklm_key_.StartWatching();
   }
 
-  NPAPI::PluginList::Singleton()->ResetPluginsLoaded();
+  NPAPI::PluginList::Singleton()->RefreshPlugins();
   PurgePluginListCache(true);
 #endif  // defined(OS_WIN)
+}
+
+static void ForceShutdownPlugin(const FilePath& plugin_path) {
+  PluginProcessHost* plugin =
+      PluginService::GetInstance()->FindPluginProcess(plugin_path);
+  if (plugin)
+    plugin->ForceShutdown();
 }
 
 void PluginService::Observe(NotificationType type,
@@ -211,15 +313,11 @@ void PluginService::Observe(NotificationType type,
                             const NotificationDetails& details) {
   switch (type.value) {
     case NotificationType::EXTENSION_LOADED: {
-      // TODO(mpcomplete): We also need to force a renderer to refresh its
-      // cache of the plugin list when we inject user scripts, since it could
-      // have a stale version by the time extensions are loaded.
-      // See: http://code.google.com/p/chromium/issues/detail?id=12306
       Extension* extension = Details<Extension>(details).ptr();
       bool plugins_changed = false;
       for (size_t i = 0; i < extension->plugins().size(); ++i) {
         const Extension::PluginInfo& plugin = extension->plugins()[i];
-        NPAPI::PluginList::Singleton()->ResetPluginsLoaded();
+        NPAPI::PluginList::Singleton()->RefreshPlugins();
         NPAPI::PluginList::Singleton()->AddExtraPluginPath(plugin.path);
         plugins_changed = true;
         if (!plugin.is_public)
@@ -235,7 +333,10 @@ void PluginService::Observe(NotificationType type,
       bool plugins_changed = false;
       for (size_t i = 0; i < extension->plugins().size(); ++i) {
         const Extension::PluginInfo& plugin = extension->plugins()[i];
-        NPAPI::PluginList::Singleton()->ResetPluginsLoaded();
+        ChromeThread::PostTask(ChromeThread::IO, FROM_HERE,
+                               NewRunnableFunction(&ForceShutdownPlugin,
+                                                   plugin.path));
+        NPAPI::PluginList::Singleton()->RefreshPlugins();
         NPAPI::PluginList::Singleton()->RemoveExtraPluginPath(plugin.path);
         plugins_changed = true;
         if (!plugin.is_public)
@@ -245,6 +346,14 @@ void PluginService::Observe(NotificationType type,
         PurgePluginListCache(false);
       break;
     }
+
+#if defined(OS_MACOSX)
+    case NotificationType::APP_ACTIVATED: {
+      ChromeThread::PostTask(ChromeThread::IO, FROM_HERE,
+                             NewRunnableFunction(&NotifyPluginsOfActivation));
+      break;
+    }
+#endif
 
     default:
       DCHECK(false);

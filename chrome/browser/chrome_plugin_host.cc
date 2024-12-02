@@ -17,10 +17,12 @@
 #include "base/singleton.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/chrome_plugin_browsing_context.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/html_dialog_ui.h"
 #include "chrome/browser/gears_integration.h"
+#include "chrome/browser/net/url_request_context_getter.h"
 #include "chrome/browser/plugin_process_host.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profile.h"
@@ -36,7 +38,6 @@
 #include "chrome/common/net/url_request_intercept_job.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
-#include "net/base/base64.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -157,7 +158,7 @@ class PluginRequestHandler : public PluginHelper, public URLRequest::Delegate {
         ToURLRequestContext(cprequest_->context);
     // TODO(mpcomplete): remove fallback case when Gears support is prevalent.
     if (!context)
-      context = Profile::GetDefaultRequestContext();
+      context = Profile::GetDefaultRequestContext()->GetURLRequestContext();
 
     GURL gurl(cprequest_->url);
     request_.reset(new URLRequest(gurl, this));
@@ -389,7 +390,7 @@ CPError STDCALL CPB_GetCookies(CPID id, CPBrowsingContext bcontext,
       ToURLRequestContext(bcontext);
   // TODO(mpcomplete): remove fallback case when Gears support is prevalent.
   if (!context) {
-    context = Profile::GetDefaultRequestContext();
+    context = Profile::GetDefaultRequestContext()->GetURLRequestContext();
     if (!context)
       return CPERR_FAILURE;
   }
@@ -460,9 +461,10 @@ int STDCALL CPB_GetBrowsingContextInfo(
     PluginService* service = PluginService::GetInstance();
     if (!service)
       return CPERR_FAILURE;
-    std::wstring wretval = service->GetChromePluginDataDir().ToWStringHack();
-    file_util::AppendToPath(&wretval, chrome::kChromePluginDataDirname);
-    *static_cast<char**>(buf) = CPB_StringDup(CPB_Alloc, WideToUTF8(wretval));
+    FilePath path = service->GetChromePluginDataDir();
+    std::string retval = WideToUTF8(
+        path.Append(chrome::kChromePluginDataDirname).ToWStringHack());
+    *static_cast<char**>(buf) = CPB_StringDup(CPB_Alloc, retval);
     return CPERR_SUCCESS;
     }
   case CPBROWSINGCONTEXT_UI_LOCALE_PTR: {
@@ -654,7 +656,8 @@ CPError STDCALL CPR_AppendFileToUpload(CPRequest* request, const char* filepath,
 
   if (!length) length = kuint64max;
   FilePath path(FilePath::FromWStringHack(UTF8ToWide(filepath)));
-  handler->request()->AppendFileRangeToUpload(path, offset, length);
+  handler->request()->AppendFileRangeToUpload(path, offset, length,
+                                              base::Time());
   return CPERR_SUCCESS;
 }
 
@@ -734,13 +737,10 @@ CPError STDCALL CPB_SendSyncMessage(CPID id, const void *data, uint32 data_len,
 CPError STDCALL CPB_PluginThreadAsyncCall(CPID id,
                                           void (*func)(void *),
                                           void *user_data) {
-  MessageLoop *message_loop = ChromeThread::GetMessageLoop(ChromeThread::IO);
-  if (!message_loop) {
-    return CPERR_FAILURE;
-  }
-  message_loop->PostTask(FROM_HERE, NewRunnableFunction(func, user_data));
-
-  return CPERR_SUCCESS;
+  bool posted = ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableFunction(func, user_data));
+  return posted ? CPERR_SUCCESS : CPERR_FAILURE;
 }
 
 CPError STDCALL CPB_OpenFileDialog(CPID id,
@@ -819,7 +819,8 @@ void CPHandleCommand(int command, CPCommandInterface* data,
   // brain trying to compile the Tuple3 ctor. This cast works.
   int32 context_as_int32 = static_cast<int32>(context);
   // Plugins can only be accessed on the IO thread.
-  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
       NewRunnableFunction(PluginCommandHandler::HandleCommand,
                           command, data, context_as_int32));
 }

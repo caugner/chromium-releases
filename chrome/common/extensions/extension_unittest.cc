@@ -1,16 +1,20 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/common/extensions/extension.h"
+
+#include "base/format_macros.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/string_util.h"
 #include "base/path_service.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_error_reporter.h"
+#include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/json_value_serializer.h"
+#include "chrome/common/url_constants.h"
 #include "net/base/mime_sniffer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,6 +25,24 @@ namespace errors = extension_manifest_errors;
 class ExtensionTest : public testing::Test {
 };
 
+// We persist location values in the preferences, so this is a sanity test that
+// someone doesn't accidentally change them.
+TEST(ExtensionTest, LocationValuesTest) {
+  ASSERT_EQ(0, Extension::INVALID);
+  ASSERT_EQ(1, Extension::INTERNAL);
+  ASSERT_EQ(2, Extension::EXTERNAL_PREF);
+  ASSERT_EQ(3, Extension::EXTERNAL_REGISTRY);
+  ASSERT_EQ(4, Extension::LOAD);
+  ASSERT_EQ(5, Extension::COMPONENT);
+}
+
+
+// Please don't put any more manifest tests here!!
+// Move them to extension_manifest_unittest.cc instead and make them use the
+// more data-driven style there instead.
+// Bug: http://crbug.com/38462
+
+
 TEST(ExtensionTest, InitFromValueInvalid) {
 #if defined(OS_WIN)
   FilePath path(FILE_PATH_LITERAL("c:\\foo"));
@@ -28,6 +50,7 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   FilePath path(FILE_PATH_LITERAL("/foo"));
 #endif
   Extension extension(path);
+  int error_code = 0;
   std::string error;
   ExtensionErrorReporter::Init(false);
 
@@ -39,15 +62,18 @@ TEST(ExtensionTest, InitFromValueInvalid) {
       .AppendASCII("Extensions")
       .AppendASCII("behllobkkfkfnphdnhnkndlbkcpglgmj")
       .AppendASCII("1.0.0.0")
-      .AppendASCII(Extension::kManifestFilename);
+      .Append(Extension::kManifestFilename);
 
   JSONFileValueSerializer serializer(extensions_path);
   scoped_ptr<DictionaryValue> valid_value(
-      static_cast<DictionaryValue*>(serializer.Deserialize(&error)));
+      static_cast<DictionaryValue*>(serializer.Deserialize(&error_code,
+                                                           &error)));
   EXPECT_EQ("", error);
+  EXPECT_EQ(0, error_code);
   ASSERT_TRUE(valid_value.get());
   ASSERT_TRUE(extension.InitFromValue(*valid_value, true, &error));
   ASSERT_EQ("", error);
+  EXPECT_EQ("en_US", extension.default_locale());
 
   scoped_ptr<DictionaryValue> input_value;
 
@@ -90,7 +116,7 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   ASSERT_FALSE(NULL == icons);
   icons->SetInteger(ASCIIToWide(IntToString(128)), 42);
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidIconPath));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidIconPath));
 
   // Test invalid user scripts list
   input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
@@ -105,7 +131,7 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   ASSERT_FALSE(NULL == content_scripts);
   content_scripts->Set(0, Value::CreateIntegerValue(42));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidContentScript));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidContentScript));
 
   // Test missing and invalid matches array
   input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
@@ -114,21 +140,21 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   content_scripts->GetDictionary(0, &user_script);
   user_script->Remove(keys::kMatches, NULL);
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidMatches));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidMatches));
 
   user_script->Set(keys::kMatches, Value::CreateIntegerValue(42));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidMatches));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidMatches));
 
   ListValue* matches = new ListValue;
   user_script->Set(keys::kMatches, matches);
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidMatchCount));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidMatchCount));
 
   // Test invalid match element
   matches->Set(0, Value::CreateIntegerValue(42));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidMatch));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidMatch));
 
   // Test missing and invalid files array
   input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
@@ -137,40 +163,40 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   user_script->Remove(keys::kJs, NULL);
   user_script->Remove(keys::kCss, NULL);
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kMissingFile));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kMissingFile));
 
   user_script->Set(keys::kJs, Value::CreateIntegerValue(42));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidJsList));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidJsList));
 
   user_script->Set(keys::kCss, new ListValue);
   user_script->Set(keys::kJs, new ListValue);
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kMissingFile));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kMissingFile));
   user_script->Remove(keys::kCss, NULL);
 
   ListValue* files = new ListValue;
   user_script->Set(keys::kJs, files);
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kMissingFile));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kMissingFile));
 
   // Test invalid file element
   files->Set(0, Value::CreateIntegerValue(42));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidJs));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidJs));
 
   user_script->Remove(keys::kJs, NULL);
   // Test the css element
   user_script->Set(keys::kCss, Value::CreateIntegerValue(42));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidCssList));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidCssList));
 
   // Test invalid file element
   ListValue* css_files = new ListValue;
   user_script->Set(keys::kCss, css_files);
   css_files->Set(0, Value::CreateIntegerValue(42));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidCss));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidCss));
 
   // Test missing and invalid permissions array
   input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
@@ -186,57 +212,78 @@ TEST(ExtensionTest, InitFromValueInvalid) {
 
   input_value->Set(keys::kPermissions, Value::CreateIntegerValue(9));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidPermissions));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidPermissions));
 
   input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
   input_value->GetList(keys::kPermissions, &permissions);
   permissions->Set(0, Value::CreateIntegerValue(24));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidPermission));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidPermission));
 
   permissions->Set(0, Value::CreateStringValue("www.google.com"));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidPermission));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidPermission));
 
   // Test permissions scheme.
   input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
   input_value->GetList(keys::kPermissions, &permissions);
   permissions->Set(0, Value::CreateStringValue("file:///C:/foo.txt"));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidPermissionScheme));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidPermissionScheme));
 
-  // Test invalid privacy blacklists list.
-  input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
-  input_value->SetInteger(keys::kPrivacyBlacklists, 42);
-  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_EQ(errors::kInvalidPrivacyBlacklists, error);
-
-  // Test invalid privacy blacklists list item.
-  input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
-  ListValue* privacy_blacklists = NULL;
-  input_value->GetList(keys::kPrivacyBlacklists, &privacy_blacklists);
-  ASSERT_FALSE(NULL == privacy_blacklists);
-  privacy_blacklists->Set(0, Value::CreateIntegerValue(42));
-  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidPrivacyBlacklistsPath));
-
-  // Test invalid UI surface count (both page action and browser action).
+  // Multiple page actions are not allowed.
   input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
   DictionaryValue* action = new DictionaryValue;
   action->SetString(keys::kPageActionId, "MyExtensionActionId");
   action->SetString(keys::kName, "MyExtensionActionName");
   ListValue* action_list = new ListValue;
   action_list->Append(action->DeepCopy());
+  action_list->Append(action);
+  input_value->Set(keys::kPageActions, action_list);
+  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
+  EXPECT_STREQ(errors::kInvalidPageActionsListSize, error.c_str());
+
+  // Test invalid UI surface count (both page action and browser action).
+  input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
+  action = new DictionaryValue;
+  action->SetString(keys::kPageActionId, "MyExtensionActionId");
+  action->SetString(keys::kName, "MyExtensionActionName");
+  action_list = new ListValue;
+  action_list->Append(action->DeepCopy());
   input_value->Set(keys::kPageActions, action_list);
   input_value->Set(keys::kBrowserAction, action);
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_STREQ(error.c_str(), errors::kOneUISurfaceOnly);
+  EXPECT_STREQ(errors::kOneUISurfaceOnly, error.c_str());
 
   // Test invalid options page url.
   input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
   input_value->Set(keys::kOptionsPage, Value::CreateNullValue());
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidOptionsPage));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidOptionsPage));
+
+  // Test invalid/empty default locale.
+  input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
+  input_value->Set(keys::kDefaultLocale, Value::CreateIntegerValue(5));
+  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidDefaultLocale));
+
+  input_value->Set(keys::kDefaultLocale, Value::CreateStringValue(""));
+  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidDefaultLocale));
+
+  // Test invalid minimum_chrome_version.
+  input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
+  input_value->Set(keys::kMinimumChromeVersion, Value::CreateIntegerValue(42));
+  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidMinimumChromeVersion));
+
+#if !defined(OS_MACOSX)
+  // TODO(aa): The version isn't stamped into the unit test binary on mac.
+  input_value->Set(keys::kMinimumChromeVersion,
+                   Value::CreateStringValue("88.8"));
+  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kChromeVersionTooLow));
+#endif
 }
 
 TEST(ExtensionTest, InitFromValueValid) {
@@ -267,6 +314,22 @@ TEST(ExtensionTest, InitFromValueValid) {
   EXPECT_EQ("", error);
   EXPECT_EQ("chrome-extension", extension.options_url().scheme());
   EXPECT_EQ("/options.html", extension.options_url().path());
+
+  // Test that an empty list of page actions does not stop a browser action
+  // from being loaded.
+  ListValue* empty_list = new ListValue;
+  input_value.Set(keys::kPageActions, empty_list);
+  EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
+  EXPECT_EQ("", error);
+
+#if !defined(OS_MACOSX)
+  // TODO(aa): The version isn't stamped into the unit test binary on mac.
+  // Test with a minimum_chrome_version.
+  input_value.SetString(keys::kMinimumChromeVersion, "1.0");
+  EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
+  EXPECT_EQ("", error);
+  // The minimum chrome version is not stored in the Extension object.
+#endif
 }
 
 TEST(ExtensionTest, GetResourceURLAndPath) {
@@ -300,19 +363,12 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   scoped_ptr<ExtensionAction> action;
   DictionaryValue input;
 
-  // First try with an empty dictionary. We should get nothing back.
-  ASSERT_TRUE(extension.LoadExtensionActionHelper(
-      &input, &error_msg, ExtensionAction::PAGE_ACTION) == NULL);
-  ASSERT_STRNE("", error_msg.c_str());
-  error_msg = "";
+  // First try with an empty dictionary.
+  action.reset(extension.LoadExtensionActionHelper(&input, &error_msg));
+  ASSERT_TRUE(action != NULL);
+  ASSERT_TRUE(error_msg.empty());
 
-  // Now try the same, but as a browser action. Ensure same results.
-  ASSERT_TRUE(extension.LoadExtensionActionHelper(
-      &input, &error_msg, ExtensionAction::BROWSER_ACTION) == NULL);
-  ASSERT_STRNE("", error_msg.c_str());
-  error_msg = "";
-
-  // Now setup some values to use in the page action.
+  // Now setup some values to use in the action.
   const std::string id("MyExtensionActionId");
   const std::string name("MyExtensionActionName");
   std::string img1("image1.png");
@@ -326,46 +382,22 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   icons->Set(1, Value::CreateStringValue(img2));
   input.Set(keys::kPageActionIcons, icons);
 
-  // Parse as page action and read back the values from the object.
-  action.reset(extension.LoadExtensionActionHelper(
-      &input, &error_msg, ExtensionAction::PAGE_ACTION));
+  // Parse and read back the values from the object.
+  action.reset(extension.LoadExtensionActionHelper(&input, &error_msg));
   ASSERT_TRUE(NULL != action.get());
-  ASSERT_STREQ("", error_msg.c_str());
-  ASSERT_STREQ(id.c_str(), action->id().c_str());
-  ASSERT_STREQ(name.c_str(), action->title().c_str());
-  ASSERT_EQ(2u, action->icon_paths().size());
-  ASSERT_STREQ(img1.c_str(), action->icon_paths()[0].c_str());
-  ASSERT_STREQ(img2.c_str(), action->icon_paths()[1].c_str());
-  ASSERT_EQ(ExtensionAction::PAGE_ACTION, action->type());
-
-  // Now try the same, but as a browser action.
-  action.reset(extension.LoadExtensionActionHelper(
-      &input, &error_msg, ExtensionAction::BROWSER_ACTION));
-  ASSERT_TRUE(NULL != action.get());
-  ASSERT_STREQ("", error_msg.c_str());
-  // Browser actions don't have an id, page actions do.
-  ASSERT_STREQ("", action->id().c_str());
-  ASSERT_STREQ(name.c_str(), action->title().c_str());
-  ASSERT_EQ(2u, action->icon_paths().size());
-  ASSERT_STREQ(img1.c_str(), action->icon_paths()[0].c_str());
-  ASSERT_STREQ(img2.c_str(), action->icon_paths()[1].c_str());
-  ASSERT_EQ(ExtensionAction::BROWSER_ACTION, action->type());
+  ASSERT_TRUE(error_msg.empty());
+  ASSERT_EQ(id, action->id());
+  // No title, so fall back to name.
+  ASSERT_EQ(name, action->GetTitle(1));
+  ASSERT_EQ(2u, action->icon_paths()->size());
+  ASSERT_EQ(img1, (*action->icon_paths())[0]);
+  ASSERT_EQ(img2, (*action->icon_paths())[1]);
 
   // Explicitly set the same type and parse again.
   input.SetString(keys::kType, values::kPageActionTypeTab);
-  action.reset(extension.LoadExtensionActionHelper(
-      &input, &error_msg, ExtensionAction::BROWSER_ACTION));
+  action.reset(extension.LoadExtensionActionHelper(&input, &error_msg));
   ASSERT_TRUE(NULL != action.get());
-  ASSERT_STREQ("", error_msg.c_str());
-  ASSERT_EQ(ExtensionAction::BROWSER_ACTION, action->type());
-
-  // Explicitly set the PAGE_ACTION type and parse again.
-  input.SetString(keys::kType, values::kPageActionTypePermanent);
-  action.reset(extension.LoadExtensionActionHelper(
-      &input, &error_msg, ExtensionAction::PAGE_ACTION));
-  ASSERT_TRUE(NULL != action.get());
-  ASSERT_STREQ("", error_msg.c_str());
-  ASSERT_EQ(ExtensionAction::PAGE_ACTION, action->type());
+  ASSERT_TRUE(error_msg.empty());
 
   // Make a deep copy of the input and remove one key at a time and see if we
   // get the right error.
@@ -374,77 +406,129 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   // First remove id key.
   copy.reset(static_cast<DictionaryValue*>(input.DeepCopy()));
   copy->Remove(keys::kPageActionId, NULL);
-  action.reset(extension.LoadExtensionActionHelper(
-      copy.get(), &error_msg, ExtensionAction::PAGE_ACTION));
+  action.reset(extension.LoadExtensionActionHelper(copy.get(), &error_msg));
   ASSERT_TRUE(NULL != action.get());
-  ASSERT_STREQ("", error_msg.c_str());
-  error_msg = "";
 
-  // Same test (id key), but with browser action.
-  copy.reset(static_cast<DictionaryValue*>(input.DeepCopy()));
-  copy->Remove(keys::kPageActionId, NULL);
-  action.reset(extension.LoadExtensionActionHelper(
-      copy.get(), &error_msg, ExtensionAction::BROWSER_ACTION));
-  // Having no id is valid for browser actions.
-  ASSERT_TRUE(NULL != action.get());
-  ASSERT_STREQ("", error_msg.c_str());
-  error_msg = "";
-
-  // Then remove the name key.
+  // Then remove the name key. It's optional, so no error.
   copy.reset(static_cast<DictionaryValue*>(input.DeepCopy()));
   copy->Remove(keys::kName, NULL);
-  action.reset(extension.LoadExtensionActionHelper(
-      copy.get(), &error_msg, ExtensionAction::PAGE_ACTION));
-  ASSERT_TRUE(NULL == action.get());
-  ASSERT_TRUE(MatchPattern(error_msg.c_str(),
-                           errors::kInvalidPageActionDefaultTitle));
-  error_msg = "";
-
-  // Same test (name key), but with browser action.
-  copy.reset(static_cast<DictionaryValue*>(input.DeepCopy()));
-  copy->Remove(keys::kName, NULL);
-  action.reset(extension.LoadExtensionActionHelper(
-      copy.get(), &error_msg, ExtensionAction::BROWSER_ACTION));
-  ASSERT_TRUE(NULL == action.get());
-  ASSERT_TRUE(MatchPattern(error_msg.c_str(),
-                           errors::kInvalidPageActionDefaultTitle));
-  error_msg = "";
+  action.reset(extension.LoadExtensionActionHelper(copy.get(), &error_msg));
+  ASSERT_TRUE(NULL != action.get());
+  ASSERT_TRUE(action->GetTitle(1).empty());
+  ASSERT_TRUE(error_msg.empty());
 
   // Then remove the icon paths key.
   copy.reset(static_cast<DictionaryValue*>(input.DeepCopy()));
   copy->Remove(keys::kPageActionIcons, NULL);
-  action.reset(extension.LoadExtensionActionHelper(
-      copy.get(), &error_msg, ExtensionAction::PAGE_ACTION));
+  action.reset(extension.LoadExtensionActionHelper(copy.get(), &error_msg));
   ASSERT_TRUE(NULL != action.get());
   error_msg = "";
-
-  // Same test (name key), but with browser action.
-  copy.reset(static_cast<DictionaryValue*>(input.DeepCopy()));
-  copy->Remove(keys::kPageActionIcons, NULL);
-  action.reset(extension.LoadExtensionActionHelper(
-      copy.get(), &error_msg, ExtensionAction::BROWSER_ACTION));
-  ASSERT_TRUE(NULL != action.get());
 
   // Now test that we can parse the new format for page actions.
 
   // Now setup some values to use in the page action.
   const std::string kTitle("MyExtensionActionTitle");
   const std::string kIcon("image1.png");
+  const std::string kPopupHtmlFile("a_popup.html");
 
   // Add the dictionary for the contextual action.
   input.Clear();
   input.SetString(keys::kPageActionDefaultTitle, kTitle);
   input.SetString(keys::kPageActionDefaultIcon, kIcon);
 
-  // Parse as page action and read back the values from the object.
-  action.reset(extension.LoadExtensionActionHelper(
-      &input, &error_msg, ExtensionAction::PAGE_ACTION));
+  // Parse and read back the values from the object.
+  action.reset(extension.LoadExtensionActionHelper(&input, &error_msg));
   ASSERT_TRUE(action.get());
-  ASSERT_STREQ("", error_msg.c_str());
-  ASSERT_EQ(kTitle, action->title());
-  ASSERT_EQ(1u, action->icon_paths().size());
-  ASSERT_EQ(kIcon, action->icon_paths()[0]);
-  ASSERT_EQ(ExtensionAction::PAGE_ACTION, action->type());
+  ASSERT_TRUE(error_msg.empty());
+  ASSERT_EQ(kTitle, action->GetTitle(1));
+  ASSERT_EQ(0u, action->icon_paths()->size());
+
+  // Invalid title should give an error even with a valid name.
+  input.Clear();
+  input.SetInteger(keys::kPageActionDefaultTitle, 42);
+  input.SetString(keys::kName, name);
+  action.reset(extension.LoadExtensionActionHelper(&input, &error_msg));
+  ASSERT_TRUE(NULL == action.get());
+  ASSERT_STREQ(errors::kInvalidPageActionDefaultTitle, error_msg.c_str());
+  error_msg = "";
+
+  // Invalid name should give an error only with no title.
+  input.SetString(keys::kPageActionDefaultTitle, kTitle);
+  input.SetInteger(keys::kName, 123);
+  action.reset(extension.LoadExtensionActionHelper(&input, &error_msg));
+  ASSERT_TRUE(NULL != action.get());
+  ASSERT_EQ(kTitle, action->GetTitle(1));
+  ASSERT_TRUE(error_msg.empty());
+
+  input.Remove(keys::kPageActionDefaultTitle, NULL);
+  action.reset(extension.LoadExtensionActionHelper(&input, &error_msg));
+  ASSERT_TRUE(NULL == action.get());
+  ASSERT_STREQ(errors::kInvalidPageActionName, error_msg.c_str());
+  error_msg = "";
+
+  // Test that keys "popup" and "default_popup" both work, but can not
+  // be used at the same time.
+  input.Clear();
+  input.SetString(keys::kPageActionDefaultTitle, kTitle);
+  input.SetString(keys::kPageActionDefaultIcon, kIcon);
+
+  // LoadExtensionActionHelper expects the extension member |extension_url_|
+  // to be set.
+  extension.extension_url_ = GURL(std::string(chrome::kExtensionScheme) +
+                                  chrome::kStandardSchemeSeparator +
+                                  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/");
+
+  // Add key "popup", expect success.
+  input.SetString(keys::kPageActionPopup, kPopupHtmlFile);
+  action.reset(extension.LoadExtensionActionHelper(&input, &error_msg));
+  ASSERT_TRUE(NULL != action.get());
+  ASSERT_TRUE(error_msg.empty());
+  ASSERT_STREQ(
+      extension.extension_url_.Resolve(kPopupHtmlFile).spec().c_str(),
+      action->GetPopupUrl(ExtensionAction::kDefaultTabId).spec().c_str());
+
+  // Add key "default_popup", expect failure.
+  input.SetString(keys::kPageActionDefaultPopup, kPopupHtmlFile);
+  action.reset(extension.LoadExtensionActionHelper(&input, &error_msg));
+  ASSERT_TRUE(NULL == action.get());
+  ASSERT_STREQ(
+      ExtensionErrorUtils::FormatErrorMessage(
+          errors::kInvalidPageActionOldAndNewKeys,
+          WideToASCII(keys::kPageActionDefaultPopup),
+          WideToASCII(keys::kPageActionPopup)).c_str(),
+      error_msg.c_str());
+  error_msg = "";
+
+  // Remove key "popup", expect success.
+  input.Remove(keys::kPageActionPopup, NULL);
+  action.reset(extension.LoadExtensionActionHelper(&input, &error_msg));
+  ASSERT_TRUE(NULL != action.get());
+  ASSERT_TRUE(error_msg.empty());
+  ASSERT_STREQ(
+      extension.extension_url_.Resolve(kPopupHtmlFile).spec().c_str(),
+      action->GetPopupUrl(ExtensionAction::kDefaultTabId).spec().c_str());
+
+  // Setting default_popup to "" is the same as having no popup.
+  input.Remove(keys::kPageActionDefaultPopup, NULL);
+  input.SetString(keys::kPageActionDefaultPopup, "");
+  action.reset(extension.LoadExtensionActionHelper(&input, &error_msg));
+  ASSERT_TRUE(NULL != action.get());
+  ASSERT_TRUE(error_msg.empty());
+  EXPECT_FALSE(action->HasPopup(ExtensionAction::kDefaultTabId));
+  ASSERT_STREQ(
+      "",
+      action->GetPopupUrl(ExtensionAction::kDefaultTabId).spec().c_str());
+
+  // Setting popup to "" is the same as having no popup.
+  input.Remove(keys::kPageActionDefaultPopup, NULL);
+  input.SetString(keys::kPageActionPopup, "");
+  action.reset(extension.LoadExtensionActionHelper(&input, &error_msg));
+  ASSERT_TRUE(NULL != action.get());
+  ASSERT_TRUE(error_msg.empty());
+  EXPECT_FALSE(action->HasPopup(ExtensionAction::kDefaultTabId));
+  ASSERT_STREQ(
+      "",
+      action->GetPopupUrl(ExtensionAction::kDefaultTabId).spec().c_str());
 }
 
 TEST(ExtensionTest, IdIsValid) {
@@ -499,9 +583,11 @@ TEST(ExtensionTest, UpdateUrls) {
 
     DictionaryValue input_value;
 #if defined(OS_WIN)
-    FilePath path(StringPrintf(L"c:\\extension%i", i));
+    // (Why %Iu below?  This is the single file in the whole code base that
+    // might make use of a WidePRIuS; let's not encourage any more.)
+    FilePath path(StringPrintf(L"c:\\extension%Iu", i));
 #else
-    FilePath path(StringPrintf("/extension%i", i));
+    FilePath path(StringPrintf("/extension%" PRIuS, i));
 #endif
     Extension extension(path);
     std::string error;
@@ -521,9 +607,11 @@ TEST(ExtensionTest, UpdateUrls) {
   for (size_t i = 0; i < invalid.size(); i++) {
     DictionaryValue input_value;
 #if defined(OS_WIN)
-    FilePath path(StringPrintf(L"c:\\extension%i", i));
+    // (Why %Iu below?  This is the single file in the whole code base that
+    // might make use of a WidePRIuS; let's not encourage any more.)
+    FilePath path(StringPrintf(L"c:\\extension%Iu", i));
 #else
-    FilePath path(StringPrintf("/extension%i", i));
+    FilePath path(StringPrintf("/extension%" PRIuS, i));
 #endif
     Extension extension(path);
     std::string error;
@@ -532,7 +620,7 @@ TEST(ExtensionTest, UpdateUrls) {
     input_value.SetString(keys::kUpdateURL, invalid[i]);
 
     EXPECT_FALSE(extension.InitFromValue(input_value, false, &error));
-    EXPECT_TRUE(MatchPattern(error, errors::kInvalidUpdateURL));
+    EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidUpdateURL));
   }
 }
 
@@ -569,7 +657,7 @@ static Extension* LoadManifest(const std::string& dir,
              .AppendASCII(test_file);
 
   JSONFileValueSerializer serializer(path);
-  scoped_ptr<Value> result(serializer.Deserialize(NULL));
+  scoped_ptr<Value> result(serializer.Deserialize(NULL, NULL));
   if (!result.get())
     return NULL;
 
@@ -683,7 +771,9 @@ TEST(ExtensionTest, IsPrivilegeIncrease) {
     { "permissions4", false },  // plugin -> plugin,tabs
     { "plugin1", false },  // plugin -> plugin
     { "plugin2", false },  // plugin -> none
-    { "plugin3", true }  // none -> plugin
+    { "plugin3", true },  // none -> plugin
+    { "storage", false },  // none -> storage
+    { "notifications", false } // none -> notifications
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTests); ++i) {

@@ -5,9 +5,9 @@
 #ifndef CHROME_BROWSER_GTK_EXTENSION_VIEW_GTK_H_
 #define CHROME_BROWSER_GTK_EXTENSION_VIEW_GTK_H_
 
-#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/size.h"
+#include "gfx/native_widget_types.h"
+#include "gfx/size.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 class Browser;
@@ -25,9 +25,6 @@ class ExtensionViewGtk {
   gfx::NativeView native_view();
   Browser* browser() const { return browser_; }
 
-  bool is_toolstrip() const { return is_toolstrip_; }
-  void set_is_toolstrip(bool is_toolstrip) { is_toolstrip_ = is_toolstrip; }
-
   void SetBackground(const SkBitmap& background);
 
   // Method for the ExtensionHost to notify us about the correct size for
@@ -38,13 +35,16 @@ class ExtensionViewGtk {
   // connection.
   void RenderViewCreated();
 
- private:
   RenderViewHost* render_view_host() const;
 
-  void CreateWidgetHostView();
+  // Declared here for testing.
+  static const int kMinWidth;
+  static const int kMinHeight;
+  static const int kMaxWidth;
+  static const int kMaxHeight;
 
-  // True if the contents are being displayed inside the extension shelf.
-  bool is_toolstrip_;
+ private:
+  void CreateWidgetHostView();
 
   Browser* browser_;
 

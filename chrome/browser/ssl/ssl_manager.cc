@@ -5,9 +5,11 @@
 #include "chrome/browser/ssl/ssl_manager.h"
 
 #include "app/l10n_util.h"
-#include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/load_from_memory_cache_details.h"
 #include "chrome/browser/net/url_request_tracking.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/renderer_host/resource_request_details.h"
 #include "chrome/browser/ssl/ssl_cert_error_handler.h"
 #include "chrome/browser/ssl/ssl_policy.h"
@@ -17,7 +19,6 @@
 #include "chrome/browser/tab_contents/provisional_load_details.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "grit/generated_resources.h"
 #include "net/base/cert_status_flags.h"
 
@@ -63,8 +64,7 @@ bool SSLManager::ProcessedSSLErrorFromRequest() const {
 void SSLManager::OnSSLCertificateError(ResourceDispatcherHost* rdh,
                                        URLRequest* request,
                                        int cert_error,
-                                       net::X509Certificate* cert,
-                                       MessageLoop* ui_loop) {
+                                       net::X509Certificate* cert) {
   DLOG(INFO) << "OnSSLCertificateError() cert_error: " << cert_error <<
                 " url: " << request->url().spec();
 
@@ -74,15 +74,15 @@ void SSLManager::OnSSLCertificateError(ResourceDispatcherHost* rdh,
 
   // A certificate error occurred.  Construct a SSLCertErrorHandler object and
   // hand it over to the UI thread for processing.
-  ui_loop->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
       NewRunnableMethod(new SSLCertErrorHandler(rdh,
                                                 request,
                                                 info->resource_type(),
                                                 info->frame_origin(),
                                                 info->main_frame_origin(),
                                                 cert_error,
-                                                cert,
-                                                ui_loop),
+                                                cert),
                         &SSLCertErrorHandler::Dispatch));
 }
 
@@ -170,11 +170,6 @@ void SSLManager::DidCommitProvisionalLoad(
     const NotificationDetails& in_details) {
   NavigationController::LoadCommittedDetails* details =
       Details<NavigationController::LoadCommittedDetails>(in_details).ptr();
-
-  // Ignore in-page navigations, they should not change the security style or
-  // the info-bars.
-  if (details->is_in_page)
-    return;
 
   NavigationEntry* entry = controller_->GetActiveEntry();
 

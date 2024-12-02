@@ -7,18 +7,20 @@
 // reading.  This is useful for callers who simply want to get the data from a
 // URL and don't care about all the nitty-gritty details.
 
-#ifndef CHROME_BROWSER_URL_FETCHER_H_
-#define CHROME_BROWSER_URL_FETCHER_H_
+#ifndef CHROME_BROWSER_NET_URL_FETCHER_H_
+#define CHROME_BROWSER_NET_URL_FETCHER_H_
+
+#include <string>
 
 #include "base/leak_tracker.h"
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
-#include "chrome/browser/net/url_fetcher_protect.h"
+#include "base/time.h"
 
 class GURL;
 typedef std::vector<std::string> ResponseCookies;
 class URLFetcher;
-class URLRequestContext;
+class URLRequestContextGetter;
 class URLRequestStatus;
 
 namespace net {
@@ -48,10 +50,6 @@ class HttpResponseHeaders;
 // You may create the URLFetcher instance on any thread; OnURLFetchComplete()
 // will be called back on the same thread you use to create the instance.
 //
-// NOTE: Take extra care when using URLFetcher in services that live on the
-//       BrowserProcess; all URLFetcher instances need to be destroyed before
-//       the IO thread goes away, since the URLFetcher destructor requests an
-//       InvokeLater operation on that thread.
 //
 // NOTE: By default URLFetcher requests are NOT intercepted, except when
 // interception is explicitly enabled in tests.
@@ -116,13 +114,6 @@ class URLFetcher {
   static URLFetcher* Create(int id, const GURL& url, RequestType request_type,
                             Delegate* d);
 
-  // This should only be used by unittests, where g_browser_process->io_thread()
-  // does not exist and we must specify an alternate loop.  Unfortunately, we
-  // can't put it under #ifdef UNIT_TEST since some callers (which themselves
-  // should only be reached in unit tests) use this.  See
-  // chrome/browser/feeds/feed_manager.cc.
-  void set_io_loop(MessageLoop* io_loop);
-
   // Sets data only needed by POSTs.  All callers making POST requests should
   // call this before the request is started.  |upload_content_type| is the MIME
   // type of the content, while |upload_content| is the data to be sent (the
@@ -143,11 +134,27 @@ class URLFetcher {
 
   // Set the URLRequestContext on the request.  Must be called before the
   // request is started.
-  void set_request_context(URLRequestContext* request_context);
+  void set_request_context(URLRequestContextGetter* request_context_getter);
+
+  // If |retry| is false, 5xx responses will be propagated to the observer,
+  // if it is true URLFetcher will automatically re-execute the request,
+  // after backoff_delay() elapses. URLFetcher has it set to true by default.
+  void set_automatcally_retry_on_5xx(bool retry);
+
+  // Returns the back-off delay before the request will be retried,
+  // when a 5xx response was received.
+  base::TimeDelta backoff_delay() const { return backoff_delay_; }
+
+  // Sets the back-off delay, allowing to mock 5xx requests in unit-tests.
+#if defined(UNIT_TEST)
+  void set_backoff_delay(base::TimeDelta backoff_delay) {
+    backoff_delay_ = backoff_delay;
+  }
+#endif  // defined(UNIT_TEST)
 
   // Retrieve the response headers from the request.  Must only be called after
   // the OnURLFetchComplete callback has run.
-  net::HttpResponseHeaders* response_headers() const;
+  virtual net::HttpResponseHeaders* response_headers() const;
 
   // Start the request.  After this is called, you may not change any other
   // settings.
@@ -160,15 +167,10 @@ class URLFetcher {
   // Returns the delegate.
   Delegate* delegate() const;
 
+  // Used by tests.
+  const std::string& upload_data() const;
+
  private:
-  // This class is the real guts of URLFetcher.
-  //
-  // When created, delegate_loop_ is set to the message loop of the current
-  // thread, while io_loop_ is set to the message loop of the IO thread.  These
-  // are used to ensure that all handling of URLRequests happens on the IO
-  // thread (since that class is not currently threadsafe and relies on
-  // underlying Microsoft APIs that we don't know to be threadsafe), while
-  // keeping the delegate callback on the delegate's thread.
   class Core;
 
   scoped_refptr<Core> core_;
@@ -177,9 +179,17 @@ class URLFetcher {
 
   base::LeakTracker<URLFetcher> leak_tracker_;
 
+  // If |automatically_retry_on_5xx_| is false, 5xx responses will be
+  // propagated to the observer, if it is true URLFetcher will automatically
+  // re-execute the request, after the back-off delay has expired.
+  // true by default.
+  bool automatically_retry_on_5xx_;
+  // Back-off time delay. 0 by default.
+  base::TimeDelta backoff_delay_;
+
   static bool g_interception_enabled;
 
   DISALLOW_EVIL_CONSTRUCTORS(URLFetcher);
 };
 
-#endif  // CHROME_BROWSER_URL_FETCHER_H_
+#endif  // CHROME_BROWSER_NET_URL_FETCHER_H_

@@ -6,10 +6,7 @@
 #define WEBKIT_TOOLS_TEST_SHELL_ACCESSIBILITY_UI_ELEMENT_H_
 
 #include "webkit/glue/cpp_bound_class.h"
-
-namespace WebKit {
-class WebAccessibilityObject;
-}
+#include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityObject.h"
 
 class AccessibilityUIElement : public CppBoundClass {
  public:
@@ -26,9 +23,6 @@ class AccessibilityUIElement : public CppBoundClass {
 
   virtual AccessibilityUIElement* GetChildAtIndex(unsigned index);
   virtual bool IsRoot() const { return false; }
-
-  std::string GetTitle();
-  std::string GetDescription();
 
  protected:
   const WebKit::WebAccessibilityObject& accessibility_object() const {
@@ -86,6 +80,7 @@ class AccessibilityUIElement : public CppBoundClass {
   void ChildrenCountGetterCallback(CppVariant* result);
   void DescriptionGetterCallback(CppVariant* result);
   void IsEnabledGetterCallback(CppVariant* result);
+  void IsSelectedGetterCallback(CppVariant* result);
   void RoleGetterCallback(CppVariant* result);
   void TitleGetterCallback(CppVariant* result);
 

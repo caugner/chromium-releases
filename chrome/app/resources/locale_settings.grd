@@ -39,7 +39,6 @@
     <!-- The translation console uses 'no' for Norwegian Bokmål. It should
          be 'nb'. -->
     <output filename="locale_settings_nb.rc" type="rc_all" lang="no" />
-    <output filename="locale_settings_or.rc" type="rc_all" lang="or" />
     <output filename="locale_settings_pl.rc" type="rc_all" lang="pl" />
     <output filename="locale_settings_pt-BR.rc" type="rc_all" lang="pt-BR" />
     <output filename="locale_settings_pt-PT.rc" type="rc_all" lang="pt-PT" />
@@ -94,7 +93,6 @@
     <!-- The translation console uses 'no' for Norwegian Bokmål. It should
          be 'nb'. -->
     <output filename="locale_settings_nb.pak" type="data_package" lang="no" />
-    <output filename="locale_settings_or.pak" type="data_package" lang="or" />
     <output filename="locale_settings_pl.pak" type="data_package" lang="pl" />
     <output filename="locale_settings_pt-BR.pak" type="data_package" lang="pt-BR" />
     <output filename="locale_settings_pt-PT.pak" type="data_package" lang="pt-PT" />
@@ -147,7 +145,6 @@
     <file path="locale_settings_mr.xtb" lang="mr" />
     <file path="locale_settings_nl.xtb" lang="nl" />
     <file path="locale_settings_nb.xtb" lang="no" />
-    <file path="locale_settings_or.xtb" lang="or" />
     <file path="locale_settings_pl.xtb" lang="pl" />
     <file path="locale_settings_pt-BR.xtb" lang="pt-BR" />
     <file path="locale_settings_pt-PT.xtb" lang="pt-PT" />
@@ -202,7 +199,6 @@
       <if expr="pp_ifdef('_google_chrome') and 'mr' == lang">    <include name="IDR_TERMS_HTML" file="terms\terms_mr.html" type="BINDATA" /></if>
       <if expr="pp_ifdef('_google_chrome') and 'nl' == lang">    <include name="IDR_TERMS_HTML" file="terms\terms_nl.html" type="BINDATA" /></if>
       <if expr="pp_ifdef('_google_chrome') and 'no' == lang">    <include name="IDR_TERMS_HTML" file="terms\terms_nb.html" type="BINDATA" /></if>
-      <if expr="pp_ifdef('_google_chrome') and 'or' == lang">    <include name="IDR_TERMS_HTML" file="terms\terms_or.html" type="BINDATA" /></if>
       <if expr="pp_ifdef('_google_chrome') and 'pl' == lang">    <include name="IDR_TERMS_HTML" file="terms\terms_pl.html" type="BINDATA" /></if>
       <if expr="pp_ifdef('_google_chrome') and 'pt-BR' == lang"> <include name="IDR_TERMS_HTML" file="terms\terms_pt-BR.html" type="BINDATA" /></if>
       <if expr="pp_ifdef('_google_chrome') and 'pt-PT' == lang"> <include name="IDR_TERMS_HTML" file="terms\terms_pt-PT.html" type="BINDATA" /></if>
@@ -227,29 +223,6 @@
     </includes>
     <messages fallback_to_english="true">
 
-      <if expr="os != 'darwin'">
-        <!-- The font used in web-style native pages (e.g. History). -->
-        <message name="IDS_WEB_FONT_FAMILY" use_name_for_id="true">
-          Arial
-        </message>
-
-        <!-- The relative font size in % used in web-style native pages
-        (e.g. History).  -->
-        <message name="IDS_WEB_FONT_SIZE" use_name_for_id="true">
-          84%
-        </message>
-      </if>
-
-      <if expr="os == 'darwin'">
-        <message name="IDS_WEB_FONT_FAMILY" desc="The font used in web-style native pages (e.g. History) (Mac)">
-          Helvetica
-        </message>
-
-        <message name="IDS_WEB_FONT_SIZE" desc="The relative font size in % used in web-style native pages (e.g. History) (Mac)">
-          84%
-        </message>
-      </if>
-
       <!-- The default value for HTTP Accept-Language header. -->
       <message name="IDS_ACCEPT_LANGUAGES" use_name_for_id="true">
         en-US,en
@@ -260,101 +233,6 @@
         ISO-8859-1
       </message>
 
-      <if expr="os != 'darwin'">
-        <!-- The default value to determine whether
-             |WebPreference::standard_font_family| is serif or sans-serif. -->
-        <message name="IDS_STANDARD_FONT_IS_SERIF" use_name_for_id="true">
-          true
-        </message>
-
-        <!-- The default value for |WebPreference::fixed_font_family| -->
-        <message name="IDS_FIXED_FONT_FAMILY" use_name_for_id="true">
-          Courier New
-        </message>
-
-        <!-- The default value for |WebPreference::serif_font_family| -->
-        <message name="IDS_SERIF_FONT_FAMILY" use_name_for_id="true">
-          Times New Roman
-        </message>
-
-        <!-- The default value for |WebPreference::sans_serif_font_family| -->
-        <message name="IDS_SANS_SERIF_FONT_FAMILY" use_name_for_id="true">
-          Arial
-        </message>
-
-        <!-- The default value for |WebPreference::cursive_font_family| -->
-        <message name="IDS_CURSIVE_FONT_FAMILY" use_name_for_id="true">
-          Comic Sans MS
-        </message>
-
-        <!-- The default value for |WebPreference::fantasy_font_family| -->
-        <message name="IDS_FANTASY_FONT_FAMILY" use_name_for_id="true">
-          Impact
-        </message>
-
-        <!-- The default value for |WebPreference::default_font_size| -->
-        <message name="IDS_DEFAULT_FONT_SIZE" use_name_for_id="true">
-          16
-        </message>
-
-        <!-- The default value for |WebPreference::default_fixed_font_size| -->
-        <message name="IDS_DEFAULT_FIXED_FONT_SIZE" use_name_for_id="true">
-          13
-        </message>
-
-        <!-- The default value for |WebPreference::minimum_font_size| -->
-        <message name="IDS_MINIMUM_FONT_SIZE" use_name_for_id="true">
-          1
-        </message>
-
-        <!-- The default value for |WebPreference::minimum_logical_font_size|. -->
-        <message name="IDS_MINIMUM_LOGICAL_FONT_SIZE" use_name_for_id="true">
-          6
-        </message>
-      </if>
-
-      <if expr="os == 'darwin'">
-        <message name="IDS_STANDARD_FONT_IS_SERIF" desc="The default value to determine whether |WebPreference::standard_font_family| is serif or sans-serif (Mac)">
-          true
-        </message>
-
-        <message name="IDS_FIXED_FONT_FAMILY" desc="The default value for |WebPreference::fixed_font_family| (Mac)">
-          Courier
-        </message>
-
-        <message name="IDS_SERIF_FONT_FAMILY" desc="The default value for |WebPreference::serif_font_family| (Mac)">
-          Times
-        </message>
-
-        <message name="IDS_SANS_SERIF_FONT_FAMILY" desc="The default value for |WebPreference::sans_serif_font_family| (Mac)">
-          Helvetica
-        </message>
-
-        <message name="IDS_CURSIVE_FONT_FAMILY" desc="The default value for |WebPreference::cursive_font_family| (Mac)">
-          Apple Chancery
-        </message>
-
-        <message name="IDS_FANTASY_FONT_FAMILY" desc="The default value for |WebPreference::fantasy_font_family| (Mac)">
-          Papyrus
-        </message>
-
-        <message name="IDS_DEFAULT_FONT_SIZE" desc="The default value for |WebPreference::default_font_size| (Mac)">
-          16
-        </message>
-
-        <message name="IDS_DEFAULT_FIXED_FONT_SIZE" desc="The default value for |WebPreference::default_fixed_font_size| (Mac)">
-          13
-        </message>
-
-        <message name="IDS_MINIMUM_FONT_SIZE" desc="The default value for |WebPreference::minimum_font_size| (Mac)">
-          1
-        </message>
-
-        <message name="IDS_MINIMUM_LOGICAL_FONT_SIZE" desc="The default value for |WebPreference::minimum_logical_font_size| (Mac)">
-          9
-        </message>
-      </if>
-
       <!-- The default value for |WebPreference::uses_universal_detector|. -->
       <message name="IDS_USES_UNIVERSAL_DETECTOR" use_name_for_id="true">
         false
@@ -363,16 +241,6 @@
       <!-- The file name of the spellchecking dictionary without the extension (case-sensitive). -->
       <message name="IDS_SPELLCHECK_DICTIONARY" use_name_for_id="true">
         en-US
-      </message>
-
-      <!-- URL for the "Learn more" link on the malware blocking page. -->
-      <message name="IDS_LEARN_MORE_MALWARE_URL" translateable="false">
-        http://www.google.com/support/bin/answer.py?answer=45449&amp;topic=360&amp;hl=[GRITLANGCODE]&amp;sa=X&amp;oi=malwarewarninglink&amp;resnum=1&amp;ct=help
-      </message>
-
-      <!-- URL for the "Learn more" link on the phishing blocking page. -->
-      <message name="IDS_LEARN_MORE_PHISHING_URL" translateable="false">
-        http://www.google.com/support/bin/answer.py?answer=106318&amp;hl=[GRITLANGCODE]
       </message>
 
       <!-- The width of the Options dialog box, in characters (character width = -->
@@ -399,6 +267,18 @@
         80
       </message>
 
+      <!-- The width of the Content Settings dialog box, in characters (character width = -->
+      <!-- average character width for default dialog box font) -->
+      <message name="IDS_CONTENT_SETTINGS_DIALOG_WIDTH_CHARS" use_name_for_id="true">
+        76
+      </message>
+
+      <!-- The height of the Content Settings dialog box, in lines (line height = character -->
+      <!-- height for default dialog box font) -->
+      <message name="IDS_CONTENT_SETTINGS_DIALOG_HEIGHT_LINES" use_name_for_id="true">
+        24
+      </message>
+
       <!-- The width and height of the URL picker dialog box in characters and lines -->
       <!-- (See above). -->
       <message name="IDS_URLPICKER_DIALOG_WIDTH_CHARS" use_name_for_id="true">
@@ -422,6 +302,15 @@
         27
       </message>
 
+      <!-- The width and height of the Sync Options (customize sync) dialog box in -->
+      <!-- characters and lines (See above for defns of char width and height). -->
+      <message name="IDS_CUSTOMIZE_SYNC_DIALOG_WIDTH_CHARS" use_name_for_id="true">
+        60
+      </message>
+      <message name="IDS_CUSTOMIZE_SYNC_DIALOG_HEIGHT_LINES" use_name_for_id="true">
+        10
+      </message>
+      
       <!-- The width and height of the Bug Reporting dialog box in characters and lines -->
       <!-- (See above). -->
       <message name="IDS_BUGREPORT_DIALOG_WIDTH_CHARS" use_name_for_id="true">
@@ -437,7 +326,7 @@
         63
       </message>
       <message name="IDS_CLEARDATA_DIALOG_HEIGHT_LINES" use_name_for_id="true">
-        16
+        17
       </message>
 
       <!-- The width and height of the Import dialog box in characters and lines (See -->
@@ -521,6 +410,32 @@
         17
       </message>
 
+      <!-- The width and height of the First Run Search Engine Selection dialog box in characters and -->
+      <!-- lines (See above). -->
+      <message name="IDS_FIRSTRUN_SEARCH_ENGINE_SELECTION_WIDTH_CHARS" use_name_for_id="true">
+        128
+      </message>
+      <if expr="pp_ifdef('_google_chrome')">
+        <message name="IDS_FIRSTRUN_SEARCH_ENGINE_SELECTION_HEIGHT_LINES" use_name_for_id="true">
+          20
+        </message>
+      </if>
+      <!-- With text instead of images, the selection dialog is much smaller. -->
+      <if expr="not pp_ifdef('_google_chrome')">
+        <message name="IDS_FIRSTRUN_SEARCH_ENGINE_SELECTION_HEIGHT_LINES" use_name_for_id="true">
+          14
+        </message>
+      </if>
+
+      <!-- The width and height of the Cookies dialog box in characters and lines -->
+      <!-- (See above). -->
+      <message name="IDS_COOKIES_PROMPT_WIDTH_CHARS" use_name_for_id="true">
+        82
+      </message>
+      <message name="IDS_COOKIES_PROMPT_HEIGHT_LINES" use_name_for_id="true">
+        25
+      </message>
+
       <!-- The width and height of the Cookies dialog box in characters and lines -->
       <!-- (See above). -->
       <message name="IDS_COOKIES_DIALOG_WIDTH_CHARS" use_name_for_id="true">
@@ -557,23 +472,27 @@
         12
       </message>
 
-      <!-- The width and height of the First Run Search Information mini -->
+      <!-- The width and height of the First Run Search Information OEM -->
       <!-- bubble in characters and lines (See above). -->
       <message name="IDS_FIRSTRUNOEMBUBBLE_DIALOG_WIDTH_CHARS" use_name_for_id="true">
-        58
+        37
       </message>
       <message name="IDS_FIRSTRUNOEMBUBBLE_DIALOG_HEIGHT_LINES" use_name_for_id="true">
-        4
+        3
       </message>
 
-      <!-- The URL to be loaded to display Help -->
-      <message name="IDS_HELP_CONTENT_URL" translateable="false">
-        http://www.google.com/support/chrome/?hl=[GRITLANGCODE]
+      <!-- The width and height of the First Run Omnibox Information minimal -->
+      <!-- bubble in characters and lines (See above). -->
+      <message name="IDS_FIRSTRUN_MINIMAL_BUBBLE_DIALOG_WIDTH_CHARS" use_name_for_id="true">
+        62
+      </message>
+      <message name="IDS_FIRSTRUN_MINIMAL_BUBBLE_DIALOG_HEIGHT_LINES" use_name_for_id="true">
+        5
       </message>
 
-      <!-- URL to post bug reports to -->
-      <message name="IDS_BUGREPORT_POST_URL" translateable="false">
-        http://web-bug.appspot.com/bugreport
+      <!-- The minimum width of javascript alert popups. -->
+      <message name="IDS_ALERT_DIALOG_WIDTH_CHARS" use_name_for_id="true">
+        30
       </message>
 
       <!-- Locale-dependent static encodings string -->
@@ -586,11 +505,6 @@
         http://tools.google.com/chrome/intl/[GRITLANGCODE]/welcome.html
       </message>
 
-      <!-- The URL for the the Learn More page shown on incognito new tab. -->
-      <message name="IDS_LEARN_MORE_INCOGNITO_URL" translateable="false">
-        http://www.google.com/support/chrome/bin/answer.py?answer=95464&amp;hl=[GRITLANGCODE]
-      </message>
-
       <!-- The URL for the "Learn more" page for the Privacy section under Options. -->
       <message name="IDS_LEARN_MORE_PRIVACY_URL" translateable="false">
         http://www.google.com/support/chrome/bin/answer.py?answer=114836&amp;hl=[GRITLANGCODE]
@@ -599,6 +513,11 @@
       <!-- The URL for the "Learn more" page for the usage/crash reporting option in the first run dialog. -->
       <message name="IDS_LEARN_MORE_REPORTING_URL" translateable="false">
         http://www.google.com/support/chrome/bin/answer.py?answer=96817&amp;hl=[GRITLANGCODE]
+      </message>
+
+      <!-- The URL for the "Learn more" privacy page for the Geolocation permission infobar. -->
+      <message name="IDS_LEARN_MORE_GEOLOCATION_URL" translateable="false">
+        http://www.google.com/support/chrome/bin/answer.py?answer=142065&amp;hl=[GRITLANGCODE]
       </message>
 
       <!-- The width and height of the bookmark manager in characters and lines -->
@@ -634,17 +553,6 @@
         http://code.google.com/chromium/?hl=[GRITLANGCODE]
       </message>
 
-      <!-- The URL for Linux ssl certificate configuration help. -->
-      <message name="IDS_LINUX_CERTIFICATES_CONFIG_URL" translateable="false">
-        http://code.google.com/p/chromium/wiki/LinuxCertManagement
-      </message>
-
-      <!-- The URL for Linux proxy configuration help when not running under -->
-      <!-- a supported desktop environment. -->
-      <message name="IDS_LINUX_PROXY_CONFIG_URL" translateable="false">
-        http://code.google.com/p/chromium/wiki/LinuxProxyConfig
-      </message>
-
       <!-- The URL for the themes gallery. -->
       <message name="IDS_THEMES_GALLERY_URL" translateable="false">
         https://tools.google.com/chrome/intl/[GRITLANGCODE]/themes/index.html
@@ -655,15 +563,22 @@
       <message name="IDS_CHROME_WELCOME_URL" translateable="false">
         http://www.google.com/chrome/intl/[GRITLANGCODE]/welcome.html
       </message>
-      
+
+      <!-- The URL for Adobe Flash storage settings. We cannot rely on -->
+      <!-- the automatic expansion of GRITLANGCODE here because Adobe does -->
+      <!-- not use the language/locale code. -->
+      <message name="IDS_FLASH_STORAGE_URL" use_name_for_id="true">
+        http://www.adobe.com/go/settmgr_storage_en
+      </message>
+
       <!-- The width of the sync setup wizard / login dialog in characters. -->
       <message name="IDS_SYNC_SETUP_WIZARD_WIDTH_CHARS" use_name_for_id="true">
         46
       </message>
-      
+
       <!-- The height of the sync setup wizard / login dialog in lines. -->
       <message name="IDS_SYNC_SETUP_WIZARD_HEIGHT_LINES" use_name_for_id="true">
-        14
+        15
       </message>
 
       <!-- The default width/height for confirmation dialogs. -->
@@ -680,6 +595,67 @@
       </message>
       <message name="IDS_CONFIRM_STOP_SYNCING_DIALOG_HEIGHT_LINES" use_name_for_id="true">
         8
+      </message>
+
+      <!-- The URL for the "Aw snap" page. -->
+      <message name="IDS_CRASH_REASON_URL" translateable="false">
+        http://www.google.com/support/chrome/bin/answer.py?answer=95669&amp;hl=[GRITLANGCODE]
+      </message>
+
+      <!-- The default width and min height for the 'download_in_progress' dialog. -->
+      <message name="IDS_DOWNLOAD_IN_PROGRESS_WIDTH_CHARS" use_name_for_id="true">
+        67
+      </message>
+      <message name="IDS_DOWNLOAD_IN_PROGRESS_MINIMUM_HEIGHT_LINES" use_name_for_id="true">
+        4
+      </message>
+
+      <!-- The width for the "create application shortcuts" dialog in characters. -->
+      <message name="IDS_CREATE_SHORTCUTS_DIALOG_WIDTH_CHARS" use_name_for_id="true">
+        55
+      </message>
+
+      <!-- The width and height for the "create application shortcuts error" dialog. -->
+      <if expr="os == 'linux2' or os == 'openbsd4' or os == 'freebsd6'">
+        <message name="IDS_CREATE_SHORTCUTS_ERROR_DIALOG_WIDTH_CHARS" use_name_for_id="true">
+         60
+        </message>
+        <message name="IDS_CREATE_SHORTCUTS_ERROR_DIALOG_HEIGHT_LINES" use_name_for_id="true">
+         6
+        </message>
+      </if>
+
+      <!-- The width of the AutoFill dialog in characters. -->
+      <message name="IDS_AUTOFILL_DIALOG_WIDTH_CHARS" use_name_for_id="true">
+        94
+      </message>
+
+      <!-- The height of the AutoFill dialog in lines. -->
+      <message name="IDS_AUTOFILL_DIALOG_HEIGHT_LINES" use_name_for_id="true">
+        32
+      </message>
+
+      <!-- The URL for About Google Translate. -->
+      <message name="IDS_ABOUT_GOOGLE_TRANSLATE_URL" translateable="false">
+        http://www.google.com/support/chrome/bin/answer.py?answer=173424&amp;hl=[GRITLANGCODE]
+      </message>
+
+      <!-- The width and height of the Content Settings Exceptions dialog box in -->
+      <!-- characters and lines (See above). -->
+      <message name="IDS_CONTENT_EXCEPTION_DIALOG_WIDTH_CHARS" use_name_for_id="true">
+        90
+      </message>
+      <message name="IDS_CONTENT_EXCEPTION_DIALOG_HEIGHT_LINES" use_name_for_id="true">
+        16
+      </message>
+
+      <!-- The width and height of the Geolocation Settings Exceptions -->
+      <!-- dialog box in characters and lines (See above). -->
+      <message name="IDS_GEOLOCATION_EXCEPTION_DIALOG_WIDTH_CHARS" use_name_for_id="true">
+        90
+      </message>
+      <message name="IDS_GEOLOCATION_EXCEPTION_DIALOG_HEIGHT_LINES" use_name_for_id="true">
+        16
       </message>
     </messages>
   </release>

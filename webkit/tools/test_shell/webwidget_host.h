@@ -5,10 +5,10 @@
 #ifndef WEBKIT_TOOLS_TEST_SHELL_WEBWIDGET_HOST_H_
 #define WEBKIT_TOOLS_TEST_SHELL_WEBWIDGET_HOST_H_
 
-#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/rect.h"
 #include "base/scoped_ptr.h"
+#include "gfx/native_widget_types.h"
+#include "gfx/rect.h"
 #include "skia/ext/platform_canvas.h"
 
 namespace gfx {
@@ -67,6 +67,8 @@ class WebWidgetHost {
     canvas()->drawARGB(167, 0, 0, 0);
   }
 
+  void PaintRect(const gfx::Rect& rect);
+
  protected:
   WebWidgetHost();
   ~WebWidgetHost();
@@ -92,7 +94,7 @@ class WebWidgetHost {
   void KeyEvent(NSEvent *);
   void SetFocus(bool enable);
  protected:
-#elif defined(OS_LINUX)
+#elif defined(TOOLKIT_USES_GTK)
  public:
   // ---------------------------------------------------------------------------
   // This is needed on Linux because the GtkWidget creation is the same between
@@ -114,7 +116,6 @@ class WebWidgetHost {
 #endif
 
   void ResetScrollRect();
-  void PaintRect(const gfx::Rect& rect);
 
   void set_painting(bool value) {
 #ifndef NDEBUG
@@ -138,7 +139,7 @@ class WebWidgetHost {
   bool track_mouse_leave_;
 #endif
 
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
   // Since GtkWindow resize is asynchronous, we have to stash the dimensions,
   // so that the backing store doesn't have to wait for sizing to take place.
   gfx::Size logical_size_;

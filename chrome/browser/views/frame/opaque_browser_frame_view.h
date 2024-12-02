@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,30 +11,30 @@
 #include "views/controls/button/button.h"
 #include "views/window/non_client_view.h"
 
+class BaseTabStrip;
 class BrowserView;
 namespace gfx {
 class Font;
 }
 class TabContents;
-class TabStrip;
 namespace views {
 class ImageButton;
+class ImageView;
 }
 
 class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
                                public views::ButtonListener,
                                public TabIconView::TabIconViewModel {
  public:
-  // Constructs a non-client view for an BrowserFrame. |is_otr| specifies if the
-  // frame was created "off-the-record" and as such different bitmaps should be
-  // used to render the frame.
+  // Constructs a non-client view for an BrowserFrame.
   OpaqueBrowserFrameView(BrowserFrame* frame, BrowserView* browser_view);
   virtual ~OpaqueBrowserFrameView();
 
   // Overridden from BrowserNonClientFrameView:
-  virtual gfx::Rect GetBoundsForTabStrip(TabStripWrapper* tabstrip) const;
+  virtual gfx::Rect GetBoundsForTabStrip(BaseTabStrip* tabstrip) const;
   virtual void UpdateThrobber(bool running);
   virtual gfx::Size GetMinimumSize();
+  virtual void PaintTabStripShadow(gfx::Canvas* canvas);
 
  protected:
   // Overridden from views::NonClientFrameView:
@@ -42,7 +42,6 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   virtual bool AlwaysUseNativeFrame() const;
   virtual gfx::Rect GetWindowBoundsForClientBounds(
       const gfx::Rect& client_bounds) const;
-  virtual gfx::Point GetSystemMenuPoint() const;
   virtual int NonClientHitTest(const gfx::Point& point);
   virtual void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask);
   virtual void EnableClose(bool enable);
@@ -52,12 +51,7 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   virtual void Paint(gfx::Canvas* canvas);
   virtual void Layout();
   virtual bool HitTest(const gfx::Point& l) const;
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    views::View* parent,
-                                    views::View* child);
   virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
-  virtual bool GetAccessibleName(std::wstring* name);
-  virtual void SetAccessibleName(const std::wstring& name);
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender, const views::Event& event);
@@ -83,44 +77,34 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   // frame, any title area, and any connected client edge.
   int NonClientTopBorderHeight() const;
 
-  // The nonclient area at the top of the window may include some "unavailable"
-  // pixels at its bottom: a dark shadow along the bottom of the titlebar and a
-  // client edge.  These vary from mode to mode, so this function returns the
-  // number of such pixels the nonclient height includes.
-  int UnavailablePixelsAtBottomOfNonClientHeight() const;
+  // Returns the y-coordinate of the caption buttons.
+  int CaptionButtonY() const;
 
-  // Calculates multiple values related to title layout.  Returns the height of
-  // the entire titlebar including any connected client edge.
-  int TitleCoordinates(int* title_top_spacing_ptr,
-                       int* title_thickness_ptr) const;
+  // Returns the thickness of the nonclient portion of the 3D edge along the
+  // bottom of the titlebar.
+  int TitlebarBottomThickness() const;
 
-  // Returns the right edge. This is the end the close button starts at (if a
-  // close button is shown).
-  int RightEdge() const;
+  // Returns the size of the titlebar icon.  This is used even when the icon is
+  // not shown, e.g. to set the titlebar height.
+  int IconSize() const;
 
-  // Calculates multiple values related to icon layout.  Returns the size of the
-  // icon (along one edge).
-  int IconSize(int* title_top_spacing_ptr,
-               int* title_thickness_ptr,
-               int* available_height_ptr) const;
+  // Returns the bounds of the titlebar icon (or where the icon would be if
+  // there was one).
+  gfx::Rect IconBounds() const;
 
   // Paint various sub-components of this view.  The *FrameBorder() functions
   // also paint the background of the titlebar area, since the top frame border
   // and titlebar background are a contiguous component.
   void PaintRestoredFrameBorder(gfx::Canvas* canvas);
   void PaintMaximizedFrameBorder(gfx::Canvas* canvas);
-  void PaintDistributorLogo(gfx::Canvas* canvas);
   void PaintTitleBar(gfx::Canvas* canvas);
   void PaintToolbarBackground(gfx::Canvas* canvas);
-  void PaintOTRAvatar(gfx::Canvas* canvas);
   void PaintRestoredClientEdge(gfx::Canvas* canvas);
 
   // Layout various sub-components of this view.
   void LayoutWindowControls();
-  void LayoutDistributorLogo();
   void LayoutTitleBar();
   void LayoutOTRAvatar();
-  void LayoutClientView();
 
   // Returns the bounds of the client area for the specified view size.
   gfx::Rect CalculateClientAreaBounds(int width, int height) const;
@@ -128,11 +112,8 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   // The layout rect of the title, if visible.
   gfx::Rect title_bounds_;
 
-  // The layout rect of the distributor logo, if visible.
-  gfx::Rect logo_bounds_;
-
-  // The layout rect of the OTR avatar icon, if visible.
-  gfx::Rect otr_avatar_bounds_;
+  // Off the record avatar icon.
+  views::ImageView* otr_avatar_icon_;
 
   // Window controls.
   views::ImageButton* minimize_button_;
@@ -155,12 +136,7 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   // The accessible name of this view.
   std::wstring accessible_name_;
 
-  static void InitClass();
-  static void InitAppWindowResources();
-  static SkBitmap* distributor_logo_;
-  static gfx::Font* title_font_;
-
   DISALLOW_EVIL_CONSTRUCTORS(OpaqueBrowserFrameView);
 };
 
-#endif  // #ifndef CHROME_BROWSER_VIEWS_FRAME_OPAQUE_BROWSER_FRAME_VIEW_H_
+#endif  // CHROME_BROWSER_VIEWS_FRAME_OPAQUE_BROWSER_FRAME_VIEW_H_

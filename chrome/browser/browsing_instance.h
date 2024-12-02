@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_BROWSING_INSTANCE_H__
-#define CHROME_BROWSER_BROWSING_INSTANCE_H__
+#ifndef CHROME_BROWSER_BROWSING_INSTANCE_H_
+#define CHROME_BROWSER_BROWSING_INSTANCE_H_
 
 #include "base/hash_tables.h"
 #include "base/logging.h"
@@ -55,15 +55,8 @@ class SiteInstance;
 class BrowsingInstance : public base::RefCounted<BrowsingInstance> {
  public:
   // Create a new BrowsingInstance.
-  BrowsingInstance(Profile* profile)
+  explicit BrowsingInstance(Profile* profile)
       : profile_(profile) {
-  }
-
-  // Virtual to allow tests to extend it.
-  virtual ~BrowsingInstance() {
-    // We should only be deleted when all of the SiteInstances that refer to
-    // us are gone.
-    DCHECK(site_instance_map_.empty());
   }
 
   // Returns whether the process-per-site model is in use (globally or just for
@@ -93,6 +86,16 @@ class BrowsingInstance : public base::RefCounted<BrowsingInstance> {
   // if the user later visits a page from this site, within this
   // BrowsingInstance.
   void UnregisterSiteInstance(SiteInstance* site_instance);
+
+ protected:
+  friend class base::RefCounted<BrowsingInstance>;
+
+  // Virtual to allow tests to extend it.
+  virtual ~BrowsingInstance() {
+    // We should only be deleted when all of the SiteInstances that refer to
+    // us are gone.
+    DCHECK(site_instance_map_.empty());
+  }
 
  private:
   // Map of site to SiteInstance, to ensure we only have one SiteInstance per
@@ -130,4 +133,4 @@ class BrowsingInstance : public base::RefCounted<BrowsingInstance> {
   DISALLOW_EVIL_CONSTRUCTORS(BrowsingInstance);
 };
 
-#endif  //  CHROME_BROWSER_BROWSING_INSTANCE_H__
+#endif  // CHROME_BROWSER_BROWSING_INSTANCE_H_

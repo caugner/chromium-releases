@@ -4,6 +4,7 @@
 
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "chrome/browser/profile_manager.h"
@@ -140,8 +141,6 @@ void RegisterForAllNavNotifications(TestNotificationTracker* tracker,
   tracker->ListenFor(NotificationType::NAV_ENTRY_CHANGED,
                      Source<NavigationController>(controller));
 }
-
-}  // namespace
 
 // -----------------------------------------------------------------------------
 
@@ -767,6 +766,62 @@ TEST_F(NavigationControllerTest, Redirect) {
   EXPECT_FALSE(controller().CanGoForward());
 }
 
+// Similar to Redirect above, but the first URL is requested by POST,
+// the second URL is requested by GET. NavigationEntry::has_post_data_
+// must be cleared. http://crbug.com/21245
+TEST_F(NavigationControllerTest, PostThenRedirect) {
+  TestNotificationTracker notifications;
+  RegisterForAllNavNotifications(&notifications, &controller());
+
+  const GURL url1("http://foo1");
+  const GURL url2("http://foo2");  // Redirection target
+
+  // First request as POST
+  controller().LoadURL(url1, GURL(), PageTransition::TYPED);
+  controller().GetActiveEntry()->set_has_post_data(true);
+
+  EXPECT_EQ(0U, notifications.size());
+  rvh()->SendNavigate(0, url2);
+  EXPECT_TRUE(notifications.Check1AndReset(
+      NotificationType::NAV_ENTRY_COMMITTED));
+
+  // Second request
+  controller().LoadURL(url1, GURL(), PageTransition::TYPED);
+
+  EXPECT_TRUE(controller().pending_entry());
+  EXPECT_EQ(controller().pending_entry_index(), -1);
+  EXPECT_EQ(url1, controller().GetActiveEntry()->url());
+
+  ViewHostMsg_FrameNavigate_Params params = {0};
+  params.page_id = 0;
+  params.url = url2;
+  params.transition = PageTransition::SERVER_REDIRECT;
+  params.redirects.push_back(GURL("http://foo1"));
+  params.redirects.push_back(GURL("http://foo2"));
+  params.should_update_history = false;
+  params.gesture = NavigationGestureAuto;
+  params.is_post = false;
+
+  NavigationController::LoadCommittedDetails details;
+
+  EXPECT_EQ(0U, notifications.size());
+  EXPECT_TRUE(controller().RendererDidNavigate(params, 0, &details));
+  EXPECT_TRUE(notifications.Check1AndReset(
+      NotificationType::NAV_ENTRY_COMMITTED));
+
+  EXPECT_TRUE(details.type == NavigationType::SAME_PAGE);
+  EXPECT_EQ(controller().entry_count(), 1);
+  EXPECT_EQ(controller().last_committed_entry_index(), 0);
+  EXPECT_TRUE(controller().GetLastCommittedEntry());
+  EXPECT_EQ(controller().pending_entry_index(), -1);
+  EXPECT_FALSE(controller().pending_entry());
+  EXPECT_EQ(url2, controller().GetActiveEntry()->url());
+  EXPECT_FALSE(controller().GetActiveEntry()->has_post_data());
+
+  EXPECT_FALSE(controller().CanGoBack());
+  EXPECT_FALSE(controller().CanGoForward());
+}
+
 // A redirect right off the bat should be a NEW_PAGE.
 TEST_F(NavigationControllerTest, ImmediateRedirect) {
   TestNotificationTracker notifications;
@@ -988,15 +1043,14 @@ TEST_F(NavigationControllerTest, InPage) {
   TestNotificationTracker notifications;
   RegisterForAllNavNotifications(&notifications, &controller());
 
-  // Main page. Note that we need "://" so this URL is treated as "standard"
-  // which are the only ones that can have a ref.
-  const GURL url1("http:////foo");
+  // Main page.
+  const GURL url1("http://foo");
   rvh()->SendNavigate(0, url1);
   EXPECT_TRUE(notifications.Check1AndReset(
       NotificationType::NAV_ENTRY_COMMITTED));
 
   // First navigation.
-  const GURL url2("http:////foo#a");
+  const GURL url2("http://foo#a");
   ViewHostMsg_FrameNavigate_Params params = {0};
   params.page_id = 1;
   params.url = url2;
@@ -1010,6 +1064,8 @@ TEST_F(NavigationControllerTest, InPage) {
   EXPECT_TRUE(controller().RendererDidNavigate(params, 0, &details));
   EXPECT_TRUE(notifications.Check1AndReset(
       NotificationType::NAV_ENTRY_COMMITTED));
+  EXPECT_TRUE(details.is_in_page);
+  EXPECT_FALSE(details.did_replace_entry);
   EXPECT_EQ(2, controller().entry_count());
 
   // Go back one.
@@ -1020,6 +1076,9 @@ TEST_F(NavigationControllerTest, InPage) {
   EXPECT_TRUE(controller().RendererDidNavigate(back_params, 0, &details));
   EXPECT_TRUE(notifications.Check1AndReset(
       NotificationType::NAV_ENTRY_COMMITTED));
+  // is_in_page is false in that case but should be true.
+  // See comment in AreURLsInPageNavigation() in navigation_controller.cc
+  // EXPECT_TRUE(details.is_in_page);
   EXPECT_EQ(2, controller().entry_count());
   EXPECT_EQ(0, controller().GetCurrentEntryIndex());
   EXPECT_EQ(back_params.url, controller().GetActiveEntry()->url());
@@ -1032,6 +1091,7 @@ TEST_F(NavigationControllerTest, InPage) {
   EXPECT_TRUE(controller().RendererDidNavigate(forward_params, 0, &details));
   EXPECT_TRUE(notifications.Check1AndReset(
       NotificationType::NAV_ENTRY_COMMITTED));
+  EXPECT_TRUE(details.is_in_page);
   EXPECT_EQ(2, controller().entry_count());
   EXPECT_EQ(1, controller().GetCurrentEntryIndex());
   EXPECT_EQ(forward_params.url,
@@ -1047,9 +1107,48 @@ TEST_F(NavigationControllerTest, InPage) {
   EXPECT_TRUE(controller().RendererDidNavigate(forward_params, 0, &details));
   EXPECT_EQ(forward_params.url,
             controller().GetActiveEntry()->url());
+
+  // Finally, navigate to an unrelated URL to make sure in_page is not sticky.
+  const GURL url3("http://bar");
+  params.page_id = 2;
+  params.url = url3;
+  notifications.Reset();
+  EXPECT_TRUE(controller().RendererDidNavigate(params, 0, &details));
+  EXPECT_TRUE(notifications.Check1AndReset(
+      NotificationType::NAV_ENTRY_COMMITTED));
+  EXPECT_FALSE(details.is_in_page);
 }
 
-namespace {
+TEST_F(NavigationControllerTest, InPage_Replace) {
+  TestNotificationTracker notifications;
+  RegisterForAllNavNotifications(&notifications, &controller());
+
+  // Main page.
+  const GURL url1("http://foo");
+  rvh()->SendNavigate(0, url1);
+  EXPECT_TRUE(notifications.Check1AndReset(
+      NotificationType::NAV_ENTRY_COMMITTED));
+
+  // First navigation.
+  const GURL url2("http://foo#a");
+  ViewHostMsg_FrameNavigate_Params params = {0};
+  params.page_id = 0;  // Same page_id
+  params.url = url2;
+  params.transition = PageTransition::LINK;
+  params.should_update_history = false;
+  params.gesture = NavigationGestureUser;
+  params.is_post = false;
+
+  // This should NOT generate a new entry.
+  NavigationController::LoadCommittedDetails details;
+  EXPECT_TRUE(controller().RendererDidNavigate(params, 0, &details));
+  EXPECT_TRUE(notifications.Check2AndReset(
+      NotificationType::NAV_LIST_PRUNED,
+      NotificationType::NAV_ENTRY_COMMITTED));
+  EXPECT_TRUE(details.is_in_page);
+  EXPECT_TRUE(details.did_replace_entry);
+  EXPECT_EQ(1, controller().entry_count());
+}
 
 // NotificationObserver implementation used in verifying we've received the
 // NotificationType::NAV_LIST_PRUNED method.
@@ -1081,8 +1180,6 @@ class PrunedListener : public NotificationObserver {
 
   DISALLOW_COPY_AND_ASSIGN(PrunedListener);
 };
-
-}  // namespace
 
 // Tests that we limit the number of navigation entries created correctly.
 TEST_F(NavigationControllerTest, EnforceMaxNavigationCount) {
@@ -1146,7 +1243,7 @@ TEST_F(NavigationControllerTest, RestoreNavigate) {
                                       PageTransition::LINK));
   TabContents our_contents(profile(), NULL, MSG_ROUTING_NONE, NULL);
   NavigationController& our_controller = our_contents.controller();
-  our_controller.RestoreFromState(navigations, 0);
+  our_controller.RestoreFromState(navigations, 0, true);
   our_controller.GoToIndex(0);
 
   // We should now have one entry, and it should be "pending".
@@ -1154,6 +1251,8 @@ TEST_F(NavigationControllerTest, RestoreNavigate) {
   EXPECT_EQ(our_controller.GetEntryAtIndex(0),
             our_controller.pending_entry());
   EXPECT_EQ(0, our_controller.GetEntryAtIndex(0)->page_id());
+  EXPECT_EQ(NavigationEntry::RESTORE_LAST_SESSION,
+            our_controller.GetEntryAtIndex(0)->restore_type());
 
   // Say we navigated to that entry.
   ViewHostMsg_FrameNavigate_Params params = {0};
@@ -1174,6 +1273,8 @@ TEST_F(NavigationControllerTest, RestoreNavigate) {
   EXPECT_FALSE(our_controller.pending_entry());
   EXPECT_EQ(url,
             our_controller.GetLastCommittedEntry()->site_instance()->site());
+  EXPECT_EQ(NavigationEntry::RESTORE_NONE,
+            our_controller.GetEntryAtIndex(0)->restore_type());
 }
 
 // Make sure that the page type and stuff is correct after an interstitial.
@@ -1435,6 +1536,99 @@ TEST_F(NavigationControllerTest, SameSubframe) {
   EXPECT_EQ(controller().last_committed_entry_index(), 0);
 }
 
+// Test view source redirection is reflected in title bar.
+TEST_F(NavigationControllerTest, ViewSourceRedirect) {
+  const char kUrl[] = "view-source:http://redirect.to/google.com";
+  const char kResult[] = "http://google.com/";
+  const char kExpected[] = "view-source:http://google.com/";
+  const GURL url(kUrl);
+  const GURL result_url(kResult);
+
+  controller().LoadURL(url, GURL(), PageTransition::TYPED);
+
+  ViewHostMsg_FrameNavigate_Params params = {0};
+  params.page_id = 0;
+  params.url = result_url;
+  params.transition = PageTransition::SERVER_REDIRECT;
+  params.should_update_history = false;
+  params.gesture = NavigationGestureAuto;
+  params.is_post = false;
+  NavigationController::LoadCommittedDetails details;
+  controller().RendererDidNavigate(params, 0, &details);
+
+  EXPECT_EQ(ASCIIToUTF16(kExpected), contents()->GetTitle());
+  EXPECT_EQ(true, contents()->ShouldDisplayURL());
+}
+
+// Make sure that on cloning a tabcontents and going back needs_reload is false.
+TEST_F(NavigationControllerTest, CloneAndGoBack) {
+  const GURL url1("http://foo1");
+  const GURL url2("http://foo2");
+
+  NavigateAndCommit(url1);
+  NavigateAndCommit(url2);
+
+  scoped_ptr<TabContents> clone(controller().tab_contents()->Clone());
+
+  ASSERT_EQ(2, clone->controller().entry_count());
+  EXPECT_TRUE(clone->controller().needs_reload());
+  clone->controller().GoBack();
+  // Navigating back should have triggered needs_reload_ to go false.
+  EXPECT_FALSE(clone->controller().needs_reload());
+}
+
+// Make sure that cloning a tabcontents doesn't copy interstitials.
+TEST_F(NavigationControllerTest, CloneOmitsInterstitials) {
+  const GURL url1("http://foo1");
+  const GURL url2("http://foo2");
+
+  NavigateAndCommit(url1);
+  NavigateAndCommit(url2);
+
+  // Add an interstitial entry.  Should be deleted with controller.
+  NavigationEntry* interstitial_entry = new NavigationEntry();
+  interstitial_entry->set_page_type(NavigationEntry::INTERSTITIAL_PAGE);
+  controller().AddTransientEntry(interstitial_entry);
+
+  scoped_ptr<TabContents> clone(controller().tab_contents()->Clone());
+
+  ASSERT_EQ(2, clone->controller().entry_count());
+}
+
+// Tests a subframe navigation while a toplevel navigation is pending.
+// http://crbug.com/43967
+TEST_F(NavigationControllerTest, SubframeWhilePending) {
+  // Load the first page.
+  const GURL url1("http://foo/");
+  NavigateAndCommit(url1);
+
+  // Now start a pending load to a totally different page, but don't commit it.
+  const GURL url2("http://bar/");
+  controller().LoadURL(url2, GURL(), PageTransition::TYPED);
+
+  // Send a subframe update from the first page, as if one had just
+  // automatically loaded. Auto subframes don't increment the page ID.
+  const GURL url1_sub("http://foo/subframe");
+  ViewHostMsg_FrameNavigate_Params params = {0};
+  params.page_id = controller().GetLastCommittedEntry()->page_id();
+  params.url = url1_sub;
+  params.transition = PageTransition::AUTO_SUBFRAME;
+  params.should_update_history = false;
+  params.gesture = NavigationGestureAuto;
+  params.is_post = false;
+  NavigationController::LoadCommittedDetails details;
+
+  // This should return false meaning that nothing was actually updated.
+  EXPECT_FALSE(controller().RendererDidNavigate(params, 0, &details));
+
+  // The notification should have updated the last committed one, and not
+  // the pending load.
+  EXPECT_EQ(url1, controller().GetLastCommittedEntry()->url());
+
+  // The active entry should be unchanged by the subframe load.
+  EXPECT_EQ(url2, controller().GetActiveEntry()->url());
+}
+
 /* TODO(brettw) These test pass on my local machine but fail on the XP buildbot
    (but not Vista) cleaning up the directory after they run.
    This should be fixed.
@@ -1515,3 +1709,5 @@ TEST_F(NavigationControllerHistoryTest, NavigationPruning) {
                                          windows_[0]->tabs[0]->navigations[1]);
 }
 */
+
+}  // namespace

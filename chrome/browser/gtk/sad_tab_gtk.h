@@ -5,45 +5,30 @@
 #ifndef CHROME_BROWSER_GTK_SAD_TAB_GTK_H_
 #define CHROME_BROWSER_GTK_SAD_TAB_GTK_H_
 
-#include <gtk/gtk.h>
+typedef struct _GtkWidget GtkWidget;
 
-#include "base/basictypes.h"
-#include "base/gfx/rect.h"
 #include "chrome/common/owned_widget_gtk.h"
+
+class TabContents;
 
 class SadTabGtk {
  public:
-  SadTabGtk();
+  explicit SadTabGtk(TabContents* tab_contents);
   ~SadTabGtk();
 
-  GtkWidget* widget() { return widget_.get(); }
+  GtkWidget* widget() const { return event_box_.get(); }
 
  private:
-  // expose-event handler that redraws the SadTabGtk.
-  static gboolean OnExposeThunk(GtkWidget* widget,
-                                GdkEventExpose* event,
-                                const SadTabGtk* sad_tab);
+  // Clicked-event handler for link to launch associated url.
+  static void OnLinkButtonClickThunk(GtkWidget* widget,
+                                     SadTabGtk* sad_tab) {
+    sad_tab->OnLinkButtonClick();
+  }
 
-  gboolean OnExpose(GtkWidget* widget, GdkEventExpose* event) const;
+  void OnLinkButtonClick();
 
-  // configure-event handler that gets the new bounds of the SadTabGtk.
-  static gboolean OnConfigureThunk(GtkWidget* widget,
-                                   GdkEventConfigure* event,
-                                   SadTabGtk* sad_tab);
-
-  gboolean OnConfigure(GtkWidget* widget, GdkEventConfigure* event);
-
-  // Track the view's width and height from configure-event signals.
-  int width_;
-  int height_;
-
-  // Regions within the display for different components, set on a
-  // configure-event.  These are relative to the bounds of the widget.
-  gfx::Rect icon_bounds_;
-  int title_y_;
-  int message_y_;
-
-  OwnedWidgetGtk widget_;
+  TabContents* tab_contents_;
+  OwnedWidgetGtk event_box_;
 
   DISALLOW_COPY_AND_ASSIGN(SadTabGtk);
 };

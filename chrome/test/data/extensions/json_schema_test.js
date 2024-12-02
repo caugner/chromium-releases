@@ -14,7 +14,9 @@ function assertValid(type, instance, schema, types) {
   validator["validate" + type](instance, schema, "");
   if (validator.errors.length != 0) {
     log("Got unexpected errors");
-    log(validator.errors);
+    for (var i = 0; i < validator.errors.length; i++) {
+      log(validator.errors[i].message + "  path: " + validator.errors[i].path);
+    }
     assert(false);
   }
 }
@@ -165,6 +167,16 @@ function testExtends() {
   assertValid("", 43, schema);
 }
 
+function ClassA() {
+  this.a = "a";
+}
+function ClassB() {
+}
+ClassB.prototype = new ClassA();
+function ClassC() {
+  this.a = "a";
+}
+
 function testObject() {
   var schema = {
     properties: {
@@ -177,8 +189,8 @@ function testObject() {
     }
   };
 
-  assertValid("Object", {foo:"foo",bar:42}, schema);
-  assertNotValid("Object", {foo:"foo",bar:42,"extra":true}, schema,
+  assertValid("Object", {foo:"foo", bar:42}, schema);
+  assertNotValid("Object", {foo:"foo", bar:42,"extra":true}, schema,
                  [formatError("unexpectedProperty")]);
   assertNotValid("Object", {foo:"foo"}, schema,
                  [formatError("propertyRequired")]);
@@ -186,21 +198,44 @@ function testObject() {
                  [formatError("invalidType", ["integer", "string"])]);
 
   schema.additionalProperties = { type: "any" };
-  assertValid("Object", {foo:"foo",bar:42,"extra":true}, schema);
-  assertValid("Object", {foo:"foo",bar:42,"extra":"foo"}, schema);
+  assertValid("Object", {foo:"foo", bar:42, "extra":true}, schema);
+  assertValid("Object", {foo:"foo", bar:42, "extra":"foo"}, schema);
 
   schema.additionalProperties = { type: "boolean" };
-  assertValid("Object", {foo:"foo",bar:42,"extra":true}, schema);
-  assertNotValid("Object", {foo:"foo",bar:42,"extra":"foo"}, schema,
+  assertValid("Object", {foo:"foo", bar:42, "extra":true}, schema);
+  assertNotValid("Object", {foo:"foo", bar:42, "extra":"foo"}, schema,
                  [formatError("invalidType", ["boolean", "string"])]);
 
   schema.properties.bar.optional = true;
-  assertValid("Object", {foo:"foo",bar:42}, schema);
+  assertValid("Object", {foo:"foo", bar:42}, schema);
   assertValid("Object", {foo:"foo"}, schema);
-  assertValid("Object", {foo:"foo",bar:null}, schema);
-  assertValid("Object", {foo:"foo",bar:undefined}, schema);
+  assertNotValid("Object", {foo:"foo", bar:null}, schema,
+                 [formatError("invalidType", ["integer", "null"])]);
+  assertValid("Object", {foo:"foo", bar:undefined}, schema);
   assertNotValid("Object", {foo:"foo", bar:"42"}, schema,
                  [formatError("invalidType", ["integer", "string"])]);
+
+  var classASchema = {
+    properties: {
+      "a": { type: "string" }
+    },
+    isInstanceOf: "ClassA"
+  };
+
+  var classBSchema = {
+    properties: {},
+    isInstanceOf: "ClassB"
+  };
+
+  var a = new ClassA();
+  var b = new ClassB();
+  var c = new ClassC();
+
+  assertValid("Object", a, classASchema);
+  assertValid("Object", b, classBSchema);
+  assertValid("Object", b, classASchema);
+  assertNotValid("Object", c, classASchema,
+                 [formatError("notInstance", [classASchema.isInstanceOf])]);           
 }
 
 function testTypeReference() {
@@ -254,7 +289,7 @@ function testTypeReference() {
 
   // Valida type references internally defined.
   assertValid("", {foo:"foo",bar:-4,baz:-2}, schemaInlineReference);
- 
+
   // Failures in validation, but succesful schema reference.
   assertNotValid("", {foo:"foo",bar:4,baz:"a"}, schema,
                 [formatError("stringMinLength", [2])], referencedTypes);

@@ -15,6 +15,7 @@
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -24,6 +25,7 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
+#include "chrome/browser/shell_integration.h"
 #include "chrome/installer/util/shell_util.h"
 #endif
 
@@ -64,7 +66,23 @@ class LaunchChromeForProfileIndexHelper : GetProfilesHelper::Delegate {
   DISALLOW_COPY_AND_ASSIGN(LaunchChromeForProfileIndexHelper);
 };
 
-}  // namespace
+// Helper to update global user data dir profiles list.
+class UserDataDirProfilesUpdater : GetProfilesHelper::Delegate {
+ public:
+  UserDataDirProfilesUpdater();
+  virtual ~UserDataDirProfilesUpdater();
+
+  // Request profiles via GetProfilesHelper.
+  void Run();
+
+  // GetProfilesHelper::Delegate method.
+  void OnGetProfilesDone(const std::vector<std::wstring>& profiles);
+
+ private:
+  scoped_refptr<GetProfilesHelper> profiles_helper_;
+
+  DISALLOW_COPY_AND_ASSIGN(UserDataDirProfilesUpdater);
+};
 
 LaunchChromeForProfileIndexHelper::LaunchChromeForProfileIndexHelper(
     const UserDataManager* manager,
@@ -92,6 +110,29 @@ void LaunchChromeForProfileIndexHelper::OnGetProfilesDone(
   // We are done, delete ourselves.
   delete this;
 }
+
+UserDataDirProfilesUpdater::UserDataDirProfilesUpdater()
+    : ALLOW_THIS_IN_INITIALIZER_LIST(
+          profiles_helper_(new GetProfilesHelper(this))) {
+}
+
+UserDataDirProfilesUpdater::~UserDataDirProfilesUpdater() {
+  profiles_helper_->OnDelegateDeleted();
+}
+
+void UserDataDirProfilesUpdater::Run() {
+  profiles_helper_->GetProfiles(NULL);
+}
+
+void UserDataDirProfilesUpdater::OnGetProfilesDone(
+    const std::vector<std::wstring>& profiles) {
+  g_browser_process->user_data_dir_profiles() = profiles;
+
+  // We are done, delete ourselves.
+  delete this;
+}
+
+}  // namespace
 
 // Separator used in folder names between the prefix and the profile name.
 // For e.g. a folder for the profile "Joe" would be named "User Data-Joe".
@@ -180,16 +221,17 @@ std::wstring UserDataManager::GetFolderNameFromProfileName(
 std::wstring UserDataManager::GetUserDataFolderForProfile(
     const std::wstring& profile_name) const {
   std::wstring folder_name = GetFolderNameFromProfileName(profile_name);
-  std::wstring folder_path(user_data_root_);
-  file_util::AppendToPath(&folder_path, folder_name);
-  return folder_path;
+  FilePath folder_path =
+    FilePath::FromWStringHack(user_data_root_)
+        .Append(FilePath::FromWStringHack(folder_name));
+  return folder_path.ToWStringHack();
 }
 
 void UserDataManager::LaunchChromeForProfile(
     const std::wstring& profile_name) const {
   std::wstring user_data_dir = GetUserDataFolderForProfile(profile_name);
-  std::wstring command;
-  DeprecatedPathServiceGet(base::FILE_EXE, &command);
+  FilePath command;
+  PathService::Get(base::FILE_EXE, &command);
   CommandLine command_line(command);
   command_line.AppendSwitch(switches::kEnableUserDataDirProfiles);
   command_line.AppendSwitchWithValue(switches::kUserDataDir,
@@ -210,8 +252,7 @@ void UserDataManager::LaunchChromeForProfile(int index) const {
 
 void UserDataManager::GetProfiles(std::vector<std::wstring>* profiles) const {
   // This function should be called on the file thread.
-  DCHECK(MessageLoop::current() ==
-      ChromeThread::GetMessageLoop(ChromeThread::FILE));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
   file_util::FileEnumerator file_enum(
       FilePath::FromWStringHack(user_data_root_),
       false, file_util::FileEnumerator::DIRECTORIES);
@@ -224,13 +265,12 @@ void UserDataManager::GetProfiles(std::vector<std::wstring>* profiles) const {
   }
 }
 
-bool UserDataManager::CreateDesktopShortcutForProfile(
+bool UserDataManager::CreateShortcutForProfileInFolder(
+    const FilePath& folder,
     const std::wstring& profile_name) const {
 #if defined(OS_WIN)
   std::wstring exe_path;
-  std::wstring shortcut_path;
-  if (!PathService::Get(base::FILE_EXE, &exe_path) ||
-      !ShellUtil::GetDesktopPath(false, &shortcut_path))
+  if (!PathService::Get(base::FILE_EXE, &exe_path))
     return false;
 
   // Working directory.
@@ -250,20 +290,51 @@ bool UserDataManager::CreateDesktopShortcutForProfile(
       IDS_START_IN_PROFILE_SHORTCUT_NAME,
       profile_name);
   shortcut_name.append(L".lnk");
-  file_util::AppendToPath(&shortcut_path, shortcut_name);
+  FilePath shortcut_path = folder.Append(shortcut_name);
 
-  return file_util::CreateShortcutLink(cmd.c_str(),
-                                       shortcut_path.c_str(),
-                                       exe_folder.c_str(),
-                                       args.c_str(),
-                                       NULL,
-                                       exe_path.c_str(),
-                                       0);
+  // Profile path from user_data_dir.
+  FilePath profile_path = FilePath(user_data_dir).Append(
+      chrome::kNotSignedInProfile);
+
+  return file_util::CreateShortcutLink(
+      cmd.c_str(),
+      shortcut_path.value().c_str(),
+      exe_folder.c_str(),
+      args.c_str(),
+      NULL,
+      exe_path.c_str(),
+      0,
+      ShellIntegration::GetChromiumAppId(profile_path).c_str());
 #else
   // TODO(port): should probably use freedesktop.org standard for desktop files.
+  // See shell_integration.h for an implementation; but this code is reportedly
+  // obsolete.
   NOTIMPLEMENTED();
   return false;
 #endif
+}
+
+bool UserDataManager::CreateDesktopShortcutForProfile(
+    const std::wstring& profile_name) const {
+#if defined(OS_WIN)
+  std::wstring desktop_path;
+  if (!ShellUtil::GetDesktopPath(false, &desktop_path))
+    return false;
+
+  return CreateShortcutForProfileInFolder(FilePath(desktop_path), profile_name);
+#else
+  // TODO(port): should probably use freedesktop.org standard for desktop files.
+  // See shell_integration.h for an implementation; but this code is reportedly
+  // obsolete.
+  NOTIMPLEMENTED();
+  return false;
+#endif
+}
+
+void UserDataManager::RefreshUserDataDirProfiles() const {
+  // UserDataDirProfilesUpdater will delete itself when done.
+  UserDataDirProfilesUpdater* updater = new UserDataDirProfilesUpdater();
+  updater->Run();
 }
 
 GetProfilesHelper::GetProfilesHelper(Delegate* delegate)
@@ -281,9 +352,8 @@ void GetProfilesHelper::GetProfiles(MessageLoop* target_loop) {
     message_loop_ = MessageLoop::current();
   }
   DCHECK(message_loop_);
-  MessageLoop* file_loop = ChromeThread::GetMessageLoop(ChromeThread::FILE);
-  file_loop->PostTask(
-      FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
       NewRunnableMethod(this, &GetProfilesHelper::GetProfilesFromManager));
 }
 
@@ -294,8 +364,7 @@ void GetProfilesHelper::OnDelegateDeleted() {
 
 void GetProfilesHelper::GetProfilesFromManager() {
   // This function should be called on the file thread.
-  DCHECK(MessageLoop::current() ==
-      ChromeThread::GetMessageLoop(ChromeThread::FILE));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
 
   // If the delegate is gone by now, no need to do any work.
   if (!delegate_)

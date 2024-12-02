@@ -48,14 +48,16 @@
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/eintr_wrapper.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/platform_thread.h"
 #include "base/process_util.h"
 #include "base/safe_strerror_posix.h"
 #include "base/stl_util-inl.h"
-#include "base/string_util.h"
 #include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "chrome/browser/browser_init.h"
@@ -64,6 +66,7 @@
 #if defined(TOOLKIT_GTK)
 #include "chrome/browser/gtk/process_singleton_dialog.h"
 #endif
+#include "chrome/browser/io_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
@@ -234,10 +237,14 @@ bool UnlinkPath(const std::string& path) {
 }
 
 // Extract the hostname and pid from the lock symlink.
-std::string ParseLockPath(const std::string& path,
-                          std::string* hostname,
-                          int* pid) {
+// Returns true if the lock existed.
+bool ParseLockPath(const std::string& path,
+                   std::string* hostname,
+                   int* pid) {
   std::string real_path = ReadLink(path);
+  if (real_path.empty())
+    return false;
+
   std::string::size_type pos = real_path.rfind('-');
 
   // If the path is not a symbolic link, or doesn't contain what we expect,
@@ -245,7 +252,7 @@ std::string ParseLockPath(const std::string& path,
   if (pos == std::string::npos) {
     *hostname = "";
     *pid = -1;
-    return "";
+    return true;
   }
 
   *hostname = real_path.substr(0, pos);
@@ -254,7 +261,7 @@ std::string ParseLockPath(const std::string& path,
   if (!StringToInt(pid_str, pid))
     *pid = -1;
 
-  return real_path;
+  return true;
 }
 
 void DisplayProfileInUseError(const std::string& lock_path,
@@ -271,21 +278,6 @@ void DisplayProfileInUseError(const std::string& lock_path,
       switches::kNoProcessSingletonDialog))
     ProcessSingletonDialog::ShowAndRun(WideToUTF8(error));
 #endif
-}
-
-// Check if the lock is on a different host.  If so, return false.  If not,
-// unlink the lock file and return true.
-bool CheckLockHostnameAndCleanup(const std::string& path) {
-  std::string hostname;
-  int pid;
-  ParseLockPath(path, &hostname, &pid);
-
-  if (!hostname.empty() && hostname != net::GetHostName()) {
-    DisplayProfileInUseError(path, hostname, pid);
-    return false;
-  }
-  UnlinkPath(path);
-  return true;
 }
 
 // Extract the process's pid from a symbol link path and if it is on
@@ -402,10 +394,6 @@ class ProcessSingleton::LinuxWatcher
         parent_(parent) {
   }
 
-  virtual ~LinuxWatcher() {
-    STLDeleteElements(&readers_);
-  }
-
   // Start listening for connections on the socket.  This method should be
   // called from the IO thread.
   void StartListening(int socket);
@@ -430,6 +418,12 @@ class ProcessSingleton::LinuxWatcher
   }
 
  private:
+  friend class base::RefCountedThreadSafe<ProcessSingleton::LinuxWatcher>;
+
+  virtual ~LinuxWatcher() {
+    STLDeleteElements(&readers_);
+  }
+
   // Removes and deletes the SocketReader.
   void RemoveSocketReader(SocketReader* reader);
 
@@ -466,8 +460,7 @@ void ProcessSingleton::LinuxWatcher::OnFileCanReadWithoutBlocking(int fd) {
 }
 
 void ProcessSingleton::LinuxWatcher::StartListening(int socket) {
-  DCHECK(ChromeThread::GetMessageLoop(ChromeThread::IO) ==
-         MessageLoop::current());
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   // Watch for client connections on this socket.
   MessageLoopForIO* ml = MessageLoopForIO::current();
   ml->AddDestructionObserver(this);
@@ -503,10 +496,8 @@ void ProcessSingleton::LinuxWatcher::HandleMessage(
   PrefService* prefs = g_browser_process->local_state();
   DCHECK(prefs);
 
-  FilePath user_data_dir;
-  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  Profile* profile = profile_manager->GetDefaultProfile(user_data_dir);
+  Profile* profile = ProfileManager::GetDefaultProfile();
+
   if (!profile) {
     // We should only be able to get here if the profile already exists and
     // has been created.
@@ -635,6 +626,8 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
 ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessWithTimeout(
     const CommandLine& cmd_line,
     int timeout_seconds) {
+  DCHECK_GE(timeout_seconds, 0);
+
   int socket;
   sockaddr_un addr;
   SetupSocket(socket_path_.value(), &socket, &addr);
@@ -642,18 +635,55 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessWithTimeout(
   // It'll close the socket automatically when exiting this method.
   SocketCloser socket_closer(socket);
 
-  // Connecting to the socket
-  int ret = HANDLE_EINTR(connect(socket,
-                                 reinterpret_cast<sockaddr*>(&addr),
-                                 sizeof(addr)));
-  if (ret < 0) {
-    // TODO(mattm): there is a bit of a race here if another instance on the
-    // same host is in Create() and has created the lock but not attached to the
-    // socket.  Our CheckLockHostnameAndCleanup call will clean up their lock
-    // and allow us to create a new one.
-    if (!CheckLockHostnameAndCleanup(lock_path_.value()))
+  for (int retries = 0; retries <= timeout_seconds; ++retries) {
+    // Connecting to the socket
+    int ret = HANDLE_EINTR(connect(socket,
+                                   reinterpret_cast<sockaddr*>(&addr),
+                                   sizeof(addr)));
+    if (ret == 0)
+      break;
+
+    // If we're in a race with another process, they may be in Create() and have
+    // created the lock but not attached to the socket.  So we check if the
+    // process with the pid from the lockfile is currently running and is a
+    // chrome browser.  If so, we loop and try again for |timeout_seconds|.
+
+    std::string hostname;
+    int pid;
+    if (!ParseLockPath(lock_path_.value(), &hostname, &pid)) {
+      // No lockfile exists.
+      return PROCESS_NONE;
+    }
+
+    if (hostname.empty()) {
+      // Invalid lockfile.
+      UnlinkPath(lock_path_.value());
+      return PROCESS_NONE;
+    }
+
+    if (hostname != net::GetHostName()) {
+      // Locked by process on another host.
+      DisplayProfileInUseError(lock_path_.value(), hostname, pid);
       return PROFILE_IN_USE;
-    return PROCESS_NONE;  // Tell the caller there's nobody to notify.
+    }
+
+    FilePath other_chrome_path(base::GetProcessExecutablePath(pid));
+    if (other_chrome_path.empty() ||
+        other_chrome_path.BaseName() !=
+        FilePath::FromWStringHack(chrome::kBrowserProcessExecutableName)) {
+      // Orphaned lockfile (no process with pid, or non-chrome process.)
+      UnlinkPath(lock_path_.value());
+      return PROCESS_NONE;
+    }
+
+    if (retries == timeout_seconds) {
+      // Retries failed.  Kill the unresponsive chrome process and continue.
+      if (!KillProcessByLockPath(lock_path_.value()))
+        return PROFILE_IN_USE;
+      return PROCESS_NONE;
+    }
+
+    PlatformThread::Sleep(1000 /* ms */);
   }
 
   timeval timeout = {timeout_seconds, 0};
@@ -713,7 +743,7 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessWithTimeout(
   return PROCESS_NOTIFIED;
 }
 
-void ProcessSingleton::Create() {
+bool ProcessSingleton::Create() {
   int sock;
   sockaddr_un addr;
 
@@ -737,7 +767,8 @@ void ProcessSingleton::Create() {
       // TODO(mattm): If the other instance is on the same host, we could try
       // to notify it rather than just failing.
       errno = saved_errno;
-      PLOG(FATAL) << "Failed to create " << lock_path_.value();
+      PLOG(ERROR) << "Failed to create " << lock_path_.value();
+      return false;
     }
   }
 
@@ -746,13 +777,9 @@ void ProcessSingleton::Create() {
   UnlinkPath(socket_path_.value());
 
   if (bind(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-    PLOG(ERROR) << "bind() failed";
-    LOG(ERROR) << "SingletonSocket failed to create a socket in your home "
-                  "directory. This means that running multiple instances of "
-                  "the Chrome binary will start multiple browser process "
-                  "rather than opening a new window in the existing process.";
+    PLOG(ERROR) << "Failed to bind() " << socket_path_.value();
     CloseSocket(sock);
-    return;
+    return false;
   }
 
   if (listen(sock, 5) < 0)
@@ -767,6 +794,8 @@ void ProcessSingleton::Create() {
     watcher_.get(),
     &ProcessSingleton::LinuxWatcher::StartListening,
     sock));
+
+  return true;
 }
 
 void ProcessSingleton::Cleanup() {

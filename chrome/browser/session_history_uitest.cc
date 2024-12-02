@@ -14,8 +14,6 @@
 #include "net/base/net_util.h"
 #include "net/url_request/url_request_unittest.h"
 
-using std::wstring;
-
 namespace {
 
 const wchar_t kDocRoot[] = L"chrome/test/data";
@@ -23,6 +21,7 @@ const wchar_t kDocRoot[] = L"chrome/test/data";
 class SessionHistoryTest : public UITest {
  protected:
   SessionHistoryTest() : UITest() {
+    dom_automation_enabled_ = true;
   }
 
   virtual void SetUp() {
@@ -31,9 +30,7 @@ class SessionHistoryTest : public UITest {
     window_ = automation()->GetBrowserWindow(0);
     ASSERT_TRUE(window_.get());
 
-    int active_tab_index = -1;
-    ASSERT_TRUE(window_->GetActiveTabIndex(&active_tab_index));
-    tab_ = window_->GetTab(active_tab_index);
+    tab_ = window_->GetActiveTab();
     ASSERT_TRUE(tab_.get());
   }
 
@@ -66,25 +63,10 @@ class SessionHistoryTest : public UITest {
     ASSERT_TRUE(tab_->NavigateToURL(url));
   }
 
-  wstring GetTabTitle() {
-    wstring title;
+  std::wstring GetTabTitle() {
+    std::wstring title;
     EXPECT_TRUE(tab_->GetTabTitle(&title));
     return title;
-  }
-
-  // Try 10 times to get the right tab title.
-  wstring TestTabTitle(const wstring& value) {
-    // Error pages load separately, but the UI automation system does not wait
-    // for error pages to load before returning after a navigation request.
-    // So, we need to sleep a little.
-    const int kWaitForErrorPageMsec = 200;
-
-    for (int i = 0; i < 10; ++i) {
-      if (value.compare(GetTabTitle()) == 0)
-        return value;
-      PlatformThread::Sleep(kWaitForErrorPageMsec);
-    }
-    return GetTabTitle();
   }
 
   GURL GetTabURL() {
@@ -483,9 +465,8 @@ TEST_F(SessionHistoryTest, JavascriptHistory) {
   // NotificationService.)
 }
 
-// This test is flaky. It looks like the server does not start fast enough,
-// and the navigation fails (with 404). See http://crbug.com/8444.
-TEST_F(SessionHistoryTest, FLAKY_LocationReplace) {
+// This test is failing consistently. See http://crbug.com/22560
+TEST_F(SessionHistoryTest, DISABLED_LocationReplace) {
   // Test that using location.replace doesn't leave the title of the old page
   // visible.
   scoped_refptr<HTTPTestServer> server =
@@ -529,6 +510,46 @@ TEST_F(SessionHistoryTest, LocationChangeInSubframe) {
 
   ASSERT_TRUE(tab_->GoBack());
   EXPECT_EQ(L"Default Title", GetTabTitle());
+}
+
+// http://code.google.com/p/chromium/issues/detail?id=38583
+#if defined(OS_WIN)
+#define HistoryLength DISABLED_HistoryLength
+#endif  // defined(OS_WIN)
+TEST_F(SessionHistoryTest, HistoryLength) {
+  scoped_refptr<HTTPTestServer> server =
+      HTTPTestServer::CreateServer(kDocRoot, NULL);
+  ASSERT_TRUE(server.get());
+
+  int length;
+  ASSERT_TRUE(tab_->ExecuteAndExtractInt(
+      L"", L"domAutomationController.send(history.length)", &length));
+  EXPECT_EQ(1, length);
+
+  ASSERT_TRUE(tab_->NavigateToURL(server->TestServerPage("files/title1.html")));
+
+  ASSERT_TRUE(tab_->ExecuteAndExtractInt(
+      L"", L"domAutomationController.send(history.length)", &length));
+  EXPECT_EQ(2, length);
+
+  // Now test that history.length is updated when the navigation is committed.
+  ASSERT_TRUE(tab_->NavigateToURL(server->TestServerPage(
+      "files/session_history/record_length.html")));
+  ASSERT_TRUE(tab_->ExecuteAndExtractInt(
+      L"", L"domAutomationController.send(history.length)", &length));
+  EXPECT_EQ(3, length);
+  ASSERT_TRUE(tab_->ExecuteAndExtractInt(
+      L"", L"domAutomationController.send(history_length)", &length));
+  EXPECT_EQ(3, length);
+
+  ASSERT_TRUE(tab_->GoBack());
+  ASSERT_TRUE(tab_->GoBack());
+
+  // Ensure history.length is properly truncated.
+  ASSERT_TRUE(tab_->NavigateToURL(server->TestServerPage("files/title2.html")));
+  ASSERT_TRUE(tab_->ExecuteAndExtractInt(
+      L"", L"domAutomationController.send(history.length)", &length));
+  EXPECT_EQ(2, length);
 }
 
 }  // namespace

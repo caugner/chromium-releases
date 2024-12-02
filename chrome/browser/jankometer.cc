@@ -18,10 +18,11 @@
 #include "base/watchdog.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/common/chrome_switches.h"
 
-#if defined(OS_LINUX)
-#include "chrome/common/gtk_util.h"
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/gtk/gtk_util.h"
 #endif
 
 using base::TimeDelta;
@@ -90,13 +91,13 @@ class JankObserver : public base::RefCountedThreadSafe<JankObserver>,
       : MaxMessageDelay_(excessive_duration),
         slow_processing_counter_(std::string("Chrome.SlowMsg") + thread_name),
         queueing_delay_counter_(std::string("Chrome.DelayMsg") + thread_name),
-        process_times_((std::string("Chrome.ProcMsgL ") +
-                        thread_name).c_str(), 1, 3600000, 50),
-        total_times_((std::string("Chrome.TotalMsgL ") +
-                      thread_name).c_str(), 1, 3600000, 50),
         total_time_watchdog_(excessive_duration, thread_name, watchdog_enable) {
-    process_times_.SetFlags(kUmaTargetedHistogramFlag);
-    total_times_.SetFlags(kUmaTargetedHistogramFlag);
+    process_times_ = Histogram::FactoryGet(
+        std::string("Chrome.ProcMsgL ") + thread_name,
+        1, 3600000, 50, Histogram::kUmaTargetedHistogramFlag);
+    total_times_ = Histogram::FactoryGet(
+        std::string("Chrome.TotalMsgL ") + thread_name,
+        1, 3600000, 50, Histogram::kUmaTargetedHistogramFlag);
   }
 
   // Attaches the observer to the current thread's message loop. You can only
@@ -136,8 +137,8 @@ class JankObserver : public base::RefCountedThreadSafe<JankObserver>,
     TimeTicks now = TimeTicks::Now();
     if (begin_process_message_ != TimeTicks()) {
       TimeDelta processing_time = now - begin_process_message_;
-      process_times_.AddTime(processing_time);
-      total_times_.AddTime(queueing_time_ + processing_time);
+      process_times_->AddTime(processing_time);
+      total_times_->AddTime(queueing_time_ + processing_time);
     }
     if (now - begin_process_message_ >
         TimeDelta::FromMilliseconds(kMaxMessageProcessingMs)) {
@@ -174,7 +175,7 @@ class JankObserver : public base::RefCountedThreadSafe<JankObserver>,
   virtual void DidProcessMessage(const MSG& msg) {
     EndProcessingTimers();
   }
-#elif defined(OS_LINUX)
+#elif defined(TOOLKIT_USES_GTK)
   virtual void WillProcessEvent(GdkEvent* event) {
     begin_process_message_ = TimeTicks::Now();
     // TODO(evanm): we want to set queueing_time_ using
@@ -191,6 +192,10 @@ class JankObserver : public base::RefCountedThreadSafe<JankObserver>,
 #endif
 
  private:
+  friend class base::RefCountedThreadSafe<JankObserver>;
+
+  ~JankObserver() {}
+
   const TimeDelta MaxMessageDelay_;
 
   // Time at which the current message processing began.
@@ -203,8 +208,8 @@ class JankObserver : public base::RefCountedThreadSafe<JankObserver>,
   // Counters for the two types of jank we measure.
   StatsCounter slow_processing_counter_;  // Messages with long processing time.
   StatsCounter queueing_delay_counter_;   // Messages with long queueing delay.
-  Histogram process_times_;           // Time spent processing task.
-  Histogram total_times_;             // Total of queueing plus processing time.
+  scoped_refptr<Histogram> process_times_;  // Time spent processing task.
+  scoped_refptr<Histogram> total_times_;  // Total queueing plus processing.
   JankWatchdog total_time_watchdog_;  // Watching for excessive total_time.
 
   DISALLOW_EVIL_CONSTRUCTORS(JankObserver);
@@ -225,11 +230,11 @@ void InstallJankometer(const CommandLine& parsed_command_line) {
   bool ui_watchdog_enabled = false;
   bool io_watchdog_enabled = false;
   if (parsed_command_line.HasSwitch(switches::kEnableWatchdog)) {
-    std::wstring list =
-        parsed_command_line.GetSwitchValue(switches::kEnableWatchdog);
-    if (list.npos != list.find(L"ui"))
+    std::string list =
+        parsed_command_line.GetSwitchValueASCII(switches::kEnableWatchdog);
+    if (list.npos != list.find("ui"))
       ui_watchdog_enabled = true;
-    if (list.npos != list.find(L"io"))
+    if (list.npos != list.find("io"))
       io_watchdog_enabled = true;
   }
 
@@ -249,12 +254,9 @@ void InstallJankometer(const CommandLine& parsed_command_line) {
       TimeDelta::FromMilliseconds(kMaxIOMessageDelayMs),
       io_watchdog_enabled);
   io_observer->AddRef();
-  base::Thread* io_thread = g_browser_process->io_thread();
-  if (io_thread) {
-    io_thread->message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(io_observer,
-            &JankObserver::AttachToCurrentThread));
-  }
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(io_observer, &JankObserver::AttachToCurrentThread));
 }
 
 void UninstallJankometer() {

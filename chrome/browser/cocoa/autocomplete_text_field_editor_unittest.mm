@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,14 @@
 #include "chrome/app/chrome_dll_resource.h"  // IDC_*
 #import "chrome/browser/cocoa/autocomplete_text_field_unittest_helper.h"
 #import "chrome/browser/cocoa/cocoa_test_helper.h"
+#import "chrome/browser/cocoa/test_event_utils.h"
 #include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
+#import "third_party/ocmock/OCMock/OCMock.h"
 
 using ::testing::Return;
+using ::testing::StrictMock;
 
 namespace {
 
@@ -26,126 +29,153 @@ void ClearPasteboard(NSPasteboard* pb) {
   [pb declareTypes:[NSArray array] owner:nil];
 }
 
-bool NoRichTextOnClipboard(NSPasteboard* pb) {
-  return ([pb dataForType:NSRTFPboardType] == nil) &&
-      ([pb dataForType:NSRTFDPboardType] == nil) &&
-      ([pb dataForType:NSHTMLPboardType] == nil);
-}
-
-bool ClipboardContainsText(NSPasteboard* pb, NSString* cmp) {
-  NSString* clipboard_text = [pb stringForType:NSStringPboardType];
-  return [clipboard_text isEqualToString:cmp];
-}
-
 // TODO(shess): Very similar to AutocompleteTextFieldTest.  Maybe
 // those can be shared.
 
-class AutocompleteTextFieldEditorTest : public PlatformTest {
+class AutocompleteTextFieldEditorTest : public CocoaTest {
  public:
-  AutocompleteTextFieldEditorTest()
-      : pb_([NSPasteboard pasteboardWithUniqueName]) {
+  virtual void SetUp() {
+    CocoaTest::SetUp();
     NSRect frame = NSMakeRect(0, 0, 50, 30);
-    field_.reset([[AutocompleteTextField alloc] initWithFrame:frame]);
+    scoped_nsobject<AutocompleteTextField> field(
+        [[AutocompleteTextField alloc] initWithFrame:frame]);
+    field_ = field.get();
     [field_ setStringValue:@"Testing"];
-    [field_ setObserver:&field_observer_];
-    [cocoa_helper_.contentView() addSubview:field_.get()];
+    [[test_window() contentView] addSubview:field_];
 
     // Arrange for |field_| to get the right field editor.
     window_delegate_.reset(
         [[AutocompleteTextFieldWindowTestDelegate alloc] init]);
-    [cocoa_helper_.window() setDelegate:window_delegate_.get()];
+    [test_window() setDelegate:window_delegate_.get()];
 
     // Get the field editor setup.
-    cocoa_helper_.makeFirstResponder(field_);
-    id editor = [field_.get() currentEditor];
-    editor_.reset([static_cast<AutocompleteTextFieldEditor*>(editor) retain]);
+    [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
+    editor_ = static_cast<AutocompleteTextFieldEditor*>([field_ currentEditor]);
+
+    EXPECT_TRUE(editor_);
+    EXPECT_TRUE([editor_ isKindOfClass:[AutocompleteTextFieldEditor class]]);
   }
 
-  virtual void SetUp() {
-    EXPECT_TRUE(editor_.get() != nil);
-    EXPECT_TRUE(
-        [editor_.get() isKindOfClass:[AutocompleteTextFieldEditor class]]);
-  }
-
-  // The removeFromSuperview call is needed to prevent crashes in
-  // later tests.
-  // TODO(shess): -removeromSuperview should not be necessary.  Fix
-  // it.  Also in autocomplete_text_field_unittest.mm.
-  virtual ~AutocompleteTextFieldEditorTest() {
-    [cocoa_helper_.window() setDelegate:nil];
-    [field_ removeFromSuperview];
-    [pb_ releaseGlobally];
-  }
-
-  NSPasteboard *clipboard() {
-    DCHECK(pb_);
-    return pb_;
-  }
-
-  CocoaTestHelper cocoa_helper_;  // Inits Cocoa, creates window, etc...
-  scoped_nsobject<AutocompleteTextFieldEditor> editor_;
-  scoped_nsobject<AutocompleteTextField> field_;
-  MockAutocompleteTextFieldObserver field_observer_;
+  AutocompleteTextFieldEditor* editor_;
+  AutocompleteTextField* field_;
   scoped_nsobject<AutocompleteTextFieldWindowTestDelegate> window_delegate_;
+};
 
- private:
-  NSPasteboard *pb_;
+TEST_VIEW(AutocompleteTextFieldEditorTest, field_);
+
+// Test that control characters are stripped from insertions.
+TEST_F(AutocompleteTextFieldEditorTest, InsertStripsControlChars) {
+  // Sets a string in the field.
+  NSString* test_string = @"astring";
+  [field_ setStringValue:test_string];
+  [editor_ selectAll:nil];
+
+  [editor_ insertText:@"t"];
+  EXPECT_TRUE([[field_ stringValue] isEqualToString:@"t"]);
+
+  [editor_ insertText:@"h"];
+  EXPECT_TRUE([[field_ stringValue] isEqualToString:@"th"]);
+
+  // TAB doesn't get inserted.
+  [editor_ insertText:[NSString stringWithFormat:@"%c", 7]];
+  EXPECT_TRUE([[field_ stringValue] isEqualToString:@"th"]);
+
+  // Newline doesn't get inserted.
+  [editor_ insertText:[NSString stringWithFormat:@"%c", 12]];
+  EXPECT_TRUE([[field_ stringValue] isEqualToString:@"th"]);
+
+  // Multi-character strings get through.
+  [editor_ insertText:[NSString stringWithFormat:@"i%cs%c", 8, 127]];
+  EXPECT_TRUE([[field_ stringValue] isEqualToString:@"this"]);
+
+  // Attempting to insert newline when everything is selected clears
+  // the field.
+  [editor_ selectAll:nil];
+  [editor_ insertText:[NSString stringWithFormat:@"%c", 12]];
+  EXPECT_TRUE([[field_ stringValue] isEqualToString:@""]);
+}
+
+// Test that |delegate| can provide page action menus.
+TEST_F(AutocompleteTextFieldEditorTest, PageActionMenus) {
+  // The event just needs to be something the mock can recognize.
+  NSEvent* event =
+      test_event_utils::MouseEventAtPoint(NSZeroPoint, NSRightMouseDown, 0);
+
+  // Trivial menu which we can recognize and which doesn't look like
+  // the default editor context menu.
+  scoped_nsobject<id> menu([[NSMenu alloc] initWithTitle:@"Menu"]);
+  [menu addItemWithTitle:@"Go Fish"
+                  action:@selector(goFish:)
+           keyEquivalent:@""];
+
+  // For OCMOCK_VALUE().
+  BOOL yes = YES;
+
+  // So that we don't have to mock the observer.
+  [editor_ setEditable:NO];
+
+  // The delegate's intercept point gets called, and results are
+  // propagated back.
+  {
+    id delegate = [OCMockObject mockForClass:[AutocompleteTextField class]];
+    [[[delegate stub] andReturnValue:OCMOCK_VALUE(yes)]
+      isKindOfClass:[AutocompleteTextField class]];
+    [[[delegate expect] andReturn:menu.get()] actionMenuForEvent:event];
+    [editor_ setDelegate:delegate];
+    NSMenu* contextMenu = [editor_ menuForEvent:event];
+    [delegate verify];
+    [editor_ setDelegate:nil];
+
+    EXPECT_EQ(contextMenu, menu.get());
+  }
+
+  // If the delegate does not return any menu, the default menu is
+  // returned.
+  {
+    id delegate = [OCMockObject mockForClass:[AutocompleteTextField class]];
+    [[[delegate stub] andReturnValue:OCMOCK_VALUE(yes)]
+      isKindOfClass:[AutocompleteTextField class]];
+    [[[delegate expect] andReturn:nil] actionMenuForEvent:event];
+    [editor_ setDelegate:delegate];
+    NSMenu* contextMenu = [editor_ menuForEvent:event];
+    [delegate verify];
+    [editor_ setDelegate:nil];
+
+    EXPECT_NE(contextMenu, menu.get());
+    NSArray* items = [contextMenu itemArray];
+    ASSERT_GT([items count], 0U);
+    EXPECT_EQ(@selector(cut:), [[items objectAtIndex:0] action])
+        << "action is: " << sel_getName([[items objectAtIndex:0] action]);
+  }
+}
+
+// Base class for testing AutocompleteTextFieldObserver messages.
+class AutocompleteTextFieldEditorObserverTest
+    : public AutocompleteTextFieldEditorTest {
+ public:
+  virtual void SetUp() {
+    AutocompleteTextFieldEditorTest::SetUp();
+    [field_ setObserver:&field_observer_];
+  }
+
+  virtual void TearDown() {
+    // Clear the observer so that we don't show output for
+    // uninteresting messages to the mock (for instance, if |field_| has
+    // focus at the end of the test).
+    [field_ setObserver:NULL];
+
+    AutocompleteTextFieldEditorTest::TearDown();
+  }
+
+  StrictMock<MockAutocompleteTextFieldObserver> field_observer_;
 };
 
 // Test that the field editor is linked in correctly.
 TEST_F(AutocompleteTextFieldEditorTest, FirstResponder) {
-  EXPECT_EQ(editor_.get(), [field_ currentEditor]);
-  EXPECT_TRUE([editor_.get() isDescendantOf:field_.get()]);
-  EXPECT_EQ([editor_.get() delegate], field_.get());
-  EXPECT_EQ([editor_.get() observer], [field_.get() observer]);
-}
-
-TEST_F(AutocompleteTextFieldEditorTest, CutCopyTest) {
-  // Make sure pasteboard is empty before we start.
-  ASSERT_EQ(NumTypesOnPasteboard(clipboard()), 0);
-
-  NSString* test_string_1 = @"astring";
-  NSString* test_string_2 = @"another string";
-
-  [editor_.get() setRichText:YES];
-
-  // Put some text on the clipboard.
-  [editor_.get() setString:test_string_1];
-  [editor_.get() selectAll:nil];
-  [editor_.get() alignRight:nil];  // Add a rich text attribute.
-  ASSERT_TRUE(NoRichTextOnClipboard(clipboard()));
-
-  // Check that copying it works and we only get plain text.
-  [editor_.get() performCopy:clipboard()];
-  ASSERT_TRUE(NoRichTextOnClipboard(clipboard()));
-  ASSERT_TRUE(ClipboardContainsText(clipboard(), test_string_1));
-
-  // Check that cutting it works and we only get plain text.
-  [editor_.get() setString:test_string_2];
-  [editor_.get() selectAll:nil];
-  [editor_.get() alignLeft:nil];  // Add a rich text attribute.
-  [editor_.get() performCut:clipboard()];
-  ASSERT_TRUE(NoRichTextOnClipboard(clipboard()));
-  ASSERT_TRUE(ClipboardContainsText(clipboard(), test_string_2));
-  ASSERT_EQ([[editor_.get() textStorage] length], 0U);
-}
-
-// Test adding/removing from the view hierarchy, mostly to ensure nothing
-// leaks or crashes.
-TEST_F(AutocompleteTextFieldEditorTest, AddRemove) {
-  EXPECT_EQ(cocoa_helper_.contentView(), [field_ superview]);
-
-  // TODO(shess): For some reason, -removeFromSuperview while |field_|
-  // is first-responder causes AutocompleteTextFieldWindowTestDelegate
-  // -windowWillReturnFieldEditor:toObject: to be passed an object of
-  // class AutocompleteTextFieldEditor.  Which is weird.  Changing
-  // first responder will remove the field editor.
-  cocoa_helper_.makeFirstResponder(nil);
-  EXPECT_FALSE([field_.get() currentEditor]);
-  EXPECT_FALSE([editor_.get() superview]);
-
-  [field_.get() removeFromSuperview];
-  EXPECT_FALSE([field_.get() superview]);
+  EXPECT_EQ(editor_, [field_ currentEditor]);
+  EXPECT_TRUE([editor_ isDescendantOf:field_]);
+  EXPECT_EQ([editor_ delegate], field_);
+  EXPECT_EQ([editor_ observer], [field_ observer]);
 }
 
 // Test drawing, mostly to ensure nothing leaks or crashes.
@@ -155,25 +185,49 @@ TEST_F(AutocompleteTextFieldEditorTest, Display) {
 }
 
 // Test that -paste: is correctly delegated to the observer.
-TEST_F(AutocompleteTextFieldEditorTest, Paste) {
+TEST_F(AutocompleteTextFieldEditorObserverTest, Paste) {
   EXPECT_CALL(field_observer_, OnPaste());
-  [editor_.get() paste:nil];
+  [editor_ paste:nil];
+}
+
+// Test that -copy: is correctly delegated to the observer.
+TEST_F(AutocompleteTextFieldEditorObserverTest, Copy) {
+  EXPECT_CALL(field_observer_, OnCopy());
+  [editor_ copy:nil];
+}
+
+// Test that -cut: is correctly delegated to the observer and clears
+// the text field.
+TEST_F(AutocompleteTextFieldEditorObserverTest, Cut) {
+  // Sets a string in the field.
+  NSString* test_string = @"astring";
+  EXPECT_CALL(field_observer_, OnDidBeginEditing());
+  EXPECT_CALL(field_observer_, OnDidChange());
+  [editor_ setString:test_string];
+  [editor_ selectAll:nil];
+
+  // Calls cut.
+  EXPECT_CALL(field_observer_, OnCopy());
+  [editor_ cut:nil];
+
+  // Check if the field is cleared.
+  ASSERT_EQ([[editor_ textStorage] length], 0U);
 }
 
 // Test that -pasteAndGo: is correctly delegated to the observer.
-TEST_F(AutocompleteTextFieldEditorTest, PasteAndGo) {
+TEST_F(AutocompleteTextFieldEditorObserverTest, PasteAndGo) {
   EXPECT_CALL(field_observer_, OnPasteAndGo());
-  [editor_.get() pasteAndGo:nil];
+  [editor_ pasteAndGo:nil];
 }
 
 // Test that the menu is constructed correctly when CanPasteAndGo().
-TEST_F(AutocompleteTextFieldEditorTest, CanPasteAndGoMenu) {
+TEST_F(AutocompleteTextFieldEditorObserverTest, CanPasteAndGoMenu) {
   EXPECT_CALL(field_observer_, CanPasteAndGo())
       .WillOnce(Return(true));
   EXPECT_CALL(field_observer_, GetPasteActionStringId())
       .WillOnce(Return(IDS_PASTE_AND_GO));
 
-  NSMenu* menu = [editor_.get() menuForEvent:nil];
+  NSMenu* menu = [editor_ menuForEvent:nil];
   NSArray* items = [menu itemArray];
   ASSERT_EQ([items count], 6U);
   // TODO(shess): Check the titles, too?
@@ -190,11 +244,11 @@ TEST_F(AutocompleteTextFieldEditorTest, CanPasteAndGoMenu) {
 }
 
 // Test that the menu is constructed correctly when !CanPasteAndGo().
-TEST_F(AutocompleteTextFieldEditorTest, CannotPasteAndGoMenu) {
+TEST_F(AutocompleteTextFieldEditorObserverTest, CannotPasteAndGoMenu) {
   EXPECT_CALL(field_observer_, CanPasteAndGo())
       .WillOnce(Return(false));
 
-  NSMenu* menu = [editor_.get() menuForEvent:nil];
+  NSMenu* menu = [editor_ menuForEvent:nil];
   NSArray* items = [menu itemArray];
   ASSERT_EQ([items count], 5U);
   // TODO(shess): Check the titles, too?
@@ -211,9 +265,9 @@ TEST_F(AutocompleteTextFieldEditorTest, CannotPasteAndGoMenu) {
 
 // Test that the menu is constructed correctly when field isn't
 // editable.
-TEST_F(AutocompleteTextFieldEditorTest, CanPasteAndGoMenuNotEditable) {
-  [field_.get() setEditable:NO];
-  [editor_.get() setEditable:NO];
+TEST_F(AutocompleteTextFieldEditorObserverTest, CanPasteAndGoMenuNotEditable) {
+  [field_ setEditable:NO];
+  [editor_ setEditable:NO];
 
   // Never call these when not editable.
   EXPECT_CALL(field_observer_, CanPasteAndGo())
@@ -221,7 +275,7 @@ TEST_F(AutocompleteTextFieldEditorTest, CanPasteAndGoMenuNotEditable) {
   EXPECT_CALL(field_observer_, GetPasteActionStringId())
       .Times(0);
 
-  NSMenu* menu = [editor_.get() menuForEvent:nil];
+  NSMenu* menu = [editor_ menuForEvent:nil];
   NSArray* items = [menu itemArray];
   ASSERT_EQ([items count], 3U);
   // TODO(shess): Check the titles, too?

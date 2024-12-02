@@ -15,7 +15,7 @@ class BookmarkModelObserver {
   virtual void Loaded(BookmarkModel* model) = 0;
 
   // Invoked from the destructor of the BookmarkModel.
-  virtual void BookmarkModelBeingDeleted(BookmarkModel* model) { }
+  virtual void BookmarkModelBeingDeleted(BookmarkModel* model) {}
 
   // Invoked when a node has moved.
   virtual void BookmarkNodeMoved(BookmarkModel* model,
@@ -39,7 +39,7 @@ class BookmarkModelObserver {
                                    int old_index,
                                    const BookmarkNode* node) = 0;
 
-  // Invoked when the title or favicon of a node has changed.
+  // Invoked when the title, url or favicon of a node has changed.
   virtual void BookmarkNodeChanged(BookmarkModel* model,
                                    const BookmarkNode* node) = 0;
 
@@ -51,6 +51,20 @@ class BookmarkModelObserver {
   // |node| have been reordered in some way, such as sorted.
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
                                              const BookmarkNode* node) = 0;
+
+  // Invoked before a batch import begins.  This tells UI intensive observers
+  // to wait until the updates finish to update themselves.
+  // These methods should only be used for imports. Observers should still
+  // respond to BookmarkNodeRemoved immediately, to avoid holding onto
+  // stale node pointers.
+  virtual void BookmarkImportBeginning(BookmarkModel* model) {}
+
+  // Invoked after a batch import finishes.  This tells observers to update
+  // themselves if they were waiting for the update to finish.
+  virtual void BookmarkImportEnding(BookmarkModel* model) {}
+
+ protected:
+  virtual ~BookmarkModelObserver() {}
 };
 
 #endif  // CHROME_BROWSER_BOOKMARKS_BOOKMARK_MODEL_OBSERVER_H_

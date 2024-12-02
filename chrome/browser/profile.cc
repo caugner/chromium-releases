@@ -1,9 +1,10 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/profile.h"
 
+#include "app/resource_bundle.h"
 #include "app/theme_provider.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
@@ -11,10 +12,15 @@
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
+#include "chrome/browser/appcache/chrome_appcache_service.h"
+#include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/browser_prefs.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/dom_ui/ntp_resource_cache.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
 #include "chrome/browser/extensions/extension_message_service.h"
@@ -22,8 +28,13 @@
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/favicon_service.h"
-#include "chrome/browser/strict_transport_security_persister.h"
+#include "chrome/browser/find_bar_state.h"
+#include "chrome/browser/geolocation/geolocation_content_settings_map.h"
+#include "chrome/browser/spellcheck_host.h"
+#include "chrome/browser/transport_security_persister.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/host_content_settings_map.h"
+#include "chrome/browser/host_zoom_map.h"
 #include "chrome/browser/in_process_webkit/webkit_context.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/ssl_config_service_manager.h"
@@ -32,18 +43,21 @@
 #include "chrome/browser/privacy_blacklist/blacklist.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/search_versus_navigate_classifier.h"
 #include "chrome/browser/search_engines/template_url_fetcher.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
-#include "chrome/browser/spellchecker.h"
 #include "chrome/browser/ssl/ssl_host_state.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_factory_impl.h"
+#include "chrome/browser/tabs/pinned_tab_service.h"
 #include "chrome/browser/thumbnail_store.h"
+#include "chrome/browser/user_style_sheet_watcher.h"
 #include "chrome/browser/visitedlink_master.h"
 #include "chrome/browser/visitedlink_event_listener.h"
 #include "chrome/browser/webdata/web_data_service.h"
-#include "chrome/common/appcache/chrome_appcache_service.h"
+#include "chrome/browser/web_resource/web_resource_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -51,16 +65,13 @@
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
+#include "grit/browser_resources.h"
 #include "grit/locale_settings.h"
-#include "net/base/strict_transport_security_state.h"
+#include "net/base/transport_security_state.h"
+#include "webkit/database/database_tracker.h"
 
-#if defined(OS_LINUX)
-#include "net/ocsp/nss_ocsp.h"
+#if defined(TOOLKIT_USES_GTK)
 #include "chrome/browser/gtk/gtk_theme_provider.h"
-#endif
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/preferences.h"
 #endif
 
 using base::Time;
@@ -120,31 +131,43 @@ bool HasACacheSubdir(const FilePath &dir) {
          file_util::PathExists(GetMediaCachePath(dir));
 }
 
+void PostExtensionLoadedToContextGetter(ChromeURLRequestContextGetter* getter,
+                                        Extension* extension) {
+  if (!getter)
+    return;
+  // Callee takes ownership of new ExtensionInfo struct.
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(getter,
+                        &ChromeURLRequestContextGetter::OnNewExtensions,
+                        extension->id(),
+                        new ChromeURLRequestContext::ExtensionInfo(
+                        extension->path(),
+                        extension->default_locale(),
+                        extension->web_extent(),
+                        extension->api_permissions())));
+}
+
+void PostExtensionUnloadedToContextGetter(ChromeURLRequestContextGetter* getter,
+                                          Extension* extension) {
+  if (!getter)
+    return;
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(getter,
+                        &ChromeURLRequestContextGetter::OnUnloadedExtension,
+                        extension->id()));
+}
+
 }  // namespace
 
 // A pointer to the request context for the default profile.  See comments on
 // Profile::GetDefaultRequestContext.
-URLRequestContext* Profile::default_request_context_;
+URLRequestContextGetter* Profile::default_request_context_;
 
-static void CleanupRequestContext(ChromeURLRequestContext* context) {
-  if (context) {
+static void CleanupRequestContext(ChromeURLRequestContextGetter* context) {
+  if (context)
     context->CleanupOnUIThread();
-
-    // Clean up request context on IO thread.
-    g_browser_process->io_thread()->message_loop()->ReleaseSoon(FROM_HERE,
-                                                                context);
-  }
-}
-
-static void CleanupAppCacheService(ChromeAppCacheService* appcache_service) {
-  if (appcache_service) {
-    // The I/O thread may be NULL during testing.
-    base::Thread* io_thread = g_browser_process->io_thread();
-    if (io_thread)
-      io_thread->message_loop()->ReleaseSoon(FROM_HERE, appcache_service);
-    else
-      appcache_service->Release();
-  }
 }
 
 // static
@@ -160,10 +183,11 @@ void Profile::RegisterUserPrefs(PrefService* prefs) {
       IDS_SPELLCHECK_DICTIONARY);
   prefs->RegisterBooleanPref(prefs::kEnableSpellCheck, true);
   prefs->RegisterBooleanPref(prefs::kEnableAutoSpellCorrect, true);
-  prefs->RegisterBooleanPref(prefs::kEnableUserScripts, false);
-#if defined(OS_LINUX)
-  prefs->RegisterBooleanPref(prefs::kUsesSystemTheme, false);
+#if defined(TOOLKIT_USES_GTK)
+  prefs->RegisterBooleanPref(prefs::kUsesSystemTheme,
+                             GtkThemeProvider::DefaultUsesSystemTheme());
 #endif
+  prefs->RegisterFilePathPref(prefs::kCurrentThemePackFilename, FilePath());
   prefs->RegisterStringPref(prefs::kCurrentThemeID,
                             UTF8ToWide(BrowserThemeProvider::kDefaultThemeID));
   prefs->RegisterDictionaryPref(prefs::kCurrentThemeImages);
@@ -179,21 +203,20 @@ Profile* Profile::CreateProfile(const FilePath& path) {
 }
 
 // static
-URLRequestContext* Profile::GetDefaultRequestContext() {
+URLRequestContextGetter* Profile::GetDefaultRequestContext() {
   return default_request_context_;
 }
 
-#if defined(OS_LINUX)
+#if defined(OS_WIN)
+#include "chrome/browser/password_manager/password_store_win.h"
+#elif defined(OS_MACOSX)
+#include "chrome/browser/keychain_mac.h"
+#include "chrome/browser/password_manager/password_store_mac.h"
+#elif defined(OS_POSIX)
 // Temporarily disabled while we figure some stuff out.
 // http://code.google.com/p/chromium/issues/detail?id=12351
 // #include "chrome/browser/password_manager/password_store_gnome.h"
 // #include "chrome/browser/password_manager/password_store_kwallet.h"
-#elif defined(OS_WIN)
-#include "chrome/browser/password_manager/password_store_win.h"
-#elif defined(OS_MACOSX)
-#include "chrome/browser/keychain_mac.h"
-#include "chrome/browser/password_manager/login_database_mac.h"
-#include "chrome/browser/password_manager/password_store_mac.h"
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -207,16 +230,8 @@ class OffTheRecordProfileImpl : public Profile,
  public:
   explicit OffTheRecordProfileImpl(Profile* real_profile)
       : profile_(real_profile),
-        extensions_request_context_(NULL),
         start_time_(Time::Now()) {
-    // Created here but lazily inititialized later, finally released on
-    // on the io thread, see CleanupAppCacheService.
-    appcache_service_ = new ChromeAppCacheService();
-    appcache_service_->AddRef();
-
-    request_context_ = ChromeURLRequestContext::CreateOffTheRecord(
-        this, appcache_service_);
-    request_context_->AddRef();
+    request_context_ = ChromeURLRequestContextGetter::CreateOffTheRecord(this);
 
     // Register for browser close notifications so we can detect when the last
     // off-the-record window is closed, in which case we can clean our states
@@ -226,9 +241,11 @@ class OffTheRecordProfileImpl : public Profile,
   }
 
   virtual ~OffTheRecordProfileImpl() {
-    CleanupRequestContext(request_context_);
-    CleanupRequestContext(extensions_request_context_);
-    CleanupAppCacheService(appcache_service_);
+   NotificationService::current()->Notify(
+      NotificationType::PROFILE_DESTROYED,
+      Source<Profile>(this),
+      NotificationService::NoDetails());
+   CleanupRequestContext(request_context_);
   }
 
   virtual ProfileId GetRuntimeId() {
@@ -254,11 +271,10 @@ class OffTheRecordProfileImpl : public Profile,
     return profile_;
   }
 
-  virtual ChromeAppCacheService* GetAppCacheService() {
-    DCHECK(request_context_);  // should be created in ctor
-    if (!appcache_service_->is_initialized())
-      appcache_service_->InitializeOnUIThread(GetPath(), true);
-    return appcache_service_;
+  virtual webkit_database::DatabaseTracker* GetDatabaseTracker() {
+    if (!db_tracker_)
+      db_tracker_ = new webkit_database::DatabaseTracker(FilePath());
+    return db_tracker_;
   }
 
   virtual VisitedLinkMaster* GetVisitedLinkMaster() {
@@ -268,23 +284,25 @@ class OffTheRecordProfileImpl : public Profile,
   }
 
   virtual ExtensionsService* GetExtensionsService() {
-    return NULL;
+    return GetOriginalProfile()->GetExtensionsService();
   }
 
   virtual UserScriptMaster* GetUserScriptMaster() {
-    return profile_->GetUserScriptMaster();
+    return GetOriginalProfile()->GetUserScriptMaster();
   }
 
   virtual ExtensionDevToolsManager* GetExtensionDevToolsManager() {
+    // TODO(mpcomplete): figure out whether we should return the original
+    // profile's version.
     return NULL;
   }
 
   virtual ExtensionProcessManager* GetExtensionProcessManager() {
-    return NULL;
+    return GetOriginalProfile()->GetExtensionProcessManager();
   }
 
   virtual ExtensionMessageService* GetExtensionMessageService() {
-    return NULL;
+    return GetOriginalProfile()->GetExtensionMessageService();
   }
 
   virtual SSLHostState* GetSSLHostState() {
@@ -295,22 +313,19 @@ class OffTheRecordProfileImpl : public Profile,
     return ssl_host_state_.get();
   }
 
-  virtual net::StrictTransportSecurityState* GetStrictTransportSecurityState() {
-    if (!strict_transport_security_state_.get()) {
-      strict_transport_security_state_ =
-          new net::StrictTransportSecurityState();
-    }
+  virtual net::TransportSecurityState* GetTransportSecurityState() {
+    if (!transport_security_state_.get())
+      transport_security_state_ = new net::TransportSecurityState();
 
-    return strict_transport_security_state_.get();
+    return transport_security_state_.get();
   }
 
   virtual HistoryService* GetHistoryService(ServiceAccessType sat) {
-    if (sat == EXPLICIT_ACCESS) {
+    if (sat == EXPLICIT_ACCESS)
       return profile_->GetHistoryService(sat);
-    } else {
-      NOTREACHED() << "This profile is OffTheRecord";
-      return NULL;
-    }
+
+    NOTREACHED() << "This profile is OffTheRecord";
+    return NULL;
   }
 
   virtual HistoryService* GetHistoryServiceWithoutCreating() {
@@ -318,30 +333,35 @@ class OffTheRecordProfileImpl : public Profile,
   }
 
   virtual FaviconService* GetFaviconService(ServiceAccessType sat) {
-    if (sat == EXPLICIT_ACCESS) {
+    if (sat == EXPLICIT_ACCESS)
       return profile_->GetFaviconService(sat);
-    } else {
-      NOTREACHED() << "This profile is OffTheRecord";
-      return NULL;
-    }
+
+    NOTREACHED() << "This profile is OffTheRecord";
+    return NULL;
+  }
+
+  virtual SearchVersusNavigateClassifier* GetSearchVersusNavigateClassifier() {
+    return profile_->GetSearchVersusNavigateClassifier();
   }
 
   virtual WebDataService* GetWebDataService(ServiceAccessType sat) {
-    if (sat == EXPLICIT_ACCESS) {
+    if (sat == EXPLICIT_ACCESS)
       return profile_->GetWebDataService(sat);
-    } else {
-      NOTREACHED() << "This profile is OffTheRecord";
-      return NULL;
-    }
+
+    NOTREACHED() << "This profile is OffTheRecord";
+    return NULL;
+  }
+
+  virtual WebDataService* GetWebDataServiceWithoutCreating() {
+    return profile_->GetWebDataServiceWithoutCreating();
   }
 
   virtual PasswordStore* GetPasswordStore(ServiceAccessType sat) {
-    if (sat == EXPLICIT_ACCESS) {
+    if (sat == EXPLICIT_ACCESS)
       return profile_->GetPasswordStore(sat);
-    } else {
-      NOTREACHED() << "This profile is OffTheRecord";
-      return NULL;
-    }
+
+    NOTREACHED() << "This profile is OffTheRecord";
+    return NULL;
   }
 
   virtual PrefService* GetPrefs() {
@@ -369,57 +389,82 @@ class OffTheRecordProfileImpl : public Profile,
     return (download_manager_.get() != NULL);
   }
 
+  virtual PersonalDataManager* GetPersonalDataManager() {
+    return NULL;
+  }
+
   virtual void InitThemes() {
-    GetOriginalProfile()->InitThemes();
+    profile_->InitThemes();
   }
 
   virtual void SetTheme(Extension* extension) {
-    GetOriginalProfile()->SetTheme(extension);
+    profile_->SetTheme(extension);
   }
 
   virtual void SetNativeTheme() {
-    GetOriginalProfile()->SetNativeTheme();
+    profile_->SetNativeTheme();
   }
 
   virtual void ClearTheme() {
-    GetOriginalProfile()->ClearTheme();
+    profile_->ClearTheme();
   }
 
   virtual Extension* GetTheme() {
-    return GetOriginalProfile()->GetTheme();
+    return profile_->GetTheme();
   }
 
-  virtual ThemeProvider* GetThemeProvider() {
-    return GetOriginalProfile()->GetThemeProvider();
+  virtual BrowserThemeProvider* GetThemeProvider() {
+    return profile_->GetThemeProvider();
   }
 
-  virtual URLRequestContext* GetRequestContext() {
+  virtual URLRequestContextGetter* GetRequestContext() {
     return request_context_;
   }
 
-  virtual URLRequestContext* GetRequestContextForMedia() {
+  virtual URLRequestContextGetter* GetRequestContextForMedia() {
     // In OTR mode, media request context is the same as the original one.
     return request_context_;
   }
 
-  URLRequestContext* GetRequestContextForExtensions() {
-    if (!extensions_request_context_) {
-      extensions_request_context_ =
-          ChromeURLRequestContext::CreateOffTheRecordForExtensions(this);
-      extensions_request_context_->AddRef();
-
-      DCHECK(extensions_request_context_->cookie_store());
-    }
-
-    return extensions_request_context_;
+  URLRequestContextGetter* GetRequestContextForExtensions() {
+    return GetOriginalProfile()->GetRequestContextForExtensions();
   }
 
   virtual net::SSLConfigService* GetSSLConfigService() {
-    return GetOriginalProfile()->GetSSLConfigService();
+    return profile_->GetSSLConfigService();
   }
 
-  virtual Blacklist* GetBlacklist() {
-    return GetOriginalProfile()->GetBlacklist();
+  virtual HostContentSettingsMap* GetHostContentSettingsMap() {
+    // Retrieve the host content settings map of the parent profile in order to
+    // ensure the preferences have been migrated.
+    profile_->GetHostContentSettingsMap();
+    if (!host_content_settings_map_.get())
+      host_content_settings_map_ = new HostContentSettingsMap(this);
+    return host_content_settings_map_.get();
+  }
+
+  virtual HostZoomMap* GetHostZoomMap() {
+    if (!host_zoom_map_)
+      host_zoom_map_ = new HostZoomMap(this);
+    return host_zoom_map_.get();
+  }
+
+  virtual GeolocationContentSettingsMap* GetGeolocationContentSettingsMap() {
+    return profile_->GetGeolocationContentSettingsMap();
+  }
+
+  virtual Blacklist* GetPrivacyBlacklist() {
+    return profile_->GetPrivacyBlacklist();
+  }
+
+  virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher() {
+    return profile_->GetUserStyleSheetWatcher();
+  }
+
+  virtual FindBarState* GetFindBarState() {
+    if (!find_bar_state_.get())
+      find_bar_state_.reset(new FindBarState());
+    return find_bar_state_.get();
   }
 
   virtual SessionService* GetSessionService() {
@@ -436,22 +481,6 @@ class OffTheRecordProfileImpl : public Profile,
     return false;
   }
 
-  virtual std::wstring GetName() {
-    return profile_->GetName();
-  }
-
-  virtual void SetName(const std::wstring& name) {
-    profile_->SetName(name);
-  }
-
-  virtual std::wstring GetID() {
-    return profile_->GetID();
-  }
-
-  virtual void SetID(const std::wstring& id) {
-    profile_->SetID(id);
-  }
-
   virtual bool DidLastSessionExitCleanly() {
     return profile_->DidLastSessionExitCleanly();
   }
@@ -461,7 +490,11 @@ class OffTheRecordProfileImpl : public Profile,
   }
 
   virtual DesktopNotificationService* GetDesktopNotificationService() {
-    return profile_->GetDesktopNotificationService();
+    if (!desktop_notification_service_.get()) {
+      desktop_notification_service_.reset(new DesktopNotificationService(
+          this, g_browser_process->notification_ui_manager()));
+    }
+    return desktop_notification_service_.get();
   }
 
   virtual ProfileSyncService* GetProfileSyncService() {
@@ -469,9 +502,7 @@ class OffTheRecordProfileImpl : public Profile,
   }
 
   virtual bool IsSameProfile(Profile* profile) {
-    if (profile == static_cast<Profile*>(this))
-      return true;
-    return profile == profile_;
+    return (profile == this) || (profile == profile_);
   }
 
   virtual Time GetStartTime() const {
@@ -485,24 +516,20 @@ class OffTheRecordProfileImpl : public Profile,
   virtual void ResetTabRestoreService() {
   }
 
-  virtual void ReinitializeSpellChecker() {
-    profile_->ReinitializeSpellChecker();
+  virtual SpellCheckHost* GetSpellCheckHost() {
+    return profile_->GetSpellCheckHost();
   }
 
-  virtual SpellChecker* GetSpellChecker() {
-    return profile_->GetSpellChecker();
-  }
-
-  virtual void DeleteSpellChecker() {
-    profile_->DeleteSpellChecker();
+  virtual void ReinitializeSpellCheckHost(bool force) {
+    profile_->ReinitializeSpellCheckHost(force);
   }
 
   virtual WebKitContext* GetWebKitContext() {
-  if (!webkit_context_.get())
-    webkit_context_ = new WebKitContext(GetPath(), true);
-  DCHECK(webkit_context_.get());
-  return webkit_context_.get();
-}
+    if (!webkit_context_.get())
+      webkit_context_ = new WebKitContext(FilePath(), true);
+    DCHECK(webkit_context_.get());
+    return webkit_context_.get();
+  }
 
   virtual ThumbnailStore* GetThumbnailStore() {
     return NULL;
@@ -517,6 +544,11 @@ class OffTheRecordProfileImpl : public Profile,
 
   virtual void InitWebResources() {
     NOTREACHED();
+  }
+
+  virtual NTPResourceCache* GetNTPResourceCache() {
+    // Just return the real profile resource cache.
+    return profile_->GetNTPResourceCache();
   }
 
   virtual void ExitedOffTheRecordMode() {
@@ -547,15 +579,19 @@ class OffTheRecordProfileImpl : public Profile,
   Profile* profile_;
 
   // The context to use for requests made from this OTR session.
-  ChromeURLRequestContext* request_context_;
-
-  ChromeURLRequestContext* extensions_request_context_;
-
-  // Use a seperate appcache service for OTR.
-  ChromeAppCacheService* appcache_service_;
+  scoped_refptr<ChromeURLRequestContextGetter> request_context_;
 
   // The download manager that only stores downloaded items in memory.
   scoped_refptr<DownloadManager> download_manager_;
+
+  // Use a separate desktop notification service for OTR.
+  scoped_ptr<DesktopNotificationService> desktop_notification_service_;
+
+  // We use a non-writable content settings map for OTR.
+  scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
+
+  // Use a separate zoom map for OTR.
+  scoped_refptr<HostZoomMap> host_zoom_map_;
 
   // Use a special WebKit context for OTR browsing.
   scoped_refptr<WebKitContext> webkit_context_;
@@ -565,14 +601,22 @@ class OffTheRecordProfileImpl : public Profile,
   // the user visited while OTR.
   scoped_ptr<SSLHostState> ssl_host_state_;
 
-  // The StrictTransportSecurityState that only stores enabled sites in memory.
-  scoped_refptr<net::StrictTransportSecurityState>
-      strict_transport_security_state_;
+  // Use a separate FindBarState so search terms do not leak back to the main
+  // profile.
+  scoped_ptr<FindBarState> find_bar_state_;
+
+  // The TransportSecurityState that only stores enabled sites in memory.
+  scoped_refptr<net::TransportSecurityState>
+      transport_security_state_;
 
   // Time we were started.
   Time start_time_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(OffTheRecordProfileImpl);
+  // The main database tracker for this profile.
+  // Should be used only on the file thread.
+  scoped_refptr<webkit_database::DatabaseTracker> db_tracker_;
+
+  DISALLOW_COPY_AND_ASSIGN(OffTheRecordProfileImpl);
 };
 
 ProfileImpl::ProfileImpl(const FilePath& path)
@@ -582,7 +626,8 @@ ProfileImpl::ProfileImpl(const FilePath& path)
       request_context_(NULL),
       media_request_context_(NULL),
       extensions_request_context_(NULL),
-      blacklist_(NULL),
+      host_content_settings_map_(NULL),
+      host_zoom_map_(NULL),
       history_service_created_(false),
       favicon_service_created_(false),
       created_web_data_service_(false),
@@ -590,7 +635,8 @@ ProfileImpl::ProfileImpl(const FilePath& path)
       created_download_manager_(false),
       created_theme_provider_(false),
       start_time_(Time::Now()),
-      spellchecker_(NULL),
+      spellcheck_host_(NULL),
+      spellcheck_host_ready_(false),
       shutdown_session_service_(false) {
   DCHECK(!path.empty()) << "Using an empty path will attempt to write " <<
                             "profile files to the root directory!";
@@ -603,11 +649,6 @@ ProfileImpl::ProfileImpl(const FilePath& path)
     extension_devtools_manager_ = new ExtensionDevToolsManager(this);
   }
 
-  // Created here but lazily inititialized later, finally released on
-  // on the io thread, see CleanupAppCacheService.
-  appcache_service_ = new ChromeAppCacheService();
-  appcache_service_->AddRef();
-
   extension_process_manager_.reset(new ExtensionProcessManager(this));
   extension_message_service_ = new ExtensionMessageService(this);
 
@@ -615,18 +656,6 @@ ProfileImpl::ProfileImpl(const FilePath& path)
   prefs->AddPrefObserver(prefs::kSpellCheckDictionary, this);
   prefs->AddPrefObserver(prefs::kEnableSpellCheck, this);
   prefs->AddPrefObserver(prefs::kEnableAutoSpellCorrect, this);
-
-  if (CommandLine::ForCurrentProcess()->
-      HasSwitch(switches::kPrivacyBlacklist)) {
-    std::wstring option = CommandLine::ForCurrentProcess()->GetSwitchValue(
-        switches::kPrivacyBlacklist);
-#if defined(OS_POSIX)
-    FilePath path(WideToUTF8(option));
-#else
-    FilePath path(option);
-#endif
-    blacklist_ = new Blacklist(path);
-  }
 
 #if defined(OS_MACOSX)
   // If the profile directory doesn't already have a cache directory and it
@@ -637,18 +666,30 @@ ProfileImpl::ProfileImpl(const FilePath& path)
   // ~/Library/Caches/Google/Chrome/MyProfileName.
   //
   // TODO(akalin): Come up with unit tests for this.
-  // TODO(akalin): Use for Linux, too?
   if (!HasACacheSubdir(path_)) {
     FilePath app_data_path, user_cache_path;
     if (PathService::Get(base::DIR_APP_DATA, &app_data_path) &&
-        PathService::Get(base::DIR_CACHE, &user_cache_path) &&
+        PathService::Get(base::DIR_USER_CACHE, &user_cache_path) &&
         app_data_path.AppendRelativePath(path_, &user_cache_path)) {
       base_cache_path_ = user_cache_path;
     }
   }
+#elif defined(OS_POSIX)  // Posix minus Mac.
+  // See http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html
+  // for a spec on where cache files go.  The net effect for most systems is we
+  // use ~/.cache/chromium/ for Chromium and ~/.cache/google-chrome/ for
+  // official builds.
+  if (!PathService::IsOverridden(chrome::DIR_USER_DATA)) {
+#if defined(GOOGLE_CHROME_BUILD)
+    const char kCacheDir[] = "google-chrome";
 #else
-  if (!PathService::IsOverridden(chrome::DIR_USER_DATA))
-    PathService::Get(chrome::DIR_USER_CACHE, &base_cache_path_);
+    const char kCacheDir[] = "chromium";
+#endif
+    PathService::Get(base::DIR_USER_CACHE, &base_cache_path_);
+    base_cache_path_ = base_cache_path_.Append(kCacheDir);
+    if (!file_util::PathExists(base_cache_path_))
+      file_util::CreateDirectory(base_cache_path_);
+  }
 #endif
   if (base_cache_path_.empty())
     base_cache_path_ = path_;
@@ -667,6 +708,8 @@ ProfileImpl::ProfileImpl(const FilePath& path)
 #if defined(OS_CHROMEOS)
   chromeos_preferences_.Init(prefs);
 #endif
+
+  pinned_tab_service_.reset(new PinnedTabService(this));
 }
 
 void ProfileImpl::InitExtensions() {
@@ -674,48 +717,43 @@ void ProfileImpl::InitExtensions() {
     return;  // Already initialized.
 
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  PrefService* prefs = GetPrefs();
-  bool user_scripts_enabled =
-      command_line->HasSwitch(switches::kEnableUserScripts) ||
-      prefs->GetBoolean(prefs::kEnableUserScripts);
-
-  FilePath script_dir;
-  if (user_scripts_enabled) {
-    if (command_line->HasSwitch(switches::kUserScriptsDir)) {
-      std::wstring path_string =
-          command_line->GetSwitchValue(switches::kUserScriptsDir);
-      script_dir = FilePath::FromWStringHack(path_string);
-    } else {
-      script_dir = GetPath();
-      script_dir = script_dir.Append(chrome::kUserScriptsDirname);
-    }
-  }
-
   ExtensionErrorReporter::Init(true);  // allow noisy errors.
-  user_script_master_ = new UserScriptMaster(
-      g_browser_process->file_thread()->message_loop(),
-      script_dir);
+
+  FilePath script_dir;  // Don't look for user scripts in any directory.
+                        // TODO(aa): We should just remove this functionality,
+                        // since it isn't used anymore.
+  user_script_master_ = new UserScriptMaster(script_dir, this);
+
   extensions_service_ = new ExtensionsService(
       this,
       CommandLine::ForCurrentProcess(),
       GetPrefs(),
       GetPath().AppendASCII(ExtensionsService::kInstallDirectoryName),
-      MessageLoop::current(),
-      g_browser_process->file_thread()->message_loop(),
       true);
+
+  // Register the bookmark manager extension.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableTabbedBookmarkManager)) {
+    FilePath bookmark_manager_path;
+    if (PathService::Get(chrome::DIR_BOOKMARK_MANAGER,
+                         &bookmark_manager_path)) {
+      std::string manifest =
+          ResourceBundle::GetSharedInstance().GetRawDataResource(
+              IDR_BOOKMARKS_MANIFEST).as_string();
+      extensions_service_->register_component_extension(
+          ExtensionsService::ComponentExtensionInfo(manifest,
+                                                    bookmark_manager_path));
+    } else {
+      NOTREACHED();
+    }
+  }
 
   extensions_service_->Init();
 
   // Load any extensions specified with --load-extension.
   if (command_line->HasSwitch(switches::kLoadExtension)) {
-    std::wstring path_string =
-        command_line->GetSwitchValue(switches::kLoadExtension);
-    FilePath path = FilePath::FromWStringHack(path_string);
+    FilePath path = command_line->GetSwitchValuePath(switches::kLoadExtension);
     extensions_service_->LoadExtension(path);
-
-    // Tell UserScriptMaser to watch this extension's directory for changes so
-    // you can live edit content scripts during development.
-    user_script_master_->AddWatchedPath(path);
   }
 }
 
@@ -723,14 +761,22 @@ void ProfileImpl::InitWebResources() {
   if (web_resource_service_)
     return;  // Already initialized.
 
-  web_resource_service_ = new WebResourceService(
-      this,
-      g_browser_process->file_thread()->message_loop());
-
+  web_resource_service_ = new WebResourceService(this);
   web_resource_service_->StartAfterDelay();
 }
 
+NTPResourceCache* ProfileImpl::GetNTPResourceCache() {
+  if (!ntp_resource_cache_.get())
+    ntp_resource_cache_.reset(new NTPResourceCache(this));
+  return ntp_resource_cache_.get();
+}
+
 ProfileImpl::~ProfileImpl() {
+  NotificationService::current()->Notify(
+      NotificationType::PROFILE_DESTROYED,
+      Source<Profile>(this),
+      NotificationService::NoDetails());
+
   tab_restore_service_ = NULL;
 
   StopCreateSessionServiceTimer();
@@ -758,9 +804,10 @@ ProfileImpl::~ProfileImpl() {
   prefs->RemovePrefObserver(prefs::kEnableSpellCheck, this);
   prefs->RemovePrefObserver(prefs::kEnableAutoSpellCorrect, this);
 
-#if defined(BROWSER_SYNC)
+  // Delete the NTP resource cache so we can unregister pref observers.
+  ntp_resource_cache_.reset();
+
   sync_service_.reset();
-#endif
 
   // Both HistoryService and WebDataService maintain threads for background
   // processing. Its possible each thread still has tasks on it that have
@@ -774,25 +821,15 @@ ProfileImpl::~ProfileImpl() {
   if (history_service_.get())
     history_service_->Cleanup();
 
-  DeleteSpellCheckerImpl(false);
+  if (spellcheck_host_.get())
+    spellcheck_host_->UnsetObserver();
 
-  if (default_request_context_ == request_context_) {
-#if defined(OS_LINUX)
-    // We use default_request_context_ for OCSP.
-    // Release URLRequestContext used in OCSP handlers.
-    net::SetURLRequestContextForOCSP(NULL);
-#endif
+  if (default_request_context_ == request_context_)
     default_request_context_ = NULL;
-  }
 
   CleanupRequestContext(request_context_);
   CleanupRequestContext(media_request_context_);
   CleanupRequestContext(extensions_request_context_);
-  CleanupAppCacheService(appcache_service_);
-
-  // When the request contexts are gone, the blacklist wont be needed anymore.
-  delete blacklist_;
-  blacklist_ = 0;
 
   // HistoryService may call into the BookmarkModel, as such we need to
   // delete HistoryService before the BookmarkModel. The destructor for
@@ -843,19 +880,16 @@ Profile* ProfileImpl::GetOriginalProfile() {
   return this;
 }
 
-ChromeAppCacheService* ProfileImpl::GetAppCacheService() {
-  if (!appcache_service_->is_initialized()) {
-    EnsureRequestContextCreated();
-    appcache_service_->InitializeOnUIThread(GetPath(), false);
-  }
-  return appcache_service_;
+webkit_database::DatabaseTracker* ProfileImpl::GetDatabaseTracker() {
+  if (!db_tracker_)
+    db_tracker_ = new webkit_database::DatabaseTracker(GetPath());
+  return db_tracker_;
 }
 
 VisitedLinkMaster* ProfileImpl::GetVisitedLinkMaster() {
   if (!visited_link_master_.get()) {
     scoped_ptr<VisitedLinkMaster> visited_links(
-      new VisitedLinkMaster(g_browser_process->file_thread(),
-                            visited_link_event_listener_.get(), this));
+      new VisitedLinkMaster(visited_link_event_listener_.get(), this));
     if (!visited_links->Init())
       return NULL;
     visited_link_master_.swap(visited_links);
@@ -892,33 +926,27 @@ SSLHostState* ProfileImpl::GetSSLHostState() {
   return ssl_host_state_.get();
 }
 
-net::StrictTransportSecurityState*
-    ProfileImpl::GetStrictTransportSecurityState() {
-  if (!strict_transport_security_state_.get()) {
-    strict_transport_security_state_ = new net::StrictTransportSecurityState();
-    strict_transport_security_persister_ = new StrictTransportSecurityPersister(
-        strict_transport_security_state_.get(),
-        g_browser_process->file_thread(), path_);
+net::TransportSecurityState*
+    ProfileImpl::GetTransportSecurityState() {
+  if (!transport_security_state_.get()) {
+    transport_security_state_ = new net::TransportSecurityState();
+    transport_security_persister_ =
+        new TransportSecurityPersister();
+    transport_security_persister_->Initialize(
+        transport_security_state_.get(), path_);
   }
 
-  return strict_transport_security_state_.get();
+  return transport_security_state_.get();
 }
 
 PrefService* ProfileImpl::GetPrefs() {
   if (!prefs_.get()) {
-    prefs_.reset(new PrefService(GetPrefFilePath(),
-                                 g_browser_process->file_thread()));
+    prefs_.reset(new PrefService(GetPrefFilePath()));
 
     // The Profile class and ProfileManager class may read some prefs so
     // register known prefs as soon as possible.
     Profile::RegisterUserPrefs(prefs_.get());
-    ProfileManager::RegisterUserPrefs(prefs_.get());
-#if defined(OS_CHROMEOS)
-    // Register Touchpad prefs here instead of in browser_prefs because these
-    // prefs are used in the constructor of ProfileImpl which happens before
-    // browser_prefs' RegisterAllPrefs is called.
-    chromeos::Preferences::RegisterUserPrefs(prefs_.get());
-#endif
+    browser::RegisterUserPrefs(prefs_.get());
 
     // The last session exited cleanly if there is no pref for
     // kSessionExitedCleanly or the value for kSessionExitedCleanly is true.
@@ -939,7 +967,7 @@ FilePath ProfileImpl::GetPrefFilePath() {
   return pref_file_path;
 }
 
-URLRequestContext* ProfileImpl::GetRequestContext() {
+URLRequestContextGetter* ProfileImpl::GetRequestContext() {
   if (!request_context_) {
     FilePath cookie_path = GetPath();
     cookie_path = cookie_path.Append(chrome::kCookieFilename);
@@ -948,42 +976,35 @@ URLRequestContext* ProfileImpl::GetRequestContext() {
     GetCacheParameters(kNormalContext, &cache_path, &max_size);
 
     cache_path = GetCachePath(cache_path);
-    request_context_ = ChromeURLRequestContext::CreateOriginal(
-        this, cookie_path, cache_path, max_size, appcache_service_);
-    request_context_->AddRef();
+    request_context_ = ChromeURLRequestContextGetter::CreateOriginal(
+        this, cookie_path, cache_path, max_size);
 
     // The first request context is always a normal (non-OTR) request context.
     // Even when Chromium is started in OTR mode, a normal profile is always
     // created first.
     if (!default_request_context_) {
       default_request_context_ = request_context_;
+      // TODO(eroman): this isn't terribly useful anymore now that the
+      // URLRequestContext is constructed by the IO thread...
       NotificationService::current()->Notify(
           NotificationType::DEFAULT_REQUEST_CONTEXT_AVAILABLE,
           NotificationService::AllSources(), NotificationService::NoDetails());
-#if defined(OS_LINUX)
-      // TODO(ukai): find a better way to set the URLRequestContext for OCSP.
-      net::SetURLRequestContextForOCSP(default_request_context_);
-#endif
     }
-
-    DCHECK(request_context_->cookie_store());
   }
 
   return request_context_;
 }
 
-URLRequestContext* ProfileImpl::GetRequestContextForMedia() {
+URLRequestContextGetter* ProfileImpl::GetRequestContextForMedia() {
   if (!media_request_context_) {
     FilePath cache_path = base_cache_path_;
     int max_size;
     GetCacheParameters(kMediaContext, &cache_path, &max_size);
 
     cache_path = GetMediaCachePath(cache_path);
-    media_request_context_ = ChromeURLRequestContext::CreateOriginalForMedia(
-        this, cache_path, max_size, appcache_service_);
-    media_request_context_->AddRef();
-
-    DCHECK(media_request_context_->cookie_store());
+    media_request_context_ =
+        ChromeURLRequestContextGetter::CreateOriginalForMedia(
+            this, cache_path, max_size);
   }
 
   return media_request_context_;
@@ -998,27 +1019,95 @@ FaviconService* ProfileImpl::GetFaviconService(ServiceAccessType sat) {
   return favicon_service_.get();
 }
 
-URLRequestContext* ProfileImpl::GetRequestContextForExtensions() {
+URLRequestContextGetter* ProfileImpl::GetRequestContextForExtensions() {
   if (!extensions_request_context_) {
     FilePath cookie_path = GetPath();
     cookie_path = cookie_path.Append(chrome::kExtensionsCookieFilename);
 
     extensions_request_context_ =
-        ChromeURLRequestContext::CreateOriginalForExtensions(this, cookie_path);
-    extensions_request_context_->AddRef();
-
-    DCHECK(extensions_request_context_->cookie_store());
+        ChromeURLRequestContextGetter::CreateOriginalForExtensions(
+            this, cookie_path);
   }
 
   return extensions_request_context_;
+}
+
+void ProfileImpl::RegisterExtensionWithRequestContexts(
+    Extension* extension) {
+  // Notify the default, extension and media contexts on the IO thread.
+  PostExtensionLoadedToContextGetter(
+      static_cast<ChromeURLRequestContextGetter*>(GetRequestContext()),
+                                                  extension);
+  PostExtensionLoadedToContextGetter(
+      static_cast<ChromeURLRequestContextGetter*>(
+          GetRequestContextForExtensions()),
+      extension);
+  PostExtensionLoadedToContextGetter(
+      static_cast<ChromeURLRequestContextGetter*>(
+          GetRequestContextForMedia()),
+      extension);
+}
+
+void ProfileImpl::UnregisterExtensionWithRequestContexts(
+    Extension* extension) {
+  // Notify the default, extension and media contexts on the IO thread.
+  PostExtensionUnloadedToContextGetter(
+      static_cast<ChromeURLRequestContextGetter*>(GetRequestContext()),
+                                                  extension);
+  PostExtensionUnloadedToContextGetter(
+      static_cast<ChromeURLRequestContextGetter*>(
+          GetRequestContextForExtensions()),
+      extension);
+  PostExtensionUnloadedToContextGetter(
+      static_cast<ChromeURLRequestContextGetter*>(
+          GetRequestContextForMedia()),
+      extension);
 }
 
 net::SSLConfigService* ProfileImpl::GetSSLConfigService() {
   return ssl_config_service_manager_->Get();
 }
 
-Blacklist* ProfileImpl::GetBlacklist() {
-  return blacklist_;
+HostContentSettingsMap* ProfileImpl::GetHostContentSettingsMap() {
+  if (!host_content_settings_map_.get())
+    host_content_settings_map_ = new HostContentSettingsMap(this);
+  return host_content_settings_map_.get();
+}
+
+HostZoomMap* ProfileImpl::GetHostZoomMap() {
+  if (!host_zoom_map_)
+    host_zoom_map_ = new HostZoomMap(this);
+  return host_zoom_map_.get();
+}
+
+GeolocationContentSettingsMap* ProfileImpl::GetGeolocationContentSettingsMap() {
+  if (!geolocation_content_settings_map_.get())
+    geolocation_content_settings_map_ = new GeolocationContentSettingsMap(this);
+  return geolocation_content_settings_map_.get();
+}
+
+Blacklist* ProfileImpl::GetPrivacyBlacklist() {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnablePrivacyBlacklists))
+    return NULL;
+  if (!privacy_blacklist_.get())
+    privacy_blacklist_ = new Blacklist(GetPrefs());
+  return privacy_blacklist_.get();
+}
+
+UserStyleSheetWatcher* ProfileImpl::GetUserStyleSheetWatcher() {
+  if (!user_style_sheet_watcher_.get()) {
+    user_style_sheet_watcher_ = new UserStyleSheetWatcher(GetPath());
+    user_style_sheet_watcher_->Init();
+  }
+  return user_style_sheet_watcher_.get();
+}
+
+FindBarState* ProfileImpl::GetFindBarState() {
+  if (!find_bar_state_.get()) {
+    find_bar_state_.reset(new FindBarState());
+  }
+  return find_bar_state_.get();
 }
 
 HistoryService* ProfileImpl::GetHistoryService(ServiceAccessType sat) {
@@ -1053,9 +1142,22 @@ TemplateURLFetcher* ProfileImpl::GetTemplateURLFetcher() {
   return template_url_fetcher_.get();
 }
 
+SearchVersusNavigateClassifier*
+ProfileImpl::GetSearchVersusNavigateClassifier() {
+  if (!search_versus_navigate_classifier_.get()) {
+    search_versus_navigate_classifier_.reset(
+        new SearchVersusNavigateClassifier(this));
+  }
+  return search_versus_navigate_classifier_.get();
+}
+
 WebDataService* ProfileImpl::GetWebDataService(ServiceAccessType sat) {
   if (!created_web_data_service_)
     CreateWebDataService();
+  return web_data_service_.get();
+}
+
+WebDataService* ProfileImpl::GetWebDataServiceWithoutCreating() {
   return web_data_service_.get();
 }
 
@@ -1078,27 +1180,25 @@ void ProfileImpl::CreatePasswordStore() {
   DCHECK(!created_password_store_ && password_store_.get() == NULL);
   created_password_store_ = true;
   scoped_refptr<PasswordStore> ps;
-#if defined(OS_LINUX)
-// Temporarily disabled while we figure some stuff out.
-// http://code.google.com/p/chromium/issues/detail?id=12351
-// if (getenv("KDE_FULL_SESSION")) {
-//   ps = new PasswordStoreKWallet();
-// } else {
-//   ps = new PasswordStoreGnome();
-// }
-  NOTIMPLEMENTED();
-#elif defined(OS_WIN)
+#if defined(OS_WIN)
   ps = new PasswordStoreWin(GetWebDataService(Profile::IMPLICIT_ACCESS));
 #elif defined(OS_MACOSX)
   FilePath login_db_file_path = GetPath();
   login_db_file_path = login_db_file_path.Append(chrome::kLoginDataFileName);
-  LoginDatabaseMac* login_db = new LoginDatabaseMac();
+  LoginDatabase* login_db = new LoginDatabase();
   if (!login_db->Init(login_db_file_path)) {
     LOG(ERROR) << "Could not initialize login database.";
     delete login_db;
     return;
   }
   ps = new PasswordStoreMac(new MacKeychain(), login_db);
+#elif defined(OS_POSIX)
+  // TODO(evanm): implement "native" password management.
+  // This bug describes the issues.
+  // http://code.google.com/p/chromium/issues/detail?id=12351
+  ps = new PasswordStoreDefault(GetWebDataService(Profile::IMPLICIT_ACCESS));
+  if (!ps->Init())
+    return;
 #else
   NOTIMPLEMENTED();
 #endif
@@ -1127,9 +1227,17 @@ bool ProfileImpl::HasCreatedDownloadManager() const {
   return created_download_manager_;
 }
 
+PersonalDataManager* ProfileImpl::GetPersonalDataManager() {
+  if (!personal_data_manager_.get()) {
+    personal_data_manager_.reset(new PersonalDataManager());
+    personal_data_manager_->Init(this);
+  }
+  return personal_data_manager_.get();
+}
+
 void ProfileImpl::InitThemes() {
   if (!created_theme_provider_) {
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
     theme_provider_.reset(new GtkThemeProvider);
 #else
     theme_provider_.reset(new BrowserThemeProvider);
@@ -1161,10 +1269,10 @@ Extension* ProfileImpl::GetTheme() {
   if (id == BrowserThemeProvider::kDefaultThemeID)
     return NULL;
 
-  return extensions_service_->GetExtensionById(id);
+  return extensions_service_->GetExtensionById(id, false);
 }
 
-ThemeProvider* ProfileImpl::GetThemeProvider() {
+BrowserThemeProvider* ProfileImpl::GetThemeProvider() {
   InitThemes();
   return theme_provider_.get();
 }
@@ -1191,20 +1299,6 @@ void ProfileImpl::ShutdownSessionService() {
 
 bool ProfileImpl::HasSessionService() const {
   return (session_service_.get() != NULL);
-}
-
-std::wstring ProfileImpl::GetName() {
-  return GetPrefs()->GetString(prefs::kProfileName);
-}
-void ProfileImpl::SetName(const std::wstring& name) {
-  GetPrefs()->SetString(prefs::kProfileName, name);
-}
-
-std::wstring ProfileImpl::GetID() {
-  return GetPrefs()->GetString(prefs::kProfileID);
-}
-void ProfileImpl::SetID(const std::wstring& id) {
-  GetPrefs()->SetString(prefs::kProfileID, id);
 }
 
 bool ProfileImpl::DidLastSessionExitCleanly() {
@@ -1252,95 +1346,45 @@ void ProfileImpl::ResetTabRestoreService() {
   tab_restore_service_ = NULL;
 }
 
-// To be run in the IO thread to notify all resource message filters that the
-// spellchecker has changed.
-class NotifySpellcheckerChangeTask : public Task {
- public:
-  NotifySpellcheckerChangeTask(
-      Profile* profile,
-      const SpellcheckerReinitializedDetails& spellchecker)
-      : profile_(profile),
-        spellchecker_(spellchecker) {
+SpellCheckHost* ProfileImpl::GetSpellCheckHost() {
+  return spellcheck_host_ready_ ? spellcheck_host_.get() : NULL;
+}
+
+void ProfileImpl::ReinitializeSpellCheckHost(bool force) {
+  // If we are already loading the spellchecker, and this is just a hint to
+  // load the spellchecker, do nothing.
+  if (!force && spellcheck_host_.get())
+    return;
+
+  spellcheck_host_ready_ = false;
+
+  bool notify = false;
+  if (spellcheck_host_.get()) {
+    spellcheck_host_->UnsetObserver();
+    spellcheck_host_ = NULL;
+    notify = true;
   }
 
- private:
-  void Run(void) {
-    NotificationService::current()->Notify(
-        NotificationType::SPELLCHECKER_REINITIALIZED,
-        Source<Profile>(profile_),
-        Details<SpellcheckerReinitializedDetails>(&spellchecker_));
-  }
-
-  Profile* profile_;
-  SpellcheckerReinitializedDetails spellchecker_;
-};
-
-void ProfileImpl::ReinitializeSpellChecker() {
   PrefService* prefs = GetPrefs();
   if (prefs->GetBoolean(prefs::kEnableSpellCheck)) {
-    DeleteSpellCheckerImpl(false);
-
     // Retrieve the (perhaps updated recently) dictionary name from preferences.
-    FilePath dict_dir;
-    PathService::Get(chrome::DIR_APP_DICTIONARIES, &dict_dir);
-    // Note that, as the object pointed to by previously by spellchecker_
-    // is being deleted in the io thread, the spellchecker_ can be made to point
-    // to a new object (RE-initialized) in parallel in this UI thread.
-    spellchecker_ = new SpellChecker(dict_dir,
+    spellcheck_host_ = new SpellCheckHost(this,
         WideToASCII(prefs->GetString(prefs::kSpellCheckDictionary)),
-        GetRequestContext(),
-        FilePath());
-    spellchecker_->AddRef();  // Manual refcounting.
-
-    // Set auto spell correct status for spellchecker.
-    spellchecker_->EnableAutoSpellCorrect(
-        prefs->GetBoolean(prefs::kEnableAutoSpellCorrect));
-
-    NotifySpellCheckerChanged();
-  } else {
-    DeleteSpellCheckerImpl(true);
+        GetRequestContext());
+    spellcheck_host_->Initialize();
+  } else if (notify) {
+    // The spellchecker has been disabled.
+    SpellCheckHostInitialized();
   }
 }
 
-void ProfileImpl::NotifySpellCheckerChanged() {
-  // The I/O thread may be NULL during testing.
-  base::Thread* io_thread = g_browser_process->io_thread();
-  if (io_thread) {  // Notify resource message filters.
-    SpellcheckerReinitializedDetails scoped_spellchecker;
-    scoped_spellchecker.spellchecker = spellchecker_;
-    io_thread->message_loop()->PostTask(FROM_HERE,
-        new NotifySpellcheckerChangeTask(this, scoped_spellchecker));
-  }
-}
-
-void ProfileImpl::DeleteSpellCheckerImpl(bool notify) {
-  if (spellchecker_) {
-    // The spellchecker must be deleted on the I/O thread.
-    // The I/O thread may be NULL during testing.
-    base::Thread* io_thread = g_browser_process->io_thread();
-    if (io_thread)
-      io_thread->message_loop()->ReleaseSoon(FROM_HERE, spellchecker_);
-    else  //  during testing, we don't have an I/O thread
-      spellchecker_->Release();
-
-    spellchecker_ = NULL;
-
-    if (notify)
-      NotifySpellCheckerChanged();
-  }
-}
-
-SpellChecker* ProfileImpl::GetSpellChecker() {
-  if (!spellchecker_) {
-    // This is where spellchecker gets initialized. Note that this is being
-    // initialized in the ui_thread. However, this is not a problem as long as
-    // it is *used* in the io thread.
-    // TODO(sidchat): One day, change everything so that spellchecker gets
-    // initialized in the IO thread itself.
-    ReinitializeSpellChecker();
-  }
-
-  return spellchecker_;
+void ProfileImpl::SpellCheckHostInitialized() {
+  spellcheck_host_ready_ = spellcheck_host_ &&
+      (spellcheck_host_->bdict_file() != base::kInvalidPlatformFileValue ||
+       spellcheck_host_->use_platform_spellchecker());
+  NotificationService::current()->Notify(
+      NotificationType::SPELLCHECK_HOST_REINITIALIZED,
+          Source<Profile>(this), NotificationService::NoDetails());
 }
 
 WebKitContext* ProfileImpl::GetWebKitContext() {
@@ -1353,11 +1397,9 @@ WebKitContext* ProfileImpl::GetWebKitContext() {
 DesktopNotificationService* ProfileImpl::GetDesktopNotificationService() {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   if (!desktop_notification_service_.get()) {
-     // TODO(johnnyg): hook this up with notification UI manager.
      desktop_notification_service_.reset(new DesktopNotificationService(
-         this, NULL));
+         this, g_browser_process->notification_ui_manager()));
   }
-
   return desktop_notification_service_.get();
 }
 
@@ -1380,9 +1422,12 @@ void ProfileImpl::Observe(NotificationType type,
     PrefService* prefs = Source<PrefService>(source).ptr();
     DCHECK(pref_name_in && prefs);
     if (*pref_name_in == prefs::kSpellCheckDictionary ||
-        *pref_name_in == prefs::kEnableSpellCheck ||
-        *pref_name_in == prefs::kEnableAutoSpellCorrect) {
-      ReinitializeSpellChecker();
+        *pref_name_in == prefs::kEnableSpellCheck) {
+      ReinitializeSpellCheckHost(true);
+    } else if (*pref_name_in == prefs::kEnableAutoSpellCorrect) {
+      NotificationService::current()->Notify(
+          NotificationType::SPELLCHECK_AUTOSPELL_TOGGLED,
+              Source<Profile>(this), NotificationService::NoDetails());
     }
   } else if (NotificationType::THEME_INSTALLED == type) {
     Extension* extension = Details<Extension>(details).ptr();
@@ -1399,19 +1444,19 @@ void ProfileImpl::StopCreateSessionServiceTimer() {
 }
 
 ProfileSyncService* ProfileImpl::GetProfileSyncService() {
-#if defined(BROWSER_SYNC)
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableSync)) {
-    if (!sync_service_.get())
-      InitSyncService();
-    return sync_service_.get();
+  if (!ProfileSyncService::IsSyncEnabled()) {
+    return NULL;
   }
-#endif
-  return NULL;
+  if (!sync_service_.get())
+    InitSyncService();
+  return sync_service_.get();
 }
 
 void ProfileImpl::InitSyncService() {
-#if defined(BROWSER_SYNC)
-  sync_service_.reset(new ProfileSyncService(this));
+  profile_sync_factory_.reset(
+      new ProfileSyncFactoryImpl(this,
+                                 CommandLine::ForCurrentProcess()));
+  sync_service_.reset(
+      profile_sync_factory_->CreateProfileSyncService());
   sync_service_->Initialize();
-#endif
 }

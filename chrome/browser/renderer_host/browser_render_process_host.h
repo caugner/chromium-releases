@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,18 +8,17 @@
 #include "build/build_config.h"
 
 #include <map>
+#include <queue>
 #include <string>
 
+#include "app/surface/transport_dib.h"
 #include "base/process.h"
-#include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "base/shared_memory.h"
-#include "base/string16.h"
 #include "base/timer.h"
-#include "chrome/common/transport_dib.h"
+#include "chrome/browser/child_process_launcher.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/common/notification_registrar.h"
-#include "webkit/api/public/WebCache.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
 
 class AudioRendererHost;
 class CommandLine;
@@ -28,6 +27,11 @@ class RendererMainThread;
 class RenderWidgetHelper;
 class TabContents;
 class VisitedLinkUpdater;
+class URLRequestContextGetter;
+
+namespace base {
+class SharedMemory;
+}
 
 namespace gfx {
 class Size;
@@ -48,28 +52,31 @@ class Size;
 // are correlated with IDs. This way, the Views and the corresponding ViewHosts
 // communicate through the two process objects.
 class BrowserRenderProcessHost : public RenderProcessHost,
-                                 public NotificationObserver {
+                                 public NotificationObserver,
+                                 public ChildProcessLauncher::Client {
  public:
   explicit BrowserRenderProcessHost(Profile* profile);
   ~BrowserRenderProcessHost();
 
   // RenderProcessHost implementation (public portion).
-  virtual bool Init();
+  virtual bool Init(bool is_extensions_process,
+                    URLRequestContextGetter* request_context);
   virtual int GetNextRoutingID();
   virtual void CancelResourceRequests(int render_widget_id);
   virtual void CrossSiteClosePageACK(const ViewMsg_ClosePage_Params& params);
-  virtual bool WaitForPaintMsg(int render_widget_id,
-                               const base::TimeDelta& max_delay,
-                               IPC::Message* msg);
-  virtual void ReceivedBadMessage(uint16 msg_type);
+  virtual bool WaitForUpdateMsg(int render_widget_id,
+                                const base::TimeDelta& max_delay,
+                                IPC::Message* msg);
+  virtual void ReceivedBadMessage(uint32 msg_type);
   virtual void WidgetRestored();
   virtual void WidgetHidden();
   virtual void ViewCreated();
-  virtual void AddWord(const string16& word);
+  virtual void SendVisitedLinkTable(base::SharedMemory* table_memory);
   virtual void AddVisitedLinks(const VisitedLinkCommon::Fingerprints& links);
   virtual void ResetVisitedLinks();
   virtual bool FastShutdownIfPossible();
   virtual bool SendWithTimeout(IPC::Message* msg, int timeout_ms);
+  virtual base::ProcessHandle GetHandle();
   virtual TransportDIB* GetTransportDIB(TransportDIB::Id dib_id);
 
   // IPC::Channel::Sender via RenderProcessHost.
@@ -83,7 +90,7 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   // If the a process has sent a message that cannot be decoded, it is deemed
   // corrupted and thus needs to be terminated using this call. This function
   // can be safely called from any thread.
-  static void BadMessageTerminateProcess(uint16 msg_type,
+  static void BadMessageTerminateProcess(uint32 msg_type,
                                          base::ProcessHandle renderer);
 
   // NotificationObserver implementation.
@@ -91,12 +98,13 @@ class BrowserRenderProcessHost : public RenderProcessHost,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
+  // ChildProcessLauncher::Client implementation.
+  virtual void OnProcessLaunched();
+
  private:
   friend class VisitRelayingRenderProcessHost;
 
   // Control message handlers.
-  void OnPageContents(const GURL& url, int32 page_id,
-                      const std::wstring& contents);
   void OnUpdatedCacheStats(const WebKit::WebCache::UsageStats& stats);
   void SuddenTerminationChanged(bool enabled);
   void OnExtensionAddListener(const std::string& event_name);
@@ -119,32 +127,34 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   void SendUserScriptsUpdate(base::SharedMemory* shared_memory);
 
   // Generates a command line to be used to spawn a renderer and appends the
-  // results to |*command_line|. |*has_cmd_prefix| will be set if the renderer
-  // command line specifies a prefix which is another program that will actually
-  // execute the renderer (like gdb).
-  void AppendRendererCommandLine(CommandLine* command_line,
-                                 bool* has_cmd_prefix) const;
+  // results to |*command_line|.
+  void AppendRendererCommandLine(CommandLine* command_line) const;
 
   // Copies applicable command line switches from the given |browser_cmd| line
   // flags to the output |renderer_cmd| line flags. Not all switches will be
   // copied over.
-  void PropogateBrowserCommandLineToRenderer(const CommandLine& browser_cmd,
+  void PropagateBrowserCommandLineToRenderer(const CommandLine& browser_cmd,
                                              CommandLine* renderer_cmd) const;
 
-  // Spawns the renderer process, returning the new handle on success, or 0 on
-  // failure. The renderer command line is given in the first argument, and
-  // whether a command prefix was used when generating the command line is
-  // speficied in the second.
-  base::ProcessHandle ExecuteRenderer(CommandLine* cmd_line,
-                                      bool has_cmd_prefix);
-
-  // Gets a handle to the renderer process, normalizing the case where we were
-  // started with --single-process.
-  base::ProcessHandle GetRendererProcessHandle();
-
   // Callers can reduce the RenderProcess' priority.
-  // Returns true if the priority is backgrounded; false otherwise.
-  void SetBackgrounded(bool boost);
+  void SetBackgrounded(bool backgrounded);
+
+  // The renderer has requested that we initialize its spellchecker. This should
+  // generally only be called once per session, as after the first call, all
+  // future renderers will be passed the initialization information on startup
+  // (or when the dictionary changes in some way).
+  void OnSpellCheckerRequestDictionary();
+
+  // Tell the renderer of a new word that has been added to the custom
+  // dictionary.
+  void AddSpellCheckWord(const std::string& word);
+
+  // Pass the renderer some basic intialization information. Note that the
+  // renderer will not load Hunspell until it needs to.
+  void InitSpellChecker();
+
+  // Tell the renderer that auto spell correction has been enabled/disabled.
+  void EnableAutoSpellCorrect(bool enable);
 
   NotificationRegistrar registrar_;
 
@@ -183,8 +193,18 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   // Buffer visited links and send them to to renderer.
   scoped_ptr<VisitedLinkUpdater> visited_link_updater_;
 
-  // True iff the renderer is a child of a zygote process.
-  bool zygote_child_;
+  // True iff this process is being used as an extension process. Not valid
+  // when running in single-process mode.
+  bool extension_process_;
+
+  // Usedt to launch and terminate the process without blocking the UI thread.
+  scoped_ptr<ChildProcessLauncher> child_process_;
+
+  // Messages we queue while waiting for the process handle.  We queue them here
+  // instead of in the channel so that we ensure they're sent after init related
+  // messages that are sent once the process handle is available.  This is
+  // because the queued messages may have dependencies on the init messages.
+  std::queue<IPC::Message*> queued_messages_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserRenderProcessHost);
 };

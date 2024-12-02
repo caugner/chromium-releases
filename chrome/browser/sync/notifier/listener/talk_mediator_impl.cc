@@ -41,8 +41,10 @@ class SslInitializationSingleton {
   DISALLOW_COPY_AND_ASSIGN(SslInitializationSingleton);
 };
 
-TalkMediatorImpl::TalkMediatorImpl()
-    : mediator_thread_(new MediatorThreadImpl()) {
+TalkMediatorImpl::TalkMediatorImpl(NotificationMethod notification_method,
+                                   bool invalidate_xmpp_auth_token)
+    : mediator_thread_(new MediatorThreadImpl(notification_method)),
+      invalidate_xmpp_auth_token_(invalidate_xmpp_auth_token) {
   // Ensure the SSL library is initialized.
   SslInitializationSingleton::GetInstance()->RegisterClient();
 
@@ -51,7 +53,8 @@ TalkMediatorImpl::TalkMediatorImpl()
 }
 
 TalkMediatorImpl::TalkMediatorImpl(MediatorThread *thread)
-    : mediator_thread_(thread) {
+    : mediator_thread_(thread),
+      invalidate_xmpp_auth_token_(false) {
   // When testing we do not initialize the SSL library.
   TalkMediatorInitialization(true);
 }
@@ -93,9 +96,7 @@ void TalkMediatorImpl::AuthWatcherEventHandler(
       // insure this code path is stable.
       break;
     case AuthWatcherEvent::AUTH_SUCCEEDED:
-      if (!state_.logged_in) {
-        DoLogin();
-      }
+      DoLogin();
       break;
     default:
       // Do nothing.
@@ -116,6 +117,7 @@ bool TalkMediatorImpl::Login() {
 }
 
 bool TalkMediatorImpl::DoLogin() {
+  mutex_.AssertAcquired();
   // Connect to the mediator thread and start processing messages.
   if (!state_.connected) {
     mediator_thread_->SignalStateChange.connect(
@@ -123,9 +125,9 @@ bool TalkMediatorImpl::DoLogin() {
         &TalkMediatorImpl::MediatorThreadMessageHandler);
     state_.connected = 1;
   }
-  if (state_.initialized && !state_.logged_in) {
+  if (state_.initialized && !state_.logging_in) {
     mediator_thread_->Login(xmpp_settings_);
-    state_.logged_in = 1;
+    state_.logging_in = 1;
     return true;
   }
   return false;
@@ -141,6 +143,7 @@ bool TalkMediatorImpl::Logout() {
   if (state_.started) {
     mediator_thread_->Logout();
     state_.started = 0;
+    state_.logging_in = 0;
     state_.logged_in = 0;
     state_.subscribed = 0;
     return true;
@@ -176,7 +179,8 @@ bool TalkMediatorImpl::SetAuthToken(const std::string& email,
   xmpp_settings_.set_resource("chrome-sync");
   xmpp_settings_.set_host(jid.domain());
   xmpp_settings_.set_use_tls(true);
-  xmpp_settings_.set_auth_cookie(token);
+  xmpp_settings_.set_auth_cookie(invalidate_xmpp_auth_token_ ?
+                                 token + "bogus" : token);
 
   state_.initialized = 1;
   return true;
@@ -213,6 +217,8 @@ void TalkMediatorImpl::MediatorThreadMessageHandler(
 void TalkMediatorImpl::OnLogin() {
   LOG(INFO) << "P2P: Logged in.";
   AutoLock lock(mutex_);
+  state_.logging_in = 0;
+  state_.logged_in = 1;
   // ListenForUpdates enables the ListenTask.  This is done before
   // SubscribeForUpdates.
   mediator_thread_->ListenForUpdates();
@@ -225,6 +231,7 @@ void TalkMediatorImpl::OnLogout() {
   LOG(INFO) << "P2P: Logged off.";
   OnSubscriptionFailure();
   AutoLock lock(mutex_);
+  state_.logging_in = 0;
   state_.logged_in = 0;
   TalkMediatorEvent event = { TalkMediatorEvent::LOGOUT_SUCCEEDED };
   channel_->NotifyListeners(event);
@@ -236,6 +243,11 @@ void TalkMediatorImpl::OnSubscriptionSuccess() {
   state_.subscribed = 1;
   TalkMediatorEvent event = { TalkMediatorEvent::SUBSCRIPTIONS_ON };
   channel_->NotifyListeners(event);
+  // Send an initial nudge when we connect.  This is to deal with the
+  // case that there are unsynced changes when Chromium starts up.  This would
+  // caused changes to be submitted before p2p is enabled, and therefore
+  // the notification won't get sent out.
+  mediator_thread_->SendNotification();
 }
 
 void TalkMediatorImpl::OnSubscriptionFailure() {

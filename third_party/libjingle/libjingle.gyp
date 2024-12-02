@@ -28,7 +28,7 @@
         'FEATURE_ENABLE_VOICEMAIL',
       ],
       'conditions': [
-        ['OS=="linux" or OS=="mac"', {
+        ['OS=="linux" or OS=="mac" or OS=="freebsd" or OS=="openbsd"', {
           'defines': [
             'POSIX',
           ],
@@ -38,10 +38,10 @@
     'conditions': [
       ['OS=="win"', {
         'include_dirs': [
-          '../third_party/platformsdk_win2008_6_1/files/Include',
+          '../third_party/platformsdk_win7/files/Include',
         ],
       }],
-      ['OS=="linux" or OS=="mac"', {
+      ['OS=="linux" or OS=="mac" or OS=="freebsd" or OS=="openbsd"', {
         'defines': [
           'POSIX',
         ],
@@ -54,8 +54,7 @@
       'type': '<(library)',
       'sources': [
 
-        # 'files/talk/p2p/client/socketmonitor.cc',  # unneeded
-        # 'files/talk/p2p/client/socketmonitor.h',   # unneeded
+        # everything in files/talk/p2p is unneeded and has been removed
         # 'files/talk/base/Equifax_Secure_Global_eBusiness_CA-1.h', # openssl
         # 'files/talk/base/basictypes.h',  # overridden
         # 'files/talk/base/natserver_main.cc',  # has a main()
@@ -67,6 +66,7 @@
         'files/talk/base/asyncpacketsocket.cc',
         'files/talk/base/asyncpacketsocket.h',
         'files/talk/base/asynctcpsocket.h',
+        'files/talk/base/asynctcpsocket.cc',
         'files/talk/base/asyncudpsocket.cc',
         'files/talk/base/asyncudpsocket.h',
         'files/talk/base/autodetectproxy.cc',
@@ -166,51 +166,6 @@
         'files/talk/base/virtualsocketserver.cc',
         'files/talk/base/virtualsocketserver.h',
         'files/talk/base/winsock_initializer.h',
-        'files/talk/p2p/base/candidate.h',
-        'files/talk/p2p/base/common.h',
-        'files/talk/p2p/base/constants.cc',
-        'files/talk/p2p/base/constants.h',
-        'files/talk/p2p/base/p2ptransport.cc',
-        'files/talk/p2p/base/p2ptransport.h',
-        'files/talk/p2p/base/p2ptransportchannel.cc',
-        'files/talk/p2p/base/p2ptransportchannel.h',
-        'files/talk/p2p/base/port.cc',
-        'files/talk/p2p/base/port.h',
-        'files/talk/p2p/base/portallocator.h',
-        'files/talk/p2p/base/rawtransport.cc',
-        'files/talk/p2p/base/rawtransport.h',
-        'files/talk/p2p/base/rawtransportchannel.cc',
-        'files/talk/p2p/base/rawtransportchannel.h',
-        'files/talk/p2p/base/relayport.cc',
-        'files/talk/p2p/base/relayport.h',
-        'files/talk/p2p/base/session.cc',
-        'files/talk/p2p/base/session.h',
-        'files/talk/p2p/base/sessionclient.h',
-        'files/talk/p2p/base/sessiondescription.h',
-        'files/talk/p2p/base/sessionid.h',
-        'files/talk/p2p/base/sessionmanager.cc',
-        'files/talk/p2p/base/sessionmanager.h',
-        'files/talk/p2p/base/stun.cc',
-        'files/talk/p2p/base/stun.h',
-        'files/talk/p2p/base/stunport.cc',
-        'files/talk/p2p/base/stunport.h',
-        'files/talk/p2p/base/stunrequest.cc',
-        'files/talk/p2p/base/stunrequest.h',
-        'files/talk/p2p/base/tcpport.cc',
-        'files/talk/p2p/base/tcpport.h',
-        'files/talk/p2p/base/transport.cc',
-        'files/talk/p2p/base/transport.h',
-        'files/talk/p2p/base/transportchannel.cc',
-        'files/talk/p2p/base/transportchannel.h',
-        'files/talk/p2p/base/transportchannelimpl.h',
-        'files/talk/p2p/base/transportchannelproxy.cc',
-        'files/talk/p2p/base/transportchannelproxy.h',
-        'files/talk/p2p/base/udpport.cc',
-        'files/talk/p2p/base/udpport.h',
-        'files/talk/p2p/client/basicportallocator.cc',
-        'files/talk/p2p/client/basicportallocator.h',
-        'files/talk/p2p/client/httpportallocator.cc',
-        'files/talk/p2p/client/httpportallocator.h',
         'files/talk/xmllite/qname.cc',
         'files/talk/xmllite/qname.h',
         'files/talk/xmllite/xmlbuilder.cc',
@@ -261,9 +216,8 @@
             'files/talk/base/win32.h',
             'files/talk/base/win32filesystem.cc',
             'files/talk/base/win32filesystem.h',
-            'files/talk/base/win32socketserver.cc',
-            'files/talk/base/win32socketserver.h',
             'files/talk/base/win32window.h',
+            'files/talk/base/win32window.cc',
             'files/talk/base/winfirewall.cc',
             'files/talk/base/winfirewall.h',
             'files/talk/base/winping.cc',
@@ -271,7 +225,7 @@
             'overrides/talk/base/winsock_initializer.cc',
           ],
         }],
-        ['OS=="linux" or OS=="mac"', {
+        ['OS=="linux" or OS=="mac" or OS=="freebsd" or OS=="openbsd"', {
           'sources': [
             'files/talk/base/unixfilesystem.cc',
           ],

@@ -11,8 +11,11 @@
 #include "views/view.h"
 #include "views/window/dialog_delegate.h"
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
 #include "chrome/browser/google_update.h"
+#endif
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/version_loader.h"
 #endif
 
 namespace views {
@@ -33,7 +36,7 @@ class Profile;
 class AboutChromeView : public views::View,
                         public views::DialogDelegate,
                         public views::LinkController
-#if defined (OS_WIN)
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
                         , public GoogleUpdateStatusListener
 #endif
                         {
@@ -70,8 +73,7 @@ class AboutChromeView : public views::View,
 
   // Overridden from views::LinkController:
   virtual void LinkActivated(views::Link* source, int event_flags);
-
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
   // Overridden from GoogleUpdateStatusListener:
   virtual void OnReportResults(GoogleUpdateUpgradeResult result,
                                GoogleUpdateErrorCode error_code,
@@ -86,50 +88,18 @@ class AboutChromeView : public views::View,
     CHECKBUTTON_ENABLED,
   };
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
   // Update the UI to show the status of the upgrade.
   void UpdateStatus(GoogleUpdateUpgradeResult result,
                     GoogleUpdateErrorCode error_code);
 #endif
 
-  // Draws a string onto the canvas (wrapping if needed) while also keeping
-  // track of where it ends so we can position a URL after the text. The
-  // parameter |bounds| represents the boundary we have to work with, |position|
-  // specifies where to draw the string (relative to the top left corner of the
-  // |bounds| rectangle and |font| specifies the font to use when drawing. When
-  // the function returns, the parameter |rect| contains where to draw the URL
-  // (to the right of where we just drew the text) and |position| is updated to
-  // reflect where to draw the next string after the URL.
-  // NOTE: The reason why we need this function is because while Skia knows how
-  // to wrap text appropriately, it doesn't tell us where it drew the last
-  // character, which we need to position the URLs within the text.
-  void DrawTextAndPositionUrl(gfx::Canvas* canvas,
-                              const std::wstring& text,
-                              views::Link* link,
-                              gfx::Rect* rect,
-                              gfx::Size* position,
-                              const gfx::Rect& bounds,
-                              const gfx::Font& font);
+#if defined(OS_CHROMEOS)
+  // Callback from chromeos::VersionLoader giving the version.
+  void OnOSVersion(chromeos::VersionLoader::Handle handle,
+                   std::string version);
+#endif
 
-  // A helper function for DrawTextAndPositionUrl, which simply draws the text
-  // from a certain starting point |position| and wraps within bounds.
-  // |word_for_word| specifies whether to draw the text word for word or wheter
-  // to treat the text as one blurb (similar to the way url's are treated inside
-  // RTL text. For details on the other parameters, see DrawTextAndPositionUrl.
-  void DrawTextStartingFrom(gfx::Canvas* canvas,
-                            const std::wstring& text,
-                            gfx::Size* position,
-                            const gfx::Rect& bounds,
-                            const gfx::Font& font,
-                            bool word_for_word);
-
-  // A simply utility function that calculates whether a word of width
-  // |word_width| fits at position |position| within the |bounds| rectangle. If
-  // not, |position| is updated to wrap to the beginning of the next line.
-  void WrapIfWordDoesntFit(int word_width,
-                           int font_height,
-                           gfx::Size* position,
-                           const gfx::Rect& bounds);
 
   Profile* profile_;
 
@@ -137,6 +107,9 @@ class AboutChromeView : public views::View,
   views::ImageView* about_dlg_background_logo_;
   views::Label* about_title_label_;
   views::Textfield* version_label_;
+#if defined(OS_CHROMEOS)
+  views::Textfield* os_version_label_;
+#endif
   views::Label* copyright_label_;
   views::Label* main_text_label_;
   int main_text_label_height_;
@@ -170,7 +143,7 @@ class AboutChromeView : public views::View,
   // Determines the order of the two links we draw in the main label.
   bool chromium_url_appears_first_;
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
   // The class that communicates with Google Update to find out if an update is
   // available and asks it to start an upgrade.
   scoped_refptr<GoogleUpdate> google_updater_;
@@ -179,11 +152,22 @@ class AboutChromeView : public views::View,
   // Our current version.
   std::wstring current_version_;
 
+  // Additional information about the version (channel and build number).
+  std::wstring version_details_;
+
   // The version Google Update reports is available to us.
   std::wstring new_version_available_;
 
   // Whether text direction is left-to-right or right-to-left.
   bool text_direction_is_rtl_;
+
+#if defined(OS_CHROMEOS)
+  // Handles asynchronously loading the version.
+  chromeos::VersionLoader loader_;
+
+  // Used to request the version.
+  CancelableRequestConsumer consumer_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(AboutChromeView);
 };

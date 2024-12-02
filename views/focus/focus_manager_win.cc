@@ -23,12 +23,14 @@ void FocusManager::FocusNativeView(gfx::NativeView native_view) {
 // static
 FocusManager* FocusManager::GetFocusManagerForNativeView(
     gfx::NativeView native_view) {
-  HWND root = ::GetAncestor(native_view, GA_ROOT);
-  if (!root)
-    return NULL;
-  WidgetWin* widget = WidgetWin::GetWidget(root);
+  WidgetWin* widget = WidgetWin::GetRootWidget(native_view);
   return widget ? widget->GetFocusManager() : NULL;
 }
 
-}  // namespace views
+// static
+FocusManager* FocusManager::GetFocusManagerForNativeWindow(
+    gfx::NativeWindow native_window) {
+  return GetFocusManagerForNativeView(native_window);
+}
 
+}  // namespace views

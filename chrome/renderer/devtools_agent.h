@@ -7,9 +7,10 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
-#include "webkit/api/public/WebDevToolsAgentClient.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDevToolsAgentClient.h"
 
 namespace IPC {
 class Message;
@@ -20,6 +21,7 @@ class WebDevToolsAgent;
 }
 
 class RenderView;
+struct DevToolsMessageData;
 
 // DevToolsAgent belongs to the inspectable RenderView and provides Glue's
 // agents with the communication capabilities. All messages from/to Glue's
@@ -36,38 +38,36 @@ class DevToolsAgent : public WebKit::WebDevToolsAgentClient {
   virtual bool OnMessageReceived(const IPC::Message& message);
 
   // WebDevToolsAgentClient implementation
-  virtual void sendMessageToFrontend(const WebKit::WebString& class_name,
-                                     const WebKit::WebString& method_name,
-                                     const WebKit::WebString& param1,
-                                     const WebKit::WebString& param2,
-                                     const WebKit::WebString& param3);
+  virtual void sendMessageToFrontend(
+      const WebKit::WebDevToolsMessageData& data);
+
   virtual int hostIdentifier();
   virtual void forceRepaint();
+  virtual void runtimeFeatureStateChanged(const WebKit::WebString& feature,
+                                          bool enabled);
+  virtual WebKit::WebCString injectedScriptSource();
+  virtual WebKit::WebCString injectedScriptDispatcherSource();
 
   // Returns agent instance for its host id.
   static DevToolsAgent* FromHostId(int host_id);
 
-  RenderView* render_view() { return view_; }
+  RenderView* render_view() { return render_view_; }
 
   WebKit::WebDevToolsAgent* GetWebAgent();
 
  private:
   friend class DevToolsAgentFilter;
 
-  void OnAttach();
+  void OnAttach(const std::vector<std::string>& runtime_features);
   void OnDetach();
-  void OnRpcMessage(const std::string& class_name,
-                    const std::string& method_name,
-                    const std::string& param1,
-                    const std::string& param2,
-                    const std::string& param3);
+  void OnRpcMessage(const DevToolsMessageData& data);
   void OnInspectElement(int x, int y);
   void OnSetApuAgentEnabled(bool enabled);
 
   static std::map<int, DevToolsAgent*> agent_for_routing_id_;
 
   int routing_id_; //  View routing id that we can access from IO thread.
-  RenderView* view_;
+  RenderView* render_view_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsAgent);
 };

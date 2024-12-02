@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "app/os_exchange_data.h"
 #include "base/pickle.h"
 #include "base/string16.h"
+#include "gfx/point.h"
 #include "googleurl/src/gurl.h"
 
 // OSExchangeData::Provider implementation for Gtk. OSExchangeDataProviderGtk
@@ -69,6 +70,12 @@ class OSExchangeDataProviderGtk : public OSExchangeData::Provider {
   virtual bool HasFile() const;
   virtual bool HasCustomFormat(OSExchangeData::CustomFormat format) const;
 
+  // Set the image and cursor offset data for this drag.  Will
+  // increment the ref count of pixbuf.
+  void SetDragImage(GdkPixbuf* pixbuf, const gfx::Point& cursor_offset);
+  GdkPixbuf* drag_image() const { return drag_image_; }
+  gfx::Point cursor_offset() const { return cursor_offset_; }
+
  private:
   typedef std::map<OSExchangeData::CustomFormat, Pickle>  PickleData;
 
@@ -98,6 +105,10 @@ class OSExchangeDataProviderGtk : public OSExchangeData::Provider {
 
   // PICKLED_DATA contents.
   PickleData pickle_data_;
+
+  // Drag image and offset data.
+  GdkPixbuf* drag_image_;
+  gfx::Point cursor_offset_;
 
   DISALLOW_COPY_AND_ASSIGN(OSExchangeDataProviderGtk);
 };

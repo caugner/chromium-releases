@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,8 @@ using ::testing::Return;
 
 class MockAudioSource : public AudioOutputStream::AudioSourceCallback {
  public:
-  MOCK_METHOD4(OnMoreData, size_t(AudioOutputStream* stream, void* dest,
-                                  size_t max_size, int pending_bytes));
+  MOCK_METHOD4(OnMoreData, uint32(AudioOutputStream* stream, void* dest,
+                                  uint32 max_size, uint32 pending_bytes));
   MOCK_METHOD1(OnClose, void(AudioOutputStream* stream));
   MOCK_METHOD2(OnError, void(AudioOutputStream* stream, int code));
 };
@@ -28,7 +28,7 @@ class MockAudioSource : public AudioOutputStream::AudioSourceCallback {
 // Validate that the SineWaveAudioSource writes the expected values for
 // the FORMAT_16BIT_MONO.
 TEST(MacAudioTest, SineWaveAudio16MonoTest) {
-  const size_t samples = 1024;
+  const uint32 samples = 1024;
   const int freq = 200;
 
   SineWaveAudioSource source(SineWaveAudioSource::FORMAT_16BIT_LINEAR_PCM, 1,
@@ -88,23 +88,19 @@ TEST(MacAudioTest, PCMWaveStreamPlay200HzTone44KssMono) {
 
   SineWaveAudioSource source(SineWaveAudioSource::FORMAT_16BIT_LINEAR_PCM, 1,
                              200.0, AudioManager::kAudioCDSampleRate);
-  size_t bytes_100_ms = (AudioManager::kAudioCDSampleRate / 10) * 2;
+  uint32 bytes_100_ms = (AudioManager::kAudioCDSampleRate / 10) * 2;
 
   EXPECT_TRUE(oas->Open(bytes_100_ms));
 
-  oas->SetVolume(0.5, 0.5);
+  oas->SetVolume(0.5);
   oas->Start(&source);
-  usleep(1500000);
+  usleep(500000);
 
   // Test that the volume is within the set limits.
-  double left_volume = 0.0;
-  double right_volume = 0.0;
-  oas->GetVolume(&left_volume, &right_volume);
-  EXPECT_LT(left_volume, 0.51);
-  EXPECT_GT(left_volume, 0.49);
-  EXPECT_LT(right_volume, 0.51);
-  EXPECT_GT(right_volume, 0.49);
-
+  double volume = 0.0;
+  oas->GetVolume(&volume);
+  EXPECT_LT(volume, 0.51);
+  EXPECT_GT(volume, 0.49);
   oas->Stop();
   oas->Close();
 }
@@ -125,7 +121,7 @@ TEST(MacAudioTest, PCMWaveStreamPlay200HzTone22KssMono) {
 
   SineWaveAudioSource source(SineWaveAudioSource::FORMAT_16BIT_LINEAR_PCM, 1,
                              200.0, AudioManager::kAudioCDSampleRate/2);
-  size_t bytes_100_ms = (AudioManager::kAudioCDSampleRate / 20) * 2;
+  uint32 bytes_100_ms = (AudioManager::kAudioCDSampleRate / 20) * 2;
 
   EXPECT_TRUE(oas->Open(bytes_100_ms));
   oas->Start(&source);
@@ -136,7 +132,7 @@ TEST(MacAudioTest, PCMWaveStreamPlay200HzTone22KssMono) {
 
 // Custom action to clear a memory buffer.
 static void ClearBuffer(AudioOutputStream* strea, void* dest,
-                        size_t max_size, size_t pending_bytes) {
+                        uint32 max_size, uint32 pending_bytes) {
   memset(dest, 0, max_size);
 }
 
@@ -151,7 +147,7 @@ TEST(MacAudioTest, PCMWaveStreamPendingBytes) {
   ASSERT_TRUE(NULL != oas);
 
   NiceMock<MockAudioSource> source;
-  size_t bytes_100_ms = (AudioManager::kAudioCDSampleRate / 10) * 2;
+  uint32 bytes_100_ms = (AudioManager::kAudioCDSampleRate / 10) * 2;
   EXPECT_TRUE(oas->Open(bytes_100_ms));
 
   // We expect the amount of pending bytes will reaching |bytes_100_ms|

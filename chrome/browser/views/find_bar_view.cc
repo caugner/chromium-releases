@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/string_util.h"
@@ -15,6 +14,7 @@
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/views/find_bar_host.h"
 #include "chrome/browser/view_ids.h"
+#include "gfx/canvas.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
@@ -76,15 +76,14 @@ static const int kDefaultCharWidth = 43;
 ////////////////////////////////////////////////////////////////////////////////
 // FindBarView, public:
 
-FindBarView::FindBarView(FindBarHost* container)
-    : container_(container),
+FindBarView::FindBarView(FindBarHost* host)
+    : DropdownBarView(host),
       find_text_(NULL),
       match_count_text_(NULL),
       focus_forwarder_view_(NULL),
       find_previous_button_(NULL),
       find_next_button_(NULL),
-      close_button_(NULL),
-      animation_offset_(0) {
+      close_button_(NULL) {
   SetID(VIEW_ID_FIND_IN_PAGE);
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
@@ -93,6 +92,7 @@ FindBarView::FindBarView(FindBarHost* container)
   find_text_->SetFont(rb.GetFont(ResourceBundle::BaseFont));
   find_text_->set_default_width_in_chars(kDefaultCharWidth);
   find_text_->SetController(this);
+  find_text_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_FIND));
   AddChildView(find_text_);
 
   match_count_text_ = new views::Label();
@@ -107,7 +107,6 @@ FindBarView::FindBarView(FindBarHost* container)
 
   find_previous_button_ = new views::ImageButton(this);
   find_previous_button_->set_tag(FIND_PREVIOUS_TAG);
-  find_previous_button_->SetEnabled(false);
   find_previous_button_->SetFocusable(true);
   find_previous_button_->SetImage(views::CustomButton::BS_NORMAL,
       rb.GetBitmapNamed(IDR_FINDINPAGE_PREV));
@@ -117,11 +116,12 @@ FindBarView::FindBarView(FindBarHost* container)
       rb.GetBitmapNamed(IDR_FINDINPAGE_PREV_P));
   find_previous_button_->SetTooltipText(
       l10n_util::GetString(IDS_FIND_IN_PAGE_PREVIOUS_TOOLTIP));
+  find_previous_button_->SetAccessibleName(
+      l10n_util::GetString(IDS_ACCNAME_PREVIOUS));
   AddChildView(find_previous_button_);
 
   find_next_button_ = new views::ImageButton(this);
   find_next_button_->set_tag(FIND_NEXT_TAG);
-  find_next_button_->SetEnabled(false);
   find_next_button_->SetFocusable(true);
   find_next_button_->SetImage(views::CustomButton::BS_NORMAL,
       rb.GetBitmapNamed(IDR_FINDINPAGE_NEXT));
@@ -131,19 +131,21 @@ FindBarView::FindBarView(FindBarHost* container)
       rb.GetBitmapNamed(IDR_FINDINPAGE_NEXT_P));
   find_next_button_->SetTooltipText(
       l10n_util::GetString(IDS_FIND_IN_PAGE_NEXT_TOOLTIP));
+  find_next_button_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_NEXT));
   AddChildView(find_next_button_);
 
   close_button_ = new views::ImageButton(this);
   close_button_->set_tag(CLOSE_TAG);
   close_button_->SetFocusable(true);
   close_button_->SetImage(views::CustomButton::BS_NORMAL,
-      rb.GetBitmapNamed(IDR_CLOSE_BAR));
+                          rb.GetBitmapNamed(IDR_CLOSE_BAR));
   close_button_->SetImage(views::CustomButton::BS_HOT,
-      rb.GetBitmapNamed(IDR_CLOSE_BAR_H));
+                          rb.GetBitmapNamed(IDR_CLOSE_BAR_H));
   close_button_->SetImage(views::CustomButton::BS_PUSHED,
-      rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
+                          rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
   close_button_->SetTooltipText(
       l10n_util::GetString(IDS_FIND_IN_PAGE_CLOSE_TOOLTIP));
+  close_button_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_CLOSE));
   AddChildView(close_button_);
 
   if (kDialog_left == NULL) {
@@ -168,48 +170,38 @@ void FindBarView::SetFindText(const string16& find_text) {
   find_text_->SetText(find_text);
 }
 
+string16 FindBarView::GetFindText() const {
+  return find_text_->text();
+}
+
 void FindBarView::UpdateForResult(const FindNotificationDetails& result,
                                   const string16& find_text) {
   bool have_valid_range =
       result.number_of_matches() != -1 && result.active_match_ordinal() != -1;
 
-  // If we don't have any results and something was passed in, then that means
-  // someone pressed F3 while the Find box was closed. In that case we need to
-  // repopulate the Find box with what was passed in.
-  string16 search_string = find_text_->text();
-  if (search_string.empty() && !find_text.empty()) {
+  // http://crbug.com/34970: some IMEs get confused if we change the text
+  // composed by them. To avoid this problem, we should check the IME status and
+  // update the text only when the IME is not composing text.
+  if (find_text_->text() != find_text && !find_text_->IsIMEComposing()) {
     find_text_->SetText(find_text);
     find_text_->SelectAll();
   }
 
-  if (!search_string.empty() && have_valid_range) {
+  if (!find_text.empty() && have_valid_range) {
     match_count_text_->SetText(
         l10n_util::GetStringF(IDS_FIND_IN_PAGE_COUNT,
                               IntToWString(result.active_match_ordinal()),
                               IntToWString(result.number_of_matches())));
+
+    UpdateMatchCountAppearance(result.number_of_matches() == 0 &&
+                               result.final_update());
   } else {
     // If there was no text entered, we don't show anything in the result count
     // area.
     match_count_text_->SetText(std::wstring());
-  }
 
-  if (search_string.empty() || result.number_of_matches() > 0 ||
-      !have_valid_range) {
-    // If there was no text entered or there were results, the match_count label
-    // should have a normal background color. We also reset the background if
-    // we don't have_valid_range, so that the text field will not show red
-    // background when reopened after an unsuccessful find.
-    ResetMatchCountBackground();
-  } else if (result.final_update()) {
-    // Otherwise we show an error background behind the match_count label.
-    match_count_text_->set_background(
-        views::Background::CreateSolidBackground(kBackgroundColorNoMatch));
-    match_count_text_->SetColor(kTextColorNoMatch);
+    UpdateMatchCountAppearance(false);
   }
-
-  // Make sure Find Next and Find Previous are enabled if we found any matches.
-  find_previous_button_->SetEnabled(result.number_of_matches() > 0);
-  find_next_button_->SetEnabled(result.number_of_matches() > 0);
 
   // The match_count label may have increased/decreased in size so we need to
   // do a layout and repaint the dialog so that the find text field doesn't
@@ -218,14 +210,10 @@ void FindBarView::UpdateForResult(const FindNotificationDetails& result,
   SchedulePaint();
 }
 
-void FindBarView::SetFocusAndSelection() {
+void FindBarView::SetFocusAndSelection(bool select_all) {
   find_text_->RequestFocus();
-  if (!find_text_->text().empty()) {
+  if (select_all && !find_text_->text().empty())
     find_text_->SelectAll();
-
-    find_previous_button_->SetEnabled(true);
-    find_next_button_->SetEnabled(true);
-  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -244,7 +232,7 @@ void FindBarView::Paint(gfx::Canvas* canvas) {
   // FindInPageWidgetWin::CreateRoundedWindowEdges() for details.
   ThemeProvider* tp = GetThemeProvider();
   gfx::Rect bounds;
-  container_->GetThemePosition(&bounds);
+  host()->GetThemePosition(&bounds);
   canvas->TileImageInt(*tp->GetBitmapNamed(IDR_THEME_TOOLBAR),
                        bounds.x(), bounds.y(), 0, 0, lb.width(), lb.height());
 
@@ -299,17 +287,17 @@ void FindBarView::Paint(gfx::Canvas* canvas) {
                        w,
                        background_height);
 
-  if (animation_offset_ > 0) {
+  if (animation_offset() > 0) {
     // While animating we draw the curved edges at the point where the
-    // controller told us the top of the window is: |animation_offset_|.
+    // controller told us the top of the window is: |animation_offset()|.
     canvas->TileImageInt(*kDialog_left,
                          lb.x(),
-                         animation_offset_,
+                         animation_offset(),
                          kDialog_left->width(),
                          kAnimatingEdgeHeight);
     canvas->TileImageInt(*kDialog_right,
                          lb.right() - kDialog_right->width(),
-                         animation_offset_,
+                         animation_offset(),
                          kDialog_right->width(),
                          kAnimatingEdgeHeight);
   }
@@ -325,6 +313,8 @@ void FindBarView::Layout() {
                            (height() - sz.height()) / 2,
                            sz.width(),
                            sz.height());
+  // Set the color.
+  ThemeChanged();
 
   // Next, the FindNext button to the left the close button.
   sz = find_next_button_->GetPreferredSize();
@@ -383,7 +373,7 @@ void FindBarView::Layout() {
                                    find_previous_button_->height());
 }
 
-void FindBarView::ViewHierarchyChanged(bool is_add, View *parent, View *child) {
+void FindBarView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
   if (is_add && child == this) {
     find_text_->SetHorizontalMargins(3, 3);  // Left and Right margins.
     find_text_->RemoveBorder();  // We draw our own border (a background image).
@@ -413,10 +403,10 @@ void FindBarView::ButtonPressed(
     case FIND_PREVIOUS_TAG:
     case FIND_NEXT_TAG:
       if (!find_text_->text().empty()) {
-        container_->GetFindBarController()->tab_contents()->StartFinding(
-            find_text_->text(),
-            sender->tag() == FIND_NEXT_TAG,
-            false);  // Not case sensitive.
+        find_bar_host()->GetFindBarController()->tab_contents()->
+            StartFinding(find_text_->text(),
+                         sender->tag() == FIND_NEXT_TAG,
+                         false);  // Not case sensitive.
       }
       if (event.IsMouseEvent()) {
         // If mouse event, we move the focus back to the text-field, so that the
@@ -428,7 +418,8 @@ void FindBarView::ButtonPressed(
       }
       break;
     case CLOSE_TAG:
-      container_->GetFindBarController()->EndFindSession();
+      find_bar_host()->GetFindBarController()->EndFindSession(
+          FindBarController::kKeepSelection);
       break;
     default:
       NOTREACHED() << L"Unknown button";
@@ -441,7 +432,7 @@ void FindBarView::ButtonPressed(
 
 void FindBarView::ContentsChanged(views::Textfield* sender,
                                   const string16& new_contents) {
-  FindBarController* controller = container_->GetFindBarController();
+  FindBarController* controller = find_bar_host()->GetFindBarController();
   DCHECK(controller);
   // We must guard against a NULL tab_contents, which can happen if the text
   // in the Find box is changed right after the tab is destroyed. Otherwise, it
@@ -456,8 +447,7 @@ void FindBarView::ContentsChanged(views::Textfield* sender,
     // The last two params here are forward (true) and case sensitive (false).
     controller->tab_contents()->StartFinding(new_contents, true, false);
   } else {
-    // The textbox is empty so we reset.  true = clear selection on page.
-    controller->tab_contents()->StopFinding(true);
+    controller->tab_contents()->StopFinding(FindBarController::kClearSelection);
     UpdateForResult(controller->tab_contents()->find_result(), string16());
   }
 }
@@ -465,10 +455,10 @@ void FindBarView::ContentsChanged(views::Textfield* sender,
 bool FindBarView::HandleKeystroke(views::Textfield* sender,
                                   const views::Textfield::Keystroke& key) {
   // If the dialog is not visible, there is no reason to process keyboard input.
-  if (!container_->IsVisible())
+  if (!host()->IsVisible())
     return false;
 
-  if (container_->MaybeForwardKeystrokeToWebpage(key))
+  if (find_bar_host()->MaybeForwardKeystrokeToWebpage(key))
     return true;  // Handled, we are done!
 
   if (key.GetKeyboardCode() == base::VKEY_RETURN) {
@@ -476,7 +466,7 @@ bool FindBarView::HandleKeystroke(views::Textfield* sender,
     string16 find_string = find_text_->text();
     if (!find_string.empty()) {
       // Search forwards for enter, backwards for shift-enter.
-      container_->GetFindBarController()->tab_contents()->StartFinding(
+      find_bar_host()->GetFindBarController()->tab_contents()->StartFinding(
           find_string,
           !key.IsShiftHeld(),
           false);  // Not case sensitive.
@@ -486,10 +476,16 @@ bool FindBarView::HandleKeystroke(views::Textfield* sender,
   return false;
 }
 
-void FindBarView::ResetMatchCountBackground() {
-  match_count_text_->set_background(
+void FindBarView::UpdateMatchCountAppearance(bool no_match) {
+  if (no_match) {
+    match_count_text_->set_background(
+        views::Background::CreateSolidBackground(kBackgroundColorNoMatch));
+    match_count_text_->SetColor(kTextColorNoMatch);
+  } else {
+    match_count_text_->set_background(
       views::Background::CreateSolidBackground(kBackgroundColorMatch));
-  match_count_text_->SetColor(kTextColorMatchCount);
+    match_count_text_->SetColor(kTextColorMatchCount);
+  }
 }
 
 bool FindBarView::FocusForwarderView::OnMousePressed(
@@ -499,4 +495,18 @@ bool FindBarView::FocusForwarderView::OnMousePressed(
     view_to_focus_on_mousedown_->RequestFocus();
   }
   return true;
+}
+
+FindBarHost* FindBarView::find_bar_host() const {
+  return static_cast<FindBarHost*>(host());
+}
+
+void FindBarView::ThemeChanged() {
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  if (GetThemeProvider()) {
+    close_button_->SetBackground(
+        GetThemeProvider()->GetColor(BrowserThemeProvider::COLOR_TAB_TEXT),
+        rb.GetBitmapNamed(IDR_CLOSE_BAR),
+        rb.GetBitmapNamed(IDR_CLOSE_BAR_MASK));
+  }
 }

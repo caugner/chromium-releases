@@ -5,27 +5,24 @@
 #include "chrome/browser/sync/engine/process_commit_response_command.h"
 
 #include <set>
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "chrome/browser/sync/engine/syncer_proto_util.h"
-#include "chrome/browser/sync/engine/syncer_session.h"
-#include "chrome/browser/sync/engine/syncer_status.h"
 #include "chrome/browser/sync/engine/syncer_util.h"
 #include "chrome/browser/sync/engine/syncproto.h"
+#include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/util/character_set_converters.h"
 
 using syncable::ScopedDirLookup;
 using syncable::WriteTransaction;
 using syncable::MutableEntry;
 using syncable::Entry;
-using syncable::Name;
-using syncable::SyncName;
-using syncable::DBName;
 
 using std::set;
+using std::string;
 using std::vector;
 
 using syncable::BASE_VERSION;
@@ -43,38 +40,39 @@ using syncable::SYNCING;
 
 namespace browser_sync {
 
-void IncrementErrorCounters(SyncerStatus status) {
-  status.increment_consecutive_problem_commits();
-  status.increment_consecutive_errors();
+using sessions::OrderedCommitSet;
+using sessions::StatusController;
+using sessions::SyncSession;
+using sessions::ConflictProgress;
+
+void IncrementErrorCounters(StatusController* status) {
+  status->increment_num_consecutive_errors();
 }
-void ResetErrorCounters(SyncerStatus status) {
-  status.zero_consecutive_problem_commits();
-  status.zero_consecutive_errors();
+void ResetErrorCounters(StatusController* status) {
+  status->set_num_consecutive_errors(0);
 }
 
 ProcessCommitResponseCommand::ProcessCommitResponseCommand() {}
 ProcessCommitResponseCommand::~ProcessCommitResponseCommand() {}
 
-void ProcessCommitResponseCommand::ModelChangingExecuteImpl(
-    SyncerSession* session) {
-  // TODO(sync): This function returns if it sees problems. We probably want
-  // to flag the need for an update or similar.
-  ScopedDirLookup dir(session->dirman(), session->account_name());
+bool ProcessCommitResponseCommand::ModelNeutralExecuteImpl(
+    sessions::SyncSession* session) {
+  ScopedDirLookup dir(session->context()->directory_manager(),
+                      session->context()->account_name());
   if (!dir.good()) {
     LOG(ERROR) << "Scoped dir lookup failed!";
-    return;
+    return false;
   }
-  const ClientToServerResponse& response = session->commit_response();
-  const vector<syncable::Id>& commit_ids = session->commit_ids();
 
-  // TODO(sync): move counters out of here.
-  SyncerStatus status(session);
+  StatusController* status = session->status_controller();
+  const ClientToServerResponse& response(status->commit_response());
+  const vector<syncable::Id>& commit_ids(status->commit_ids());
 
   if (!response.has_commit()) {
     // TODO(sync): What if we didn't try to commit anything?
     LOG(WARNING) << "Commit response has no commit body!";
     IncrementErrorCounters(status);
-    return;
+    return false;
   }
 
   const CommitResponse& cr = response.commit();
@@ -89,8 +87,37 @@ void ProcessCommitResponseCommand::ModelChangingExecuteImpl(
         LOG(ERROR) << "  " << cr.entryresponse(i).error_message();
     }
     IncrementErrorCounters(status);
+    return false;
+  }
+  return true;
+}
+
+void ProcessCommitResponseCommand::ModelChangingExecuteImpl(
+    SyncSession* session) {
+  ProcessCommitResponse(session);
+  ExtensionsActivityMonitor* monitor = session->context()->extensions_monitor();
+  if (session->status_controller()->HasBookmarkCommitActivity() &&
+      session->status_controller()->syncer_status()
+          .num_successful_bookmark_commits == 0) {
+    monitor->PutRecords(session->extensions_activity());
+    session->mutable_extensions_activity()->clear();
+  }
+}
+
+void ProcessCommitResponseCommand::ProcessCommitResponse(
+    SyncSession* session) {
+  // TODO(sync): This function returns if it sees problems. We probably want
+  // to flag the need for an update or similar.
+  ScopedDirLookup dir(session->context()->directory_manager(),
+                      session->context()->account_name());
+  if (!dir.good()) {
+    LOG(ERROR) << "Scoped dir lookup failed!";
     return;
   }
+
+  StatusController* status = session->status_controller();
+  const ClientToServerResponse& response(status->commit_response());
+  const CommitResponse& cr = response.commit();
 
   // If we try to commit a parent and child together and the parent conflicts
   // the child will have a bad parent causing an error. As this is not a
@@ -103,34 +130,42 @@ void ProcessCommitResponseCommand::ModelChangingExecuteImpl(
   bool over_quota = false;
   set<syncable::Id> conflicting_new_folder_ids;
   set<syncable::Id> deleted_folders;
+  ConflictProgress* conflict_progress = status->mutable_conflict_progress();
+  OrderedCommitSet::Projection proj = status->commit_id_projection();
   { // Scope for WriteTransaction.
     WriteTransaction trans(dir, SYNCER, __FILE__, __LINE__);
-    for (int i = 0; i < cr.entryresponse_size(); i++) {
-      CommitResponse::RESPONSE_TYPE response_type =
-          ProcessSingleCommitResponse(&trans, cr.entryresponse(i),
-                                      commit_ids[i],
+    for (size_t i = 0; i < proj.size(); i++) {
+      CommitResponse::ResponseType response_type =
+          ProcessSingleCommitResponse(&trans, cr.entryresponse(proj[i]),
+                                      status->GetCommitIdAt(proj[i]),
                                       &conflicting_new_folder_ids,
-                                      &deleted_folders, session);
+                                      &deleted_folders);
       switch (response_type) {
         case CommitResponse::INVALID_MESSAGE:
           ++error_commits;
           break;
         case CommitResponse::CONFLICT:
           ++conflicting_commits;
-          session->AddCommitConflict(commit_ids[i]);
+          // Only server CONFLICT responses will activate conflict resolution.
+          conflict_progress->AddConflictingItemById(
+              status->GetCommitIdAt(proj[i]));
           break;
         case CommitResponse::SUCCESS:
           // TODO(sync): worry about sync_rate_ rate calc?
           ++successes;
-          status.increment_successful_commits();
+          if (status->GetCommitIdModelTypeAt(proj[i]) == syncable::BOOKMARKS)
+            status->increment_num_successful_bookmark_commits();
+          status->increment_num_successful_commits();
           break;
         case CommitResponse::OVER_QUOTA:
           over_quota = true;
-          // We handle over quota like a retry.
+          // We handle over quota like a retry, which is same as transient.
         case CommitResponse::RETRY:
-          session->AddBlockedItem(commit_ids[i]);
-          break;
         case CommitResponse::TRANSIENT_ERROR:
+          // TODO(tim): Now that we have SyncSession::Delegate, we
+          // should plumb this directly for exponential backoff purposes rather
+          // than trying to infer from HasMoreToSync(). See
+          // SyncerThread::CalculatePollingWaitTime.
           ++transient_error_commits;
           break;
         default:
@@ -140,46 +175,40 @@ void ProcessCommitResponseCommand::ModelChangingExecuteImpl(
   }
 
   // TODO(sync): move status reporting elsewhere.
-  status.set_conflicting_commits(conflicting_commits);
-  status.set_error_commits(error_commits);
+  status->increment_num_conflicting_commits_by(conflicting_commits);
   if (0 == successes) {
-    status.increment_consecutive_transient_error_commits_by(
+    status->increment_num_consecutive_transient_error_commits_by(
         transient_error_commits);
-    status.increment_consecutive_errors_by(transient_error_commits);
+    status->increment_num_consecutive_errors_by(transient_error_commits);
   } else {
-    status.zero_consecutive_transient_error_commits();
-    status.zero_consecutive_errors();
+    status->set_num_consecutive_transient_error_commits(0);
+    status->set_num_consecutive_errors(0);
   }
-  // If all commits are errors count it as an error.
-  if (commit_count == error_commits) {
-    // A larger error step than normal because a POST just succeeded.
-    status.TallyBigNewError();
-  }
+  int commit_count = static_cast<int>(proj.size());
   if (commit_count != (conflicting_commits + error_commits +
                        transient_error_commits)) {
     ResetErrorCounters(status);
   }
   SyncerUtil::MarkDeletedChildrenSynced(dir, &deleted_folders);
-  session->set_over_quota(over_quota);
+  status->set_over_quota(over_quota);
 
   return;
 }
 
 void LogServerError(const CommitResponse_EntryResponse& res) {
   if (res.has_error_message())
-    LOG(ERROR) << "  " << res.error_message();
+    LOG(WARNING) << "  " << res.error_message();
   else
-    LOG(ERROR) << "  No detailed error message returned from server";
+    LOG(WARNING) << "  No detailed error message returned from server";
 }
 
-CommitResponse::RESPONSE_TYPE
+CommitResponse::ResponseType
 ProcessCommitResponseCommand::ProcessSingleCommitResponse(
     syncable::WriteTransaction* trans,
     const sync_pb::CommitResponse_EntryResponse& pb_server_entry,
     const syncable::Id& pre_commit_id,
     std::set<syncable::Id>* conflicting_new_folder_ids,
-    set<syncable::Id>* deleted_folders,
-    SyncerSession* const session) {
+    set<syncable::Id>* deleted_folders) {
 
   const CommitResponse_EntryResponse& server_entry =
       *static_cast<const CommitResponse_EntryResponse*>(&pb_server_entry);
@@ -188,9 +217,9 @@ ProcessCommitResponseCommand::ProcessSingleCommitResponse(
   bool syncing_was_set = local_entry.Get(SYNCING);
   local_entry.Put(SYNCING, false);
 
-  CommitResponse::RESPONSE_TYPE response = (CommitResponse::RESPONSE_TYPE)
+  CommitResponse::ResponseType response = (CommitResponse::ResponseType)
       server_entry.response_type();
-  if (!CommitResponse::RESPONSE_TYPE_IsValid(response)) {
+  if (!CommitResponse::ResponseType_IsValid(response)) {
     LOG(ERROR) << "Commit response has unknown response type! Possibly out "
                "of date client?";
     return CommitResponse::INVALID_MESSAGE;
@@ -244,7 +273,7 @@ ProcessCommitResponseCommand::ProcessSingleCommitResponse(
 
   ProcessSuccessfulCommitResponse(trans, server_entry, pre_commit_id,
                                   &local_entry, syncing_was_set,
-                                  deleted_folders, session);
+                                  deleted_folders);
   return response;
 }
 
@@ -252,8 +281,7 @@ void ProcessCommitResponseCommand::ProcessSuccessfulCommitResponse(
     syncable::WriteTransaction* trans,
     const CommitResponse_EntryResponse& server_entry,
     const syncable::Id& pre_commit_id, syncable::MutableEntry* local_entry,
-    bool syncing_was_set, set<syncable::Id>* deleted_folders,
-    SyncerSession* const session) {
+    bool syncing_was_set, set<syncable::Id>* deleted_folders) {
   int64 old_version = local_entry->Get(BASE_VERSION);
   int64 new_version = server_entry.version();
   bool bad_commit_version = false;
@@ -340,33 +368,15 @@ void ProcessCommitResponseCommand::PerformCommitTimeNameAside(
     syncable::WriteTransaction* trans,
     const CommitResponse_EntryResponse& server_entry,
     syncable::MutableEntry* local_entry) {
-  Name old_name(local_entry->GetName());
-
-  // Ensure that we don't collide with an existing entry.
-  SyncName server_name =
+  string old_name = local_entry->Get(syncable::NON_UNIQUE_NAME);
+  const string server_name =
       SyncerProtoUtil::NameFromCommitEntryResponse(server_entry);
 
-  LOG(INFO) << "Server provided committed name:" << server_name.value();
-  if (!server_name.value().empty() &&
-      static_cast<SyncName&>(old_name) != server_name) {
-    LOG(INFO) << "Server name differs from local name, attempting"
-              << " commit time name aside.";
-
-    DBName db_name(server_name.value());
-    db_name.MakeOSLegal();
-
-    // This is going to produce ~1 names instead of (Edited) names.
-    // Since this should be EXTREMELY rare, we do this for now.
-    db_name.MakeNoncollidingForEntry(trans, local_entry->Get(SERVER_PARENT_ID),
-                                     local_entry);
-
-    CHECK(!db_name.empty());
-
-    LOG(INFO) << "Server commit moved aside entry: " << old_name.db_value()
-              << " to new name " << db_name;
-
+  if (!server_name.empty() && old_name != server_name) {
+    LOG(INFO) << "Server commit moved aside entry: " << old_name
+              << " to new name " << server_name;
     // Should be safe since we're in a "commit lock."
-    local_entry->PutName(Name::FromDBNameAndSyncName(db_name, server_name));
+    local_entry->Put(syncable::NON_UNIQUE_NAME, server_name);
   }
 }
 

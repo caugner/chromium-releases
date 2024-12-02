@@ -4,7 +4,6 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/scoped_nsautorelease_pool.h"
 #include "base/scoped_nsobject.h"
 #include "chrome/browser/cocoa/browser_test_helper.h"
 #import "chrome/browser/cocoa/cocoa_test_helper.h"
@@ -16,33 +15,32 @@
 
 namespace {
 
-class InfoBarContainerControllerTest : public PlatformTest {
+class InfoBarContainerControllerTest : public CocoaTest {
   virtual void SetUp() {
+    CocoaTest::SetUp();
     resizeDelegate_.reset([[ViewResizerPong alloc] init]);
     TabStripModel* model = browser_helper_.browser()->tabstrip_model();
-    controller_.reset([[InfoBarContainerController alloc]
-                        initWithTabStripModel:model
-                               resizeDelegate:resizeDelegate_.get()]);
+    ViewResizerPong *viewResizer = resizeDelegate_.get();
+    controller_ =
+        [[InfoBarContainerController alloc] initWithTabStripModel:model
+                                                   resizeDelegate:viewResizer];
+    NSView* view = [controller_ view];
+    [[test_window() contentView] addSubview:view];
+  }
+
+  virtual void TearDown() {
+    [[controller_ view] removeFromSuperviewWithoutNeedingDisplay];
+    [controller_ release];
+    CocoaTest::TearDown();
   }
 
  public:
-  // Order is very important here.  We want the controller deleted
-  // before the pool, and want the pool deleted before
-  // BrowserTestHelper.
-  CocoaTestHelper cocoa_helper_;
   BrowserTestHelper browser_helper_;
-  base::ScopedNSAutoreleasePool pool_;
   scoped_nsobject<ViewResizerPong> resizeDelegate_;
-  scoped_nsobject<InfoBarContainerController> controller_;
+  InfoBarContainerController* controller_;
 };
 
-TEST_F(InfoBarContainerControllerTest, Show) {
-  // Make sure the container's view is non-nil and draws without crashing.
-  NSView* view = [controller_ view];
-  EXPECT_TRUE(view != nil);
-
-  [cocoa_helper_.contentView() addSubview:view];
-}
+TEST_VIEW(InfoBarContainerControllerTest, [controller_ view])
 
 TEST_F(InfoBarContainerControllerTest, BWCPong) {
   // Call positionInfoBarsAndResize and check that |resizeDelegate_| got a
@@ -54,7 +52,6 @@ TEST_F(InfoBarContainerControllerTest, BWCPong) {
 
 TEST_F(InfoBarContainerControllerTest, AddAndRemoveInfoBars) {
   NSView* view = [controller_ view];
-  [cocoa_helper_.contentView() addSubview:view];
 
   // Add three infobars, one of each type, and then remove them.
   // After each step check to make sure we have the correct number of
@@ -63,38 +60,37 @@ TEST_F(InfoBarContainerControllerTest, AddAndRemoveInfoBars) {
   MockLinkInfoBarDelegate linkDelegate;
   MockConfirmInfoBarDelegate confirmDelegate;
 
-  [controller_ addInfoBar:&alertDelegate];
+  [controller_ addInfoBar:&alertDelegate animate:NO];
   EXPECT_EQ(1U, [[view subviews] count]);
 
-  [controller_ addInfoBar:&linkDelegate];
+  [controller_ addInfoBar:&linkDelegate animate:NO];
   EXPECT_EQ(2U, [[view subviews] count]);
 
-  [controller_ addInfoBar:&confirmDelegate];
+  [controller_ addInfoBar:&confirmDelegate animate:NO];
   EXPECT_EQ(3U, [[view subviews] count]);
 
   // Just to mix things up, remove them in a different order.
-  [controller_ removeInfoBarsForDelegate:&linkDelegate];
+  [controller_ closeInfoBarsForDelegate:&linkDelegate animate:NO];
   EXPECT_EQ(2U, [[view subviews] count]);
 
-  [controller_ removeInfoBarsForDelegate:&confirmDelegate];
+  [controller_ closeInfoBarsForDelegate:&confirmDelegate animate:NO];
   EXPECT_EQ(1U, [[view subviews] count]);
 
-  [controller_ removeInfoBarsForDelegate:&alertDelegate];
+  [controller_ closeInfoBarsForDelegate:&alertDelegate animate:NO];
   EXPECT_EQ(0U, [[view subviews] count]);
 }
 
 TEST_F(InfoBarContainerControllerTest, RemoveAllInfoBars) {
   NSView* view = [controller_ view];
-  [cocoa_helper_.contentView() addSubview:view];
 
   // Add three infobars and then remove them all.
   MockAlertInfoBarDelegate alertDelegate;
   MockLinkInfoBarDelegate linkDelegate;
   MockConfirmInfoBarDelegate confirmDelegate;
 
-  [controller_ addInfoBar:&alertDelegate];
-  [controller_ addInfoBar:&linkDelegate];
-  [controller_ addInfoBar:&confirmDelegate];
+  [controller_ addInfoBar:&alertDelegate animate:NO];
+  [controller_ addInfoBar:&linkDelegate animate:NO];
+  [controller_ addInfoBar:&confirmDelegate animate:NO];
   EXPECT_EQ(3U, [[view subviews] count]);
 
   [controller_ removeAllInfoBars];

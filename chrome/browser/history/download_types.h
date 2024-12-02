@@ -12,6 +12,7 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/time.h"
+#include "chrome/browser/download/download_file.h"
 #include "googleurl/src/gurl.h"
 
 // Used for informing the download database of a new download, where we don't
@@ -39,7 +40,8 @@ struct DownloadCreateInfo {
         request_id(-1),
         db_handle(0),
         save_as(false),
-        is_dangerous(false) {
+        is_dangerous(false),
+        is_extension_install(false) {
   }
 
   DownloadCreateInfo()
@@ -53,7 +55,8 @@ struct DownloadCreateInfo {
         request_id(-1),
         db_handle(0),
         save_as(false),
-        is_dangerous(false) {
+        is_dangerous(false),
+        is_extension_install(false) {
   }
 
   // DownloadItem fields
@@ -80,9 +83,13 @@ struct DownloadCreateInfo {
   bool is_dangerous;
   // The original name for a dangerous download.
   FilePath original_name;
+  // Whether this download is for extension install or not.
+  bool is_extension_install;
   // The charset of the referring page where the download request comes from.
   // It's used to construct a suggested filename.
   std::string referrer_charset;
+  // The download file save info.
+  DownloadSaveInfo save_info;
 };
 
 #endif  // CHROME_BROWSER_HISTORY_DOWNLOAD_TYPES_H_

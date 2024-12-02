@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,21 +46,26 @@ SBOX_TESTS_COMMAND int Reg_OpenKey(int argc, wchar_t **argv) {
   if (argc != 4)
     return SBOX_TEST_FAILED_TO_EXECUTE_COMMAND;
 
-  REGSAM desired_access;
-  if (wcscmp(argv[1], L"read") == 0)
+  REGSAM desired_access = 0;
+  ULONG options = 0;
+  if (wcscmp(argv[1], L"read") == 0) {
     desired_access = KEY_READ;
-  else if (wcscmp(argv[1], L"write") == 0)
+  } else if (wcscmp(argv[1], L"write") == 0) {
     desired_access = KEY_ALL_ACCESS;
-  else
+  } else if (wcscmp(argv[1], L"link") == 0) {
+    options = REG_OPTION_CREATE_LINK;
+    desired_access = KEY_ALL_ACCESS;
+  } else {
     desired_access = MAXIMUM_ALLOWED;
+  }
 
   HKEY root = GetReservedKeyFromName(argv[2]);
   HKEY key;
   LRESULT result = 0;
 
   if (wcscmp(argv[0], L"create") == 0)
-    result = ::RegCreateKeyEx(root, argv[3], 0, NULL, 0, desired_access, NULL,
-                              &key, NULL);
+    result = ::RegCreateKeyEx(root, argv[3], 0, NULL, options, desired_access,
+                              NULL, &key, NULL);
   else
     result = ::RegOpenKeyEx(root, argv[3], 0, desired_access, &key);
 
@@ -97,12 +102,14 @@ TEST(RegistryPolicyTest, TestKeyAnyAccess) {
   EXPECT_EQ(SBOX_TEST_SUCCEEDED, runner.RunTest(
       L"Reg_OpenKey open read HKEY_LOCAL_MACHINE software\\microsoft"));
 
-  // Tests write access on key allowed for read-write.
-  EXPECT_EQ(SBOX_TEST_SUCCEEDED, runner.RunTest(
-      L"Reg_OpenKey create write HKEY_LOCAL_MACHINE software\\microsoft"));
+  if (::IsUserAnAdmin()) {
+    // Tests write access on key allowed for read-write.
+    EXPECT_EQ(SBOX_TEST_SUCCEEDED, runner.RunTest(
+        L"Reg_OpenKey create write HKEY_LOCAL_MACHINE software\\microsoft"));
 
-  EXPECT_EQ(SBOX_TEST_SUCCEEDED, runner.RunTest(
-      L"Reg_OpenKey open write HKEY_LOCAL_MACHINE software\\microsoft"));
+    EXPECT_EQ(SBOX_TEST_SUCCEEDED, runner.RunTest(
+        L"Reg_OpenKey open write HKEY_LOCAL_MACHINE software\\microsoft"));
+  }
 
   // Tests subdirectory access on keys where we don't have subdirectory acess.
   EXPECT_EQ(SBOX_TEST_DENIED, runner.RunTest(L"Reg_OpenKey create read "
@@ -192,6 +199,50 @@ TEST(RegistryPolicyTest, TestKeyAllAccessSubDir) {
         L"HKEY_LOCAL_MACHINE software\\Policies\\google_unit_tests"));
 
     RegDeleteKey(HKEY_LOCAL_MACHINE, L"software\\Policies\\google_unit_tests");
+  }
+}
+
+TEST(RegistryPolicyTest, TestKeyCreateLink) {
+  TestRunner runner;
+
+  EXPECT_TRUE(runner.AddRule(TargetPolicy::SUBSYS_REGISTRY,
+                             TargetPolicy::REG_ALLOW_READONLY,
+                             L"HKEY_LOCAL_MACHINE"));
+
+  EXPECT_TRUE(runner.AddRule(TargetPolicy::SUBSYS_REGISTRY,
+                             TargetPolicy::REG_ALLOW_ANY,
+                             L"HKEY_LOCAL_MACHINE\\Software\\Policies"));
+
+  EXPECT_TRUE(runner.AddRule(TargetPolicy::SUBSYS_REGISTRY,
+                             TargetPolicy::REG_ALLOW_ANY,
+                             L"HKEY_LOCAL_MACHINE\\Software\\Policies\\*"));
+
+  // Tests to see if we can create a registry link key.
+  // NOTE: In theory here we should make sure to check for SBOX_TEST_DENIED
+  // instead of !SBOX_TEST_SUCCEEDED, but unfortunately the result is not
+  // access denied. Internally RegCreateKeyEx (At least on Vista 64) tries to
+  // create the link, and we return successfully access denied, then, it
+  // decides to try to break the path in multiple chunks, and create the links
+  // one by one. In this scenario, it tries to create "HKLM\Software" as a
+  // link key, which obviously fail with STATUS_OBJECT_NAME_COLLISION, and
+  // this is what is returned to the user.
+  EXPECT_NE(SBOX_TEST_SUCCEEDED, runner.RunTest(L"Reg_OpenKey create link "
+      L"HKEY_LOCAL_MACHINE software\\Policies\\google_unit_tests"));
+
+  // In case our code fails, and the call works, we need to delete the new
+  // link. There is no api for this, so we need to use the NT call.
+  HKEY key = NULL;
+  LRESULT result = ::RegOpenKeyEx(HKEY_LOCAL_MACHINE,
+                                  L"software\\Policies\\google_unit_tests",
+                                  REG_OPTION_OPEN_LINK, MAXIMUM_ALLOWED,
+                                  &key);
+
+  if (!result) {
+    HMODULE ntdll = GetModuleHandle(L"ntdll.dll");
+    NtDeleteKeyFunction NtDeleteKey =
+        reinterpret_cast<NtDeleteKeyFunction>(GetProcAddress(ntdll,
+                                                             "NtDeleteKey"));
+    NtDeleteKey(key);
   }
 }
 

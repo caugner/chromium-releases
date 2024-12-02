@@ -1,37 +1,29 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved. Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "chrome/browser/views/autocomplete/autocomplete_popup_win.h"
 
-#include "app/gfx/insets.h"
 #include "app/win_util.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view_win.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/views/autocomplete/autocomplete_popup_contents_view.h"
+#include "gfx/insets.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // AutocompletePopupWin, public:
 
 AutocompletePopupWin::AutocompletePopupWin(
-    AutocompletePopupContentsView* contents)
-    : contents_(contents) {
-  set_delete_on_destroy(false);
+    AutocompleteEditView* edit_view,
+    AutocompletePopupContentsView* contents) {
+  // Create the popup.
   set_window_style(WS_POPUP | WS_CLIPCHILDREN);
   set_window_ex_style(WS_EX_TOOLWINDOW | WS_EX_LAYERED);
-}
-
-AutocompletePopupWin::~AutocompletePopupWin() {
-}
-
-void AutocompletePopupWin::Init(AutocompleteEditView* edit_view,
-                                views::View* contents) {
-  // Create the popup
   WidgetWin::Init(GetAncestor(edit_view->GetNativeView(), GA_ROOT),
-                  contents_->GetPopupBounds());
+                  contents->GetPopupBounds());
   // The contents is owned by the LocationBarView.
-  contents_->SetParentOwned(false);
-  SetContentsView(contents_);
+  contents->set_parent_owned(false);
+  SetContentsView(contents);
 
   // When an IME is attached to the rich-edit control, retrieve its window
   // handle and show this popup window under the IME windows.
@@ -43,20 +35,7 @@ void AutocompletePopupWin::Init(AutocompleteEditView* edit_view,
                SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
-void AutocompletePopupWin::Show() {
-  // Move the popup to the place appropriate for the window's current position -
-  // it may have been moved since it was last shown.
-  SetBounds(contents_->GetPopupBounds());
-  if (!IsVisible())
-    WidgetWin::Show();
-}
-
-bool AutocompletePopupWin::IsOpen() const {
-  return IsCreated() && IsVisible();
-}
-
-bool AutocompletePopupWin::IsCreated() const {
-  return !!IsWindow();
+AutocompletePopupWin::~AutocompletePopupWin() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////

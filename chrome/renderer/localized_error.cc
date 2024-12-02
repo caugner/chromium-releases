@@ -5,6 +5,7 @@
 #include "chrome/renderer/localized_error.h"
 
 #include "app/l10n_util.h"
+#include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/values.h"
@@ -12,7 +13,7 @@
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
-#include "webkit/api/public/WebURLError.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLError.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebURLError;
@@ -88,12 +89,39 @@ WebErrorNetErrorMap net_error_options[] = {
    IDS_ERRORPAGES_DETAILS_TOO_MANY_REDIRECTS,
    SUGGEST_RELOAD | SUGGEST_LEARNMORE,
   },
+  {net::ERR_SSL_PROTOCOL_ERROR,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_SSL_PROTOCOL_ERROR,
+   IDS_ERRORPAGES_SUMMARY_SSL_PROTOCOL_ERROR,
+   IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
+   SUGGEST_NONE,
+  },
+  {net::ERR_BAD_SSL_CLIENT_AUTH_CERT,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_BAD_SSL_CLIENT_AUTH_CERT,
+   IDS_ERRORPAGES_SUMMARY_BAD_SSL_CLIENT_AUTH_CERT,
+   IDS_ERRORPAGES_DETAILS_BAD_SSL_CLIENT_AUTH_CERT,
+   SUGGEST_NONE,
+  },
 };
+
+bool LocaleIsRTL() {
+#if defined(TOOLKIT_GTK)
+  // base::i18n::GetTextDirection uses the GTK text direction, which doesn't work
+  // within the renderer sandbox.
+  return base::i18n::GetICUTextDirection() == base::i18n::RIGHT_TO_LEFT;
+#else
+  return base::i18n::IsRTL();
+#endif
+}
 
 }  // namespace
 
 void GetLocalizedErrorValues(const WebURLError& error,
                              DictionaryValue* error_strings) {
+  bool rtl = LocaleIsRTL();
+  error_strings->SetString(L"textdirection", rtl ? L"rtl" : L"ltr");
+
   // Grab strings that are applicable to all error pages
   error_strings->SetString(L"detailsLink",
     l10n_util::GetString(IDS_ERRORPAGES_DETAILS_LINK));
@@ -128,8 +156,8 @@ void GetLocalizedErrorValues(const WebURLError& error,
   std::wstring failed_url(
       ASCIIToWide(std::string(error.unreachableURL.spec())));
   // URLs are always LTR.
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
-    l10n_util::WrapStringWithLTRFormatting(&failed_url);
+  if (rtl)
+    base::i18n::WrapStringWithLTRFormatting(&failed_url);
   error_strings->SetString(L"title",
                            l10n_util::GetStringF(options.title_resource_id,
                                                  failed_url));
@@ -169,8 +197,8 @@ void GetLocalizedErrorValues(const WebURLError& error,
           l10n_util::GetString(IDS_ERRORPAGES_SUGGESTION_HOMEPAGE));
       std::wstring homepage(ASCIIToWide(failed_url.GetWithEmptyPath().spec()));
       // URLs are always LTR.
-      if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
-        l10n_util::WrapStringWithLTRFormatting(&homepage);
+      if (rtl)
+        base::i18n::WrapStringWithLTRFormatting(&homepage);
       suggest_home_page->SetString(L"homePage", homepage);
       // TODO(tc): we actually want the unicode hostname
       suggest_home_page->SetString(L"hostName",
@@ -209,10 +237,13 @@ void GetLocalizedErrorValues(const WebURLError& error,
 
 void GetFormRepostErrorValues(const GURL& display_url,
                               DictionaryValue* error_strings) {
+  bool rtl = LocaleIsRTL();
+  error_strings->SetString(L"textdirection", rtl ? L"rtl" : L"ltr");
+
   std::wstring failed_url(ASCIIToWide(display_url.spec()));
   // URLs are always LTR.
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
-    l10n_util::WrapStringWithLTRFormatting(&failed_url);
+  if (rtl)
+    base::i18n::WrapStringWithLTRFormatting(&failed_url);
   error_strings->SetString(
       L"title", l10n_util::GetStringF(IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
                                       failed_url.c_str()));

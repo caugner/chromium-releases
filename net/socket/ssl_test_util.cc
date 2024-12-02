@@ -2,39 +2,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <string>
-#include <algorithm>
-
 #include "net/socket/ssl_test_util.h"
+
+#include <algorithm>
+#include <string>
+#include <vector>
 
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
 #include <wincrypt.h>
-#elif defined(OS_LINUX)
-#include <nspr.h>
-#include <nss.h>
-#include <secerr.h>
-// Work around https://bugzilla.mozilla.org/show_bug.cgi?id=455424
-// until NSS 3.12.2 comes out and we update to it.
-#define Lock FOO_NSS_Lock
-#include <ssl.h>
-#include <sslerr.h>
-#include <pk11pub.h>
-#undef Lock
-#include "base/nss_init.h"
 #elif defined(OS_MACOSX)
-#include <Security/Security.h>
-#include "base/scoped_cftyperef.h"
 #include "net/base/x509_certificate.h"
 #endif
 
 #include "base/file_util.h"
+#include "base/leak_annotations.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "net/base/cert_test_util.h"
 #include "net/base/host_resolver.h"
+#include "net/base/net_test_constants.h"
 #include "net/base/test_completion_callback.h"
 #include "net/socket/tcp_client_socket.h"
 #include "net/socket/tcp_pinger.h"
@@ -43,83 +33,6 @@
 #if defined(OS_WIN)
 #pragma comment(lib, "crypt32.lib")
 #endif
-
-namespace {
-
-#if defined(OS_LINUX)
-static CERTCertificate* LoadTemporaryCert(const FilePath& filename) {
-  base::EnsureNSSInit();
-
-  std::string rawcert;
-  if (!file_util::ReadFileToString(filename.ToWStringHack(), &rawcert)) {
-    LOG(ERROR) << "Can't load certificate " << filename.ToWStringHack();
-    return NULL;
-  }
-
-  CERTCertificate *cert;
-  cert = CERT_DecodeCertFromPackage(const_cast<char *>(rawcert.c_str()),
-                                    rawcert.length());
-  if (!cert) {
-    LOG(ERROR) << "Can't convert certificate " << filename.ToWStringHack();
-    return NULL;
-  }
-
-  // TODO(port): remove this const_cast after NSS 3.12.3 is released
-  CERTCertTrust trust;
-  int rv = CERT_DecodeTrustString(&trust, const_cast<char *>("TCu,Cu,Tu"));
-  if (rv != SECSuccess) {
-    LOG(ERROR) << "Can't decode trust string";
-    CERT_DestroyCertificate(cert);
-    return NULL;
-  }
-
-  rv = CERT_ChangeCertTrust(CERT_GetDefaultCertDB(), cert, &trust);
-  if (rv != SECSuccess) {
-    LOG(ERROR) << "Can't change trust for certificate "
-               << filename.ToWStringHack();
-    CERT_DestroyCertificate(cert);
-    return NULL;
-  }
-
-  return cert;
-}
-#endif
-
-#if defined(OS_MACOSX)
-static net::X509Certificate* LoadTemporaryCert(const FilePath& filename) {
-  std::string rawcert;
-  if (!file_util::ReadFileToString(filename.ToWStringHack(), &rawcert)) {
-    LOG(ERROR) << "Can't load certificate " << filename.ToWStringHack();
-    return NULL;
-  }
-
-  CFDataRef pem = CFDataCreate(kCFAllocatorDefault,
-                               reinterpret_cast<const UInt8*>(rawcert.data()),
-                               static_cast<CFIndex>(rawcert.size()));
-  if (!pem)
-    return NULL;
-  scoped_cftyperef<CFDataRef> scoped_pem(pem);
-
-  SecExternalFormat input_format = kSecFormatUnknown;
-  SecExternalItemType item_type = kSecItemTypeUnknown;
-  CFArrayRef cert_array = NULL;
-  if (SecKeychainItemImport(pem, NULL, &input_format, &item_type, 0, NULL, NULL,
-                            &cert_array))
-    return NULL;
-  scoped_cftyperef<CFArrayRef> scoped_cert_array(cert_array);
-
-  if (!CFArrayGetCount(cert_array))
-    return NULL;
-
-  SecCertificateRef cert_ref = static_cast<SecCertificateRef>(
-      const_cast<void*>(CFArrayGetValueAtIndex(cert_array, 0)));
-  CFRetain(cert_ref);
-  return net::X509Certificate::CreateFromHandle(cert_ref,
-      net::X509Certificate::SOURCE_FROM_NETWORK);
-}
-#endif
-
-}  // namespace
 
 namespace net {
 
@@ -137,13 +50,10 @@ const int TestServerLauncher::kBadHTTPSPort = 9666;
 const wchar_t TestServerLauncher::kCertIssuerName[] = L"Test CA";
 
 TestServerLauncher::TestServerLauncher() : process_handle_(
-                                               base::kNullProcessHandle),
-                                           forking_(false),
-                                           connection_attempts_(10),
-                                           connection_timeout_(1000)
-#if defined(OS_LINUX)
-, cert_(NULL)
-#endif
+    base::kNullProcessHandle),
+    forking_(false),
+    connection_attempts_(kDefaultTestConnectionAttempts),
+    connection_timeout_(kDefaultTestConnectionTimeout)
 {
   InitCertPath();
 }
@@ -154,9 +64,6 @@ TestServerLauncher::TestServerLauncher(int connection_attempts,
                           forking_(false),
                           connection_attempts_(connection_attempts),
                           connection_timeout_(connection_timeout)
-#if defined(OS_LINUX)
-, cert_(NULL)
-#endif
 {
   InitCertPath();
 }
@@ -176,7 +83,7 @@ void AppendToPythonPath(const FilePath& dir) {
 
 #if defined(OS_WIN)
   const wchar_t kPythonPath[] = L"PYTHONPATH";
-  // FIXME(dkegel): handle longer PYTHONPATH variables
+  // TODO(dkegel): handle longer PYTHONPATH variables
   wchar_t oldpath[4096];
   if (GetEnvironmentVariable(kPythonPath, oldpath, arraysize(oldpath)) == 0) {
     SetEnvironmentVariableW(kPythonPath, dir.value().c_str());
@@ -277,14 +184,13 @@ bool TestServerLauncher::Start(Protocol protocol,
 #elif defined(OS_POSIX)
   std::vector<std::string> command_line;
   command_line.push_back("python");
-  command_line.push_back(WideToUTF8(testserver_path.ToWStringHack()));
+  command_line.push_back(testserver_path.value());
   command_line.push_back("--port=" + port_str);
-  command_line.push_back("--data-dir=" +
-                         WideToUTF8(document_root_dir_.ToWStringHack()));
+  command_line.push_back("--data-dir=" + document_root_dir_.value());
   if (protocol == ProtoFTP)
     command_line.push_back("-f");
   if (!cert_path.value().empty())
-    command_line.push_back("--https=" + WideToUTF8(cert_path.ToWStringHack()));
+    command_line.push_back("--https=" + cert_path.value());
   if (forking_)
     command_line.push_back("--forking");
 
@@ -313,7 +219,8 @@ bool TestServerLauncher::WaitToStart(const std::string& host_name, int port) {
   // Verify that the webserver is actually started.
   // Otherwise tests can fail if they run faster than Python can start.
   net::AddressList addr;
-  scoped_refptr<net::HostResolver> resolver(net::CreateSystemHostResolver());
+  scoped_refptr<net::HostResolver> resolver(
+      net::CreateSystemHostResolver(NULL));
   net::HostResolver::RequestInfo info(host_name, port);
   int rv = resolver->Resolve(info, &addr, NULL, NULL, NULL);
   if (rv != net::OK)
@@ -344,7 +251,11 @@ bool TestServerLauncher::Stop() {
   if (!process_handle_)
     return true;
 
-  bool ret = base::KillProcess(process_handle_, 1, true);
+  // First check if the process has already terminated.
+  bool ret = base::WaitForSingleProcess(process_handle_, 0);
+  if (!ret)
+    ret = base::KillProcess(process_handle_, 1, true);
+
   if (ret) {
     base::CloseProcessHandle(process_handle_);
     process_handle_ = base::kNullProcessHandle;
@@ -357,10 +268,7 @@ bool TestServerLauncher::Stop() {
 }
 
 TestServerLauncher::~TestServerLauncher() {
-#if defined(OS_LINUX)
-  if (cert_)
-    CERT_DestroyCertificate(reinterpret_cast<CERTCertificate*>(cert_));
-#elif defined(OS_MACOSX)
+#if defined(OS_MACOSX)
   SetMacTestCertificate(NULL);
 #endif
   Stop();
@@ -385,7 +293,7 @@ FilePath TestServerLauncher::GetExpiredCertPath() {
 }
 
 bool TestServerLauncher::LoadTestRootCert() {
-#if defined(OS_LINUX)
+#if defined(USE_NSS)
   if (cert_)
     return true;
 
@@ -393,13 +301,13 @@ bool TestServerLauncher::LoadTestRootCert() {
 
   // This currently leaks a little memory.
   // TODO(dkegel): fix the leak and remove the entry in
-  // tools/valgrind/suppressions.txt
-  cert_ = reinterpret_cast<PrivateCERTCertificate*>(
-          LoadTemporaryCert(GetRootCertPath()));
+  // tools/valgrind/memcheck/suppressions.txt
+  ANNOTATE_SCOPED_MEMORY_LEAK;  // Tell heap checker about the leak.
+  cert_ = LoadTemporaryRootCert(GetRootCertPath());
   DCHECK(cert_);
   return (cert_ != NULL);
 #elif defined(OS_MACOSX)
-  X509Certificate* cert = LoadTemporaryCert(GetRootCertPath());
+  X509Certificate* cert = LoadTemporaryRootCert(GetRootCertPath());
   if (!cert)
     return false;
   SetMacTestCertificate(cert);
@@ -410,7 +318,6 @@ bool TestServerLauncher::LoadTestRootCert() {
 }
 
 bool TestServerLauncher::CheckCATrusted() {
-// TODO(port): Port either this or LoadTemporaryCert to MacOSX.
 #if defined(OS_WIN)
   HCERTSTORE cert_store = CertOpenSystemStore(NULL, L"ROOT");
   if (!cert_store) {

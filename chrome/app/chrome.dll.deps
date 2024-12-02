@@ -14,8 +14,10 @@ dependents = [
   'ole32.dll',
   'OLEAUT32.dll',
   'OLEACC.dll',
+  'PSAPI.DLL',
   'secur32.dll',
   't2embed.dll',
+  'riched20.dll',
 ]
 
 delay_loaded = [
@@ -25,7 +27,6 @@ delay_loaded = [
   'WINHTTP.dll',
   'WININET.dll',
   'WS2_32.dll',
-  'PSAPI.DLL',
   'dwmapi.dll',
   'dbghelp.dll',
   'COMDLG32.dll',

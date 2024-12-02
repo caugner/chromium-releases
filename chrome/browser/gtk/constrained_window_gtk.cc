@@ -4,14 +4,15 @@
 
 #include "chrome/browser/gtk/constrained_window_gtk.h"
 
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view_gtk.h"
-#include "chrome/common/gtk_util.h"
 
 ConstrainedWindowGtk::ConstrainedWindowGtk(
     TabContents* owner, ConstrainedWindowGtkDelegate* delegate)
     : owner_(owner),
-      delegate_(delegate) {
+      delegate_(delegate),
+      visible_(false) {
   DCHECK(owner);
   DCHECK(delegate);
   GtkWidget* dialog = delegate->GetWidgetRoot();
@@ -29,20 +30,25 @@ ConstrainedWindowGtk::ConstrainedWindowGtk(
   gtk_container_add(GTK_CONTAINER(frame), alignment);
   gtk_container_add(GTK_CONTAINER(ebox), frame);
   border_.Own(ebox);
-
-  gtk_widget_show_all(border_.get());
-
-  // We collaborate with TabContentsViewGtk and stick ourselves in the
-  // TabContentsViewGtk's floating container.
-  ContainingView()->AttachConstrainedWindow(this);
 }
 
 ConstrainedWindowGtk::~ConstrainedWindowGtk() {
   border_.Destroy();
 }
 
+void ConstrainedWindowGtk::ShowConstrainedWindow() {
+  gtk_widget_show_all(border_.get());
+
+  // We collaborate with TabContentsViewGtk and stick ourselves in the
+  // TabContentsViewGtk's floating container.
+  ContainingView()->AttachConstrainedWindow(this);
+
+  visible_ = true;
+}
+
 void ConstrainedWindowGtk::CloseConstrainedWindow() {
-  ContainingView()->RemoveConstrainedWindow(this);
+  if (visible_)
+    ContainingView()->RemoveConstrainedWindow(this);
   delegate_->DeleteDelegate();
   owner_->WillClose(this);
 

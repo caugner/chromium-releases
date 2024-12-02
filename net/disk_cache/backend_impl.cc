@@ -14,6 +14,7 @@
 #include "base/sys_info.h"
 #include "base/timer.h"
 #include "base/worker_pool.h"
+#include "net/base/net_errors.h"
 #include "net/disk_cache/cache_util.h"
 #include "net/disk_cache/entry_impl.h"
 #include "net/disk_cache/errors.h"
@@ -26,6 +27,7 @@
 
 using base::Time;
 using base::TimeDelta;
+using base::TimeTicks;
 
 namespace {
 
@@ -128,12 +130,7 @@ bool DelayedCacheCleanup(const FilePath& full_path) {
     return false;
   }
 
-#if defined(OS_WIN)
   WorkerPool::PostTask(FROM_HERE, new CleanupTask(path, name_str), true);
-#elif defined(OS_POSIX)
-  // TODO(rvargas): Use the worker pool.
-  MessageLoop::current()->PostTask(FROM_HERE, new CleanupTask(path, name_str));
-#endif
   return true;
 }
 
@@ -176,30 +173,43 @@ Backend* CreateCacheBackend(const FilePath& full_path, bool force,
   return BackendImpl::CreateBackend(full_path, force, max_bytes, type, kNone);
 }
 
+int CreateCacheBackend(net::CacheType type, const FilePath& path, int max_bytes,
+                       bool force, Backend** backend,
+                       CompletionCallback* callback) {
+  if (type == net::MEMORY_CACHE)
+    *backend = CreateInMemoryCacheBackend(max_bytes);
+  else
+    *backend = BackendImpl::CreateBackend(path, force, max_bytes, type, kNone);
+  return *backend ? net::OK : net::ERR_FAILED;
+}
+
+// Returns the preferred maximum number of bytes for the cache given the
+// number of available bytes.
 int PreferedCacheSize(int64 available) {
-  // If there is not enough space to use kDefaultCacheSize, use 80% of the
-  // available space.
-  if (available < kDefaultCacheSize)
+  // Return 80% of the available space if there is not enough space to use
+  // kDefaultCacheSize.
+  if (available < kDefaultCacheSize * 10 / 8)
     return static_cast<int32>(available * 8 / 10);
 
-  // Don't use more than 10% of the available space.
-  if (available < 10 * kDefaultCacheSize)
+  // Return kDefaultCacheSize if it uses 80% to 10% of the available space.
+  if (available < kDefaultCacheSize * 10)
     return kDefaultCacheSize;
 
-  // Use 10% of the free space until we reach 2.5 * kDefaultCacheSize.
+  // Return 10% of the available space if the target size
+  // (2.5 * kDefaultCacheSize) is more than 10%.
   if (available < static_cast<int64>(kDefaultCacheSize) * 25)
     return static_cast<int32>(available / 10);
 
-  // After reaching our target size (2.5 * kDefaultCacheSize), attempt to use
-  // 1% of the availabe space.
-  if (available < static_cast<int64>(kDefaultCacheSize) * 100)
+  // Return the target size (2.5 * kDefaultCacheSize) if it uses 10% to 1%
+  // of the available space.
+  if (available < static_cast<int64>(kDefaultCacheSize) * 250)
     return kDefaultCacheSize * 5 / 2;
 
-  int64 one_percent = available / 100;
-  if (one_percent > kint32max)
-    return kint32max;
+  // Return 1% of the available space if it does not exceed kint32max.
+  if (available < static_cast<int64>(kint32max) * 100)
+    return static_cast<int32>(available / 100);
 
-  return static_cast<int32>(one_percent);
+  return kint32max;
 }
 
 // ------------------------------------------------------------------------
@@ -354,7 +364,7 @@ bool BackendImpl::OpenEntry(const std::string& key, Entry** entry) {
   if (disabled_)
     return false;
 
-  Time start = Time::Now();
+  TimeTicks start = TimeTicks::Now();
   uint32 hash = Hash(key);
 
   EntryImpl* cache_entry = MatchEntry(key, hash, false);
@@ -379,6 +389,14 @@ bool BackendImpl::OpenEntry(const std::string& key, Entry** entry) {
   return true;
 }
 
+int BackendImpl::OpenEntry(const std::string& key, Entry** entry,
+                           CompletionCallback* callback) {
+  if (OpenEntry(key, entry))
+    return net::OK;
+
+  return net::ERR_FAILED;
+}
+
 bool BackendImpl::CreateEntry(const std::string& key, Entry** entry) {
   if (disabled_ || key.empty())
     return false;
@@ -386,7 +404,7 @@ bool BackendImpl::CreateEntry(const std::string& key, Entry** entry) {
   DCHECK(entry);
   *entry = NULL;
 
-  Time start = Time::Now();
+  TimeTicks start = TimeTicks::Now();
   uint32 hash = Hash(key);
 
   scoped_refptr<EntryImpl> parent;
@@ -461,6 +479,14 @@ bool BackendImpl::CreateEntry(const std::string& key, Entry** entry) {
   return true;
 }
 
+int BackendImpl::CreateEntry(const std::string& key, Entry** entry,
+                             CompletionCallback* callback) {
+  if (CreateEntry(key, entry))
+    return net::OK;
+
+  return net::ERR_FAILED;
+}
+
 bool BackendImpl::DoomEntry(const std::string& key) {
   if (disabled_)
     return false;
@@ -477,6 +503,14 @@ bool BackendImpl::DoomEntry(const std::string& key) {
   return true;
 }
 
+int BackendImpl::DoomEntry(const std::string& key,
+                           CompletionCallback* callback) {
+  if (DoomEntry(key))
+    return net::OK;
+
+  return net::ERR_FAILED;
+}
+
 bool BackendImpl::DoomAllEntries() {
   if (!num_refs_) {
     PrepareForRestart();
@@ -490,6 +524,13 @@ bool BackendImpl::DoomAllEntries() {
     stats_.OnEvent(Stats::DOOM_CACHE);
     return true;
   }
+}
+
+int BackendImpl::DoomAllEntries(CompletionCallback* callback) {
+  if (DoomAllEntries())
+    return net::OK;
+
+  return net::ERR_FAILED;
 }
 
 bool BackendImpl::DoomEntriesBetween(const Time initial_time,
@@ -528,6 +569,15 @@ bool BackendImpl::DoomEntriesBetween(const Time initial_time,
   return true;
 }
 
+int BackendImpl::DoomEntriesBetween(const base::Time initial_time,
+                                    const base::Time end_time,
+                                    CompletionCallback* callback) {
+  if (DoomEntriesBetween(initial_time, end_time))
+    return net::OK;
+
+  return net::ERR_FAILED;
+}
+
 // We use OpenNextEntry to retrieve elements from the cache, until we get
 // entries that are too old.
 bool BackendImpl::DoomEntriesSince(const Time initial_time) {
@@ -552,8 +602,24 @@ bool BackendImpl::DoomEntriesSince(const Time initial_time) {
   }
 }
 
+int BackendImpl::DoomEntriesSince(const base::Time initial_time,
+                                  CompletionCallback* callback) {
+  if (DoomEntriesSince(initial_time))
+    return net::OK;
+
+  return net::ERR_FAILED;
+}
+
 bool BackendImpl::OpenNextEntry(void** iter, Entry** next_entry) {
   return OpenFollowingEntry(true, iter, next_entry);
+}
+
+int BackendImpl::OpenNextEntry(void** iter, Entry** next_entry,
+                               CompletionCallback* callback) {
+  if (OpenNextEntry(iter, next_entry))
+    return net::OK;
+
+  return net::ERR_FAILED;
 }
 
 void BackendImpl::EndEnumeration(void** iter) {
@@ -1014,6 +1080,14 @@ bool BackendImpl::InitBackingStore(bool* file_created) {
     LOG(ERROR) << "Unable to map Index file";
     return false;
   }
+
+  if (index_->GetLength() < sizeof(Index)) {
+    // We verify this again on CheckIndex() but it's easier to make sure now
+    // that the header is there.
+    LOG(ERROR) << "Corrupt Index file";
+    return false;
+  }
+
   return true;
 }
 
@@ -1108,8 +1182,13 @@ int BackendImpl::NewEntry(Addr address, EntryImpl** entry, bool* dirty) {
     return ERR_INVALID_ADDRESS;
   }
 
+  TimeTicks start = TimeTicks::Now();
   if (!cache_entry->entry()->Load())
     return ERR_READ_FAILURE;
+
+  if (IsLoaded()) {
+    CACHE_UMA(AGE_MS, "LoadTime", GetSizeGroup(), start);
+  }
 
   if (!cache_entry->SanityCheck()) {
     LOG(WARNING) << "Messed up entry found.";
@@ -1565,7 +1644,9 @@ bool BackendImpl::CheckIndex() {
 
   AdjustMaxCacheSize(data_->header.table_len);
 
-  if (data_->header.num_bytes < 0) {
+  if (data_->header.num_bytes < 0 ||
+      (max_size_ < kint32max - kDefaultCacheSize &&
+       data_->header.num_bytes > max_size_ + kDefaultCacheSize)) {
     LOG(ERROR) << "Invalid cache (current) size";
     return false;
   }

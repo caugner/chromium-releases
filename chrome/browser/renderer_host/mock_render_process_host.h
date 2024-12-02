@@ -10,13 +10,13 @@
 #include "chrome/common/ipc_test_sink.h"
 
 class TransportDIB;
+class URLRequestContextGetter;
 
-// A mock render process host that has no corresponding renderer process. The
-// process() refers to the current process, and all IPC messages are sent into
-// the message sink for inspection by tests.
+// A mock render process host that has no corresponding renderer process.  All
+// IPC messages are sent into the message sink for inspection by tests.
 class MockRenderProcessHost : public RenderProcessHost {
  public:
-  MockRenderProcessHost(Profile* profile);
+  explicit MockRenderProcessHost(Profile* profile);
   virtual ~MockRenderProcessHost();
 
   // Provides access to all IPC messages that would have been sent to the
@@ -30,23 +30,29 @@ class MockRenderProcessHost : public RenderProcessHost {
   int bad_msg_count() const { return bad_msg_count_; }
 
   // RenderProcessHost implementation (public portion).
-  virtual bool Init();
+  virtual bool Init(bool is_extensions_process,
+                    URLRequestContextGetter* request_context);
   virtual int GetNextRoutingID();
   virtual void CancelResourceRequests(int render_widget_id);
   virtual void CrossSiteClosePageACK(const ViewMsg_ClosePage_Params& params);
-  virtual bool WaitForPaintMsg(int render_widget_id,
-                               const base::TimeDelta& max_delay,
-                               IPC::Message* msg);
-  virtual void ReceivedBadMessage(uint16 msg_type);
+  virtual bool WaitForUpdateMsg(int render_widget_id,
+                                const base::TimeDelta& max_delay,
+                                IPC::Message* msg);
+  virtual void ReceivedBadMessage(uint32 msg_type);
   virtual void WidgetRestored();
   virtual void WidgetHidden();
   virtual void ViewCreated();
   virtual void AddWord(const string16& word);
+  virtual void SendVisitedLinkTable(base::SharedMemory* table_memory);
   virtual void AddVisitedLinks(
       const VisitedLinkCommon::Fingerprints& visited_links);
   virtual void ResetVisitedLinks();
   virtual bool FastShutdownIfPossible();
   virtual bool SendWithTimeout(IPC::Message* msg, int timeout_ms);
+  virtual base::ProcessHandle GetHandle() {
+    return base::kNullProcessHandle;
+  }
+
   virtual TransportDIB* GetTransportDIB(TransportDIB::Id dib_id);
 
   // IPC::Channel::Sender via RenderProcessHost.

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_APP_MODAL_DIALOG_QUEUE_H__
-#define CHROME_BROWSER_APP_MODAL_DIALOG_QUEUE_H__
+#ifndef CHROME_BROWSER_APP_MODAL_DIALOG_QUEUE_H_
+#define CHROME_BROWSER_APP_MODAL_DIALOG_QUEUE_H_
 
 #include <queue>
 
@@ -54,10 +54,16 @@ class AppModalDialogQueue {
  private:
   friend struct DefaultSingletonTraits<AppModalDialogQueue>;
 
-  AppModalDialogQueue() : active_dialog_(NULL) { }
+  AppModalDialogQueue() : active_dialog_(NULL), showing_modal_dialog_(false) {}
 
   // Shows |dialog| and notifies the BrowserList that a modal dialog is showing.
   void ShowModalDialog(AppModalDialog* dialog);
+
+  // Returns the next dialog to show. This removes entries from
+  // app_modal_dialog_queue_ until one is valid or the queue is empty. This
+  // returns NULL if there are no more dialogs, or all the dialogs in the queue
+  // are not valid.
+  AppModalDialog* GetNextDialog();
 
   // Contains all app modal dialogs which are waiting to be shown, with the
   // currently modal dialog at the front of the queue.
@@ -67,7 +73,11 @@ class AppModalDialogQueue {
   // active app-modal dialog box.
   AppModalDialog* active_dialog_;
 
+  // Stores if |ShowModalDialog()| is currently being called on an app-modal
+  // dialog.
+  bool showing_modal_dialog_;
+
   DISALLOW_COPY_AND_ASSIGN(AppModalDialogQueue);
 };
 
-#endif // CHROME_BROWSER_APP_MODAL_DIALOG_QUEUE_H__
+#endif  // CHROME_BROWSER_APP_MODAL_DIALOG_QUEUE_H_

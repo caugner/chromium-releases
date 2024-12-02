@@ -1,26 +1,23 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/base/host_resolver_impl.h"
-
-#if defined(OS_WIN)
-#include <ws2tcpip.h>
-#include <wspiapi.h>
-#elif defined(OS_POSIX)
-#include <netdb.h>
-#endif
 
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
+#include "base/string_util.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
-#include "net/base/load_log_unittest.h"
 #include "net/base/mock_host_resolver.h"
+#include "net/base/mock_network_change_notifier.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_log_unittest.h"
+#include "net/base/net_util.h"
+#include "net/base/sys_addrinfo.h"
 #include "net/base/test_completion_callback.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -29,15 +26,60 @@
 //    cache while an async is already pending).
 
 namespace net {
+
 namespace {
-static const int kMaxCacheEntries = 100;
-static const int kMaxCacheAgeMs = 60000;
+
+HostCache* CreateDefaultCache() {
+  return new HostCache(
+      100,  // max cache entries.
+      base::TimeDelta::FromMinutes(1),
+      base::TimeDelta::FromSeconds(0));
+}
+
+static const size_t kMaxJobs = 10u;
+
+HostResolverImpl* CreateHostResolverImpl(HostResolverProc* resolver_proc) {
+  return new HostResolverImpl(
+      resolver_proc,
+      CreateDefaultCache(),
+      NULL,  // network_change_notifier
+      kMaxJobs);
+}
+
+// Helper to create a HostResolver::RequestInfo.
+HostResolver::RequestInfo CreateResolverRequest(
+    const std::string& hostname,
+    RequestPriority priority) {
+  HostResolver::RequestInfo info(hostname, 80);
+  info.set_priority(priority);
+  return info;
+}
+
+// Helper to create a HostResolver::RequestInfo.
+HostResolver::RequestInfo CreateResolverRequestForAddressFamily(
+    const std::string& hostname,
+    RequestPriority priority,
+    AddressFamily address_family) {
+  HostResolver::RequestInfo info(hostname, 80);
+  info.set_priority(priority);
+  info.set_address_family(address_family);
+  return info;
+}
 
 // A variant of WaitingHostResolverProc that pushes each host mapped into a
 // list.
 // (and uses a manual-reset event rather than auto-reset).
 class CapturingHostResolverProc : public HostResolverProc {
  public:
+  struct CaptureEntry {
+    CaptureEntry(const std::string& hostname, AddressFamily address_family)
+        : hostname(hostname), address_family(address_family) {}
+    std::string hostname;
+    AddressFamily address_family;
+  };
+
+  typedef std::vector<CaptureEntry> CaptureList;
+
   explicit CapturingHostResolverProc(HostResolverProc* previous)
       : HostResolverProc(previous), event_(true, false) {
   }
@@ -46,17 +88,21 @@ class CapturingHostResolverProc : public HostResolverProc {
     event_.Signal();
   }
 
-  virtual int Resolve(const std::string& host, AddressList* addrlist) {
+  virtual int Resolve(const std::string& hostname,
+                      AddressFamily address_family,
+                      HostResolverFlags host_resolver_flags,
+                      AddressList* addrlist) {
     event_.Wait();
     {
       AutoLock l(lock_);
-      capture_list_.push_back(host);
+      capture_list_.push_back(CaptureEntry(hostname, address_family));
     }
-    return ResolveUsingPrevious(host, addrlist);
+    return ResolveUsingPrevious(hostname, address_family,
+                                host_resolver_flags, addrlist);
   }
 
-  std::vector<std::string> GetCaptureList() const {
-    std::vector<std::string> copy;
+  CaptureList GetCaptureList() const {
+    CaptureList copy;
     {
       AutoLock l(lock_);
       copy = capture_list_;
@@ -65,9 +111,44 @@ class CapturingHostResolverProc : public HostResolverProc {
   }
 
  private:
-  std::vector<std::string> capture_list_;
+  ~CapturingHostResolverProc() {}
+
+  CaptureList capture_list_;
   mutable Lock lock_;
   base::WaitableEvent event_;
+};
+
+// This resolver function creates an IPv4 address, whose numeral value
+// describes a hash of the requested hostname, and the value of the requested
+// address_family.
+//
+// The resolved address for (hostname, address_family) will take the form:
+//    192.x.y.z
+//
+// Where:
+//   x = length of hostname
+//   y = ASCII value of hostname[0]
+//   z = value of address_family
+//
+class EchoingHostResolverProc : public HostResolverProc {
+ public:
+  EchoingHostResolverProc() : HostResolverProc(NULL) {}
+
+  virtual int Resolve(const std::string& hostname,
+                      AddressFamily address_family,
+                      HostResolverFlags host_resolver_flags,
+                      AddressList* addrlist) {
+    // Encode the request's hostname and address_family in the output address.
+    std::string ip_literal = StringPrintf("192.%d.%d.%d",
+        static_cast<int>(hostname.size()),
+        static_cast<int>(hostname[0]),
+        static_cast<int>(address_family));
+
+    return SystemHostResolverProc(ip_literal,
+                                  ADDRESS_FAMILY_UNSPECIFIED,
+                                  host_resolver_flags,
+                                  addrlist);
+  }
 };
 
 // Helper that represents a single Resolve() result, used to inspect all the
@@ -182,18 +263,18 @@ TEST_F(HostResolverImplTest, SynchronousLookup) {
   resolver_proc->AddRule("just.testing", "192.168.1.42");
 
   scoped_refptr<HostResolver> host_resolver(
-      new HostResolverImpl(resolver_proc, kMaxCacheEntries, kMaxCacheAgeMs));
+      CreateHostResolverImpl(resolver_proc));
 
   HostResolver::RequestInfo info("just.testing", kPortnum);
-  scoped_refptr<LoadLog> log(new LoadLog);
-  int err = host_resolver->Resolve(info, &adrlist, NULL, NULL, log);
+  CapturingBoundNetLog log(CapturingNetLog::kUnbounded);
+  int err = host_resolver->Resolve(info, &adrlist, NULL, NULL, log.bound());
   EXPECT_EQ(OK, err);
 
-  EXPECT_EQ(2u, log->events().size());
-  ExpectLogContains(log, 0, LoadLog::TYPE_HOST_RESOLVER_IMPL,
-                    LoadLog::PHASE_BEGIN);
-  ExpectLogContains(log, 1, LoadLog::TYPE_HOST_RESOLVER_IMPL,
-                    LoadLog::PHASE_END);
+  EXPECT_EQ(2u, log.entries().size());
+  EXPECT_TRUE(LogContainsBeginEvent(
+      log.entries(), 0, NetLog::TYPE_HOST_RESOLVER_IMPL));
+  EXPECT_TRUE(LogContainsEndEvent(
+      log.entries(), 1, NetLog::TYPE_HOST_RESOLVER_IMPL));
 
   const struct addrinfo* ainfo = adrlist.head();
   EXPECT_EQ(static_cast<addrinfo*>(NULL), ainfo->ai_next);
@@ -214,25 +295,26 @@ TEST_F(HostResolverImplTest, AsynchronousLookup) {
   resolver_proc->AddRule("just.testing", "192.168.1.42");
 
   scoped_refptr<HostResolver> host_resolver(
-      new HostResolverImpl(resolver_proc, kMaxCacheEntries, kMaxCacheAgeMs));
+      CreateHostResolverImpl(resolver_proc));
 
   HostResolver::RequestInfo info("just.testing", kPortnum);
-  scoped_refptr<LoadLog> log(new LoadLog);
-  int err = host_resolver->Resolve(info, &adrlist, &callback_, NULL, log);
+  CapturingBoundNetLog log(CapturingNetLog::kUnbounded);
+  int err = host_resolver->Resolve(info, &adrlist, &callback_, NULL,
+                                   log.bound());
   EXPECT_EQ(ERR_IO_PENDING, err);
 
-  EXPECT_EQ(1u, log->events().size());
-  ExpectLogContains(log, 0, LoadLog::TYPE_HOST_RESOLVER_IMPL,
-                    LoadLog::PHASE_BEGIN);
+  EXPECT_EQ(1u, log.entries().size());
+  EXPECT_TRUE(LogContainsBeginEvent(
+      log.entries(), 0, NetLog::TYPE_HOST_RESOLVER_IMPL));
 
   MessageLoop::current()->Run();
 
   ASSERT_TRUE(callback_called_);
   ASSERT_EQ(OK, callback_result_);
 
-  EXPECT_EQ(2u, log->events().size());
-  ExpectLogContains(log, 1, LoadLog::TYPE_HOST_RESOLVER_IMPL,
-                    LoadLog::PHASE_END);
+  EXPECT_EQ(2u, log.entries().size());
+  EXPECT_TRUE(LogContainsEndEvent(
+      log.entries(), 1, NetLog::TYPE_HOST_RESOLVER_IMPL));
 
   const struct addrinfo* ainfo = adrlist.head();
   EXPECT_EQ(static_cast<addrinfo*>(NULL), ainfo->ai_next);
@@ -248,15 +330,16 @@ TEST_F(HostResolverImplTest, CanceledAsynchronousLookup) {
   scoped_refptr<WaitingHostResolverProc> resolver_proc =
       new WaitingHostResolverProc(NULL);
 
-  scoped_refptr<LoadLog> log(new LoadLog);
+  CapturingBoundNetLog log(CapturingNetLog::kUnbounded);
   {
     scoped_refptr<HostResolver> host_resolver(
-        new HostResolverImpl(resolver_proc, kMaxCacheEntries, kMaxCacheAgeMs));
+        CreateHostResolverImpl(resolver_proc));
     AddressList adrlist;
     const int kPortnum = 80;
 
     HostResolver::RequestInfo info("just.testing", kPortnum);
-    int err = host_resolver->Resolve(info, &adrlist, &callback_, NULL, log);
+    int err = host_resolver->Resolve(info, &adrlist, &callback_, NULL,
+                                     log.bound());
     EXPECT_EQ(ERR_IO_PENDING, err);
 
     // Make sure we will exit the queue even when callback is not called.
@@ -268,12 +351,13 @@ TEST_F(HostResolverImplTest, CanceledAsynchronousLookup) {
 
   resolver_proc->Signal();
 
-  EXPECT_EQ(3u, log->events().size());
-  ExpectLogContains(log, 0, LoadLog::TYPE_HOST_RESOLVER_IMPL,
-                    LoadLog::PHASE_BEGIN);
-  ExpectLogContains(log, 1, LoadLog::TYPE_CANCELLED, LoadLog::PHASE_NONE);
-  ExpectLogContains(log, 2, LoadLog::TYPE_HOST_RESOLVER_IMPL,
-                    LoadLog::PHASE_END);
+  EXPECT_EQ(3u, log.entries().size());
+  EXPECT_TRUE(LogContainsBeginEvent(
+      log.entries(), 0, NetLog::TYPE_HOST_RESOLVER_IMPL));
+  EXPECT_TRUE(LogContainsEvent(
+      log.entries(), 1, NetLog::TYPE_CANCELLED, NetLog::PHASE_NONE));
+  EXPECT_TRUE(LogContainsEndEvent(
+      log.entries(), 2, NetLog::TYPE_HOST_RESOLVER_IMPL));
 
   EXPECT_FALSE(callback_called_);
 }
@@ -286,7 +370,7 @@ TEST_F(HostResolverImplTest, NumericIPv4Address) {
   resolver_proc->AllowDirectLookup("*");
 
   scoped_refptr<HostResolver> host_resolver(
-      new HostResolverImpl(resolver_proc, kMaxCacheEntries, kMaxCacheAgeMs));
+      CreateHostResolverImpl(resolver_proc));
   AddressList adrlist;
   const int kPortnum = 5555;
   HostResolver::RequestInfo info("127.1.2.3", kPortnum);
@@ -311,7 +395,7 @@ TEST_F(HostResolverImplTest, NumericIPv6Address) {
   // Resolve a plain IPv6 address.  Don't worry about [brackets], because
   // the caller should have removed them.
   scoped_refptr<HostResolver> host_resolver(
-      new HostResolverImpl(resolver_proc, kMaxCacheEntries, kMaxCacheAgeMs));
+      CreateHostResolverImpl(resolver_proc));
   AddressList adrlist;
   const int kPortnum = 5555;
   HostResolver::RequestInfo info("2001:db8::1", kPortnum);
@@ -346,7 +430,7 @@ TEST_F(HostResolverImplTest, EmptyHost) {
   resolver_proc->AllowDirectLookup("*");
 
   scoped_refptr<HostResolver> host_resolver(
-      new HostResolverImpl(resolver_proc, kMaxCacheEntries, kMaxCacheAgeMs));
+      CreateHostResolverImpl(resolver_proc));
   AddressList adrlist;
   const int kPortnum = 5555;
   HostResolver::RequestInfo info("", kPortnum);
@@ -384,7 +468,8 @@ class DeDupeRequestsVerifier : public ResolveRequest::Delegate {
 
       // The resolver_proc should have been called only twice -- once with "a",
       // once with "b".
-      std::vector<std::string> capture_list = resolver_proc_->GetCaptureList();
+      CapturingHostResolverProc::CaptureList capture_list =
+          resolver_proc_->GetCaptureList();
       EXPECT_EQ(2U, capture_list.size());
 
       // End this test, we are done.
@@ -407,7 +492,7 @@ TEST_F(HostResolverImplTest, DeDupeRequests) {
       new CapturingHostResolverProc(NULL);
 
   scoped_refptr<HostResolver> host_resolver(
-      new HostResolverImpl(resolver_proc, kMaxCacheEntries, kMaxCacheAgeMs));
+      CreateHostResolverImpl(resolver_proc));
 
   // The class will receive callbacks for when each resolve completes. It
   // checks that the right things happened.
@@ -458,7 +543,7 @@ TEST_F(HostResolverImplTest, CancelMultipleRequests) {
       new CapturingHostResolverProc(NULL);
 
   scoped_refptr<HostResolver> host_resolver(
-      new HostResolverImpl(resolver_proc, kMaxCacheEntries, kMaxCacheAgeMs));
+      CreateHostResolverImpl(resolver_proc));
 
   // The class will receive callbacks for when each resolve completes. It
   // checks that the right things happened.
@@ -545,7 +630,7 @@ TEST_F(HostResolverImplTest, CancelWithinCallback) {
       new CapturingHostResolverProc(NULL);
 
   scoped_refptr<HostResolver> host_resolver(
-      new HostResolverImpl(resolver_proc, kMaxCacheEntries, kMaxCacheAgeMs));
+      CreateHostResolverImpl(resolver_proc));
 
   // The class will receive callbacks for when each resolve completes. It
   // checks that the right things happened.
@@ -606,7 +691,7 @@ TEST_F(HostResolverImplTest, DeleteWithinCallback) {
   // checks that the right things happened. Note that the verifier holds the
   // only reference to |host_resolver|, so it can delete it within callback.
   HostResolver* host_resolver =
-      new HostResolverImpl(resolver_proc, kMaxCacheEntries, kMaxCacheAgeMs);
+      CreateHostResolverImpl(resolver_proc);
   DeleteWithinCallbackVerifier verifier(host_resolver);
 
   // Start 4 requests, duplicating hosts "a". Since the resolver_proc is
@@ -659,7 +744,7 @@ TEST_F(HostResolverImplTest, StartWithinCallback) {
 
   // Turn off caching for this host resolver.
   scoped_refptr<HostResolver> host_resolver(
-      new HostResolverImpl(resolver_proc, 0, 0));
+      new HostResolverImpl(resolver_proc, NULL, NULL, kMaxJobs));
 
   // The class will receive callbacks for when each resolve completes. It
   // checks that the right things happened.
@@ -724,7 +809,7 @@ class BypassCacheVerifier : public ResolveRequest::Delegate {
 
 TEST_F(HostResolverImplTest, BypassCache) {
   scoped_refptr<HostResolver> host_resolver(
-      new HostResolverImpl(NULL, kMaxCacheEntries, kMaxCacheAgeMs));
+      CreateHostResolverImpl(NULL));
 
   // The class will receive callbacks for when each resolve completes. It
   // checks that the right things happened.
@@ -742,6 +827,7 @@ bool operator==(const HostResolver::RequestInfo& a,
    return a.hostname() == b.hostname() &&
           a.port() == b.port() &&
           a.allow_cached_response() == b.allow_cached_response() &&
+          a.priority() == b.priority() &&
           a.is_speculative() == b.is_speculative() &&
           a.referrer() == b.referrer();
 }
@@ -808,7 +894,7 @@ class CapturingObserver : public HostResolver::Observer {
 // synchronous.
 TEST_F(HostResolverImplTest, Observers) {
   scoped_refptr<HostResolver> host_resolver(
-      new HostResolverImpl(NULL, kMaxCacheEntries, kMaxCacheAgeMs));
+      CreateHostResolverImpl(NULL));
 
   CapturingObserver observer;
 
@@ -818,23 +904,23 @@ TEST_F(HostResolverImplTest, Observers) {
 
   // Resolve "host1".
   HostResolver::RequestInfo info1("host1", 70);
-  scoped_refptr<LoadLog> log(new LoadLog);
-  int rv = host_resolver->Resolve(info1, &addrlist, NULL, NULL, log);
+  CapturingBoundNetLog log(CapturingNetLog::kUnbounded);
+  int rv = host_resolver->Resolve(info1, &addrlist, NULL, NULL, log.bound());
   EXPECT_EQ(OK, rv);
 
-  EXPECT_EQ(6u, log->events().size());
-  ExpectLogContains(log, 0, LoadLog::TYPE_HOST_RESOLVER_IMPL,
-                    LoadLog::PHASE_BEGIN);
-  ExpectLogContains(log, 1, LoadLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONSTART,
-                    LoadLog::PHASE_BEGIN);
-  ExpectLogContains(log, 2, LoadLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONSTART,
-                    LoadLog::PHASE_END);
-  ExpectLogContains(log, 3, LoadLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONFINISH,
-                    LoadLog::PHASE_BEGIN);
-  ExpectLogContains(log, 4, LoadLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONFINISH,
-                    LoadLog::PHASE_END);
-  ExpectLogContains(log, 5, LoadLog::TYPE_HOST_RESOLVER_IMPL,
-                    LoadLog::PHASE_END);
+  EXPECT_EQ(6u, log.entries().size());
+  EXPECT_TRUE(LogContainsBeginEvent(
+      log.entries(), 0, NetLog::TYPE_HOST_RESOLVER_IMPL));
+  EXPECT_TRUE(LogContainsBeginEvent(
+      log.entries(), 1, NetLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONSTART));
+  EXPECT_TRUE(LogContainsEndEvent(
+      log.entries(), 2, NetLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONSTART));
+  EXPECT_TRUE(LogContainsBeginEvent(
+      log.entries(), 3, NetLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONFINISH));
+  EXPECT_TRUE(LogContainsEndEvent(
+      log.entries(), 4, NetLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONFINISH));
+  EXPECT_TRUE(LogContainsEndEvent(
+      log.entries(), 5, NetLog::TYPE_HOST_RESOLVER_IMPL));
 
   EXPECT_EQ(1U, observer.start_log.size());
   EXPECT_EQ(1U, observer.finish_log.size());
@@ -894,7 +980,7 @@ TEST_F(HostResolverImplTest, CancellationObserver) {
   {
     // Create a host resolver and attach an observer.
     scoped_refptr<HostResolver> host_resolver(
-        new HostResolverImpl(NULL, kMaxCacheEntries, kMaxCacheAgeMs));
+        CreateHostResolverImpl(NULL));
     host_resolver->AddObserver(&observer);
 
     TestCompletionCallback callback;
@@ -957,5 +1043,460 @@ TEST_F(HostResolverImplTest, CancellationObserver) {
               CapturingObserver::StartOrCancelEntry(1, info));
 }
 
+// Test that IP address changes flush the cache.
+TEST_F(HostResolverImplTest, FlushCacheOnIPAddressChange) {
+  MockNetworkChangeNotifier mock_network_change_notifier;
+  scoped_refptr<HostResolver> host_resolver(
+      new HostResolverImpl(NULL, CreateDefaultCache(),
+                           &mock_network_change_notifier,
+                           kMaxJobs));
+
+  AddressList addrlist;
+
+  // Resolve "host1".
+  HostResolver::RequestInfo info1("host1", 70);
+  TestCompletionCallback callback;
+  int rv = host_resolver->Resolve(info1, &addrlist, &callback, NULL, NULL);
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+  EXPECT_EQ(OK, callback.WaitForResult());
+
+  // Resolve "host1" again -- this time it will be served from cache, but it
+  // should still notify of completion.
+  rv = host_resolver->Resolve(info1, &addrlist, &callback, NULL, NULL);
+  ASSERT_EQ(OK, rv);  // Should complete synchronously.
+
+  // Flush cache by triggering an IP address change.
+  mock_network_change_notifier.NotifyIPAddressChange();
+
+  // Resolve "host1" again -- this time it won't be served from cache, so it
+  // will complete asynchronously.
+  rv = host_resolver->Resolve(info1, &addrlist, &callback, NULL, NULL);
+  ASSERT_EQ(ERR_IO_PENDING, rv);  // Should complete asynchronously.
+  EXPECT_EQ(OK, callback.WaitForResult());
+}
+
+// Tests that when the maximum threads is set to 1, requests are dequeued
+// in order of priority.
+TEST_F(HostResolverImplTest, HigherPriorityRequestsStartedFirst) {
+  scoped_refptr<CapturingHostResolverProc> resolver_proc =
+      new CapturingHostResolverProc(NULL);
+
+  // This HostResolverImpl will only allow 1 outstanding resolve at a time.
+  size_t kMaxJobs = 1u;
+  scoped_refptr<HostResolver> host_resolver(
+      new HostResolverImpl(resolver_proc, CreateDefaultCache(),
+                           NULL, kMaxJobs));
+
+  CapturingObserver observer;
+  host_resolver->AddObserver(&observer);
+
+  // Note that at this point the CapturingHostResolverProc is blocked, so any
+  // requests we make will not complete.
+
+  HostResolver::RequestInfo req[] = {
+      CreateResolverRequest("req0", LOW),
+      CreateResolverRequest("req1", MEDIUM),
+      CreateResolverRequest("req2", MEDIUM),
+      CreateResolverRequest("req3", LOW),
+      CreateResolverRequest("req4", HIGHEST),
+      CreateResolverRequest("req5", LOW),
+      CreateResolverRequest("req6", LOW),
+      CreateResolverRequest("req5", HIGHEST),
+  };
+
+  TestCompletionCallback callback[arraysize(req)];
+  AddressList addrlist[arraysize(req)];
+
+  // Start all of the requests.
+  for (size_t i = 0; i < arraysize(req); ++i) {
+    int rv = host_resolver->Resolve(req[i], &addrlist[i],
+                                    &callback[i], NULL, NULL);
+    EXPECT_EQ(ERR_IO_PENDING, rv);
+  }
+
+  // Unblock the resolver thread so the requests can run.
+  resolver_proc->Signal();
+
+  // Wait for all the requests to complete succesfully.
+  for (size_t i = 0; i < arraysize(req); ++i) {
+    EXPECT_EQ(OK, callback[i].WaitForResult()) << "i=" << i;
+  }
+
+  host_resolver->RemoveObserver(&observer);
+
+  // Since we have restricted to a single concurrent thread in the jobpool,
+  // the requests should complete in order of priority (with the exception
+  // of the first request, which gets started right away, since there is
+  // nothing outstanding).
+  CapturingHostResolverProc::CaptureList capture_list =
+      resolver_proc->GetCaptureList();
+  ASSERT_EQ(7u, capture_list.size());
+
+  EXPECT_EQ("req0", capture_list[0].hostname);
+  EXPECT_EQ("req4", capture_list[1].hostname);
+  EXPECT_EQ("req5", capture_list[2].hostname);
+  EXPECT_EQ("req1", capture_list[3].hostname);
+  EXPECT_EQ("req2", capture_list[4].hostname);
+  EXPECT_EQ("req3", capture_list[5].hostname);
+  EXPECT_EQ("req6", capture_list[6].hostname);
+
+  // Also check using the observer's trace.
+  EXPECT_EQ(8U, observer.start_log.size());
+  EXPECT_EQ(8U, observer.finish_log.size());
+  EXPECT_EQ(0U, observer.cancel_log.size());
+
+  EXPECT_EQ("req0", observer.finish_log[0].info.hostname());
+  EXPECT_EQ("req4", observer.finish_log[1].info.hostname());
+
+  // There were two requests for "req5". The highest priority
+  // one should have been dispatched earlier.
+  EXPECT_EQ("req5", observer.finish_log[2].info.hostname());
+  EXPECT_EQ("req5", observer.finish_log[3].info.hostname());
+  EXPECT_EQ(HIGHEST, observer.finish_log[2].info.priority());
+  EXPECT_EQ(LOW, observer.finish_log[3].info.priority());
+
+  EXPECT_EQ("req1", observer.finish_log[4].info.hostname());
+  EXPECT_EQ("req2", observer.finish_log[5].info.hostname());
+  EXPECT_EQ("req3", observer.finish_log[6].info.hostname());
+  EXPECT_EQ("req6", observer.finish_log[7].info.hostname());
+}
+
+// Try cancelling a request which has not been attached to a job yet.
+TEST_F(HostResolverImplTest, CancelPendingRequest) {
+  scoped_refptr<CapturingHostResolverProc> resolver_proc =
+      new CapturingHostResolverProc(NULL);
+
+  // This HostResolverImpl will only allow 1 outstanding resolve at a time.
+  const size_t kMaxJobs = 1u;
+  scoped_refptr<HostResolver> host_resolver(
+      new HostResolverImpl(resolver_proc, CreateDefaultCache(),
+                           NULL, kMaxJobs));
+
+  // Note that at this point the CapturingHostResolverProc is blocked, so any
+  // requests we make will not complete.
+
+  HostResolver::RequestInfo req[] = {
+      CreateResolverRequest("req0", LOWEST),
+      CreateResolverRequest("req1", HIGHEST),  // Will cancel.
+      CreateResolverRequest("req2", MEDIUM),
+      CreateResolverRequest("req3", LOW),
+      CreateResolverRequest("req4", HIGHEST),   // Will cancel.
+      CreateResolverRequest("req5", LOWEST),    // Will cancel.
+      CreateResolverRequest("req6", MEDIUM),
+  };
+
+  TestCompletionCallback callback[arraysize(req)];
+  AddressList addrlist[arraysize(req)];
+  HostResolver::RequestHandle handle[arraysize(req)];
+
+  // Start all of the requests.
+  for (size_t i = 0; i < arraysize(req); ++i) {
+    int rv = host_resolver->Resolve(req[i], &addrlist[i],
+                                    &callback[i], &handle[i], NULL);
+    EXPECT_EQ(ERR_IO_PENDING, rv);
+  }
+
+  // Cancel some requests
+  host_resolver->CancelRequest(handle[1]);
+  host_resolver->CancelRequest(handle[4]);
+  host_resolver->CancelRequest(handle[5]);
+  handle[1] = handle[4] = handle[5] = NULL;
+
+  // Unblock the resolver thread so the requests can run.
+  resolver_proc->Signal();
+
+  // Wait for all the requests to complete succesfully.
+  for (size_t i = 0; i < arraysize(req); ++i) {
+    if (!handle[i])
+      continue;  // Don't wait for the requests we cancelled.
+    EXPECT_EQ(OK, callback[i].WaitForResult());
+  }
+
+  // Verify that they called out the the resolver proc (which runs on the
+  // resolver thread) in the expected order.
+  CapturingHostResolverProc::CaptureList capture_list =
+      resolver_proc->GetCaptureList();
+  ASSERT_EQ(4u, capture_list.size());
+
+  EXPECT_EQ("req0", capture_list[0].hostname);
+  EXPECT_EQ("req2", capture_list[1].hostname);
+  EXPECT_EQ("req6", capture_list[2].hostname);
+  EXPECT_EQ("req3", capture_list[3].hostname);
+}
+
+// Test that when too many requests are enqueued, old ones start to be aborted.
+TEST_F(HostResolverImplTest, QueueOverflow) {
+  scoped_refptr<CapturingHostResolverProc> resolver_proc =
+      new CapturingHostResolverProc(NULL);
+
+  // This HostResolverImpl will only allow 1 outstanding resolve at a time.
+  const size_t kMaxOutstandingJobs = 1u;
+  scoped_refptr<HostResolverImpl> host_resolver(
+      new HostResolverImpl(resolver_proc, CreateDefaultCache(),
+                           NULL, kMaxOutstandingJobs));
+
+  // Only allow up to 3 requests to be enqueued at a time.
+  const size_t kMaxPendingRequests = 3u;
+  host_resolver->SetPoolConstraints(HostResolverImpl::POOL_NORMAL,
+                                    kMaxOutstandingJobs,
+                                    kMaxPendingRequests);
+
+  // Note that at this point the CapturingHostResolverProc is blocked, so any
+  // requests we make will not complete.
+
+  HostResolver::RequestInfo req[] = {
+      CreateResolverRequest("req0", LOWEST),
+      CreateResolverRequest("req1", HIGHEST),
+      CreateResolverRequest("req2", MEDIUM),
+      CreateResolverRequest("req3", MEDIUM),
+
+      // At this point, there are 3 enqueued requests.
+      // Insertion of subsequent requests will cause evictions
+      // based on priority.
+
+      CreateResolverRequest("req4", LOW),      // Evicts itself!
+      CreateResolverRequest("req5", MEDIUM),   // Evicts req3
+      CreateResolverRequest("req6", HIGHEST),  // Evicts req5.
+      CreateResolverRequest("req7", MEDIUM),   // Evicts req2.
+  };
+
+  TestCompletionCallback callback[arraysize(req)];
+  AddressList addrlist[arraysize(req)];
+  HostResolver::RequestHandle handle[arraysize(req)];
+
+  // Start all of the requests.
+  for (size_t i = 0; i < arraysize(req); ++i) {
+    int rv = host_resolver->Resolve(req[i], &addrlist[i],
+                                    &callback[i], &handle[i], NULL);
+    if (i == 4u)
+      EXPECT_EQ(ERR_HOST_RESOLVER_QUEUE_TOO_LARGE, rv);
+    else
+      EXPECT_EQ(ERR_IO_PENDING, rv) << i;
+  }
+
+  // Unblock the resolver thread so the requests can run.
+  resolver_proc->Signal();
+
+  // Requests 3, 5, 2 will have been evicted due to queue overflow.
+  size_t reqs_expected_to_fail[] = { 2, 3, 5 };
+  for (size_t i = 0; i < arraysize(reqs_expected_to_fail); ++i) {
+    EXPECT_EQ(ERR_HOST_RESOLVER_QUEUE_TOO_LARGE,
+              callback[reqs_expected_to_fail[i]].WaitForResult());
+  }
+
+  // The rest should succeed.
+  size_t reqs_expected_to_succeed[] = { 0, 1, 6, 7 };
+  for (size_t i = 0; i < arraysize(reqs_expected_to_succeed); ++i) {
+    EXPECT_EQ(OK, callback[reqs_expected_to_succeed[i]].WaitForResult());
+  }
+
+  // Verify that they called out the the resolver proc (which runs on the
+  // resolver thread) in the expected order.
+  CapturingHostResolverProc::CaptureList capture_list =
+      resolver_proc->GetCaptureList();
+  ASSERT_EQ(4u, capture_list.size());
+
+  EXPECT_EQ("req0", capture_list[0].hostname);
+  EXPECT_EQ("req1", capture_list[1].hostname);
+  EXPECT_EQ("req6", capture_list[2].hostname);
+  EXPECT_EQ("req7", capture_list[3].hostname);
+}
+
+// Tests that after changing the default AddressFamily to IPV4, requests
+// with UNSPECIFIED address family map to IPV4.
+TEST_F(HostResolverImplTest, SetDefaultAddressFamily_IPv4) {
+  scoped_refptr<CapturingHostResolverProc> resolver_proc =
+      new CapturingHostResolverProc(new EchoingHostResolverProc);
+
+  // This HostResolverImpl will only allow 1 outstanding resolve at a time.
+  const size_t kMaxOutstandingJobs = 1u;
+  scoped_refptr<HostResolverImpl> host_resolver(
+      new HostResolverImpl(resolver_proc, CreateDefaultCache(),
+                           NULL, kMaxOutstandingJobs));
+
+  host_resolver->SetDefaultAddressFamily(ADDRESS_FAMILY_IPV4);
+
+  // Note that at this point the CapturingHostResolverProc is blocked, so any
+  // requests we make will not complete.
+
+  HostResolver::RequestInfo req[] = {
+      CreateResolverRequestForAddressFamily("h1", MEDIUM,
+                                            ADDRESS_FAMILY_UNSPECIFIED),
+      CreateResolverRequestForAddressFamily("h1", MEDIUM, ADDRESS_FAMILY_IPV4),
+      CreateResolverRequestForAddressFamily("h1", MEDIUM, ADDRESS_FAMILY_IPV6),
+  };
+
+  TestCompletionCallback callback[arraysize(req)];
+  AddressList addrlist[arraysize(req)];
+  HostResolver::RequestHandle handle[arraysize(req)];
+
+  // Start all of the requests.
+  for (size_t i = 0; i < arraysize(req); ++i) {
+    int rv = host_resolver->Resolve(req[i], &addrlist[i],
+                                    &callback[i], &handle[i], NULL);
+    EXPECT_EQ(ERR_IO_PENDING, rv) << i;
+  }
+
+  // Unblock the resolver thread so the requests can run.
+  resolver_proc->Signal();
+
+  // Wait for all the requests to complete.
+  for (size_t i = 0u; i < arraysize(req); ++i) {
+    EXPECT_EQ(OK, callback[i].WaitForResult());
+  }
+
+  // Since the requests all had the same priority and we limited the thread
+  // count to 1, they should have completed in the same order as they were
+  // requested. Moreover, request0 and request1 will have been serviced by
+  // the same job.
+
+  CapturingHostResolverProc::CaptureList capture_list =
+      resolver_proc->GetCaptureList();
+  ASSERT_EQ(2u, capture_list.size());
+
+  EXPECT_EQ("h1", capture_list[0].hostname);
+  EXPECT_EQ(ADDRESS_FAMILY_IPV4, capture_list[0].address_family);
+
+  EXPECT_EQ("h1", capture_list[1].hostname);
+  EXPECT_EQ(ADDRESS_FAMILY_IPV6, capture_list[1].address_family);
+
+  // Now check that the correct resolved IP addresses were returned.
+  // Addresses take the form: 192.x.y.z
+  //    x = length of hostname
+  //    y = ASCII value of hostname[0]
+  //    z = value of address family
+  EXPECT_EQ("192.2.104.1", NetAddressToString(addrlist[0].head()));
+  EXPECT_EQ("192.2.104.1", NetAddressToString(addrlist[1].head()));
+  EXPECT_EQ("192.2.104.2", NetAddressToString(addrlist[2].head()));
+}
+
+// This is the exact same test as SetDefaultAddressFamily_IPv4, except the order
+// of requests 0 and 1 is flipped, and the default is set to IPv6 in place of
+// IPv4.
+TEST_F(HostResolverImplTest, SetDefaultAddressFamily_IPv6) {
+  scoped_refptr<CapturingHostResolverProc> resolver_proc =
+      new CapturingHostResolverProc(new EchoingHostResolverProc);
+
+  // This HostResolverImpl will only allow 1 outstanding resolve at a time.
+  const size_t kMaxOutstandingJobs = 1u;
+  scoped_refptr<HostResolverImpl> host_resolver(
+      new HostResolverImpl(resolver_proc, CreateDefaultCache(),
+                           NULL, kMaxOutstandingJobs));
+
+  host_resolver->SetDefaultAddressFamily(ADDRESS_FAMILY_IPV6);
+
+  // Note that at this point the CapturingHostResolverProc is blocked, so any
+  // requests we make will not complete.
+
+  HostResolver::RequestInfo req[] = {
+      CreateResolverRequestForAddressFamily("h1", MEDIUM, ADDRESS_FAMILY_IPV6),
+      CreateResolverRequestForAddressFamily("h1", MEDIUM,
+                                            ADDRESS_FAMILY_UNSPECIFIED),
+      CreateResolverRequestForAddressFamily("h1", MEDIUM, ADDRESS_FAMILY_IPV4),
+  };
+
+  TestCompletionCallback callback[arraysize(req)];
+  AddressList addrlist[arraysize(req)];
+  HostResolver::RequestHandle handle[arraysize(req)];
+
+  // Start all of the requests.
+  for (size_t i = 0; i < arraysize(req); ++i) {
+    int rv = host_resolver->Resolve(req[i], &addrlist[i],
+                                    &callback[i], &handle[i], NULL);
+    EXPECT_EQ(ERR_IO_PENDING, rv) << i;
+  }
+
+  // Unblock the resolver thread so the requests can run.
+  resolver_proc->Signal();
+
+  // Wait for all the requests to complete.
+  for (size_t i = 0u; i < arraysize(req); ++i) {
+    EXPECT_EQ(OK, callback[i].WaitForResult());
+  }
+
+  // Since the requests all had the same priority and we limited the thread
+  // count to 1, they should have completed in the same order as they were
+  // requested. Moreover, request0 and request1 will have been serviced by
+  // the same job.
+
+  CapturingHostResolverProc::CaptureList capture_list =
+      resolver_proc->GetCaptureList();
+  ASSERT_EQ(2u, capture_list.size());
+
+  EXPECT_EQ("h1", capture_list[0].hostname);
+  EXPECT_EQ(ADDRESS_FAMILY_IPV6, capture_list[0].address_family);
+
+  EXPECT_EQ("h1", capture_list[1].hostname);
+  EXPECT_EQ(ADDRESS_FAMILY_IPV4, capture_list[1].address_family);
+
+  // Now check that the correct resolved IP addresses were returned.
+  // Addresses take the form: 192.x.y.z
+  //    x = length of hostname
+  //    y = ASCII value of hostname[0]
+  //    z = value of address family
+  EXPECT_EQ("192.2.104.2", NetAddressToString(addrlist[0].head()));
+  EXPECT_EQ("192.2.104.2", NetAddressToString(addrlist[1].head()));
+  EXPECT_EQ("192.2.104.1", NetAddressToString(addrlist[2].head()));
+}
+
+// This tests that the default address family is respected for synchronous
+// resolutions.
+TEST_F(HostResolverImplTest, SetDefaultAddressFamily_Synchronous) {
+  scoped_refptr<CapturingHostResolverProc> resolver_proc =
+      new CapturingHostResolverProc(new EchoingHostResolverProc);
+
+  const size_t kMaxOutstandingJobs = 10u;
+  scoped_refptr<HostResolverImpl> host_resolver(
+      new HostResolverImpl(resolver_proc, CreateDefaultCache(),
+                           NULL, kMaxOutstandingJobs));
+
+  host_resolver->SetDefaultAddressFamily(ADDRESS_FAMILY_IPV4);
+
+  // Unblock the resolver thread so the requests can run.
+  resolver_proc->Signal();
+
+  HostResolver::RequestInfo req[] = {
+      CreateResolverRequestForAddressFamily("b", MEDIUM,
+                                            ADDRESS_FAMILY_UNSPECIFIED),
+      CreateResolverRequestForAddressFamily("b", MEDIUM, ADDRESS_FAMILY_IPV6),
+      CreateResolverRequestForAddressFamily("b", MEDIUM,
+                                            ADDRESS_FAMILY_UNSPECIFIED),
+      CreateResolverRequestForAddressFamily("b", MEDIUM, ADDRESS_FAMILY_IPV4),
+  };
+  AddressList addrlist[arraysize(req)];
+
+  // Start and run all of the requests synchronously.
+  for (size_t i = 0; i < arraysize(req); ++i) {
+    int rv = host_resolver->Resolve(req[i], &addrlist[i],
+                                    NULL, NULL, NULL);
+    EXPECT_EQ(OK, rv) << i;
+  }
+
+  // We should have sent 2 requests to the resolver --
+  // one for (b, IPv4), and one for (b, IPv6).
+  CapturingHostResolverProc::CaptureList capture_list =
+      resolver_proc->GetCaptureList();
+  ASSERT_EQ(2u, capture_list.size());
+
+  EXPECT_EQ("b", capture_list[0].hostname);
+  EXPECT_EQ(ADDRESS_FAMILY_IPV4, capture_list[0].address_family);
+
+  EXPECT_EQ("b", capture_list[1].hostname);
+  EXPECT_EQ(ADDRESS_FAMILY_IPV6, capture_list[1].address_family);
+
+  // Now check that the correct resolved IP addresses were returned.
+  // Addresses take the form: 192.x.y.z
+  //    x = length of hostname
+  //    y = ASCII value of hostname[0]
+  //    z = value of address family
+  EXPECT_EQ("192.1.98.1", NetAddressToString(addrlist[0].head()));
+  EXPECT_EQ("192.1.98.2", NetAddressToString(addrlist[1].head()));
+  EXPECT_EQ("192.1.98.1", NetAddressToString(addrlist[2].head()));
+  EXPECT_EQ("192.1.98.1", NetAddressToString(addrlist[3].head()));
+}
+
+// TODO(cbentzel): Test a mix of requests with different HostResolverFlags.
+
 }  // namespace
+
 }  // namespace net

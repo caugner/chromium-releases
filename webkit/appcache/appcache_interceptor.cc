@@ -9,6 +9,7 @@
 #include "webkit/appcache/appcache_interfaces.h"
 #include "webkit/appcache/appcache_request_handler.h"
 #include "webkit/appcache/appcache_service.h"
+#include "webkit/appcache/appcache_url_request_job.h"
 
 namespace appcache {
 
@@ -28,9 +29,13 @@ void AppCacheInterceptor::SetExtraRequestInfo(
   if (!service || (host_id == kNoHostId))
     return;
 
+  AppCacheBackendImpl* backend = service->GetBackend(process_id);
+  if (!backend)
+    return;
+
   // TODO(michaeln): An invalid host id is indicative of bad data
   // from a child process. How should we handle that here?
-  AppCacheHost* host = service->GetBackend(process_id)->GetHost(host_id);
+  AppCacheHost* host = backend->GetHost(host_id);
   if (!host)
     return;
 

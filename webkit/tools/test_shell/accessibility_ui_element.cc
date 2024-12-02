@@ -2,202 +2,226 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
-#include "AccessibilityObject.h"
-
-#undef LOG
-
-#include "webkit/api/public/WebAccessibilityObject.h"
-#include "webkit/glue/glue_util.h"
+#include "base/logging.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityObject.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
 #include "webkit/tools/test_shell/accessibility_ui_element.h"
 
-using namespace WebCore;
-
+using WebKit::WebCString;
+using WebKit::WebString;
 using WebKit::WebAccessibilityObject;
-
-using webkit_glue::StringToStdString;
-using webkit_glue::AccessibilityObjectToWebAccessibilityObject;
-using webkit_glue::WebAccessibilityObjectToAccessibilityObject;
+using WebKit::WebAccessibilityRole;
 
 namespace {
 
-static PassRefPtr<AccessibilityObject> AXObject(
-    const WebAccessibilityObject& object) {
-  RefPtr<AccessibilityObject> o =
-      WebAccessibilityObjectToAccessibilityObject(object);
-  // Always ask to update the render tree before querying accessibility object.
-  o->updateBackingStore();
-  return o;
-}
-
 // Map role value to string, matching Safari/Mac platform implementation to
 // avoid rebaselining layout tests.
-static std::string RoleToString(AccessibilityRole role) {
+static std::string RoleToString(WebAccessibilityRole role) {
   std::string result = "AXRole: AX";
   switch (role) {
-    case ButtonRole:
+    case WebKit::WebAccessibilityRoleButton:
       return result.append("Button");
-    case RadioButtonRole:
+    case WebKit::WebAccessibilityRoleRadioButton:
       return result.append("RadioButton");
-    case CheckBoxRole:
+    case WebKit::WebAccessibilityRoleCheckBox:
       return result.append("CheckBox");
-    case SliderRole:
+    case WebKit::WebAccessibilityRoleSlider:
       return result.append("Slider");
-    case TabGroupRole:
+    case WebKit::WebAccessibilityRoleTabGroup:
       return result.append("TabGroup");
-    case TextFieldRole:
+    case WebKit::WebAccessibilityRoleTextField:
       return result.append("TextField");
-    case StaticTextRole:
+    case WebKit::WebAccessibilityRoleStaticText:
       return result.append("StaticText");
-    case TextAreaRole:
+    case WebKit::WebAccessibilityRoleTextArea:
       return result.append("TextArea");
-    case ScrollAreaRole:
+    case WebKit::WebAccessibilityRoleScrollArea:
       return result.append("ScrollArea");
-    case PopUpButtonRole:
+    case WebKit::WebAccessibilityRolePopUpButton:
       return result.append("PopUpButton");
-    case MenuButtonRole:
+    case WebKit::WebAccessibilityRoleMenuButton:
       return result.append("MenuButton");
-    case TableRole:
+    case WebKit::WebAccessibilityRoleTable:
       return result.append("Table");
-    case ApplicationRole:
+    case WebKit::WebAccessibilityRoleApplication:
       return result.append("Application");
-    case GroupRole:
+    case WebKit::WebAccessibilityRoleGroup:
       return result.append("Group");
-    case RadioGroupRole:
+    case WebKit::WebAccessibilityRoleRadioGroup:
       return result.append("RadioGroup");
-    case ListRole:
+    case WebKit::WebAccessibilityRoleList:
       return result.append("List");
-    case ScrollBarRole:
+    case WebKit::WebAccessibilityRoleScrollBar:
       return result.append("ScrollBar");
-    case ValueIndicatorRole:
+    case WebKit::WebAccessibilityRoleValueIndicator:
       return result.append("ValueIndicator");
-    case ImageRole:
+    case WebKit::WebAccessibilityRoleImage:
       return result.append("Image");
-    case MenuBarRole:
+    case WebKit::WebAccessibilityRoleMenuBar:
       return result.append("MenuBar");
-    case MenuRole:
+    case WebKit::WebAccessibilityRoleMenu:
       return result.append("Menu");
-    case MenuItemRole:
+    case WebKit::WebAccessibilityRoleMenuItem:
       return result.append("MenuItem");
-    case ColumnRole:
+    case WebKit::WebAccessibilityRoleColumn:
       return result.append("Column");
-    case RowRole:
+    case WebKit::WebAccessibilityRoleRow:
       return result.append("Row");
-    case ToolbarRole:
+    case WebKit::WebAccessibilityRoleToolbar:
       return result.append("Toolbar");
-    case BusyIndicatorRole:
+    case WebKit::WebAccessibilityRoleBusyIndicator:
       return result.append("BusyIndicator");
-    case ProgressIndicatorRole:
+    case WebKit::WebAccessibilityRoleProgressIndicator:
       return result.append("ProgressIndicator");
-    case WindowRole:
+    case WebKit::WebAccessibilityRoleWindow:
       return result.append("Window");
-    case DrawerRole:
+    case WebKit::WebAccessibilityRoleDrawer:
       return result.append("Drawer");
-    case SystemWideRole:
+    case WebKit::WebAccessibilityRoleSystemWide:
       return result.append("SystemWide");
-    case OutlineRole:
+    case WebKit::WebAccessibilityRoleOutline:
       return result.append("Outline");
-    case IncrementorRole:
+    case WebKit::WebAccessibilityRoleIncrementor:
       return result.append("Incrementor");
-    case BrowserRole:
+    case WebKit::WebAccessibilityRoleBrowser:
       return result.append("Browser");
-    case ComboBoxRole:
+    case WebKit::WebAccessibilityRoleComboBox:
       return result.append("ComboBox");
-    case SplitGroupRole:
+    case WebKit::WebAccessibilityRoleSplitGroup:
       return result.append("SplitGroup");
-    case SplitterRole:
+    case WebKit::WebAccessibilityRoleSplitter:
       return result.append("Splitter");
-    case ColorWellRole:
+    case WebKit::WebAccessibilityRoleColorWell:
       return result.append("ColorWell");
-    case GrowAreaRole:
+    case WebKit::WebAccessibilityRoleGrowArea:
       return result.append("GrowArea");
-    case SheetRole:
+    case WebKit::WebAccessibilityRoleSheet:
       return result.append("Sheet");
-    case HelpTagRole:
+    case WebKit::WebAccessibilityRoleHelpTag:
       return result.append("HelpTag");
-    case MatteRole:
+    case WebKit::WebAccessibilityRoleMatte:
       return result.append("Matte");
-    case RulerRole:
+    case WebKit::WebAccessibilityRoleRuler:
       return result.append("Ruler");
-    case RulerMarkerRole:
+    case WebKit::WebAccessibilityRoleRulerMarker:
       return result.append("RulerMarker");
-    case LinkRole:
+    case WebKit::WebAccessibilityRoleLink:
       return result.append("Link");
-    case DisclosureTriangleRole:
+    case WebKit::WebAccessibilityRoleDisclosureTriangle:
       return result.append("DisclosureTriangle");
-    case GridRole:
+    case WebKit::WebAccessibilityRoleGrid:
       return result.append("Grid");
-    case CellRole:
+    case WebKit::WebAccessibilityRoleCell:
       return result.append("Cell");
-    case ColumnHeaderRole:
+    case WebKit::WebAccessibilityRoleColumnHeader:
       return result.append("ColumnHeader");
-    case RowHeaderRole:
+    case WebKit::WebAccessibilityRoleRowHeader:
       return result.append("RowHeader");
-    case WebCoreLinkRole:
+    case WebKit::WebAccessibilityRoleWebCoreLink:
       // Maps to Link role.
       return result.append("Link");
-    case ImageMapLinkRole:
+    case WebKit::WebAccessibilityRoleImageMapLink:
       return result.append("ImageMapLink");
-    case ImageMapRole:
+    case WebKit::WebAccessibilityRoleImageMap:
       return result.append("ImageMap");
-    case ListMarkerRole:
+    case WebKit::WebAccessibilityRoleListMarker:
       return result.append("ListMarker");
-    case WebAreaRole:
+    case WebKit::WebAccessibilityRoleWebArea:
       return result.append("WebArea");
-    case HeadingRole:
+    case WebKit::WebAccessibilityRoleHeading:
       return result.append("Heading");
-    case ListBoxRole:
+    case WebKit::WebAccessibilityRoleListBox:
       return result.append("ListBox");
-    case ListBoxOptionRole:
+    case WebKit::WebAccessibilityRoleListBoxOption:
       return result.append("ListBoxOption");
-    case TableHeaderContainerRole:
+    case WebKit::WebAccessibilityRoleTableHeaderContainer:
       return result.append("TableHeaderContainer");
-    case DefinitionListTermRole:
+    case WebKit::WebAccessibilityRoleDefinitionListTerm:
       return result.append("DefinitionListTerm");
-    case DefinitionListDefinitionRole:
+    case WebKit::WebAccessibilityRoleDefinitionListDefinition:
       return result.append("DefinitionListDefinition");
-    case AnnotationRole:
+    case WebKit::WebAccessibilityRoleAnnotation:
       return result.append("Annotation");
-    case SliderThumbRole:
+    case WebKit::WebAccessibilityRoleSliderThumb:
       return result.append("SliderThumb");
-    case LandmarkApplicationRole:
+    case WebKit::WebAccessibilityRoleLandmarkApplication:
       return result.append("LandmarkApplication");
-    case LandmarkBannerRole:
+    case WebKit::WebAccessibilityRoleLandmarkBanner:
       return result.append("LandmarkBanner");
-    case LandmarkComplementaryRole:
+    case WebKit::WebAccessibilityRoleLandmarkComplementary:
       return result.append("LandmarkComplementary");
-    case LandmarkContentInfoRole:
+    case WebKit::WebAccessibilityRoleLandmarkContentInfo:
       return result.append("LandmarkContentInfo");
-    case LandmarkMainRole:
+    case WebKit::WebAccessibilityRoleLandmarkMain:
       return result.append("LandmarkMain");
-    case LandmarkNavigationRole:
+    case WebKit::WebAccessibilityRoleLandmarkNavigation:
       return result.append("LandmarkNavigation");
-    case LandmarkSearchRole:
+    case WebKit::WebAccessibilityRoleLandmarkSearch:
       return result.append("LandmarkSearch");
-    case ApplicationLogRole:
+    case WebKit::WebAccessibilityRoleApplicationLog:
       return result.append("ApplicationLog");
-    case ApplicationMarqueeRole:
+    case WebKit::WebAccessibilityRoleApplicationMarquee:
       return result.append("ApplicationMarquee");
-    case ApplicationStatusRole:
+    case WebKit::WebAccessibilityRoleApplicationStatus:
       return result.append("ApplicationStatus");
-    case ApplicationTimerRole:
+    case WebKit::WebAccessibilityRoleApplicationTimer:
       return result.append("ApplicationTimer");
-    case DocumentRole:
+    case WebKit::WebAccessibilityRoleDocument:
       return result.append("Document");
-    case DocumentArticleRole:
+    case WebKit::WebAccessibilityRoleDocumentArticle:
       return result.append("DocumentArticle");
-    case DocumentNoteRole:
+    case WebKit::WebAccessibilityRoleDocumentNote:
       return result.append("DocumentNote");
-    case DocumentRegionRole:
+    case WebKit::WebAccessibilityRoleDocumentRegion:
       return result.append("DocumentRegion");
-    case UserInterfaceTooltipRole:
+    case WebKit::WebAccessibilityRoleUserInterfaceTooltip:
       return result.append("UserInterfaceTooltip");
     default:
-      // Also matches UnknownRole.
+      // Also matches WebAccessibilityRoleUnknown.
       return result.append("Unknown");
   }
 }
+
+std::string GetDescription(const WebAccessibilityObject& object) {
+  std::string description = object.accessibilityDescription().utf8();
+  return description.insert(0, "AXDescription: ");
+}
+
+std::string GetRole(const WebAccessibilityObject& object) {
+  return RoleToString(object.roleValue());
+}
+
+std::string GetTitle(const WebAccessibilityObject& object) {
+  std::string title = object.title().utf8();
+  return title.insert(0, "AXTitle: ");
+}
+
+std::string GetAttributes(const WebAccessibilityObject& object) {
+  // TODO(dglazkov): Concatenate all attributes of the AccessibilityObject.
+  std::string attributes(GetTitle(object));
+  attributes.append("\n");
+  attributes.append(GetRole(object));
+  attributes.append("\n");
+  attributes.append(GetDescription(object));
+  return attributes;
+}
+
+
+// Collects attributes into a string, delimited by dashes. Used by all methods
+// that output lists of attributes: AttributesOfLinkedUIElementsCallback,
+// AttributesOfChildrenCallback, etc.
+class AttributesCollector {
+ public:
+  void CollectAttributes(const WebAccessibilityObject& object) {
+    attributes_.append("\n------------\n");
+    attributes_.append(GetAttributes(object));
+  }
+  std::string attributes() const { return attributes_; }
+
+private:
+  std::string attributes_;
+};
 
 }  // namespace
 
@@ -274,6 +298,7 @@ AccessibilityUIElement::AccessibilityUIElement(
   BindProperty("selectedTextRange", &selected_text_range);
   BindProperty("isEnabled", &AccessibilityUIElement::IsEnabledGetterCallback);
   BindProperty("isRequired", &is_required_);
+  BindProperty("isSelected", &AccessibilityUIElement::IsSelectedGetterCallback);
   BindProperty("valueDescription", &value_description_);
 
   BindFallbackMethod(&AccessibilityUIElement::FallbackCallback);
@@ -281,32 +306,12 @@ AccessibilityUIElement::AccessibilityUIElement(
 
 AccessibilityUIElement* AccessibilityUIElement::GetChildAtIndex(
     unsigned index) {
-  RefPtr<AccessibilityObject> object = AXObject(accessibility_object());
-  if (object->children().size() <= index)
-    return NULL;
-
-  WebAccessibilityObject child =
-      AccessibilityObjectToWebAccessibilityObject(object->children()[index]);
-  return factory_->Create(child);
-}
-
-std::string AccessibilityUIElement::GetTitle() {
-  std::string title = StringToStdString(AXObject(
-      accessibility_object())->title());
-  return title.insert(0, "AXTitle: ");
-}
-
-std::string AccessibilityUIElement::GetDescription() {
-  std::string description = StringToStdString(AXObject(
-      accessibility_object())->accessibilityDescription());
-  return description.insert(0, "AXDescription: ");
+  return factory_->Create(accessibility_object().childAt(index));
 }
 
 void AccessibilityUIElement::AllAttributesCallback(
     const CppArgumentList& args, CppVariant* result) {
-  // TODO(dglazkov): Concatenate all attributes of the AccessibilityObject.
-  std::string attributes(GetTitle());
-  result->Set(attributes);
+  result->Set(GetAttributes(accessibility_object()));
 }
 
 void AccessibilityUIElement::AttributesOfLinkedUIElementsCallback(
@@ -321,7 +326,12 @@ void AccessibilityUIElement::AttributesOfDocumentLinksCallback(
 
 void AccessibilityUIElement::AttributesOfChildrenCallback(
     const CppArgumentList& args, CppVariant* result) {
-  result->SetNull();
+  AttributesCollector collector;
+  unsigned size = accessibility_object().childCount();
+  for(unsigned i = 0; i < size; ++i) {
+    collector.CollectAttributes(accessibility_object().childAt(i));
+  }
+  result->Set(collector.attributes());
 }
 
 void AccessibilityUIElement::ParametrizedAttributeNamesCallback(
@@ -432,7 +442,17 @@ void AccessibilityUIElement::AttributeValueCallback(
 
 void AccessibilityUIElement::IsAttributeSettableCallback(
     const CppArgumentList& args, CppVariant* result) {
-  result->SetNull();
+  if (args.size() < 1 && !args[0].isString()) {
+    result->SetNull();
+    return;
+  }
+
+  std::string attribute = args[0].ToString();
+  bool settable = false;
+  if (attribute == "AXValue") {
+    settable = accessibility_object().canSetValueAttribute();
+  }
+  result->Set(settable);
 }
 
 void AccessibilityUIElement::IsActionSupportedCallback(
@@ -466,24 +486,28 @@ void AccessibilityUIElement::FallbackCallback(const CppArgumentList &args,
 void AccessibilityUIElement::ChildrenCountGetterCallback(CppVariant* result) {
   int count = 1;  // Root object always has only one child, the WebView.
   if (!IsRoot())
-    count = AXObject(accessibility_object())->children().size();
+    count = accessibility_object().childCount();
   result->Set(count);
 }
 
 void AccessibilityUIElement::DescriptionGetterCallback(CppVariant *result) {
-  result->Set(GetDescription());
+  result->Set(GetDescription(accessibility_object()));
 }
 
 void AccessibilityUIElement::IsEnabledGetterCallback(CppVariant* result) {
-  result->Set(AXObject(accessibility_object())->isEnabled());
+  result->Set(accessibility_object().isEnabled());
+}
+
+void AccessibilityUIElement::IsSelectedGetterCallback(CppVariant* result) {
+  result->SetNull();
 }
 
 void AccessibilityUIElement::RoleGetterCallback(CppVariant* result) {
-  result->Set(RoleToString(AXObject(accessibility_object())->roleValue()));
+  result->Set(GetRole(accessibility_object()));
 }
 
 void AccessibilityUIElement::TitleGetterCallback(CppVariant* result) {
-  result->Set(GetTitle());
+  result->Set(GetTitle(accessibility_object()));
 }
 
 
@@ -512,6 +536,9 @@ void AccessibilityUIElementList::Clear() {
 
 AccessibilityUIElement* AccessibilityUIElementList::Create(
     const WebAccessibilityObject& object) {
+  if (object.isNull())
+    return NULL;
+
   AccessibilityUIElement* element = new AccessibilityUIElement(object, this);
   elements_.push_back(element);
   return element;

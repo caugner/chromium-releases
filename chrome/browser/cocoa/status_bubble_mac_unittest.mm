@@ -13,19 +13,6 @@
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
-#import "third_party/GTM/AppKit/GTMTheme.h"
-
-@interface StatusBubbleMacTestWindowDelegate : NSObject <GTMThemeDelegate>
-@end
-@implementation StatusBubbleMacTestWindowDelegate
-- (GTMTheme*)gtm_themeForWindow:(NSWindow*)window {
-  return [[[GTMTheme alloc] init] autorelease];
-}
-
-- (NSPoint)gtm_themePatternPhaseForWindow:(NSWindow*)window {
-  return NSZeroPoint;
-}
-@end
 
 // The test delegate records all of the status bubble object's state
 // transitions.
@@ -44,15 +31,29 @@
 }
 @end
 
-class StatusBubbleMacTest : public PlatformTest {
+// This class implements, for testing purposes, a subclass of |StatusBubbleMac|
+// whose |MouseMoved()| method does nothing. (Ideally, we'd have a way of
+// controlling the "mouse" location, but the current implementation of
+// |StatusBubbleMac| uses |[NSEvent mouseLocation]| directly.) Without this,
+// tests can be flaky since results may depend on the mouse location.
+class StatusBubbleMacIgnoreMouseMoved : public StatusBubbleMac {
  public:
-  StatusBubbleMacTest() {
-    NSWindow* window = cocoa_helper_.window();
+  StatusBubbleMacIgnoreMouseMoved(NSWindow* parent, id delegate)
+      : StatusBubbleMac(parent, delegate) {}
+
+  virtual void MouseMoved(const gfx::Point& location, bool left_content) {}
+};
+
+class StatusBubbleMacTest : public CocoaTest {
+ public:
+  virtual void SetUp() {
+    CocoaTest::SetUp();
+    NSWindow* window = test_window();
     EXPECT_TRUE(window);
     delegate_.reset([[StatusBubbleMacTestDelegate alloc] init]);
     EXPECT_TRUE(delegate_.get());
-    bubble_.reset(new StatusBubbleMac(window, delegate_));
-    EXPECT_TRUE(bubble_.get());
+    bubble_ = new StatusBubbleMacIgnoreMouseMoved(window, delegate_);
+    EXPECT_TRUE(bubble_);
 
     // Turn off delays and transitions for test mode.  This doesn't just speed
     // things along, it's actually required to get StatusBubbleMac to behave
@@ -62,6 +63,13 @@ class StatusBubbleMacTest : public PlatformTest {
     bubble_->immediate_ = true;
 
     EXPECT_FALSE(bubble_->window_);  // lazily creates window
+  }
+
+  virtual void TearDown() {
+    // Not using a scoped_ptr because bubble must be deleted before calling
+    // TearDown to get rid of bubble's window.
+    delete bubble_;
+    CocoaTest::TearDown();
   }
 
   bool IsVisible() {
@@ -97,19 +105,10 @@ class StatusBubbleMacTest : public PlatformTest {
   StatusBubbleMac::StatusBubbleState StateAt(int index) {
     return (*States())[index];
   }
-  CocoaTestHelper cocoa_helper_;  // Inits Cocoa, creates window, etc...
   BrowserTestHelper browser_helper_;
   scoped_nsobject<StatusBubbleMacTestDelegate> delegate_;
-  scoped_ptr<StatusBubbleMac> bubble_;
+  StatusBubbleMac* bubble_;  // Strong.
 };
-
-TEST_F(StatusBubbleMacTest, Theme) {
-  bubble_->SetStatus(L"Theme test");  // Creates the window
-  [GetParent() setDelegate:
-      [[[StatusBubbleMacTestWindowDelegate alloc] init] autorelease]];
-  EXPECT_TRUE([GetParent() gtm_theme] != nil);
-  EXPECT_TRUE([[GetWindow() contentView] gtm_theme] != nil);
-}
 
 TEST_F(StatusBubbleMacTest, SetStatus) {
   bubble_->SetStatus(L"");
@@ -139,7 +138,7 @@ TEST_F(StatusBubbleMacTest, SetURL) {
   EXPECT_TRUE([GetURLText() isEqualToString:@"about:blank"]);
   bubble_->SetURL(GURL("foopy://"), L"");
   EXPECT_TRUE(IsVisible());
-  EXPECT_TRUE([GetURLText() isEqualToString:@"foopy:"]);
+  EXPECT_TRUE([GetURLText() isEqualToString:@"foopy://"]);
   bubble_->SetURL(GURL("http://www.cnn.com"), L"");
   EXPECT_TRUE(IsVisible());
   EXPECT_TRUE([GetURLText() isEqualToString:@"http://www.cnn.com/"]);
@@ -402,13 +401,8 @@ TEST_F(StatusBubbleMacTest, StateTransitions) {
   EXPECT_EQ(StatusBubbleMac::kBubbleHidden, StateAt(0));
 }
 
-TEST_F(StatusBubbleMacTest, MouseMove) {
-  // TODO(pinkerton): Not sure what to do here since it relies on
-  // [NSEvent currentEvent] and the current mouse location.
-}
-
 TEST_F(StatusBubbleMacTest, Delete) {
-  NSWindow* window = cocoa_helper_.window();
+  NSWindow* window = test_window();
   // Create and delete immediately.
   StatusBubbleMac* bubble = new StatusBubbleMac(window, nil);
   delete bubble;
@@ -436,7 +430,7 @@ TEST_F(StatusBubbleMacTest, UpdateSizeAndPosition) {
   EXPECT_TRUE(NSEqualRects(rect_before, rect_after));
 
   // Move the window and call resize; only the origin should change.
-  NSWindow* window = cocoa_helper_.window();
+  NSWindow* window = test_window();
   ASSERT_TRUE(window);
   NSRect frame = [window frame];
   rect_before = [GetWindow() frame];

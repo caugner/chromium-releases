@@ -40,17 +40,19 @@ class ExtensionBrowserEventRouter : public TabStripModelObserver,
   void OnBrowserWindowReady(const Browser* browser);
 
   // TabStripModelObserver
-  void TabInsertedAt(TabContents* contents, int index, bool foreground);
-  void TabClosingAt(TabContents* contents, int index);
-  void TabDetachedAt(TabContents* contents, int index);
-  void TabSelectedAt(TabContents* old_contents,
-                     TabContents* new_contents,
-                     int index,
-                     bool user_gesture);
-  void TabMoved(TabContents* contents, int from_index, int to_index,
-                bool pinned_state_changed);
-  void TabChangedAt(TabContents* contents, int index, bool loading_only);
-  void TabStripEmpty();
+  virtual void TabInsertedAt(TabContents* contents, int index, bool foreground);
+  virtual void TabClosingAt(TabContents* contents, int index);
+  virtual void TabDetachedAt(TabContents* contents, int index);
+  virtual void TabSelectedAt(TabContents* old_contents,
+                             TabContents* new_contents,
+                             int index,
+                             bool user_gesture);
+  virtual void TabMoved(TabContents* contents, int from_index, int to_index);
+  virtual void TabChangedAt(TabContents* contents, int index,
+                            TabChangeType change_type);
+  virtual void TabReplacedAt(TabContents* old_contents,
+                             TabContents* new_contents, int index);
+  virtual void TabStripEmpty();
 
   // Page Action execute event.
   void PageActionExecuted(Profile* profile,
@@ -75,6 +77,24 @@ class ExtensionBrowserEventRouter : public TabStripModelObserver,
   // Internal processing of tab updated events. Is called by both TabChangedAt
   // and Observe/NAV_ENTRY_COMMITTED.
   void TabUpdated(TabContents* contents, bool did_navigate);
+
+  // Called to dispatch a deprecated style page action click event that was
+  // registered like:
+  //   chrome.pageActions["name"].addListener(function(actionId, info){})
+  void DispatchOldPageActionEvent(Profile* profile,
+    const std::string& extension_id,
+    const std::string& page_action_id,
+    int tab_id,
+    const std::string& url,
+    int button);
+
+  // Register ourselves to receive the various notifications we are interested
+  // in for a browser.
+  void RegisterForBrowserNotifications(const Browser* browser);
+
+  // Register ourselves to receive the various notifications we are interested
+  // in for a tab.
+  void RegisterForTabNotifications(TabContents* contents);
 
   ExtensionBrowserEventRouter();
   friend struct DefaultSingletonTraits<ExtensionBrowserEventRouter>;

@@ -1,13 +1,18 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 
-#include "base/gfx/rect.h"
+#include "base/singleton.h"
 #include "chrome/common/renderer_preferences.h"
+#include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/glue/webpreferences.h"
+
+#if defined(OS_LINUX)
+#include "chrome/browser/gtk/gtk_util.h"
+#endif
 
 RenderViewHostDelegate::View* RenderViewHostDelegate::GetViewDelegate() {
   return NULL;
@@ -42,8 +47,23 @@ RenderViewHostDelegate::GetFavIconDelegate() {
   return NULL;
 }
 
-RenderViewHostDelegate::Autofill*
-RenderViewHostDelegate::GetAutofillDelegate() {
+RenderViewHostDelegate::Autocomplete*
+RenderViewHostDelegate::GetAutocompleteDelegate() {
+  return NULL;
+}
+
+RenderViewHostDelegate::AutoFill*
+RenderViewHostDelegate::GetAutoFillDelegate() {
+  return NULL;
+}
+
+RenderViewHostDelegate::BookmarkDrag*
+RenderViewHostDelegate::GetBookmarkDragDelegate() {
+  return NULL;
+}
+
+AutomationResourceRoutingDelegate*
+RenderViewHostDelegate::GetAutomationResourceRoutingDelegate() {
   return NULL;
 }
 
@@ -55,16 +75,8 @@ TabContents* RenderViewHostDelegate::GetAsTabContents() {
   return NULL;
 }
 
-void RenderViewHostDelegate::AddBlockedNotice(const GURL& url,
-                                              const string16& reason) {
-}
-
 GURL RenderViewHostDelegate::GetAlternateErrorPageURL() const {
   return GURL();
-}
-
-RendererPreferences RenderViewHostDelegate::GetRendererPrefs() const {
-  return RendererPreferences();
 }
 
 WebPreferences RenderViewHostDelegate::GetWebkitPrefs() {

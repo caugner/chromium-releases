@@ -14,16 +14,25 @@
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 
+#include "google_update_settings.h"
 #include "installer_util_strings.h"
 
 namespace {
 
-// Gets the language from the OS.  If we're unable to get the system language,
-// defaults to en-us.
-std::wstring GetSystemLanguage() {
+// Gets the language from the OS, while taking a parameter to optionally pull
+// the language from Omaha's settings first.
+std::wstring GetSystemLanguage(const bool use_omaha_language) {
   static std::wstring language;
   if (!language.empty())
     return language;
+
+  if (use_omaha_language) {
+    // First try to get the language from Omaha, if one is set already.
+    GoogleUpdateSettings::GetLanguage(&language);
+    if (!language.empty())
+      return language;
+  }
+
   // We don't have ICU at this point, so we use win32 apis.
   LCID id = GetThreadLocale();
   int length = GetLocaleInfo(id, LOCALE_SISO639LANGNAME, 0, 0);
@@ -73,12 +82,19 @@ std::wstring GetSystemLanguage() {
   return language;
 }
 
+// Gets the language from the OS.  If we're unable to get the system language,
+// defaults to en-us.
+std::wstring GetSystemLanguage() {
+  return GetSystemLanguage(false);
+}
+
 // This method returns the appropriate language offset given the language as a
 // string.  Note: This method is not thread safe because of how we create
 // |offset_map|.
 int GetLanguageOffset(const std::wstring& language) {
   static std::map<std::wstring, int> offset_map;
   if (offset_map.empty()) {
+#if defined(GOOGLE_CHROME_BUILD)
     offset_map[L"ar"] = IDS_L10N_OFFSET_AR;
     offset_map[L"bg"] = IDS_L10N_OFFSET_BG;
     offset_map[L"bn"] = IDS_L10N_OFFSET_BN;
@@ -96,14 +112,14 @@ int GetLanguageOffset(const std::wstring& language) {
     offset_map[L"fil"] = IDS_L10N_OFFSET_FIL;
     offset_map[L"fr"] = IDS_L10N_OFFSET_FR;
     offset_map[L"gu"] = IDS_L10N_OFFSET_GU;
-    offset_map[L"he"] = IDS_L10N_OFFSET_HE;
+    offset_map[L"he"] = IDS_L10N_OFFSET_IW;
     offset_map[L"hi"] = IDS_L10N_OFFSET_HI;
     offset_map[L"hr"] = IDS_L10N_OFFSET_HR;
     offset_map[L"hu"] = IDS_L10N_OFFSET_HU;
     offset_map[L"id"] = IDS_L10N_OFFSET_ID;
     offset_map[L"it"] = IDS_L10N_OFFSET_IT;
     // Google web properties use iw for he. Handle both just to be safe.
-    offset_map[L"iw"] = IDS_L10N_OFFSET_HE;
+    offset_map[L"iw"] = IDS_L10N_OFFSET_IW;
     offset_map[L"ja"] = IDS_L10N_OFFSET_JA;
     offset_map[L"kn"] = IDS_L10N_OFFSET_KN;
     offset_map[L"ko"] = IDS_L10N_OFFSET_KO;
@@ -115,7 +131,6 @@ int GetLanguageOffset(const std::wstring& language) {
     offset_map[L"nb"] = IDS_L10N_OFFSET_NO;
     offset_map[L"nl"] = IDS_L10N_OFFSET_NL;
     offset_map[L"no"] = IDS_L10N_OFFSET_NO;
-    offset_map[L"or"] = IDS_L10N_OFFSET_OR;
     offset_map[L"pl"] = IDS_L10N_OFFSET_PL;
     offset_map[L"pt-br"] = IDS_L10N_OFFSET_PT_BR;
     offset_map[L"pt-pt"] = IDS_L10N_OFFSET_PT_PT;
@@ -136,6 +151,9 @@ int GetLanguageOffset(const std::wstring& language) {
     offset_map[L"vi"] = IDS_L10N_OFFSET_VI;
     offset_map[L"zh-cn"] = IDS_L10N_OFFSET_ZH_CN;
     offset_map[L"zh-tw"] = IDS_L10N_OFFSET_ZH_TW;
+#else  // GOOGLE_CHROME_BUILD not defined
+    offset_map[L"en-us"] = IDS_L10N_OFFSET_EN_US;
+#endif  // if defined(GOOGLE_CHROME_BUILD)
   }
 
   std::map<std::wstring, int>::iterator it = offset_map.find(
@@ -143,7 +161,9 @@ int GetLanguageOffset(const std::wstring& language) {
   if (it != offset_map.end())
     return it->second;
 
+#if defined(GOOGLE_CHROME_BUILD)
   NOTREACHED() << "unknown system language-country";
+#endif  // if defined(GOOGLE_CHROME_BUILD)
 
   // Fallback on the en-US offset just in case.
   return IDS_L10N_OFFSET_EN_US;
@@ -176,11 +196,12 @@ std::wstring GetLocalizedEulaResource() {
   int len = ::GetModuleFileName(NULL, full_exe_path, MAX_PATH);
   if (len == 0 || len == MAX_PATH)
     return L"";
-  std::wstring language = GetSystemLanguage();
+  std::wstring language = GetSystemLanguage(true);
   const wchar_t* resource = L"IDR_OEMPG_EN.HTML";
 
   static std::map<int, wchar_t*> html_map;
   if (html_map.empty()) {
+#if defined(GOOGLE_CHROME_BUILD)
     html_map[IDS_L10N_OFFSET_AR] = L"IDR_OEMPG_AR.HTML";
     html_map[IDS_L10N_OFFSET_BG] = L"IDR_OEMPG_BG.HTML";
     html_map[IDS_L10N_OFFSET_CA] = L"IDR_OEMPG_CA.HTML";
@@ -222,6 +243,9 @@ std::wstring GetLocalizedEulaResource() {
     html_map[IDS_L10N_OFFSET_VI] = L"IDR_OEMPG_VI.HTML";
     html_map[IDS_L10N_OFFSET_ZH_CN] = L"IDR_OEMPG_ZH_CN.HTML";
     html_map[IDS_L10N_OFFSET_ZH_TW] = L"IDR_OEMPG_ZH_TW.HTML";
+#else  // GOOGLE_CHROME_BUILD not defined
+    html_map[IDS_L10N_OFFSET_EN_US] = L"IDR_OEMPG_EN.HTML";
+#endif  // if defined(GOOGLE_CHROME_BUILD)
   }
 
   std::map<int, wchar_t*>::iterator it = html_map.find(
@@ -232,8 +256,12 @@ std::wstring GetLocalizedEulaResource() {
   // Spaces and DOS paths must be url encoded.
   std::wstring url_path =
       StringPrintf(L"res://%ls/#23/%ls", full_exe_path, resource);
-  DWORD count = url_path.size() * 3;
-  scoped_ptr<wchar_t> url_canon(new wchar_t[count]);
+
+  // The cast is safe because url_path has limited length
+  // (see the definition of full_exe_path and resource).
+  DCHECK(kuint32max > (url_path.size() * 3));
+  DWORD count = static_cast<DWORD>(url_path.size() * 3);
+  scoped_array<wchar_t> url_canon(new wchar_t[count]);
   HRESULT hr = ::UrlCanonicalizeW(url_path.c_str(), url_canon.get(),
                                   &count, URL_ESCAPE_UNSAFE);
   if (SUCCEEDED(hr))

@@ -8,21 +8,97 @@
 #include "views/widget/widget_gtk.h"
 #include "views/window/window.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/wm_ipc.h"
+#endif
+
+namespace {
+
+class BubbleWidget : public views::WidgetGtk {
+ public:
+  explicit BubbleWidget(BrowserBubble* bubble)
+      : views::WidgetGtk(views::WidgetGtk::TYPE_WINDOW),
+        bubble_(bubble),
+        closed_(false) {
+  }
+
+  void Show(bool activate) {
+    // TODO: honor activate.
+    views::WidgetGtk::Show();
+  }
+
+  virtual void Close() {
+    if (closed_)
+      return;
+    closed_ = true;
+    if (IsActive()) {
+      BrowserBubble::Delegate* delegate = bubble_->delegate();
+      if (delegate)
+        delegate->BubbleLostFocus(bubble_, false);
+    }
+    views::WidgetGtk::Close();
+  }
+
+  virtual void Hide() {
+    if (IsActive()) {
+      BrowserBubble::Delegate* delegate = bubble_->delegate();
+      if (delegate)
+        delegate->BubbleLostFocus(bubble_, false);
+    }
+    views::WidgetGtk::Hide();
+  }
+
+  virtual void IsActiveChanged() {
+    if (IsActive() || closed_)
+      return;
+    BrowserBubble::Delegate* delegate = bubble_->delegate();
+    if (!delegate) {
+      bubble_->DetachFromBrowser();
+      delete bubble_;
+      return;
+    }
+
+    // TODO(jcampan): http://crbugs.com/29131 Check if the window we are losing
+    //                focus to is a child window and pass that to the call
+    //                below.
+    delegate->BubbleLostFocus(bubble_, false);
+  }
+
+  virtual gboolean OnFocusIn(GtkWidget* widget, GdkEventFocus* event) {
+    BrowserBubble::Delegate* delegate = bubble_->delegate();
+    if (delegate)
+      delegate->BubbleGotFocus(bubble_);
+    return views::WidgetGtk::OnFocusIn(widget, event);
+  }
+
+ private:
+  BrowserBubble* bubble_;
+  bool closed_;
+
+  DISALLOW_COPY_AND_ASSIGN(BubbleWidget);
+};
+
+}  // namespace
+
 void BrowserBubble::InitPopup() {
-  gfx::NativeView native_view = frame_->GetNativeView();
-  gfx::NativeWindow native_window = frame_->GetWindow()->GetNativeWindow();
-  views::WidgetGtk* pop = new views::WidgetGtk(views::WidgetGtk::TYPE_POPUP);
+  // TODO(port)
+  DCHECK(!drop_shadow_enabled_) <<
+    "Drop shadows not supported on GTK browser bubbles.";
+
+  views::WidgetGtk* pop = new BubbleWidget(this);
   pop->SetOpacity(0xFF);
-  pop->Init(native_view, bounds_);
+  pop->make_transient_to_parent();
+  pop->Init(frame_->GetNativeView(), bounds_);
+#if defined(OS_CHROMEOS)
+  chromeos::WmIpc::instance()->SetWindowType(
+      pop->GetNativeView(),
+      chromeos::WmIpc::WINDOW_TYPE_CHROME_INFO_BUBBLE,
+      NULL);
+#endif
   pop->SetContentsView(view_);
   popup_ = pop;
   Reposition();
-
-  BrowserView* browser_view =
-      BrowserView::GetBrowserViewForNativeWindow(native_window);
-  DCHECK(browser_view);
-  if (browser_view)
-    browser_view->AttachBrowserBubble(this);
+  AttachToBrowser();
 }
 
 void BrowserBubble::MovePopup(int x, int y, int w, int h) {
@@ -33,9 +109,7 @@ void BrowserBubble::MovePopup(int x, int y, int w, int h) {
 void BrowserBubble::Show(bool activate) {
   if (visible_)
     return;
-  // TODO(port) respect activate flag.
-  views::WidgetGtk* pop = static_cast<views::WidgetGtk*>(popup_);
-  pop->Show();
+  static_cast<BubbleWidget*>(popup_)->Show(activate);
   visible_ = true;
 }
 

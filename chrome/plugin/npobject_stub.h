@@ -10,9 +10,10 @@
 
 #include <vector>
 
-#include "app/gfx/native_widget_types.h"
 #include "base/ref_counted.h"
 #include "base/weak_ptr.h"
+#include "chrome/plugin/npobject_base.h"
+#include "gfx/native_widget_types.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_channel.h"
 
@@ -26,7 +27,8 @@ struct NPVariant_Param;
 // more information.
 class NPObjectStub : public IPC::Channel::Listener,
                      public IPC::Message::Sender,
-                     public base::SupportsWeakPtr<NPObjectStub> {
+                     public base::SupportsWeakPtr<NPObjectStub>,
+                     public NPObjectBase {
  public:
   NPObjectStub(NPObject* npobject,
                PluginChannelBase* channel,
@@ -42,6 +44,15 @@ class NPObjectStub : public IPC::Channel::Listener,
   // This is needed because the renderer calls NPN_DeallocateObject on the
   // window script object on destruction to avoid leaks.
   void OnPluginDestroyed();
+
+  // NPObjectBase implementation.
+  virtual NPObject* GetUnderlyingNPObject() {
+    return npobject_;
+  }
+
+  IPC::Channel::Listener* GetChannelListener() {
+    return static_cast<IPC::Channel::Listener*>(this);
+  }
 
  private:
   // IPC::Channel::Listener implementation:
@@ -73,7 +84,6 @@ class NPObjectStub : public IPC::Channel::Listener,
                    IPC::Message* reply_msg);
   void OnEvaluate(const std::string& script, bool popups_allowed,
                   IPC::Message* reply_msg);
-  void OnSetException(const std::string& message);
 
  private:
   NPObject* npobject_;

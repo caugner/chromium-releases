@@ -4,9 +4,9 @@
 
 #include "chrome/browser/gtk/process_singleton_dialog.h"
 
+#include "app/gtk_util.h"
 #include "app/l10n_util.h"
 #include "base/message_loop.h"
-#include "chrome/common/gtk_util.h"
 #include "grit/chromium_strings.h"
 
 // static
@@ -22,13 +22,13 @@ ProcessSingletonDialog::ProcessSingletonDialog(const std::string& message) {
       GTK_BUTTONS_NONE,
       "%s",
       message.c_str());
+  gtk_util::ApplyMessageDialogQuirks(dialog_);
   gtk_window_set_title(GTK_WINDOW(dialog_),
                        l10n_util::GetStringUTF8(IDS_PRODUCT_NAME).c_str());
   gtk_dialog_add_button(GTK_DIALOG(dialog_), GTK_STOCK_QUIT,
                         GTK_RESPONSE_REJECT);
 
-  g_signal_connect(G_OBJECT(dialog_), "response",
-                   G_CALLBACK(OnResponse), this);
+  g_signal_connect(dialog_, "response", G_CALLBACK(OnResponse), this);
 
   gtk_widget_show_all(dialog_);
   MessageLoop::current()->Run();

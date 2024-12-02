@@ -4,16 +4,30 @@
 
 #include "chrome/browser/sync/engine/model_changing_syncer_command.h"
 
+#include "base/callback.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
-#include "chrome/browser/sync/engine/syncer_session.h"
+#include "chrome/browser/sync/sessions/status_controller.h"
+#include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/util/closure.h"
 
 namespace browser_sync {
 
-void ModelChangingSyncerCommand::ExecuteImpl(SyncerSession* session) {
+void ModelChangingSyncerCommand::ExecuteImpl(sessions::SyncSession* session) {
   work_session_ = session;
-  session->model_safe_worker()->DoWorkAndWaitUntilDone(
-      NewCallback(this, &ModelChangingSyncerCommand::StartChangingModel));
+  if (!ModelNeutralExecuteImpl(work_session_)) {
+    return;
+  }
+
+  for (size_t i = 0; i < session->workers().size(); ++i) {
+    ModelSafeWorker* worker = session->workers()[i];
+    ModelSafeGroup group = worker->GetModelSafeGroup();
+
+    sessions::StatusController* status = work_session_->status_controller();
+    sessions::ScopedModelSafeGroupRestriction r(status, group);
+    scoped_ptr<Closure> c(NewCallback(this,
+        &ModelChangingSyncerCommand::StartChangingModel));
+    worker->DoWorkAndWaitUntilDone(c.get());
+  }
 }
 
 }  // namespace browser_sync

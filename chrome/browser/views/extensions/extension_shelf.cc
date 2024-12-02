@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -246,7 +246,7 @@ ExtensionShelf::Toolstrip::Toolstrip(ExtensionShelf* shelf,
       ALLOW_THIS_IN_INITIALIZER_LIST(timer_factory_(this)) {
   DCHECK(host->view());
   // We're owned by shelf_, not the bubble that we get inserted in and out of.
-  SetParentOwned(false);
+  set_parent_owned(false);
 
   mole_animation_.reset(new SlideAnimation(this));
 
@@ -428,7 +428,8 @@ void ExtensionShelf::Toolstrip::LayoutWindow() {
 
   if (!window_.get()) {
     window_.reset(new BrowserBubble(this, shelf_->GetWidget(),
-                                    gfx::Point(0, 0)));
+                                    gfx::Point(0, 0),
+                                    false));  //  Do not add a drop-shadow.
     window_->set_delegate(this);
   }
 
@@ -455,14 +456,7 @@ void ExtensionShelf::Toolstrip::LayoutWindow() {
   // level widget, we need to do some coordinate conversion to get this right.
   gfx::Point origin(-kToolstripPadding, 0);
   if (expanded_ || mole_animation_->IsAnimating()) {
-    if (shelf_->IsOnTop()) {
-      if (handle_visible_)
-        origin.set_y(-GetHandlePreferredSize().height());
-      else
-        origin.set_y(0);
-    } else {
-      origin.set_y(GetShelfView()->height() - window_size.height());
-    }
+    origin.set_y(GetShelfView()->height() - window_size.height());
     views::View::ConvertPointToView(GetShelfView(), shelf_->GetRootView(),
                                     &origin);
   } else {
@@ -692,10 +686,7 @@ ExtensionShelf::ExtensionShelf(Browser* browser)
       fullscreen_(false) {
   SetID(VIEW_ID_DEV_EXTENSION_SHELF);
 
-  if (IsOnTop())
-    top_margin_ = kTopMarginWhenExtensionsOnTop;
-  else
-    top_margin_ = kTopMarginWhenExtensionsOnBottom;
+  top_margin_ = kTopMarginWhenExtensionsOnBottom;
 
   model_->AddObserver(this);
   LoadFromModel();
@@ -788,25 +779,11 @@ bool ExtensionShelf::GetAccessibleRole(AccessibilityTypes::Role* role) {
   return true;
 }
 
-bool ExtensionShelf::GetAccessibleName(std::wstring* name) {
-  DCHECK(name);
-
-  if (!accessible_name_.empty()) {
-    name->assign(accessible_name_);
-    return true;
-  }
-  return false;
-}
-
-void ExtensionShelf::SetAccessibleName(const std::wstring& name) {
-  accessible_name_.assign(name);
-}
-
 void ExtensionShelf::ThemeChanged() {
   // Refresh the CSS to update toolstrip text colors from theme.
   int count = model_->count();
   for (int i = 0; i < count; ++i)
-    ToolstripAtIndex(i)->view()->host()->InsertThemeCSS();
+    ToolstripAtIndex(i)->view()->host()->InsertThemedToolstripCSS();
 
   Layout();
 }
@@ -1103,12 +1080,6 @@ gfx::Size ExtensionShelf::LayoutItems(bool compute_bounds_only) {
   return prefsize;
 }
 
-bool ExtensionShelf::IsOnTop() const {
-  static bool is_on_top = CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kShowExtensionsOnTop);
-  return is_on_top;
-}
-
 bool ExtensionShelf::IsDetached() const {
   return OnNewTabPage() && (size_animation_->GetCurrentValue() != 1);
 }
@@ -1127,10 +1098,7 @@ void ExtensionShelf::OnFullscreenToggled(bool fullscreen) {
   if (fullscreen == fullscreen_)
     return;
   fullscreen_ = fullscreen;
-  if (!IsAlwaysShown() || IsOnTop())
+  if (!IsAlwaysShown())
     return;
-  if (fullscreen_)
-    size_animation_->Hide();
-  else
-    size_animation_->Show();
+  size_animation_->Reset(fullscreen ? 0 : 1);
 }

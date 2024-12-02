@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include <sys/errno.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -38,7 +39,7 @@
 
 namespace file_util {
 
-#if defined(OS_FREEBSD) || \
+#if defined(OS_OPENBSD) || defined(OS_FREEBSD) || \
     (defined(OS_MACOSX) && \
      MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_5)
 typedef struct stat stat_wrapper_t;
@@ -59,18 +60,6 @@ static const char* kTempFileName = "com.google.chrome.XXXXXX";
 static const char* kTempFileName = "org.chromium.XXXXXX";
 #endif
 
-std::wstring GetDirectoryFromPath(const std::wstring& path) {
-  if (EndsWithSeparator(path)) {
-    return FilePath::FromWStringHack(path)
-        .StripTrailingSeparators()
-        .ToWStringHack();
-  } else {
-    char full_path[PATH_MAX];
-    base::strlcpy(full_path, WideToUTF8(path).c_str(), arraysize(full_path));
-    return UTF8ToWide(dirname(full_path));
-  }
-}
-
 bool AbsolutePath(FilePath* path) {
   char full_path[PATH_MAX];
   if (realpath(path->value().c_str(), full_path) == NULL)
@@ -85,9 +74,10 @@ int CountFilesCreatedAfter(const FilePath& path,
 
   DIR* dir = opendir(path.value().c_str());
   if (dir) {
-#if !defined(OS_LINUX) && !defined(OS_MACOSX) && !defined(OS_FREEBSD)
-  #error Depending on the definition of struct dirent, additional space for \
-      pathname may be needed
+#if !defined(OS_LINUX) && !defined(OS_MACOSX) && !defined(OS_FREEBSD) && \
+    !defined(OS_OPENBSD) && !defined(OS_SOLARIS)
+  #error Port warning: depending on the definition of struct dirent, \
+         additional space for pathname may be needed
 #endif
     struct dirent ent_buf;
     struct dirent* ent;
@@ -306,14 +296,8 @@ bool PathExists(const FilePath& path) {
 bool PathIsWritable(const FilePath& path) {
   FilePath test_path(path);
   stat_wrapper_t file_info;
-  if (CallStat(test_path.value().c_str(), &file_info) != 0) {
-    // If the path doesn't exist, test the parent dir.
-    test_path = test_path.DirName();
-    // If the parent dir doesn't exist, then return false (the path is not
-    // directly writable).
-    if (CallStat(test_path.value().c_str(), &file_info) != 0)
-      return false;
-  }
+  if (CallStat(test_path.value().c_str(), &file_info) != 0)
+    return false;
   if (S_IWOTH & file_info.st_mode)
     return true;
   if (getegid() == file_info.st_gid && (S_IWGRP & file_info.st_mode))
@@ -445,10 +429,16 @@ bool CreateDirectory(const FilePath& full_path) {
   // Iterate through the parents and create the missing ones.
   for (std::vector<FilePath>::reverse_iterator i = subpaths.rbegin();
        i != subpaths.rend(); ++i) {
-    if (!DirectoryExists(*i)) {
-      if (mkdir(i->value().c_str(), 0700) != 0)
-        return false;
-    }
+    if (DirectoryExists(*i))
+      continue;
+    if (mkdir(i->value().c_str(), 0700) == 0)
+      continue;
+    // Mkdir failed, but it might have failed with EEXIST, or some other error
+    // due to the the directory appearing out of thin air. This can occur if
+    // two processes are trying to create the same file system tree at the same
+    // time. Check to see if it exists and make sure it is a directory.
+    if (!DirectoryExists(*i))
+      return false;
   }
   return true;
 }
@@ -461,6 +451,13 @@ bool GetFileInfo(const FilePath& file_path, FileInfo* results) {
   results->size = file_info.st_size;
   results->last_modified = base::Time::FromTimeT(file_info.st_mtime);
   return true;
+}
+
+bool SetLastModifiedTime(const FilePath& file_path, base::Time last_modified) {
+  struct timeval times[2];
+  times[0] = last_modified.ToTimeVal();
+  times[1] = last_modified.ToTimeVal();
+  return (utimes(file_path.value().c_str(), times) == 0);
 }
 
 bool GetInode(const FilePath& path, ino_t* inode) {
@@ -486,9 +483,10 @@ int ReadFile(const FilePath& filename, char* data, int size) {
   if (fd < 0)
     return -1;
 
-  int ret_value = HANDLE_EINTR(read(fd, data, size));
-  HANDLE_EINTR(close(fd));
-  return ret_value;
+  ssize_t bytes_read = HANDLE_EINTR(read(fd, data, size));
+  if (int ret = HANDLE_EINTR(close(fd)) < 0)
+    return ret;
+  return bytes_read;
 }
 
 int WriteFile(const FilePath& filename, const char* data, int size) {
@@ -496,9 +494,10 @@ int WriteFile(const FilePath& filename, const char* data, int size) {
   if (fd < 0)
     return -1;
 
-  int rv = WriteFileDescriptor(fd, data, size);
-  HANDLE_EINTR(close(fd));
-  return rv;
+  int bytes_written = WriteFileDescriptor(fd, data, size);
+  if (int ret = HANDLE_EINTR(close(fd)) < 0)
+    return ret;
+  return bytes_written;
 }
 
 int WriteFileDescriptor(const int fd, const char* data, int size) {
@@ -539,11 +538,11 @@ bool SetCurrentDirectory(const FilePath& path) {
 FileEnumerator::FileEnumerator(const FilePath& root_path,
                                bool recursive,
                                FileEnumerator::FILE_TYPE file_type)
-    : root_path_(root_path),
+    : current_directory_entry_(0),
+      root_path_(root_path),
       recursive_(recursive),
       file_type_(file_type),
-      is_in_find_op_(false),
-      current_directory_entry_(0) {
+      is_in_find_op_(false) {
   // INCLUDE_DOT_DOT must not be specified if recursive.
   DCHECK(!(recursive && (INCLUDE_DOT_DOT & file_type_)));
   pending_paths_.push(root_path);
@@ -553,19 +552,19 @@ FileEnumerator::FileEnumerator(const FilePath& root_path,
                                bool recursive,
                                FileEnumerator::FILE_TYPE file_type,
                                const FilePath::StringType& pattern)
-    : root_path_(root_path),
+    : current_directory_entry_(0),
+      root_path_(root_path),
       recursive_(recursive),
       file_type_(file_type),
-      pattern_(root_path.Append(pattern)),
-      is_in_find_op_(false),
-      current_directory_entry_(0) {
+      pattern_(root_path.Append(pattern).value()),
+      is_in_find_op_(false) {
   // INCLUDE_DOT_DOT must not be specified if recursive.
   DCHECK(!(recursive && (INCLUDE_DOT_DOT & file_type_)));
   // The Windows version of this code appends the pattern to the root_path,
   // potentially only matching against items in the top-most directory.
   // Do the same here.
   if (pattern.size() == 0)
-    pattern_ = FilePath();
+    pattern_ = FilePath::StringType();
   pending_paths_.push(root_path);
 }
 
@@ -581,6 +580,15 @@ void FileEnumerator::GetFindInfo(FindInfo* info) {
   DirectoryEntryInfo* cur_entry = &directory_entries_[current_directory_entry_];
   memcpy(&(info->stat), &(cur_entry->stat), sizeof(info->stat));
   info->filename.assign(cur_entry->filename.value());
+}
+
+bool FileEnumerator::IsDirectory(const FindInfo& info) {
+  return S_ISDIR(info.stat.st_mode);
+}
+
+// static
+FilePath FileEnumerator::GetFilename(const FindInfo& find_info) {
+  return FilePath(find_info.filename);
 }
 
 FilePath FileEnumerator::Next() {
@@ -607,9 +615,8 @@ FilePath FileEnumerator::Next() {
       if (ShouldSkip(full_path))
         continue;
 
-      if (pattern_.value().size() &&
-          fnmatch(pattern_.value().c_str(), full_path.value().c_str(),
-              FNM_NOESCAPE))
+      if (pattern_.size() &&
+          fnmatch(pattern_.c_str(), full_path.value().c_str(), FNM_NOESCAPE))
         continue;
 
       if (recursive_ && S_ISDIR(i->stat.st_mode))
@@ -631,10 +638,12 @@ bool FileEnumerator::ReadDirectory(std::vector<DirectoryEntryInfo>* entries,
   if (!dir)
     return false;
 
-#if !defined(OS_LINUX) && !defined(OS_MACOSX) && !defined(OS_FREEBSD)
-  #error Depending on the definition of struct dirent, additional space for \
-      pathname may be needed
+#if !defined(OS_LINUX) && !defined(OS_MACOSX) && !defined(OS_FREEBSD) && \
+    !defined(OS_OPENBSD) && !defined(OS_SOLARIS)
+  #error Port warning: depending on the definition of struct dirent, \
+         additional space for pathname may be needed
 #endif
+
   struct dirent dent_buf;
   struct dirent* dent;
   while (readdir_r(dir, &dent_buf, &dent) == 0 && dent) {
@@ -650,7 +659,7 @@ bool FileEnumerator::ReadDirectory(std::vector<DirectoryEntryInfo>* entries,
     if (ret < 0) {
       // Print the stat() error message unless it was ENOENT and we're
       // following symlinks.
-      if (!(ret == ENOENT && !show_links)) {
+      if (!(errno == ENOENT && !show_links)) {
         PLOG(ERROR) << "Couldn't stat "
                     << source.Append(dent->d_name).value();
       }
@@ -667,22 +676,15 @@ bool FileEnumerator::ReadDirectory(std::vector<DirectoryEntryInfo>* entries,
 // MemoryMappedFile
 
 MemoryMappedFile::MemoryMappedFile()
-    : file_(-1),
+    : file_(base::kInvalidPlatformFileValue),
       data_(NULL),
       length_(0) {
 }
 
-bool MemoryMappedFile::MapFileToMemory(const FilePath& file_name) {
-  file_ = open(file_name.value().c_str(), O_RDONLY);
-
-  if (file_ == -1) {
-    LOG(ERROR) << "Couldn't open " << file_name.value();
-    return false;
-  }
-
+bool MemoryMappedFile::MapFileToMemoryInternal() {
   struct stat file_stat;
-  if (fstat(file_, &file_stat) == -1) {
-    LOG(ERROR) << "Couldn't fstat " << file_name.value() << ", errno " << errno;
+  if (fstat(file_, &file_stat) == base::kInvalidPlatformFileValue) {
+    LOG(ERROR) << "Couldn't fstat " << file_ << ", errno " << errno;
     return false;
   }
   length_ = file_stat.st_size;
@@ -690,7 +692,7 @@ bool MemoryMappedFile::MapFileToMemory(const FilePath& file_name) {
   data_ = static_cast<uint8*>(
       mmap(NULL, length_, PROT_READ, MAP_SHARED, file_, 0));
   if (data_ == MAP_FAILED)
-    LOG(ERROR) << "Couldn't mmap " << file_name.value() << ", errno " << errno;
+    LOG(ERROR) << "Couldn't mmap " << file_ << ", errno " << errno;
 
   return data_ != MAP_FAILED;
 }
@@ -698,12 +700,17 @@ bool MemoryMappedFile::MapFileToMemory(const FilePath& file_name) {
 void MemoryMappedFile::CloseHandles() {
   if (data_ != NULL)
     munmap(data_, length_);
-  if (file_ != -1)
+  if (file_ != base::kInvalidPlatformFileValue)
     close(file_);
 
   data_ = NULL;
   length_ = 0;
-  file_ = -1;
+  file_ = base::kInvalidPlatformFileValue;
+}
+
+bool HasFileBeenModifiedSince(const FileEnumerator::FindInfo& find_info,
+                              const base::Time& cutoff_time) {
+  return find_info.stat.st_mtime >= cutoff_time.ToTimeT();
 }
 
 } // namespace file_util

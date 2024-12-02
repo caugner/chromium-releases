@@ -1,17 +1,24 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/gtk/import_dialog_gtk.h"
 
+#include <string>
+
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "chrome/common/gtk_util.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/gtk/accessible_widget_helper_gtk.h"
+#include "chrome/browser/gtk/gtk_util.h"
+#include "chrome/browser/importer/importer_data_types.h"
 #include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
 
 // static
-void ImportDialogGtk::Show(GtkWindow* parent, Profile* profile) {
-  new ImportDialogGtk(parent, profile);
+void ImportDialogGtk::Show(GtkWindow* parent, Profile* profile,
+                           int initial_state) {
+  new ImportDialogGtk(parent, profile, initial_state);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -25,16 +32,32 @@ void ImportDialogGtk::ImportComplete() {
   delete this;
 }
 
-ImportDialogGtk::ImportDialogGtk(GtkWindow* parent, Profile* profile)
-    : parent_(parent), profile_(profile), importer_host_(new ImporterHost()) {
+ImportDialogGtk::ImportDialogGtk(GtkWindow* parent, Profile* profile,
+                                 int initial_state)
+    : parent_(parent),
+      profile_(profile),
+      importer_host_(new ImporterHost()),
+      initial_state_(initial_state) {
   // Build the dialog.
+  std::string dialog_name = l10n_util::GetStringUTF8(
+      IDS_IMPORT_SETTINGS_TITLE);
   dialog_ = gtk_dialog_new_with_buttons(
-      l10n_util::GetStringUTF8(IDS_IMPORT_SETTINGS_TITLE).c_str(),
+      dialog_name.c_str(),
       parent,
       (GtkDialogFlags) (GTK_DIALOG_MODAL | GTK_DIALOG_NO_SEPARATOR),
       GTK_STOCK_CANCEL,
       GTK_RESPONSE_REJECT,
       NULL);
+
+  accessible_widget_helper_.reset(new AccessibleWidgetHelper(
+      dialog_, profile));
+  accessible_widget_helper_->SendOpenWindowNotification(dialog_name);
+
+  gtk_widget_realize(dialog_);
+  gtk_util::SetWindowSizeFromResources(GTK_WINDOW(dialog_),
+                                       IDS_IMPORT_DIALOG_WIDTH_CHARS,
+                                       -1,  // height
+                                       false);  // resizable
   importer_host_->set_parent_window(GTK_WINDOW(dialog_));
 
   // Add import button separately as we might need to disable it, if
@@ -44,10 +67,6 @@ ImportDialogGtk::ImportDialogGtk(GtkWindow* parent, Profile* profile)
       GTK_STOCK_APPLY, GTK_RESPONSE_ACCEPT);
   GTK_WIDGET_SET_FLAGS(import_button, GTK_CAN_DEFAULT);
   gtk_dialog_set_default_response(GTK_DIALOG(dialog_), GTK_RESPONSE_ACCEPT);
-
-  // TODO(rahulk): find how to set size properly so that the dialog
-  // box width is at least enough to display full title.
-  gtk_widget_set_size_request(dialog_, 300, -1);
 
   GtkWidget* content_area = GTK_DIALOG(dialog_)->vbox;
   gtk_box_set_spacing(GTK_BOX(content_area), gtk_util::kContentAreaSpacing);
@@ -72,22 +91,26 @@ ImportDialogGtk::ImportDialogGtk(GtkWindow* parent, Profile* profile)
   bookmarks_ = gtk_check_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_IMPORT_FAVORITES_CHKBOX).c_str());
   gtk_box_pack_start(GTK_BOX(vbox), bookmarks_, FALSE, FALSE, 0);
-  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(bookmarks_), TRUE);
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(bookmarks_),
+      (initial_state_ & importer::FAVORITES) != 0);
 
   search_engines_ = gtk_check_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_IMPORT_SEARCH_ENGINES_CHKBOX).c_str());
   gtk_box_pack_start(GTK_BOX(vbox), search_engines_, FALSE, FALSE, 0);
-  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(search_engines_), TRUE);
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(search_engines_),
+      (initial_state_ & importer::SEARCH_ENGINES) != 0);
 
   passwords_ = gtk_check_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_IMPORT_PASSWORDS_CHKBOX).c_str());
   gtk_box_pack_start(GTK_BOX(vbox), passwords_, FALSE, FALSE, 0);
-  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(passwords_), TRUE);
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(passwords_),
+      (initial_state_ & importer::PASSWORDS) != 0);
 
   history_ = gtk_check_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_IMPORT_HISTORY_CHKBOX).c_str());
   gtk_box_pack_start(GTK_BOX(vbox), history_, FALSE, FALSE, 0);
-  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(history_), TRUE);
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(history_),
+      (initial_state_ & importer::HISTORY) !=0);
 
   gtk_box_pack_start(GTK_BOX(content_area), vbox, FALSE, FALSE, 0);
 
@@ -114,22 +137,24 @@ ImportDialogGtk::ImportDialogGtk(GtkWindow* parent, Profile* profile)
 
   g_signal_connect(dialog_, "response",
                    G_CALLBACK(HandleOnResponseDialog), this);
-  gtk_window_set_resizable(GTK_WINDOW(dialog_), FALSE);
   gtk_widget_show_all(dialog_);
+}
+
+ImportDialogGtk::~ImportDialogGtk() {
 }
 
 void ImportDialogGtk::OnDialogResponse(GtkWidget* widget, int response) {
   gtk_widget_hide_all(dialog_);
   if (response == GTK_RESPONSE_ACCEPT) {
-    uint16 items = NONE;
+    uint16 items = importer::NONE;
     if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(bookmarks_)))
-      items |= FAVORITES;
+      items |= importer::FAVORITES;
     if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(search_engines_)))
-      items |= SEARCH_ENGINES;
+      items |= importer::SEARCH_ENGINES;
     if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(passwords_)))
-      items |= PASSWORDS;
+      items |= importer::PASSWORDS;
     if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(history_)))
-      items |= HISTORY;
+      items |= importer::HISTORY;
 
     if (items == 0) {
       ImportComplete();

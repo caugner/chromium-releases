@@ -1,18 +1,22 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 
+#include "base/base64.h"
 #include "base/hmac.h"
-#include "base/logging.h"
 #include "base/sha2.h"
 #include "base/string_util.h"
 #include "chrome/browser/google_util.h"
 #include "googleurl/src/gurl.h"
-#include "net/base/base64.h"
+#include "googleurl/src/url_util.h"
 #include "net/base/escape.h"
 #include "unicode/locid.h"
+
+#if defined(OS_WIN)
+#include "chrome/installer/util/browser_distribution.h"
+#endif
 
 static const int kSafeBrowsingMacDigestSize = 20;
 
@@ -21,7 +25,125 @@ static const int kSafeBrowsingMacDigestSize = 20;
 static const char kContinueUrlFormat[] =
   "http://www.google.com/tools/firefox/toolbar/FT2/intl/%s/submit_success.html";
 
-static const char kReportParams[] = "?tpl=chrome&continue=%s&url=%s";
+static const char kReportParams[] = "?tpl=%s&continue=%s&url=%s";
+
+
+// SBChunkList -----------------------------------------------------------------
+
+void SBChunkList::clear() {
+  for (std::vector<SBChunk>::iterator citer = chunks_.begin();
+       citer != chunks_.end(); ++citer) {
+    for (std::deque<SBChunkHost>::iterator hiter = citer->hosts.begin();
+         hiter != citer->hosts.end(); ++hiter) {
+      if (hiter->entry) {
+        hiter->entry->Destroy();
+        hiter->entry = NULL;
+      }
+    }
+  }
+  chunks_.clear();
+}
+
+// SBEntry ---------------------------------------------------------------------
+
+// static
+SBEntry* SBEntry::Create(Type type, int prefix_count) {
+  int size = Size(type, prefix_count);
+  SBEntry *rv = static_cast<SBEntry*>(malloc(size));
+  memset(rv, 0, size);
+  rv->set_type(type);
+  rv->set_prefix_count(prefix_count);
+  return rv;
+}
+
+void SBEntry::Destroy() {
+  free(this);
+}
+
+// static
+int SBEntry::PrefixSize(Type type) {
+  switch (type) {
+    case ADD_PREFIX:
+      return sizeof(SBPrefix);
+    case ADD_FULL_HASH:
+      return sizeof(SBFullHash);
+    case SUB_PREFIX:
+      return sizeof(SBSubPrefix);
+    case SUB_FULL_HASH:
+      return sizeof(SBSubFullHash);
+    default:
+      NOTREACHED();
+      return 0;
+  }
+}
+
+int SBEntry::Size() const {
+  return Size(type(), prefix_count());
+}
+
+// static
+int SBEntry::Size(Type type, int prefix_count) {
+  return sizeof(Data) + prefix_count * PrefixSize(type);
+}
+
+SBEntry* SBEntry::Enlarge(int extra_prefixes) {
+  int new_prefix_count = prefix_count() + extra_prefixes;
+  SBEntry* rv = SBEntry::Create(type(), new_prefix_count);
+  memcpy(rv, this, Size());  // NOTE: Blows away rv.data_!
+  // We have to re-set |rv|'s prefix count since we just copied our own over it.
+  rv->set_prefix_count(new_prefix_count);
+  Destroy();
+  return rv;
+}
+
+int SBEntry::ChunkIdAtPrefix(int index) const {
+  if (type() == SUB_PREFIX)
+    return sub_prefixes_[index].add_chunk;
+  return (type() == SUB_FULL_HASH) ?
+      sub_full_hashes_[index].add_chunk : chunk_id();
+}
+
+void SBEntry::SetChunkIdAtPrefix(int index, int chunk_id) {
+  DCHECK(IsSub());
+
+  if (type() == SUB_PREFIX)
+    sub_prefixes_[index].add_chunk = chunk_id;
+  else
+    sub_full_hashes_[index].add_chunk = chunk_id;
+}
+
+const SBPrefix& SBEntry::PrefixAt(int index) const {
+  DCHECK(IsPrefix());
+
+  return IsAdd() ? add_prefixes_[index] : sub_prefixes_[index].prefix;
+}
+
+const SBFullHash& SBEntry::FullHashAt(int index) const {
+  DCHECK(!IsPrefix());
+
+  return IsAdd() ? add_full_hashes_[index] : sub_full_hashes_[index].prefix;
+}
+
+void SBEntry::SetPrefixAt(int index, const SBPrefix& prefix) {
+  DCHECK(IsPrefix());
+
+  if (IsAdd())
+    add_prefixes_[index] = prefix;
+  else
+    sub_prefixes_[index].prefix = prefix;
+}
+
+void SBEntry::SetFullHashAt(int index, const SBFullHash& full_hash) {
+  DCHECK(!IsPrefix());
+
+  if (IsAdd())
+    add_full_hashes_[index] = full_hash;
+  else
+    sub_full_hashes_[index].prefix = full_hash;
+}
+
+
+// Utility functions -----------------------------------------------------------
 
 namespace safe_browsing_util {
 
@@ -31,83 +153,218 @@ const char kPhishingList[] = "goog-phish-shavar";
 int GetListId(const std::string& name) {
   if (name == kMalwareList)
     return MALWARE;
-  else if (name == kPhishingList)
-    return PHISH;
-
-  return -1;
+  return (name == kPhishingList) ? PHISH : INVALID;
 }
 
 std::string GetListName(int list_id) {
-  switch (list_id) {
-    case MALWARE:
-      return kMalwareList;
-    case PHISH:
-      return kPhishingList;
-    default:
-      return "";
+  if (list_id == MALWARE)
+    return kMalwareList;
+  return (list_id == PHISH) ? kPhishingList : std::string();
+}
+
+std::string Unescape(const std::string& url) {
+  std::string unescaped_str(url);
+  std::string old_unescaped_str;
+  const int kMaxLoopIterations = 1024;
+  int loop_var = 0;
+  do {
+    old_unescaped_str = unescaped_str;
+    unescaped_str = UnescapeURLComponent(old_unescaped_str,
+        UnescapeRule::CONTROL_CHARS | UnescapeRule::SPACES |
+        UnescapeRule::URL_SPECIAL_CHARS);
+  } while (unescaped_str != old_unescaped_str && ++loop_var <=
+           kMaxLoopIterations);
+
+  return unescaped_str;
+}
+
+std::string Escape(const std::string& url) {
+  std::string escaped_str;
+  const char* kHexString = "0123456789ABCDEF";
+  for (size_t i = 0; i < url.length(); i++) {
+    unsigned char c = static_cast<unsigned char>(url[i]);
+    if (c <= ' ' || c > '~' || c == '#' || c == '%') {
+      escaped_str.push_back('%');
+      escaped_str.push_back(kHexString[c >> 4]);
+      escaped_str.push_back(kHexString[c & 0xf]);
+    } else {
+      escaped_str.push_back(c);
+    }
+  }
+
+  return escaped_str;
+}
+
+std::string RemoveConsecutiveChars(const std::string& str, const char c) {
+  std::string output(str);
+  std::string string_to_find;
+  std::string::size_type loc = 0;
+  string_to_find.append(2, c);
+  while ((loc = output.find(string_to_find, loc)) != std::string::npos) {
+    output.erase(loc, 1);
+  }
+
+  return output;
+}
+
+// Canonicalizes url as per Google Safe Browsing Specification.
+// See section 6.1 in
+// http://code.google.com/p/google-safe-browsing/wiki/Protocolv2Spec.
+void CanonicalizeUrl(const GURL& url,
+                     std::string* canonicalized_hostname,
+                     std::string* canonicalized_path,
+                     std::string* canonicalized_query) {
+  DCHECK(url.is_valid());
+
+  // We only canonicalize "normal" URLs.
+  if (!url.IsStandard())
+    return;
+
+  // Following canonicalization steps are excluded since url parsing takes care
+  // of those :-
+  // 1. Remove any tab (0x09), CR (0x0d), and LF (0x0a) chars from url.
+  //    (Exclude escaped version of these chars).
+  // 2. Normalize hostname to 4 dot-seperated decimal values.
+  // 3. Lowercase hostname.
+  // 4. Resolve path sequences "/../" and "/./".
+
+  // That leaves us with the following :-
+  // 1. Remove fragment in URL.
+  GURL url_without_fragment;
+  GURL::Replacements f_replacements;
+  f_replacements.ClearRef();
+  f_replacements.ClearUsername();
+  f_replacements.ClearPassword();
+  url_without_fragment = url.ReplaceComponents(f_replacements);
+
+  // 2. Do URL unescaping until no more hex encoded characters exist.
+  std::string url_unescaped_str(Unescape(url_without_fragment.spec()));
+  url_parse::Parsed parsed;
+  url_parse::ParseStandardURL(url_unescaped_str.data(),
+      url_unescaped_str.length(), &parsed);
+
+  // 3. In hostname, remove all leading and trailing dots.
+  const std::string host = (parsed.host.len > 0) ? url_unescaped_str.substr(
+      parsed.host.begin, parsed.host.len) : "";
+  const char kCharsToTrim[] = ".";
+  std::string host_without_end_dots;
+  TrimString(host, kCharsToTrim, &host_without_end_dots);
+
+  // 4. In hostname, replace consecutive dots with a single dot.
+  std::string host_without_consecutive_dots(RemoveConsecutiveChars(
+      host_without_end_dots, '.'));
+
+  // 5. In path, replace runs of consecutive slashes with a single slash.
+  std::string path = (parsed.path.len > 0) ? url_unescaped_str.substr(
+       parsed.path.begin, parsed.path.len): "";
+  std::string path_without_consecutive_slash(RemoveConsecutiveChars(
+      path, '/'));
+
+  url_canon::Replacements<char> hp_replacements;
+  hp_replacements.SetHost(host_without_consecutive_dots.data(),
+  url_parse::Component(0, host_without_consecutive_dots.length()));
+  hp_replacements.SetPath(path_without_consecutive_slash.data(),
+  url_parse::Component(0, path_without_consecutive_slash.length()));
+
+  std::string url_unescaped_with_can_hostpath;
+  url_canon::StdStringCanonOutput output(&url_unescaped_with_can_hostpath);
+  url_parse::Parsed temp_parsed;
+  url_util::ReplaceComponents(url_unescaped_str.data(),
+                              url_unescaped_str.length(), parsed,
+                              hp_replacements, NULL, &output, &temp_parsed);
+  output.Complete();
+
+  // 6. Step needed to revert escaping done in url_util::ReplaceComponents.
+  url_unescaped_with_can_hostpath = Unescape(url_unescaped_with_can_hostpath);
+
+  // 7. After performing all above steps, percent-escape all chars in url which
+  // are <= ASCII 32, >= 127, #, %. Escapes must be uppercase hex characters.
+  std::string escaped_canon_url_str(Escape(url_unescaped_with_can_hostpath));
+  url_parse::Parsed final_parsed;
+  url_parse::ParseStandardURL(escaped_canon_url_str.data(),
+                              escaped_canon_url_str.length(), &final_parsed);
+
+  if (canonicalized_hostname && final_parsed.host.len > 0) {
+    *canonicalized_hostname =
+        escaped_canon_url_str.substr(final_parsed.host.begin,
+                                     final_parsed.host.len);
+  }
+  if (canonicalized_path && final_parsed.path.len > 0) {
+    *canonicalized_path = escaped_canon_url_str.substr(final_parsed.path.begin,
+                                                       final_parsed.path.len);
+  }
+  if (canonicalized_query && final_parsed.query.len > 0) {
+    *canonicalized_query = escaped_canon_url_str.substr(
+        final_parsed.query.begin, final_parsed.query.len);
   }
 }
 
 void GenerateHostsToCheck(const GURL& url, std::vector<std::string>* hosts) {
-  // Per Safe Browsing Protocol 2 spec, first we try the host.  Then we try up
-  // to 4 hostnames starting with the last 5 components and successively
-  // removing the leading component.  The TLD is skipped.
   hosts->clear();
-  int hostnames_checked = 0;
 
-  std::string host = url.host();
+  std::string canon_host;
+  CanonicalizeUrl(url, &canon_host, NULL, NULL);
+
+  const std::string host = canon_host;  // const sidesteps GCC bugs below!
   if (host.empty())
     return;
 
-  const char* host_start = host.c_str();
-  const char* index = host_start + host.size() - 1;
-  bool skipped_tld = false;
-  while (index != host_start && hostnames_checked < 4) {
-    if (*index == '.') {
-      if (!skipped_tld) {
-        skipped_tld = true;
-      } else {
-        const char* host_to_check = index + 1;
-        hosts->push_back(host_to_check);
-        hostnames_checked++;
-      }
+  // Per the Safe Browsing Protocol v2 spec, we try the host, and also up to 4
+  // hostnames formed by starting with the last 5 components and successively
+  // removing the leading component.  The last component isn't examined alone,
+  // since it's the TLD or a subcomponent thereof.
+  //
+  // Note that we don't need to be clever about stopping at the "real" eTLD --
+  // the data on the server side has been filtered to ensure it will not
+  // blacklist a whole TLD, and it's not significantly slower on our side to
+  // just check too much.
+  //
+  // Also note that because we have a simple blacklist, not some sort of complex
+  // whitelist-in-blacklist or vice versa, it doesn't matter what order we check
+  // these in.
+  const size_t kMaxHostsToCheck = 4;
+  bool skipped_last_component = false;
+  for (std::string::const_reverse_iterator i(host.rbegin());
+       i != host.rend() && hosts->size() < kMaxHostsToCheck; ++i) {
+    if (*i == '.') {
+      if (skipped_last_component)
+        hosts->push_back(std::string(i.base(), host.end()));
+      else
+        skipped_last_component = true;
     }
-
-    index--;
   }
-
-  // Check the full host too.
-  hosts->push_back(host.c_str());
+  hosts->push_back(host);
 }
 
-// Per the Safe Browsing 2 spec, we try the exact path with/without the query
-// parameters, and also the 4 paths formed by starting at the root and adding
-// more path components.
-void  GeneratePathsToCheck(const GURL& url, std::vector<std::string>* paths) {
+void GeneratePathsToCheck(const GURL& url, std::vector<std::string>* paths) {
   paths->clear();
-  std::string path = url.path();
+
+  std::string canon_path;
+  std::string canon_query;
+  CanonicalizeUrl(url, NULL, &canon_path, &canon_query);
+
+  const std::string path = canon_path;   // const sidesteps GCC bugs below!
+  const std::string query = canon_query;
   if (path.empty())
     return;
 
-  if (url.has_query())
-    paths->push_back(path + "?" + url.query());
-
-  paths->push_back(path);
-  if (path == "/")
-    return;
-
-  int path_components_checked = 0;
-  const char* path_start = path.c_str();
-  const char* index = path_start;
-  const char* last_char = path_start + path.size() - 1;
-  while (*index && index != last_char && path_components_checked < 4) {
-    if (*index == '/') {
-      paths->push_back(std::string(path_start, index - path_start + 1));
-      path_components_checked++;
-    }
-
-    index++;
+  // Per the Safe Browsing Protocol v2 spec, we try the exact path with/without
+  // the query parameters, and also up to 4 paths formed by starting at the root
+  // and adding more path components.
+  //
+  // As with the hosts above, it doesn't matter what order we check these in.
+  const size_t kMaxPathsToCheck = 4;
+  for (std::string::const_iterator i(path.begin());
+       i != path.end() && paths->size() < kMaxPathsToCheck; ++i) {
+    if (*i == '/')
+      paths->push_back(std::string(path.begin(), i + 1));
   }
+
+  if (!paths->empty() && paths->back() != path)
+    paths->push_back(path);
+
+  if (!query.empty())
+    paths->push_back(path + "?" + query);
 }
 
 int CompareFullHashes(const GURL& url,
@@ -146,15 +403,11 @@ bool IsMalwareList(const std::string& list_name) {
 
 static void DecodeWebSafe(std::string* decoded) {
   DCHECK(decoded);
-  for (size_t i = 0; i < decoded->size(); ++i) {
-    switch ((*decoded)[i]) {
-      case '_':
-        (*decoded)[i] = '/';
-        break;
-      case '-':
-        (*decoded)[i] = '+';
-        break;
-    }
+  for (std::string::iterator i(decoded->begin()); i != decoded->end(); ++i) {
+    if (*i == '_')
+      *i = '/';
+    else if (*i == '-')
+      *i = '+';
   }
 }
 
@@ -163,12 +416,12 @@ bool VerifyMAC(const std::string& key, const std::string& mac,
   std::string key_copy = key;
   DecodeWebSafe(&key_copy);
   std::string decoded_key;
-  net::Base64Decode(key_copy, &decoded_key);
+  base::Base64Decode(key_copy, &decoded_key);
 
   std::string mac_copy = mac;
   DecodeWebSafe(&mac_copy);
   std::string decoded_mac;
-  net::Base64Decode(mac_copy, &decoded_mac);
+  base::Base64Decode(mac_copy, &decoded_mac);
 
   base::HMAC hmac(base::HMAC::SHA1);
   if (!hmac.Init(decoded_key))
@@ -178,17 +431,7 @@ bool VerifyMAC(const std::string& key, const std::string& mac,
   if (!hmac.Sign(data_str, digest, kSafeBrowsingMacDigestSize))
     return false;
 
-  return memcmp(digest, decoded_mac.data(), kSafeBrowsingMacDigestSize) == 0;
-}
-
-void FreeChunks(std::deque<SBChunk>* chunks) {
-  while (!chunks->empty()) {
-    while (!chunks->front().hosts.empty()) {
-      chunks->front().hosts.front().entry->Destroy();
-      chunks->front().hosts.pop_front();
-    }
-    chunks->pop_front();
-  }
+  return !memcmp(digest, decoded_mac.data(), kSafeBrowsingMacDigestSize);
 }
 
 GURL GeneratePhishingReportUrl(const std::string& report_page,
@@ -198,442 +441,20 @@ GURL GeneratePhishingReportUrl(const std::string& report_page,
   if (!lang)
     lang = "en";  // fallback
   const std::string continue_esc =
-      EscapeQueryParamValue(StringPrintf(kContinueUrlFormat, lang));
-  const std::string current_esc = EscapeQueryParamValue(url_to_report);
-  const std::string format = report_page + kReportParams;
-  GURL report_url(StringPrintf(format.c_str(),
-                               continue_esc.c_str(),
-                               current_esc.c_str()));
+      EscapeQueryParamValue(StringPrintf(kContinueUrlFormat, lang), true);
+  const std::string current_esc = EscapeQueryParamValue(url_to_report, true);
+
+#if defined(OS_WIN)
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  std::string client_name(dist->GetSafeBrowsingName());
+#else
+  std::string client_name("googlechrome");
+#endif
+
+  GURL report_url(report_page +
+      StringPrintf(kReportParams, client_name.c_str(), continue_esc.c_str(),
+                   current_esc.c_str()));
   return google_util::AppendGoogleLocaleParam(report_url);
 }
 
 }  // namespace safe_browsing_util
-
-const int SBEntry::kMinSize = sizeof(SBEntry::Data);
-
-SBEntry* SBEntry::Create(Type type, int prefix_count) {
-  int size = Size(type, prefix_count);
-  SBEntry *rv = static_cast<SBEntry*>(malloc(size));
-  memset(rv, 0, size);
-  rv->set_type(type);
-  rv->set_prefix_count(prefix_count);
-  return rv;
-}
-
-void SBEntry::Destroy() {
-  free(this);
-}
-
-bool SBEntry::IsValid() const {
-  switch (type()) {
-    case ADD_PREFIX:
-    case ADD_FULL_HASH:
-    case SUB_PREFIX:
-    case SUB_FULL_HASH:
-      return true;
-    default:
-      return false;
-  }
-}
-
-int SBEntry::Size() const {
-  return Size(type(), prefix_count());
-}
-
-int SBEntry::Size(Type type, int prefix_count) {
-  return sizeof(Data) + prefix_count * PrefixSize(type);
-}
-
-SBEntry* SBEntry::Enlarge(int extra_prefixes) {
-  int new_prefix_count = prefix_count() + extra_prefixes;
-  SBEntry* rv = SBEntry::Create(type(), new_prefix_count);
-  memcpy(rv, this, Size());
-  rv->set_prefix_count(new_prefix_count);
-  Destroy();
-  return rv;
-}
-
-void SBEntry::RemovePrefix(int index) {
-  DCHECK(index < prefix_count());
-  int bytes_to_copy = PrefixSize(type()) * (prefix_count() - index - 1);
-  void* to;
-  switch (type()) {
-    case ADD_PREFIX:
-      to = &add_prefixes_[index];
-      break;
-    case ADD_FULL_HASH:
-      to = &add_full_hashes_[index];
-      break;
-    case SUB_PREFIX:
-      to = &sub_prefixes_[index];
-      break;
-    case SUB_FULL_HASH:
-      to = &sub_full_hashes_[index];
-      break;
-    default:
-      NOTREACHED();
-      return;
-  }
-
-  char* from = reinterpret_cast<char*>(to) + PrefixSize(type());
-  memmove(to, from, bytes_to_copy);
-  set_prefix_count(prefix_count() - 1);
-}
-
-bool SBEntry::PrefixesMatch(
-    int index, const SBEntry* that, int that_index)  const {
-  // If they're of different hash sizes, or if they're both adds or subs, then
-  // they can't match.
-  if (HashLen() != that->HashLen() || IsAdd() == that->IsAdd())
-    return false;
-
-  if (ChunkIdAtPrefix(index) != that->ChunkIdAtPrefix(that_index))
-    return false;
-
-  if (HashLen() == sizeof(SBPrefix))
-    return PrefixAt(index) == that->PrefixAt(that_index);
-
-  return FullHashAt(index) == that->FullHashAt(that_index);
-}
-
-bool SBEntry::AddPrefixMatches(int index, const SBFullHash& full_hash) const {
-  DCHECK(IsAdd());
-
-  if (HashLen() == sizeof(SBFullHash))
-    return full_hash == add_full_hashes_[index];
-
-  SBPrefix prefix;
-  memcpy(&prefix, &full_hash, sizeof(SBPrefix));
-  return prefix == add_prefixes_[index];
-}
-
-bool SBEntry::IsAdd() const {
-  return type() == ADD_PREFIX || type() == ADD_FULL_HASH;
-}
-
-bool SBEntry::IsSub() const {
-  return type() == SUB_PREFIX || type() == SUB_FULL_HASH;
-}
-
-int SBEntry::HashLen() const {
-  if (type() == ADD_PREFIX || type() == SUB_PREFIX)
-    return sizeof(SBPrefix);
-
-  return sizeof(SBFullHash);
-}
-
-int SBEntry::PrefixSize(Type type) {
-  switch (type) {
-    case ADD_PREFIX:
-      return sizeof(SBPrefix);
-    case ADD_FULL_HASH:
-      return sizeof(SBFullHash);
-    case SUB_PREFIX:
-      return sizeof(SBSubPrefix);
-    case SUB_FULL_HASH:
-      return sizeof(SBSubFullHash);
-    default:
-      NOTREACHED();
-      return 0;
-  }
-}
-
-int SBEntry::ChunkIdAtPrefix(int index) const {
-  if (type() == SUB_PREFIX)
-    return sub_prefixes_[index].add_chunk;
-
-  if (type() == SUB_FULL_HASH)
-    return sub_full_hashes_[index].add_chunk;
-
-  return chunk_id();
-}
-
-void SBEntry::SetChunkIdAtPrefix(int index, int chunk_id) {
-  DCHECK(IsSub());
-
-  if (type() == SUB_PREFIX) {
-    sub_prefixes_[index].add_chunk = chunk_id;
-  } else {
-    sub_full_hashes_[index].add_chunk = chunk_id;
-  }
-}
-
-const SBPrefix& SBEntry::PrefixAt(int index) const {
-  DCHECK(HashLen() == sizeof(SBPrefix));
-
-  if (IsAdd())
-    return add_prefixes_[index];
-
-  return sub_prefixes_[index].prefix;
-}
-
-const SBFullHash& SBEntry::FullHashAt(int index) const {
-  DCHECK(HashLen() == sizeof(SBFullHash));
-
-  if (IsAdd())
-    return add_full_hashes_[index];
-
-  return sub_full_hashes_[index].prefix;
-}
-
-void SBEntry::SetPrefixAt(int index, const SBPrefix& prefix) {
-  DCHECK(HashLen() == sizeof(SBPrefix));
-
-  if (IsAdd()) {
-    add_prefixes_[index] = prefix;
-  } else {
-    sub_prefixes_[index].prefix = prefix;
-  }
-}
-
-void SBEntry::SetFullHashAt(int index, const SBFullHash& full_hash) {
-  DCHECK(HashLen() == sizeof(SBFullHash));
-
-  if (IsAdd()) {
-    add_full_hashes_[index] = full_hash;
-  } else {
-    sub_full_hashes_[index].prefix = full_hash;
-  }
-}
-
-
-
-SBHostInfo::SBHostInfo() : size_(0) {
-}
-
-bool SBHostInfo::Initialize(const void* data, int size) {
-  size_ = size;
-  if (!size_)
-    return true;
-
-  data_.reset(new char[size_]);
-  memcpy(data_.get(), data, size_);
-  if (!IsValid()) {
-    size_ = 0;
-    data_.reset();
-    return false;
-  }
-
-  return true;
-}
-
-bool SBHostInfo::IsValid() {
-  const SBEntry* entry = NULL;
-  while (GetNextEntry(&entry)) {
-    if (!entry->IsValid())
-      return false;
-  }
-  return true;
-}
-
-void SBHostInfo::Add(const SBEntry* entry) {
-  int new_size = size_ + entry->Size();
-  char* new_data = new char[new_size];
-  memcpy(new_data, data_.get(), size_);
-  memcpy(new_data + size_, entry, entry->Size());
-  data_.reset(new_data);
-  size_ = new_size;
-  DCHECK(IsValid());
-}
-
-void SBHostInfo::AddPrefixes(SBEntry* entry) {
-  DCHECK(entry->IsAdd());
-  bool insert_entry = true;
-  const SBEntry* sub_entry = NULL;
-  // Remove any prefixes for which a sub already came.
-  while (GetNextEntry(&sub_entry)) {
-    if (sub_entry->IsAdd() || entry->list_id() != sub_entry->list_id())
-      continue;
-
-    if (sub_entry->prefix_count() == 0) {
-      if (entry->chunk_id() != sub_entry->chunk_id())
-        continue;
-
-      // We don't want to add any of these prefixes so just return.  Also no
-      // more need to store the sub chunk data around for this chunk_id so
-      // remove it.
-      RemoveSubEntry(entry->list_id(), entry->chunk_id());
-      return;
-    }
-
-    // Remove any matching prefixes.
-    for (int i = 0; i < sub_entry->prefix_count(); ++i) {
-      for (int j = 0; j < entry->prefix_count(); ++j) {
-        if (entry->PrefixesMatch(j, sub_entry, i)) {
-          entry->RemovePrefix(j--);
-          if (!entry->prefix_count()) {
-            // The add entry used to have prefixes, but they were all removed
-            // because of matching sub entries.  We don't want to add this
-            // empty add entry, because it would block that entire host.
-            insert_entry = false;
-          }
-        }
-      }
-    }
-
-    RemoveSubEntry(entry->list_id(), entry->chunk_id());
-    break;
-  }
-
-  if (insert_entry)
-    Add(entry);
-  DCHECK(IsValid());
-}
-
-void SBHostInfo::RemoveSubEntry(int list_id, int chunk_id) {
-  scoped_array<char> new_data(new char[size_]);  // preallocate new data
-  char* write_ptr = new_data.get();
-  int new_size = 0;
-  const SBEntry* entry = NULL;
-  while (GetNextEntry(&entry)) {
-    if (entry->list_id() == list_id &&
-        entry->chunk_id() == chunk_id &&
-        entry->IsSub() &&
-        entry->prefix_count() == 0) {
-      continue;
-    }
-
-    SBEntry* new_sub_entry = const_cast<SBEntry*>(entry);
-    scoped_array<char> data;
-    if (entry->IsSub() && entry->list_id() == list_id &&
-        entry->prefix_count()) {
-      // Make a copy of the entry so that we can modify it.
-      data.reset(new char[entry->Size()]);
-      new_sub_entry = reinterpret_cast<SBEntry*>(data.get());
-      memcpy(new_sub_entry, entry, entry->Size());
-      // Remove any matching prefixes.
-      for (int i = 0; i < new_sub_entry->prefix_count(); ++i) {
-        if (new_sub_entry->ChunkIdAtPrefix(i) == chunk_id)
-          new_sub_entry->RemovePrefix(i--);
-      }
-
-      if (new_sub_entry->prefix_count() == 0)
-        continue;  // We removed the last prefix in the entry, so remove it.
-    }
-
-    memcpy(write_ptr, new_sub_entry, new_sub_entry->Size());
-    new_size += new_sub_entry->Size();
-    write_ptr += new_sub_entry->Size();
-  }
-
-  size_ = new_size;
-  data_.reset(new_data.release());
-  DCHECK(IsValid());
-}
-
-void SBHostInfo::RemovePrefixes(SBEntry* sub_entry, bool persist) {
-  DCHECK(sub_entry->IsSub());
-  scoped_array<char> new_data(new char[size_]);
-  char* write_ptr = new_data.get();
-  int new_size = 0;
-  const SBEntry* add_entry = NULL;
-  // Remove any of the prefixes that are in the database.
-  while (GetNextEntry(&add_entry)) {
-    SBEntry* new_add_entry = const_cast<SBEntry*>(add_entry);
-    scoped_array<char> data;
-    if (add_entry->IsAdd() && add_entry->list_id() == sub_entry->list_id()) {
-      if (sub_entry->prefix_count() == 0 &&
-          add_entry->chunk_id() == sub_entry->chunk_id()) {
-        // When prefixes are empty, that means we want to remove the entry for
-        // that host key completely.  No need to add this sub chunk to the db.
-        persist = false;
-        continue;
-      } else if (sub_entry->prefix_count() && add_entry->prefix_count()) {
-        // Remove any of the sub prefixes from these add prefixes.
-        data.reset(new char[add_entry->Size()]);
-        new_add_entry = reinterpret_cast<SBEntry*>(data.get());
-        memcpy(new_add_entry, add_entry, add_entry->Size());
-
-        for (int i = 0; i < new_add_entry->prefix_count(); ++i) {
-          for (int j = 0; j < sub_entry->prefix_count(); ++j) {
-            if (!sub_entry->PrefixesMatch(j, new_add_entry, i))
-              continue;
-
-            new_add_entry->RemovePrefix(i--);
-            sub_entry->RemovePrefix(j--);
-            if (sub_entry->prefix_count() == 0)
-              persist = false;  // Sub entry is all used up.
-
-            break;
-          }
-        }
-      }
-    }
-
-    // If we didn't modify the entry, then add it.  Else if we modified it,
-    // then only add it if there are prefixes left.  Otherwise, it it had n
-    // prefixes and now it has 0, if we were to add it that would mean all
-    // prefixes from that host are in the database.
-    if (new_add_entry == add_entry || new_add_entry->prefix_count()) {
-      memcpy(write_ptr, new_add_entry, new_add_entry->Size());
-      new_size += new_add_entry->Size();
-      write_ptr += new_add_entry->Size();
-    }
-  }
-
-  if (persist && new_size == size_) {
-    // We didn't find any matches because the sub came before the add, so save
-    // it for later.
-    Add(sub_entry);
-    return;
-  }
-
-  size_ = new_size;
-  data_.reset(new_data.release());
-  DCHECK(IsValid());
-}
-
-bool SBHostInfo::Contains(const std::vector<SBFullHash>& prefixes,
-                          int* list_id,
-                          std::vector<SBPrefix>* prefix_hits) {
-  prefix_hits->clear();
-  *list_id = -1;
-  bool hits = false;
-  const SBEntry* add_entry = NULL;
-  while (GetNextEntry(&add_entry)) {
-    if (add_entry->IsSub())
-      continue;
-
-    if (add_entry->prefix_count() == 0) {
-      // This means all paths for this url are blacklisted.
-      return true;
-    }
-
-    for (int i = 0; i < add_entry->prefix_count(); ++i) {
-      for (size_t j = 0; j < prefixes.size(); ++j) {
-        if (!add_entry->AddPrefixMatches(i, prefixes[j]))
-          continue;
-
-        hits = true;
-        if (add_entry->HashLen() == sizeof(SBFullHash)) {
-          *list_id = add_entry->list_id();
-        } else {
-          prefix_hits->push_back(add_entry->PrefixAt(i));
-        }
-      }
-    }
-  }
-
-  return hits;
-}
-
-bool SBHostInfo::GetNextEntry(const SBEntry** entry) {
-  const char* current = reinterpret_cast<const char*>(*entry);
-
-  // It is an error to call this function with a |*entry| outside of |data_|.
-  DCHECK(!current || current >= data_.get());
-  DCHECK(!current || current + (*entry)->Size() <= data_.get() + size_);
-
-  // Compute the address of the next entry.
-  const char* next = current ? current + (*entry)->Size() : data_.get();
-  const SBEntry* next_entry = reinterpret_cast<const SBEntry*>(next);
-
-  // Validate that the next entry is wholly contained inside of |data_|.
-  const char* end = data_.get() + size_;
-  if (next + SBEntry::kMinSize <= end && next + next_entry->Size() <= end) {
-    *entry = next_entry;
-    return true;
-  }
-
-  return false;
-}

@@ -1,13 +1,14 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_BASE_ESCAPE_H__
-#define NET_BASE_ESCAPE_H__
+#ifndef NET_BASE_ESCAPE_H_
+#define NET_BASE_ESCAPE_H_
 
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/string16.h"
 
 // Escaping --------------------------------------------------------------------
 
@@ -35,7 +36,7 @@ void AppendEscapedCharForHTML(char c, std::string* output);
 
 // Escape chars that might cause this text to be interpretted as HTML tags.
 std::string EscapeForHTML(const std::string& text);
-std::wstring EscapeForHTML(const std::wstring& text);
+string16 EscapeForHTML(const string16& text);
 
 // Unescaping ------------------------------------------------------------------
 
@@ -91,39 +92,46 @@ class UnescapeRule {
 // conversions need to take place, it only unescapes.
 std::string UnescapeURLComponent(const std::string& escaped_text,
                                  UnescapeRule::Type rules);
+string16 UnescapeURLComponent(const string16& escaped_text,
+                              UnescapeRule::Type rules);
 
 // Unescapes the given substring as a URL, and then tries to interpret the
-// result as being encoded in the given code page. If the result is convertable
-// into the code page, it will be returned as converted. If it is not, the
-// original escaped string will be converted into a wide string and returned.
-std::wstring UnescapeAndDecodeURLComponent(const std::string& text,
-                                           const char* codepage,
-                                           UnescapeRule::Type rules);
-inline std::wstring UnescapeAndDecodeUTF8URLComponent(
-    const std::string& text,
-    UnescapeRule::Type rules) {
-  return UnescapeAndDecodeURLComponent(text, "UTF-8", rules);
-}
+// result as being encoded as UTF-8. If the result is convertable into UTF-8, it
+// will be returned as converted. If it is not, the original escaped string will
+// be converted into a string16 and returned.
+//
+// |offset_for_adjustment| may be NULL; if not, it is an offset into |text| that
+// will be adjusted to point at the same logical place in the result string.  If
+// this isn't possible because it points into the middle of an escape sequence
+// or past the end of the string, it will be set to string16::npos.
+string16 UnescapeAndDecodeUTF8URLComponent(const std::string& text,
+                                           UnescapeRule::Type rules,
+                                           size_t* offset_for_adjustment);
+
+// Unescape the following ampersand character codes from |text|:
+// &lt; &gt; &amp; &quot; &#39;
+string16 UnescapeForHTML(const string16& text);
 
 // Deprecated ------------------------------------------------------------------
 
 // Escapes characters in text suitable for use as a query parameter value.
 // We %XX everything except alphanumerics and -_.!~*'()
+// Spaces change to "+" unless you pass usePlus=false.
 // This is basically the same as encodeURIComponent in javascript.
-// For the wstring version, we do a conversion to charset before encoding the
+// For the string16 version, we do a conversion to charset before encoding the
 // string.  If the charset doesn't exist, we return false.
 //
 // TODO(brettw) bug 1201094: This function should be removed. See the bug for
 // why and what callers should do instead.
-std::string EscapeQueryParamValue(const std::string& text);
-bool EscapeQueryParamValue(const std::wstring& text, const char* codepage,
-                           std::wstring* escaped);
+std::string EscapeQueryParamValue(const std::string& text, bool use_plus);
+bool EscapeQueryParamValue(const string16& text, const char* codepage,
+                           bool use_plus, string16* escaped);
 
 // A specialized version of EscapeQueryParamValue for wide strings that
 // assumes the codepage is UTF8.  This is provided as a convenience.
 //
 // TODO(brettw) bug 1201094: This function should be removed. See the bug for
 // why and what callers should do instead.
-std::wstring EscapeQueryParamValueUTF8(const std::wstring& text);
+std::wstring EscapeQueryParamValueUTF8(const std::wstring& text, bool use_plus);
 
-#endif  // #ifndef NET_BASE_ESCAPE_H__
+#endif  // NET_BASE_ESCAPE_H_

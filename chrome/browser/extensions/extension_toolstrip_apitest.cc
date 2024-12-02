@@ -4,6 +4,8 @@
 
 #include "chrome/browser/extensions/extension_apitest.h"
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Toolstrip) {
+// Disabled, http://crbug.com/30151 (Linux and ChromeOS),
+// http://crbug.com/35034 (others).
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_Toolstrip) {
   ASSERT_TRUE(RunExtensionTest("toolstrip")) << message_;
 }

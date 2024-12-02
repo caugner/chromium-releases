@@ -13,11 +13,13 @@
 
 #if defined(OS_WIN)
 #include <objidl.h>
-#elif defined(OS_LINUX)
+#elif !defined(OS_MACOSX)
 #include <gtk/gtk.h>
 #endif
 
+#include "app/download_file_interface.h"
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/scoped_ptr.h"
 
 class GURL;
@@ -43,7 +45,7 @@ class OSExchangeData {
   // nodes are written using a CustomFormat.
 #if defined(OS_WIN)
   typedef CLIPFORMAT CustomFormat;
-#elif defined(OS_LINUX)
+#elif !defined(OS_MACOSX)
   typedef GdkAtom CustomFormat;
 #endif
 
@@ -57,6 +59,16 @@ class OSExchangeData {
     FILE_CONTENTS  = 1 << 4,
     HTML           = 1 << 5,
 #endif
+  };
+
+  // Encapsulates the info about a file to be downloaded.
+  struct DownloadFileInfo {
+    FilePath filename;
+    scoped_refptr<DownloadFileProvider> downloader;
+
+    DownloadFileInfo(const FilePath& filename, DownloadFileProvider* downloader)
+        : filename(filename),
+          downloader(downloader) {}
   };
 
   // Provider defines the platform specific part of OSExchangeData that
@@ -91,6 +103,7 @@ class OSExchangeData {
     virtual bool GetHtml(std::wstring* html, GURL* base_url) const = 0;
     virtual bool HasFileContents() const = 0;
     virtual bool HasHtml() const = 0;
+    virtual void SetDownloadFileInfo(const DownloadFileInfo& download) = 0;
 #endif
   };
 
@@ -164,6 +177,9 @@ class OSExchangeData {
   bool GetFileContents(std::wstring* filename,
                        std::string* file_contents) const;
   bool GetHtml(std::wstring* html, GURL* base_url) const;
+
+  // Adds a download file with full path (CF_HDROP).
+  void SetDownloadFileInfo(const DownloadFileInfo& download);
 #endif
 
  private:

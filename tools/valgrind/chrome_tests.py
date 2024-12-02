@@ -5,11 +5,7 @@
 
 # chrome_tests.py
 
-''' Runs various chrome tests through valgrind_test.py.
-
-This file is a copy of ../purify/chrome_tests.py. Eventually, it would be nice
-to merge these two files.
-'''
+''' Runs various chrome tests through valgrind_test.py.'''
 
 import glob
 import logging
@@ -20,15 +16,6 @@ import sys
 
 import google.logging_utils
 import google.path_utils
-# Import the platform_utils up in the layout tests which have been modified to
-# work under non-Windows platforms instead of the ones that are in the
-# tools/python/google directory. (See chrome_tests.sh which sets PYTHONPATH
-# correctly.)
-#
-# TODO(erg): Copy/Move the relevant functions from the layout_package version
-# of platform_utils back up to google.platform_utils
-# package. http://crbug.com/6164
-import layout_package.path_utils
 
 import common
 import valgrind_test
@@ -70,9 +57,6 @@ def FindDirContainingNewestFile(dirs, file):
   return newest_dir
 
 class ChromeTests:
-  '''This class is derived from the chrome_tests.py file in ../purify/.
-  '''
-
   def __init__(self, options, args, test):
     # The known list of tests.
     # Recognise the original abbreviations as well as full executable names.
@@ -86,10 +70,11 @@ class ChromeTests:
       "net": self.TestNet,              "net_unittests": self.TestNet,
       "printing": self.TestPrinting,    "printing_unittests": self.TestPrinting,
       "startup": self.TestStartup,      "startup_tests": self.TestStartup,
+      "sync": self.TestSync,            "sync_unit_tests": self.TestSync,
       "test_shell": self.TestTestShell, "test_shell_tests": self.TestTestShell,
       "ui": self.TestUI,                "ui_tests": self.TestUI,
       "unit": self.TestUnit,            "unit_tests": self.TestUnit,
-      "app": self.TestApp,               "app_unittests": self.TestApp,
+      "app": self.TestApp,              "app_unittests": self.TestApp,
     }
 
     if test not in self._test_list:
@@ -105,9 +90,8 @@ class ChromeTests:
     # relative to the top of the tree.
     self._source_dir = os.path.dirname(os.path.dirname(script_dir))
     # since this path is used for string matching, make sure it's always
-    # an absolute Windows-style path
-    self._source_dir = layout_package.path_utils.GetAbsolutePath(
-        self._source_dir)
+    # an absolute Unix-style path
+    self._source_dir = os.path.abspath(self._source_dir).replace('\\', '/')
     valgrind_test_script = os.path.join(script_dir, "valgrind_test.py")
     self._command_preamble = [valgrind_test_script,
                               "--source_dir=%s" % (self._source_dir)]
@@ -129,15 +113,19 @@ class ChromeTests:
       self._data_dirs.append(os.path.join(module_dir, "data", "valgrind"))
 
     if not self._options.build_dir:
-      dirs = [
-        os.path.join(self._source_dir, "xcodebuild", "Debug"),
-        os.path.join(self._source_dir, "sconsbuild", "Debug"),
-        os.path.join(self._source_dir, "out", "Debug"),
-      ]
-      if exe:
-        self._options.build_dir = FindDirContainingNewestFile(dirs, exe)
+      if common.IsWine():
+        self._options.build_dir = os.path.join(
+            self._source_dir, "chrome", "Debug")
       else:
-        self._options.build_dir = FindNewestDir(dirs)
+        dirs = [
+          os.path.join(self._source_dir, "xcodebuild", "Debug"),
+          os.path.join(self._source_dir, "sconsbuild", "Debug"),
+          os.path.join(self._source_dir, "out", "Debug"),
+        ]
+        if exe:
+          self._options.build_dir = FindDirContainingNewestFile(dirs, exe)
+        else:
+          self._options.build_dir = FindNewestDir(dirs)
 
     cmd = list(self._command_preamble)
     for directory in self._data_dirs:
@@ -147,15 +135,12 @@ class ChromeTests:
       if os.path.exists(suppression_file):
         cmd.append("--suppressions=%s" % suppression_file)
       # Platform specific suppression
-      suppression_platform = {
-        'darwin': 'mac',
-        'linux2': 'linux'
-      }[sys.platform]
-      suppression_file_platform = \
-          os.path.join(directory,
-              '%s/suppressions_%s.txt' % (tool_name, suppression_platform))
-      if os.path.exists(suppression_file_platform):
-        cmd.append("--suppressions=%s" % suppression_file_platform)
+      for suppression_platform in common.PlatformNames():
+        suppression_file_platform = \
+            os.path.join(directory,
+                '%s/suppressions_%s.txt' % (tool_name, suppression_platform))
+        if os.path.exists(suppression_file_platform):
+          cmd.append("--suppressions=%s" % suppression_file_platform)
 
     cmd.append("--tool=%s" % self._options.valgrind_tool)
     if self._options.valgrind_tool_flags:
@@ -164,6 +149,9 @@ class ChromeTests:
       for arg in valgrind_test_args:
         cmd.append(arg)
     if exe:
+      if common.IsWine():
+        cmd.append(os.environ.get('WINE'))
+        exe = exe + '.exe'
       cmd.append(os.path.join(self._options.build_dir, exe))
       # Valgrind runs tests slowly, so slow tests hurt more; show elapased time
       # so we can find the slowpokes.
@@ -183,12 +171,12 @@ class ChromeTests:
     '''
     filters = []
     for directory in self._data_dirs:
-      platform_suffix = {'darwin': 'mac',
-                         'linux2': 'linux'}[sys.platform]
       gtest_filter_files = [
           os.path.join(directory, name + ".gtest.txt"),
           os.path.join(directory, name + ".gtest-%s.txt" % \
-              self._options.valgrind_tool),
+              self._options.valgrind_tool)]
+      for platform_suffix in common.PlatformNames():
+        gtest_filter_files += [
           os.path.join(directory, name + ".gtest_%s.txt" % platform_suffix),
           os.path.join(directory, name + ".gtest-%s_%s.txt" % \
               (self._options.valgrind_tool, platform_suffix))]
@@ -222,8 +210,12 @@ class ChromeTests:
 
     # Sets LD_LIBRARY_PATH to the build folder so external libraries can be
     # loaded.
-    os.putenv("LD_LIBRARY_PATH", self._options.build_dir)
-    return valgrind_test.RunTool(cmd)
+    if (os.getenv("LD_LIBRARY_PATH")):
+      os.putenv("LD_LIBRARY_PATH", "%s:%s" % (os.getenv("LD_LIBRARY_PATH"),
+                                              self._options.build_dir))
+    else:
+      os.putenv("LD_LIBRARY_PATH", self._options.build_dir)
+    return valgrind_test.RunTool(cmd, module)
 
   def TestBase(self):
     return self.SimpleTest("base", "base_unittests")
@@ -269,14 +261,17 @@ class ChromeTests:
   def TestUI(self):
     return self.SimpleTest("chrome", "ui_tests",
                            valgrind_test_args=[
-                            "--timeout=120000",
+                            "--timeout=180000",
                             "--trace_children",
                             "--indirect"],
                            cmd_args=[
-                            "--ui-test-timeout=120000",
-                            "--ui-test-action-timeout=80000",
+                            "--ui-test-timeout=180000",
+                            "--ui-test-action-timeout=120000",
                             "--ui-test-action-max-timeout=180000",
-                            "--ui-test-terminate-timeout=60000"])
+                            "--ui-test-terminate-timeout=120000"])
+
+  def TestSync(self):
+    return self.SimpleTest("chrome", "sync_unit_tests")
 
   def TestLayoutChunk(self, chunk_num, chunk_size):
     # Run tests [chunk_num*chunk_size .. (chunk_num+1)*chunk_size) from the
@@ -293,6 +288,7 @@ class ChromeTests:
     cmd = self._DefaultCommand("webkit")
     cmd.append("--trace_children")
     cmd.append("--indirect")
+    cmd.append("--ignore_exit_code")
     # Now build script_cmd, the run_webkits_tests.py commandline
     # Store each chunk in its own directory so that we can find the data later
     chunk_dir = os.path.join("layout", "chunk_%05d" % chunk_num)
@@ -329,14 +325,14 @@ class ChromeTests:
     # Now run script_cmd with the wrapper in cmd
     cmd.extend(["--"])
     cmd.extend(script_cmd)
-    return valgrind_test.RunTool(cmd)
+    return valgrind_test.RunTool(cmd, "layout")
 
   def TestLayout(self):
     # A "chunk file" is maintained in the local directory so that each test
     # runs a slice of the layout tests of size chunk_size that increments with
     # each run.  Since tests can be added and removed from the layout tests at
     # any time, this is not going to give exact coverage, but it will allow us
-    # to continuously run small slices of the layout tests under purify rather
+    # to continuously run small slices of the layout tests under valgrind rather
     # than having to run all of them in one shot.
     chunk_size = self._options.num_tests
     if (chunk_size == 0):

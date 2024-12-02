@@ -42,9 +42,6 @@ namespace URLFixerUpper {
   // instead of ".com").
   std::string FixupURL(const std::string& text,
                        const std::string& desired_tld);
-  // Deprecated temporary compatibility function.
-  std::wstring FixupURL(const std::wstring& text,
-                        const std::wstring& desired_tld);
 
   // Converts |text| to a fixed-up URL, allowing it to be a relative path on
   // the local filesystem.  Begin searching in |base_dir|; if empty, use the
@@ -61,6 +58,10 @@ namespace URLFixerUpper {
   std::wstring FixupRelativeFile(const std::wstring& base_dir,
                                  const std::wstring& text);
 
+  // For paths like ~, we use $HOME for the current user's home
+  // directory.  For tests, we allow our idea of $HOME to be overriden
+  // by this variable.
+  extern const char* home_directory_override;
 };
 
-#endif  // #ifndef CHROME_BROWSER_NET_URL_FIXER_UPPER_H_
+#endif  // CHROME_BROWSER_NET_URL_FIXER_UPPER_H_

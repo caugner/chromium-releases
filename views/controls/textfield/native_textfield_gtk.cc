@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,18 @@
 
 #include "views/controls/textfield/native_textfield_gtk.h"
 
-#include "app/gfx/gtk_util.h"
-#include "base/string_util.h"
-#include "skia/ext/skia_utils_gtk.h"
+#include "base/logging.h"
+#include "base/utf_string_conversions.h"
+#include "gfx/gtk_util.h"
+#include "gfx/insets.h"
+#include "gfx/skia_utils_gtk.h"
+#include "views/controls/textfield/gtk_views_entry.h"
 #include "views/controls/textfield/textfield.h"
 
 namespace views {
+
 // A character used to hide a text in password mode.
-const char kPasswordChar = '*';
+static const char kPasswordChar = '*';
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTextfieldGtk, public:
@@ -29,6 +33,26 @@ NativeTextfieldGtk::NativeTextfieldGtk(Textfield* textfield)
 }
 
 NativeTextfieldGtk::~NativeTextfieldGtk() {
+}
+
+// Returns the inner border of an entry.
+// static
+gfx::Insets NativeTextfieldGtk::GetEntryInnerBorder(GtkEntry* entry) {
+  const GtkBorder* inner_border = gtk_entry_get_inner_border(entry);
+  if (inner_border)
+    return gfx::Insets(*inner_border);
+
+  // No explicit border set, try the style.
+  GtkBorder* style_border;
+  gtk_widget_style_get(GTK_WIDGET(entry), "inner-border", &style_border, NULL);
+  if (style_border) {
+    gfx::Insets insets = gfx::Insets(*style_border);
+    gtk_border_free(style_border);
+    return insets;
+  }
+
+  // If border is null, Gtk uses 2 on all sides.
+  return gfx::Insets(2, 2, 2, 2);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -96,7 +120,7 @@ void NativeTextfieldGtk::UpdateTextColor() {
     gtk_widget_modify_text(native_view(), GTK_STATE_NORMAL, NULL);
     return;
   }
-  GdkColor gdk_color = skia::SkColorToGdkColor(textfield_->text_color());
+  GdkColor gdk_color = gfx::SkColorToGdkColor(textfield_->text_color());
   gtk_widget_modify_text(native_view(), GTK_STATE_NORMAL, &gdk_color);
 }
 
@@ -107,7 +131,7 @@ void NativeTextfieldGtk::UpdateBackgroundColor() {
     gtk_widget_modify_base(native_view(), GTK_STATE_NORMAL, NULL);
     return;
   }
-  GdkColor gdk_color = skia::SkColorToGdkColor(textfield_->background_color());
+  GdkColor gdk_color = gfx::SkColorToGdkColor(textfield_->background_color());
   gtk_widget_modify_base(native_view(), GTK_STATE_NORMAL, &gdk_color);
 }
 
@@ -121,8 +145,17 @@ void NativeTextfieldGtk::UpdateReadOnly() {
 void NativeTextfieldGtk::UpdateFont() {
   if (!native_view())
     return;
-  gtk_widget_modify_font(native_view(),
-                         gfx::Font::PangoFontFromGfxFont(textfield_->font()));
+  PangoFontDescription* pfd =
+      gfx::Font::PangoFontFromGfxFont(textfield_->font());
+  gtk_widget_modify_font(native_view(), pfd);
+  pango_font_description_free(pfd);
+}
+
+void NativeTextfieldGtk::UpdateIsPassword() {
+  if (!native_view())
+    return;
+  gtk_entry_set_visibility(GTK_ENTRY(native_view()),
+                           !textfield_->IsPassword());
 }
 
 void NativeTextfieldGtk::UpdateEnabled() {
@@ -137,23 +170,15 @@ gfx::Insets NativeTextfieldGtk::CalculateInsets() {
 
   GtkWidget* widget = native_view();
   GtkEntry* entry = GTK_ENTRY(widget);
-  const GtkBorder* inner_border = gtk_entry_get_inner_border(entry);
-  int left = 0, right = 0, top = 0, bottom = 0;
-  if (!inner_border)
-    gtk_widget_style_get(widget, "inner-border", &inner_border, NULL);
+  gfx::Insets insets;
 
-  if (inner_border) {
-    left += inner_border->left;
-    right += inner_border->right;
-    top += inner_border->top;
-    bottom += inner_border->bottom;
-  }
+  insets += GetEntryInnerBorder(entry);
 
   if (entry->has_frame) {
-    left += widget->style->xthickness;
-    right += widget->style->xthickness;
-    top += widget->style->ythickness;
-    bottom += widget->style->ythickness;
+    insets += gfx::Insets(widget->style->ythickness,
+                          widget->style->xthickness,
+                          widget->style->ythickness,
+                          widget->style->xthickness);
   }
 
   gboolean interior_focus;
@@ -162,14 +187,10 @@ gfx::Insets NativeTextfieldGtk::CalculateInsets() {
                        "focus-line-width", &focus_width,
                        "interior-focus", &interior_focus,
                        NULL);
-  if (!interior_focus) {
-    left += focus_width;
-    right += focus_width;
-    top += focus_width;
-    bottom += focus_width;
-  }
+  if (!interior_focus)
+    insets += gfx::Insets(focus_width, focus_width, focus_width, focus_width);
 
-  return gfx::Insets(top, left, bottom, right);
+  return insets;
 }
 
 void NativeTextfieldGtk::SetHorizontalMargins(int left, int right) {
@@ -189,6 +210,10 @@ View* NativeTextfieldGtk::GetView() {
 
 gfx::NativeView NativeTextfieldGtk::GetTestingHandle() const {
   return native_view();
+}
+
+bool NativeTextfieldGtk::IsIMEComposing() const {
+  return false;
 }
 
 // static
@@ -227,12 +252,10 @@ gboolean NativeTextfieldGtk::OnChanged() {
 // NativeTextfieldGtk, NativeControlGtk overrides:
 
 void NativeTextfieldGtk::CreateNativeControl() {
-  NativeControlCreated(gtk_entry_new());
-  if (textfield_->IsPassword()) {
-    gtk_entry_set_invisible_char(GTK_ENTRY(native_view()),
-                                 static_cast<gunichar>(kPasswordChar));
-    gtk_entry_set_visibility(GTK_ENTRY(native_view()), false);
-  }
+  NativeControlCreated(gtk_views_entry_new(this));
+  gtk_entry_set_invisible_char(GTK_ENTRY(native_view()),
+                               static_cast<gunichar>(kPasswordChar));
+  textfield_->UpdateAllProperties();
 }
 
 void NativeTextfieldGtk::NativeControlCreated(GtkWidget* widget) {

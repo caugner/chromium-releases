@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_EXTERNAL_PROTOCOL_DIALOG_H_
-#define CHROME_BROWSER_EXTERNAL_PROTOCOL_DIALOG_H_
+#ifndef CHROME_BROWSER_VIEWS_EXTERNAL_PROTOCOL_DIALOG_H_
+#define CHROME_BROWSER_VIEWS_EXTERNAL_PROTOCOL_DIALOG_H_
 
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
@@ -31,6 +31,7 @@ class ExternalProtocolDialog : public views::DialogDelegate {
       MessageBoxFlags::DialogButton button) const;
   virtual std::wstring GetWindowTitle() const;
   virtual void DeleteDelegate();
+  virtual bool Cancel();
   virtual bool Accept();
   virtual views::View* GetContentsView();
 
@@ -54,4 +55,4 @@ class ExternalProtocolDialog : public views::DialogDelegate {
   DISALLOW_COPY_AND_ASSIGN(ExternalProtocolDialog);
 };
 
-#endif // CHROME_BROWSER_EXTERNAL_PROTOCOL_DIALOG_H_
+#endif  // CHROME_BROWSER_VIEWS_EXTERNAL_PROTOCOL_DIALOG_H_

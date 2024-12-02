@@ -20,11 +20,7 @@ namespace {
 
 const wchar_t kDocRoot[] = L"chrome/test/data";
 
-class RedirectTest : public UITest {
- protected:
-  RedirectTest() : UITest() {
-  }
-};
+typedef UITest RedirectTest;
 
 // Tests a single server redirect
 TEST_F(RedirectTest, Server) {
@@ -216,7 +212,7 @@ TEST_F(RedirectTest, NoHttpToFile) {
   scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
   ASSERT_TRUE(tab_proxy.get());
   std::wstring actual_title;
-  tab_proxy->GetTabTitle(&actual_title);
+  ASSERT_TRUE(tab_proxy->GetTabTitle(&actual_title));
   EXPECT_NE(L"File!", actual_title);
 }
 

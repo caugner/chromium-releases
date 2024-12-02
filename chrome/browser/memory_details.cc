@@ -7,14 +7,14 @@
 #include "app/l10n_util.h"
 #include "base/file_version_info.h"
 #include "base/process_util.h"
-#include "base/string_util.h"
-#include "chrome/browser/browser_process.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/child_process_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/renderer_host/backing_store_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/child_process_host.h"
 #include "chrome/common/url_constants.h"
 #include "grit/chromium_strings.h"
 
@@ -37,20 +37,18 @@
 //
 
 void MemoryDetails::StartFetch() {
-  ui_loop_ = MessageLoop::current();
-
-  DCHECK(ui_loop_ != g_browser_process->io_thread()->message_loop());
-  DCHECK(ui_loop_ != g_browser_process->file_thread()->message_loop());
+  DCHECK(!ChromeThread::CurrentlyOn(ChromeThread::IO));
+  DCHECK(!ChromeThread::CurrentlyOn(ChromeThread::FILE));
 
   // In order to process this request, we need to use the plugin information.
   // However, plugin process information is only available from the IO thread.
-  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
       NewRunnableMethod(this, &MemoryDetails::CollectChildInfoOnIOThread));
 }
 
 void MemoryDetails::CollectChildInfoOnIOThread() {
-  DCHECK(MessageLoop::current() ==
-      ChromeThread::GetMessageLoop(ChromeThread::IO));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   std::vector<ProcessMemoryInformation> child_info;
 
@@ -67,12 +65,13 @@ void MemoryDetails::CollectChildInfoOnIOThread() {
   }
 
   // Now go do expensive memory lookups from the file thread.
-  ChromeThread::GetMessageLoop(ChromeThread::FILE)->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
       NewRunnableMethod(this, &MemoryDetails::CollectProcessData, child_info));
 }
 
 void MemoryDetails::CollectChildInfoOnUIThread() {
-  DCHECK(MessageLoop::current() == ui_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
 
 #if defined(OS_LINUX)
   const pid_t zygote_pid = Singleton<ZygoteHost>()->pid();
@@ -94,8 +93,12 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
          RenderProcessHost::AllHostsIterator()); !renderer_iter.IsAtEnd();
          renderer_iter.Advance()) {
       DCHECK(renderer_iter.GetCurrentValue());
-      if (process.pid != renderer_iter.GetCurrentValue()->process().pid())
+      // Ignore processes that don't have a connection, such as crashed tabs or
+      // phantom tabs.
+      if (!renderer_iter.GetCurrentValue()->HasConnection() || process.pid !=
+              base::GetProcId(renderer_iter.GetCurrentValue()->GetHandle())) {
         continue;
+      }
       process.type = ChildProcessInfo::RENDER_PROCESS;
       // The RenderProcessHost may host multiple TabContents.  Any
       // of them which contain diagnostics information make the whole
@@ -186,31 +189,37 @@ void MemoryDetails::UpdateHistograms() {
     int sample = static_cast<int>(browser.processes[index].working_set.priv);
     aggregate_memory += sample;
     switch (browser.processes[index].type) {
-     case ChildProcessInfo::BROWSER_PROCESS:
-       UMA_HISTOGRAM_MEMORY_KB("Memory.Browser", sample);
-       break;
-     case ChildProcessInfo::RENDER_PROCESS:
-       UMA_HISTOGRAM_MEMORY_KB("Memory.Renderer", sample);
-       break;
-     case ChildProcessInfo::PLUGIN_PROCESS:
-       UMA_HISTOGRAM_MEMORY_KB("Memory.Plugin", sample);
-       plugin_count++;
-       break;
-     case ChildProcessInfo::WORKER_PROCESS:
-       UMA_HISTOGRAM_MEMORY_KB("Memory.Worker", sample);
-       worker_count++;
-       break;
-     case ChildProcessInfo::ZYGOTE_PROCESS:
-       UMA_HISTOGRAM_MEMORY_KB("Memory.Zygote", sample);
-       break;
-     case ChildProcessInfo::SANDBOX_HELPER_PROCESS:
-       UMA_HISTOGRAM_MEMORY_KB("Memory.SandboxHelper", sample);
-       break;
-     case ChildProcessInfo::NACL_PROCESS:
-       UMA_HISTOGRAM_MEMORY_KB("Memory.NativeClient", sample);
-       break;
-     default:
-       NOTREACHED();
+      case ChildProcessInfo::BROWSER_PROCESS:
+        UMA_HISTOGRAM_MEMORY_KB("Memory.Browser", sample);
+        break;
+      case ChildProcessInfo::RENDER_PROCESS:
+        UMA_HISTOGRAM_MEMORY_KB("Memory.Renderer", sample);
+        break;
+      case ChildProcessInfo::PLUGIN_PROCESS:
+        UMA_HISTOGRAM_MEMORY_KB("Memory.Plugin", sample);
+        plugin_count++;
+        break;
+      case ChildProcessInfo::WORKER_PROCESS:
+        UMA_HISTOGRAM_MEMORY_KB("Memory.Worker", sample);
+        worker_count++;
+        break;
+      case ChildProcessInfo::UTILITY_PROCESS:
+        UMA_HISTOGRAM_MEMORY_KB("Memory.Utility", sample);
+        break;
+      case ChildProcessInfo::ZYGOTE_PROCESS:
+        UMA_HISTOGRAM_MEMORY_KB("Memory.Zygote", sample);
+        break;
+      case ChildProcessInfo::SANDBOX_HELPER_PROCESS:
+        UMA_HISTOGRAM_MEMORY_KB("Memory.SandboxHelper", sample);
+        break;
+      case ChildProcessInfo::NACL_LOADER_PROCESS:
+        UMA_HISTOGRAM_MEMORY_KB("Memory.NativeClient", sample);
+        break;
+      case ChildProcessInfo::NACL_BROKER_PROCESS:
+        UMA_HISTOGRAM_MEMORY_KB("Memory.NativeClientBroker", sample);
+        break;
+      default:
+        NOTREACHED();
     }
   }
   UMA_HISTOGRAM_MEMORY_KB("Memory.BackingStore",
@@ -220,6 +229,8 @@ void MemoryDetails::UpdateHistograms() {
       static_cast<int>(browser.processes.size()));
   UMA_HISTOGRAM_COUNTS_100("Memory.PluginProcessCount", plugin_count);
   UMA_HISTOGRAM_COUNTS_100("Memory.WorkerProcessCount", worker_count);
+  // TODO(viettrungluu): Do we want separate counts for the other
+  // (platform-specific) process types?
 
   int total_sample = static_cast<int>(aggregate_memory / 1000);
   UMA_HISTOGRAM_MEMORY_MB("Memory.Total", total_sample);

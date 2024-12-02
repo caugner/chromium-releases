@@ -5,21 +5,29 @@
 #include "chrome/browser/gtk/options/fonts_page_gtk.h"
 
 #include "app/l10n_util.h"
+#include "app/l10n_util_collator.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/options/options_layout_gtk.h"
-#include "chrome/common/gtk_util.h"
+#include "chrome/browser/profile.h"
 #include "chrome/common/pref_names.h"
+#include "gfx/font.h"
 #include "grit/generated_resources.h"
 
 namespace {
 
 // Make a Gtk font name string from a font family name and pixel size.
 std::string MakeFontName(std::wstring family_name, int pixel_size) {
+  // The given font might not be available (the default fonts we use are not
+  // installed by default on some distros).  So figure out which font we are
+  // actually falling back to and display that.  (See crbug.com/31381.)
+  std::wstring actual_family_name = gfx::Font::CreateFont(
+      family_name, pixel_size).FontName();
   std::string fontname;
   // TODO(mattm): We can pass in the size in pixels (px), and the font button
   // actually honors it, but when you open the selector it interprets it as
   // points.  See crbug.com/17857
-  SStringPrintf(&fontname, "%s, %dpx", WideToUTF8(family_name).c_str(),
+  SStringPrintf(&fontname, "%s, %dpx", WideToUTF8(actual_family_name).c_str(),
                 pixel_size);
   return fontname;
 }
@@ -39,20 +47,20 @@ void FontsPageGtk::Init() {
   serif_font_button_ = gtk_font_button_new();
   gtk_font_button_set_use_font(GTK_FONT_BUTTON(serif_font_button_), TRUE);
   gtk_font_button_set_use_size(GTK_FONT_BUTTON(serif_font_button_), TRUE);
-  g_signal_connect(serif_font_button_, "font-set", G_CALLBACK(OnSerifFontSet),
-                   this);
+  g_signal_connect(serif_font_button_, "font-set",
+                   G_CALLBACK(OnSerifFontSetThunk), this);
 
   sans_font_button_ = gtk_font_button_new();
   gtk_font_button_set_use_font(GTK_FONT_BUTTON(sans_font_button_), TRUE);
   gtk_font_button_set_use_size(GTK_FONT_BUTTON(sans_font_button_), TRUE);
-  g_signal_connect(sans_font_button_, "font-set", G_CALLBACK(OnSansFontSet),
-                   this);
+  g_signal_connect(sans_font_button_, "font-set",
+                   G_CALLBACK(OnSansFontSetThunk), this);
 
   fixed_font_button_ = gtk_font_button_new();
   gtk_font_button_set_use_font(GTK_FONT_BUTTON(fixed_font_button_), TRUE);
   gtk_font_button_set_use_size(GTK_FONT_BUTTON(fixed_font_button_), TRUE);
-  g_signal_connect(fixed_font_button_, "font-set", G_CALLBACK(OnFixedFontSet),
-                   this);
+  g_signal_connect(fixed_font_button_, "font-set",
+                   G_CALLBACK(OnFixedFontSetThunk), this);
 
   GtkWidget* font_controls = gtk_util::CreateLabeledControlsGroup(NULL,
       l10n_util::GetStringUTF8(
@@ -101,8 +109,8 @@ void FontsPageGtk::Init() {
 
 void FontsPageGtk::InitDefaultEncodingComboBox() {
   default_encoding_combobox_ = gtk_combo_box_new_text();
-  g_signal_connect(G_OBJECT(default_encoding_combobox_), "changed",
-                   G_CALLBACK(OnDefaultEncodingChanged), this);
+  g_signal_connect(default_encoding_combobox_, "changed",
+                   G_CALLBACK(OnDefaultEncodingChangedThunk), this);
   int canonical_encoding_names_length =
       CharacterEncoding::GetSupportCanonicalEncodingCount();
   // Initialize the vector of all sorted encodings according to current
@@ -153,10 +161,10 @@ void FontsPageGtk::NotifyPrefChanged(const std::wstring* pref_name) {
 }
 
 void FontsPageGtk::SetFontsFromButton(StringPrefMember* name_pref,
-                        IntegerPrefMember* size_pref,
-                        GtkFontButton* font_button) {
+                                      IntegerPrefMember* size_pref,
+                                      GtkWidget* font_button) {
   PangoFontDescription* desc = pango_font_description_from_string(
-      gtk_font_button_get_font_name(font_button));
+      gtk_font_button_get_font_name(GTK_FONT_BUTTON(font_button)));
   int size = pango_font_description_get_size(desc);
   name_pref->SetValue(UTF8ToWide(pango_font_description_get_family(desc)));
   size_pref->SetValue(size / PANGO_SCALE);
@@ -167,41 +175,32 @@ void FontsPageGtk::SetFontsFromButton(StringPrefMember* name_pref,
   NotifyPrefChanged(NULL);
 }
 
-
-// static
-void FontsPageGtk::OnSerifFontSet(GtkFontButton* font_button,
-                                  FontsPageGtk* fonts_page) {
-  fonts_page->SetFontsFromButton(&fonts_page->serif_name_,
-                                 &fonts_page->variable_width_size_,
-                                 font_button);
+void FontsPageGtk::OnSerifFontSet(GtkWidget* font_button) {
+  SetFontsFromButton(&serif_name_,
+                     &variable_width_size_,
+                     font_button);
 }
 
-// static
-void FontsPageGtk::OnSansFontSet(GtkFontButton* font_button,
-                                 FontsPageGtk* fonts_page) {
-  fonts_page->SetFontsFromButton(&fonts_page->sans_serif_name_,
-                                 &fonts_page->variable_width_size_,
-                                 font_button);
+void FontsPageGtk::OnSansFontSet(GtkWidget* font_button) {
+  SetFontsFromButton(&sans_serif_name_,
+                     &variable_width_size_,
+                     font_button);
 }
 
-// static
-void FontsPageGtk::OnFixedFontSet(GtkFontButton* font_button,
-                                  FontsPageGtk* fonts_page) {
-  fonts_page->SetFontsFromButton(&fonts_page->fixed_width_name_,
-                                 &fonts_page->fixed_width_size_,
-                                 font_button);
+void FontsPageGtk::OnFixedFontSet(GtkWidget* font_button) {
+  SetFontsFromButton(&fixed_width_name_,
+                     &fixed_width_size_,
+                     font_button);
 }
 
-// static
-void FontsPageGtk::OnDefaultEncodingChanged(GtkComboBox* combo_box,
-                                            FontsPageGtk* fonts_page) {
-  int index = gtk_combo_box_get_active(combo_box);
+void FontsPageGtk::OnDefaultEncodingChanged(GtkWidget* combo_box) {
+  int index = gtk_combo_box_get_active(GTK_COMBO_BOX(combo_box));
   if (index < 0 ||
-      static_cast<size_t>(index) >= fonts_page->sorted_encoding_list_.size()) {
+      static_cast<size_t>(index) >= sorted_encoding_list_.size()) {
     NOTREACHED();
     return;
   }
-  fonts_page->default_encoding_.SetValue(
+  default_encoding_.SetValue(
       ASCIIToWide(CharacterEncoding::GetCanonicalEncodingNameByCommandId(
-          fonts_page->sorted_encoding_list_[index].encoding_id)));
+          sorted_encoding_list_[index].encoding_id)));
 }

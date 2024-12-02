@@ -1,9 +1,9 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_HISTORY_EXPIRE_HISTORY_BACKEND_H__
-#define CHROME_BROWSER_HISTORY_EXPIRE_HISTORY_BACKEND_H__
+#ifndef CHROME_BROWSER_HISTORY_EXPIRE_HISTORY_BACKEND_H_
+#define CHROME_BROWSER_HISTORY_EXPIRE_HISTORY_BACKEND_H_
 
 #include <queue>
 #include <set>
@@ -36,6 +36,9 @@ class BroadcastNotificationDelegate {
   // thread. The details argument will have ownership taken by this function.
   virtual void BroadcastNotifications(NotificationType type,
                                       HistoryDetails* details_deleted) = 0;
+
+ protected:
+  virtual ~BroadcastNotificationDelegate() {}
 };
 
 // Encapsulates visit expiration criteria and type of visits to expire.
@@ -79,8 +82,10 @@ class ExpireHistoryBackend {
   // Deletes everything associated with a URL.
   void DeleteURL(const GURL& url);
 
-  // Removes all visits in the given time range, updating the URLs accordingly.
-  void ExpireHistoryBetween(base::Time begin_time, base::Time end_time);
+  // Removes all visits to restrict_urls (or all URLs if empty) in the given
+  // time range, updating the URLs accordingly,
+  void ExpireHistoryBetween(const std::set<GURL>& restrict_urls,
+                            base::Time begin_time, base::Time end_time);
 
   // Archives all visits before and including the given time, updating the URLs
   // accordingly. This function is intended for migrating old databases
@@ -96,7 +101,7 @@ class ExpireHistoryBackend {
   }
 
  private:
-  //friend class ExpireHistoryTest_DeleteFaviconsIfPossible_Test;
+  // friend class ExpireHistoryTest_DeleteFaviconsIfPossible_Test;
   FRIEND_TEST(ExpireHistoryTest, DeleteTextIndexForURL);
   FRIEND_TEST(ExpireHistoryTest, DeleteFaviconsIfPossible);
   FRIEND_TEST(ExpireHistoryTest, ArchiveSomeOldHistory);
@@ -277,4 +282,4 @@ class ExpireHistoryBackend {
 
 }  // namespace history
 
-#endif  // CHROME_BROWSER_HISTORY_EXPIRE_HISTORY_BACKEND_H__
+#endif  // CHROME_BROWSER_HISTORY_EXPIRE_HISTORY_BACKEND_H_

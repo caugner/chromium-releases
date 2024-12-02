@@ -14,6 +14,7 @@
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
 
+class FilePath;
 class MessageLoop;
 
 // Provides an abstraction of profiles on top of the user data directory
@@ -51,6 +52,11 @@ class UserDataManager {
   // This function should be called on the file thread.
   void GetProfiles(std::vector<std::wstring>* profiles) const;
 
+  // Creates a shortcut for the given profile name in |folder|.
+  // Returns false if the shortcut creation fails; true otherwise.
+  bool CreateShortcutForProfileInFolder(const FilePath& folder,
+      const std::wstring& profile_name) const;
+
   // Creates a desktop shortcut for the given profile name.
   // Returns false if the shortcut creation fails; true otherwise.
   bool CreateDesktopShortcutForProfile(const std::wstring& profile_name) const;
@@ -64,6 +70,9 @@ class UserDataManager {
   // This method launches Chrome asynchornously since it enumerates profiles
   // on a separate thread.
   void LaunchChromeForProfile(int index) const;
+
+  // Updates global user data dir profile list stored in g_browser_process.
+  void RefreshUserDataDirProfiles() const;
 
  private:
   // Gets the name of the profile from the name of the folder.
@@ -129,6 +138,10 @@ class GetProfilesHelper
   void OnDelegateDeleted();
 
  private:
+  friend class base::RefCountedThreadSafe<GetProfilesHelper>;
+
+  ~GetProfilesHelper() {}
+
   // Helper to get the profiles from user data manager.
   void GetProfilesFromManager();
 

@@ -24,16 +24,17 @@
 #define CHROME_COMMON_WEBKIT_PARAM_TRAITS_H_
 
 #include "ipc/ipc_message_utils.h"
-#include "webkit/api/public/WebCache.h"
-#include "webkit/api/public/WebCompositionCommand.h"
-#include "webkit/api/public/WebConsoleMessage.h"
-#include "webkit/api/public/WebContextMenuData.h"
-#include "webkit/api/public/WebDragOperation.h"
-#include "webkit/api/public/WebFindOptions.h"
-#include "webkit/api/public/WebInputEvent.h"
-#include "webkit/api/public/WebMediaPlayerAction.h"
-#include "webkit/api/public/WebScreenInfo.h"
-#include "webkit/api/public/WebTextDirection.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCompositionCommand.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebConsoleMessage.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebContextMenuData.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDragOperation.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFindOptions.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebMediaPlayerAction.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebScreenInfo.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebTextDirection.h"
 
 namespace IPC {
 
@@ -120,6 +121,24 @@ struct ParamTraits<WebKit::WebCompositionCommand> {
 template <>
 struct ParamTraits<WebKit::WebConsoleMessage::Level> {
   typedef WebKit::WebConsoleMessage::Level param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, static_cast<int>(p));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    int value;
+    if (!ReadParam(m, iter, &value))
+      return false;
+    *r = static_cast<param_type>(value);
+    return true;
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    LogParam(static_cast<int>(p), l);
+  }
+};
+
+template <>
+struct ParamTraits<WebKit::WebPopupType> {
+  typedef WebKit::WebPopupType param_type;
   static void Write(Message* m, const param_type& p) {
     WriteParam(m, static_cast<int>(p));
   }

@@ -1,3 +1,7 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #ifndef SANDBOX_IMPL_H__
 #define SANDBOX_IMPL_H__
 
@@ -44,10 +48,28 @@ class Sandbox {
  public:
   enum { kMaxThreads = 100 };
 
+
+  // There are a lot of reasons why the Seccomp sandbox might not be available.
+  // This could be because the kernel does not support Seccomp mode, or it
+  // could be because we fail to successfully rewrite all system call entry
+  // points.
+  // "proc_fd" should be a file descriptor for "/proc", or -1 if not provided
+  // by the caller.
+  static int supportsSeccompSandbox(int proc_fd)
+                                          asm("SupportsSeccompSandbox");
+
+  // The sandbox needs to be able to access "/proc/self/maps". If this file
+  // is not accessible when "startSandbox()" gets called, the caller can
+  // provide an already opened file descriptor by calling "setProcSelfMaps()".
+  // The sandbox becomes the newer owner of this file descriptor and will
+  // eventually close it when "startSandbox()" executes.
+  static void setProcSelfMaps(int proc_self_maps)
+                                          asm("SeccompSandboxSetProcSelfMaps");
+
   // This is the main public entry point. It finds all system calls that
   // need rewriting, sets up the resources needed by the sandbox, and
   // enters Seccomp mode.
-  static void startSandbox() asm("StartSeccompSandbox");
+  static void startSandbox()              asm("StartSeccompSandbox");
 
  private:
 // syscall_table.c has to be implemented in C, as C++ does not support
@@ -64,7 +86,11 @@ class Sandbox {
   // calls playground$sandbox__clone().
   static int sandbox_clone(int flags, void* stack, int* pid, int* ctid,
                            void* tls, void* wrapper_sp)
-                                            asm("playground$sandbox__clone");
+    asm("playground$sandbox__clone")
+  #if defined(__x86_64__)
+    __attribute__((visibility("internal")))
+#endif
+    ;
 #else
 #define STATIC
 #define bool int
@@ -89,6 +115,12 @@ class Sandbox {
   #if defined(__NR_ipc)
   STATIC int sandbox_ipc(unsigned, int, int, int, void*, long)
                                           asm("playground$sandbox_ipc");
+  #endif
+  STATIC int sandbox_lstat(const char* path, void* buf)
+                                          asm("playground$sandbox_lstat");
+  #if defined(__NR_lstat64)
+  STATIC int sandbox_lstat64(const char *path, void* b)
+                                          asm("playground$sandbox_lstat64");
   #endif
   STATIC int sandbox_madvise(void*, size_t, int)
                                           asm("playground$sandbox_madvise");
@@ -236,7 +268,7 @@ class Sandbox {
   // Wrapper around "read()" that can deal with partial and interrupted reads
   // and that does not modify the global errno variable.
   static ssize_t read(SysCalls& sys, int fd, void* buf, size_t len) {
-    if (len < 0) {
+    if (static_cast<ssize_t>(len) < 0) {
       sys.my_errno = EINVAL;
       return -1;
     }
@@ -263,7 +295,12 @@ class Sandbox {
 
   // Sends a file handle to another process.
   static bool sendFd(int transport, int fd0, int fd1, const void* buf,
-                     size_t len) asm("playground$sendFd");
+                     size_t len)
+    asm("playground$sendFd")
+  #if defined(__x86_64__)
+    __attribute__((visibility("internal")))
+  #endif
+    ;
 
   // If getFd() fails, it will set the first valid fd slot (e.g. fd0) to
   // -errno.
@@ -327,7 +364,6 @@ class Sandbox {
         void* edx;
         void* ecx;
         void* ebx;
-        void* ret2;
       } regs32 __attribute__((packed));
     #else
     #error Unsupported target platform
@@ -559,7 +595,11 @@ class Sandbox {
   static void* defaultSystemCallHandler(int syscallNum, void* arg0,
                                         void* arg1, void* arg2, void* arg3,
                                         void* arg4, void* arg5)
-                                    asm("playground$defaultSystemCallHandler");
+                                    asm("playground$defaultSystemCallHandler")
+  #if defined(__x86_64__)
+                                    __attribute__((visibility("internal")))
+  #endif
+  ;
 
   // Return a secure memory structure that can be used by a newly created
   // thread.
@@ -569,15 +609,16 @@ class Sandbox {
   // memory mappings that existed when the sandbox was first enabled. Going
   // forward, all these mappings are off-limits for operations such as
   // mmap(), munmap(), and mprotect().
-  static void  initializeProtectedMap(int fd);
+  static int   initializeProtectedMap(int fd);
 
   // Helper functions that allows the trusted process to get access to
   // "/proc/self/maps" in the sandbox.
-  static void  snapshotMemoryMappings(int processFd);
+  static void  snapshotMemoryMappings(int processFd, int proc_self_maps);
 
   // Main loop for the trusted process.
-  static void  trustedProcess(int parentProc, int processFdPub, int sandboxFd,
-                              int cloneFd, SecureMem::Args* secureArena)
+  static void  trustedProcess(int parentMapsFd, int processFdPub,
+                              int sandboxFd, int cloneFd,
+                              SecureMem::Args* secureArena)
                                                      __attribute__((noreturn));
 
   // Fork()s of the trusted process.
@@ -589,6 +630,10 @@ class Sandbox {
   static void  createTrustedThread(int processFdPub, int cloneFdPub,
                                    SecureMem::Args* secureMem);
 
+  static int   proc_self_maps_;
+  static enum SandboxStatus {
+    STATUS_UNKNOWN, STATUS_UNSUPPORTED, STATUS_AVAILABLE, STATUS_ENABLED
+  }            status_;
   static int   pid_;
   static int   processFdPub_;
   static int   cloneFdPub_;

@@ -14,8 +14,8 @@
 #include "base/task.h"
 #include "base/thread.h"
 #include "base/win_util.h"
-#include "chrome/app/client_util.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
+#include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
@@ -212,21 +212,11 @@ GoogleUpdate::~GoogleUpdate() {
 void GoogleUpdate::CheckForUpdate(bool install_if_newer, Window* window) {
   // We need to shunt this request over to InitiateGoogleUpdateCheck and have
   // it run in the file thread.
-  MessageLoop* file_loop = g_browser_process->file_thread()->message_loop();
-  file_loop->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &GoogleUpdate::InitiateGoogleUpdateCheck,
-      install_if_newer, window, MessageLoop::current()));
-}
-
-// Adds/removes a listener. Only one listener is maintained at the moment.
-void GoogleUpdate::AddStatusChangeListener(
-    GoogleUpdateStatusListener* listener) {
-  DCHECK(!listener_);
-  listener_ = listener;
-}
-
-void GoogleUpdate::RemoveStatusChangeListener() {
-  listener_ = NULL;
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
+      NewRunnableMethod(
+          this, &GoogleUpdate::InitiateGoogleUpdateCheck, install_if_newer,
+          window, MessageLoop::current()));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -287,10 +277,11 @@ bool GoogleUpdate::InitiateGoogleUpdateCheck(bool install_if_newer,
   if (hr != S_OK)
     return ReportFailure(hr, GOOGLE_UPDATE_ONDEMAND_CLASS_NOT_FOUND, main_loop);
 
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   if (!install_if_newer)
-    hr = on_demand->CheckForUpdate(google_update::kChromeGuid, job_observer);
+    hr = on_demand->CheckForUpdate(dist->GetAppGuid().c_str(), job_observer);
   else
-    hr = on_demand->Update(google_update::kChromeGuid, job_observer);
+    hr = on_demand->Update(dist->GetAppGuid().c_str(), job_observer);
 
   if (hr != S_OK)
     return ReportFailure(hr, GOOGLE_UPDATE_ONDEMAND_CLASS_REPORTED_ERROR,

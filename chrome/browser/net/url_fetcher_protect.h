@@ -5,8 +5,8 @@
 // This file implements backoff in the suggest system so that we don't
 // DOS the Suggest servers when using URLFetcher.
 
-#ifndef CHROME_BROWSER_URL_FETCHER_PROTECT_H__
-#define CHROME_BROWSER_URL_FETCHER_PROTECT_H__
+#ifndef CHROME_BROWSER_NET_URL_FETCHER_PROTECT_H_
+#define CHROME_BROWSER_NET_URL_FETCHER_PROTECT_H_
 
 #include <map>
 #include <queue>
@@ -123,9 +123,11 @@ class URLFetcherProtectManager {
   static URLFetcherProtectManager* GetInstance();
 
   // Registers a new entry in this service. If the entry already exists,
-  // just returns it.
+  // just returns it. Ownership of the return object remains with the manager.
   URLFetcherProtectEntry* Register(const std::string& id);
-  // Always registers the entry even when it exists.
+  // Always registers the entry even when it exists; any existing entry for this
+  // id will be deleted and existing references to it will become invalid.
+  // Ownership of the return object remains with the manager.
   URLFetcherProtectEntry* Register(const std::string& id,
                                    URLFetcherProtectEntry* entry);
 
@@ -141,4 +143,4 @@ class URLFetcherProtectManager {
   DISALLOW_COPY_AND_ASSIGN(URLFetcherProtectManager);
 };
 
-#endif  // CHROME_BROWSER_URL_FETCHER_PROTECT_H__
+#endif  // CHROME_BROWSER_NET_URL_FETCHER_PROTECT_H_

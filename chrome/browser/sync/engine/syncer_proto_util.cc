@@ -4,14 +4,17 @@
 
 #include "chrome/browser/sync/engine/syncer_proto_util.h"
 
+#include "base/format_macros.h"
+#include "base/string_util.h"
+#include "chrome/browser/sync/engine/auth_watcher.h"
 #include "chrome/browser/sync/engine/net/server_connection_manager.h"
 #include "chrome/browser/sync/engine/syncer.h"
 #include "chrome/browser/sync/engine/syncer_util.h"
 #include "chrome/browser/sync/protocol/service_constants.h"
+#include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable-inl.h"
 #include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/util/character_set_converters.h"
 
 using std::string;
 using std::stringstream;
@@ -27,31 +30,12 @@ using syncable::ScopedDirLookup;
 using syncable::SyncName;
 
 namespace browser_sync {
+using sessions::SyncSession;
 
 namespace {
 
 // Time to backoff syncing after receiving a throttled response.
 static const int kSyncDelayAfterThrottled = 2 * 60 * 60;  // 2 hours
-
-// Verifies the store birthday, alerting/resetting as appropriate if there's a
-// mismatch.
-bool VerifyResponseBirthday(const ScopedDirLookup& dir,
-                            const ClientToServerResponse* response) {
-  // Process store birthday.
-  if (!response->has_store_birthday())
-    return true;
-  string birthday = dir->store_birthday();
-  if (response->store_birthday() == birthday)
-    return true;
-  LOG(INFO) << "New store birthday: " << response->store_birthday();
-  if (!birthday.empty()) {
-    LOG(ERROR) << "Birthday changed, showing syncer stuck";
-    return false;
-  }
-  dir->set_store_birthday(response->store_birthday());
-  return true;
-}
-
 void LogResponseProfilingData(const ClientToServerResponse& response) {
   if (response.has_profiling_data()) {
     stringstream response_trace;
@@ -92,91 +76,149 @@ void LogResponseProfilingData(const ClientToServerResponse& response) {
 
 }  // namespace
 
-// static
-bool SyncerProtoUtil::PostClientToServerMessage(ClientToServerMessage* msg,
-    ClientToServerResponse* response, SyncerSession* session) {
-  bool rv = false;
-  string tx, rx;
-  CHECK(response);
 
-  ScopedDirLookup dir(session->dirman(), session->account_name());
-  if (!dir.good())
-    return false;
-  string birthday = dir->store_birthday();
-  if (!birthday.empty()) {
-    msg->set_store_birthday(birthday);
-  } else {
-    LOG(INFO) << "no birthday set";
+// static
+bool SyncerProtoUtil::VerifyResponseBirthday(syncable::Directory* dir,
+    const ClientToServerResponse* response) {
+
+  std::string local_birthday = dir->store_birthday();
+
+  if (local_birthday.empty()) {
+    if (!response->has_store_birthday()) {
+      LOG(WARNING) << "Expected a birthday on first sync.";
+      return false;
+    }
+
+    LOG(INFO) << "New store birthday: " << response->store_birthday();
+    dir->set_store_birthday(response->store_birthday());
+    return true;
   }
 
+  // Error situation, but we're not stuck.
+  if (!response->has_store_birthday()) {
+    LOG(WARNING) << "No birthday in server response?";
+    return true;
+  }
+
+  if (response->store_birthday() != local_birthday) {
+    LOG(WARNING) << "Birthday changed, showing syncer stuck";
+    return false;
+  }
+
+  return true;
+}
+
+// static
+void SyncerProtoUtil::AddRequestBirthday(syncable::Directory* dir,
+                                         ClientToServerMessage* msg) {
+  if (!dir->store_birthday().empty()) {
+    msg->set_store_birthday(dir->store_birthday());
+  }
+}
+
+// static
+bool SyncerProtoUtil::PostAndProcessHeaders(ServerConnectionManager* scm,
+                                            AuthWatcher* auth_watcher,
+                                            ClientToServerMessage* msg,
+                                            ClientToServerResponse* response) {
+
+  std::string tx, rx;
   msg->SerializeToString(&tx);
+
   HttpResponse http_response;
   ServerConnectionManager::PostBufferParams params = {
     tx, &rx, &http_response
   };
 
-  if (!session->connection_manager()->PostBufferWithCachedAuth(&params)) {
+  ScopedServerStatusWatcher server_status_watcher(scm, &http_response);
+  if (!scm->PostBufferWithCachedAuth(&params, &server_status_watcher)) {
     LOG(WARNING) << "Error posting from syncer:" << http_response;
+    return false;
   } else {
-    rv = response->ParseFromString(rx);
+    std::string new_token =
+        http_response.update_client_auth_header;
+    if (!new_token.empty()) {
+      // We could also do this in the SCM's PostBufferWithAuth.
+      // But then we could be in the middle of authentication, which seems
+      // like a bad time to update the token. A consequence of this is that
+      // we can't reset the cookie in response to auth attempts, but this
+      // should be OK.
+      auth_watcher->RenewAuthToken(new_token);
+    }
+
+    if (response->ParseFromString(rx)) {
+      // TODO(tim): This is an egregious layering violation (bug 35060).
+      switch (response->error_code()) {
+        case ClientToServerResponse::ACCESS_DENIED:
+        case ClientToServerResponse::AUTH_INVALID:
+        case ClientToServerResponse::USER_NOT_ACTIVATED:
+          // Fires on ScopedServerStatusWatcher
+          http_response.server_status = HttpResponse::SYNC_AUTH_ERROR;
+          return false;
+        default:
+          return true;
+      }
+    }
+
+    return false;
   }
-  SyncerStatus status(session);
-  if (rv) {
-    if (!VerifyResponseBirthday(dir, response)) {
-      // TODO(ncarter): Add a unit test for the case where the syncer becomes
-      // stuck due to a bad birthday.
-      status.set_syncer_stuck(true);
+}
+
+// static
+bool SyncerProtoUtil::PostClientToServerMessage(ClientToServerMessage* msg,
+    ClientToServerResponse* response, SyncSession* session) {
+
+  CHECK(response);
+
+  ScopedDirLookup dir(session->context()->directory_manager(),
+      session->context()->account_name());
+  if (!dir.good()) {
+    return false;
+  }
+
+  AddRequestBirthday(dir, msg);
+
+  if (!PostAndProcessHeaders(session->context()->connection_manager(),
+                             session->context()->auth_watcher(),
+                             msg,
+                             response)) {
+    return false;
+  }
+
+  if (!VerifyResponseBirthday(dir, response)) {
+    // TODO(ncarter): Add a unit test for the case where the syncer becomes
+    // stuck due to a bad birthday.
+    session->status_controller()->set_syncer_stuck(true);
+    return false;
+  }
+
+  switch (response->error_code()) {
+    case ClientToServerResponse::SUCCESS:
+      LogResponseProfilingData(*response);
+      return true;
+    case ClientToServerResponse::NOT_MY_BIRTHDAY:
+      LOG(WARNING) << "Server thought we had wrong birthday.";
       return false;
-    }
-
-    // We use an exponential moving average to determine the rate of errors.
-    // It's more reactive to recent situations and uses no extra storage.
-    status.ForgetOldError();
-    // If we're decaying send out an update.
-    status.CheckErrorRateTooHigh();
-
-    switch (response->error_code()) {
-      case ClientToServerResponse::SUCCESS:
-        if (!response->has_store_birthday() && birthday.empty()) {
-          LOG(ERROR) <<
-            "Server didn't provide birthday in proto buffer response.";
-          rv = false;
-        }
-        LogResponseProfilingData(*response);
-        break;
-      case ClientToServerResponse::USER_NOT_ACTIVATED:
-      case ClientToServerResponse::AUTH_INVALID:
-      case ClientToServerResponse::ACCESS_DENIED:
-        LOG(INFO) << "Authentication expired, re-requesting";
-        LOG(INFO) << "Not implemented in syncer yet!!!";
-        status.AuthFailed();
-        rv = false;
-        break;
-      case ClientToServerResponse::NOT_MY_BIRTHDAY:
-        LOG(WARNING) << "Not my birthday return.";
-        rv = false;
-        break;
-      case ClientToServerResponse::THROTTLED:
-        LOG(WARNING) << "Client silenced by server.";
-        session->set_silenced_until(base::TimeTicks::Now() +
-            base::TimeDelta::FromSeconds(kSyncDelayAfterThrottled));
-        rv = false;
-        break;
-      default:
-        NOTREACHED();
-        break;
-    }
-
-  } else if (session->connection_manager()->IsServerReachable()) {
-    status.TallyNewError();
+    case ClientToServerResponse::THROTTLED:
+      LOG(WARNING) << "Client silenced by server.";
+      session->delegate()->OnSilencedUntil(base::TimeTicks::Now() +
+          base::TimeDelta::FromSeconds(kSyncDelayAfterThrottled));
+      return false;
+    case ClientToServerResponse::USER_NOT_ACTIVATED:
+    case ClientToServerResponse::AUTH_INVALID:
+    case ClientToServerResponse::ACCESS_DENIED:
+      // WARNING: PostAndProcessHeaders contains a hack for this case.
+      LOG(WARNING) << "SyncerProtoUtil: Authentication expired.";
+    default:
+      NOTREACHED();
+      return false;
   }
-  return rv;
 }
 
 // static
 bool SyncerProtoUtil::Compare(const syncable::Entry& local_entry,
                               const SyncEntity& server_entry) {
-  SyncName name = NameFromSyncEntity(server_entry);
+  const std::string name = NameFromSyncEntity(server_entry);
 
   CHECK(local_entry.Get(ID) == server_entry.id()) <<
     " SyncerProtoUtil::Compare precondition not met.";
@@ -194,7 +236,7 @@ bool SyncerProtoUtil::Compare(const syncable::Entry& local_entry,
 
   // These checks are somewhat prolix, but they're easier to debug than a big
   // boolean statement.
-  SyncName client_name = local_entry.GetName();
+  string client_name = local_entry.Get(syncable::NON_UNIQUE_NAME);
   if (client_name != name) {
     LOG(WARNING) << "Client name mismatch";
     return false;
@@ -244,33 +286,65 @@ void SyncerProtoUtil::CopyBlobIntoProtoBytes(const syncable::Blob& blob,
 }
 
 // static
-syncable::SyncName SyncerProtoUtil::NameFromSyncEntity(
+const std::string& SyncerProtoUtil::NameFromSyncEntity(
     const SyncEntity& entry) {
-  SyncName result(PSTR(""));
 
-  AppendUTF8ToPathString(entry.name(), &result.value());
   if (entry.has_non_unique_name()) {
-    AppendUTF8ToPathString(entry.non_unique_name(),
-                           &result.non_unique_value());
-  } else {
-    result.non_unique_value() = result.value();
+      return entry.non_unique_name();
   }
-  return result;
+
+  return entry.name();
 }
 
 // static
-syncable::SyncName SyncerProtoUtil::NameFromCommitEntryResponse(
+const std::string& SyncerProtoUtil::NameFromCommitEntryResponse(
     const CommitResponse_EntryResponse& entry) {
-  SyncName result(PSTR(""));
 
-  AppendUTF8ToPathString(entry.name(), &result.value());
   if (entry.has_non_unique_name()) {
-    AppendUTF8ToPathString(entry.non_unique_name(),
-                           &result.non_unique_value());
-  } else {
-    result.non_unique_value() = result.value();
+      return entry.non_unique_name();
   }
-  return result;
+
+  return entry.name();
+}
+
+std::string SyncerProtoUtil::SyncEntityDebugString(
+    const sync_pb::SyncEntity& entry) {
+  return StringPrintf("id: %s, parent_id: %s, "
+                      "version: %"PRId64"d, "
+                      "mtime: %" PRId64"d (client: %" PRId64"d), "
+                      "ctime: %" PRId64"d (client: %" PRId64"d), "
+                      "name: %s, sync_timestamp: %" PRId64"d, "
+                      "%s ",
+                      entry.id_string().c_str(),
+                      entry.parent_id_string().c_str(),
+                      entry.version(),
+                      entry.mtime(), ServerTimeToClientTime(entry.mtime()),
+                      entry.ctime(), ServerTimeToClientTime(entry.ctime()),
+                      entry.name().c_str(), entry.sync_timestamp(),
+                      entry.deleted() ? "deleted, ":"");
+}
+
+namespace {
+std::string GetUpdatesResponseString(
+    const sync_pb::GetUpdatesResponse& response) {
+  std::string output;
+  output.append("GetUpdatesResponse:\n");
+  for (int i = 0; i < response.entries_size(); i++) {
+    output.append(SyncerProtoUtil::SyncEntityDebugString(response.entries(i)));
+    output.append("\n");
+  }
+  return output;
+}
+}  // namespace
+
+std::string SyncerProtoUtil::ClientToServerResponseDebugString(
+    const sync_pb::ClientToServerResponse& response) {
+  // Add more handlers as needed.
+  std::string output;
+  if (response.has_get_updates()) {
+    output.append(GetUpdatesResponseString(response.get_updates()));
+  }
+  return output;
 }
 
 }  // namespace browser_sync

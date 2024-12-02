@@ -1,6 +1,6 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "chrome/browser/in_process_webkit/webkit_context.h"
 
@@ -14,32 +14,57 @@ WebKitContext::WebKitContext(const FilePath& data_path, bool is_incognito)
 }
 
 WebKitContext::~WebKitContext() {
-  // If the WebKit thread was ever spun up, delete the object there.  If we're
-  // on the IO thread, this is safe because the WebKit thread goes away after
-  // the IO.  If we're on the UI thread, we're safe because the UI thread kills
-  // the WebKit thread.
-  MessageLoop* webkit_loop = ChromeThread::GetMessageLoop(ChromeThread::WEBKIT);
-  if (webkit_loop)
-    webkit_loop->DeleteSoon(FROM_HERE, dom_storage_context_.release());
+  // If the WebKit thread was ever spun up, delete the object there.  The task
+  // will just get deleted if the WebKit thread isn't created (which only
+  // happens during testing).
+  DOMStorageContext* dom_storage_context = dom_storage_context_.release();
+  if (!ChromeThread::DeleteSoon(
+          ChromeThread::WEBKIT, FROM_HERE, dom_storage_context)) {
+    // The WebKit thread wasn't created, and the task got deleted without
+    // freeing the DOMStorageContext, so delete it manually.
+    delete dom_storage_context;
+  }
 }
 
 void WebKitContext::PurgeMemory() {
-  // DOMStorageContext::PurgeMemory() should only be called on the WebKit
-  // thread.
-  //
-  // Note that if there is no WebKit thread, then there's nothing in
-  // LocalStorage and it's OK to no-op here.  Further note that in a unittest,
-  // there may be no threads at all, in which case MessageLoop::current() will
-  // also be NULL and we'll go ahead and call PurgeMemory() directly, which is
-  // probably what the test wants.
-  MessageLoop* webkit_loop = ChromeThread::GetMessageLoop(ChromeThread::WEBKIT);
-  if (MessageLoop::current() == webkit_loop) {
-    dom_storage_context_->PurgeMemory();
-  } else if (webkit_loop) {
-    // Since we're not on the WebKit thread, proxy the call over to it.  We
-    // can't post a task to call DOMStorageContext::PurgeMemory() directly
-    // because that class is not refcounted.
-    webkit_loop->PostTask(FROM_HERE,
-                          NewRunnableMethod(this, &WebKitContext::PurgeMemory));
+  if (!ChromeThread::CurrentlyOn(ChromeThread::WEBKIT)) {
+    bool result = ChromeThread::PostTask(
+        ChromeThread::WEBKIT, FROM_HERE,
+        NewRunnableMethod(this, &WebKitContext::PurgeMemory));
+    DCHECK(result);
+    return;
   }
+
+  dom_storage_context_->PurgeMemory();
+}
+
+void WebKitContext::DeleteDataModifiedSince(
+    const base::Time& cutoff,
+    const char* url_scheme_to_be_skipped) {
+  if (!ChromeThread::CurrentlyOn(ChromeThread::WEBKIT)) {
+    bool result = ChromeThread::PostTask(
+        ChromeThread::WEBKIT, FROM_HERE,
+        NewRunnableMethod(this, &WebKitContext::DeleteDataModifiedSince,
+                          cutoff, url_scheme_to_be_skipped));
+    DCHECK(result);
+    return;
+  }
+
+  dom_storage_context_->DeleteDataModifiedSince(cutoff,
+                                                url_scheme_to_be_skipped);
+}
+
+
+void WebKitContext::DeleteSessionStorageNamespace(
+    int64 session_storage_namespace_id) {
+  if (!ChromeThread::CurrentlyOn(ChromeThread::WEBKIT)) {
+    ChromeThread::PostTask(
+        ChromeThread::WEBKIT, FROM_HERE,
+        NewRunnableMethod(this, &WebKitContext::DeleteSessionStorageNamespace,
+                          session_storage_namespace_id));
+    return;
+  }
+
+  dom_storage_context_->DeleteSessionStorageNamespace(
+      session_storage_namespace_id);
 }

@@ -1,21 +1,31 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/test/testing_profile.h"
 
 #include "build/build_config.h"
+#include "base/command_line.h"
 #include "base/string_util.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/dom_ui/ntp_resource_cache.h"
 #include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/net/url_request_context_getter.h"
+#include "chrome/browser/sessions/session_service.h"
+#include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/notification_service.h"
+#include "net/url_request/url_request_context.h"
+#include "testing/gmock/include/gmock/gmock.h"
+#include "webkit/database/database_tracker.h"
 
 #if defined(OS_LINUX) && !defined(TOOLKIT_VIEWS)
 #include "chrome/browser/gtk/gtk_theme_provider.h"
 #endif
 
 using base::Time;
+using testing::Return;
 
 namespace {
 
@@ -36,6 +46,8 @@ class QuittingHistoryDBTask : public HistoryDBTask {
   }
 
  private:
+  ~QuittingHistoryDBTask() {}
+
   DISALLOW_COPY_AND_ASSIGN(QuittingHistoryDBTask);
 };
 
@@ -72,6 +84,55 @@ class BookmarkLoadObserver : public BookmarkModelObserver {
   DISALLOW_COPY_AND_ASSIGN(BookmarkLoadObserver);
 };
 
+// This context is used to assist testing the CookieMonster by providing a
+// valid CookieStore. This can probably be expanded to test other aspects of
+// the context as well.
+class TestURLRequestContext : public URLRequestContext {
+ public:
+  TestURLRequestContext() {
+    cookie_store_ = new net::CookieMonster(NULL, NULL);
+  }
+};
+
+// Used to return a dummy context (normally the context is on the IO thread).
+// The one here can be run on the main test thread. Note that this can lead to
+// a leak if your test does not have a ChromeThread::IO in it because
+// URLRequestContextGetter is defined as a ReferenceCounted object with a
+// DeleteOnIOThread trait.
+class TestURLRequestContextGetter : public URLRequestContextGetter {
+ public:
+  virtual URLRequestContext* GetURLRequestContext() {
+    if (!context_)
+      context_ = new TestURLRequestContext();
+    return context_.get();
+  }
+
+ private:
+  scoped_refptr<URLRequestContext> context_;
+};
+
+class TestExtensionURLRequestContext : public URLRequestContext {
+ public:
+  TestExtensionURLRequestContext() {
+    net::CookieMonster* cookie_monster = new net::CookieMonster(NULL, NULL);
+    const char* schemes[] = {chrome::kExtensionScheme};
+    cookie_monster->SetCookieableSchemes(schemes, 1);
+    cookie_store_ = cookie_monster;
+  }
+};
+
+class TestExtensionURLRequestContextGetter : public URLRequestContextGetter {
+ public:
+  virtual URLRequestContext* GetURLRequestContext() {
+    if (!context_)
+      context_ = new TestExtensionURLRequestContext();
+    return context_.get();
+  }
+
+ private:
+  scoped_refptr<URLRequestContext> context_;
+};
+
 }  // namespace
 
 TestingProfile::TestingProfile()
@@ -100,11 +161,23 @@ TestingProfile::TestingProfile(int count)
 }
 
 TestingProfile::~TestingProfile() {
+  NotificationService::current()->Notify(
+      NotificationType::PROFILE_DESTROYED,
+      Source<Profile>(this),
+      NotificationService::NoDetails());
   DestroyHistoryService();
+  // FaviconService depends on HistoryServce so destroying it later.
+  DestroyFaviconService();
+  DestroyWebDataService();
   file_util::Delete(path_, true);
 }
 
-void TestingProfile::CreateHistoryService(bool delete_file) {
+void TestingProfile::CreateFaviconService() {
+  favicon_service_ = NULL;
+  favicon_service_ = new FaviconService(this);
+}
+
+void TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
   if (history_service_.get())
     history_service_->Cleanup();
 
@@ -116,7 +189,13 @@ void TestingProfile::CreateHistoryService(bool delete_file) {
     file_util::Delete(path, false);
   }
   history_service_ = new HistoryService(this);
-  history_service_->Init(GetPath(), bookmark_bar_model_.get());
+  history_service_->Init(GetPath(), bookmark_bar_model_.get(), no_db);
+}
+
+void TestingProfile::DestroyFaviconService() {
+  if (!favicon_service_.get())
+    return;
+  favicon_service_ = NULL;
 }
 
 void TestingProfile::DestroyHistoryService() {
@@ -159,6 +238,21 @@ void TestingProfile::CreateBookmarkModel(bool delete_file) {
   bookmark_bar_model_->Load();
 }
 
+void TestingProfile::CreateWebDataService(bool delete_file) {
+  if (web_data_service_.get())
+    web_data_service_->Shutdown();
+
+  if (delete_file) {
+    FilePath path = GetPath();
+    path = path.Append(chrome::kWebDataFilename);
+    file_util::Delete(path, false);
+  }
+
+  web_data_service_ = new WebDataService;
+  if (web_data_service_.get())
+    web_data_service_->Init(GetPath());
+}
+
 void TestingProfile::BlockUntilBookmarkModelLoaded() {
   DCHECK(bookmark_bar_model_.get());
   if (bookmark_bar_model_->IsLoaded())
@@ -180,6 +274,12 @@ void TestingProfile::UseThemeProvider(BrowserThemeProvider* theme_provider) {
   theme_provider_.reset(theme_provider);
 }
 
+webkit_database::DatabaseTracker* TestingProfile::GetDatabaseTracker() {
+  if (!db_tracker_)
+    db_tracker_ = new webkit_database::DatabaseTracker(GetPath());
+  return db_tracker_;
+}
+
 void TestingProfile::InitThemes() {
   if (!created_theme_provider_) {
 #if defined(OS_LINUX) && !defined(TOOLKIT_VIEWS)
@@ -192,6 +292,31 @@ void TestingProfile::InitThemes() {
   }
 }
 
+URLRequestContextGetter* TestingProfile::GetRequestContext() {
+  return request_context_.get();
+}
+
+void TestingProfile::CreateRequestContext() {
+  if (!request_context_)
+    request_context_ = new TestURLRequestContextGetter();
+}
+
+URLRequestContextGetter* TestingProfile::GetRequestContextForExtensions() {
+  if (!extensions_request_context_)
+      extensions_request_context_ = new TestExtensionURLRequestContextGetter();
+  return extensions_request_context_.get();
+}
+
+void TestingProfile::set_session_service(SessionService* session_service) {
+  session_service_ = session_service;
+}
+
+NTPResourceCache* TestingProfile::GetNTPResourceCache() {
+  if (!ntp_resource_cache_.get())
+    ntp_resource_cache_.reset(new NTPResourceCache(this));
+  return ntp_resource_cache_.get();
+}
+
 void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
   DCHECK(history_service_.get());
   DCHECK(MessageLoop::current());
@@ -201,18 +326,18 @@ void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
   MessageLoop::current()->Run();
 }
 
-void TestingProfile::CreateProfileSyncService() {
-#if defined(BROWSER_SYNC)
+ProfileSyncService* TestingProfile::GetProfileSyncService() {
   if (!profile_sync_service_.get()) {
-    profile_sync_service_.reset(new ProfileSyncService(this));
-    profile_sync_service_->Initialize();
+    ProfileSyncServiceMock* pss = new ProfileSyncServiceMock();
+    ON_CALL(*pss, HasSyncSetupCompleted()).WillByDefault(Return(false));
+    profile_sync_service_.reset(pss);
   }
-#endif
+  return profile_sync_service_.get();
 }
 
-ProfileSyncService* TestingProfile::GetProfileSyncService() {
-#if defined(BROWSER_SYNC)
-  return profile_sync_service_.get();
-#endif
-  return NULL;
+void TestingProfile::DestroyWebDataService() {
+  if (!web_data_service_.get())
+    return;
+
+  web_data_service_->Shutdown();
 }

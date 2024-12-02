@@ -1,29 +1,22 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
+
 #include "base/sha2.h"
+#include "base/string_util.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
-  bool VectorContains(const std::vector<std::string>& data,
-                      const std::string& str) {
-    for (size_t i = 0; i < data.size(); ++i) {
-      if (data[i] == str)
-        return true;
-    }
 
-    return false;
-  }
-
-SBFullHash CreateFullHash(SBPrefix prefix) {
-  SBFullHash result;
-  memset(&result, 0, sizeof(result));
-  memcpy(&result, &prefix, sizeof(result));
-  return result;
+bool VectorContains(const std::vector<std::string>& data,
+                    const std::string& str) {
+  return std::find(data.begin(), data.end(), str) != data.end();
 }
+
 }
 
 // Tests that we generate the required host/path combinations for testing
@@ -67,6 +60,225 @@ TEST(SafeBrowsingUtilTest, UrlParsing) {
   EXPECT_TRUE(VectorContains(paths, "/"));
 }
 
+// Tests the url canonicalization according to the Safe Browsing spec.
+// See section 6.1 in
+// http://code.google.com/p/google-safe-browsing/wiki/Protocolv2Spec.
+TEST(SafeBrowsingUtilTest, CanonicalizeUrl) {
+  struct {
+    const char* input_url;
+    const char* expected_canonicalized_hostname;
+    const char* expected_canonicalized_path;
+    const char* expected_canonicalized_query;
+  } tests[] = {
+    {
+      "http://host/%25%32%35",
+      "host",
+      "/%25",
+      ""
+    }, {
+      "http://host/%25%32%35%25%32%35",
+      "host",
+      "/%25%25",
+      ""
+    }, {
+      "http://host/%2525252525252525",
+      "host",
+      "/%25",
+      ""
+    }, {
+      "http://host/asdf%25%32%35asd",
+      "host",
+      "/asdf%25asd",
+      ""
+    }, {
+      "http://host/%%%25%32%35asd%%",
+      "host",
+      "/%25%25%25asd%25%25",
+      ""
+    }, {
+      "http://host/%%%25%32%35asd%%",
+      "host",
+      "/%25%25%25asd%25%25",
+      ""
+    }, {
+      "http://www.google.com/",
+      "www.google.com",
+      "/",
+      ""
+    }, {
+      "http://%31%36%38%2e%31%38%38%2e%39%39%2e%32%36/%2E%73%65%63%75%72%65/%77"
+          "%77%77%2E%65%62%61%79%2E%63%6F%6D/",
+      "168.188.99.26",
+      "/.secure/www.ebay.com/",
+      ""
+    }, {
+      "http://195.127.0.11/uploads/%20%20%20%20/.verify/.eBaysecure=updateuserd"
+          "ataxplimnbqmn-xplmvalidateinfoswqpcmlx=hgplmcx/",
+      "195.127.0.11",
+      "/uploads/%20%20%20%20/.verify/.eBaysecure=updateuserdataxplimnbqmn-xplmv"
+          "alidateinfoswqpcmlx=hgplmcx/",
+      ""
+    }, {
+      "http://host.com/%257Ea%2521b%2540c%2523d%2524e%25f%255E00%252611%252A"
+          "22%252833%252944_55%252B",
+      "host.com",
+      "/~a!b@c%23d$e%25f^00&11*22(33)44_55+",
+      ""
+    }, {
+      "http://3279880203/blah",
+      "195.127.0.11",
+      "/blah",
+      ""
+    }, {
+      "http://www.google.com/blah/..",
+      "www.google.com",
+      "/",
+      ""
+    }, {
+      "http://www.google.com/blah#fraq",
+      "www.google.com",
+      "/blah",
+      ""
+    }, {
+      "http://www.GOOgle.com/",
+      "www.google.com",
+      "/",
+      ""
+    }, {
+      "http://www.google.com.../",
+      "www.google.com",
+      "/",
+      ""
+    }, {
+      "http://www.google.com/q?",
+      "www.google.com",
+      "/q",
+      ""
+    }, {
+      "http://www.google.com/q?r?",
+      "www.google.com",
+      "/q",
+      "r?"
+    }, {
+      "http://www.google.com/q?r?s",
+      "www.google.com",
+      "/q",
+      "r?s"
+    }, {
+      "http://evil.com/foo#bar#baz",
+      "evil.com",
+      "/foo",
+      ""
+    }, {
+      "http://evil.com/foo;",
+      "evil.com",
+      "/foo;",
+      ""
+    }, {
+      "http://evil.com/foo?bar;",
+      "evil.com",
+      "/foo",
+      "bar;"
+    }, {
+      "http://notrailingslash.com",
+      "notrailingslash.com",
+      "/",
+      ""
+    }, {
+      "http://www.gotaport.com:1234/",
+      "www.gotaport.com",
+      "/",
+      ""
+    }, {
+      "  http://www.google.com/  ",
+      "www.google.com",
+      "/",
+      ""
+    }, {
+      "http:// leadingspace.com/",
+      "%20leadingspace.com",
+      "/",
+      ""
+    }, {
+      "http://%20leadingspace.com/",
+      "%20leadingspace.com",
+      "/",
+      ""
+    }, {
+      "https://www.securesite.com/",
+      "www.securesite.com",
+      "/",
+      ""
+    }, {
+      "http://host.com/ab%23cd",
+      "host.com",
+      "/ab%23cd",
+      ""
+    }, {
+      "http://host%3e.com//twoslashes?more//slashes",
+      "host>.com",
+      "/twoslashes",
+      "more//slashes"
+    }, {
+      "http://host.com/abc?val=xyz#anything",
+      "host.com",
+      "/abc",
+      "val=xyz"
+    }, {
+      "http://abc:def@host.com/xyz",
+      "host.com",
+      "/xyz",
+      ""
+    }, {
+      "http://host%3e.com/abc/%2e%2e%2fdef",
+      "host>.com",
+      "/def",
+      ""
+    }, {
+      "http://.......host...com.....//abc/////def%2F%2F%2Fxyz",
+      "host.com",
+      "/abc/def/xyz",
+      ""
+    }, {
+      "ftp://host.com/foo?bar",
+      "host.com",
+      "/foo",
+      "bar"
+    }, {
+      "data:text/html;charset=utf-8,%0D%0A",
+      "",
+      "",
+      ""
+    }, {
+      "javascript:alert()",
+      "",
+      "",
+      ""
+    }, {
+      "mailto:abc@example.com",
+      "",
+      "",
+      ""
+    },
+  };
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+    SCOPED_TRACE(StringPrintf("Test: %s", tests[i].input_url));
+    GURL url(tests[i].input_url);
+
+    std::string canonicalized_hostname;
+    std::string canonicalized_path;
+    std::string canonicalized_query;
+    safe_browsing_util::CanonicalizeUrl(url, &canonicalized_hostname,
+        &canonicalized_path, &canonicalized_query);
+
+    EXPECT_EQ(tests[i].expected_canonicalized_hostname,
+              canonicalized_hostname);
+    EXPECT_EQ(tests[i].expected_canonicalized_path,
+              canonicalized_path);
+    EXPECT_EQ(tests[i].expected_canonicalized_query,
+              canonicalized_query);
+  }
+}
 
 TEST(SafeBrowsingUtilTest, FullHashCompare) {
   GURL url("http://www.evil.com/phish.html");
@@ -81,214 +293,4 @@ TEST(SafeBrowsingUtilTest, FullHashCompare) {
 
   url = GURL("http://www.evil.com/okay_path.html");
   EXPECT_EQ(safe_browsing_util::CompareFullHashes(url, full_hashes), -1);
-}
-
-// Checks the reading/writing code of the database information for a hostkey.
-TEST(SafeBrowsing, HostInfo) {
-  // Test a simple case of adding a prefix from scratch.
-  SBEntry* entry = SBEntry::Create(SBEntry::ADD_PREFIX, 1);
-  entry->SetPrefixAt(0, 0x01000000);
-  entry->set_list_id(1);
-  entry->set_chunk_id(1);
-
-  SBHostInfo info;
-  info.AddPrefixes(entry);
-  entry->Destroy();
-
-  int list_id;
-  std::vector<SBFullHash> full_hashes;
-  full_hashes.push_back(CreateFullHash(0x01000000));
-  std::vector<SBPrefix> prefix_hits;
-  EXPECT_TRUE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  // Test appending prefixes to an existing entry.
-  entry = SBEntry::Create(SBEntry::ADD_PREFIX, 2);
-  entry->SetPrefixAt(0, 0x02000000);
-  entry->SetPrefixAt(1, 0x02000001);
-  entry->set_list_id(1);
-  entry->set_chunk_id(2);
-  info.AddPrefixes(entry);
-  entry->Destroy();
-
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x01000000));
-  EXPECT_TRUE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x02000000));
-  EXPECT_TRUE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x02000001));
-  EXPECT_TRUE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-
-  // Test removing the entire first entry.
-  entry = SBEntry::Create(SBEntry::SUB_PREFIX, 0);
-  entry->set_list_id(1);
-  entry->set_chunk_id(1);
-  info.RemovePrefixes(entry, false);
-  entry->Destroy();
-
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x01000000));
-  EXPECT_FALSE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x02000000));
-  EXPECT_TRUE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x02000001));
-  EXPECT_TRUE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  // Test removing one prefix from the second entry.
-  entry = SBEntry::Create(SBEntry::SUB_PREFIX, 1);
-  entry->SetPrefixAt(0,0x02000000);
-  entry->SetChunkIdAtPrefix(0, 2);
-  entry->set_list_id(1);
-  info.RemovePrefixes(entry, false);
-  entry->Destroy();
-
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x02000000));
-  EXPECT_FALSE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x02000001));
-  EXPECT_TRUE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  // Test adding a sub that specifies a prefix before the add.
-  entry = SBEntry::Create(SBEntry::SUB_PREFIX, 1);
-  entry->SetPrefixAt(0, 0x1000);
-  entry->SetChunkIdAtPrefix(0, 100);
-  entry->set_list_id(1);
-  info.RemovePrefixes(entry, true);
-  entry->Destroy();
-
-  // Make sure we don't get a match from a sub.
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x1000));
-  EXPECT_FALSE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  // Now add the prefixes.
-  entry = SBEntry::Create(SBEntry::ADD_PREFIX, 3);
-  entry->SetPrefixAt(0, 0x10000);
-  entry->SetPrefixAt(1, 0x1000);
-  entry->SetPrefixAt(2, 0x100000);
-  entry->set_list_id(1);
-  entry->set_chunk_id(100);
-  info.AddPrefixes(entry);
-  entry->Destroy();
-
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x10000));
-  EXPECT_TRUE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x1000));
-  EXPECT_FALSE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x100000));
-  EXPECT_TRUE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  // Now try adding a sub that deletes all prefixes from the chunk.
-  entry = SBEntry::Create(SBEntry::SUB_PREFIX, 0);
-  entry->set_list_id(1);
-  entry->set_chunk_id(100);
-  info.RemovePrefixes(entry, true);
-  entry->Destroy();
-
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x10000));
-  EXPECT_FALSE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x100000));
-  EXPECT_FALSE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  // Add a sub for all prefixes before the add comes.
-  entry = SBEntry::Create(SBEntry::SUB_PREFIX, 0);
-  entry->set_list_id(1);
-  entry->set_chunk_id(200);
-  info.RemovePrefixes(entry, true);
-  entry->Destroy();
-
-  // Now add the prefixes.
-  entry = SBEntry::Create(SBEntry::ADD_PREFIX, 3);
-  entry->SetPrefixAt(0, 0x2000);
-  entry->SetPrefixAt(1, 0x20000);
-  entry->SetPrefixAt(2, 0x200000);
-  entry->set_list_id(1);
-  entry->set_chunk_id(200);
-  info.AddPrefixes(entry);
-  entry->Destroy();
-
-  // None of the prefixes should be found.
-  full_hashes.clear();
-  full_hashes.push_back(CreateFullHash(0x2000));
-  full_hashes.push_back(CreateFullHash(0x20000));
-  full_hashes.push_back(CreateFullHash(0x200000));
-  EXPECT_FALSE(info.Contains(full_hashes, &list_id, &prefix_hits));
-}
-
-// Checks that if we have a hostname blacklisted and we get a sub prefix, the
-// hostname remains blacklisted.
-TEST(SafeBrowsing, HostInfo2) {
-  // Blacklist the entire hostname.
-  SBEntry* entry = SBEntry::Create(SBEntry::ADD_PREFIX, 0);
-  entry->set_list_id(1);
-  entry->set_chunk_id(1);
-
-  SBHostInfo info;
-  info.AddPrefixes(entry);
-  entry->Destroy();
-
-  int list_id;
-  std::vector<SBFullHash> full_hashes;
-  full_hashes.push_back(CreateFullHash(0x01000000));
-  std::vector<SBPrefix> prefix_hits;
-  EXPECT_TRUE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  // Now add a sub prefix.
-  entry = SBEntry::Create(SBEntry::SUB_PREFIX, 1);
-  entry->SetPrefixAt(0, 0x02000000);
-  entry->SetChunkIdAtPrefix(0, 2);
-  entry->set_list_id(1);
-  info.RemovePrefixes(entry, true);
-  entry->Destroy();
-
-  // Any prefix except the one removed should still be blocked.
-  EXPECT_TRUE(info.Contains(full_hashes, &list_id, &prefix_hits));
-}
-
-// Checks that if we get a sub chunk with one prefix, then get the add chunk
-// for that same prefix afterwards, the entry becomes empty.
-TEST(SafeBrowsing, HostInfo3) {
-  SBHostInfo info;
-
-  // Add a sub prefix.
-  SBEntry* entry = SBEntry::Create(SBEntry::SUB_PREFIX, 1);
-  entry->SetPrefixAt(0, 0x01000000);
-  entry->SetChunkIdAtPrefix(0, 1);
-  entry->set_list_id(1);
-  info.RemovePrefixes(entry, true);
-  entry->Destroy();
-
-  int list_id;
-  std::vector<SBFullHash> full_hashes;
-  full_hashes.push_back(CreateFullHash(0x01000000));
-  std::vector<SBPrefix> prefix_hits;
-  EXPECT_FALSE(info.Contains(full_hashes, &list_id, &prefix_hits));
-
-  // Now add the prefix.
-  entry = SBEntry::Create(SBEntry::ADD_PREFIX, 1);
-  entry->SetPrefixAt(0, 0x01000000);
-  entry->set_list_id(1);
-  entry->set_chunk_id(1);
-  info.AddPrefixes(entry);
-  entry->Destroy();
-
-  EXPECT_FALSE(info.Contains(full_hashes, &list_id, &prefix_hits));
 }

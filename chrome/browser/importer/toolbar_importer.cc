@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,22 @@
 #include <limits>
 
 #include "app/l10n_util.h"
-#include "base/string_util.h"
 #include "base/rand_util.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/first_run.h"
 #include "chrome/browser/importer/importer_bridge.h"
+#include "chrome/browser/net/url_request_context_getter.h"
+#include "chrome/browser/profile.h"
 #include "chrome/common/libxml_utils.h"
 #include "grit/generated_resources.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/data_url.h"
 #include "net/url_request/url_request_context.h"
+
+using importer::FAVORITES;
+using importer::NONE;
+using importer::ProfileInfo;
 
 //
 // ToolbarImporterUtils
@@ -25,8 +32,8 @@ static const wchar_t kSplitStringToken = L';';
 static const char* kGoogleDomainSecureCookieId = "SID=";
 
 bool toolbar_importer_utils::IsGoogleGAIACookieInstalled() {
-  URLRequestContext* context = Profile::GetDefaultRequestContext();
-  net::CookieStore* store = context->cookie_store();
+  net::CookieStore* store =
+      Profile::GetDefaultRequestContext()->GetCookieStore();
   GURL url(kGoogleDomainUrl);
   net::CookieOptions options;
   options.set_include_httponly();  // The SID cookie might be httponly.
@@ -112,14 +119,12 @@ void Toolbar5Importer::Cancel() {
 
   // If we are conducting network operations, post a message to the importer
   // thread for synchronization.
-  if (NULL != bridge_->delegate_loop_) {
-    if (bridge_->delegate_loop_ != MessageLoop::current()) {
-      bridge_->delegate_loop_->PostTask(
-          FROM_HERE,
-          NewRunnableMethod(this, &Toolbar5Importer::Cancel));
-    } else {
-      EndImport();
-    }
+  if (ChromeThread::CurrentlyOn(ChromeThread::UI)) {
+    EndImport();
+  } else {
+    ChromeThread::PostTask(
+        ChromeThread::UI, FROM_HERE,
+        NewRunnableMethod(this, &Toolbar5Importer::Cancel));
   }
 }
 
@@ -157,7 +162,8 @@ void Toolbar5Importer::OnURLFetchComplete(
 }
 
 void Toolbar5Importer::ContinueImport() {
-  DCHECK((items_to_import_ == FAVORITES) || (items_to_import_ == NONE)) <<
+  DCHECK((items_to_import_ == FAVORITES) ||
+         (items_to_import_ == NONE)) <<
       "The items requested are not supported";
 
   // The order here is important.  Each Begin... will clear the flag

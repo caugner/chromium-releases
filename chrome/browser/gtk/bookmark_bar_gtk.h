@@ -10,34 +10,38 @@
 #include <string>
 #include <vector>
 
+#include "app/gtk_signal.h"
 #include "app/slide_animation.h"
 #include "base/scoped_ptr.h"
+#include "chrome/browser/bookmarks/bookmark_context_menu_controller.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
+#include "chrome/browser/gtk/bookmark_bar_instructions_gtk.h"
 #include "chrome/browser/gtk/menu_bar_helper.h"
 #include "chrome/browser/gtk/view_id_util.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/owned_widget_gtk.h"
+#include "gfx/size.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
-class BookmarkContextMenuGtk;
 class BookmarkMenuController;
 class Browser;
 class BrowserWindowGtk;
 class CustomContainerButton;
+class MenuGtk;
 class PageNavigator;
 class Profile;
 class TabstripOriginProvider;
 struct GtkThemeProvider;
 
 class BookmarkBarGtk : public AnimationDelegate,
-#if defined(BROWSER_SYNC)
                        public ProfileSyncServiceObserver,
-#endif
                        public BookmarkModelObserver,
                        public MenuBarHelper::Delegate,
-                       public NotificationObserver {
+                       public NotificationObserver,
+                       public BookmarkBarInstructionsGtk::Delegate,
+                       public BookmarkContextMenuControllerDelegate {
   FRIEND_TEST(BookmarkBarGtkUnittest, DisplaysHelpMessageOnEmpty);
   FRIEND_TEST(BookmarkBarGtkUnittest, HidesHelpMessageWithBookmark);
   FRIEND_TEST(BookmarkBarGtkUnittest, BuildsButtons);
@@ -104,6 +108,9 @@ class BookmarkBarGtk : public AnimationDelegate,
   // The NTP needs to have access to this.
   static const int kBookmarkBarNTPHeight;
 
+  // BookmarkContextMenuController::Delegate implementation --------------------
+  virtual void CloseMenu();
+
  private:
   // Helper function which generates GtkToolItems for |bookmark_toolbar_|.
   void CreateAllBookmarkButtons();
@@ -123,9 +130,6 @@ class BookmarkBarGtk : public AnimationDelegate,
   // bookmark bar model has.
   int GetBookmarkButtonCount();
 
-  // Sets the correct color for |instructions_label_|.
-  void UpdateInstructionsLabelColor();
-
   // Set the appearance of the overflow button appropriately (either chromium
   // style or GTK style).
   void SetOverflowButtonAppearance();
@@ -135,7 +139,7 @@ class BookmarkBarGtk : public AnimationDelegate,
   // |extra_space| is how much extra space to give the toolbar during the
   // calculation (for the purposes of determining if ditching the chevron
   // would be a good idea).
-  // If non-NULL, |showing_folders| is packed with all the folders that are
+  // If non-NULL, |showing_folders| will be packed with all the folders that are
   // showing on the bar.
   int GetFirstHiddenBookmark(int extra_space,
                              std::vector<GtkWidget*>* showing_folders);
@@ -149,6 +153,22 @@ class BookmarkBarGtk : public AnimationDelegate,
   // Turns on or off the app_paintable flag on |event_box_|, depending on our
   // state.
   void UpdateEventBoxPaintability();
+
+  // Queue a paint on the event box.
+  void PaintEventBox();
+
+  // Finds the size of the current tab contents, if it exists and sets |size|
+  // to the correct value. Returns false if there isn't a TabContents, a
+  // condition that can happen during testing.
+  bool GetTabContentsSize(gfx::Size* size);
+
+  // Makes the appropriate widget on the bookmark bar stop throbbing
+  // (a folder, the overflow chevron, or nothing).
+  void StartThrobbing(const BookmarkNode* node);
+
+  // Set |throbbing_widget_| to |widget|. Also makes sure that
+  // |throbbing_widget_| doesn't become stale.
+  void SetThrobbingWidget(GtkWidget* widget);
 
   // Overridden from BookmarkModelObserver:
 
@@ -198,70 +218,50 @@ class BookmarkBarGtk : public AnimationDelegate,
                         GdkEventButton* event);
 
   // GtkButton callbacks.
-  static gboolean OnButtonPressed(GtkWidget* sender,
-                                  GdkEventButton* event,
-                                  BookmarkBarGtk* bar);
-  static void OnClicked(GtkWidget* sender,
-                        BookmarkBarGtk* bar);
-  static void OnButtonDragBegin(GtkWidget* widget,
-                                GdkDragContext* drag_context,
-                                BookmarkBarGtk* bar);
-  static void OnButtonDragEnd(GtkWidget* button,
-                              GdkDragContext* drag_context,
-                              BookmarkBarGtk* bar);
-  static void OnButtonDragGet(GtkWidget* widget, GdkDragContext* context,
-                              GtkSelectionData* selection_data,
-                              guint target_type, guint time,
-                              BookmarkBarGtk* bar);
+  CHROMEGTK_CALLBACK_1(BookmarkBarGtk, gboolean, OnButtonPressed,
+                       GdkEventButton*);
+  CHROMEGTK_CALLBACK_1(BookmarkBarGtk, gboolean, OnSyncErrorButtonPressed,
+                       GdkEventButton*);
+  CHROMEGTK_CALLBACK_0(BookmarkBarGtk, void, OnClicked);
+  CHROMEGTK_CALLBACK_1(BookmarkBarGtk, void, OnButtonDragBegin,
+                       GdkDragContext*);
+  CHROMEGTK_CALLBACK_1(BookmarkBarGtk, void, OnButtonDragEnd, GdkDragContext*);
+  CHROMEGTK_CALLBACK_4(BookmarkBarGtk, void, OnButtonDragGet,
+                       GdkDragContext*, GtkSelectionData*, guint, guint);
 
   // GtkButton callbacks for folder buttons.
-  static void OnFolderClicked(GtkWidget* sender,
-                              BookmarkBarGtk* bar);
+  CHROMEGTK_CALLBACK_0(BookmarkBarGtk, void, OnFolderClicked);
 
   // GtkToolbar callbacks.
-  static gboolean OnToolbarExpose(GtkWidget* widget, GdkEventExpose* event,
-                                  BookmarkBarGtk* window);
-  static gboolean OnToolbarDragMotion(GtkToolbar* toolbar,
-                                      GdkDragContext* context,
-                                      gint x,
-                                      gint y,
-                                      guint time,
-                                      BookmarkBarGtk* bar);
-  static void OnToolbarDragLeave(GtkToolbar* toolbar,
-                                 GdkDragContext* context,
-                                 guint time,
-                                 BookmarkBarGtk* bar);
-  static void OnToolbarSizeAllocate(GtkWidget* widget,
-                                    GtkAllocation* allocation,
-                                    BookmarkBarGtk* bar);
+  CHROMEGTK_CALLBACK_4(BookmarkBarGtk, gboolean, OnToolbarDragMotion,
+                       GdkDragContext*, gint, gint, guint);
+  CHROMEGTK_CALLBACK_2(BookmarkBarGtk, void, OnToolbarDragLeave,
+                       GdkDragContext*, guint);
+  CHROMEGTK_CALLBACK_1(BookmarkBarGtk, void, OnToolbarSizeAllocate,
+                       GtkAllocation*);
 
   // Used for both folder buttons and the toolbar.
-  static void OnDragReceived(GtkWidget* widget,
-                             GdkDragContext* context,
-                             gint x, gint y,
-                             GtkSelectionData* selection_data,
-                             guint target_type, guint time,
-                             BookmarkBarGtk* bar);
+  CHROMEGTK_CALLBACK_6(BookmarkBarGtk, void, OnDragReceived,
+                       GdkDragContext*, gint, gint, GtkSelectionData*,
+                       guint, guint);
 
   // GtkEventBox callbacks.
-  static gboolean OnEventBoxExpose(GtkWidget* widget, GdkEventExpose* event,
-                                   BookmarkBarGtk* window);
+  CHROMEGTK_CALLBACK_1(BookmarkBarGtk, gboolean, OnEventBoxExpose,
+                       GdkEventExpose*);
+  CHROMEGTK_CALLBACK_0(BookmarkBarGtk, void, OnEventBoxDestroy);
 
-  // GtkVSeparator callbacks.
-  static gboolean OnSeparatorExpose(GtkWidget* widget, GdkEventExpose* event,
-                                    BookmarkBarGtk* window);
+  // Callbacks on our parent widget.
+  CHROMEGTK_CALLBACK_1(BookmarkBarGtk, void, OnParentSizeAllocate,
+                       GtkAllocation*);
 
-#if defined(BROWSER_SYNC)
+  // |throbbing_widget_| callback.
+  CHROMEGTK_CALLBACK_0(BookmarkBarGtk, void, OnThrobbingWidgetDestroy);
+
   // ProfileSyncServiceObserver method.
   virtual void OnStateChanged();
 
-  // Determines whether the sync error button should appear on the bookmarks
-  // bar.
-  bool ShouldShowSyncErrorButton();
-
-  // Creates the sync error button and adds it as a child view.
-  GtkWidget* CreateSyncErrorButton();
-#endif
+  // Overriden from BookmarkBarInstructionsGtk::Delegate.
+  virtual void ShowImportDialog();
 
   Profile* profile_;
 
@@ -291,11 +291,13 @@ class BookmarkBarGtk : public AnimationDelegate,
   // Used to position all children.
   GtkWidget* bookmark_hbox_;
 
-  // A GtkLabel to display when there are no bookmark buttons to display.
-  GtkWidget* instructions_label_;
-
-  // The alignment for |instructions_label_|.
+  // Alignment widget that is visible if there are no bookmarks on
+  // the bookmar bar.
   GtkWidget* instructions_;
+
+  // BookmarkBarInstructionsGtk that holds the label and the link for importing
+  // bookmarks when there are no bookmarks on the bookmark bar.
+  scoped_ptr<BookmarkBarInstructionsGtk> instructions_gtk_;
 
   // GtkToolbar which contains all the bookmark buttons.
   OwnedWidgetGtk bookmark_toolbar_;
@@ -307,20 +309,17 @@ class BookmarkBarGtk : public AnimationDelegate,
   // The other bookmarks button.
   GtkWidget* other_bookmarks_button_;
 
-#if defined(BROWSER_SYNC)
-  // The sync re-login indicator which appears when the user needs to re-enter
-  // credentials in order to continue syncing.
+  // The sync error button.
   GtkWidget* sync_error_button_;
 
   // A pointer to the ProfileSyncService instance if one exists.
   ProfileSyncService* sync_service_;
-#endif
 
   // The BookmarkNode from the model being dragged. NULL when we aren't
   // dragging.
   const BookmarkNode* dragged_node_;
 
-  // We create a GtkToolbarItem from |dragged_node_| for display.
+  // We create a GtkToolbarItem from |dragged_node_| ;or display.
   GtkToolItem* toolbar_drop_item_;
 
   // Theme provider for building buttons.
@@ -333,7 +332,10 @@ class BookmarkBarGtk : public AnimationDelegate,
 
   // The last displayed right click menu, or NULL if no menus have been
   // displayed yet.
-  scoped_ptr<BookmarkContextMenuGtk> current_context_menu_;
+  // The controller.
+  scoped_ptr<BookmarkContextMenuController> current_context_menu_controller_;
+  // The view.
+  scoped_ptr<MenuGtk> current_context_menu_;
 
   // The last displayed left click menu, or NULL if no menus have been
   // displayed yet.
@@ -351,6 +353,16 @@ class BookmarkBarGtk : public AnimationDelegate,
   int last_allocation_width_;
 
   NotificationRegistrar registrar_;
+
+  // The size of the tab contents last time we forced a paint. We keep track
+  // of this so we don't force too many paints.
+  gfx::Size last_tab_contents_size_;
+
+  // The currently throbbing widget. This is NULL if no widget is throbbing.
+  // We track it because we only want to allow one widget to throb at a time.
+  GtkWidget* throbbing_widget_;
+
+  ScopedRunnableMethodFactory<BookmarkBarGtk> method_factory_;
 };
 
 #endif  // CHROME_BROWSER_GTK_BOOKMARK_BAR_GTK_H_

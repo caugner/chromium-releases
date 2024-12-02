@@ -1,10 +1,15 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "debug.h"
 #include "sandbox_impl.h"
 
 namespace playground {
 
 int Sandbox::sandbox_access(const char *pathname, int mode) {
-  Debug::syscall(__NR_access, "Executing handler");
+  long long tm;
+  Debug::syscall(&tm, __NR_access, "Executing handler");
   size_t len                      = strlen(pathname);
   struct Request {
     int       sysnum;
@@ -26,10 +31,11 @@ int Sandbox::sandbox_access(const char *pathname, int mode) {
       read(sys, threadFdPub(), &rc, sizeof(rc)) != sizeof(rc)) {
     die("Failed to forward access() request [sandbox]");
   }
+  Debug::elapsed(tm, __NR_access);
   return static_cast<int>(rc);
 }
 
-bool Sandbox::process_access(int parentProc, int sandboxFd, int threadFdPub,
+bool Sandbox::process_access(int parentMapsFd, int sandboxFd, int threadFdPub,
                            int threadFd, SecureMem::Args* mem) {
   // Read request
   SysCalls sys;
@@ -56,7 +62,7 @@ bool Sandbox::process_access(int parentProc, int sandboxFd, int threadFdPub,
     }
     return false;
   }
-  SecureMem::lockSystemCall(parentProc, mem);
+  SecureMem::lockSystemCall(parentMapsFd, mem);
   if (read(sys, sandboxFd, mem->pathname, access_req.path_length) !=
       (ssize_t)access_req.path_length) {
     goto read_parm_failed;
@@ -68,7 +74,7 @@ bool Sandbox::process_access(int parentProc, int sandboxFd, int threadFdPub,
                   "\"").c_str());
 
   // Tell trusted thread to access the file.
-  SecureMem::sendSystemCall(threadFdPub, true, parentProc, mem, __NR_access,
+  SecureMem::sendSystemCall(threadFdPub, true, parentMapsFd, mem, __NR_access,
                             mem->pathname - (char*)mem + (char*)mem->self,
                             access_req.mode);
   return true;

@@ -41,7 +41,7 @@
 #endif
 
 #ifdef OS_LINUX
-#include <GL/glx.h>
+#include <X11/Xlib.h>
 #include <X11/Intrinsic.h>
 #include <gtk/gtk.h>
 #endif
@@ -53,6 +53,7 @@
 #include <vector>
 #include "base/scoped_ptr.h"
 #include "base/hash_tables.h"
+#include "core/cross/bitmap.h"
 #include "core/cross/display_mode.h"
 #include "core/cross/display_window.h"
 #include "core/cross/object_base.h"
@@ -65,6 +66,8 @@
 #include "core/cross/object_manager.h"
 #include "core/cross/error.h"
 #include "core/cross/profiler.h"
+#include "core/cross/render_surface.h"
+#include "core/cross/texture.h"
 #include "plugin/cross/main_thread_task_poster.h"
 #include "plugin/cross/np_v8_bridge.h"
 #include "client_glue.h"
@@ -116,6 +119,7 @@ class StreamManager;
 namespace _o3d {
 using o3d::Id;
 using o3d::ObjectBase;
+using o3d::Bitmap;
 using o3d::Client;
 using o3d::ClassManager;
 using o3d::ClientInfoManager;
@@ -126,7 +130,10 @@ using o3d::MainThreadTaskPoster;
 using o3d::ObjectManager;
 using o3d::Profiler;
 using o3d::Renderer;
+using o3d::RenderSurface;
+using o3d::RenderDepthStencilSurface;
 using o3d::ServiceLocator;
+using o3d::Texture2D;
 
 class NPAPIObject: public NPObject {
   NPP npp_;
@@ -224,7 +231,9 @@ class PluginObject: public NPObject {
                           GdkEventConfigure *configure_event);
   gboolean OnGtkDelete(GtkWidget *widget,
                        GdkEvent *configure);
+  void SetDisplay(Display *display);
 #elif defined(OS_MACOSX)
+#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
   void SetFullscreenOverlayMacWindow(WindowRef window) {
     mac_fullscreen_overlay_window_ = window;
   }
@@ -232,6 +241,7 @@ class PluginObject: public NPObject {
   WindowRef GetFullscreenOverlayMacWindow() {
     return mac_fullscreen_overlay_window_;
   }
+#endif
 
   void SetFullscreenMacWindow(WindowRef window) {
     mac_fullscreen_window_ = window;
@@ -265,22 +275,29 @@ class PluginObject: public NPObject {
   // either can be NULL depending on drawing_model
   AGLContext mac_agl_context_;
   CGLContextObj mac_cgl_context_;
+  // If in Chrome, we actually do all of our rendering offscreen, and
+  // bootstrap off a 1x1 pbuffer
+  CGLPBufferObj mac_cgl_pbuffer_;
 
   // Fullscreen related stuff.
 
+#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
   // FullscreenIdle gets repeatedly called while we are in fullscreen mode.
   // Currently its only task is to hide the fullscreen message at the right
   // time.
   void FullscreenIdle();
-  double  time_to_hide_overlay_;
+  double time_to_hide_overlay_;
+#endif
   WindowRef mac_fullscreen_window_;  // NULL if not in fullscreen modee
+#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
   WindowRef mac_fullscreen_overlay_window_;  // NULL if not in fullscreen mode
+#endif
   Ptr mac_fullscreen_state_;
 
 #endif  //  OS_MACOSX
 #ifdef OS_LINUX
-  Display *display_;
   Window window_;
+  Window fullscreen_window_;
 
   // Xt mode
   Widget xt_widget_;
@@ -290,6 +307,7 @@ class PluginObject: public NPObject {
 
   // XEmbed mode
   Window drawable_;
+  GdkDisplay *gdk_display_;
   GtkWidget *gtk_container_;
   GtkWidget *gtk_fullscreen_container_;
   GtkWidget *gtk_event_source_;
@@ -354,7 +372,11 @@ class PluginObject: public NPObject {
   // called by the platform-specific event-handling code if the region set by
   // SetFullscreenClickRegion is clicked.  It requests the mode previously set
   // by SetFullscreenClickRegion(), and fails if there wasn't one.
+#ifdef OS_LINUX
+  bool RequestFullscreenDisplay(guint32 timestamp);
+#else
   bool RequestFullscreenDisplay();
+#endif
 
   // Make a region of the plugin area that will invoke fullscreen mode if
   // clicked.  The app developer is responsible for communicating this to the
@@ -456,6 +478,26 @@ class PluginObject: public NPObject {
   void set_last_click_time(Time value) { last_click_time_ = value; }
 #endif
 
+#if defined(CB_SERVICE_REMOTE)
+  void SetGPUPluginObject(NPObject* gpu_plugin_object);
+  NPObject* GetGPUPluginObject() {
+    return gpu_plugin_object_;
+  }
+#endif
+
+  // Support for rendering the plugin's content into render surfaces.
+  // This is currently different than offscreen rendering support in
+  // the renderer. It is a bit of a mess because only the PluginObject
+  // and Renderer have the necessary information about the viewport
+  // size, and only the Client has enough information to properly
+  // initiate a render.
+  void EnableOffscreenRendering();
+  void DisableOffscreenRendering();
+  bool IsOffscreenRenderingEnabled() const;
+  RenderSurface::Ref GetOffscreenRenderSurface() const;
+  RenderDepthStencilSurface::Ref GetOffscreenDepthRenderSurface() const;
+  Bitmap::Ref GetOffscreenBitmap() const;
+
  private:
   bool fullscreen_region_valid_;
   int fullscreen_region_x_;
@@ -470,7 +512,28 @@ class PluginObject: public NPObject {
   HCURSOR cursors_[o3d::Cursor::NUM_CURSORS];  // loaded windows cursors.
   HCURSOR hCursor_;
   bool painted_once_;
+#elif defined(OS_LINUX)
+  Display *display_;
+  Cursor cursors_[o3d::Cursor::NUM_CURSORS];  // loaded windows cursors.
 #endif  // OS_WIN
+
+#if defined(CB_SERVICE_REMOTE)
+  NPObject* gpu_plugin_object_;
+#endif
+
+  // Support for offscreen rendering and thereby windowless plugins.
+  // Currently used only for the CoreGraphics drawing model on Mac OS
+  // X when there is no WindowRef. It would be nicer to put this in
+  // the Renderer and/or make its off_screen mode work everywhere, but
+  // this is only a legacy solution for older browsers.
+  bool offscreen_rendering_enabled_;
+  Texture2D::Ref offscreen_texture_;
+  RenderSurface::Ref offscreen_render_surface_;
+  RenderDepthStencilSurface::Ref offscreen_depth_render_surface_;
+  Bitmap::Ref offscreen_readback_bitmap_;
+
+  bool AllocateOffscreenRenderSurfaces(int width, int height);
+  void DeallocateOffscreenRenderSurfaces();
 };
 
 }  // namespace o3d

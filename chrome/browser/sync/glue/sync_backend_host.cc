@@ -2,17 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if defined(BROWSER_SYNC)
-
 #include "build/build_config.h"
-#include "base/file_version_info.h"
 #include "base/file_util.h"
-#include "base/string_util.h"
+#include "base/file_version_info.h"
+#include "base/task.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/sync/glue/change_processor.h"
+#include "chrome/browser/sync/glue/database_model_worker.h"
+#include "chrome/browser/sync/glue/history_model_worker.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/http_bridge.h"
-#include "chrome/browser/sync/glue/bookmark_model_worker.h"
+#include "chrome/browser/sync/sessions/session_state.h"
+#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_type.h"
 #include "webkit/glue/webkit_glue.h"
 
 static const int kSaveChangesIntervalSeconds = 10;
@@ -21,43 +25,94 @@ static const char kGaiaSourceForChrome[] = "ChromiumBrowser";
 static const FilePath::CharType kSyncDataFolderName[] =
     FILE_PATH_LITERAL("Sync Data");
 
+using browser_sync::DataTypeController;
+
+typedef GoogleServiceAuthError AuthError;
+
 namespace browser_sync {
 
-SyncBackendHost::SyncBackendHost(SyncFrontend* frontend,
-                                 const FilePath& profile_path,
-                                 ChangeProcessingInterface* processor)
+using sessions::SyncSessionSnapshot;
+
+SyncBackendHost::SyncBackendHost(
+    SyncFrontend* frontend,
+    Profile* profile,
+    const FilePath& profile_path,
+    const DataTypeController::TypeMap& data_type_controllers)
     : core_thread_("Chrome_SyncCoreThread"),
       frontend_loop_(MessageLoop::current()),
-      bookmark_model_worker_(NULL),
+      profile_(profile),
       frontend_(frontend),
-      processor_(processor),
       sync_data_folder_path_(profile_path.Append(kSyncDataFolderName)),
-      last_auth_error_(AUTH_ERROR_NONE) {
+      data_type_controllers_(data_type_controllers),
+      last_auth_error_(AuthError::None()) {
+
   core_ = new Core(this);
+}
+
+SyncBackendHost::SyncBackendHost()
+    : core_thread_("Chrome_SyncCoreThread"),
+      frontend_loop_(MessageLoop::current()),
+      frontend_(NULL),
+      last_auth_error_(AuthError::None()) {
 }
 
 SyncBackendHost::~SyncBackendHost() {
   DCHECK(!core_ && !frontend_) << "Must call Shutdown before destructor.";
+  DCHECK(registrar_.workers.empty());
 }
 
-void SyncBackendHost::Initialize(const GURL& sync_service_url,
-                                 URLRequestContext* baseline_context) {
+void SyncBackendHost::Initialize(
+    const GURL& sync_service_url,
+    const syncable::ModelTypeSet& types,
+    URLRequestContextGetter* baseline_context_getter,
+    const std::string& lsid,
+    bool delete_sync_data_folder,
+    bool invalidate_sync_login,
+    bool invalidate_sync_xmpp_login,
+    NotificationMethod notification_method) {
   if (!core_thread_.Start())
     return;
-  bookmark_model_worker_ = new BookmarkModelWorker(frontend_loop_);
+
+  // Create a worker for the UI thread and route bookmark changes to it.
+  // TODO(tim): Pull this into a method to reuse.  For now we don't even
+  // need to lock because we init before the syncapi exists and we tear down
+  // after the syncapi is destroyed.  Make sure to NULL-check workers_ indices
+  // when a new type is synced as the worker may already exist and you just
+  // need to update routing_info_.
+  registrar_.workers[GROUP_DB] = new DatabaseModelWorker();
+  registrar_.workers[GROUP_HISTORY] =
+    new HistoryModelWorker(
+        profile_->GetHistoryService(Profile::IMPLICIT_ACCESS));
+  registrar_.workers[GROUP_UI] = new UIModelWorker(frontend_loop_);
+  registrar_.workers[GROUP_PASSIVE] = new ModelSafeWorker();
+
+  // Any datatypes that we want the syncer to pull down must
+  // be in the routing_info map.  We set them to group passive, meaning that
+  // updates will be applied, but not dispatched to the UI thread yet.
+  for (syncable::ModelTypeSet::const_iterator it = types.begin();
+       it != types.end(); ++it) {
+    registrar_.routing_info[(*it)] = GROUP_PASSIVE;
+  }
 
   core_thread_.message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoInitialize,
-                        sync_service_url, bookmark_model_worker_, true,
-                        new HttpBridgeFactory(baseline_context),
-                        new HttpBridgeFactory(baseline_context)));
+                        Core::DoInitializeOptions(
+                            sync_service_url, true,
+                            new HttpBridgeFactory(baseline_context_getter),
+                            new HttpBridgeFactory(baseline_context_getter),
+                            lsid,
+                            delete_sync_data_folder,
+                            invalidate_sync_login,
+                            invalidate_sync_xmpp_login,
+                            notification_method)));
 }
 
 void SyncBackendHost::Authenticate(const std::string& username,
-                                   const std::string& password) {
+                                   const std::string& password,
+                                   const std::string& captcha) {
   core_thread_.message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoAuthenticate,
-                        username, password));
+                        username, password, captcha));
 }
 
 void SyncBackendHost::Shutdown(bool sync_disabled) {
@@ -70,11 +125,12 @@ void SyncBackendHost::Shutdown(bool sync_disabled) {
                         &SyncBackendHost::Core::DoShutdown,
                         sync_disabled));
 
-  // Before joining the core_thread_, we wait for the BookmarkModelWorker to
+  // Before joining the core_thread_, we wait for the UIModelWorker to
   // give us the green light that it is not depending on the frontend_loop_ to
   // process any more tasks. Stop() blocks until this termination condition
   // is true.
-  bookmark_model_worker_->Stop();
+  if (ui_worker())
+    ui_worker()->Stop();
 
   // Stop will return once the thread exits, which will be after DoShutdown
   // runs. DoShutdown needs to run from core_thread_ because the sync backend
@@ -88,25 +144,118 @@ void SyncBackendHost::Shutdown(bool sync_disabled) {
   // DoShutdown.
   core_thread_.Stop();
 
-  bookmark_model_worker_ = NULL;
+  registrar_.routing_info.clear();
+  registrar_.workers[GROUP_DB] = NULL;
+  registrar_.workers[GROUP_HISTORY] = NULL;
+  registrar_.workers[GROUP_UI] = NULL;
+  registrar_.workers[GROUP_PASSIVE] = NULL;
+  registrar_.workers.erase(GROUP_DB);
+  registrar_.workers.erase(GROUP_HISTORY);
+  registrar_.workers.erase(GROUP_UI);
+  registrar_.workers.erase(GROUP_PASSIVE);
   frontend_ = NULL;
   core_ = NULL;  // Releases reference to core_.
 }
 
-void SyncBackendHost::Core::NotifyFrontend(FrontendNotification notification) {
-  if (!host_ || !host_->frontend_) {
-    return;  // This can happen in testing because the UI loop processes tasks
-             // after an instance of SyncBackendHost was destroyed.  In real
-             // life this doesn't happen.
+void SyncBackendHost::ConfigureDataTypes(const syncable::ModelTypeSet& types,
+                                         CancelableTask* ready_task) {
+  // Only one configure is allowed at a time.
+  DCHECK(!configure_ready_task_.get());
+  AutoLock lock(registrar_lock_);
+  bool has_new = false;
+
+  for (DataTypeController::TypeMap::const_iterator it =
+           data_type_controllers_.begin();
+       it != data_type_controllers_.end(); ++it) {
+    syncable::ModelType type = (*it).first;
+
+    // If a type is not specified, remove it from the routing_info.
+    if (types.count(type) == 0) {
+      registrar_.routing_info.erase(type);
+    } else {
+      // Add a newly specified data type as GROUP_PASSIVE into the
+      // routing_info, if it does not already exist.
+      if (registrar_.routing_info.count(type) == 0) {
+        registrar_.routing_info[type] = GROUP_PASSIVE;
+        has_new = true;
+      }
+    }
   }
-  switch (notification) {
-    case INITIALIZED:
-      host_->frontend_->OnBackendInitialized();
-      return;
-    case SYNC_CYCLE_COMPLETED:
-      host_->frontend_->OnSyncCycleCompleted();
-      return;
+
+  // If no new data types were added to the passive group, no need to
+  // wait for the syncer.
+  if (!has_new) {
+    ready_task->Run();
+    delete ready_task;
+    return;
   }
+
+  // Save the task here so we can run it when the syncer finishes
+  // initializing the new data types.  It will be run only when the
+  // set of initially sycned data types matches the types requested in
+  // this configure.
+  configure_ready_task_.reset(ready_task);
+  configure_initial_sync_types_ = types;
+
+  // Nudge the syncer.  On the next sync cycle, the syncer should
+  // notice that the routing info has changed and start the process of
+  // downloading updates for newly added data types.  Once this is
+  // complete, the configure_ready_task_ is run via an
+  // OnInitializationComplete notification.
+  core_->syncapi()->RequestNudge();
+}
+
+void SyncBackendHost::ActivateDataType(
+    DataTypeController* data_type_controller,
+    ChangeProcessor* change_processor) {
+  // TODO(skrul): Add some kind of lock here that prevents concurrent
+  // calls.
+  // Ensure that the given data type is in the PASSIVE group.
+  browser_sync::ModelSafeRoutingInfo::iterator i =
+      registrar_.routing_info.find(data_type_controller->type());
+  DCHECK(i != registrar_.routing_info.end());
+  DCHECK((*i).second == GROUP_PASSIVE);
+  syncable::ModelType type = data_type_controller->type();
+  // Change the data type's routing info to its group.
+  registrar_.routing_info[type] = data_type_controller->model_safe_group();
+
+  // Add the data type's change processor to the list of change
+  // processors so it can receive updates.
+  DCHECK_EQ(processors_.count(type), 0U);
+  processors_[type] = change_processor;
+}
+
+void SyncBackendHost::DeactivateDataType(
+    DataTypeController* data_type_controller,
+    ChangeProcessor* change_processor) {
+  registrar_.routing_info.erase(data_type_controller->type());
+
+  std::map<syncable::ModelType, ChangeProcessor*>::size_type erased =
+      processors_.erase(data_type_controller->type());
+  DCHECK_EQ(erased, 1U);
+
+  // TODO(sync): At this point we need to purge the data associated
+  // with this data type from the sync db.
+}
+
+bool SyncBackendHost::RequestPause() {
+  return core_->syncapi()->RequestPause();
+}
+
+bool SyncBackendHost::RequestResume() {
+  return core_->syncapi()->RequestResume();
+}
+
+void SyncBackendHost::Core::NotifyPaused() {
+  NotificationService::current()->Notify(NotificationType::SYNC_PAUSED,
+                                         NotificationService::AllSources(),
+                                         NotificationService::NoDetails());
+}
+
+void SyncBackendHost::Core::NotifyResumed() {
+  NotificationService::current()->Notify(NotificationType::SYNC_RESUMED,
+                                         NotificationService::AllSources(),
+                                         NotificationService::NoDetails());
 }
 
 SyncBackendHost::UserShareHandle SyncBackendHost::GetUserShareHandle() const {
@@ -125,8 +274,27 @@ string16 SyncBackendHost::GetAuthenticatedUsername() const {
   return UTF8ToUTF16(core_->syncapi()->GetAuthenticatedUsername());
 }
 
-AuthErrorState SyncBackendHost::GetAuthErrorState() const {
+const GoogleServiceAuthError& SyncBackendHost::GetAuthError() const {
   return last_auth_error_;
+}
+
+const SyncSessionSnapshot* SyncBackendHost::GetLastSessionSnapshot() const {
+  return last_snapshot_.get();
+}
+
+void SyncBackendHost::GetWorkers(std::vector<ModelSafeWorker*>* out) {
+  AutoLock lock(registrar_lock_);
+  out->clear();
+  for (WorkerMap::const_iterator it = registrar_.workers.begin();
+       it != registrar_.workers.end(); ++it) {
+    out->push_back((*it).second);
+  }
+}
+
+void SyncBackendHost::GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) {
+  AutoLock lock(registrar_lock_);
+  ModelSafeRoutingInfo copy(registrar_.routing_info);
+  out->swap(copy);
 }
 
 SyncBackendHost::Core::Core(SyncBackendHost* backend)
@@ -144,6 +312,10 @@ std::string MakeUserAgentForSyncapi() {
   user_agent += "WIN ";
 #elif defined(OS_LINUX)
   user_agent += "LINUX ";
+#elif defined(OS_FREEBSD)
+  user_agent += "FREEBSD ";
+#elif defined(OS_OPENBSD)
+  user_agent += "OPENBSD ";
 #elif defined(OS_MACOSX)
   user_agent += "MAC ";
 #endif
@@ -161,13 +333,13 @@ std::string MakeUserAgentForSyncapi() {
   return user_agent;
 }
 
-void SyncBackendHost::Core::DoInitialize(
-    const GURL& service_url,
-    BookmarkModelWorker* bookmark_model_worker,
-    bool attempt_last_user_authentication,
-    sync_api::HttpPostProviderFactory* http_provider_factory,
-    sync_api::HttpPostProviderFactory* auth_http_provider_factory) {
+void SyncBackendHost::Core::DoInitialize(const DoInitializeOptions& options) {
   DCHECK(MessageLoop::current() == host_->core_thread_.message_loop());
+
+  // Blow away the partial or corrupt sync data folder before doing any more
+  // initialization, if necessary.
+  if (options.delete_sync_data_folder)
+    DeleteSyncDataFolder();
 
   // Make sure that the directory exists before initializing the backend.
   // If it already exists, this will do no harm.
@@ -175,30 +347,39 @@ void SyncBackendHost::Core::DoInitialize(
   DCHECK(success);
 
   syncapi_->SetObserver(this);
-  string16 path_str;
-#if defined (OS_WIN)
-  path_str = host_->sync_data_folder_path().value();
-#elif defined(OS_LINUX) || defined(OS_MACOSX)
-  path_str = UTF8ToUTF16(host_->sync_data_folder_path().value());
-#endif
-  success = syncapi_->Init(path_str.c_str(),
-      (service_url.host() + service_url.path()).c_str(),
-      service_url.EffectiveIntPort(),
+  const FilePath& path_str = host_->sync_data_folder_path();
+  success = syncapi_->Init(path_str,
+      (options.service_url.host() + options.service_url.path()).c_str(),
+      options.service_url.EffectiveIntPort(),
       kGaiaServiceId,
       kGaiaSourceForChrome,
-      service_url.SchemeIsSecure(),
-      http_provider_factory,
-      auth_http_provider_factory,
-      bookmark_model_worker,
-      attempt_last_user_authentication,
-      MakeUserAgentForSyncapi().c_str());
+      options.service_url.SchemeIsSecure(),
+      options.http_bridge_factory,
+      options.auth_http_bridge_factory,
+      host_,  // ModelSafeWorkerRegistrar.
+      options.attempt_last_user_authentication,
+      options.invalidate_sync_login,
+      options.invalidate_sync_xmpp_login,
+      MakeUserAgentForSyncapi().c_str(),
+      options.lsid.c_str(),
+      options.notification_method);
   DCHECK(success) << "Syncapi initialization failed!";
 }
 
 void SyncBackendHost::Core::DoAuthenticate(const std::string& username,
-                                           const std::string& password) {
+                                           const std::string& password,
+                                           const std::string& captcha) {
   DCHECK(MessageLoop::current() == host_->core_thread_.message_loop());
-  syncapi_->Authenticate(username.c_str(), password.c_str());
+  syncapi_->Authenticate(username.c_str(), password.c_str(), captcha.c_str());
+}
+
+UIModelWorker* SyncBackendHost::ui_worker() {
+  ModelSafeWorker* w = registrar_.workers[GROUP_UI];
+  if (w == NULL)
+    return NULL;
+  if (w->GetModelSafeGroup() != GROUP_UI)
+    NOTREACHED();
+  return static_cast<UIModelWorker*>(w);
 }
 
 void SyncBackendHost::Core::DoShutdown(bool sync_disabled) {
@@ -207,36 +388,16 @@ void SyncBackendHost::Core::DoShutdown(bool sync_disabled) {
   save_changes_timer_.Stop();
   syncapi_->Shutdown();  // Stops the SyncerThread.
   syncapi_->RemoveObserver();
-  host_->bookmark_model_worker_->OnSyncerShutdownComplete();
+  host_->ui_worker()->OnSyncerShutdownComplete();
 
-  if (sync_disabled &&
-      file_util::DirectoryExists(host_->sync_data_folder_path())) {
-    // Delete the sync data folder to cleanup backend data.
-    bool success = file_util::Delete(host_->sync_data_folder_path(), true);
-    DCHECK(success);
-  }
+  if (sync_disabled)
+    DeleteSyncDataFolder();
 
   host_ = NULL;
 }
 
-static AuthErrorState AuthProblemToAuthError(
-    const sync_api::SyncManager::AuthProblem& auth_problem) {
-  switch (auth_problem) {
-    case sync_api::SyncManager::AUTH_PROBLEM_NONE:
-      return AUTH_ERROR_NONE;
-    case sync_api::SyncManager::AUTH_PROBLEM_INVALID_GAIA_CREDENTIALS:
-      return AUTH_ERROR_INVALID_GAIA_CREDENTIALS;
-    case sync_api::SyncManager::AUTH_PROBLEM_CONNECTION_FAILED:
-      return AUTH_ERROR_CONNECTION_FAILED;
-    case sync_api::SyncManager::AUTH_PROBLEM_USER_NOT_SIGNED_UP:
-      return AUTH_ERROR_USER_NOT_SIGNED_UP;
-  }
-
-  NOTREACHED() << "Unknown AuthProblem.";
-  return AUTH_ERROR_NONE;
-}
-
 void SyncBackendHost::Core::OnChangesApplied(
+    syncable::ModelType model_type,
     const sync_api::BaseTransaction* trans,
     const sync_api::SyncManager::ChangeRecord* changes,
     int change_count) {
@@ -245,25 +406,68 @@ void SyncBackendHost::Core::OnChangesApplied(
     return;
   }
 
-  // ChangesApplied is the one exception that should come over from the sync
-  // backend already on the service_loop_ thanks to our BookmarkModelWorker.
-  // SyncFrontend changes exclusively on the UI loop, because it updates
-  // the bookmark model.  As such, we don't need to worry about changes that
-  // have been made to the bookmark model but not yet applied to the sync
-  // model -- such changes only happen on the UI loop, and there's no
-  // contention.
-  if (host_->frontend_loop_ != MessageLoop::current()) {
-    // TODO(ncarter): Bug 1480644.  Make this a DCHECK once syncapi filters
-    // out all irrelevant changes.
-    DLOG(WARNING) << "Could not update bookmark model from non-UI thread";
+  std::map<syncable::ModelType, ChangeProcessor*>::const_iterator it =
+      host_->processors_.find(model_type);
+
+  // Until model association happens for a datatype, it will not appear in
+  // the processors list.  During this time, it is OK to drop changes on
+  // the floor (since model association has not happened yet).  When the
+  // data type is activated, model association takes place then the change
+  // processor is added to the processors_ list.  This all happens on
+  // the UI thread so we will never drop any changes after model
+  // association.
+  if (it == host_->processors_.end())
+    return;
+
+  if (!IsCurrentThreadSafeForModel(model_type)) {
+    NOTREACHED() << "Changes applied on wrong thread.";
     return;
   }
-  host_->processor_->ApplyChangesFromSyncModel(trans, changes, change_count);
+
+  // Now that we're sure we're on the correct thread, we can access the
+  // ChangeProcessor.
+  ChangeProcessor* processor = it->second;
+
+  // Ensure the change processor is willing to accept changes.
+  if (!processor->IsRunning())
+    return;
+
+  processor->ApplyChangesFromSyncModel(trans, changes, change_count);
 }
 
-void SyncBackendHost::Core::OnSyncCycleCompleted() {
+void SyncBackendHost::Core::OnSyncCycleCompleted(
+    const SyncSessionSnapshot* snapshot) {
   host_->frontend_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &Core::NotifyFrontend, SYNC_CYCLE_COMPLETED));
+      &Core::HandleSyncCycleCompletedOnFrontendLoop,
+      new SyncSessionSnapshot(*snapshot)));
+}
+
+void SyncBackendHost::Core::HandleSyncCycleCompletedOnFrontendLoop(
+    SyncSessionSnapshot* snapshot) {
+  if (!host_ || !host_->frontend_)
+    return;
+  DCHECK_EQ(MessageLoop::current(), host_->frontend_loop_);
+
+  host_->last_snapshot_.reset(snapshot);
+
+  // If we are waiting for a configuration change, check here to see
+  // if this sync cycle has initialized all of the types we've been
+  // waiting for.
+  if (host_->configure_ready_task_.get()) {
+    bool found_all = true;
+    for (syncable::ModelTypeSet::const_iterator it =
+             host_->configure_initial_sync_types_.begin();
+         it != host_->configure_initial_sync_types_.end(); ++it) {
+      found_all &= snapshot->initial_sync_ended.test(*it);
+    }
+
+    if (found_all) {
+      host_->configure_ready_task_->Run();
+      host_->configure_ready_task_.reset();
+      host_->configure_initial_sync_types_.clear();
+    }
+  }
+  host_->frontend_->OnSyncCycleCompleted();
 }
 
 void SyncBackendHost::Core::OnInitializationComplete() {
@@ -274,24 +478,58 @@ void SyncBackendHost::Core::OnInitializationComplete() {
   // We could be on some random sync backend thread, so MessageLoop::current()
   // can definitely be null in here.
   host_->frontend_loop_->PostTask(FROM_HERE,
-      NewRunnableMethod(this, &Core::NotifyFrontend, INITIALIZED));
+      NewRunnableMethod(this,
+                        &Core::HandleInitalizationCompletedOnFrontendLoop));
 
   // Initialization is complete, so we can schedule recurring SaveChanges.
   host_->core_thread_.message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(this, &Core::StartSavingChanges));
 }
 
-void SyncBackendHost::Core::OnAuthProblem(
-    sync_api::SyncManager::AuthProblem auth_problem) {
+void SyncBackendHost::Core::HandleInitalizationCompletedOnFrontendLoop() {
+  host_->frontend_->OnBackendInitialized();
+}
+
+
+bool SyncBackendHost::Core::IsCurrentThreadSafeForModel(
+    syncable::ModelType model_type) {
+  AutoLock lock(host_->registrar_lock_);
+
+  browser_sync::ModelSafeRoutingInfo::const_iterator routing_it =
+      host_->registrar_.routing_info.find(model_type);
+  if (routing_it == host_->registrar_.routing_info.end())
+    return false;
+  browser_sync::ModelSafeGroup group = routing_it->second;
+  WorkerMap::const_iterator worker_it = host_->registrar_.workers.find(group);
+  if (worker_it == host_->registrar_.workers.end())
+    return false;
+  ModelSafeWorker* worker = worker_it->second;
+  return worker->CurrentThreadIsWorkThread();
+}
+
+
+void SyncBackendHost::Core::OnAuthError(const AuthError& auth_error) {
   // We could be on SyncEngine_AuthWatcherThread.  Post to our core loop so
   // we can modify state.
   host_->frontend_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(this, &Core::HandleAuthErrorEventOnFrontendLoop,
-      AuthProblemToAuthError(auth_problem)));
+      auth_error));
+}
+
+void SyncBackendHost::Core::OnPaused() {
+  host_->frontend_loop_->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(this, &Core::NotifyPaused));
+}
+
+void SyncBackendHost::Core::OnResumed() {
+  host_->frontend_loop_->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(this, &Core::NotifyResumed));
 }
 
 void SyncBackendHost::Core::HandleAuthErrorEventOnFrontendLoop(
-    AuthErrorState new_auth_error) {
+    const GoogleServiceAuthError& new_auth_error) {
   if (!host_ || !host_->frontend_)
     return;
 
@@ -311,6 +549,11 @@ void SyncBackendHost::Core::SaveChanges() {
   syncapi_->SaveChanges();
 }
 
-}  // namespace browser_sync
+void SyncBackendHost::Core::DeleteSyncDataFolder() {
+  if (file_util::DirectoryExists(host_->sync_data_folder_path())) {
+    if (!file_util::Delete(host_->sync_data_folder_path(), true))
+      LOG(DFATAL) << "Could not delete the Sync Data folder.";
+  }
+}
 
-#endif  // defined(BROWSER_SYNC)
+}  // namespace browser_sync

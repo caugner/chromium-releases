@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,14 +29,20 @@ enum Rotate {
   MIRROR_ROTATE_270,  // Transpose.
 };
 
+// Filter affects how scaling looks.
+enum ScaleFilter {
+  FILTER_NONE,        // No filter (point sampled).
+  FILTER_BILINEAR,    // Bilinear filter.
+};
+
 // Convert a frame of YUV to 32 bit ARGB.
 // Pass in YV16/YV12 depending on source format
 void ConvertYUVToRGB32(const uint8* yplane,
                        const uint8* uplane,
                        const uint8* vplane,
                        uint8* rgbframe,
-                       int frame_width,
-                       int frame_height,
+                       int width,
+                       int height,
                        int ystride,
                        int uvstride,
                        int rgbstride,
@@ -48,15 +54,16 @@ void ScaleYUVToRGB32(const uint8* yplane,
                      const uint8* uplane,
                      const uint8* vplane,
                      uint8* rgbframe,
-                     int frame_width,
-                     int frame_height,
-                     int scaled_width,
-                     int scaled_height,
+                     int source_width,
+                     int source_height,
+                     int width,
+                     int height,
                      int ystride,
                      int uvstride,
                      int rgbstride,
                      YUVType yuv_type,
-                     Rotate view_rotate);
+                     Rotate view_rotate,
+                     ScaleFilter filter);
 
 }  // namespace media
 

@@ -1,3 +1,7 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "debug.h"
 #include "sandbox_impl.h"
 #include "syscall_table.h"
@@ -38,6 +42,7 @@ asm(
     // This is the wrapper which is called by the untrusted code, trying to
     // make a system call.
     "playground$syscallWrapper:"
+    ".internal playground$syscallWrapper\n"
     ".globl playground$syscallWrapper\n"
     ".type playground$syscallWrapper, @function\n"
     #if defined(__x86_64__)
@@ -145,14 +150,76 @@ asm(
 
     // Check range of system call
     "cmp playground$maxSyscall, %eax\n"
-    "ja  1f\n"
+    "ja  5f\n"
+
+    // We often have long sequences of calls to gettimeofday(). This is
+    // needlessly expensive. Coalesce them into a single call.
+    //
+    // We keep track of state in TLS storage that we can access through
+    // the %fs segment register. See trusted_thread.cc for the exact
+    // memory layout.
+    //
+    // TODO(markus): maybe, we should proactively call gettimeofday() and
+    //               clock_gettime(), whenever we talk to the trusted thread?
+    //               or maybe, if we have recently seen requests to compute
+    //               the time. There might be a repeated pattern of those.
+    "cmp  $78, %eax\n"             // __NR_gettimeofday
+    "jnz  2f\n"
+    "cmp  %eax, %fs:0x102C-0x54\n" // last system call
+    "jnz  0f\n"
+
+    // This system call and the last system call prior to this one both are
+    // calls to gettimeofday(). Try to avoid making the new call and just
+    // return the same result as in the previous call.
+    // Just in case the caller is spinning on the result from gettimeofday(),
+    // every so often, call the actual system call.
+    "decl %fs:0x1030-0x54\n"       // countdown calls to gettimofday()
+    "jz   0f\n"
+
+    // Atomically read the 64bit word representing last-known timestamp and
+    // return it to the caller. On x86-32 this is a little more complicated and
+    // requires the use of the cmpxchg8b instruction.
+    "mov  %ebx, %eax\n"
+    "mov  %ecx, %edx\n"
+    "lock; cmpxchg8b 100f\n"
+    "mov  %eax, 0(%ebx)\n"
+    "mov  %edx, 4(%ebx)\n"
+    "xor  %eax, %eax\n"
+    "add  $28, %esp\n"
+    "jmp  4f\n"
+
+    // This is a call to gettimeofday(), but we don't have a valid cached
+    // result, yet.
+  "0:mov  %eax, %fs:0x102C-0x54\n" // remember syscall number
+    "movl $500, %fs:0x1030-0x54\n" // make system call, each 500 invocations
+    "call playground$defaultSystemCallHandler\n"
+
+    // Returned from gettimeofday(). Remember return value, in case the
+    // application calls us again right away.
+    // Again, this has to happen atomically and requires cmpxchg8b.
+    "mov 4(%ebx), %ecx\n"
+    "mov 0(%ebx), %ebx\n"
+    "mov 100f, %eax\n"
+    "mov 101f, %edx\n"
+  "1:lock; cmpxchg8b 100f\n"
+    "jnz 1b\n"
+    "xor %eax, %eax\n"
+    "jmp 6f\n"
+
+    // Remember the number of the last system call made. We deliberately do
+    // not remember calls to gettid(), as we have often seen long sequences
+    // of calls to just gettimeofday() and gettid(). In that situation, we
+    // would still like to coalesce the gettimeofday() calls.
+  "2:cmp $224, %eax\n"             // __NR_gettid
+    "jz  3f\n"
+    "mov  %eax, %fs:0x102C-0x54\n" // remember syscall number
 
     // Retrieve function call from system call table (c.f. syscall_table.c).
     // We have three different types of entries; zero for denied system calls,
     // that should be handled by the defaultSystemCallHandler(); minus one
     // for unrestricted system calls that need to be forwarded to the trusted
     // thread; and function pointers to specific handler functions.
-    "shl  $3, %eax\n"
+  "3:shl  $3, %eax\n"
     "lea  playground$syscallTable, %ebx\n"
     "add  %ebx, %eax\n"
     "mov  0(%eax), %eax\n"
@@ -160,14 +227,13 @@ asm(
     // Jump to function if non-null and not UNRESTRICTED_SYSCALL, otherwise
     // jump to fallback handler.
     "cmp  $1, %eax\n"
-    "jbe  1f\n"
+    "jbe  5f\n"
     "add  $4, %esp\n"
     "call *%eax\n"
     "add  $24, %esp\n"
-  "0:"
 
     // Restore CPU registers, except for %eax which was set by the system call.
-    "pop  %ebp\n"
+  "4:pop  %ebp\n"
     "pop  %edi\n"
     "pop  %esi\n"
     "pop  %edx\n"
@@ -177,13 +243,16 @@ asm(
     // Return to caller
     "ret\n"
 
-  "1:"
     // Call default handler.
-    "push $2f\n"
-    "push $playground$defaultSystemCallHandler\n"
-    "ret\n"
-  "2:add  $28, %esp\n"
-    "jmp 0b\n"
+  "5:call playground$defaultSystemCallHandler\n"
+  "6:add  $28, %esp\n"
+    "jmp 4b\n"
+
+    ".pushsection \".bss\"\n"
+    ".balign 8\n"
+"100:.byte 0, 0, 0, 0\n"
+"101:.byte 0, 0, 0, 0\n"
+    ".popsection\n"
 
     #else
     #error Unsupported target platform
@@ -202,19 +271,20 @@ void* Sandbox::defaultSystemCallHandler(int syscallNum, void* arg0, void* arg1,
   // these system calls are not restricted in Seccomp mode. But depending on
   // the exact instruction sequence in libc, we might not be able to reliably
   // filter out these system calls at the time when we instrument the code.
-  SysCalls sys;
-  long     rc;
+  SysCalls  sys;
+  long      rc;
+  long long tm;
   switch (syscallNum) {
     case __NR_read:
-      Debug::syscall(syscallNum, "Allowing unrestricted system call");
+      Debug::syscall(&tm, syscallNum, "Allowing unrestricted system call");
       rc             = sys.read((long)arg0, arg1, (size_t)arg2);
       break;
     case __NR_write:
-      Debug::syscall(syscallNum, "Allowing unrestricted system call");
+      Debug::syscall(&tm, syscallNum, "Allowing unrestricted system call");
       rc             = sys.write((long)arg0, arg1, (size_t)arg2);
       break;
     case __NR_rt_sigreturn:
-      Debug::syscall(syscallNum, "Allowing unrestricted system call");
+      Debug::syscall(&tm, syscallNum, "Allowing unrestricted system call");
       rc             = sys.rt_sigreturn((unsigned long)arg0);
       break;
     default:
@@ -226,7 +296,7 @@ void* Sandbox::defaultSystemCallHandler(int syscallNum, void* arg0, void* arg1,
 
       if ((unsigned)syscallNum <= maxSyscall &&
           syscallTable[syscallNum].handler == UNRESTRICTED_SYSCALL) {
-        Debug::syscall(syscallNum, "Allowing unrestricted system call");
+        Debug::syscall(&tm, syscallNum, "Allowing unrestricted system call");
      perform_unrestricted:
         struct {
           int          sysnum;
@@ -240,9 +310,10 @@ void* Sandbox::defaultSystemCallHandler(int syscallNum, void* arg0, void* arg1,
             read(sys, thread, &rc, sizeof(rc)) != sizeof(rc)) {
           die("Failed to forward unrestricted system call");
         }
+        Debug::elapsed(tm, syscallNum);
         return rc;
       } else if (Debug::isEnabled()) {
-        Debug::syscall(syscallNum,
+        Debug::syscall(&tm, syscallNum,
                        "In production mode, this call would be disallowed");
         goto perform_unrestricted;
       } else {
@@ -252,6 +323,7 @@ void* Sandbox::defaultSystemCallHandler(int syscallNum, void* arg0, void* arg1,
   if (rc < 0) {
     rc               = -sys.my_errno;
   }
+  Debug::elapsed(tm, syscallNum);
   return (void *)rc;
 }
 

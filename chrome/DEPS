@@ -1,5 +1,7 @@
 include_rules = [
   "+app",
+  "+gfx",
+  "+gpu",
   "+net",
   "+printing",
   "+views",
@@ -16,10 +18,16 @@ include_rules = [
   "-tools",
 
   # Allow inclusion of WebKit API files.
-  "+webkit/api",
+  "+third_party/WebKit/WebKit/chromium",
 
   # Allow inclusion of the appcache library.
   "+webkit/appcache",
+
+  # Allow inclusion of the database library.
+  "+webkit/database",
+
+  # Allow Apple code ImageAndTextCell.
+  "+third_party/apple",
 
   # Allow inclusion of Mozilla interface headers.
   "+third_party/mozilla",
@@ -29,6 +37,9 @@ include_rules = [
 
   # Allow usage of Google Toolbox for Mac.
   "+third_party/GTM",
+
+  # Allow usage of the libjingle library.
+  "+third_party/libjingle",
 
   # Our Skia extensions.
   "+skia/ext",

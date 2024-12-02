@@ -12,17 +12,21 @@
 // Holds information about a child process.
 class ChildProcessInfo {
  public:
+  // NOTE: Do not remove or reorder the elements in this enum, and only add new
+  // items at the end. We depend on these specific values in a histogram.
   enum ProcessType {
+    UNKNOWN_PROCESS = 1,
     BROWSER_PROCESS,
     RENDER_PROCESS,
     PLUGIN_PROCESS,
     WORKER_PROCESS,
-    NACL_PROCESS,
+    NACL_LOADER_PROCESS,
     UTILITY_PROCESS,
     PROFILE_IMPORT_PROCESS,
     ZYGOTE_PROCESS,
     SANDBOX_HELPER_PROCESS,
-    UNKNOWN_PROCESS,
+    NACL_BROKER_PROCESS,
+    GPU_PROCESS
   };
 
   ChildProcessInfo(const ChildProcessInfo& original);

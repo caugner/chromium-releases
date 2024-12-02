@@ -7,6 +7,7 @@
 #include "chrome/browser/profile_manager.h"
 
 #include "app/l10n_util.h"
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
@@ -15,23 +16,25 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/net/url_request_context_getter.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "grit/generated_resources.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_job_tracker.h"
 
-// static
-void ProfileManager::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterStringPref(prefs::kProfileName, L"");
-  prefs->RegisterStringPref(prefs::kProfileNickname, L"");
-  prefs->RegisterStringPref(prefs::kProfileID, L"");
-}
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/cryptohome_library.h"
+#endif
 
 // static
 void ProfileManager::ShutdownSessionServices() {
@@ -40,12 +43,26 @@ void ProfileManager::ShutdownSessionServices() {
     (*i)->ShutdownSessionService();
 }
 
-ProfileManager::ProfileManager() {
-  base::SystemMonitor::Get()->AddObserver(this);
+// static
+Profile* ProfileManager::GetDefaultProfile() {
+  FilePath user_data_dir;
+  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  return profile_manager->GetDefaultProfile(user_data_dir);
+}
+
+ProfileManager::ProfileManager() : logged_in_(false) {
+  SystemMonitor::Get()->AddObserver(this);
+#if defined(OS_CHROMEOS)
+  registrar_.Add(
+      this,
+      NotificationType::LOGIN_USER_CHANGED,
+      NotificationService::AllSources());
+#endif
 }
 
 ProfileManager::~ProfileManager() {
-  base::SystemMonitor* system_monitor = base::SystemMonitor::Get();
+  SystemMonitor* system_monitor = SystemMonitor::Get();
   if (system_monitor)
     system_monitor->RemoveObserver(this);
 
@@ -69,7 +86,7 @@ FilePath ProfileManager::GetDefaultProfileDir(
   return default_profile_dir;
 }
 
-FilePath ProfileManager::GetDefaultProfilePath(
+FilePath ProfileManager::GetProfilePrefsPath(
     const FilePath &profile_dir) {
   FilePath default_prefs_path(profile_dir);
   default_prefs_path = default_prefs_path.Append(chrome::kPreferencesFilename);
@@ -77,86 +94,90 @@ FilePath ProfileManager::GetDefaultProfilePath(
 }
 
 Profile* ProfileManager::GetDefaultProfile(const FilePath& user_data_dir) {
-  // Initialize profile, creating default if necessary
-  FilePath default_profile_dir = GetDefaultProfileDir(user_data_dir);
+  FilePath default_profile_dir(user_data_dir);
+#if defined(OS_CHROMEOS)
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (logged_in_) {
+    std::wstring profile_dir;
+    // If the user has logged in, pick up the new profile.
+    // TODO(davemoore) Delete this once chromium os has started using
+    // "--login-profile" instead of "--profile".
+    if (command_line.HasSwitch(switches::kLoginProfile)) {
+      profile_dir = command_line.GetSwitchValue(switches::kLoginProfile);
+    } else if (command_line.HasSwitch(switches::kProfile)) {
+      profile_dir = command_line.GetSwitchValue(switches::kProfile);
+    } else {
+      // We should never be logged in with no profile dir.
+      NOTREACHED();
+      return NULL;
+    }
+    default_profile_dir = default_profile_dir.Append(
+        FilePath::FromWStringHack(profile_dir));
+    return GetProfile(default_profile_dir);
+  } else {
+    // If not logged in on cros, always return the incognito profile
+    default_profile_dir = default_profile_dir.Append(
+        FilePath::FromWStringHack(chrome::kNotSignedInProfile));
+    Profile*profile = GetProfile(default_profile_dir);
+
+    // For cros, return the OTR profile so we never accidentally keep
+    // user data in an unencrypted profile. But doing this makes
+    // many of the browser and ui tests fail.
+    // TODO(davemoore) Fix the tests so they allow OTR profiles.
+    if (!command_line.HasSwitch(switches::kTestType))
+      profile = profile->GetOffTheRecordProfile();
+
+    return profile;
+  }
+#else
+  default_profile_dir = default_profile_dir.Append(
+      FilePath::FromWStringHack(chrome::kNotSignedInProfile));
+  return GetProfile(default_profile_dir);
+#endif
+}
+
+#if defined(OS_CHROMEOS)
+Profile* ProfileManager::GetWizardProfile() {
+  FilePath user_data_dir;
+  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+  FilePath default_profile_dir(user_data_dir);
+  default_profile_dir = default_profile_dir.Append(
+      FilePath::FromWStringHack(chrome::kNotSignedInProfile));
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+
+  // Don't init extensions for this profile
+  return profile_manager->GetProfile(default_profile_dir, false);
+}
+#endif
+
+Profile* ProfileManager::GetProfile(const FilePath& profile_dir) {
+  return GetProfile(profile_dir, true);
+}
+
+Profile* ProfileManager::GetProfile(
+    const FilePath& profile_dir, bool init_extensions) {
   // If the profile is already loaded (e.g., chrome.exe launched twice), just
   // return it.
-  Profile* profile = GetProfileByPath(default_profile_dir);
+  Profile* profile = GetProfileByPath(profile_dir);
   if (NULL != profile)
     return profile;
 
-  if (!ProfileManager::IsProfile(default_profile_dir)) {
+  if (!ProfileManager::IsProfile(profile_dir)) {
     // If the profile directory doesn't exist, create it.
-    profile = ProfileManager::CreateProfile(default_profile_dir,
-        L"",  // No name.
-        L"",  // No nickname.
-        chrome::kNotSignedInID);
-    if (!profile)
-      return NULL;
-    bool result = AddProfile(profile);
-    DCHECK(result);
+    profile = ProfileManager::CreateProfile(profile_dir);
   } else {
     // The profile already exists on disk, just load it.
-    profile = AddProfileByPath(default_profile_dir);
-    if (!profile)
-      return NULL;
-
-    if (profile->GetID() != chrome::kNotSignedInID) {
-      // Something must've gone wrong with the profile section of the
-      // Preferences file, fix it.
-      profile->SetID(chrome::kNotSignedInID);
-      profile->SetName(chrome::kNotSignedInProfile);
-    }
+    profile = Profile::CreateProfile(profile_dir);
   }
   DCHECK(profile);
+  if (profile) {
+    bool result = AddProfile(profile, init_extensions);
+    DCHECK(result);
+  }
   return profile;
 }
 
-Profile* ProfileManager::AddProfileByPath(const FilePath& path) {
-  Profile* profile = GetProfileByPath(path);
-  if (profile)
-    return profile;
-
-  profile = Profile::CreateProfile(path);
-  if (AddProfile(profile)) {
-    return profile;
-  } else {
-    return NULL;
-  }
-}
-
-void ProfileManager::NewWindowWithProfile(Profile* profile) {
-  DCHECK(profile);
-  Browser* browser = Browser::Create(profile);
-  browser->AddTabWithURL(GURL(), GURL(), PageTransition::TYPED, true, -1,
-                         false, NULL);
-  browser->window()->Show();
-}
-
-Profile* ProfileManager::AddProfileByID(const std::wstring& id) {
-  AvailableProfile* available = GetAvailableProfileByID(id);
-  if (!available)
-    return NULL;
-
-  FilePath path;
-  PathService::Get(chrome::DIR_USER_DATA, &path);
-  path = path.Append(available->directory());
-
-  return AddProfileByPath(path);
-}
-
-AvailableProfile* ProfileManager::GetAvailableProfileByID(
-    const std::wstring& id) {
-  for (AvailableProfileVector::const_iterator i(available_profiles_.begin());
-       i != available_profiles_.end(); ++i) {
-    if ((*i)->id() == id)
-      return *i;
-  }
-
-  return NULL;
-}
-
-bool ProfileManager::AddProfile(Profile* profile) {
+bool ProfileManager::AddProfile(Profile* profile, bool init_extensions) {
   DCHECK(profile);
 
   // Make sure that we're not loading a profile with the same ID as a profile
@@ -167,35 +188,14 @@ bool ProfileManager::AddProfile(Profile* profile) {
                     ") as an already-loaded profile.";
     return false;
   }
-  if (GetProfileByID(profile->GetID())) {
-    NOTREACHED() << "Attempted to add profile with the same ID (" <<
-                    profile->GetID() << ") as an already-loaded profile.";
-    return false;
-  }
 
   profiles_.insert(profiles_.end(), profile);
+  if (init_extensions)
+    profile->InitExtensions();
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (!command_line.HasSwitch(switches::kDisableWebResources))
+    profile->InitWebResources();
   return true;
-}
-
-void ProfileManager::RemoveProfile(Profile* profile) {
-  for (iterator i(begin()); i != end(); ++i) {
-    if ((*i) == profile) {
-      profiles_.erase(i);
-      return;
-    }
-  }
-}
-
-void ProfileManager::RemoveProfileByPath(const FilePath& path) {
-  for (iterator i(begin()); i != end(); ++i) {
-    if ((*i)->GetPath() == path) {
-      delete *i;
-      profiles_.erase(i);
-      return;
-    }
-  }
-
-  NOTREACHED() << "Attempted to remove non-loaded profile: " << path.value();
 }
 
 Profile* ProfileManager::GetProfileByPath(const FilePath& path) const {
@@ -207,88 +207,73 @@ Profile* ProfileManager::GetProfileByPath(const FilePath& path) const {
   return NULL;
 }
 
-Profile* ProfileManager::GetProfileByID(const std::wstring& id) const {
-  for (const_iterator i(begin()); i != end(); ++i) {
-    if ((*i)->GetID() == id)
-      return *i;
-  }
-
-  return NULL;
-}
-
 void ProfileManager::OnSuspend() {
   DCHECK(CalledOnValidThread());
 
   for (const_iterator i(begin()); i != end(); ++i) {
-     g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-       NewRunnableFunction(&ProfileManager::SuspendProfile, *i));
+    ChromeThread::PostTask(
+        ChromeThread::IO, FROM_HERE,
+        NewRunnableFunction(&ProfileManager::SuspendProfile, *i));
   }
 }
 
 void ProfileManager::OnResume() {
   DCHECK(CalledOnValidThread());
   for (const_iterator i(begin()); i != end(); ++i) {
-    g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-      NewRunnableFunction(&ProfileManager::ResumeProfile, *i));
+    ChromeThread::PostTask(
+        ChromeThread::IO, FROM_HERE,
+        NewRunnableFunction(&ProfileManager::ResumeProfile, *i));
   }
+}
+
+void ProfileManager::Observe(
+    NotificationType type,
+    const NotificationSource& source,
+    const NotificationDetails& details) {
+#if defined(OS_CHROMEOS)
+  if (type == NotificationType::LOGIN_USER_CHANGED) {
+    CHECK(chromeos::CrosLibrary::Get()->EnsureLoaded());
+    // If we don't have a mounted profile directory we're in trouble.
+    // TODO(davemoore) Once we have better api this check should ensure that
+    // our profile directory is the one that's mounted, and that it's mounted
+    // as the current user.
+    CHECK(chromeos::CrosLibrary::Get()->GetCryptohomeLibrary()->IsMounted());
+    logged_in_ = true;
+  }
+#endif
 }
 
 void ProfileManager::SuspendProfile(Profile* profile) {
   DCHECK(profile);
-  DCHECK(MessageLoop::current() ==
-    ChromeThread::GetMessageLoop(ChromeThread::IO));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   for (URLRequestJobTracker::JobIterator i = g_url_request_job_tracker.begin();
        i != g_url_request_job_tracker.end(); ++i)
     (*i)->Kill();
 
-  profile->GetRequestContext()->http_transaction_factory()->Suspend(true);
+  profile->GetRequestContext()->GetURLRequestContext()->
+      http_transaction_factory()->Suspend(true);
 }
 
 void ProfileManager::ResumeProfile(Profile* profile) {
   DCHECK(profile);
-  DCHECK(MessageLoop::current() ==
-    ChromeThread::GetMessageLoop(ChromeThread::IO));
-  profile->GetRequestContext()->http_transaction_factory()->Suspend(false);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  profile->GetRequestContext()->GetURLRequestContext()->
+      http_transaction_factory()->Suspend(false);
 }
-
-
 
 // static
 bool ProfileManager::IsProfile(const FilePath& path) {
-  FilePath prefs_path = GetDefaultProfilePath(path);
-
+  FilePath prefs_path = GetProfilePrefsPath(path);
   FilePath history_path = path;
   history_path = history_path.Append(chrome::kHistoryFilename);
 
   return file_util::PathExists(prefs_path) &&
-         file_util::PathExists(history_path);
+      file_util::PathExists(history_path);
 }
 
 // static
-bool ProfileManager::CopyProfileData(const FilePath& source_path,
-                                     const FilePath& destination_path) {
-  // create destination directory if necessary
-  if (!file_util::PathExists(destination_path)) {
-    bool result = file_util::CreateDirectory(destination_path);
-    if (!result) {
-      DLOG(WARNING) << "Unable to create destination directory " <<
-                       destination_path.value();
-      return false;
-    }
-  }
-
-  // copy files in directory
-  return file_util::CopyDirectory(source_path, destination_path, false);
-}
-
-// static
-Profile* ProfileManager::CreateProfile(const FilePath& path,
-                                       const std::wstring& name,
-                                       const std::wstring& nickname,
-                                       const std::wstring& id) {
-  DCHECK_LE(nickname.length(), name.length());
-
+Profile* ProfileManager::CreateProfile(const FilePath& path) {
   if (IsProfile(path)) {
     DCHECK(false) << "Attempted to create a profile with the path:\n"
         << path.value() << "\n but that path already contains a profile";
@@ -302,19 +287,5 @@ Profile* ProfileManager::CreateProfile(const FilePath& path,
       return NULL;
   }
 
-  Profile* profile = Profile::CreateProfile(path);
-  PrefService* prefs = profile->GetPrefs();
-  DCHECK(prefs);
-  prefs->SetString(prefs::kProfileName, name);
-  prefs->SetString(prefs::kProfileNickname, nickname);
-  prefs->SetString(prefs::kProfileID, id);
-
-  return profile;
-}
-
-// static
-std::wstring ProfileManager::CanonicalizeID(const std::wstring& id) {
-  std::wstring no_whitespace;
-  TrimWhitespace(id, TRIM_ALL, &no_whitespace);
-  return StringToLowerASCII(no_whitespace);
+  return Profile::CreateProfile(path);
 }

@@ -20,8 +20,7 @@ class FirewallManager;
 class MemoryStream;
 
 class AsyncHttpRequest:
-  public SignalThread,
-  public sigslot::has_slots<> {
+  public SignalThread {
 public:
   AsyncHttpRequest(const std::string &user_agent);
 
@@ -103,7 +102,8 @@ class SslSocketFactory : public talk_base::SocketFactory {
  public:
   SslSocketFactory(talk_base::SocketFactory * factory, const std::string &user_agent)
     : factory_(factory), logging_level_(talk_base::LS_VERBOSE), 
-      binary_mode_(false), agent_(user_agent) { }
+      binary_mode_(false), agent_(user_agent),
+      ignore_bad_cert_(false), use_restartable_ssl_sockets_(false) { }
 
   void UseSSL(const char * hostname) { hostname_ = hostname; }
   void DisableSSL() { hostname_.clear(); }
@@ -112,6 +112,12 @@ class SslSocketFactory : public talk_base::SocketFactory {
   const talk_base::ProxyInfo& proxy() const { return proxy_; }
   bool ignore_bad_cert() {return ignore_bad_cert_;}
   void SetIgnoreBadCert(bool ignore) { ignore_bad_cert_ = ignore; }
+  bool use_restartable_ssl_sockets() const {
+    return use_restartable_ssl_sockets_;
+  }
+  void SetUseRestartableSSLSockets(bool use_restartable_ssl_sockets) {
+    use_restartable_ssl_sockets_ = use_restartable_ssl_sockets;
+  }
 
   void SetLogging(talk_base::LoggingSeverity level, const std::string& label, 
       bool binary_mode = false) {
@@ -131,6 +137,7 @@ private:
   bool binary_mode_;
   std::string agent_;
   bool ignore_bad_cert_;
+  bool use_restartable_ssl_sockets_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

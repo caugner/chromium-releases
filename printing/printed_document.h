@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 
 #include <map>
 
-#include "app/gfx/native_widget_types.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "gfx/native_widget_types.h"
 #include "googleurl/src/gurl.h"
 #include "printing/print_settings.h"
 #include "printing/native_metafile.h"
@@ -39,7 +39,6 @@ class PrintedDocument : public base::RefCountedThreadSafe<PrintedDocument> {
   PrintedDocument(const PrintSettings& settings,
                   PrintedPagesSource* source,
                   int cookie);
-  ~PrintedDocument();
 
   // Sets a page's data. 0-based. Takes metafile ownership.
   // Note: locks for a short amount of time.
@@ -72,7 +71,7 @@ class PrintedDocument : public base::RefCountedThreadSafe<PrintedDocument> {
 
   // Retrieves the current memory usage of the renderer pages.
   // Note: locks for a short amount of time.
-  size_t MemoryUsage() const;
+  uint32 MemoryUsage() const;
 
   // Sets the number of pages in the document to be rendered. Can only be set
   // once.
@@ -97,7 +96,7 @@ class PrintedDocument : public base::RefCountedThreadSafe<PrintedDocument> {
   const GURL& url() const { return immutable_.url_; }
   const std::wstring& date() const { return immutable_.date_; }
   const std::wstring& time() const { return immutable_.time_; }
-  const int cookie() const { return immutable_.cookie_; }
+  int cookie() const { return immutable_.cookie_; }
 
   // Sets a path where to dump printing output files for debugging. If never set
   // no files are generated.
@@ -106,13 +105,17 @@ class PrintedDocument : public base::RefCountedThreadSafe<PrintedDocument> {
   static const std::wstring& debug_dump_path();
 
  private:
+  friend class base::RefCountedThreadSafe<PrintedDocument>;
+
+  ~PrintedDocument();
+
   // Array of data for each print previewed page.
   typedef std::map<int, scoped_refptr<PrintedPage> > PrintedPages;
 
   // Contains all the mutable stuff. All this stuff MUST be accessed with the
   // lock held.
   struct Mutable {
-    Mutable(PrintedPagesSource* source);
+    explicit Mutable(PrintedPagesSource* source);
 
     // Source that generates the PrintedPage's (i.e. a TabContents). It will be
     // set back to NULL if the source is deleted before this object.
@@ -187,7 +190,7 @@ class PrintedDocument : public base::RefCountedThreadSafe<PrintedDocument> {
   // All the immutable members.
   const Immutable immutable_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(PrintedDocument);
+  DISALLOW_COPY_AND_ASSIGN(PrintedDocument);
 };
 
 }  // namespace printing

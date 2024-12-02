@@ -4,11 +4,13 @@
 
 #include "chrome/browser/shell_dialogs.h"
 
-#include <CoreServices/CoreServices.h>
 #import <Cocoa/Cocoa.h>
+#include <CoreServices/CoreServices.h>
+
 #include <map>
 #include <set>
 
+#import "base/cocoa_protocols_mac.h"
 #include "base/logging.h"
 #include "base/mac_util.h"
 #include "base/scoped_cftyperef.h"
@@ -21,7 +23,7 @@ class SelectFileDialogImpl;
 
 // A bridge class to act as the modal delegate to the save/open sheet and send
 // the results to the C++ class.
-@interface SelectFileDialogBridge : NSObject {
+@interface SelectFileDialogBridge : NSObject<NSOpenSavePanelDelegate> {
  @private
   SelectFileDialogImpl* selectFileDialogImpl_;  // WEAK; owns us
 }
@@ -30,6 +32,9 @@ class SelectFileDialogImpl;
 - (void)endedPanel:(NSSavePanel *)panel
         withReturn:(int)returnCode
            context:(void *)context;
+
+// NSSavePanel delegate method
+- (BOOL)panel:(id)sender shouldShowFilename:(NSString *)filename;
 
 @end
 
@@ -63,6 +68,8 @@ class SelectFileDialogImpl : public SelectFileDialog {
                        const std::vector<FilePath>& files,
                        int index);
 
+  bool ShouldEnableFilename(NSPanel* dialog, NSString* filename);
+
   struct SheetContext {
     Type type;
     NSWindow* owning_window;
@@ -84,6 +91,9 @@ class SelectFileDialogImpl : public SelectFileDialog {
 
   // The set of all parent windows for which we are currently running dialogs.
   std::set<NSWindow*> parents_;
+
+  // A map from file dialogs to their types.
+  std::map<NSPanel*, Type> type_map_;
 
   DISALLOW_COPY_AND_ASSIGN(SelectFileDialogImpl);
 };
@@ -123,14 +133,15 @@ void SelectFileDialogImpl::SelectFile(
          type == SELECT_OPEN_FILE ||
          type == SELECT_OPEN_MULTI_FILE ||
          type == SELECT_SAVEAS_FILE);
-  DCHECK(owning_window);
   parents_.insert(owning_window);
 
+  // Note: we need to retain the dialog as owning_window can be null.
+  // (see http://crbug.com/29213)
   NSSavePanel* dialog;
   if (type == SELECT_SAVEAS_FILE)
-    dialog = [NSSavePanel savePanel];
+    dialog = [[NSSavePanel savePanel] retain];
   else
-    dialog = [NSOpenPanel openPanel];
+    dialog = [[NSOpenPanel openPanel] retain];
 
   if (!title.empty())
     [dialog setTitle:base::SysUTF16ToNSString(title)];
@@ -174,6 +185,7 @@ void SelectFileDialogImpl::SelectFile(
     [dialog setRequiredFileType:base::SysUTF8ToNSString(default_extension)];
 
   params_map_[dialog] = params;
+  type_map_[dialog] = type;
 
   SheetContext* context = new SheetContext;
   context->type = type;
@@ -202,6 +214,7 @@ void SelectFileDialogImpl::SelectFile(
       [open_dialog setCanChooseDirectories:NO];
     }
 
+    [open_dialog setDelegate:bridge_.get()];
     [open_dialog beginSheetForDirectory:default_dir
                                    file:default_filename
                                   types:allowed_file_types
@@ -221,6 +234,7 @@ void SelectFileDialogImpl::FileWasSelected(NSPanel* dialog,
   void* params = params_map_[dialog];
   params_map_.erase(dialog);
   parents_.erase(parent_window);
+  type_map_.erase(dialog);
 
   if (!listener_)
     return;
@@ -292,6 +306,15 @@ NSView* SelectFileDialogImpl::GetAccessoryView(const FileTypeInfo* file_types,
   return accessory_view;
 }
 
+bool SelectFileDialogImpl::ShouldEnableFilename(NSPanel* dialog,
+                                                NSString* filename) {
+  // If this is a single open file dialog, disable selecting packages.
+  if (type_map_[dialog] != SELECT_OPEN_FILE)
+    return true;
+
+  return ![[NSWorkspace sharedWorkspace] isFilePackageAtPath:filename];
+}
+
 @implementation SelectFileDialogBridge
 
 - (id)initWithSelectFileDialogImpl:(SelectFileDialogImpl*)s {
@@ -344,6 +367,11 @@ NSView* SelectFileDialogImpl::GetAccessoryView(const FileTypeInfo* file_types,
                                          isMulti,
                                          paths,
                                          index);
+  [panel release];
+}
+
+- (BOOL)panel:(id)sender shouldShowFilename:(NSString *)filename {
+  return selectFileDialogImpl_->ShouldEnableFilename(sender, filename);
 }
 
 @end

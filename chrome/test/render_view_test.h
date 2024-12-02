@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,18 +13,19 @@
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/sandbox_init_wrapper.h"
 #include "chrome/renderer/mock_keyboard.h"
-#include "chrome/renderer/mock_render_process.h"
 #include "chrome/renderer/mock_render_thread.h"
 #include "chrome/renderer/render_view.h"
 #include "chrome/renderer/renderer_main_platform_delegate.h"
 #include "chrome/renderer/renderer_webkitclient_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/api/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+
+class MockRenderProcess;
 
 class RenderViewTest : public testing::Test {
  public:
-  RenderViewTest() {}
-  ~RenderViewTest() {}
+  RenderViewTest();
+  ~RenderViewTest();
 
  protected:
   // Spins the message loop to process all messages that are currently pending.
@@ -54,11 +55,20 @@ class RenderViewTest : public testing::Test {
 
   virtual void TearDown();
 
+  // A special WebKitClientImpl class for getting rid off the dependency to the
+  // sandbox, which is not available in RenderViewTest.
+  class RendererWebKitClientImplNoSandbox : public RendererWebKitClientImpl {
+   public:
+    virtual WebKit::WebSandboxSupport* sandboxSupport() {
+      return NULL;
+    }
+  };
+
   MessageLoop msg_loop_;
   MockRenderThread render_thread_;
-  scoped_ptr<MockProcess> mock_process_;
+  scoped_ptr<MockRenderProcess> mock_process_;
   scoped_refptr<RenderView> view_;
-  RendererWebKitClientImpl webkitclient_;
+  RendererWebKitClientImplNoSandbox webkitclient_;
   scoped_ptr<MockKeyboard> mock_keyboard_;
 
   // Used to setup the process so renderers can run.

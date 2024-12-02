@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authos. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,7 +62,7 @@ TEST(ManifestParserTest, NoManifestUrl) {
   const std::string kData("CACHE MANIFEST\r"
     "relative/tobase.com\r"
     "http://absolute.com/addme.com");
-  const GURL kUrl = GURL::EmptyGURL();
+  const GURL kUrl;
   EXPECT_TRUE(ParseManifest(kUrl, kData.c_str(), kData.length(), manifest));
   EXPECT_TRUE(manifest.explicit_urls.empty());
   EXPECT_TRUE(manifest.fallback_namespaces.empty());
@@ -299,6 +299,45 @@ TEST(ManifestParserTest, UnusualUtf8) {
   base::hash_set<std::string> urls = manifest.explicit_urls;
   EXPECT_TRUE(urls.find("http://bad.com/%EF%BF%BDinvalidutf8") != urls.end());
   EXPECT_TRUE(urls.find("http://bad.com/nonbmp%F1%84%AB%BC") != urls.end());
+}
+
+TEST(ManifestParserTest, IgnoreAfterSpace) {
+  Manifest manifest;
+  const GURL kUrl("http://smorg.borg");
+  const std::string kData(
+    "CACHE MANIFEST\r"
+    "resource.txt this stuff after the white space should be ignored\r");
+  EXPECT_TRUE(ParseManifest(kUrl, kData.c_str(), kData.length(), manifest));
+
+  base::hash_set<std::string> urls = manifest.explicit_urls;
+  EXPECT_TRUE(urls.find("http://smorg.borg/resource.txt") != urls.end());
+}
+
+TEST(ManifestParserTest, DifferentOriginUrlWithSecureScheme) {
+  Manifest manifest;
+  const GURL kUrl("https://www.foo.com");
+  const std::string kData("CACHE MANIFEST\r"
+    "CACHE: \r"
+    "relative/secureschemesameorigin\r"
+    "https://www.foo.com/secureschemesameorigin\r"
+    "http://www.xyz.com/secureschemedifforigin\r"
+    "https://www.xyz.com/secureschemedifforigin\r");
+
+  EXPECT_TRUE(ParseManifest(kUrl, kData.c_str(), kData.length(), manifest));
+  EXPECT_TRUE(manifest.fallback_namespaces.empty());
+  EXPECT_TRUE(manifest.online_whitelist_namespaces.empty());
+
+  base::hash_set<std::string> urls = manifest.explicit_urls;
+  const size_t kExpected = 2;
+  ASSERT_EQ(kExpected, urls.size());
+  EXPECT_TRUE(urls.find("https://www.foo.com/relative/secureschemesameorigin")
+      != urls.end());
+  EXPECT_TRUE(urls.find("https://www.foo.com/secureschemesameorigin") !=
+      urls.end());
+  EXPECT_FALSE(urls.find("http://www.xyz.com/secureschemedifforigin") !=
+      urls.end());
+  EXPECT_FALSE(urls.find("https://www.xyz.com/secureschemedifforigin") !=
+      urls.end());
 }
 
 }  // namespace appcache

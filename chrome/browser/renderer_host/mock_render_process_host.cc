@@ -4,17 +4,24 @@
 
 #include "chrome/browser/renderer_host/mock_render_process_host.h"
 
+#include "chrome/browser/child_process_security_policy.h"
+
 MockRenderProcessHost::MockRenderProcessHost(Profile* profile)
     : RenderProcessHost(profile),
       transport_dib_(NULL),
       bad_msg_count_(0) {
+  // Child process security operations can't be unit tested unless we add
+  // ourselves as an existing child process.
+  ChildProcessSecurityPolicy::GetInstance()->Add(id());
 }
 
 MockRenderProcessHost::~MockRenderProcessHost() {
+  ChildProcessSecurityPolicy::GetInstance()->Remove(id());
   delete transport_dib_;
 }
 
-bool MockRenderProcessHost::Init() {
+bool MockRenderProcessHost::Init(bool is_extensions_process,
+                                 URLRequestContextGetter* request_context) {
   return true;
 }
 
@@ -30,13 +37,13 @@ void MockRenderProcessHost::CrossSiteClosePageACK(
     const ViewMsg_ClosePage_Params& params) {
 }
 
-bool MockRenderProcessHost::WaitForPaintMsg(int render_widget_id,
-                                            const base::TimeDelta& max_delay,
-                                            IPC::Message* msg) {
+bool MockRenderProcessHost::WaitForUpdateMsg(int render_widget_id,
+                                             const base::TimeDelta& max_delay,
+                                             IPC::Message* msg) {
   return false;
 }
 
-void MockRenderProcessHost::ReceivedBadMessage(uint16 msg_type) {
+void MockRenderProcessHost::ReceivedBadMessage(uint32 msg_type) {
   ++bad_msg_count_;
 }
 
@@ -50,6 +57,10 @@ void MockRenderProcessHost::ViewCreated() {
 }
 
 void MockRenderProcessHost::AddWord(const string16& word) {
+}
+
+void MockRenderProcessHost::SendVisitedLinkTable(
+    base::SharedMemory* table_memory) {
 }
 
 void MockRenderProcessHost::AddVisitedLinks(

@@ -11,13 +11,18 @@
 
 #import <Cocoa/Cocoa.h>
 
+#import "base/cocoa_protocols_mac.h"
+
 class BookmarkNode;
 class BookmarkMenuBridge;
 
-@interface BookmarkMenuCocoaController : NSObject {
+@interface BookmarkMenuCocoaController : NSObject<NSMenuDelegate> {
  @private
   BookmarkMenuBridge* bridge_;  // weak; owns me
 }
+
+// The Bookmarks menu
+@property (readonly) NSMenu* menu;
 
 // Return an autoreleased string to be used as a menu title for the
 // given bookmark node.

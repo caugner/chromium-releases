@@ -9,15 +9,19 @@
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
-#include "webkit/glue/glue_util.h"
-#include "webkit/glue/webplugin.h"
-#include "webkit/glue/webplugin_delegate.h"
+#include "base/utf_string_conversions.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/plugins/plugin_host.h"
 #include "webkit/glue/plugins/plugin_lib.h"
 #include "webkit/glue/plugins/plugin_stream_url.h"
 #include "webkit/glue/plugins/plugin_string_stream.h"
+#include "webkit/glue/plugins/webplugin.h"
+#include "webkit/glue/plugins/webplugin_delegate.h"
 #include "net/base/escape.h"
+
+#if defined(OS_MACOSX)
+#include <ApplicationServices/ApplicationServices.h>
+#endif
 
 namespace NPAPI {
 
@@ -33,12 +37,24 @@ PluginInstance::PluginInstance(PluginLib *plugin, const std::string &mime_type)
       mime_type_(mime_type),
       use_mozilla_user_agent_(false),
 #if defined (OS_MACOSX)
-      drawing_model_(0),
-      event_model_(0),
+#ifdef NP_NO_QUICKDRAW
+      drawing_model_(NPDrawingModelCoreGraphics),
+#else
+      drawing_model_(NPDrawingModelQuickDraw),
+#endif
+#ifdef NP_NO_CARBON
+      event_model_(NPEventModelCocoa),
+#else
+      event_model_(NPEventModelCarbon),
+#endif
+      currently_handled_event_(NULL),
 #endif
       message_loop_(MessageLoop::current()),
       load_manually_(false),
-      in_close_streams_(false) {
+      in_close_streams_(false),
+      next_timer_id_(1),
+      next_notify_id_(0),
+      next_range_request_id_(0) {
   npp_ = new NPP_t();
   npp_->ndata = 0;
   npp_->pdata = 0;
@@ -59,13 +75,16 @@ PluginInstance::~PluginInstance() {
     plugin_->CloseInstance();
 }
 
-PluginStreamUrl* PluginInstance::CreateStream(int resource_id,
+PluginStreamUrl* PluginInstance::CreateStream(unsigned long resource_id,
                                               const GURL& url,
                                               const std::string& mime_type,
-                                              bool notify_needed,
-                                              void* notify_data) {
+                                              int notify_id) {
+
+  bool notify;
+  void* notify_data;
+  GetNotifyData(notify_id, &notify, &notify_data);
   PluginStreamUrl* stream = new PluginStreamUrl(
-      resource_id, url, this, notify_needed, notify_data);
+      resource_id, url, this, notify, notify_data);
 
   AddStream(stream);
   return stream;
@@ -110,6 +129,19 @@ void PluginInstance::CloseStreams() {
   in_close_streams_ = false;
 }
 
+webkit_glue::WebPluginResourceClient* PluginInstance::GetRangeRequest(
+    int id) {
+  PendingRangeRequestMap::iterator iter = pending_range_requests_.find(id);
+  if (iter == pending_range_requests_.end()) {
+    NOTREACHED();
+    return NULL;
+  }
+
+  webkit_glue::WebPluginResourceClient* rv = iter->second->AsResourceClient();
+  pending_range_requests_.erase(iter);
+  return rv;
+}
+
 bool PluginInstance::Start(const GURL& url,
                            char** const param_names,
                            char** const param_values,
@@ -133,8 +165,16 @@ NPObject *PluginInstance::GetPluginScriptableObject() {
 }
 
 // WebPluginLoadDelegate methods
-void PluginInstance::DidFinishLoadWithReason(const GURL& url, NPReason reason,
-                                             void* notify_data) {
+void PluginInstance::DidFinishLoadWithReason(
+    const GURL& url, NPReason reason, int notify_id) {
+  bool notify;
+  void* notify_data;
+  GetNotifyData(notify_id, &notify, &notify_data);
+  if (!notify) {
+    NOTREACHED();
+    return;
+  }
+
   NPP_URLNotify(url.spec().c_str(), reason, notify_data);
 }
 
@@ -156,7 +196,7 @@ NPError PluginInstance::NPP_New(unsigned short mode,
 
 void PluginInstance::NPP_Destroy() {
   DCHECK(npp_functions_ != 0);
-  DCHECK(npp_functions_->newp != 0);
+  DCHECK(npp_functions_->destroy != 0);
 
   if (npp_functions_->destroy != 0) {
     NPSavedData *savedData = 0;
@@ -175,6 +215,9 @@ void PluginInstance::NPP_Destroy() {
        file_index++) {
     file_util::Delete(files_created_[file_index], false);
   }
+
+  // Ensure that no timer callbacks are invoked after NPP_Destroy.
+  timers_.clear();
 }
 
 NPError PluginInstance::NPP_SetWindow(NPWindow *window) {
@@ -203,8 +246,7 @@ NPError PluginInstance::NPP_DestroyStream(NPStream *stream, NPReason reason) {
   DCHECK(npp_functions_ != 0);
   DCHECK(npp_functions_->destroystream != 0);
 
-  if (stream == NULL || (stream->ndata == NULL) ||
-      !IsValidStream(stream))
+  if (stream == NULL || !IsValidStream(stream) || (stream->ndata == NULL))
     return NPERR_INVALID_INSTANCE_ERROR;
 
   if (npp_functions_->destroystream != 0) {
@@ -298,21 +340,21 @@ bool PluginInstance::NPP_Print(NPPrint* platform_print) {
 void PluginInstance::SendJavaScriptStream(const GURL& url,
                                           const std::string& result,
                                           bool success,
-                                          bool notify_needed,
-                                          intptr_t notify_data) {
+                                          int notify_id) {
+  bool notify;
+  void* notify_data;
+  GetNotifyData(notify_id, &notify, &notify_data);
+
   if (success) {
     PluginStringStream *stream =
-      new PluginStringStream(this, url, notify_needed,
-                             reinterpret_cast<void*>(notify_data));
+        new PluginStringStream(this, url, notify, notify_data);
     AddStream(stream);
     stream->SendToPlugin(result, "text/html");
   } else {
     // NOTE: Sending an empty stream here will crash MacroMedia
     // Flash 9.  Just send the URL Notify.
-    if (notify_needed) {
-      this->NPP_URLNotify(url.spec().c_str(), NPRES_DONE,
-                          reinterpret_cast<void*>(notify_data));
-    }
+    if (notify)
+      NPP_URLNotify(url.spec().c_str(), NPRES_DONE, notify_data);
   }
 }
 
@@ -323,8 +365,7 @@ void PluginInstance::DidReceiveManualResponse(const GURL& url,
                                               uint32 last_modified) {
   DCHECK(load_manually_);
 
-  plugin_data_stream_ = CreateStream(-1, url, mime_type, false, NULL);
-
+  plugin_data_stream_ = CreateStream(-1, url, mime_type, 0);
   plugin_data_stream_->DidReceiveResponse(mime_type, headers, expected_length,
                                           last_modified, true);
 }
@@ -355,25 +396,85 @@ void PluginInstance::DidManualLoadFail() {
 
 void PluginInstance::PluginThreadAsyncCall(void (*func)(void *),
                                            void *user_data) {
-  message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &PluginInstance::OnPluginThreadAsyncCall, func, user_data));
+  message_loop_->PostTask(
+      FROM_HERE, NewRunnableMethod(
+          this, &PluginInstance::OnPluginThreadAsyncCall, func, user_data));
 }
 
 void PluginInstance::OnPluginThreadAsyncCall(void (*func)(void *),
                                              void *user_data) {
-#if defined(OS_WIN)
-    // We are invoking an arbitrary callback provided by a third
-  // party plugin. It's better to wrap this into an exception
-  // block to protect us from crashes.
-  __try {
+  // Do not invoke the callback if NPP_Destroy has already been invoked.
+  if (webplugin_)
     func(user_data);
-  } __except(EXCEPTION_EXECUTE_HANDLER) {
-    // Maybe we can disable a crashing plugin.
-    // But for now, just continue.
-  }
-#else
-  func(user_data);
+}
+
+uint32 PluginInstance::ScheduleTimer(uint32 interval,
+                                     NPBool repeat,
+                                     void (*func)(NPP id, uint32 timer_id)) {
+  // Use next timer id.
+  uint32 timer_id;
+  timer_id = next_timer_id_;
+  ++next_timer_id_;
+  DCHECK(next_timer_id_ != 0);
+
+  // Record timer interval and repeat.
+  TimerInfo info;
+  info.interval = interval;
+  info.repeat = repeat;
+  timers_[timer_id] = info;
+
+  // Schedule the callback.
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      NewRunnableMethod(
+          this, &PluginInstance::OnTimerCall, func, npp_, timer_id),
+      interval);
+  return timer_id;
+}
+
+void PluginInstance::UnscheduleTimer(uint32 timer_id) {
+  // Remove info about the timer.
+  TimerMap::iterator it = timers_.find(timer_id);
+  if (it != timers_.end())
+    timers_.erase(it);
+}
+
+#if !defined(OS_MACOSX)
+NPError PluginInstance::PopUpContextMenu(NPMenu* menu) {
+  NOTIMPLEMENTED();
+  return NPERR_GENERIC_ERROR;
+}
 #endif
+
+void PluginInstance::OnTimerCall(void (*func)(NPP id, uint32 timer_id),
+                                 NPP id,
+                                 uint32 timer_id) {
+  // Do not invoke callback if the timer has been unscheduled.
+  TimerMap::iterator it = timers_.find(timer_id);
+  if (it == timers_.end())
+    return;
+
+  // Get all information about the timer before invoking the callback. The
+  // callback might unschedule the timer.
+  TimerInfo info = it->second;
+
+  func(id, timer_id);
+
+  // If the timer was unscheduled by the callback, just free up the timer id.
+  if (timers_.find(timer_id) == timers_.end())
+    return;
+
+  // Reschedule repeating timers after invoking the callback so callback is not
+  // re-entered if it pumps the messager loop.
+  if (info.repeat) {
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        NewRunnableMethod(
+            this, &PluginInstance::OnTimerCall, func, npp_, timer_id),
+        info.interval);
+  } else {
+    timers_.erase(it);
+  }
 }
 
 void PluginInstance::PushPopupsEnabledState(bool enabled) {
@@ -419,13 +520,112 @@ void PluginInstance::RequestRead(NPStream* stream, NPByteRange* range_list) {
       // is called on it.
       plugin_stream->set_seekable(true);
 
+      pending_range_requests_[++next_range_request_id_] = plugin_stream;
       webplugin_->InitiateHTTPRangeRequest(
-          stream->url, range_info.c_str(),
-          reinterpret_cast<intptr_t>(plugin_stream),
-          plugin_stream->notify_needed(),
-          reinterpret_cast<intptr_t>(plugin_stream->notify_data()));
-      break;
+          stream->url, range_info.c_str(), next_range_request_id_);
+      return;
     }
+  }
+  NOTREACHED();
+}
+
+void PluginInstance::RequestURL(const char* url,
+                                const char* method,
+                                const char* target,
+                                const char* buf,
+                                unsigned int len,
+                                bool notify,
+                                void* notify_data) {
+  int notify_id = 0;
+  if (notify) {
+    notify_id = ++next_notify_id_;
+    pending_requests_[notify_id] = notify_data;
+  }
+
+  webplugin_->HandleURLRequest(
+      url, method, target, buf, len, notify_id, popups_allowed());
+}
+
+bool PluginInstance::ConvertPoint(double source_x, double source_y,
+                                  NPCoordinateSpace source_space,
+                                  double* dest_x, double* dest_y,
+                                  NPCoordinateSpace dest_space) {
+#if defined(OS_MACOSX)
+  CGRect main_display_bounds = CGDisplayBounds(CGMainDisplayID());
+
+  double flipped_screen_x = source_x;
+  double flipped_screen_y = source_y;
+  switch(source_space) {
+    case NPCoordinateSpacePlugin:
+      flipped_screen_x += plugin_origin_.x();
+      flipped_screen_y += plugin_origin_.y();
+      break;
+    case NPCoordinateSpaceWindow:
+      flipped_screen_x += containing_window_frame_.x();
+      flipped_screen_y = containing_window_frame_.height() - source_y +
+          containing_window_frame_.y();
+      break;
+    case NPCoordinateSpaceFlippedWindow:
+      flipped_screen_x += containing_window_frame_.x();
+      flipped_screen_y += containing_window_frame_.y();
+      break;
+    case NPCoordinateSpaceScreen:
+      flipped_screen_y = main_display_bounds.size.height - flipped_screen_y;
+      break;
+    case NPCoordinateSpaceFlippedScreen:
+      break;
+    default:
+      NOTREACHED();
+      return false;
+  }
+
+  double target_x = flipped_screen_x;
+  double target_y = flipped_screen_y;
+  switch(dest_space) {
+    case NPCoordinateSpacePlugin:
+      target_x -= plugin_origin_.x();
+      target_y -= plugin_origin_.y();
+      break;
+    case NPCoordinateSpaceWindow:
+      target_x -= containing_window_frame_.x();
+      target_y -= containing_window_frame_.y();
+      target_y = containing_window_frame_.height() - target_y;
+      break;
+    case NPCoordinateSpaceFlippedWindow:
+      target_x -= containing_window_frame_.x();
+      target_y -= containing_window_frame_.y();
+      break;
+    case NPCoordinateSpaceScreen:
+      target_y = main_display_bounds.size.height - flipped_screen_y;
+      break;
+    case NPCoordinateSpaceFlippedScreen:
+      break;
+    default:
+      NOTREACHED();
+      return false;
+  }
+
+  if (dest_x)
+    *dest_x = target_x;
+  if (dest_y)
+    *dest_y = target_y;
+  return true;
+#else
+  NOTIMPLEMENTED();
+  return false;
+#endif
+}
+
+void PluginInstance::GetNotifyData(
+    int notify_id, bool* notify, void** notify_data) {
+  PendingRequestMap::iterator iter = pending_requests_.find(notify_id);
+  if (iter != pending_requests_.end()) {
+    *notify = true;
+    *notify_data = iter->second;
+    pending_requests_.erase(iter);
+  } else {
+    *notify = false;
+    *notify_data = NULL;
   }
 }
 

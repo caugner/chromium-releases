@@ -1,10 +1,10 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/controls/menu/submenu_view.h"
 
-#include "app/gfx/canvas.h"
+#include "gfx/canvas.h"
 #include "views/controls/menu/menu_controller.h"
 #include "views/controls/menu/menu_scroll_view_container.h"
 #include "views/widget/root_view.h"
@@ -34,7 +34,7 @@ SubmenuView::SubmenuView(MenuItemView* parent)
       scroll_view_container_(NULL) {
   DCHECK(parent);
   // We'll delete ourselves, otherwise the ScrollView would delete us on close.
-  SetParentOwned(false);
+  set_parent_owned(false);
 }
 
 SubmenuView::~SubmenuView() {
@@ -70,7 +70,15 @@ void SubmenuView::Layout() {
   View* parent = GetParent();
   if (!parent)
     return;
-  SetBounds(x(), y(), parent->width(), GetPreferredSize().height());
+
+  // Use our current y, unless it means part of the menu isn't visible anymore.
+  int pref_height = GetPreferredSize().height();
+  int new_y;
+  if (pref_height > parent->height())
+    new_y = std::max(parent->height() - pref_height, y());
+  else
+    new_y = 0;
+  SetBounds(x(), new_y, parent->width(), pref_height);
 
   gfx::Insets insets = GetInsets();
   int x = insets.left();
@@ -160,19 +168,13 @@ bool SubmenuView::OnMouseWheel(const MouseWheelEvent& e) {
 
   // Find the index of the first menu item whose y-coordinate is >= visible
   // y-coordinate.
-  int first_vis_index = -1;
-  for (int i = 0; i < menu_item_count; ++i) {
-    MenuItemView* menu_item = GetMenuItemAt(i);
-    if (menu_item->y() == vis_bounds.y()) {
-      first_vis_index = i;
-      break;
-    } else if (menu_item->y() > vis_bounds.y()) {
-      first_vis_index = std::max(0, i - 1);
-      break;
-    }
-  }
-  if (first_vis_index == -1)
+  int i = 0;
+  while ((i < menu_item_count) && (GetMenuItemAt(i)->y() < vis_bounds.y()))
+    ++i;
+  if (i == menu_item_count)
     return true;
+  int first_vis_index = std::max(0,
+      (GetMenuItemAt(i)->y() == vis_bounds.y()) ? i : i - 1);
 
   // If the first item isn't entirely visible, make it visible, otherwise make
   // the next/previous one entirely visible.
@@ -181,31 +183,24 @@ bool SubmenuView::OnMouseWheel(const MouseWheelEvent& e) {
 #elif defined(OS_LINUX)
   int delta = abs(e.GetOffset());
 #endif
-  bool scroll_up = (e.GetOffset() > 0);
-  while (delta-- > 0) {
-    int scroll_amount = 0;
+  for (bool scroll_up = (e.GetOffset() > 0); delta != 0; --delta) {
+    int scroll_target;
     if (scroll_up) {
       if (GetMenuItemAt(first_vis_index)->y() == vis_bounds.y()) {
-        if (first_vis_index != 0) {
-          scroll_amount = GetMenuItemAt(first_vis_index - 1)->y() -
-                          vis_bounds.y();
-          first_vis_index--;
-        } else {
+        if (first_vis_index == 0)
           break;
-        }
-      } else {
-        scroll_amount = GetMenuItemAt(first_vis_index)->y() - vis_bounds.y();
+        first_vis_index--;
       }
+      scroll_target = GetMenuItemAt(first_vis_index)->y();
     } else {
-      if (first_vis_index + 1 == GetMenuItemCount())
+      if (first_vis_index + 1 == menu_item_count)
         break;
-      scroll_amount = GetMenuItemAt(first_vis_index + 1)->y() -
-                      vis_bounds.y();
+      scroll_target = GetMenuItemAt(first_vis_index + 1)->y();
       if (GetMenuItemAt(first_vis_index)->y() == vis_bounds.y())
         first_vis_index++;
     }
-    ScrollRectToVisible(0, vis_bounds.y() + scroll_amount, vis_bounds.width(),
-                        vis_bounds.height());
+    ScrollRectToVisible(gfx::Rect(gfx::Point(0, scroll_target),
+                                  vis_bounds.size()));
     vis_bounds = GetVisibleBounds();
   }
 
@@ -221,6 +216,8 @@ void SubmenuView::ShowAt(gfx::NativeWindow parent,
                          bool do_capture) {
   if (host_) {
     host_->Show();
+    if (do_capture)
+      host_->DoCapture();
     return;
   }
 
@@ -228,8 +225,12 @@ void SubmenuView::ShowAt(gfx::NativeWindow parent,
   // Force construction of the scroll view container.
   GetScrollViewContainer();
   // Make sure the first row is visible.
-  ScrollRectToVisible(0, 0, 1, 1);
+  ScrollRectToVisible(gfx::Rect(gfx::Point(), gfx::Size(1, 1)));
   host_->Init(parent, bounds, scroll_view_container_, do_capture);
+}
+
+void SubmenuView::Reposition(const gfx::Rect& bounds) {
+  host_->SetBounds(bounds);
 }
 
 void SubmenuView::Close() {
@@ -275,7 +276,7 @@ MenuScrollViewContainer* SubmenuView::GetScrollViewContainer() {
   if (!scroll_view_container_) {
     scroll_view_container_ = new MenuScrollViewContainer(this);
     // Otherwise MenuHost would delete us.
-    scroll_view_container_->SetParentOwned(false);
+    scroll_view_container_->set_parent_owned(false);
   }
   return scroll_view_container_;
 }
@@ -304,8 +305,7 @@ void SubmenuView::SchedulePaintForDropIndicator(
   if (position == MenuDelegate::DROP_ON) {
     item->SchedulePaint();
   } else if (position != MenuDelegate::DROP_NONE) {
-    gfx::Rect bounds = CalculateDropIndicatorBounds(item, position);
-    SchedulePaint(bounds.x(), bounds.y(), bounds.width(), bounds.height());
+    SchedulePaint(CalculateDropIndicatorBounds(item, position), false);
   }
 }
 

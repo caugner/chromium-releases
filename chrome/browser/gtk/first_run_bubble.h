@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "chrome/browser/first_run.h"
 #include "chrome/browser/gtk/info_bubble_gtk.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/notification_observer.h"
@@ -24,9 +25,9 @@ class FirstRunBubble : public InfoBubbleGtkDelegate,
  public:
   // Shows the first run bubble, pointing at |rect|.
   static void Show(Profile* profile,
-                   GtkWindow* parent,
+                   GtkWidget* anchor,
                    const gfx::Rect& rect,
-                   bool use_OEM_bubble);
+                   FirstRun::BubbleType bubble_type);
 
   // Implements the InfoBubbleGtkDelegate.  We are notified when the bubble
   // is about to be closed.
@@ -41,7 +42,7 @@ class FirstRunBubble : public InfoBubbleGtkDelegate,
 
  private:
   FirstRunBubble(Profile* profile,
-                 GtkWindow* parent,
+                 GtkWidget* anchor,
                  const gfx::Rect& rect);
   ~FirstRunBubble() { }
 
@@ -66,8 +67,9 @@ class FirstRunBubble : public InfoBubbleGtkDelegate,
   // Provides colors and stuff.
   GtkThemeProvider* theme_provider_;
 
-  // The toplevel window our dialogs should be transient for.
-  GtkWindow* parent_;
+  // The widget we anchor to, and a descendant of the toplevel window we
+  // are transient for.
+  GtkWidget* anchor_;
 
   // We let the InfoBubble own our content, and then we delete ourself
   // when the widget is destroyed (when the InfoBubble is destroyed).

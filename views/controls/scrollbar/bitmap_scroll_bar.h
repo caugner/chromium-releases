@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -114,8 +114,7 @@ class BitmapScrollBar : public ScrollBar,
 
   // ContextMenuController overrides.
   virtual void ShowContextMenu(View* source,
-                               int x,
-                               int y,
+                               const gfx::Point& p,
                                bool is_mouse_gesture);
 
   // Menu::Delegate overrides:
@@ -184,9 +183,9 @@ class BitmapScrollBar : public ScrollBar,
   // True if the scroll buttons at each end of the scroll bar should be shown.
   bool show_scroll_buttons_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(BitmapScrollBar);
+  DISALLOW_COPY_AND_ASSIGN(BitmapScrollBar);
 };
 
 }  // namespace views
 
-#endif  // #ifndef VIEWS_CONTROLS_SCROLLBAR_BITMAP_SCROLL_BAR_H_
+#endif  // VIEWS_CONTROLS_SCROLLBAR_BITMAP_SCROLL_BAR_H_

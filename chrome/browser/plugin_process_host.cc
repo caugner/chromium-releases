@@ -1,44 +1,31 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-#include "build/build_config.h"
 
 #include "chrome/browser/plugin_process_host.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
+#elif defined(OS_POSIX)
+#include <utility>  // for pair<>
 #endif
 
 #include <vector>
 
 #include "app/app_switches.h"
-#include "app/gfx/native_widget_types.h"
 #include "base/command_line.h"
-#if defined(OS_POSIX)
-#include "base/global_descriptors_posix.h"
-#endif
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/file_version_info.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
-#include "base/scoped_ptr.h"
 #include "base/string_util.h"
-#include "base/thread.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_list.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_window.h"
 #include "chrome/browser/child_process_security_policy.h"
 #include "chrome/browser/chrome_plugin_browsing_context.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/net/url_request_context_getter.h"
 #include "chrome/browser/net/url_request_tracking.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/renderer_host/browser_render_process_host.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_plugin_lib.h"
@@ -46,27 +33,20 @@
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
-#include "ipc/ipc_channel_handle.h"
-#include "ipc/ipc_descriptors.h"
+#include "gfx/native_widget_types.h"
 #include "ipc/ipc_switches.h"
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
-#include "webkit/glue/plugins/plugin_constants_win.h"
 
 #if defined(OS_WIN)
 #include "app/win_util.h"
-#include "chrome/browser/sandbox_policy.h"
-#include "sandbox/src/sandbox.h"
+#include "webkit/glue/plugins/plugin_constants_win.h"
 #endif
 
-#if defined(OS_POSIX)
-#include "ipc/ipc_channel_posix.h"
-#endif
-
-#if defined(OS_LINUX)
-#include "app/gfx/gtk_native_view_id_manager.h"
+#if defined(USE_X11)
+#include "gfx/gtk_native_view_id_manager.h"
 #endif
 
 #if defined(OS_MACOSX)
@@ -121,7 +101,7 @@ class PluginDownloadUrlHelper : public URLRequest::Delegate {
   std::string download_url_;
   int download_source_child_unique_id_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(PluginDownloadUrlHelper);
+  DISALLOW_COPY_AND_ASSIGN(PluginDownloadUrlHelper);
 };
 
 PluginDownloadUrlHelper::PluginDownloadUrlHelper(
@@ -149,7 +129,8 @@ void PluginDownloadUrlHelper::InitiateDownload() {
   download_file_request_ = new URLRequest(GURL(download_url_), this);
   chrome_browser_net::SetOriginProcessUniqueIDForRequest(
       download_source_child_unique_id_, download_file_request_);
-  download_file_request_->set_context(Profile::GetDefaultRequestContext());
+  download_file_request_->set_context(
+      Profile::GetDefaultRequestContext()->GetURLRequestContext());
   download_file_request_->Start();
 }
 
@@ -300,13 +281,13 @@ void PluginProcessHost::AddWindow(HWND window) {
 
 #endif  // defined(OS_WIN)
 
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
 void PluginProcessHost::OnMapNativeViewId(gfx::NativeViewId id,
                                           gfx::PluginWindowHandle* output) {
   *output = 0;
   Singleton<GtkNativeViewManager>()->GetXIDForId(output, id);
 }
-#endif  // defined(OS_LINUX)
+#endif  // defined(TOOLKIT_USES_GTK)
 
 PluginProcessHost::PluginProcessHost()
     : ChildProcessHost(
@@ -336,12 +317,24 @@ PluginProcessHost::~PluginProcessHost() {
   for (window_index = plugin_fullscreen_windows_set_.begin();
        window_index != plugin_fullscreen_windows_set_.end();
        window_index++) {
-    if (MessageLoop::current() ==
-        ChromeThread::GetMessageLoop(ChromeThread::UI)) {
-      mac_util::ReleaseFullScreen();
+    if (ChromeThread::CurrentlyOn(ChromeThread::UI)) {
+      mac_util::ReleaseFullScreen(mac_util::kFullScreenModeHideAll);
     } else {
-      ChromeThread::GetMessageLoop(ChromeThread::UI)->PostTask(FROM_HERE,
-          NewRunnableFunction(mac_util::ReleaseFullScreen));
+      ChromeThread::PostTask(
+          ChromeThread::UI, FROM_HERE,
+          NewRunnableFunction(mac_util::ReleaseFullScreen,
+                              mac_util::kFullScreenModeHideAll));
+    }
+  }
+  // If the plugin hid the cursor, reset that.
+  if (!plugin_cursor_visible_) {
+    if (ChromeThread::CurrentlyOn(ChromeThread::UI)) {
+      mac_util::SetCursorVisibility(true);
+    } else {
+      ChromeThread::PostTask(
+        ChromeThread::UI, FROM_HERE,
+        NewRunnableFunction(mac_util::SetCursorVisibility,
+                            true));
     }
   }
 #endif
@@ -355,22 +348,25 @@ bool PluginProcessHost::Init(const WebPluginInfo& info,
   if (!CreateChannel())
     return false;
 
-  // Build command line for plugin, we have to quote the plugin's path to deal
-  // with spaces.
-  FilePath exe_path = GetChildPath();
+  // Build command line for plugin. When we have a plugin launcher, we can't
+  // allow "self" on linux and we need the real file path.
+  const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
+  std::wstring plugin_launcher =
+      browser_command_line.GetSwitchValue(switches::kPluginLauncher);
+  FilePath exe_path = GetChildPath(plugin_launcher.empty());
   if (exe_path.empty())
     return false;
 
-  CommandLine cmd_line(exe_path);
+  CommandLine* cmd_line = new CommandLine(exe_path);
   // Put the process type and plugin path first so they're easier to see
   // in process listings using native process management tools.
-  cmd_line.AppendSwitchWithValue(switches::kProcessType,
-                                 switches::kPluginProcess);
-  cmd_line.AppendSwitchWithValue(switches::kPluginPath,
-                                 info.path.ToWStringHack());
+  cmd_line->AppendSwitchWithValue(switches::kProcessType,
+                                  switches::kPluginProcess);
+  cmd_line->AppendSwitchWithValue(switches::kPluginPath,
+                                  info.path.ToWStringHack());
 
   if (logging::DialogsAreSuppressed())
-    cmd_line.AppendSwitch(switches::kNoErrorDialogs);
+    cmd_line->AppendSwitch(switches::kNoErrorDialogs);
 
   // Propagate the following switches to the plugin command line (along with
   // any associated values) if present in the browser command line
@@ -392,54 +388,44 @@ bool PluginProcessHost::Init(const WebPluginInfo& info,
     switches::kMemoryProfiling,
     switches::kUseLowFragHeapCrt,
     switches::kEnableStatsTable,
+    switches::kEnableGPUPlugin,
+#if defined(OS_CHROMEOS)
+    switches::kProfile,
+#endif
   };
-
-  const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
 
   for (size_t i = 0; i < arraysize(switch_names); ++i) {
     if (browser_command_line.HasSwitch(switch_names[i])) {
-      cmd_line.AppendSwitchWithValue(
+      cmd_line->AppendSwitchWithValue(
           switch_names[i],
-          browser_command_line.GetSwitchValue(switch_names[i]));
+          browser_command_line.GetSwitchValueASCII(switch_names[i]));
     }
   }
 
   // If specified, prepend a launcher program to the command line.
-  std::wstring plugin_launcher =
-      browser_command_line.GetSwitchValue(switches::kPluginLauncher);
   if (!plugin_launcher.empty())
-    cmd_line.PrependWrapper(plugin_launcher);
+    cmd_line->PrependWrapper(plugin_launcher);
 
   if (!locale.empty()) {
     // Pass on the locale so the null plugin will use the right language in the
     // prompt to install the desired plugin.
-    cmd_line.AppendSwitchWithValue(switches::kLang, locale);
+    cmd_line->AppendSwitchWithValue(switches::kLang, locale);
   }
 
   // Gears requires the data dir to be available on startup.
   std::wstring data_dir =
     PluginService::GetInstance()->GetChromePluginDataDir().ToWStringHack();
   DCHECK(!data_dir.empty());
-  cmd_line.AppendSwitchWithValue(switches::kPluginDataDir, data_dir);
+  cmd_line->AppendSwitchWithValue(switches::kPluginDataDir, data_dir);
 
-  cmd_line.AppendSwitchWithValue(switches::kProcessChannelID,
-                                 ASCIIToWide(channel_id()));
+  cmd_line->AppendSwitchWithValue(switches::kProcessChannelID,
+                                  ASCIIToWide(channel_id()));
 
-  SetCrashReporterCommandLine(&cmd_line);
+  SetCrashReporterCommandLine(cmd_line);
 
-  base::ProcessHandle process = 0;
-#if defined(OS_WIN)
-  process = sandbox::StartProcess(&cmd_line);
-#else
-  // This code is duplicated with browser_render_process_host.cc, but
-  // there's not a good place to de-duplicate it.
-  base::file_handle_mapping_vector fds_to_map;
-  const int ipcfd = channel().GetClientFileDescriptor();
-  if (ipcfd > -1)
-    fds_to_map.push_back(std::pair<int, int>(
-        ipcfd, kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor));
+#if defined(OS_POSIX)
   base::environment_vector env;
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(__LP64__)
   // Add our interposing library for Carbon. This is stripped back out in
   // plugin_main.cc, so changes here should be reflected there.
   std::string interpose_list(plugin_interpose_strings::kInterposeLibraryPath);
@@ -449,31 +435,41 @@ bool PluginProcessHost::Init(const WebPluginInfo& info,
     interpose_list.insert(0, ":");
     interpose_list.insert(0, existing_list);
   }
-  env.push_back(std::pair<const char*, const char*>(
+  env.push_back(std::pair<std::string, std::string>(
       plugin_interpose_strings::kDYLDInsertLibrariesKey,
-      interpose_list.c_str()));
-#endif  // OS_MACOSX
-  if (!base::LaunchApp(cmd_line.argv(), env, fds_to_map, false, &process))
-    return false;
-#endif  // OS_WIN
+      interpose_list));
+#endif
+#endif
 
-  if (!process)
-    return false;
-  SetHandle(process);
+  Launch(
+#if defined(OS_WIN)
+      FilePath(),
+#elif defined(OS_POSIX)
+      false,
+      env,
+#endif
+      cmd_line);
 
+  return true;
+}
+
+void PluginProcessHost::ForceShutdown() {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  Send(new PluginProcessMsg_NotifyRenderersOfPendingShutdown());
+  ChildProcessHost::ForceShutdown();
+}
+
+void PluginProcessHost::OnProcessLaunched() {
   FilePath gears_path;
   if (PathService::Get(chrome::FILE_GEARS_PLUGIN, &gears_path)) {
     FilePath::StringType gears_path_lc = StringToLowerASCII(gears_path.value());
     FilePath::StringType plugin_path_lc =
-        StringToLowerASCII(info.path.value());
+        StringToLowerASCII(info_.path.value());
     if (plugin_path_lc == gears_path_lc) {
-      // Give Gears plugins "background" priority.  See
-      // http://b/issue?id=1280317.
+      // Give Gears plugins "background" priority.  See http://b/1280317.
       SetProcessBackgrounded();
     }
   }
-
-  return true;
 }
 
 void PluginProcessHost::OnMessageReceived(const IPC::Message& msg) {
@@ -491,7 +487,7 @@ void PluginProcessHost::OnMessageReceived(const IPC::Message& msg) {
                         OnPluginWindowDestroyed)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_DownloadUrl, OnDownloadUrl)
 #endif
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_MapNativeViewId,
                         OnMapNativeViewId)
 #endif
@@ -502,8 +498,10 @@ void PluginProcessHost::OnMessageReceived(const IPC::Message& msg) {
                         OnPluginShowWindow)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginHideWindow,
                         OnPluginHideWindow)
-    IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginDisposeWindow,
-                        OnPluginDisposeWindow)
+    IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginReceivedFocus,
+                        OnPluginReceivedFocus)
+    IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginSetCursorVisibility,
+                        OnPluginSetCursorVisibility)
 #endif
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
@@ -523,11 +521,19 @@ void PluginProcessHost::OnChannelError() {
   for (size_t i = 0; i < pending_requests_.size(); ++i) {
     ReplyToRenderer(pending_requests_[i].renderer_message_filter_.get(),
                     IPC::ChannelHandle(),
-                    WebPluginInfo(),
+                    info_,
                     pending_requests_[i].reply_msg);
   }
 
   pending_requests_.clear();
+
+  while (!sent_requests_.empty()) {
+    ReplyToRenderer(sent_requests_.front().renderer_message_filter_.get(),
+                    IPC::ChannelHandle(),
+                    info_,
+                    sent_requests_.front().reply_msg);
+    sent_requests_.pop();
+  }
 }
 
 void PluginProcessHost::OpenChannelToPlugin(
@@ -555,7 +561,7 @@ void PluginProcessHost::OnGetCookies(uint32 request_context,
         ToURLRequestContext(request_context);
   // TODO(mpcomplete): remove fallback case when Gears support is prevalent.
   if (!context)
-    context = Profile::GetDefaultRequestContext();
+    context = Profile::GetDefaultRequestContext()->GetURLRequestContext();
 
   // Note: We don't have a first_party_for_cookies check because plugins bypass
   // third-party cookie blocking.
@@ -563,7 +569,7 @@ void PluginProcessHost::OnGetCookies(uint32 request_context,
     *cookies = context->cookie_store()->GetCookies(url);
   } else {
     DLOG(ERROR) << "Could not serve plugin cookies request.";
-    *cookies = EmptyString();
+    cookies->clear();
   }
 }
 
@@ -631,7 +637,7 @@ void PluginProcessHost::RequestPluginChannel(
   } else {
     ReplyToRenderer(renderer_message_filter,
                     IPC::ChannelHandle(),
-                    WebPluginInfo(),
+                    info_,
                     reply_msg);
   }
 }
@@ -660,8 +666,7 @@ void PluginProcessHost::OnGetPluginFinderUrl(std::string* plugin_finder_url) {
 
 void PluginProcessHost::OnPluginMessage(
     const std::vector<uint8>& data) {
-  DCHECK(MessageLoop::current() ==
-         ChromeThread::GetMessageLoop(ChromeThread::IO));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   ChromePluginLib *chrome_plugin = ChromePluginLib::Find(info_.path);
   if (chrome_plugin) {

@@ -1,14 +1,27 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/gtk/import_progress_dialog_gtk.h"
 
+#include <string>
+
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "chrome/common/gtk_util.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+
+using importer::ALL;
+using importer::BOOKMARKS_HTML;
+using importer::FAVORITES;
+using importer::HISTORY;
+using importer::HOME_PAGE;
+using importer::ImportItem;
+using importer::PASSWORDS;
+using importer::ProfileInfo;
+using importer::SEARCH_ENGINES;
 
 namespace {
 
@@ -208,7 +221,7 @@ void StartImportingWithUI(GtkWindow* parent,
                           Profile* profile,
                           ImportObserver* observer,
                           bool first_run) {
-  DCHECK(items != 0);
+  DCHECK_NE(0, items);
   ImportProgressDialogGtk::StartImport(parent, items, importer_host,
                                        browser_profile, profile, observer,
                                        first_run);

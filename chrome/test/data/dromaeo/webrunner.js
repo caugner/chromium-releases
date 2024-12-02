@@ -231,9 +231,10 @@
 	var title, testName, testID, testSummary = {} , testSummaryNum = {}, maxTotal = 0, maxTotalNum = 0;
 	var nameDone = {};
 	var automated = false;
+	var post_json = false;
 	
 	// Query String Parsing
-	var search = (window.location.search || "?").substr(1);
+	var search = window.limitSearch || (window.location.search || "?").substr(1);
 
 	search = search.replace(/&runStyle=([^&]+)/, function(all, type){
 		runStyle = type;
@@ -271,7 +272,10 @@
 		if (m)
 			numTests = Number(m[1]);
 
-		automated = /^automated$/.exec(parts[i]);
+		if (/^automated$/.exec(parts[i]))
+			automated = true;
+		if (/^post_json$/.exec(parts[i]))
+			post_json = true;
 	}
 
 	jQuery(function(){
@@ -361,8 +365,25 @@
 			
 			$("#overview input").remove();
 			updateTimebar();
+
+			if ( window.limitSearch ) {
+				var summary = (runStyle === "runs/s" ? Math.pow(Math.E, maxTotal / maxTotalNum) : maxTotal).toFixed(2);
+
+				if ( typeof tpRecordTime !== "undefined" ) {
+					tpRecordTime( summary );
+
+				} else {
+					var pre = document.createElement("pre");
+					pre.style.display = "none";
+					pre.innerHTML = "__start_report" + summary + "__end_report";
+					document.body.appendChild( pre );
+				}
+
+				if ( typeof goQuitApplication !== "undefined" ) {
+					goQuitApplication();
+				}
 	
-			if ( dataStore && dataStore.length ) {
+			} else if ( dataStore && dataStore.length ) {
 				if (!automated) {
 					$("body").addClass("alldone");
 					var div = jQuery("<div class='results'>Saving...</div>").insertBefore("#overview");
@@ -375,7 +396,14 @@
 							div.html("Results saved. You can access them at a later time at the following URL:<br/><strong><a href='" + url + "'>" + url + "</a></strong></div>");
 						}
 					});
-				} else {
+				} else if (post_json) {
+					jQuery.ajax({
+						type: "POST",
+						url: "store.php",
+						data: "data=" + encodeURIComponent(JSON.stringify(window.automation.GetResults()))
+					});
+				}
+				else {
 					window.automation.SetDone();
 				}
 			}
@@ -417,6 +445,10 @@
 				.click(function(){});
 			interval = true;
 			dequeue();
+		}
+
+		if ( window.limitSearch ) {
+			$("#pause").click();
 		}
 	}
 
@@ -783,13 +815,32 @@
 			return (runStyle === "runs/s" ? Math.pow(Math.E, maxTotal / maxTotalNum) : maxTotal).toString();
 		}
 		window.automation.GetResults = function() {
-			results = {}
+			var results = {};
+			var aggregated = {};
+			function normalizeName(name) {
+				// At least for ui_tests, dots are not allowed.
+				return name.replace(".", "_");
+			}
+			function appendToAggregated(name, value) {
+				name = normalizeName(name);
+				(aggregated[name] || (aggregated[name] = [])).push(Math.log(value));
+			}
+
 			for (var i = 0; i < dataStore.length; i++) {
 				var data = dataStore[i];
-				// dots are not allowed.
-				var key = (data.collection + "/" + data.name).replace(".", "_");
-				results[key] = data.mean.toString();
+				var topName = data.collection.split("-", 1)[0];
+				appendToAggregated(topName, data.mean);
+				appendToAggregated(data.collection, data.mean);
+				results[normalizeName(data.collection + "/" + data.name)] = data.mean.toString();
 			}
+
+			for (var name in aggregated) {
+				var means = aggregated[name];
+				var sum = 0;
+				for (var i = 0; i < means.length; i++) sum += means[i];
+				results[name] = Math.pow(Math.E, sum/means.length).toString();
+			}
+
 			return results;
 		}
 	}

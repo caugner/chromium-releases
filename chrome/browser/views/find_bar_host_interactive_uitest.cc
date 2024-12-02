@@ -53,9 +53,17 @@ class FindInPageTest : public InProcessBrowserTest {
 
   int GetFocusedViewID() {
 #if defined(TOOLKIT_VIEWS)
+#if defined(OS_LINUX)
+    // See http://crbug.com/26873 .
+    views::FocusManager* focus_manager =
+        views::FocusManager::GetFocusManagerForNativeView(
+            GTK_WIDGET(browser()->window()->GetNativeHandle()));
+#else
     views::FocusManager* focus_manager =
         views::FocusManager::GetFocusManagerForNativeView(
             browser()->window()->GetNativeHandle());
+#endif
+
     if (!focus_manager) {
       NOTREACHED();
       return -1;
@@ -106,7 +114,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, CrashEscHandlers) {
   // This used to crash until bug 1303709 was fixed.
   ui_controls::SendKeyPressNotifyWhenDone(
       browser()->window()->GetNativeHandle(), base::VKEY_ESCAPE,
-      true, false, false, new MessageLoop::QuitTask());
+      false, false, false, new MessageLoop::QuitTask());
   ui_test_utils::RunMessageLoop();
 }
 
@@ -122,9 +130,11 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestore) {
   // return to the location bar.
   browser()->FocusLocationBar();
   EXPECT_EQ(VIEW_ID_LOCATION_BAR, GetFocusedViewID());
-  browser()->find_bar()->Show();
+  // Ensure the creation of the find bar controller.
+  browser()->GetFindBarController()->Show();
   EXPECT_EQ(VIEW_ID_FIND_IN_PAGE_TEXT_FIELD, GetFocusedViewID());
-  browser()->find_bar()->EndFindSession();
+  browser()->GetFindBarController()->EndFindSession(
+      FindBarController::kKeepSelection);
   EXPECT_EQ(VIEW_ID_LOCATION_BAR, GetFocusedViewID());
 
   // Focus the location bar, find something on the page, close the find box,
@@ -133,8 +143,9 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestore) {
   browser()->Find();
   EXPECT_EQ(VIEW_ID_FIND_IN_PAGE_TEXT_FIELD, GetFocusedViewID());
   ui_test_utils::FindInPage(browser()->GetSelectedTabContents(),
-                            L"a", true, false, NULL);
-  browser()->find_bar()->EndFindSession();
+                            ASCIIToUTF16("a"), true, false, NULL);
+  browser()->GetFindBarController()->EndFindSession(
+      FindBarController::kKeepSelection);
   EXPECT_EQ(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW, GetFocusedViewID());
 
   // Focus the location bar, open and close the find box, focus should return to
@@ -142,8 +153,9 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestore) {
   // is fixed).
   browser()->FocusLocationBar();
   EXPECT_EQ(VIEW_ID_LOCATION_BAR, GetFocusedViewID());
-  browser()->find_bar()->Show();
+  browser()->GetFindBarController()->Show();
   EXPECT_EQ(VIEW_ID_FIND_IN_PAGE_TEXT_FIELD, GetFocusedViewID());
-  browser()->find_bar()->EndFindSession();
+  browser()->GetFindBarController()->EndFindSession(
+      FindBarController::kKeepSelection);
   EXPECT_EQ(VIEW_ID_LOCATION_BAR, GetFocusedViewID());
 }

@@ -12,7 +12,6 @@
 #include "app/sql/connection.h"
 #include "app/sql/statement.h"
 #include "chrome/browser/history/url_database.h"
-#include "chrome/browser/history/visit_log.h"
 #include "chrome/common/page_transition_types.h"
 #include "chrome/common/url_constants.h"
 
@@ -108,7 +107,6 @@ VisitID VisitDatabase::AddVisit(VisitRow* visit) {
   statement.BindInt64(3, visit->transition);
   statement.BindInt64(4, visit->segment_id);
   statement.BindInt64(5, visit->is_indexed);
-  AddEventToVisitLog(VisitLog::ADD_VISIT);
   if (!statement.Run())
     return 0;
 
@@ -125,7 +123,6 @@ void VisitDatabase::DeleteVisit(const VisitRow& visit) {
     return;
   update_chain.BindInt64(0, visit.referring_visit);
   update_chain.BindInt64(1, visit.visit_id);
-  AddEventToVisitLog(VisitLog::UPDATE_VISIT);
   update_chain.Run();
 
   // Now delete the actual visit.
@@ -134,7 +131,6 @@ void VisitDatabase::DeleteVisit(const VisitRow& visit) {
   if (!del)
     return;
   del.BindInt64(0, visit.visit_id);
-  AddEventToVisitLog(VisitLog::DELETE_VISIT);
   del.Run();
 }
 
@@ -145,7 +141,6 @@ bool VisitDatabase::GetRowForVisit(VisitID visit_id, VisitRow* out_visit) {
     return false;
 
   statement.BindInt64(0, visit_id);
-  AddEventToVisitLog(VisitLog::SELECT_VISIT);
   if (!statement.Step())
     return false;
 
@@ -179,7 +174,6 @@ bool VisitDatabase::UpdateVisitRow(const VisitRow& visit) {
   statement.BindInt64(4, visit.segment_id);
   statement.BindInt64(5, visit.is_indexed);
   statement.BindInt64(6, visit.visit_id);
-  AddEventToVisitLog(VisitLog::UPDATE_VISIT);
   return statement.Run();
 }
 
@@ -195,7 +189,6 @@ bool VisitDatabase::GetVisitsForURL(URLID url_id, VisitVector* visits) {
     return false;
 
   statement.BindInt64(0, url_id);
-  AddEventToVisitLog(VisitLog::SELECT_VISIT);
   FillVisitVector(statement, visits);
   return true;
 }
@@ -220,7 +213,6 @@ void VisitDatabase::GetAllVisitsInRange(base::Time begin_time,
   statement.BindInt64(2,
       max_results ? max_results : std::numeric_limits<int64>::max());
 
-  AddEventToVisitLog(VisitLog::SELECT_VISIT);
   FillVisitVector(statement, visits);
 }
 
@@ -250,13 +242,11 @@ void VisitDatabase::GetVisitsInRangeForTransition(
   statement.BindInt64(4,
       max_results ? max_results : std::numeric_limits<int64>::max());
 
-  AddEventToVisitLog(VisitLog::SELECT_VISIT);
   FillVisitVector(statement, visits);
 }
 
 void VisitDatabase::GetVisibleVisitsInRange(base::Time begin_time,
                                             base::Time end_time,
-                                            bool most_recent_visit_only,
                                             int max_count,
                                             VisitVector* visits) {
   visits->clear();
@@ -284,17 +274,14 @@ void VisitDatabase::GetVisibleVisitsInRange(base::Time begin_time,
   statement.BindInt(5, PageTransition::MANUAL_SUBFRAME);
   statement.BindInt(6, PageTransition::KEYWORD_GENERATED);
 
-  AddEventToVisitLog(VisitLog::SELECT_VISIT);
   std::set<URLID> found_urls;
   while (statement.Step()) {
     VisitRow visit;
     FillVisitRow(statement, &visit);
-    if (most_recent_visit_only) {
-      // Make sure the URL this visit corresponds to is unique if required.
-      if (found_urls.find(visit.url_id) != found_urls.end())
-        continue;
-      found_urls.insert(visit.url_id);
-    }
+    // Make sure the URL this visit corresponds to is unique.
+    if (found_urls.find(visit.url_id) != found_urls.end())
+      continue;
+    found_urls.insert(visit.url_id);
     visits->push_back(visit);
 
     if (max_count > 0 && static_cast<int>(visits->size()) >= max_count)
@@ -315,7 +302,6 @@ VisitID VisitDatabase::GetMostRecentVisitForURL(URLID url_id,
     return 0;
 
   statement.BindInt64(0, url_id);
-  AddEventToVisitLog(VisitLog::SELECT_VISIT);
   if (!statement.Step())
     return 0;  // No visits for this URL.
 
@@ -344,7 +330,6 @@ bool VisitDatabase::GetMostRecentVisitsForURL(URLID url_id,
 
   statement.BindInt64(0, url_id);
   statement.BindInt(1, max_results);
-  AddEventToVisitLog(VisitLog::SELECT_VISIT);
   FillVisitVector(statement, visits);
   return true;
 }
@@ -363,7 +348,6 @@ bool VisitDatabase::GetRedirectFromVisit(VisitID from_visit,
   statement.BindInt64(0, from_visit);
   statement.BindInt(1, PageTransition::IS_REDIRECT_MASK);
 
-  AddEventToVisitLog(VisitLog::SELECT_VISIT);
   if (!statement.Step())
     return false;  // No redirect from this visit.
   if (to_visit)
@@ -390,7 +374,6 @@ bool VisitDatabase::GetRedirectToVisit(VisitID to_visit,
         "WHERE v.id = ?"));
     statement.BindInt64(0, row.referring_visit);
 
-    AddEventToVisitLog(VisitLog::SELECT_VISIT);
     if (!statement.Step())
       return false;
 
@@ -431,7 +414,6 @@ bool VisitDatabase::GetVisitCountToHost(const GURL& url,
   statement.BindString(0, host_query_min);
   statement.BindString(1, host_query_max);
 
-  AddEventToVisitLog(VisitLog::SELECT_VISIT);
   if (!statement.Step()) {
     // We've never been to this page before.
     *count = 0;
@@ -446,7 +428,6 @@ bool VisitDatabase::GetVisitCountToHost(const GURL& url,
 bool VisitDatabase::GetStartDate(base::Time* first_visit) {
   sql::Statement statement(GetDB().GetCachedStatement(SQL_FROM_HERE,
       "SELECT MIN(visit_time) FROM visits WHERE visit_time != 0"));
-  AddEventToVisitLog(VisitLog::SELECT_VISIT);
   if (!statement || !statement.Step() || statement.ColumnInt64(0) == 0) {
     *first_visit = base::Time::Now();
     return false;

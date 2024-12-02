@@ -15,6 +15,7 @@ enum InstallStatus {
   FIRST_INSTALL_SUCCESS, // Successfully installed Chrome for the first time
   INSTALL_REPAIRED,      // Same version reinstalled for repair
   NEW_VERSION_UPDATED,   // Chrome successfully updated to new version
+  EXISTING_VERSION_LAUNCHED,  // No work done, just launched existing chrome
   HIGHER_VERSION_EXISTS, // Higher version of Chrome already exists
   USER_LEVEL_INSTALL_EXISTS, // User level install already exists
   SYSTEM_LEVEL_INSTALL_EXISTS, // Machine level install already exists
@@ -40,10 +41,17 @@ enum InstallStatus {
   EULA_ACCEPTED,         // EULA dialog was accepted by user.
   EULA_ACCEPTED_OPT_IN,  // EULA accepted wtih the crash optin selected.
   INSTALL_DIR_IN_USE,    // Installation directory is in use by another process
-  UNINSTALL_REQUIRES_REBOOT // Uninstallation required a reboot.
+  UNINSTALL_REQUIRES_REBOOT, // Uninstallation required a reboot.
+  IN_USE_UPDATED,        // Chrome successfully updated but old version running
+  SAME_VERSION_REPAIR_FAILED, // Chrome repair failed as Chrome was running
+  REENTRY_SYS_UPDATE,    // Setup has been re-lauched as the interactive user
+  SXS_OPTION_NOT_SUPPORTED  // The chrome-sxs option provided does not work
+                            // with other command line options.
 };
 
 namespace switches {
+extern const wchar_t kChromeFrame[];
+extern const wchar_t kChromeSxS[];
 extern const wchar_t kCreateAllShortcuts[];
 extern const wchar_t kDeleteProfile[];
 extern const wchar_t kDisableLogging[];
@@ -57,6 +65,7 @@ extern const wchar_t kInstallArchive[];
 extern const wchar_t kInstallerData[];
 extern const wchar_t kLogFile[];
 extern const wchar_t kMakeChromeDefault[];
+extern const wchar_t kMsi[];
 extern const wchar_t kNewSetupExe[];
 extern const wchar_t kRegisterChromeBrowser[];
 extern const wchar_t kRegisterChromeBrowserSuffix[];
@@ -70,18 +79,26 @@ extern const wchar_t kVerboseLogging[];
 extern const wchar_t kShowEula[];
 extern const wchar_t kAltDesktopShortcut[];
 extern const wchar_t kInactiveUserToast[];
+extern const wchar_t kSystemLevelToast[];
 }  // namespace switches
 
+extern const wchar_t kGoogleChromeInstallSubDir1[];
+extern const wchar_t kGoogleChromeInstallSubDir2[];
 extern const wchar_t kInstallBinaryDir[];
 extern const wchar_t kInstallUserDataDir[];
 extern const wchar_t kChromeExe[];
 extern const wchar_t kChromeOldExe[];
 extern const wchar_t kChromeNewExe[];
+extern const wchar_t kNaClExe[];
 extern const wchar_t kChromeDll[];
+extern const wchar_t kChromeNaCl64Dll[];
+extern const wchar_t kChromeFrameDll[];
 extern const wchar_t kSetupExe[];
 extern const wchar_t kInstallerDir[];
+extern const wchar_t kSxSSuffix[];
 
 extern const wchar_t kUninstallStringField[];
+extern const wchar_t kUninstallArgumentsField[];
 extern const wchar_t kUninstallDisplayNameField[];
 extern const wchar_t kUninstallMetricsName[];
 extern const wchar_t kUninstallInstallationDate[];

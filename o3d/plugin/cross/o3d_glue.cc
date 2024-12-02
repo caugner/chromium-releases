@@ -37,9 +37,10 @@
 
 #include <string>
 #include <algorithm>
+#include "core/cross/image_utils.h"
 #include "core/cross/renderer.h"
+#include "core/cross/texture.h"
 #include "core/cross/client_info.h"
-#include "gpu_plugin/np_utils/np_headers.h"
 #include "plugin/cross/o3d_glue.h"
 #include "plugin/cross/config.h"
 #include "plugin/cross/stream_manager.h"
@@ -50,8 +51,16 @@
 #include "plugin_mac.h"
 #endif
 
+#ifdef OS_LINUX
+#include <X11/cursorfont.h>
+#endif
+
 namespace glue {
 namespace _o3d {
+
+using o3d::Bitmap;
+using o3d::Texture;
+using o3d::Texture2D;
 
 void RegisterType(NPP npp, const ObjectBase::Class *clientclass,
                   NPClass *npclass) {
@@ -122,24 +131,31 @@ PluginObject::PluginObject(NPP npp)
       event_model_(NPEventModelCarbon),
       mac_window_(0),
       mac_fullscreen_window_(0),
+#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
       mac_fullscreen_overlay_window_(0),
+#endif
       mac_window_selected_tab_(0),
       mac_cocoa_window_(0),
       mac_surface_hidden_(0),
       mac_2d_context_(0),
       mac_agl_context_(0),
       mac_cgl_context_(0),
+      mac_cgl_pbuffer_(0),
       last_mac_event_time_(0),
+#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
       time_to_hide_overlay_(0.0),
 #endif
+#endif  // OS_MACOSX
 #ifdef OS_LINUX
       display_(NULL),
       window_(0),
+      fullscreen_window_(0),
       xt_widget_(NULL),
       xt_app_context_(NULL),
       xt_interval_(0),
       last_click_time_(0),
       drawable_(0),
+      gdk_display_(NULL),
       gtk_container_(NULL),
       gtk_fullscreen_container_(NULL),
       gtk_event_source_(NULL),
@@ -149,12 +165,16 @@ PluginObject::PluginObject(NPP npp)
       draw_(true),
       in_plugin_(false),
 #endif
+#if defined(CB_SERVICE_REMOTE)
+      gpu_plugin_object_(NULL),
+#endif
       np_v8_bridge_(&service_locator_, npp),
       stream_manager_(new StreamManager(npp)),
       cursor_type_(o3d::Cursor::DEFAULT),
       prev_width_(0),
-      prev_height_(0) {
-#ifdef OS_WIN
+      prev_height_(0),
+      offscreen_rendering_enabled_(false) {
+#if defined(OS_WIN) || defined(OS_LINUX)
   memset(cursors_, 0, sizeof(cursors_));
 #endif
 
@@ -206,12 +226,14 @@ void PluginObject::Init(int argc, char* argn[], char* argv[]) {
 }
 
 void PluginObject::TearDown() {
+  DisableOffscreenRendering();
 #ifdef OS_WIN
   ClearPluginProperty(hWnd_);
-#endif  // OS_WIN
-#ifdef OS_MACOSX
+#elif defined(OS_MACOSX)
   o3d::ReleaseSafariBrowserWindow(mac_cocoa_window_);
-#endif
+#elif defined(OS_LINUX)
+  SetDisplay(NULL);
+#endif  // OS_WIN
   UnmapAll();
 
   // Delete the StreamManager to cleanup any streams that are in midflight.
@@ -400,7 +422,6 @@ bool PluginObject::SetRendererIsSoftware(bool state) {
 
 #endif  // OS_MACOSX
 
-
 void PluginObject::RegisterType(const ObjectBase::Class *clientclass,
                                 NPClass *npclass) {
   client_to_np_class_map_[clientclass] = npclass;
@@ -472,26 +493,51 @@ void PluginObject::LogAssertHandlerFunction(const std::string& str) {
   DLOG(ERROR) << "FATAL LOG ERROR: " << str;
 }
 
+#if defined(CB_SERVICE_REMOTE)
+void PluginObject::SetGPUPluginObject(NPObject* gpu_plugin_object) {
+  if (gpu_plugin_object) {
+    NPN_RetainObject(gpu_plugin_object);
+  }
+
+  if (gpu_plugin_object_) {
+    NPN_ReleaseObject(gpu_plugin_object_);
+  }
+
+  gpu_plugin_object_ = gpu_plugin_object;
+}
+#endif
+
 enum {
-  PROP_CLIENT,
-  PROP_GPU_CONFIG,
-  NUM_PROPERTY_IDS
+  kPropClient,
+  kPropGpuConfig,
+  kNumPropertyIds
 };
 
-static NPIdentifier property_ids[NUM_PROPERTY_IDS];
-static const NPUTF8 *property_names[NUM_PROPERTY_IDS] = {
+static NPIdentifier property_ids[kNumPropertyIds];
+static const NPUTF8 *property_names[kNumPropertyIds] = {
   "client",
   "gpuConfig",
 };
 
 enum {
-  METHOD_EVAL,
-  NUM_METHOD_IDS,
+  kMethodEval,
+
+#if defined(CB_SERVICE_REMOTE)
+  kMethodSetGPUPluginObject,
+  kMethodGetGPUPluginObject,
+#endif
+
+  kNumMethodIds,
 };
 
-static NPIdentifier method_ids[NUM_METHOD_IDS];
-static const NPUTF8 *method_names[NUM_METHOD_IDS] = {
+static NPIdentifier method_ids[kNumMethodIds];
+static const NPUTF8 *method_names[kNumMethodIds] = {
   "eval",
+
+#if defined(CB_SERVICE_REMOTE)
+  "setGPUPluginObject",
+  "getGPUPluginObject",
+#endif
 };
 
 static NPObject *PluginAllocate(NPP npp, NPClass *npclass) {
@@ -505,7 +551,7 @@ static void PluginDeallocate(NPObject *object) {
 static bool PluginHasMethod(NPObject *header, NPIdentifier name) {
   DebugScopedId id(name);
   PluginObject *plugin_object = static_cast<PluginObject *>(header);
-  for (int i = 0; i < NUM_METHOD_IDS; ++i) {
+  for (int i = 0; i < kNumMethodIds; ++i) {
     if (name == method_ids[i]) {
       return true;
     }
@@ -516,31 +562,51 @@ static bool PluginHasMethod(NPObject *header, NPIdentifier name) {
 }
 
 static bool PluginInvoke(NPObject *header, NPIdentifier name,
-                         const NPVariant *args, uint32_t argCount,
+                         const NPVariant *args, uint32_t arg_count,
                          NPVariant *np_result) {
   DebugScopedId id(name);
   PluginObject *plugin_object = static_cast<PluginObject *>(header);
-  if (name == method_ids[METHOD_EVAL]) {
-    return plugin_object->np_v8_bridge()->Evaluate(args, argCount, np_result);
-  } else {
+  if (name == method_ids[kMethodEval]) {
+    return plugin_object->np_v8_bridge()->Evaluate(args, arg_count, np_result);
+  }
+#if defined(CB_SERVICE_REMOTE)
+  else if (name == method_ids[kMethodGetGPUPluginObject]) {
+    if (arg_count != 0)
+      return false;
+    ValueToNPVariant(plugin_object->GetGPUPluginObject(), np_result);
+    return true;
+  } else if (name == method_ids[kMethodSetGPUPluginObject]) {
+    if (arg_count != 1)
+      return false;
+    VOID_TO_NPVARIANT(*np_result);
+    NPObjectPointer<NPObject> gpu_plugin_object;
+    if (NPVariantToValue(&gpu_plugin_object, args[0])) {
+      plugin_object->SetGPUPluginObject(gpu_plugin_object.Get());
+      return true;
+    } else {
+      return false;
+    }
+  }  // NOLINT
+#endif  // CB_SERVICE_REMOTE
+  else {  // NOLINT
     NPObject *globals = plugin_object->globals_npobject();
-    return globals->_class->invoke(globals, name, args, argCount, np_result);
+    return globals->_class->invoke(globals, name, args, arg_count, np_result);
   }
 }
 
 static bool PluginInvokeDefault(NPObject *header, const NPVariant *args,
-                                uint32_t argCount, NPVariant *result) {
+                                uint32_t arg_count, NPVariant *result) {
   PluginObject *plugin_object = static_cast<PluginObject *>(header);
   NPP npp = plugin_object->npp();
   NPObject *globals = plugin_object->globals_npobject();
-  return globals->_class->invokeDefault(globals, args, argCount, result);
+  return globals->_class->invokeDefault(globals, args, arg_count, result);
 }
 
 static bool PluginHasProperty(NPObject *header, NPIdentifier name) {
   DebugScopedId id(name);
   PluginObject *plugin_object = static_cast<PluginObject *>(header);
   NPP npp = plugin_object->npp();
-  for (unsigned int i = 0; i < NUM_PROPERTY_IDS; ++i) {
+  for (unsigned int i = 0; i < kNumPropertyIds; ++i) {
     if (name == property_ids[i]) return true;
   }
   NPObject *globals = plugin_object->globals_npobject();
@@ -552,7 +618,7 @@ static bool PluginGetProperty(NPObject *header, NPIdentifier name,
   DebugScopedId id(name);
   PluginObject *plugin_object = static_cast<PluginObject *>(header);
   NPP npp = plugin_object->npp();
-  if (name == property_ids[PROP_GPU_CONFIG]) {
+  if (name == property_ids[kPropGpuConfig]) {
     // Gets the GPU config (VendorID, DeviceID, name) as a string.
     // NOTE: this should probably be removed before we ship.
     o3d::GPUDevice device;
@@ -580,7 +646,7 @@ static bool PluginGetProperty(NPObject *header, NPIdentifier name,
     return temp;
   }
 
-  if (name == property_ids[PROP_CLIENT]) {
+  if (name == property_ids[kPropClient]) {
     NPObject *npobject = plugin_object->client_npobject();
     GLUE_PROFILE_START(npp, "retainobject");
     NPN_RetainObject(npobject);
@@ -597,7 +663,7 @@ static bool PluginSetProperty(NPObject *header, NPIdentifier name,
   DebugScopedId id(name);
   PluginObject *plugin_object = static_cast<PluginObject *>(header);
   NPP npp = plugin_object->npp();
-  if (name == property_ids[PROP_CLIENT]) {
+  if (name == property_ids[kPropClient]) {
     return false;
   }
   NPObject *globals = plugin_object->globals_npobject();
@@ -606,18 +672,18 @@ static bool PluginSetProperty(NPObject *header, NPIdentifier name,
 
 static bool PluginEnumerate(NPObject *header, NPIdentifier **value,
                             uint32_t *count) {
-  *count = NUM_PROPERTY_IDS + NUM_METHOD_IDS + glue::GetStaticPropertyCount();
+  *count = kNumPropertyIds + kNumMethodIds + glue::GetStaticPropertyCount();
   PluginObject *plugin_object = static_cast<PluginObject *>(header);
   NPP npp = plugin_object->npp();
   GLUE_PROFILE_START(npp, "memalloc");
   *value = static_cast<NPIdentifier *>(
       NPN_MemAlloc(*count * sizeof(NPIdentifier)));
   GLUE_PROFILE_STOP(npp, "memalloc");
-  memcpy(*value, property_ids, NUM_PROPERTY_IDS * sizeof(NPIdentifier));
-  memcpy(*value + NUM_PROPERTY_IDS, method_ids,
-         NUM_METHOD_IDS * sizeof(NPIdentifier));
+  memcpy(*value, property_ids, kNumPropertyIds * sizeof(NPIdentifier));
+  memcpy(*value + kNumPropertyIds, method_ids,
+         kNumMethodIds * sizeof(NPIdentifier));
   glue::StaticEnumeratePropertyHelper(
-      *value + NUM_PROPERTY_IDS + NUM_METHOD_IDS);
+      *value + kNumPropertyIds + kNumMethodIds);
   return true;
 }
 
@@ -646,8 +712,8 @@ PluginObject *PluginObject::Create(NPP npp) {
 
 void InitializeGlue(NPP npp) {
   GLUE_PROFILE_START(npp, "getstringidentifiers");
-  NPN_GetStringIdentifiers(property_names, NUM_PROPERTY_IDS, property_ids);
-  NPN_GetStringIdentifiers(method_names, NUM_METHOD_IDS, method_ids);
+  NPN_GetStringIdentifiers(property_names, kNumPropertyIds, property_ids);
+  NPN_GetStringIdentifiers(method_names, kNumMethodIds, method_ids);
   GLUE_PROFILE_STOP(npp, "getstringidentifiers");
   glue::InitializeGlue(npp);
 }
@@ -660,6 +726,12 @@ void PluginObject::Resize(int width, int height) {
     prev_height_ = height;
 
     if (renderer_ && !fullscreen_) {
+      // If we are rendering offscreen, we may need to reallocate the
+      // render surfaces.
+      if (offscreen_rendering_enabled_) {
+        AllocateOffscreenRenderSurfaces(width, height);
+      }
+
       // Tell the renderer and client that our window has been resized.
       // If we're in fullscreen mode when this happens, we don't want to pass
       // the information through; the renderer will pick it up when we switch
@@ -820,8 +892,99 @@ void PluginObject::PlatformSpecificSetCursor() {
 
 #ifdef OS_LINUX
 
+void PluginObject::SetDisplay(Display *display) {
+  if (display_ != display) {
+    if (display_) {
+      for (int i = 0; i < o3d::Cursor::NUM_CURSORS; ++i) {
+        if (cursors_[i]) {
+          XFreeCursor(display_, cursors_[i]);
+          cursors_[i] = 0;
+        }
+      }
+    }
+    display_ = display;
+  }
+}
+
+static unsigned int O3DToX11CursorShape(o3d::Cursor::CursorType cursor_type) {
+  switch (cursor_type) {
+    case o3d::Cursor::DEFAULT:
+      return XC_arrow;
+    case o3d::Cursor::CROSSHAIR:
+      return XC_crosshair;
+    case o3d::Cursor::POINTER:
+      return XC_hand2;
+    case o3d::Cursor::E_RESIZE:
+      return XC_right_side;
+    case o3d::Cursor::NE_RESIZE:
+      return XC_top_right_corner;
+    case o3d::Cursor::NW_RESIZE:
+      return XC_top_left_corner;
+    case o3d::Cursor::N_RESIZE:
+      return XC_top_side;
+    case o3d::Cursor::SE_RESIZE:
+      return XC_bottom_right_corner;
+    case o3d::Cursor::SW_RESIZE:
+      return XC_bottom_left_corner;
+    case o3d::Cursor::S_RESIZE:
+      return XC_bottom_side;
+    case o3d::Cursor::W_RESIZE:
+      return XC_left_side;
+    case o3d::Cursor::MOVE:
+      return XC_fleur;
+    case o3d::Cursor::TEXT:
+      return XC_xterm;
+    case o3d::Cursor::WAIT:
+      return XC_watch;
+    case o3d::Cursor::PROGRESS:
+      NOTIMPLEMENTED();
+      return XC_watch;
+    case o3d::Cursor::HELP:
+      NOTIMPLEMENTED();
+      return XC_arrow;
+  }
+  NOTIMPLEMENTED();
+  return XC_arrow;
+}
+
+static Cursor O3DToX11Cursor(Display *display, Window window,
+                             o3d::Cursor::CursorType cursor_type) {
+  switch (cursor_type) {
+    case o3d::Cursor::NONE: {
+      // There is no X11 primitive for hiding the cursor. The standard practice
+      // is to define a custom cursor from a 1x1 invisible pixmap.
+      static char zero[1] = {0};
+      Pixmap zero_pixmap = XCreateBitmapFromData(display, window, zero, 1, 1);
+      DLOG_ASSERT(zero_pixmap);
+      if (!zero_pixmap) {
+        return 0;
+      }
+      // This could actually be any colour, since our mask pixmap specifies that
+      // no pixels are visible.
+      XColor black;
+      black.red = 0;
+      black.green = 0;
+      black.blue = 0;
+      Cursor cursor = XCreatePixmapCursor(display, zero_pixmap, zero_pixmap,
+                                          &black, &black, 0, 0);
+      XFreePixmap(display, zero_pixmap);
+      return cursor;
+    }
+
+    default:
+      return XCreateFontCursor(display, O3DToX11CursorShape(cursor_type));
+  }
+}
+
 void PluginObject::PlatformSpecificSetCursor() {
-  // TODO: fill this in.
+  if (!cursors_[cursor_type_]) {
+    // According to the docs, the window here is only relevant for selecting the
+    // screen, and we always create our fullscreen and embedded windows on the
+    // same screen, so we can just always use the embedded window.
+    cursors_[cursor_type_] = O3DToX11Cursor(display_, window_, cursor_type_);
+  }
+  Window window = fullscreen_ ? fullscreen_window_ : window_;
+  XDefineCursor(display_, window, cursors_[cursor_type_]);
 }
 
 #endif  // OS_LINUX
@@ -896,13 +1059,100 @@ void PluginObject::AsyncTick() {
 }
 
 void PluginObject::Tick() {
-  DCHECK(pending_ticks_ > 0);
+  DCHECK_GT(pending_ticks_, 0);
   --pending_ticks_;
 
   client_->Tick();
   if (renderer_ && renderer_->need_to_render()) {
     client_->RenderClient(true);
   }
+}
+
+void PluginObject::EnableOffscreenRendering() {
+  if (!offscreen_rendering_enabled_) {
+    AllocateOffscreenRenderSurfaces(width(), height());
+    offscreen_rendering_enabled_ = true;
+  }
+}
+
+void PluginObject::DisableOffscreenRendering() {
+  if (offscreen_rendering_enabled_) {
+    DeallocateOffscreenRenderSurfaces();
+    offscreen_rendering_enabled_ = false;
+  }
+}
+
+bool PluginObject::IsOffscreenRenderingEnabled() const {
+  return offscreen_rendering_enabled_;
+}
+
+RenderSurface::Ref PluginObject::GetOffscreenRenderSurface() const {
+  return offscreen_render_surface_;
+}
+
+Bitmap::Ref PluginObject::GetOffscreenBitmap() const {
+  return offscreen_readback_bitmap_;
+}
+
+bool PluginObject::AllocateOffscreenRenderSurfaces(int width, int height) {
+  int pot_width =
+      static_cast<int>(o3d::image::ComputePOTSize(width));
+  int pot_height =
+      static_cast<int>(o3d::image::ComputePOTSize(height));
+  if (!renderer_ || pot_width == 0 || pot_height == 0) {
+    return false;
+  }
+  bool must_reallocate_render_surfaces =
+      (offscreen_render_surface_.IsNull() ||
+       offscreen_depth_render_surface_.IsNull() ||
+       offscreen_render_surface_->width() != pot_width ||
+       offscreen_render_surface_->height() != pot_height);
+  if (must_reallocate_render_surfaces) {
+    Texture2D::Ref texture = renderer_->CreateTexture2D(
+        pot_width,
+        pot_height,
+        Texture::ARGB8,
+        1,
+        true);
+    if (texture.IsNull()) {
+      return false;
+    }
+    RenderSurface::Ref surface(texture->GetRenderSurface(0));
+    if (surface.IsNull()) {
+      return false;
+    }
+    RenderDepthStencilSurface::Ref depth(renderer_->CreateDepthStencilSurface(
+        pot_width,
+        pot_height));
+    if (depth.IsNull()) {
+      return false;
+    }
+    offscreen_texture_ = texture;
+    offscreen_render_surface_ = surface;
+    offscreen_depth_render_surface_ = depth;
+  }
+  offscreen_render_surface_->SetClipSize(width, height);
+  offscreen_depth_render_surface_->SetClipSize(width, height);
+  if (offscreen_readback_bitmap_.IsNull() ||
+      offscreen_readback_bitmap_->width() != width ||
+      offscreen_readback_bitmap_->height() != height) {
+    o3d::Bitmap::Ref bitmap = Bitmap::Ref(
+        new Bitmap(service_locator()));
+    bitmap->Allocate(Texture::ARGB8,
+                     width, height, 1, Bitmap::IMAGE);
+    offscreen_readback_bitmap_ = bitmap;
+  }
+  // Tell the Client about the newly allocated surfaces so that normal
+  // calls to RenderClient can automatically do the right thing.
+  client_->SetOffscreenRenderingSurfaces(offscreen_render_surface_,
+                                         offscreen_depth_render_surface_);
+  return true;
+}
+
+void PluginObject::DeallocateOffscreenRenderSurfaces() {
+  offscreen_render_surface_.Reset();
+  offscreen_depth_render_surface_.Reset();
+  offscreen_readback_bitmap_.Reset();
 }
 
 }  // namespace _o3d

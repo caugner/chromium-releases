@@ -5,6 +5,8 @@
 #include "chrome/installer/util/google_update_settings.h"
 
 #include "base/registry.h"
+#include "base/string_util.h"
+#include "base/time.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
 
@@ -39,6 +41,15 @@ bool ClearGoogleUpdateStrKey(const wchar_t* const name) {
   return key.WriteValue(name, L"");
 }
 
+bool RemoveGoogleUpdateStrKey(const wchar_t* const name) {
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  std::wstring reg_path = dist->GetStateKey();
+  RegKey key(HKEY_CURRENT_USER, reg_path.c_str(), KEY_READ | KEY_WRITE);
+  if (!key.ValueExists(name))
+    return true;
+  return key.DeleteValue(name);
+}
+
 }  // namespace.
 
 bool GoogleUpdateSettings::GetCollectStatsConsent() {
@@ -67,11 +78,41 @@ bool GoogleUpdateSettings::SetCollectStatsConsent(bool consented) {
   return key_hkcu.WriteValue(google_update::kRegUsageStatsField, value);
 }
 
+bool GoogleUpdateSettings::GetMetricsId(std::wstring* metrics_id) {
+  return ReadGoogleUpdateStrKey(google_update::kRegMetricsId, metrics_id);
+}
+
+bool GoogleUpdateSettings::SetMetricsId(const std::wstring& metrics_id) {
+  return WriteGoogleUpdateStrKey(google_update::kRegMetricsId, metrics_id);
+}
+
 bool GoogleUpdateSettings::SetEULAConsent(bool consented) {
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   std::wstring reg_path = dist->GetStateMediumKey();
   RegKey key(HKEY_LOCAL_MACHINE, reg_path.c_str(), KEY_READ | KEY_SET_VALUE);
   return key.WriteValue(google_update::kRegEULAAceptedField, consented? 1 : 0);
+}
+
+int GoogleUpdateSettings::GetLastRunTime() {
+ std::wstring time_s;
+ if (!ReadGoogleUpdateStrKey(google_update::kRegLastRunTimeField, &time_s))
+   return -1;
+ int64 time_i;
+ if (!StringToInt64(time_s, &time_i))
+   return -1;
+ base::TimeDelta td =
+    base::Time::NowFromSystemTime() - base::Time::FromInternalValue(time_i);
+ return td.InDays();
+}
+
+bool GoogleUpdateSettings::SetLastRunTime() {
+  int64 time = base::Time::NowFromSystemTime().ToInternalValue();
+  return WriteGoogleUpdateStrKey(google_update::kRegLastRunTimeField,
+                                 Int64ToWString(time));
+}
+
+bool GoogleUpdateSettings::RemoveLastRunTime() {
+  return RemoveGoogleUpdateStrKey(google_update::kRegLastRunTimeField);
 }
 
 bool GoogleUpdateSettings::GetBrowser(std::wstring* browser) {
@@ -101,4 +142,34 @@ bool GoogleUpdateSettings::GetReferral(std::wstring* referral) {
 bool GoogleUpdateSettings::ClearReferral() {
   return ClearGoogleUpdateStrKey(google_update::kRegReferralField);
 }
+
+bool GoogleUpdateSettings::GetChromeChannel(bool system_install,
+    std::wstring* channel) {
+  HKEY root_key = system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  std::wstring reg_path = dist->GetStateKey();
+  RegKey key(root_key, reg_path.c_str(), KEY_READ);
+  std::wstring update_branch;
+  if (!key.ReadValue(google_update::kRegApField, &update_branch)) {
+    *channel = L"unknown";
+    return false;
+  }
+
+  // Map to something pithy for human consumption. There are no rules as to
+  // what the ap string can contain, but generally it will contain a number
+  // followed by a dash followed by the branch name (and then some random
+  // suffix). We fall back on empty string in case we fail to parse.
+  // Only ever return "", "unknown", "dev" or "beta".
+  if (update_branch.find(L"-beta") != std::wstring::npos)
+    *channel = L"beta";
+  else if (update_branch.find(L"-dev") != std::wstring::npos)
+    *channel = L"dev";
+  else if (update_branch.empty())
+    *channel = L"";
+  else
+    *channel = L"unknown";
+
+  return true;
+}
+
 

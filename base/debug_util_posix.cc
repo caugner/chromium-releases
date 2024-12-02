@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "build/build_config.h"
 #include "base/debug_util.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
@@ -17,11 +17,12 @@
 #include <cxxabi.h>
 #endif
 
-#include <string>
-
 #if defined(OS_MACOSX)
 #include <AvailabilityMacros.h>
 #endif
+
+#include <iostream>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/compat_execinfo.h"
@@ -30,6 +31,11 @@
 #include "base/safe_strerror_posix.h"
 #include "base/scoped_ptr.h"
 #include "base/string_piece.h"
+#include "base/string_util.h"
+
+#if defined(USE_SYMBOLIZE)
+#include "base/third_party/symbolize/symbolize.h"
+#endif
 
 namespace {
 // The prefix used for mangled symbols, per the Itanium C++ ABI:
@@ -86,6 +92,48 @@ void DemangleSymbols(std::string* text) {
 
 #endif  // defined(__GLIBCXX__)
 }
+
+// Gets the backtrace as a vector of strings. If possible, resolve symbol
+// names and attach these. Otherwise just use raw addresses. Returns true
+// if any symbol name is resolved.
+bool GetBacktraceStrings(void **trace, int size,
+                         std::vector<std::string>* trace_strings) {
+  bool symbolized = false;
+
+#if defined(USE_SYMBOLIZE)
+  for (int i = 0; i < size; ++i) {
+    char symbol[1024];
+    // Subtract by one as return address of function may be in the next
+    // function when a function is annotated as noreturn.
+    if (google::Symbolize(static_cast<char *>(trace[i]) - 1,
+                          symbol, sizeof(symbol))) {
+      // Don't call DemangleSymbols() here as the symbol is demangled by
+      // google::Symbolize().
+      trace_strings->push_back(StringPrintf("%s [%p]", symbol, trace[i]));
+      symbolized = true;
+    } else {
+      trace_strings->push_back(StringPrintf("%p", trace[i]));
+    }
+  }
+#else
+  scoped_ptr_malloc<char*> trace_symbols(backtrace_symbols(trace, size));
+  if (trace_symbols.get()) {
+    for (int i = 0; i < size; ++i) {
+      std::string trace_symbol = trace_symbols.get()[i];
+      DemangleSymbols(&trace_symbol);
+      trace_strings->push_back(trace_symbol);
+    }
+    symbolized = true;
+  } else {
+    for (int i = 0; i < size; ++i) {
+      trace_strings->push_back(StringPrintf("%p", trace[i]));
+    }
+  }
+#endif  // defined(USE_SYMBOLIZE)
+
+  return symbolized;
+}
+
 }  // namespace
 
 // static
@@ -124,7 +172,7 @@ bool DebugUtil::BeingDebugged() {
   size_t info_size = sizeof(info);
 
   int sysctl_result = sysctl(mib, arraysize(mib), &info, &info_size, NULL, 0);
-  DCHECK(sysctl_result == 0);
+  DCHECK_EQ(sysctl_result, 0);
   if (sysctl_result != 0) {
     is_set = true;
     being_debugged = false;
@@ -155,7 +203,8 @@ bool DebugUtil::BeingDebugged() {
   char buf[1024];
 
   ssize_t num_read = HANDLE_EINTR(read(status_fd, buf, sizeof(buf)));
-  HANDLE_EINTR(close(status_fd));
+  if (HANDLE_EINTR(close(status_fd)) < 0)
+    return false;
 
   if (num_read <= 0)
     return false;
@@ -172,15 +221,41 @@ bool DebugUtil::BeingDebugged() {
   return pid_index < status.size() && status[pid_index] != '0';
 }
 
-#endif  // OS_LINUX
+#elif defined(OS_FREEBSD)
+
+bool DebugUtil::BeingDebugged() {
+  // TODO(benl): can we determine this under FreeBSD?
+  NOTIMPLEMENTED();
+  return false;
+}
+
+#endif  // defined(OS_FREEBSD)
+
+// We want to break into the debugger in Debug mode, and cause a crash dump in
+// Release mode. Breakpad behaves as follows:
+//
+// +-------+-----------------+-----------------+
+// | OS    | Dump on SIGTRAP | Dump on SIGABRT |
+// +-------+-----------------+-----------------+
+// | Linux |       N         |        Y        |
+// | Mac   |       Y         |        N        |
+// +-------+-----------------+-----------------+
+//
+// Thus we do the following:
+// Linux: Debug mode, send SIGTRAP; Release mode, send SIGABRT.
+// Mac: Always send SIGTRAP.
+
+#if defined(NDEBUG) && !defined(OS_MACOSX)
+#define DEBUG_BREAK() abort()
+#elif defined(ARCH_CPU_ARM_FAMILY)
+#define DEBUG_BREAK() asm("bkpt 0")
+#else
+#define DEBUG_BREAK() asm("int3")
+#endif
 
 // static
 void DebugUtil::BreakDebugger() {
-#if defined(ARCH_CPU_ARM_FAMILY)
-  asm("bkpt 0");
-#else
-  asm("int3");
-#endif
+  DEBUG_BREAK();
 }
 
 StackTrace::StackTrace() {
@@ -201,7 +276,11 @@ void StackTrace::PrintBacktrace() {
     return;
 #endif
   fflush(stderr);
-  backtrace_symbols_fd(trace_, count_, STDERR_FILENO);
+  std::vector<std::string> trace_strings;
+  GetBacktraceStrings(trace_, count_, &trace_strings);
+  for (size_t i = 0; i < trace_strings.size(); ++i) {
+    std::cerr << "\t" << trace_strings[i] << "\n";
+  }
 }
 
 void StackTrace::OutputToStream(std::ostream* os) {
@@ -209,22 +288,15 @@ void StackTrace::OutputToStream(std::ostream* os) {
   if (backtrace_symbols == NULL)
     return;
 #endif
-  scoped_ptr_malloc<char*> trace_symbols(backtrace_symbols(trace_, count_));
-
-  // If we can't retrieve the symbols, print an error and just dump the raw
-  // addresses.
-  if (trace_symbols.get() == NULL) {
+  std::vector<std::string> trace_strings;
+  if (GetBacktraceStrings(trace_, count_, &trace_strings)) {
+    (*os) << "Backtrace:\n";
+  } else {
     (*os) << "Unable get symbols for backtrace (" << safe_strerror(errno)
           << "). Dumping raw addresses in trace:\n";
-    for (int i = 0; i < count_; ++i) {
-      (*os) << "\t" << trace_[i] << "\n";
-    }
-  } else {
-    (*os) << "Backtrace:\n";
-    for (int i = 0; i < count_; ++i) {
-      std::string trace_symbol(trace_symbols.get()[i]);
-      DemangleSymbols(&trace_symbol);
-      (*os) << "\t" << trace_symbol << "\n";
-    }
+  }
+
+  for (size_t i = 0; i < trace_strings.size(); ++i) {
+    (*os) << "\t" << trace_strings[i] << "\n";
   }
 }

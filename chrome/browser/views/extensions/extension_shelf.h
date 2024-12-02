@@ -1,17 +1,17 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_VIEWS_EXTENSIONS_EXTENSION_SHELF_H_
 #define CHROME_BROWSER_VIEWS_EXTENSIONS_EXTENSION_SHELF_H_
 
-#include "app/gfx/canvas.h"
 #include "app/slide_animation.h"
 #include "base/task.h"
 #include "chrome/browser/extensions/extension_shelf_model.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/views/browser_bubble.h"
 #include "chrome/browser/views/detachable_toolbar_view.h"
+#include "gfx/canvas.h"
 #include "views/view.h"
 
 class Browser;
@@ -39,7 +39,6 @@ class ExtensionShelf : public DetachableToolbarView,
   int top_margin() { return top_margin_; }
 
   // DetachableToolbarView methods:
-  virtual bool IsOnTop() const;
   virtual bool IsDetached() const;
   virtual double GetAnimationValue() const {
     return size_animation_->GetCurrentValue();
@@ -51,9 +50,7 @@ class ExtensionShelf : public DetachableToolbarView,
   virtual void Layout();
   virtual void OnMouseExited(const views::MouseEvent& event);
   virtual void OnMouseEntered(const views::MouseEvent& event);
-  virtual bool GetAccessibleName(std::wstring* name);
   virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
-  virtual void SetAccessibleName(const std::wstring& name);
   virtual void ThemeChanged();
 
   // ExtensionContainer methods:

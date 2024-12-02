@@ -1,13 +1,13 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/toolbar_view.h"
 
+#include <algorithm>
 #include <string>
 
 #include "app/drag_drop_types.h"
-#include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
 #include "app/os_exchange_data.h"
 #include "app/resource_bundle.h"
@@ -16,23 +16,25 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/back_forward_menu_model_views.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/character_encoding.h"
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/encoding_menu_controller.h"
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/sync/sync_status_ui_helper.h"
+#include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/user_data_manager.h"
 #include "chrome/browser/views/bookmark_menu_button.h"
 #include "chrome/browser/views/browser_actions_container.h"
 #include "chrome/browser/views/event_utils.h"
+#include "chrome/browser/views/frame/browser_view.h"
 #include "chrome/browser/views/go_button.h"
 #include "chrome/browser/views/location_bar_view.h"
 #include "chrome/browser/views/toolbar_star_toggle.h"
@@ -41,7 +43,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
+#include "gfx/canvas.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -49,7 +51,9 @@
 #include "views/background.h"
 #include "views/controls/button/button_dropdown.h"
 #include "views/controls/label.h"
+#include "views/controls/menu/menu_2.h"
 #include "views/drag_utils.h"
+#include "views/focus/view_storage.h"
 #include "views/widget/tooltip_manager.h"
 #include "views/window/non_client_view.h"
 #include "views/window/window.h"
@@ -62,9 +66,6 @@ static const int kStatusBubbleWidth = 480;
 // Separation between the location bar and the menus.
 static const int kMenuButtonOffset = 3;
 
-// The minimum width of the location bar when browser actions are visible.
-static const int kMinLocationBarWidthWithBrowserActions = 400;
-
 // Padding to the right of the location bar
 static const int kPaddingRight = 2;
 
@@ -75,82 +76,10 @@ static const int kPopupBottomSpacingGlass = 1;
 static SkBitmap* kPopupBackgroundEdge = NULL;
 
 ////////////////////////////////////////////////////////////////////////////////
-// EncodingMenuModel
-
-EncodingMenuModel::EncodingMenuModel(Browser* browser)
-    : SimpleMenuModel(this),
-      browser_(browser) {
-  Build();
-}
-
-void EncodingMenuModel::Build() {
-  EncodingMenuController::EncodingMenuItemList encoding_menu_items;
-  EncodingMenuController encoding_menu_controller;
-  encoding_menu_controller.GetEncodingMenuItems(browser_->profile(),
-                                                &encoding_menu_items);
-
-  int group_id = 0;
-  EncodingMenuController::EncodingMenuItemList::iterator it =
-      encoding_menu_items.begin();
-  for (; it != encoding_menu_items.end(); ++it) {
-    int id = it->first;
-    string16& label = it->second;
-    if (id == 0) {
-      AddSeparator();
-    } else {
-      if (id == IDC_ENCODING_AUTO_DETECT) {
-        AddCheckItem(id, label);
-      } else {
-        // Use the id of the first radio command as the id of the group.
-        if (group_id <= 0)
-          group_id = id;
-        AddRadioItem(id, label, group_id);
-      }
-    }
-  }
-}
-
-bool EncodingMenuModel::IsCommandIdChecked(int command_id) const {
-  TabContents* current_tab = browser_->GetSelectedTabContents();
-  EncodingMenuController controller;
-  return controller.IsItemChecked(browser_->profile(),
-                                  current_tab->encoding(), command_id);
-}
-
-bool EncodingMenuModel::IsCommandIdEnabled(int command_id) const {
-  return browser_->command_updater()->IsCommandEnabled(command_id);
-}
-
-bool EncodingMenuModel::GetAcceleratorForCommandId(
-    int command_id,
-    views::Accelerator* accelerator) {
-  return false;
-}
-
-void EncodingMenuModel::ExecuteCommand(int command_id) {
-  browser_->ExecuteCommand(command_id);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// EncodingMenuModel
-
-ZoomMenuModel::ZoomMenuModel(views::SimpleMenuModel::Delegate* delegate)
-    : SimpleMenuModel(delegate) {
-  Build();
-}
-
-void ZoomMenuModel::Build() {
-  AddItemWithStringId(IDC_ZOOM_PLUS, IDS_ZOOM_PLUS);
-  AddItemWithStringId(IDC_ZOOM_NORMAL, IDS_ZOOM_NORMAL);
-  AddItemWithStringId(IDC_ZOOM_MINUS, IDS_ZOOM_MINUS);
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, public:
 
 ToolbarView::ToolbarView(Browser* browser)
     : model_(browser->toolbar_model()),
-      acc_focused_view_(NULL),
       back_(NULL),
       forward_(NULL),
       reload_(NULL),
@@ -165,8 +94,10 @@ ToolbarView::ToolbarView(Browser* browser)
       profile_(NULL),
       browser_(browser),
       profiles_menu_contents_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          profiles_helper_(new GetProfilesHelper(this))) {
+      last_focused_view_storage_id_(-1),
+      menu_bar_emulation_mode_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+  SetID(VIEW_ID_TOOLBAR);
   browser_->command_updater()->AddCommandObserver(IDC_BACK, this);
   browser_->command_updater()->AddCommandObserver(IDC_FORWARD, this);
   browser_->command_updater()->AddCommandObserver(IDC_RELOAD, this);
@@ -184,14 +115,17 @@ ToolbarView::ToolbarView(Browser* browser)
 }
 
 ToolbarView::~ToolbarView() {
-  profiles_helper_->OnDelegateDeleted();
+  if (menu_bar_emulation_mode_) {
+    focus_manager_->UnregisterAccelerators(this);
+    focus_manager_->RemoveFocusChangeListener(this);
+  }
 }
 
 void ToolbarView::Init(Profile* profile) {
-  back_menu_model_.reset(new BackForwardMenuModelViews(
-      browser_, BackForwardMenuModel::BACKWARD_MENU, GetWidget()));
-  forward_menu_model_.reset(new BackForwardMenuModelViews(
-      browser_, BackForwardMenuModel::FORWARD_MENU, GetWidget()));
+  back_menu_model_.reset(new BackForwardMenuModel(
+      browser_, BackForwardMenuModel::BACKWARD_MENU));
+  forward_menu_model_.reset(new BackForwardMenuModel(
+      browser_, BackForwardMenuModel::FORWARD_MENU));
 
   // Create all the individual Views in the Toolbar.
   CreateLeftSideControls();
@@ -201,6 +135,11 @@ void ToolbarView::Init(Profile* profile) {
   show_home_button_.Init(prefs::kShowHomeButton, profile->GetPrefs(), this);
 
   SetProfile(profile);
+  if (!app_menu_model_.get()) {
+    SetAppMenuModel(new AppMenuModel(this, browser_));
+  }
+
+  focus_manager_ = GetFocusManager();
 }
 
 void ToolbarView::SetProfile(Profile* profile) {
@@ -214,39 +153,103 @@ void ToolbarView::SetProfile(Profile* profile) {
 void ToolbarView::Update(TabContents* tab, bool should_restore_state) {
   if (location_bar_)
     location_bar_->Update(should_restore_state ? tab : NULL);
+
+  if (browser_actions_)
+    browser_actions_->RefreshBrowserActionViews();
 }
 
-int ToolbarView::GetNextAccessibleViewIndex(int view_index, bool nav_left) {
-  int modifier = 1;
+void ToolbarView::SetAppMenuModel(AppMenuModel* model) {
+  app_menu_model_.reset(model);
+  app_menu_menu_.reset(new views::Menu2(app_menu_model_.get()));
+}
 
-  if (nav_left)
-    modifier = -1;
+void ToolbarView::EnterMenuBarEmulationMode(int last_focused_view_storage_id,
+                                            views::MenuButton* menu_to_focus) {
+  last_focused_view_storage_id_ = last_focused_view_storage_id;
+  if (!menu_to_focus)
+    menu_to_focus = page_menu_;
 
-  int current_view_index = view_index + modifier;
-
-  while ((current_view_index >= 0) &&
-         (current_view_index < GetChildViewCount())) {
-    // Skip the location bar, as it has its own keyboard navigation. Also skip
-    // any views that cannot be interacted with.
-    if (current_view_index == GetChildIndex(location_bar_) ||
-        !GetChildViewAt(current_view_index)->IsEnabled() ||
-        !GetChildViewAt(current_view_index)->IsVisible()) {
-      current_view_index += modifier;
-      continue;
-    }
-    // Update view_index with the available button index found.
-    view_index = current_view_index;
-    break;
+  // If we're already in the menu bar emulation mode, just set the focus.
+  if (menu_bar_emulation_mode_) {
+    menu_to_focus->RequestFocus();
+    return;
   }
-  // Returns the next available button index, or if no button is available in
-  // the specified direction, remains where it was.
-  return view_index;
+
+  // Make the menus focusable and set focus to the initial menu.
+  menu_bar_emulation_mode_ = true;
+  page_menu_->SetFocusable(true);
+  app_menu_->SetFocusable(true);
+  menu_to_focus->RequestFocus();
+
+  // Listen so we know when focus has moved to something other than one
+  // of these menus.
+  focus_manager_->AddFocusChangeListener(this);
+
+  // Add accelerators so that the usual keys used to interact with a
+  // menu bar work as expected.
+  views::Accelerator return_key(base::VKEY_RETURN, false, false, false);
+  focus_manager_->RegisterAccelerator(return_key, this);
+  views::Accelerator space(base::VKEY_SPACE, false, false, false);
+  focus_manager_->RegisterAccelerator(space, this);
+  views::Accelerator escape(base::VKEY_ESCAPE, false, false, false);
+  focus_manager_->RegisterAccelerator(escape, this);
+  views::Accelerator down(base::VKEY_DOWN, false, false, false);
+  focus_manager_->RegisterAccelerator(down, this);
+  views::Accelerator up(base::VKEY_UP, false, false, false);
+  focus_manager_->RegisterAccelerator(up, this);
+  views::Accelerator left(base::VKEY_LEFT, false, false, false);
+  focus_manager_->RegisterAccelerator(left, this);
+  views::Accelerator right(base::VKEY_RIGHT, false, false, false);
+  focus_manager_->RegisterAccelerator(right, this);
+}
+
+void ToolbarView::AddMenuListener(views::MenuListener* listener) {
+  menu_listeners_.push_back(listener);
+}
+
+void ToolbarView::RemoveMenuListener(views::MenuListener* listener) {
+  for (std::vector<views::MenuListener*>::iterator iter =
+      menu_listeners_.begin();
+    iter != menu_listeners_.end();
+    ++iter) {
+      if (*iter == listener) {
+        menu_listeners_.erase(iter);
+        return;
+      }
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// ToolbarView, FocusChangeListener overrides:
+
+void ToolbarView::FocusWillChange(views::View* focused_before,
+                                  views::View* focused_now) {
+  // If the focus is switching to something outside the menu bar,
+  // take it out of the focus traversal.
+  if (focused_now != NULL &&
+      focused_now != page_menu_ &&
+      focused_now != app_menu_) {
+    // Post ExitMenuBarEmulationMode to the queue rather than running it
+    // right away, because otherwise we'll remove ourselves from the
+    // list of listeners while FocusManager is in the middle of iterating
+    // over that list.
+    MessageLoop::current()->PostTask(
+        FROM_HERE, method_factory_.NewRunnableMethod(
+            &ToolbarView::ExitMenuBarEmulationMode));
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// ToolbarView, AccessibleToolbarView overrides:
+
+bool ToolbarView::IsAccessibleViewTraversable(views::View* view) {
+  return view != location_bar_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, Menu::BaseControllerDelegate overrides:
 
-bool ToolbarView::GetAcceleratorInfo(int id, views::Accelerator* accel) {
+bool ToolbarView::GetAcceleratorInfo(int id, menus::Accelerator* accel) {
   return GetWidget()->GetAccelerator(id, accel);
 }
 
@@ -264,39 +267,6 @@ void ToolbarView::RunMenu(views::View* source, const gfx::Point& pt) {
     default:
       NOTREACHED() << "Invalid source menu.";
   }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// ToolbarView, GetProfilesHelper::Delegate implementation:
-
-void ToolbarView::OnGetProfilesDone(
-    const std::vector<std::wstring>& profiles) {
-  // Nothing to do if the menu has gone away.
-  if (!profiles_menu_contents_.get())
-    return;
-
-  // Store the latest list of profiles in the browser.
-  browser_->set_user_data_dir_profiles(profiles);
-
-  // Add direct sub menu items for profiles.
-  std::vector<std::wstring>::const_iterator iter = profiles.begin();
-  for (int i = IDC_NEW_WINDOW_PROFILE_0;
-       (i <= IDC_NEW_WINDOW_PROFILE_LAST) && (iter != profiles.end());
-       ++i, ++iter)
-    profiles_menu_contents_->AddItem(i, WideToUTF16Hack(*iter));
-
-  // If there are more profiles then show "Other" link.
-  if (iter != profiles.end()) {
-    profiles_menu_contents_->AddSeparator();
-    profiles_menu_contents_->AddItemWithStringId(IDC_SELECT_PROFILE,
-                                                 IDS_SELECT_PROFILE);
-  }
-
-  // Always show a link to select a new profile.
-  profiles_menu_contents_->AddSeparator();
-  profiles_menu_contents_->AddItemWithStringId(
-      IDC_NEW_PROFILE,
-      IDS_SELECT_PROFILE_DIALOG_NEW_PROFILE_ENTRY);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -354,6 +324,12 @@ void ToolbarView::ButtonPressed(
       // ongoing user edits, since it doesn't realize this is a user-initiated
       // action.
       location_bar_->Revert();
+      // Shift-clicking or Ctrl-clicking the reload button means we should
+      // ignore any cached content.
+      // TODO(avayvod): eliminate duplication of this logic in
+      // CompactLocationBarView.
+      if (id == IDC_RELOAD && (event.IsShiftDown() || event.IsControlDown()))
+        id = IDC_RELOAD_IGNORING_CACHE;
       break;
   }
   browser_->ExecuteCommandWithDisposition(
@@ -400,7 +376,7 @@ void ToolbarView::Observe(NotificationType type,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ToolbarView, views::SimpleMenuModel::Delegate implementation:
+// ToolbarView, menus::SimpleMenuModel::Delegate implementation:
 
 bool ToolbarView::IsCommandIdChecked(int command_id) const {
   if (command_id == IDC_SHOW_BOOKMARK_BAR)
@@ -413,7 +389,7 @@ bool ToolbarView::IsCommandIdEnabled(int command_id) const {
 }
 
 bool ToolbarView::GetAcceleratorForCommandId(int command_id,
-                                             views::Accelerator* accelerator) {
+    menus::Accelerator* accelerator) {
   // The standard Ctrl-X, Ctrl-V and Ctrl-C are not defined as accelerators
   // anywhere so we need to check for them explicitly here.
   // TODO(cpu) Bug 1109102. Query WebKit land for the actual bindings.
@@ -438,6 +414,43 @@ void ToolbarView::ExecuteCommand(int command_id) {
 
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, views::View overrides:
+
+bool ToolbarView::AcceleratorPressed(
+    const views::Accelerator& accelerator) {
+  // The only accelerators we handle here are if the menus are focused.
+  views::View* focused_view = GetFocusManager()->GetFocusedView();
+  if (focused_view != page_menu_ && focused_view != app_menu_) {
+    ExitMenuBarEmulationMode();
+    return false;
+  }
+
+  // Safe to cast, given the check above.
+  views::MenuButton* menu = static_cast<views::MenuButton*>(focused_view);
+  switch (accelerator.GetKeyCode()) {
+    case base::VKEY_ESCAPE:
+      RestoreLastFocusedView();
+      return true;
+    case base::VKEY_LEFT:
+    case base::VKEY_RIGHT:
+      if (menu == app_menu_)
+        page_menu_->RequestFocus();
+      else
+        app_menu_->RequestFocus();
+      return true;
+    case base::VKEY_UP:
+    case base::VKEY_DOWN:
+    case base::VKEY_RETURN:
+    case base::VKEY_SPACE:
+      // Hide the tooltip before activating a menu button.
+      if (GetWidget()->GetTooltipManager())
+        GetWidget()->GetTooltipManager()->HideKeyboardTooltip();
+
+      ActivateMenuButton(menu);
+      return true;
+    default:
+      return false;
+  }
+}
 
 gfx::Size ToolbarView::GetPreferredSize() {
   if (IsDisplayModeNormal()) {
@@ -529,20 +542,6 @@ void ToolbarView::Layout() {
       app_menu_width - page_menu_width - browser_actions_width -
       kMenuButtonOffset - go_button_width - location_x;
 
-  // We wait until the width of location bar is a minimum allowed. After this
-  // state, the width available for the browser actions is compromised until
-  // it can hold a minimum number of browser actions (currently 2). After this
-  // state, the location bar width starts shrinking again, with the minimum
-  // number of browser actions sticking on the the right of the location bar.
-  // TODO(sidchat): Use percentage width instead of fixed width to determine
-  //                minimum width of the location bar. BUG=24316.
-  if (available_width < kMinLocationBarWidthWithBrowserActions &&
-      browser_actions_width > 0) {
-    available_width += browser_actions_width;
-    browser_actions_width = browser_actions_->GetClippedPreferredWidth(
-        available_width - kMinLocationBarWidthWithBrowserActions);
-    available_width -= browser_actions_width;
-  }
   location_bar_->SetBounds(location_x, child_y, std::max(available_width, 0),
                            child_height);
 
@@ -604,194 +603,15 @@ void ToolbarView::ThemeChanged() {
   LoadRightSideControlsImages();
 }
 
-void ToolbarView::ShowContextMenu(int x, int y, bool is_mouse_gesture) {
-  if (acc_focused_view_)
-    acc_focused_view_->ShowContextMenu(x, y, is_mouse_gesture);
-}
-
-void ToolbarView::DidGainFocus() {
-  // Check to see if MSAA focus should be restored to previously focused button,
-  // and if button is an enabled, visibled child of toolbar.
-  if (!acc_focused_view_ ||
-      (acc_focused_view_->GetParent()->GetID() != VIEW_ID_TOOLBAR) ||
-      !acc_focused_view_->IsEnabled() ||
-      !acc_focused_view_->IsVisible()) {
-    // Find first accessible child (-1 to start search at parent).
-    int first_acc_child = GetNextAccessibleViewIndex(-1, false);
-
-    // No buttons enabled or visible.
-    if (first_acc_child == -1)
-      return;
-
-    set_acc_focused_view(GetChildViewAt(first_acc_child));
-  }
-
-  // Default focus is on the toolbar.
-  int view_index = VIEW_ID_TOOLBAR;
-
-  // Set hot-tracking for child, and update focused_view for MSAA focus event.
-  if (acc_focused_view_) {
-    acc_focused_view_->SetHotTracked(true);
-
-    // Show the tooltip for the view that got the focus.
-    if (GetWidget()->GetTooltipManager())
-      GetWidget()->GetTooltipManager()->ShowKeyboardTooltip(acc_focused_view_);
-
-    // Update focused_view with MSAA-adjusted child id.
-    view_index = acc_focused_view_->GetID();
-  }
-
-#if defined(OS_WIN)
-  gfx::NativeView wnd = GetWidget()->GetNativeView();
-
-  // Notify Access Technology that there was a change in keyboard focus.
-  ::NotifyWinEvent(EVENT_OBJECT_FOCUS, wnd, OBJID_CLIENT,
-                   static_cast<LONG>(view_index));
-#else
-  // TODO(port): deal with toolbar a11y focus.
-  NOTIMPLEMENTED();
-#endif
-}
-
-void ToolbarView::WillLoseFocus() {
-  // Any tooltips that are active should be hidden when toolbar loses focus.
-  if (GetWidget() && GetWidget()->GetTooltipManager())
-    GetWidget()->GetTooltipManager()->HideKeyboardTooltip();
-
-  // Removes the Child MSAA view's focus when toolbar loses focus.
-  if (acc_focused_view_) {
-    acc_focused_view_->SetHotTracked(false);
-    acc_focused_view_ = NULL;
-  }
-}
-
-void ToolbarView::RequestFocus() {
-  // When the toolbar needs to request focus, the default implementation of
-  // View::RequestFocus requires the View to be focusable. Since ToolbarView is
-  // not technically focused, we need to temporarily set and remove focus so
-  // that it can focus back to its MSAA focused state.
-  if (acc_focused_view_) {
-    SetFocusable(true);
-    View::RequestFocus();
-    SetFocusable(false);
-  } else {
-    View::RequestFocus();
-  }
-}
-
-bool ToolbarView::OnKeyPressed(const views::KeyEvent& e) {
-  // Paranoia check, button should be initialized upon toolbar gaining focus.
-  if (!acc_focused_view_)
-    return false;
-
-  int focused_view = GetChildIndex(acc_focused_view_);
-  int next_view = focused_view;
-
-  switch (e.GetKeyCode()) {
-    case base::VKEY_LEFT:
-      next_view = GetNextAccessibleViewIndex(focused_view, true);
-      break;
-    case base::VKEY_RIGHT:
-      next_view = GetNextAccessibleViewIndex(focused_view, false);
-      break;
-    case base::VKEY_DOWN:
-    case base::VKEY_RETURN:
-      // VKEY_SPACE is already handled by the default case.
-      if (acc_focused_view_->GetID() == VIEW_ID_PAGE_MENU ||
-          acc_focused_view_->GetID() == VIEW_ID_APP_MENU) {
-        // If a menu button in toolbar is activated and its menu is displayed,
-        // then active tooltip should be hidden.
-        if (GetWidget()->GetTooltipManager())
-          GetWidget()->GetTooltipManager()->HideKeyboardTooltip();
-        // Safe to cast, given to above view id check.
-        static_cast<views::MenuButton*>(acc_focused_view_)->Activate();
-        if (!acc_focused_view_) {
-          // Activate triggered a focus change, don't try to change focus.
-          return true;
-        }
-        // Re-enable hot-tracking, as Activate() will disable it.
-        acc_focused_view_->SetHotTracked(true);
-        break;
-      }
-    default:
-      // If key is not handled explicitly, pass it on to view.
-      return acc_focused_view_->OnKeyPressed(e);
-  }
-
-  // No buttons enabled or visible.
-  if (next_view == -1)
-    return false;
-
-  // Only send an event if focus moved.
-  if (next_view != focused_view) {
-    // Remove hot-tracking from old focused button.
-    acc_focused_view_->SetHotTracked(false);
-
-    // All is well, update the focused child member variable.
-    acc_focused_view_ = GetChildViewAt(next_view);
-
-    // Hot-track new focused button.
-    acc_focused_view_->SetHotTracked(true);
-
-    // Show the tooltip for the view that got the focus.
-    if (GetWidget()->GetTooltipManager()) {
-      GetWidget()->GetTooltipManager()->
-          ShowKeyboardTooltip(GetChildViewAt(next_view));
-    }
-#if defined(OS_WIN)
-    // Retrieve information to generate an MSAA focus event.
-    gfx::NativeView wnd = GetWidget()->GetNativeView();
-    int view_id = acc_focused_view_->GetID();
-    // Notify Access Technology that there was a change in keyboard focus.
-    ::NotifyWinEvent(EVENT_OBJECT_FOCUS, wnd, OBJID_CLIENT,
-                     static_cast<LONG>(view_id));
-#else
-    NOTIMPLEMENTED();
-#endif
-    return true;
-  }
-  return false;
-}
-
-bool ToolbarView::OnKeyReleased(const views::KeyEvent& e) {
-  // Paranoia check, button should be initialized upon toolbar gaining focus.
-  if (!acc_focused_view_)
-    return false;
-
-  // Have keys be handled by the views themselves.
-  return acc_focused_view_->OnKeyReleased(e);
-}
-
-bool ToolbarView::GetAccessibleName(std::wstring* name) {
-  if (!accessible_name_.empty()) {
-    (*name).assign(accessible_name_);
-    return true;
-  }
-  return false;
-}
-
-bool ToolbarView::GetAccessibleRole(AccessibilityTypes::Role* role) {
-  DCHECK(role);
-
-  *role = AccessibilityTypes::ROLE_TOOLBAR;
-  return true;
-}
-
-void ToolbarView::SetAccessibleName(const std::wstring& name) {
-  accessible_name_.assign(name);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, views::DragController implementation:
 
 void ToolbarView::WriteDragData(views::View* sender,
-                                int press_x,
-                                int press_y,
+                                const gfx::Point& press_pt,
                                 OSExchangeData* data) {
-  DCHECK(
-      GetDragOperations(sender, press_x, press_y) != DragDropTypes::DRAG_NONE);
+  DCHECK(GetDragOperations(sender, press_pt) != DragDropTypes::DRAG_NONE);
 
-  UserMetrics::RecordAction(L"Toolbar_DragStar", profile_);
+  UserMetrics::RecordAction(UserMetricsAction("Toolbar_DragStar"), profile_);
 
   // If there is a bookmark for the URL, add the bookmark drag data for it. We
   // do this to ensure the bookmark is moved, rather than creating an new
@@ -814,7 +634,7 @@ void ToolbarView::WriteDragData(views::View* sender,
   }
 }
 
-int ToolbarView::GetDragOperations(views::View* sender, int x, int y) {
+int ToolbarView::GetDragOperations(views::View* sender, const gfx::Point& p) {
   DCHECK(sender == star_);
   TabContents* tab = browser_->GetSelectedTabContents();
   if (!tab || !tab->ShouldDisplayURL() || !tab->GetURL().is_valid()) {
@@ -878,14 +698,12 @@ void ToolbarView::CreateLeftSideControls() {
 }
 
 void ToolbarView::CreateCenterStack(Profile *profile) {
-  star_ = new ToolbarStarToggle(this, this);
-  star_->set_tag(IDC_BOOKMARK_PAGE);
+  star_ = new ToolbarStarToggle(this);
   star_->SetDragController(this);
-  star_->SetTooltipText(l10n_util::GetString(IDS_TOOLTIP_STAR));
-  star_->SetToggledTooltipText(l10n_util::GetString(IDS_TOOLTIP_STARRED));
-  star_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_STAR));
-  star_->SetID(VIEW_ID_STAR_BUTTON);
-  AddChildView(star_);
+  star_->set_profile(profile);
+  star_->set_host_view(this);
+  star_->set_bubble_positioner(this);
+  star_->Init();
 
   location_bar_ = new LocationBarView(profile, browser_->command_updater(),
                                       model_, this,
@@ -899,6 +717,7 @@ void ToolbarView::CreateCenterStack(Profile *profile) {
 
   LoadCenterStackImages();
 
+  AddChildView(star_);
   location_bar_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_LOCATION));
   AddChildView(location_bar_);
   location_bar_->Init();
@@ -906,7 +725,8 @@ void ToolbarView::CreateCenterStack(Profile *profile) {
 }
 
 void ToolbarView::CreateRightSideControls(Profile* profile) {
-  browser_actions_ = new BrowserActionsContainer(profile, this);
+  browser_actions_ = new BrowserActionsContainer(browser_, this,
+                                                 true);  // should_save_size
 
   page_menu_ = new views::MenuButton(NULL, std::wstring(), this, false);
   page_menu_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_PAGE));
@@ -977,25 +797,12 @@ void ToolbarView::LoadLeftSideControlsImages() {
 }
 
 void ToolbarView::LoadCenterStackImages() {
+  star_->LoadImages();
+
   ThemeProvider* tp = GetThemeProvider();
 
   SkColor color = tp->GetColor(BrowserThemeProvider::COLOR_BUTTON_BACKGROUND);
   SkBitmap* background = tp->GetBitmapNamed(IDR_THEME_BUTTON_BACKGROUND);
-
-  star_->SetImage(views::CustomButton::BS_NORMAL, tp->GetBitmapNamed(IDR_STAR));
-  star_->SetImage(views::CustomButton::BS_HOT, tp->GetBitmapNamed(IDR_STAR_H));
-  star_->SetImage(views::CustomButton::BS_PUSHED,
-      tp->GetBitmapNamed(IDR_STAR_P));
-  star_->SetImage(views::CustomButton::BS_DISABLED,
-      tp->GetBitmapNamed(IDR_STAR_D));
-  star_->SetToggledImage(views::CustomButton::BS_NORMAL,
-      tp->GetBitmapNamed(IDR_STARRED));
-  star_->SetToggledImage(views::CustomButton::BS_HOT,
-      tp->GetBitmapNamed(IDR_STARRED_H));
-  star_->SetToggledImage(views::CustomButton::BS_PUSHED,
-      tp->GetBitmapNamed(IDR_STARRED_P));
-  star_->SetBackground(color, background,
-      tp->GetBitmapNamed(IDR_STAR_MASK));
 
   go_->SetImage(views::CustomButton::BS_NORMAL, tp->GetBitmapNamed(IDR_GO));
   go_->SetImage(views::CustomButton::BS_HOT, tp->GetBitmapNamed(IDR_GO_H));
@@ -1028,138 +835,101 @@ void ToolbarView::LoadRightSideControlsImages() {
 }
 
 void ToolbarView::RunPageMenu(const gfx::Point& pt) {
-  CreatePageMenu();
+  page_menu_model_.reset(new PageMenuModel(this, browser_));
+  page_menu_menu_.reset(new views::Menu2(page_menu_model_.get()));
+  for (unsigned int i = 0; i < menu_listeners_.size(); i++) {
+    page_menu_menu_->AddMenuListener(menu_listeners_[i]);
+  }
   page_menu_menu_->RunMenuAt(pt, views::Menu2::ALIGN_TOPRIGHT);
+  for (unsigned int i = 0; i < menu_listeners_.size(); i++) {
+    page_menu_menu_->RemoveMenuListener(menu_listeners_[i]);
+  }
+  SwitchToOtherMenuIfNeeded(page_menu_menu_.get(), app_menu_);
 }
 
 void ToolbarView::RunAppMenu(const gfx::Point& pt) {
-  CreateAppMenu();
+  if (app_menu_model_->BuildProfileSubMenu())
+    app_menu_menu_->Rebuild();
+  for (unsigned int i = 0; i < menu_listeners_.size(); i++) {
+    app_menu_menu_->AddMenuListener(menu_listeners_[i]);
+  }
   app_menu_menu_->RunMenuAt(pt, views::Menu2::ALIGN_TOPRIGHT);
+  for (unsigned int i = 0; i < menu_listeners_.size(); i++) {
+    app_menu_menu_->RemoveMenuListener(menu_listeners_[i]);
+  }
+  SwitchToOtherMenuIfNeeded(app_menu_menu_.get(), page_menu_);
 }
 
-void ToolbarView::CreatePageMenu() {
-  if (page_menu_contents_.get())
-    return;
+void ToolbarView::SwitchToOtherMenuIfNeeded(
+    views::Menu2* previous_menu, views::MenuButton* next_menu_button) {
+  // If the user tried to move to the right or left, switch from the
+  // app menu to the page menu. Switching to the next menu is delayed
+  // until the next event loop so that the call stack that initiated
+  // activating the first menu can return. (If we didn't do this, the
+  // call stack would grow each time the user switches menus, and
+  // the actions taken after the user finally exits a menu would cause
+  // flicker.)
+  views::MenuWrapper::MenuAction action = previous_menu->GetMenuAction();
+  if (action == views::MenuWrapper::MENU_ACTION_NEXT ||
+      action == views::MenuWrapper::MENU_ACTION_PREVIOUS) {
+    MessageLoop::current()->PostTask(
+        FROM_HERE, method_factory_.NewRunnableMethod(
+            &ToolbarView::ActivateMenuButton,
+            next_menu_button));
+  }
+}
 
-  page_menu_contents_.reset(new views::SimpleMenuModel(this));
-  page_menu_contents_->AddItemWithStringId(IDC_CREATE_SHORTCUTS,
-                                           IDS_CREATE_SHORTCUTS);
-  page_menu_contents_->AddSeparator();
-  page_menu_contents_->AddItemWithStringId(IDC_CUT, IDS_CUT);
-  page_menu_contents_->AddItemWithStringId(IDC_COPY, IDS_COPY);
-  page_menu_contents_->AddItemWithStringId(IDC_PASTE, IDS_PASTE);
-  page_menu_contents_->AddSeparator();
-  page_menu_contents_->AddItemWithStringId(IDC_FIND, IDS_FIND);
-  page_menu_contents_->AddItemWithStringId(IDC_SAVE_PAGE, IDS_SAVE_PAGE);
-  page_menu_contents_->AddItemWithStringId(IDC_PRINT, IDS_PRINT);
-  page_menu_contents_->AddSeparator();
-
-  zoom_menu_contents_.reset(new ZoomMenuModel(this));
-  page_menu_contents_->AddSubMenuWithStringId(
-      IDS_ZOOM_MENU, zoom_menu_contents_.get());
-
-  encoding_menu_contents_.reset(new EncodingMenuModel(browser_));
-  page_menu_contents_->AddSubMenuWithStringId(
-      IDS_ENCODING_MENU, encoding_menu_contents_.get());
+void ToolbarView::ActivateMenuButton(views::MenuButton* menu_button) {
+#if defined(OS_LINUX)
+  // Under GTK, opening a pop-up menu causes the main window to lose focus.
+  // Focus is automatically returned when the menu closes.
+  //
+  // Make sure that the menu button being activated has focus, so that
+  // when the user escapes from the menu without selecting anything, focus
+  // will be returned here.
+  if (!menu_button->HasFocus()) {
+    menu_button->RequestFocus();
+    GetFocusManager()->StoreFocusedView();
+  }
+#endif
 
 #if defined(OS_WIN)
-  CreateDevToolsMenuContents();
-  page_menu_contents_->AddSeparator();
-  page_menu_contents_->AddSubMenuWithStringId(
-      IDS_DEVELOPER_MENU, devtools_menu_contents_.get());
-
-  page_menu_contents_->AddSeparator();
-  page_menu_contents_->AddItemWithStringId(IDC_REPORT_BUG, IDS_REPORT_BUG);
-#else
-  NOTIMPLEMENTED();
+  // On Windows, we have to explicitly clear the focus before opening
+  // the pop-up menu, then set the focus again when it closes.
+  GetFocusManager()->ClearFocus();
 #endif
 
-  page_menu_menu_.reset(new views::Menu2(page_menu_contents_.get()));
-}
+  // Tell the menu button to activate, opening its pop-up menu.
+  menu_button->Activate();
 
 #if defined(OS_WIN)
-void ToolbarView::CreateDevToolsMenuContents() {
-  devtools_menu_contents_.reset(new views::SimpleMenuModel(this));
-  devtools_menu_contents_->AddItem(IDC_VIEW_SOURCE,
-                                   l10n_util::GetString(IDS_VIEW_SOURCE));
-  if (g_browser_process->have_inspector_files()) {
-    devtools_menu_contents_->AddItem(IDC_DEV_TOOLS,
-                                     l10n_util::GetString(IDS_DEV_TOOLS));
-  }
-  devtools_menu_contents_->AddItem(IDC_TASK_MANAGER,
-                                   l10n_util::GetString(IDS_TASK_MANAGER));
+  EnterMenuBarEmulationMode(last_focused_view_storage_id_, menu_button);
+#endif
 }
-#endif
 
-void ToolbarView::CreateAppMenu() {
-  // We always rebuild the app menu so that we can get the current state of
-  // the sync system.
+void ToolbarView::ExitMenuBarEmulationMode() {
+  if (page_menu_->HasFocus() || app_menu_->HasFocus())
+    RestoreLastFocusedView();
 
-  app_menu_contents_.reset(new views::SimpleMenuModel(this));
-  app_menu_contents_->AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
-  app_menu_contents_->AddItemWithStringId(IDC_NEW_WINDOW, IDS_NEW_WINDOW);
-  app_menu_contents_->AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW,
-                                          IDS_NEW_INCOGNITO_WINDOW);
-  // Enumerate profiles asynchronously and then create the parent menu item.
-  // We will create the child menu items for this once the asynchronous call is
-  // done.  See OnGetProfilesDone().
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kEnableUserDataDirProfiles) &&
-      !profiles_menu_contents_.get()) {
-    profiles_helper_->GetProfiles(NULL);
-    profiles_menu_contents_.reset(new views::SimpleMenuModel(this));
-    app_menu_contents_->AddSubMenuWithStringId(IDS_PROFILE_MENU,
-                                               profiles_menu_contents_.get());
+  focus_manager_->UnregisterAccelerators(this);
+  focus_manager_->RemoveFocusChangeListener(this);
+  page_menu_->SetFocusable(false);
+  app_menu_->SetFocusable(false);
+  menu_bar_emulation_mode_ = false;
+}
+
+void ToolbarView::RestoreLastFocusedView() {
+  views::ViewStorage* view_storage = views::ViewStorage::GetSharedInstance();
+  views::View* last_focused_view =
+      view_storage->RetrieveView(last_focused_view_storage_id_);
+  if (last_focused_view) {
+    last_focused_view->RequestFocus();
+  } else {
+    // Focus the location bar
+    views::View* view = GetAncestorWithClassName(BrowserView::kViewClassName);
+    if (view) {
+      BrowserView* browser_view = static_cast<BrowserView*>(view);
+      browser_view->SetFocusToLocationBar(false);
+    }
   }
-
-  app_menu_contents_->AddSeparator();
-  app_menu_contents_->AddCheckItemWithStringId(IDC_SHOW_BOOKMARK_BAR,
-                                               IDS_SHOW_BOOKMARK_BAR);
-  app_menu_contents_->AddItemWithStringId(IDC_FULLSCREEN, IDS_FULLSCREEN);
-  app_menu_contents_->AddSeparator();
-  app_menu_contents_->AddItemWithStringId(IDC_SHOW_HISTORY, IDS_SHOW_HISTORY);
-  app_menu_contents_->AddItemWithStringId(IDC_SHOW_BOOKMARK_MANAGER,
-                                          IDS_BOOKMARK_MANAGER);
-  app_menu_contents_->AddItemWithStringId(IDC_SHOW_DOWNLOADS,
-                                          IDS_SHOW_DOWNLOADS);
-
-  // Create the manage extensions menu item.
-  ExtensionsService* extensions_service =
-      browser_->profile()->GetExtensionsService();
-  if (extensions_service && extensions_service->extensions_enabled()) {
-    app_menu_contents_->AddItemWithStringId(IDC_MANAGE_EXTENSIONS,
-                                            IDS_SHOW_EXTENSIONS);
-  }
-
-  app_menu_contents_->AddSeparator();
-#if defined(BROWSER_SYNC)
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableSync)) {
-    std::wstring label;
-    std::wstring link;
-    // TODO(timsteele): Need a ui helper method to just get the type without
-    // needing labels.
-    SyncStatusUIHelper::MessageType type = SyncStatusUIHelper::GetLabels(
-        browser_->profile()->GetProfileSyncService(), &label, &link);
-    label = type == SyncStatusUIHelper::SYNCED ?
-        l10n_util::GetString(IDS_SYNC_MENU_BOOKMARKS_SYNCED_LABEL) :
-        type == SyncStatusUIHelper::SYNC_ERROR ?
-        l10n_util::GetString(IDS_SYNC_MENU_BOOKMARK_SYNC_ERROR_LABEL) :
-        l10n_util::GetString(IDS_SYNC_START_SYNC_BUTTON_LABEL);
-    app_menu_contents_->AddItem(IDC_SYNC_BOOKMARKS, label);
-    app_menu_contents_->AddSeparator();
-  }
-#endif
-  app_menu_contents_->AddItem(IDC_OPTIONS,
-                              l10n_util::GetStringFUTF16(
-                                  IDS_OPTIONS,
-                                  l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
-  app_menu_contents_->AddItem(IDC_ABOUT,
-                              l10n_util::GetStringFUTF16(
-                                  IDS_ABOUT,
-                                  l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
-  app_menu_contents_->AddItemWithStringId(IDC_HELP_PAGE, IDS_HELP_PAGE);
-  app_menu_contents_->AddSeparator();
-  app_menu_contents_->AddItemWithStringId(IDC_EXIT, IDS_EXIT);
-
-  app_menu_menu_.reset(new views::Menu2(app_menu_contents_.get()));
 }

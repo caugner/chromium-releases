@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include "app/resource_bundle.h"
 #include "app/l10n_util.h"
 #include "base/compiler_specific.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/cert_store.h"
 #include "chrome/browser/page_info_model.h"
 #include "chrome/browser/page_info_window.h"
@@ -35,6 +35,8 @@
 
 #if defined(OS_WIN)
 #include "app/win_util.h"
+#elif defined(OS_LINUX)
+#include "chrome/browser/gtk/certificate_viewer.h"
 #endif
 
 namespace {
@@ -357,6 +359,8 @@ void PageInfoWindowView::ShowCertDialog(int cert_id) {
   // This next call blocks but keeps processing windows messages, making it
   // modal to the browser window.
   BOOL rv = ::CryptUIDlgViewCertificate(&view_info, &properties_changed);
+#elif defined(OS_LINUX)
+  ShowCertificateViewer(window()->GetNativeWindow(), cert_id);
 #else
   NOTIMPLEMENTED();
 #endif
@@ -395,7 +399,7 @@ Section::Section(const string16& title,
 
   head_line_label_ = new views::Label(UTF16ToWideHack(head_line));
   head_line_label_->SetFont(
-      head_line_label_->GetFont().DeriveFont(0, gfx::Font::BOLD));
+      head_line_label_->font().DeriveFont(0, gfx::Font::BOLD));
   head_line_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   AddChildView(head_line_label_);
 

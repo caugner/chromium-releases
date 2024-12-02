@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,16 @@
 #include "base/compiler_specific.h"
 #include "base/id_map.h"
 #include "base/string_util.h"
-#include "webkit/api/public/WebURL.h"
-#include "webkit/api/public/WebURLRequest.h"
-#include "webkit/api/public/WebURLResponse.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDataSource.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
 
 using WebKit::WebApplicationCacheHost;
 using WebKit::WebApplicationCacheHostClient;
+using WebKit::WebDataSource;
+using WebKit::WebFrame;
 using WebKit::WebURLRequest;
 using WebKit::WebURL;
 using WebKit::WebURLResponse;
@@ -23,6 +27,17 @@ static IDMap<WebApplicationCacheHostImpl> all_hosts;
 
 WebApplicationCacheHostImpl* WebApplicationCacheHostImpl::FromId(int id) {
   return all_hosts.Lookup(id);
+}
+
+WebApplicationCacheHostImpl* WebApplicationCacheHostImpl::FromFrame(
+    WebFrame* frame) {
+  if (!frame)
+    return NULL;
+  WebDataSource* data_source = frame->dataSource();
+  if (!data_source)
+    return NULL;
+  return static_cast<WebApplicationCacheHostImpl*>
+      (data_source->applicationCacheHost());
 }
 
 WebApplicationCacheHostImpl::WebApplicationCacheHostImpl(
@@ -60,6 +75,13 @@ void WebApplicationCacheHostImpl::OnStatusChanged(appcache::Status status) {
 }
 
 void WebApplicationCacheHostImpl::OnEventRaised(appcache::EventID event_id) {
+  // Most events change the status. Clear out what we know so that the latest
+  // status will be obtained from the backend.
+  if (PROGRESS_EVENT != event_id) {
+    has_status_ = false;
+    has_cached_status_ = false;
+  }
+
   client_->notifyEventListener(static_cast<EventID>(event_id));
 }
 
@@ -109,7 +131,7 @@ bool WebApplicationCacheHostImpl::selectCacheWithManifest(
       is_new_master_entry_ = YES;
     } else {
       is_new_master_entry_ = NO;
-      manifest_gurl = GURL::EmptyGURL();
+      manifest_gurl = GURL();
     }
     backend_->SelectCache(host_id_, document_url_,
                           kNoCacheId, manifest_gurl);
@@ -140,6 +162,11 @@ void WebApplicationCacheHostImpl::didReceiveResponseForMainResource(
     const WebURLResponse& response) {
   document_response_ = response;
   document_url_ = document_response_.url();
+  if (document_url_.has_ref()) {
+    GURL::Replacements replacements;
+    replacements.ClearRef();
+    document_url_ = document_url_.ReplaceComponents(replacements);
+  }
   is_scheme_supported_ =  IsSchemeSupported(document_url_);
   if ((document_response_.appCacheID() != kNoCacheId) ||
       !is_scheme_supported_ || !is_get_method_)
@@ -190,6 +217,10 @@ bool WebApplicationCacheHostImpl::startUpdate() {
 }
 
 bool WebApplicationCacheHostImpl::swapCache() {
+  // Cache status will change when cache is swapped. Clear out any saved idea
+  // of status so that backend will be queried for actual status.
+  has_status_ = false;
+  has_cached_status_ = false;
   return backend_->SwapCache(host_id_);
 }
 

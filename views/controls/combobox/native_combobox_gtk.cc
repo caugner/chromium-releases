@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved. Use of this
+// Copyright (c) 2010 The Chromium Authors. All rights reserved. Use of this
 // source code is governed by a BSD-style license that can be found in the
 // LICENSE file.
 
@@ -6,9 +6,11 @@
 
 #include <gtk/gtk.h>
 
+#include <algorithm>
+
 #include "app/combobox_model.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "views/controls/combobox/combobox.h"
 
 namespace views {
@@ -110,7 +112,7 @@ void NativeComboboxGtk::CreateNativeControl() {
   gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(widget), cell, TRUE);
   gtk_cell_layout_set_attributes(
       GTK_CELL_LAYOUT(widget), cell, "text", 0, NULL);
-  g_signal_connect(G_OBJECT(widget), "changed",
+  g_signal_connect(widget, "changed",
                    G_CALLBACK(CallChanged), this);
 
   NativeControlCreated(widget);
@@ -118,11 +120,10 @@ void NativeComboboxGtk::CreateNativeControl() {
 
 void NativeComboboxGtk::NativeControlCreated(GtkWidget* native_control) {
   NativeControlGtk::NativeControlCreated(native_control);
-
-  // Set the data from combobox
+  // Set the initial state of the combobox.
   UpdateFromModel();
-  // and show the 1st item by default.
-  gtk_combo_box_set_active(GTK_COMBO_BOX(native_control), 0);
+  UpdateEnabled();
+  UpdateSelectedItem();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

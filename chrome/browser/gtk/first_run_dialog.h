@@ -5,6 +5,9 @@
 #ifndef CHROME_BROWSER_GTK_FIRST_RUN_DIALOG_H_
 #define CHROME_BROWSER_GTK_FIRST_RUN_DIALOG_H_
 
+typedef struct _GtkButton GtkButton;
+typedef struct _GtkWidget GtkWidget;
+
 #include "chrome/browser/first_run.h"
 #include "chrome/browser/importer/importer.h"
 

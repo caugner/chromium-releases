@@ -9,8 +9,9 @@
 #include "chrome/common/child_process.h"
 #include "chrome/common/extensions/extension_unpacker.h"
 #include "chrome/common/extensions/update_manifest.h"
-#include "chrome/common/render_messages.h"
+#include "chrome/common/utility_messages.h"
 #include "chrome/common/web_resource/web_resource_unpacker.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 UtilityThread::UtilityThread() {
   ChildProcess::current()->AddRefProcess();
@@ -29,9 +30,10 @@ void UtilityThread::OnControlMessageReceived(const IPC::Message& msg) {
 
 void UtilityThread::OnUnpackExtension(const FilePath& extension_path) {
   ExtensionUnpacker unpacker(extension_path);
-  if (unpacker.Run() && unpacker.DumpImagesToFile()) {
+  if (unpacker.Run() && unpacker.DumpImagesToFile() &&
+      unpacker.DumpMessageCatalogsToFile()) {
     Send(new UtilityHostMsg_UnpackExtension_Succeeded(
-         *unpacker.parsed_manifest()));
+       *unpacker.parsed_manifest()));
   } else {
     Send(new UtilityHostMsg_UnpackExtension_Failed(unpacker.error_message()));
   }

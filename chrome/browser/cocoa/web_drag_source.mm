@@ -4,18 +4,21 @@
 
 #import "chrome/browser/cocoa/web_drag_source.h"
 
-#include "base/file_util.h"
+#include "base/file_path.h"
 #include "base/nsimage_cache_mac.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/task.h"
 #include "base/thread.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/download/drag_download_file.h"
+#include "chrome/browser/download/drag_download_util.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view_mac.h"
 #include "net/base/file_stream.h"
-#include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #import "third_party/mozilla/include/NSPasteboard+Utils.h"
 #include "webkit/glue/webdropdata.h"
@@ -28,22 +31,14 @@ using net::FileStream;
 
 namespace {
 
-// Make a drag image from the drop data.
-// TODO(viettrungluu): Move this somewhere more sensible.
-NSImage* MakeDragImage(const WebDropData* drop_data) {
-  // TODO(viettrungluu): Just a stub for now. Make it do something (see, e.g.,
-  // WebKit/WebKit/mac/Misc/WebNSViewExtras.m: |-_web_DragImageForElement:...|).
+// An unofficial standard pasteboard title type to be provided alongside the
+// |NSURLPboardType|.
+NSString* const kNSURLTitlePboardType = @"public.url-name";
 
-  // Default to returning a generic image.
-  return nsimage_cache::ImageNamed(@"nav.pdf");
-}
-
-// Returns a filename appropriate for the drop data (of form "FILENAME-seq.EXT"
-// if seq > 0).
+// Returns a filename appropriate for the drop data
 // TODO(viettrungluu): Refactor to make it common across platforms,
 // and move it somewhere sensible.
-FilePath GetFileNameFromDragData(
-    const WebDropData& drop_data, unsigned seq) {
+FilePath GetFileNameFromDragData(const WebDropData& drop_data) {
   // Images without ALT text will only have a file extension so we need to
   // synthesize one from the provided extension and URL.
   FilePath file_name([SysUTF16ToNSString(drop_data.file_description_filename)
@@ -52,17 +47,11 @@ FilePath GetFileNameFromDragData(
 
   if (file_name.empty()) {
     // Retrieve the name from the URL.
-    file_name = FilePath::FromWStringHack(
-        net::GetSuggestedFilename(drop_data.url, "", "", L""));
+    file_name = net::GetSuggestedFilename(drop_data.url, "", "", FilePath());
   }
 
   file_name = file_name.ReplaceExtension([SysUTF16ToNSString(
           drop_data.file_extension) fileSystemRepresentation]);
-
-  if (seq > 0) {
-    file_name =
-        file_name.InsertBeforeExtension(std::string("-")+UintToString(seq));
-  }
 
   return file_name;
 }
@@ -123,6 +112,8 @@ void PromiseWriterTask::Run() {
 
 - (id)initWithContentsView:(TabContentsViewCocoa*)contentsView
                   dropData:(const WebDropData*)dropData
+                     image:(NSImage*)image
+                    offset:(NSPoint)offset
                 pasteboard:(NSPasteboard*)pboard
          dragOperationMask:(NSDragOperation)dragOperationMask {
   if ((self = [super init])) {
@@ -131,6 +122,9 @@ void PromiseWriterTask::Run() {
 
     dropData_.reset(new WebDropData(*dropData));
     DCHECK(dropData_.get());
+
+    dragImage_.reset([image retain]);
+    imageOffset_ = offset;
 
     pasteboard_.reset([pboard retain]);
     DCHECK(pasteboard_.get());
@@ -148,6 +142,12 @@ void PromiseWriterTask::Run() {
 }
 
 - (void)lazyWriteToPasteboard:(NSPasteboard*)pboard forType:(NSString*)type {
+  // NSHTMLPboardType requires the character set to be declared. Otherwise, it
+  // assumes US-ASCII. Awesome.
+  static const string16 kHtmlHeader =
+      ASCIIToUTF16("<meta http-equiv=\"Content-Type\" "
+                   "content=\"text/html;charset=UTF-8\">");
+
   // Be extra paranoid; avoid crashing.
   if (!dropData_.get()) {
     NOTREACHED() << "No drag-and-drop data available for lazy write.";
@@ -157,16 +157,20 @@ void PromiseWriterTask::Run() {
   // HTML.
   if ([type isEqualToString:NSHTMLPboardType]) {
     DCHECK(!dropData_->text_html.empty());
-    [pboard setString:SysUTF16ToNSString(dropData_->text_html)
+    // See comment on |kHtmlHeader| above.
+    [pboard setString:SysUTF16ToNSString(kHtmlHeader + dropData_->text_html)
               forType:NSHTMLPboardType];
 
   // URL.
   } else if ([type isEqualToString:NSURLPboardType]) {
     DCHECK(dropData_->url.is_valid());
-    [pboard     setURLs:[NSArray
-        arrayWithObject:SysUTF8ToNSString(dropData_->url.spec())]
-             withTitles:[NSArray arrayWithObject:
-                            SysUTF16ToNSString(dropData_->url_title)]];
+    NSURL* url = [NSURL URLWithString:SysUTF8ToNSString(dropData_->url.spec())];
+    [url writeToPasteboard:pboard];
+
+  // URL title.
+  } else if ([type isEqualToString:kNSURLTitlePboardType]) {
+    [pboard setString:SysUTF16ToNSString(dropData_->url_title)
+              forType:kNSURLTitlePboardType];
 
   // File contents.
   } else if ([type isEqualToString:NSFileContentsPboardType] ||
@@ -179,7 +183,7 @@ void PromiseWriterTask::Run() {
                 dataWithBytes:dropData_->file_contents.data()
                        length:dropData_->file_contents.length()]]);
     [file_wrapper setPreferredFilename:SysUTF8ToNSString(
-            GetFileNameFromDragData(*dropData_, 0).value())];
+            GetFileNameFromDragData(*dropData_).value())];
     [pboard writeFileWrapper:file_wrapper];
 
   // TIFF.
@@ -223,13 +227,20 @@ void PromiseWriterTask::Run() {
                                         clickCount:1
                                           pressure:1.0];
 
-  [contentsView_ dragImage:[self dragImage]
-                        at:position
-                    offset:NSZeroSize
-                     event:dragEvent
-                pasteboard:pasteboard_
-                    source:contentsView_
-                 slideBack:YES];
+  if (dragImage_) {
+    position.x -= imageOffset_.x;
+    // Deal with Cocoa's flipped coordinate system.
+    position.y -= [dragImage_.get() size].height - imageOffset_.y;
+  }
+  // Per kwebster, offset arg is ignored, see -_web_DragImageForElement: in
+  // third_party/WebKit/WebKit/mac/Misc/WebNSViewExtras.m.
+  [window dragImage:[self dragImage]
+                 at:position
+             offset:NSZeroSize
+              event:dragEvent
+         pasteboard:pasteboard_
+             source:contentsView_
+          slideBack:YES];
 }
 
 - (void)endDragAt:(NSPoint)screenPoint
@@ -239,7 +250,7 @@ void PromiseWriterTask::Run() {
     rvh->DragSourceSystemDragEnded();
 
     // Convert |screenPoint| to view coordinates and flip it.
-    NSPoint localPoint = [contentsView_ convertPointFromBase:screenPoint];
+    NSPoint localPoint = [contentsView_ convertPoint:screenPoint fromView:nil];
     NSRect viewFrame = [contentsView_ frame];
     localPoint.y = viewFrame.size.height - localPoint.y;
     // Flip |screenPoint|.
@@ -259,7 +270,7 @@ void PromiseWriterTask::Run() {
   RenderViewHost* rvh = [contentsView_ tabContents]->render_view_host();
   if (rvh) {
     // Convert |screenPoint| to view coordinates and flip it.
-    NSPoint localPoint = [contentsView_ convertPointFromBase:screenPoint];
+    NSPoint localPoint = [contentsView_ convertPoint:screenPoint fromView:nil];
     NSRect viewFrame = [contentsView_ frame];
     localPoint.y = viewFrame.size.height - localPoint.y;
     // Flip |screenPoint|.
@@ -278,37 +289,36 @@ void PromiseWriterTask::Run() {
     return nil;
   }
 
-  FileStream* file_stream = new FileStream;
-  DCHECK(file_stream);
-  if (!file_stream)
+  FilePath fileName = downloadFileName_.empty() ?
+      GetFileNameFromDragData(*dropData_) : downloadFileName_;
+  FilePath filePath(SysNSStringToUTF8(path));
+  filePath = filePath.Append(fileName);
+  FileStream* fileStream =
+      drag_download_util::CreateFileStreamForDrop(&filePath);
+  if (!fileStream)
     return nil;
 
-  FilePath path_name(SysNSStringToUTF8(path));
-  FilePath file_name;
-  unsigned seq;
-  const unsigned k_max_seq = 99;
-  for (seq = 0; seq <= k_max_seq; seq++) {
-    file_name = GetFileNameFromDragData(*dropData_, seq);
-    FilePath file_path = path_name.Append(file_name);
+  if (downloadURL_.is_valid()) {
+    TabContents* tabContents = [contentsView_ tabContents];
+    scoped_refptr<DragDownloadFile> dragFileDownloader = new DragDownloadFile(
+        filePath,
+        linked_ptr<net::FileStream>(fileStream),
+        downloadURL_,
+        tabContents->GetURL(),
+        tabContents->encoding(),
+        tabContents);
 
-    // Explicitly (and redundantly check) for file -- despite the fact that our
-    // open won't overwrite -- just to avoid log spew.
-    if (!file_util::PathExists(file_path) &&
-        file_stream->Open(path_name.Append(file_name),
-            base::PLATFORM_FILE_CREATE | base::PLATFORM_FILE_WRITE) == net::OK)
-      break;
+    // The finalizer will take care of closing and deletion.
+    dragFileDownloader->Start(
+        new drag_download_util::PromiseFileFinalizer(dragFileDownloader));
+  } else {
+    // The writer will take care of closing and deletion.
+    g_browser_process->file_thread()->message_loop()->PostTask(FROM_HERE,
+        new PromiseWriterTask(*dropData_, fileStream));
   }
-  if (seq > k_max_seq) {
-    delete file_stream;
-    return nil;
-  }
-
-  // The writer will take care of closing and deletion.
-  g_browser_process->file_thread()->message_loop()->PostTask(FROM_HERE,
-      new PromiseWriterTask(*dropData_, file_stream));
 
   // Once we've created the file, we should return the file name.
-  return SysUTF8ToNSString(file_name.value());
+  return SysUTF8ToNSString(filePath.BaseName().value());
 }
 
 @end  // @implementation WebDragSource
@@ -326,31 +336,56 @@ void PromiseWriterTask::Run() {
     [pasteboard_ addTypes:[NSArray arrayWithObject:NSHTMLPboardType]
                     owner:contentsView_];
 
-  // URL.
+  // URL (and title).
   if (dropData_->url.is_valid())
-    [pasteboard_ addTypes:[NSArray arrayWithObject:NSURLPboardType]
+    [pasteboard_ addTypes:[NSArray arrayWithObjects:NSURLPboardType,
+                                                    kNSURLTitlePboardType, nil]
                     owner:contentsView_];
 
   // File.
-  if (!dropData_->file_contents.empty()) {
-    // |dropData_->file_extension| comes with the '.', which we must strip.
-    NSString* fileExtension =
-        (dropData_->file_extension.length() > 0) ?
-        SysUTF16ToNSString(dropData_->file_extension.substr(1)) : @"";
+  if (!dropData_->file_contents.empty() ||
+      !dropData_->download_metadata.empty()) {
+    NSString* fileExtension = 0;
 
-    // File contents (with and without specific type), file (HFS) promise, TIFF.
-    // TODO(viettrungluu): others?
-    [pasteboard_ addTypes:[NSArray arrayWithObjects:
+    if (dropData_->download_metadata.empty()) {
+      // |dropData_->file_extension| comes with the '.', which we must strip.
+      fileExtension = (dropData_->file_extension.length() > 0) ?
+          SysUTF16ToNSString(dropData_->file_extension.substr(1)) : @"";
+    } else {
+      string16 mimeType;
+      FilePath fileName;
+      if (drag_download_util::ParseDownloadMetadata(
+              dropData_->download_metadata,
+              &mimeType,
+              &fileName,
+              &downloadURL_)) {
+        std::string contentDisposition =
+            "attachment; filename=" + fileName.value();
+        DownloadManager::GenerateFileName(downloadURL_,
+                                          contentDisposition,
+                                          std::string(),
+                                          UTF16ToUTF8(mimeType),
+                                          &downloadFileName_);
+        fileExtension = SysUTF8ToNSString(downloadFileName_.Extension());
+      }
+    }
+
+    if (fileExtension) {
+      // File contents (with and without specific type), file (HFS) promise,
+      // TIFF.
+      // TODO(viettrungluu): others?
+      [pasteboard_ addTypes:[NSArray arrayWithObjects:
                                   NSFileContentsPboardType,
                                   NSCreateFileContentsPboardType(fileExtension),
                                   NSFilesPromisePboardType,
                                   NSTIFFPboardType,
                                   nil]
-                    owner:contentsView_];
+                      owner:contentsView_];
 
-    // For the file promise, we need to specify the extension.
-    [pasteboard_ setPropertyList:[NSArray arrayWithObject:fileExtension]
-                         forType:NSFilesPromisePboardType];
+      // For the file promise, we need to specify the extension.
+      [pasteboard_ setPropertyList:[NSArray arrayWithObject:fileExtension]
+                           forType:NSFilesPromisePboardType];
+    }
   }
 
   // Plain text.
@@ -360,7 +395,11 @@ void PromiseWriterTask::Run() {
 }
 
 - (NSImage*)dragImage {
-  return MakeDragImage(dropData_.get());
+  if (dragImage_)
+    return dragImage_;
+
+  // Default to returning a generic image.
+  return nsimage_cache::ImageNamed(@"nav.pdf");
 }
 
 @end  // @implementation WebDragSource (Private)

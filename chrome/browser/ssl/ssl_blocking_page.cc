@@ -7,12 +7,15 @@
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/histogram.h"
+#include "base/i18n/rtl.h"
 #include "base/string_piece.h"
 #include "base/values.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/cert_store.h"
 #include "chrome/browser/dom_operation_notification_details.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/ssl/ssl_cert_error_handler.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
@@ -21,7 +24,6 @@
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 
@@ -31,12 +33,11 @@ enum SSLBlockingPageEvent {
   SHOW,
   PROCEED,
   DONT_PROCEED,
+  UNUSED_ENUM,
 };
 
 void RecordSSLBlockingPageStats(SSLBlockingPageEvent event) {
-  static LinearHistogram histogram("interstial.ssl", 0, 2, 3);
-  histogram.SetFlags(kUmaTargetedHistogramFlag);
-  histogram.Add(event);
+  UMA_HISTOGRAM_ENUMERATION("interstial.ssl", event, UNUSED_ENUM);
 }
 
 }  // namespace
@@ -44,11 +45,13 @@ void RecordSSLBlockingPageStats(SSLBlockingPageEvent event) {
 // Note that we always create a navigation entry with SSL errors.
 // No error happening loading a sub-resource triggers an interstitial so far.
 SSLBlockingPage::SSLBlockingPage(SSLCertErrorHandler* handler,
-                                 Delegate* delegate)
+                                 Delegate* delegate,
+                                 bool overridable)
     : InterstitialPage(handler->GetTabContents(), true, handler->request_url()),
       handler_(handler),
       delegate_(delegate),
-      delegate_has_been_notified_(false) {
+      delegate_has_been_notified_(false),
+      overridable_(overridable) {
   RecordSSLBlockingPageStats(SHOW);
 }
 
@@ -64,8 +67,6 @@ std::string SSLBlockingPage::GetHTMLContents() {
   // Let's build the html error page.
   DictionaryValue strings;
   SSLErrorInfo error_info = delegate_->GetSSLErrorInfo(handler_);
-  strings.SetString(L"title",
-                    l10n_util::GetString(IDS_SSL_BLOCKING_PAGE_TITLE));
   strings.SetString(L"headLine", error_info.title());
   strings.SetString(L"description", error_info.details());
 
@@ -73,18 +74,25 @@ std::string SSLBlockingPage::GetHTMLContents() {
                     l10n_util::GetString(IDS_CERT_ERROR_EXTRA_INFO_TITLE));
   SetExtraInfo(&strings, error_info.extra_information());
 
-  strings.SetString(L"proceed",
-                    l10n_util::GetString(IDS_SSL_BLOCKING_PAGE_PROCEED));
-  strings.SetString(L"exit",
-                    l10n_util::GetString(IDS_SSL_BLOCKING_PAGE_EXIT));
+  int resource_id;
+  if (overridable_) {
+    resource_id = IDR_SSL_ROAD_BLOCK_HTML;
+    strings.SetString(L"title",
+                      l10n_util::GetString(IDS_SSL_BLOCKING_PAGE_TITLE));
+    strings.SetString(L"proceed",
+                      l10n_util::GetString(IDS_SSL_BLOCKING_PAGE_PROCEED));
+    strings.SetString(L"exit",
+                      l10n_util::GetString(IDS_SSL_BLOCKING_PAGE_EXIT));
+  } else {
+    resource_id = IDR_SSL_ERROR_HTML;
+    strings.SetString(L"title", l10n_util::GetString(IDS_SSL_ERROR_PAGE_TITLE));
+    strings.SetString(L"back", l10n_util::GetString(IDS_SSL_ERROR_PAGE_BACK));
+  }
 
-  strings.SetString(L"textdirection",
-      (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) ?
-       L"rtl" : L"ltr");
+  strings.SetString(L"textdirection", base::i18n::IsRTL() ? L"rtl" : L"ltr");
 
-  static const base::StringPiece html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_SSL_ROAD_BLOCK_HTML));
+  base::StringPiece html(
+      ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id));
 
   return jstemplate_builder::GetI18nTemplateHtml(html, &strings);
 }

@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#include <netinet/tcp.h>
 
 #include "base/eintr_wrapper.h"
 #include "base/message_loop.h"
@@ -15,8 +16,12 @@
 #include "base/trace_event.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_log.h"
+#if defined(USE_SYSTEM_LIBEVENT)
+#include <event.h>
+#else
 #include "third_party/libevent/event.h"
-
+#endif
 
 namespace net {
 
@@ -27,17 +32,26 @@ const int kInvalidSocket = -1;
 // Return 0 on success, -1 on failure.
 // Too small a function to bother putting in a library?
 int SetNonBlocking(int fd) {
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (-1 == flags)
-      return flags;
-    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+  int flags = fcntl(fd, F_GETFL, 0);
+  if (-1 == flags)
+    return flags;
+  return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+// DisableNagle turns off buffering in the kernel. By default, TCP sockets will
+// wait up to 200ms for more data to complete a packet before transmitting.
+// After calling this function, the kernel will not wait. See TCP_NODELAY in
+// `man 7 tcp`.
+int DisableNagle(int fd) {
+  int on = 1;
+  return setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
 }
 
 // Convert values from <errno.h> to values from "net/base/net_errors.h"
-int MapPosixError(int err) {
+int MapPosixError(int os_error) {
   // There are numerous posix error codes, but these are the ones we thus far
   // find interesting.
-  switch (err) {
+  switch (os_error) {
     case EAGAIN:
 #if EWOULDBLOCK != EAGAIN
     case EWOULDBLOCK:
@@ -51,6 +65,7 @@ int MapPosixError(int err) {
       return ERR_TIMED_OUT;
     case ECONNRESET:
     case ENETRESET:  // Related to keep-alive
+    case EPIPE:
       return ERR_CONNECTION_RESET;
     case ECONNABORTED:
       return ERR_CONNECTION_ABORTED;
@@ -64,24 +79,29 @@ int MapPosixError(int err) {
     case 0:
       return OK;
     default:
-      LOG(WARNING) << "Unknown error " << err << " mapped to net::ERR_FAILED";
+      LOG(WARNING) << "Unknown error " << os_error
+                   << " mapped to net::ERR_FAILED";
       return ERR_FAILED;
   }
 }
 
-int MapConnectError(int err) {
-  switch (err) {
+int MapConnectError(int os_error) {
+  switch (os_error) {
     case ETIMEDOUT:
       return ERR_CONNECTION_TIMED_OUT;
-    default:
-      return MapPosixError(err);
+    default: {
+      int net_error = MapPosixError(os_error);
+      if (net_error == ERR_FAILED)
+        return ERR_CONNECTION_FAILED;  // More specific than ERR_FAILED.
+      return net_error;
+    }
   }
 }
 
-// Given err, an errno from a connect() attempt, returns true if connect()
-// should be retried with another address.
-bool ShouldTryNextAddress(int err) {
-  switch (err) {
+// Given os_error, an errno from a connect() attempt, returns true if
+// connect() should be retried with another address.
+bool ShouldTryNextAddress(int os_error) {
+  switch (os_error) {
     case EADDRNOTAVAIL:
     case EAFNOSUPPORT:
     case ECONNREFUSED:
@@ -117,15 +137,37 @@ TCPClientSocketLibevent::~TCPClientSocketLibevent() {
   Disconnect();
 }
 
-int TCPClientSocketLibevent::Connect(CompletionCallback* callback) {
+int TCPClientSocketLibevent::Connect(CompletionCallback* callback,
+                                     const BoundNetLog& net_log) {
   // If already connected, then just return OK.
   if (socket_ != kInvalidSocket)
     return OK;
 
   DCHECK(!waiting_connect_);
+  DCHECK(!net_log_.net_log());
 
   TRACE_EVENT_BEGIN("socket.connect", this, "");
 
+  net_log.BeginEvent(NetLog::TYPE_TCP_CONNECT);
+
+  int rv = DoConnect();
+
+  if (rv == ERR_IO_PENDING) {
+    // Synchronous operation not supported.
+    DCHECK(callback);
+
+    net_log_ = net_log;
+    waiting_connect_ = true;
+    write_callback_ = callback;
+  } else {
+    TRACE_EVENT_END("socket.connect", this, "");
+    net_log.EndEvent(NetLog::TYPE_TCP_CONNECT);
+  }
+
+  return rv;
+}
+
+int TCPClientSocketLibevent::DoConnect() {
   while (true) {
     DCHECK(current_ai_);
 
@@ -135,31 +177,27 @@ int TCPClientSocketLibevent::Connect(CompletionCallback* callback) {
 
     if (!HANDLE_EINTR(connect(socket_, current_ai_->ai_addr,
                               static_cast<int>(current_ai_->ai_addrlen)))) {
-      TRACE_EVENT_END("socket.connect", this, "");
       // Connected without waiting!
       return OK;
     }
 
-    int error_code = errno;
-    if (error_code == EINPROGRESS)
+    int os_error = errno;
+    if (os_error == EINPROGRESS)
       break;
 
     close(socket_);
     socket_ = kInvalidSocket;
 
-    if (current_ai_->ai_next && ShouldTryNextAddress(error_code)) {
+    if (current_ai_->ai_next && ShouldTryNextAddress(os_error)) {
       // connect() can fail synchronously for an address even on a
       // non-blocking socket.  As an example, this can happen when there is
       // no route to the host.  Retry using the next address in the list.
       current_ai_ = current_ai_->ai_next;
     } else {
-      DLOG(INFO) << "connect failed: " << error_code;
-      return MapConnectError(error_code);
+      DLOG(INFO) << "connect failed: " << os_error;
+      return MapConnectError(os_error);
     }
   }
-
-  // Synchronous operation not supported
-  DCHECK(callback);
 
   // Initialize write_socket_watcher_ and link it to our MessagePump.
   // POLLOUT is set if the connection is established.
@@ -173,8 +211,6 @@ int TCPClientSocketLibevent::Connect(CompletionCallback* callback) {
     return MapPosixError(errno);
   }
 
-  waiting_connect_ = true;
-  write_callback_ = callback;
   return ERR_IO_PENDING;
 }
 
@@ -316,8 +352,16 @@ int TCPClientSocketLibevent::CreateSocket(const addrinfo* ai) {
   if (socket_ == kInvalidSocket)
     return MapPosixError(errno);
 
-  if (SetNonBlocking(socket_))
-    return MapPosixError(errno);
+  if (SetNonBlocking(socket_)) {
+    const int err = MapPosixError(errno);
+    close(socket_);
+    socket_ = kInvalidSocket;
+    return err;
+  }
+
+  // This mirrors the behaviour on Windows. See the comment in
+  // tcp_client_socket_win.cc after searching for "NODELAY".
+  DisableNagle(socket_);  // If DisableNagle fails, we don't care.
 
   return OK;
 }
@@ -345,28 +389,33 @@ void TCPClientSocketLibevent::DoWriteCallback(int rv) {
 void TCPClientSocketLibevent::DidCompleteConnect() {
   int result = ERR_UNEXPECTED;
 
-  TRACE_EVENT_END("socket.connect", this, "");
-
   // Check to see if connect succeeded
-  int error_code = 0;
-  socklen_t len = sizeof(error_code);
-  if (getsockopt(socket_, SOL_SOCKET, SO_ERROR, &error_code, &len) < 0)
-    error_code = errno;
+  int os_error = 0;
+  socklen_t len = sizeof(os_error);
+  if (getsockopt(socket_, SOL_SOCKET, SO_ERROR, &os_error, &len) < 0)
+    os_error = errno;
 
-  if (error_code == EINPROGRESS || error_code == EALREADY) {
+  if (os_error == EINPROGRESS || os_error == EALREADY) {
     NOTREACHED();  // This indicates a bug in libevent or our code.
     result = ERR_IO_PENDING;
-  } else if (current_ai_->ai_next && ShouldTryNextAddress(error_code)) {
+  } else if (current_ai_->ai_next && ShouldTryNextAddress(os_error)) {
     // This address failed, try next one in list.
     const addrinfo* next = current_ai_->ai_next;
     Disconnect();
     current_ai_ = next;
-    result = Connect(write_callback_);
+    BoundNetLog net_log = net_log_;
+    net_log_ = BoundNetLog();
+    TRACE_EVENT_END("socket.connect", this, "");
+    net_log.EndEvent(NetLog::TYPE_TCP_CONNECT);
+    result = Connect(write_callback_, net_log);
   } else {
-    result = MapConnectError(error_code);
+    result = MapConnectError(os_error);
     bool ok = write_socket_watcher_.StopWatchingFileDescriptor();
     DCHECK(ok);
     waiting_connect_ = false;
+    TRACE_EVENT_END("socket.connect", this, "");
+    net_log_.EndEvent(NetLog::TYPE_TCP_CONNECT);
+    net_log_ = BoundNetLog();
   }
 
   if (result != ERR_IO_PENDING) {
@@ -419,9 +468,12 @@ void TCPClientSocketLibevent::DidCompleteWrite() {
   }
 }
 
-int TCPClientSocketLibevent::GetPeerName(struct sockaddr *name,
-                                         socklen_t *namelen) {
-  return ::getpeername(socket_, name, namelen);
+int TCPClientSocketLibevent::GetPeerAddress(AddressList* address) const {
+  DCHECK(address);
+  if (!current_ai_)
+    return ERR_UNEXPECTED;
+  address->Copy(current_ai_, false);
+  return OK;
 }
 
 }  // namespace net

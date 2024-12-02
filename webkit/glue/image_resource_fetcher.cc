@@ -4,8 +4,9 @@
 
 #include "webkit/glue/image_resource_fetcher.h"
 
-#include "base/gfx/size.h"
-#include "webkit/api/public/WebFrame.h"
+#include "base/callback.h"
+#include "gfx/size.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "webkit/glue/image_decoder.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 

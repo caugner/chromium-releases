@@ -47,36 +47,19 @@
 #include "core/cross/event.h"
 #include "plugin/cross/plugin_logging.h"
 #include "plugin/cross/out_of_memory.h"
+#include "plugin/cross/whitelist.h"
 #include "statsreport/metrics.h"
 #include "v8/include/v8.h"
 #include "breakpad/win/bluescreen_detector.h"
-
-#if defined(RENDERER_CB)
-#include "core/cross/command_buffer/renderer_cb.h"
-#include "core/cross/command_buffer/display_window_cb.h"
-#include "gpu_plugin/command_buffer.h"
-#endif
 
 using glue::_o3d::PluginObject;
 using glue::StreamManager;
 using o3d::DisplayWindowWindows;
 using o3d::Event;
 
-#if defined(RENDERER_CB)
-using o3d::gpu_plugin::CommandBuffer;
-using o3d::gpu_plugin::NPObjectPointer;
-#endif
-
 namespace {
 // The instance handle of the O3D DLL.
 HINSTANCE g_module_instance;
-
-// TODO(apatrick): We can have an NPBrowser in the other configurations when we
-//    move over to gyp. This is just to avoid having to write scons files for
-//    np_utils.
-#if defined(RENDERER_CB)
-o3d::gpu_plugin::NPBrowser* g_browser;
-#endif
 }  // namespace anonymous
 
 #if !defined(O3D_INTERNAL_PLUGIN)
@@ -432,7 +415,19 @@ LRESULT HandleDragAndDrop(PluginObject *obj, WPARAM wParam) {
   return 1;
 }
 
+static const UINT kDestroyWindowMessageID = WM_USER + 1;
+
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
+  // To work around deadlocks caused by calling DestroyWindow
+  // synchronously during plugin destruction in Chrome's multi-process
+  // architecture, we call DestroyWindow asynchronously.
+  if (Msg == kDestroyWindowMessageID) {
+    ::DestroyWindow(hWnd);
+    // Do not touch anything related to the plugin; it has likely
+    // already been destroyed.
+    return 0;
+  }
+
   PluginObject *obj = PluginObject::GetPluginProperty(hWnd);
   if (obj == NULL) {                   // It's not my window
     return 1;  // 0 often means we handled it.
@@ -688,7 +683,7 @@ void CleanupAllWindows(PluginObject *obj) {
   if (obj->GetContentHWnd()) {
     ::KillTimer(obj->GetContentHWnd(), 0);
     PluginObject::ClearPluginProperty(obj->GetContentHWnd());
-    ::DestroyWindow(obj->GetContentHWnd());
+    ::PostMessage(obj->GetContentHWnd(), kDestroyWindowMessageID, 0, 0);
     obj->SetContentHWnd(NULL);
   }
 
@@ -718,12 +713,34 @@ void ReplaceContentWindow(HWND content_hwnd,
   LONG_PTR style = ::GetWindowLongPtr(content_hwnd, GWL_STYLE);
   style |= WS_CHILD;
   ::SetWindowLongPtr(content_hwnd, GWL_STYLE, style);
+  LONG_PTR exstyle = ::GetWindowLongPtr(content_hwnd, GWL_EXSTYLE);
+  exstyle &= ~WS_EX_TOOLWINDOW;
+  ::SetWindowLongPtr(content_hwnd, GWL_EXSTYLE, exstyle);
   ::SetParent(content_hwnd, containing_hwnd);
   BOOL res = ::SetWindowPos(content_hwnd, containing_hwnd,
                             0, 0, width, height,
                             SWP_NOZORDER | SWP_ASYNCWINDOWPOS);
   DCHECK(res);
   ::ShowWindow(content_hwnd, SW_SHOW);
+}
+
+// Get the screen rect of the monitor the window is on, in virtual screen
+// coordinates.
+// Return true on success, false on failure.
+bool GetScreenRect(HWND hwnd,
+                   RECT* rect) {
+  HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
+  if (monitor == NULL)
+    return false;
+
+  MONITORINFO monitor_info;
+  monitor_info.cbSize = sizeof(monitor_info);
+  if (GetMonitorInfo(monitor, &monitor_info)) {
+    *rect = monitor_info.rcMonitor;
+    return true;
+  } else {
+    return false;
+  }
 }
 
 }  // namespace anonymous
@@ -736,10 +753,6 @@ extern "C" {
 
 NPError OSCALL NP_Initialize(NPNetscapeFuncs *browserFuncs) {
   HANDLE_CRASHES;
-
-#if defined(RENDERER_CB)
-  g_browser = new o3d::gpu_plugin::NPBrowser(browserFuncs);
-#endif
 
   NPError retval = InitializeNPNApi(browserFuncs);
   if (retval != NPERR_NO_ERROR) return retval;
@@ -756,7 +769,7 @@ NPError OSCALL NP_Shutdown(void) {
 
   if (g_logger) {
     // Do a last sweep to aggregate metrics before we shut down
-    g_logger->ProcessMetrics(true, false);
+    g_logger->ProcessMetrics(true, false, false);
     delete g_logger;
     g_logger = NULL;
     g_logging_initialized = false;
@@ -778,11 +791,6 @@ NPError OSCALL NP_Shutdown(void) {
     delete g_bluescreen_detector;
     g_bluescreen_detector = NULL;
   }
-
-#if defined(RENDERER_CB)
-  delete g_browser;
-  g_browser = NULL;
-#endif
 
 #endif  // O3D_INTERNAL_PLUGIN
 
@@ -817,6 +825,10 @@ NPError NPP_New(NPMIMEType pluginType,
     g_logging_initialized = true;
   }
 #endif
+
+  if (!IsDomainAuthorized(instance)) {
+    return NPERR_INVALID_URL;
+  }
 
   PluginObject* pluginObject = glue::_o3d::PluginObject::Create(
       instance);
@@ -916,26 +928,10 @@ NPError NPP_SetWindow(NPP instance, NPWindow *window) {
   ::ShowWindow(content_window, SW_SHOW);
 
   // create and assign the graphics context
-#if defined(RENDERER_CB)
-  const unsigned int kDefaultCommandBufferSize = 256 << 10;
-  NPObjectPointer<CommandBuffer> command_buffer =
-      RendererCBLocal::CreateCommandBuffer(instance,
-                                           obj->GetHWnd(),
-                                           kDefaultCommandBufferSize);
-
-  DisplayWindowCB default_display;
-  default_display.set_npp(instance);
-  default_display.set_command_buffer(command_buffer);
-
-  obj->CreateRenderer(default_display);
-  obj->renderer()->Resize(window->width, window->height);
-  obj->client()->Init();
-#else
   DisplayWindowWindows default_display;
   default_display.set_hwnd(obj->GetHWnd());
   obj->CreateRenderer(default_display);
   obj->client()->Init();
-#endif
 
   // we set the timer to 10ms or 100fps. At the time of this comment
   // the renderer does a vsync the max fps it will run will be the refresh
@@ -985,14 +981,21 @@ bool PluginObject::RequestFullscreenDisplay() {
     LONG_PTR style = ::GetWindowLongPtr(GetContentHWnd(), GWL_STYLE);
     style &= ~WS_CHILD;
     ::SetWindowLongPtr(GetContentHWnd(), GWL_STYLE, style);
+    // Add WS_EX_TOOLWINDOW to the window exstyle so the content window won't
+    // show in the Taskbar.
+    LONG_PTR exstyle = ::GetWindowLongPtr(GetContentHWnd(), GWL_EXSTYLE);
+    exstyle |= WS_EX_TOOLWINDOW;
+    ::SetWindowLongPtr(GetContentHWnd(), GWL_EXSTYLE, exstyle);
     ::ShowWindow(GetContentHWnd(), SW_SHOW);
     // We need to resize the full-screen window to the desired size of
     // the display mode early, before calling
     // Renderer::GoFullscreen().
-    o3d::DisplayMode mode;
-    if (GetDisplayMode(fullscreen_region_mode_id_, &mode)) {
-      ::SetWindowPos(GetContentHWnd(), HWND_TOP, 0, 0,
-                     mode.width(), mode.height(),
+    RECT screen_rect;
+    if (GetScreenRect(GetPluginHWnd(), &screen_rect)) {
+      ::SetWindowPos(GetContentHWnd(), HWND_TOPMOST,
+                     screen_rect.left, screen_rect.top,
+                     screen_rect.right - screen_rect.left + 1,
+                     screen_rect.bottom - screen_rect.top + 1,
                      SWP_NOZORDER | SWP_NOREPOSITION | SWP_ASYNCWINDOWPOS);
       DisplayWindowWindows display;
       display.set_hwnd(GetContentHWnd());

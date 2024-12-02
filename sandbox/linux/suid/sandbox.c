@@ -8,9 +8,12 @@
 #include <asm/unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,13 +23,37 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/vfs.h>
 #include <unistd.h>
-#include <stdbool.h>
 
+#include "linux_util.h"
+#include "process_util.h"
 #include "suid_unsafe_environment_variables.h"
 
 #if !defined(CLONE_NEWPID)
 #define CLONE_NEWPID 0x20000000
+#endif
+
+#if !defined(BTRFS_SUPER_MAGIC)
+#define BTRFS_SUPER_MAGIC 0x9123683E
+#endif
+#if !defined(EXT2_SUPER_MAGIC)
+#define EXT2_SUPER_MAGIC 0xEF53
+#endif
+#if !defined(EXT3_SUPER_MAGIC)
+#define EXT3_SUPER_MAGIC 0xEF53
+#endif
+#if !defined(EXT4_SUPER_MAGIC)
+#define EXT4_SUPER_MAGIC 0xEF53
+#endif
+#if !defined(REISERFS_SUPER_MAGIC)
+#define REISERFS_SUPER_MAGIC 0x52654973
+#endif
+#if !defined(TMPFS_MAGIC)
+#define TMPFS_MAGIC 0x01021994
+#endif
+#if !defined(XFS_SUPER_MAGIC)
+#define XFS_SUPER_MAGIC 0x58465342
 #endif
 
 static const char kSandboxDescriptorEnvironmentVarName[] = "SBX_D";
@@ -37,7 +64,7 @@ static const char kMsgChrootMe = 'C';
 static const char kMsgChrootSuccessful = 'O';
 
 static void FatalError(const char *msg, ...)
-    __attribute__((noreturn, format(printf,1,2)));
+    __attribute__((noreturn, format(printf, 1, 2)));
 
 static void FatalError(const char *msg, ...) {
   va_list ap;
@@ -56,10 +83,40 @@ static int CloneChrootHelperProcess() {
     return -1;
   }
 
+  // Some people mount /tmp on a non-POSIX filesystem (e.g. NFS). This
+  // breaks all sorts of assumption in our code. So, if we don't recognize the
+  // filesystem, we will try to use an alternative location for our temp
+  // directory.
+  char tempDirectoryTemplate[80] = "/tmp/chrome-sandbox-chroot-XXXXXX";
+  struct statfs sfs;
+  if (!statfs("/tmp", &sfs) &&
+      (unsigned long)sfs.f_type != BTRFS_SUPER_MAGIC &&
+      (unsigned long)sfs.f_type != EXT2_SUPER_MAGIC &&
+      (unsigned long)sfs.f_type != EXT3_SUPER_MAGIC &&
+      (unsigned long)sfs.f_type != EXT4_SUPER_MAGIC &&
+      (unsigned long)sfs.f_type != REISERFS_SUPER_MAGIC &&
+      (unsigned long)sfs.f_type != TMPFS_MAGIC &&
+      (unsigned long)sfs.f_type != XFS_SUPER_MAGIC) {
+    // If /dev/shm exists, it is supposed to be a tmpfs filesystem. While we
+    // are not actually using it for shared memory, moving our temp directory
+    // into a known tmpfs filesystem is preferable over using a potentially
+    // unreliable non-POSIX filesystem.
+    if (!statfs("/dev/shm", &sfs) && sfs.f_type == TMPFS_MAGIC) {
+      *tempDirectoryTemplate = '\000';
+      strncat(tempDirectoryTemplate, "/dev/shm/chrome-sandbox-chroot-XXXXXX",
+              sizeof(tempDirectoryTemplate) - 1);
+    } else {
+      // Neither /tmp is a well-known POSIX filesystem, nor /dev/shm is a
+      // tmpfs. After all, we now use /tmp as the location of our temp
+      // directory, but we quite likely fail the moment we try to access it
+      // through chroot_dir_fd. If so, we will print a verbose error message
+      // (see below)
+    }
+  }
+
   // We create a temp directory for our chroot. Nobody should ever write into
   // it, so it's root:root mode 000.
-  char kTempDirectoryTemplate[] = "/tmp/chrome-sandbox-chroot-XXXXXX";
-  const char* temp_dir = mkdtemp(kTempDirectoryTemplate);
+  const char* temp_dir = mkdtemp(tempDirectoryTemplate);
   if (!temp_dir) {
     perror("Failed to create temp directory for chroot");
     return -1;
@@ -80,13 +137,15 @@ static int CloneChrootHelperProcess() {
   char proc_self_fd_str[128];
   int printed = snprintf(proc_self_fd_str, sizeof(proc_self_fd_str),
                          "/proc/self/fd/%d", chroot_dir_fd);
-  if (printed < 0 || printed >= sizeof(proc_self_fd_str)) {
+  if (printed < 0 || printed >= (int)sizeof(proc_self_fd_str)) {
     fprintf(stderr, "Error in snprintf");
     return -1;
   }
 
   if (fchown(chroot_dir_fd, 0 /* root */, 0 /* root */)) {
-    perror("fchown");
+    fprintf(stderr, "Could not set up sandbox work directory. Maybe, /tmp is "
+                    "a non-POSIX filesystem and /dev/shm doesn't exist "
+                    "either. Consider mounting a \"tmpfs\" on /tmp.\n");
     return -1;
   }
 
@@ -109,7 +168,7 @@ static int CloneChrootHelperProcess() {
   if (pid == 0) {
     // We share our files structure with an untrusted process. As a security in
     // depth measure, we make sure that we can't open anything by mistake.
-    // TODO: drop CAP_SYS_RESOURCE / use SECURE_NOROOT
+    // TODO(agl): drop CAP_SYS_RESOURCE / use SECURE_NOROOT
 
     const struct rlimit nofile = {0, 0};
     if (setrlimit(RLIMIT_NOFILE, &nofile))
@@ -187,7 +246,7 @@ static bool SpawnChrootHelper() {
   // number of the file descriptor.
   char desc_str[64];
   int printed = snprintf(desc_str, sizeof(desc_str), "%d", chroot_signal_fd);
-  if (printed < 0 || printed >= sizeof(desc_str)) {
+  if (printed < 0 || printed >= (int)sizeof(desc_str)) {
     fprintf(stderr, "Failed to snprintf\n");
     return false;
   }
@@ -258,7 +317,6 @@ static bool DropRoot() {
 }
 
 static bool SetupChildEnvironment() {
-
   unsigned i;
 
   // ld.so may have cleared several environment variables because we are SUID.
@@ -289,6 +347,46 @@ int main(int argc, char **argv) {
   if (argc <= 1) {
     fprintf(stderr, "Usage: %s <renderer process> <args...>\n", argv[0]);
     return 1;
+  }
+
+  // In the SUID sandbox, if we succeed in calling MoveToNewPIDNamespace()
+  // below, then the zygote and all the renderers are in an alternate PID
+  // namespace and do not know their real PIDs. As such, they report the wrong
+  // PIDs to the task manager.
+  //
+  // To fix this, when the zygote spawns a new renderer, it gives the renderer
+  // a dummy socket, which has a unique inode number. Then it asks the sandbox
+  // host to find the PID of the process holding that fd by searching /proc.
+  //
+  // Since the zygote and renderers are all spawned by this setuid executable,
+  // their entries in /proc are owned by root and only readable by root. In
+  // order to search /proc for the fd we want, this setuid executable has to
+  // double as a helper and perform the search. The code block below does this
+  // when you call it with --find-inode INODE_NUMBER.
+  if (argc == 3 && (0 == strcmp(argv[1], kFindInodeSwitch))) {
+    pid_t pid;
+    char* endptr;
+    ino_t inode = strtoull(argv[2], &endptr, 10);
+    if (inode == ULLONG_MAX || *endptr)
+      return 1;
+    if (!FindProcessHoldingSocket(&pid, inode))
+      return 1;
+    printf("%d\n", pid);
+    return 0;
+  }
+  // Likewise, we cannot adjust /proc/pid/oom_adj for sandboxed renderers
+  // because those files are owned by root. So we need another helper here.
+  if (argc == 4 && (0 == strcmp(argv[1], kAdjustOOMScoreSwitch))) {
+    char* endptr;
+    long score;
+    unsigned long pid_ul = strtoul(argv[2], &endptr, 10);
+    if (pid_ul == ULONG_MAX || *endptr)
+      return 1;
+    pid_t pid = pid_ul;
+    score = strtol(argv[3], &endptr, 10);
+    if (score == LONG_MAX || score == LONG_MIN || *endptr)
+      return 1;
+    return AdjustOOMScore(pid, score);
   }
 
   if (!MoveToNewPIDNamespace())

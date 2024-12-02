@@ -7,6 +7,12 @@
 
 #include <string>
 
+#include "base/string16.h"
+
+namespace base {
+class Time;
+}
+
 namespace net {
 
 class FtpUtil {
@@ -19,6 +25,24 @@ class FtpUtil {
 
   // Convert VMS path to Unix-style path.
   static std::string VMSPathToUnix(const std::string& vms_path);
+
+  // Convert three-letter month abbreviation (like Nov) to its number (in range
+  // 1-12).
+  static bool ThreeLetterMonthToNumber(const string16& text, int* number);
+
+  // Convert a "ls -l" date listing to time. The listing comes in three columns.
+  // The first one contains month, the second one contains day of month.
+  // The first one is either a time (and then we guess the year based
+  // on |current_time|), or is a year (and then we don't know the time).
+  static bool LsDateListingToTime(const string16& month,
+                                  const string16& day,
+                                  const string16& rest,
+                                  const base::Time& current_time,
+                                  base::Time* result);
+
+  // Skip |columns| columns from |text| (whitespace-delimited), and return the
+  // remaining part, without leading/trailing whitespace.
+  static string16 GetStringPartAfterColumns(const string16& text, int columns);
 };
 
 }  // namespace net

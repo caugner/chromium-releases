@@ -1,10 +1,13 @@
 {
   "id": "behllobkkfkfnphdnhnkndlbkcpglgmj",
   "version": "1.0.0.0",
-  "name": "My extension 1",
+  "name": "__MSG_chrome_extension_name__",
   "enabled": true,
-  "description": "The first extension that I made.",
+  "description": "__MSG_chrome_extension_description__",
   "permissions": ["http://*.google.com/*", "https://*.google.com/*"],
+  "allow_reload": false,
+  "order": 2,
+  "enabledIncognito": false,
   "content_scripts": [
     {
       "matches": ["file://*", "http://*.google.com/*", "https://*.google.com/*"],
@@ -27,5 +30,6 @@
       "render_proess_id": 0,
       "render_view_id": 0
     }
-  ]
+  ],
+  "hasPopupAction": false
 }

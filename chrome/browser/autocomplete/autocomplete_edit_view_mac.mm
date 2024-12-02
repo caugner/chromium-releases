@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,20 @@
 #include <Carbon/Carbon.h>  // kVK_Return
 
 #include "app/clipboard/clipboard.h"
-#include "app/gfx/font.h"
-#include "app/l10n_util_mac.h"
+#include "app/clipboard/scoped_clipboard_writer.h"
 #include "app/resource_bundle.h"
-#import "base/cocoa_protocols_mac.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_view_mac.h"
-#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/cocoa/event_utils.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/toolbar_model.h"
 #include "grit/generated_resources.h"
+#include "net/base/escape.h"
 
 // Focus-handling between |field_| and |model_| is a bit subtle.
 // Other platforms detect change of focus, which is inconvenient
@@ -126,21 +125,6 @@ NSRange ComponentToNSRange(const url_parse::Component& component) {
 
 }  // namespace
 
-// Thin Obj-C bridge class that is the delegate of the omnibox field.
-// It intercepts various control delegate methods and vectors them to
-// the edit view.
-
-// TODO(shess): Consider moving more of this code off to
-// AutocompleteTextFieldObserver.
-
-@interface AutocompleteFieldDelegate : NSObject<NSTextFieldDelegate> {
- @private
-  AutocompleteEditViewMac* edit_view_;  // weak, owns us.
-}
-- initWithEditView:(AutocompleteEditViewMac*)view;
-- (void)windowDidResignKey:(NSNotification*)notification;
-@end
-
 // TODO(shess): AutocompletePopupViewMac doesn't really need an
 // NSTextField.  It wants to know where the position the popup, what
 // font to use, and it also needs to be able to attach the popup to
@@ -159,25 +143,25 @@ AutocompleteEditViewMac::AutocompleteEditViewMac(
       toolbar_model_(toolbar_model),
       command_updater_(command_updater),
       field_(field),
-      edit_helper_([[AutocompleteFieldDelegate alloc] initWithEditView:this]) {
+      line_height_(0) {
   DCHECK(controller);
   DCHECK(toolbar_model);
   DCHECK(profile);
   DCHECK(command_updater);
   DCHECK(field);
-  [field_ setDelegate:edit_helper_.get()];
   [field_ setObserver:this];
 
   // Needed so that editing doesn't lose the styling.
   [field_ setAllowsEditingTextAttributes:YES];
 
-  // Track the window's key status for signalling focus changes to
-  // |model_|.
-  NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
-  [nc addObserver:edit_helper_
-         selector:@selector(windowDidResignKey:)
-             name:NSWindowDidResignKeyNotification
-           object:[field_ window]];
+  // Get the appropriate line height for the font that we use.
+  NSFont* font = ResourceBundle::GetSharedInstance().GetFont(
+      ResourceBundle::BaseFont).nativeFont();
+  scoped_nsobject<NSLayoutManager>
+      layoutManager([[NSLayoutManager alloc] init]);
+  [layoutManager setUsesScreenFonts:YES];
+  line_height_ = [layoutManager defaultLineHeightForFont:font];
+  DCHECK(line_height_ > 0);
 }
 
 AutocompleteEditViewMac::~AutocompleteEditViewMac() {
@@ -190,9 +174,7 @@ AutocompleteEditViewMac::~AutocompleteEditViewMac() {
   popup_view_.reset();
   model_.reset();
 
-  // Disconnect field_ from edit_helper_ so that we don't get calls
-  // after destruction.
-  [field_ setDelegate:nil];
+  // Disconnect from |field_|, it outlives this object.
   [field_ setObserver:NULL];
 }
 
@@ -332,6 +314,26 @@ void AutocompleteEditViewMac::SetWindowTextAndCaretPos(const std::wstring& text,
   SetTextAndSelectedRange(text, NSMakeRange(caret_pos, caret_pos));
 }
 
+void AutocompleteEditViewMac::SetForcedQuery() {
+  // We need to do this first, else |SetSelectedRange()| won't work.
+  FocusLocation(true);
+
+  const std::wstring current_text(GetText());
+  if (current_text.empty() || (current_text[0] != '?')) {
+    SetUserText(L"?");
+  } else {
+    NSRange range = NSMakeRange(1, current_text.size() - 1);
+    [[field_ currentEditor] setSelectedRange:range];
+  }
+}
+
+bool AutocompleteEditViewMac::IsSelectAll() {
+  if (![field_ currentEditor])
+    return true;
+  const NSRange all_range = NSMakeRange(0, [[field_ stringValue] length]);
+  return NSEqualRanges(all_range, GetSelectedRange());
+}
+
 void AutocompleteEditViewMac::SelectAll(bool reversed) {
   // TODO(shess): Figure out what |reversed| implies.  The gtk version
   // has it imply inverting the selection front to back, but I don't
@@ -352,6 +354,7 @@ void AutocompleteEditViewMac::RevertAll() {
   // can be removed.
   EmphasizeURLComponents();
   controller_->OnChanged();
+  [field_ clearUndoChain];
 }
 
 void AutocompleteEditViewMac::UpdatePopup() {
@@ -359,13 +362,23 @@ void AutocompleteEditViewMac::UpdatePopup() {
   if (!model_->has_focus())
     return;
 
-  // TODO(shess):
-  // Shouldn't inline autocomplete when the caret/selection isn't at
-  // the end of the text.
-  //
-  // One option would seem to be to check for a non-nil field
-  // editor, and check it's selected range against its length.
-  model_->StartAutocomplete(false);
+  // Comment copied from AutocompleteEditViewWin::UpdatePopup():
+  // Don't inline autocomplete when:
+  //   * The user is deleting text
+  //   * The caret/selection isn't at the end of the text
+  //   * The user has just pasted in something that replaced all the text
+  //   * The user is trying to compose something in an IME
+  bool prevent_inline_autocomplete = false;
+  NSTextView* editor = (NSTextView*)[field_ currentEditor];
+  if (editor) {
+    if ([editor hasMarkedText])
+      prevent_inline_autocomplete = true;
+
+    if (NSMaxRange([editor selectedRange]) < [[editor textStorage] length])
+      prevent_inline_autocomplete = true;
+  }
+
+  model_->StartAutocomplete(prevent_inline_autocomplete);
 }
 
 void AutocompleteEditViewMac::ClosePopup() {
@@ -379,58 +392,10 @@ void AutocompleteEditViewMac::SetText(const std::wstring& display_text) {
   NSString* ss = base::SysWideToNSString(display_text);
   NSMutableAttributedString* as =
       [[[NSMutableAttributedString alloc] initWithString:ss] autorelease];
-  NSFont* font = ResourceBundle::GetSharedInstance().GetFont(
-      ResourceBundle::BaseFont).nativeFont();
-  [as addAttribute:NSFontAttributeName value:font
-             range:NSMakeRange(0, [as length])];
 
-  url_parse::Parsed parts;
-  AutocompleteInput::Parse(display_text, model_->GetDesiredTLD(),
-                           &parts, NULL);
-  const bool emphasize = model_->CurrentTextIsURL() && (parts.host.len > 0);
-  if (emphasize) {
-    [as addAttribute:NSForegroundColorAttributeName value:BaseTextColor()
-               range:NSMakeRange(0, [as length])];
+  ApplyTextAttributes(display_text, as);
 
-    [as addAttribute:NSForegroundColorAttributeName value:HostTextColor()
-               range:ComponentToNSRange(parts.host)];
-  }
-
-  // TODO(shess): GTK has this as a member var, figure out why.
-  // [Could it be to not change if no change?  If so, I'm guessing
-  // AppKit may already handle that.]
-  const ToolbarModel::SecurityLevel scheme_security_level =
-      toolbar_model_->GetSchemeSecurityLevel();
-
-  if (scheme_security_level == ToolbarModel::SECURE) {
-    [field_ setBackgroundColor:SecureBackgroundColor()];
-  } else if (scheme_security_level == ToolbarModel::NORMAL) {
-    [field_ setBackgroundColor:NormalBackgroundColor()];
-  } else if (scheme_security_level == ToolbarModel::INSECURE) {
-    [field_ setBackgroundColor:InsecureBackgroundColor()];
-  } else {
-    NOTREACHED() << "Unexpected scheme_security_level: "
-                 << scheme_security_level;
-  }
-
-  // Emphasize the scheme for security UI display purposes (if necessary).
-  if (!model_->user_input_in_progress() && parts.scheme.is_nonempty() &&
-      (scheme_security_level != ToolbarModel::NORMAL)) {
-    NSColor* color;
-    if (scheme_security_level == ToolbarModel::SECURE) {
-      color = SecureSchemeColor();
-    } else {
-      color = InsecureSchemeColor();
-      // Add a strikethrough through the scheme.
-      [as addAttribute:NSStrikethroughStyleAttributeName
-                 value:[NSNumber numberWithInt:NSUnderlineStyleSingle]
-                 range:ComponentToNSRange(parts.scheme)];
-    }
-    [as addAttribute:NSForegroundColorAttributeName value:color
-               range:ComponentToNSRange(parts.scheme)];
-  }
-
-  [field_ setObjectValue:as];
+  [field_ setAttributedStringValue:as];
 
   // TODO(shess): This may be an appropriate place to call:
   //   controller_->OnChanged();
@@ -456,10 +421,84 @@ void AutocompleteEditViewMac::SetTextAndSelectedRange(
 }
 
 void AutocompleteEditViewMac::EmphasizeURLComponents() {
-  if ([field_ currentEditor]) {
-    SetTextAndSelectedRange(GetText(), GetSelectedRange());
+  NSTextView* editor = (NSTextView*)[field_ currentEditor];
+  // If the autocomplete text field is in editing mode, then we can just change
+  // its attributes through its editor. Otherwise, we simply reset its content.
+  if (editor) {
+    NSTextStorage* storage = [editor textStorage];
+    [storage beginEditing];
+
+    // Clear the existing attributes from the text storage, then
+    // overlay the appropriate Omnibox attributes.
+    [storage setAttributes:[NSDictionary dictionary]
+                     range:NSMakeRange(0, [storage length])];
+    ApplyTextAttributes(GetText(), storage);
+
+    [storage endEditing];
   } else {
     SetText(GetText());
+  }
+}
+
+void AutocompleteEditViewMac::ApplyTextAttributes(
+    const std::wstring& display_text, NSMutableAttributedString* as) {
+  NSFont* font = ResourceBundle::GetSharedInstance().GetFont(
+      ResourceBundle::BaseFont).nativeFont();
+  [as addAttribute:NSFontAttributeName value:font
+             range:NSMakeRange(0, [as length])];
+
+  // Make a paragraph style locking in the standard line height as the maximum,
+  // otherwise the baseline may shift "downwards".
+  scoped_nsobject<NSMutableParagraphStyle>
+      paragraph_style([[NSMutableParagraphStyle alloc] init]);
+  [paragraph_style setMaximumLineHeight:line_height_];
+  [as addAttribute:NSParagraphStyleAttributeName value:paragraph_style
+             range:NSMakeRange(0, [as length])];
+
+  url_parse::Component scheme, host;
+  AutocompleteInput::ParseForEmphasizeComponents(
+      display_text, model_->GetDesiredTLD(), &scheme, &host);
+  const bool emphasize = model_->CurrentTextIsURL() && (host.len > 0);
+  if (emphasize) {
+    [as addAttribute:NSForegroundColorAttributeName value:BaseTextColor()
+               range:NSMakeRange(0, [as length])];
+
+    [as addAttribute:NSForegroundColorAttributeName value:HostTextColor()
+               range:ComponentToNSRange(host)];
+  }
+
+  // TODO(shess): GTK has this as a member var, figure out why.
+  // [Could it be to not change if no change?  If so, I'm guessing
+  // AppKit may already handle that.]
+  const ToolbarModel::SecurityLevel scheme_security_level =
+      toolbar_model_->GetSchemeSecurityLevel();
+
+  if (scheme_security_level == ToolbarModel::SECURE) {
+    [field_ setBackgroundColor:SecureBackgroundColor()];
+  } else if (scheme_security_level == ToolbarModel::NORMAL) {
+    [field_ setBackgroundColor:NormalBackgroundColor()];
+  } else if (scheme_security_level == ToolbarModel::INSECURE) {
+    [field_ setBackgroundColor:InsecureBackgroundColor()];
+  } else {
+    NOTREACHED() << "Unexpected scheme_security_level: "
+                 << scheme_security_level;
+  }
+
+  // Emphasize the scheme for security UI display purposes (if necessary).
+  if (!model_->user_input_in_progress() && scheme.is_nonempty() &&
+      (scheme_security_level != ToolbarModel::NORMAL)) {
+    NSColor* color;
+    if (scheme_security_level == ToolbarModel::SECURE) {
+      color = SecureSchemeColor();
+    } else {
+      color = InsecureSchemeColor();
+      // Add a strikethrough through the scheme.
+      [as addAttribute:NSStrikethroughStyleAttributeName
+                 value:[NSNumber numberWithInt:NSUnderlineStyleSingle]
+                 range:ComponentToNSRange(scheme)];
+    }
+    [as addAttribute:NSForegroundColorAttributeName value:color
+               range:ComponentToNSRange(scheme)];
   }
 }
 
@@ -473,6 +512,7 @@ void AutocompleteEditViewMac::OnTemporaryTextMaybeChanged(
 
   SetWindowTextAndCaretPos(display_text, display_text.size());
   controller_->OnChanged();
+  [field_ clearUndoChain];
 }
 
 bool AutocompleteEditViewMac::OnInlineAutocompleteTextMaybeChanged(
@@ -485,9 +525,11 @@ bool AutocompleteEditViewMac::OnInlineAutocompleteTextMaybeChanged(
   }
 
   DCHECK_LE(user_text_length, display_text.size());
-  const NSRange range = NSMakeRange(user_text_length, display_text.size());
+  const NSRange range =
+      NSMakeRange(user_text_length, display_text.size() - user_text_length);
   SetTextAndSelectedRange(display_text, range);
   controller_->OnChanged();
+  [field_ clearUndoChain];
 
   return true;
 }
@@ -553,30 +595,28 @@ gfx::NativeView AutocompleteEditViewMac::GetNativeView() const {
   return field_;
 }
 
-void AutocompleteEditViewMac::OnUpOrDownKeyPressed(bool up, bool by_page) {
-  // We should only arrive here when the field is focussed.
-  DCHECK(IsFirstResponder());
-
-  const int count = by_page ? model_->result().size() : 1;
-  model_->OnUpOrDownKeyPressed(up ? -count : count);
+CommandUpdater* AutocompleteEditViewMac::GetCommandUpdater() {
+  return command_updater_;
 }
 
-void AutocompleteEditViewMac::OnEscapeKeyPressed() {
-  // We should only arrive here when the field is focussed.
-  DCHECK(IsFirstResponder());
-
-  model_->OnEscapeKeyPressed();
-}
-
-void AutocompleteEditViewMac::OnWillBeginEditing() {
+void AutocompleteEditViewMac::OnDidBeginEditing() {
   // We should only arrive here when the field is focussed.
   DCHECK([field_ currentEditor]);
 
   NSEvent* theEvent = [NSApp currentEvent];
   const bool controlDown = ([theEvent modifierFlags]&NSControlKeyMask) != 0;
   model_->OnSetFocus(controlDown);
+  controller_->OnSetFocus();
 
   // Capture the current state.
+  OnBeforePossibleChange();
+}
+
+void AutocompleteEditViewMac::OnDidChange() {
+  // Figure out what changed and notify the model_.
+  OnAfterPossibleChange();
+
+  // Then capture the new state.
   OnBeforePossibleChange();
 }
 
@@ -585,10 +625,144 @@ void AutocompleteEditViewMac::OnDidEndEditing() {
 
   // Tell the model to reset itself.
   model_->OnKillFocus();
+  controller_->OnKillFocus();
+}
+
+bool AutocompleteEditViewMac::OnDoCommandBySelector(SEL cmd) {
+  // We should only arrive here when the field is focussed.
+  DCHECK(IsFirstResponder());
+
+  // Don't intercept up/down-arrow if the popup isn't open.
+  if (popup_view_->IsOpen()) {
+    if (cmd == @selector(moveDown:)) {
+      model_->OnUpOrDownKeyPressed(1);
+      return true;
+    }
+
+    if (cmd == @selector(moveUp:)) {
+      model_->OnUpOrDownKeyPressed(-1);
+      return true;
+    }
+  }
+
+  if (cmd == @selector(scrollPageDown:)) {
+    model_->OnUpOrDownKeyPressed(model_->result().size());
+    return true;
+  }
+
+  if (cmd == @selector(scrollPageUp:)) {
+    model_->OnUpOrDownKeyPressed(-model_->result().size());
+    return true;
+  }
+
+  if (cmd == @selector(cancelOperation:)) {
+    return model_->OnEscapeKeyPressed();
+  }
+
+  if (cmd == @selector(insertTab:)) {
+    if (model_->is_keyword_hint() && !model_->keyword().empty()) {
+      model_->AcceptKeyword();
+      return true;
+    }
+  }
+
+  // TODO(shess): Option-tab, would normally insert a literal tab
+  // character.  Consider combining with -insertTab:
+  if (cmd == @selector(insertTabIgnoringFieldEditor:)) {
+    return true;
+  }
+
+  // |-noop:| is sent when the user presses Cmd+Return. Override the no-op
+  // behavior with the proper WindowOpenDisposition.
+  NSEvent* event = [NSApp currentEvent];
+  if (cmd == @selector(insertNewline:) ||
+     (cmd == @selector(noop:) && [event keyCode] == kVK_Return)) {
+    WindowOpenDisposition disposition =
+        event_utils::WindowOpenDispositionFromNSEvent(event);
+    model_->AcceptInput(disposition, false);
+    // Opening a URL in a background tab should also revert the omnibox contents
+    // to their original state.  We cannot do a blanket revert in OpenURL()
+    // because middle-clicks also open in a new background tab, but those should
+    // not revert the omnibox text.
+    RevertAll();
+    return true;
+  }
+
+  // Option-Return
+  if (cmd == @selector(insertNewlineIgnoringFieldEditor:)) {
+    model_->AcceptInput(NEW_FOREGROUND_TAB, false);
+    return true;
+  }
+
+  // When the user does Control-Enter, the existing content has "www."
+  // prepended and ".com" appended.  |model_| should already have
+  // received notification when the Control key was depressed, but it
+  // is safe to tell it twice.
+  if (cmd == @selector(insertLineBreak:)) {
+    OnControlKeyChanged(true);
+    WindowOpenDisposition disposition =
+        event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
+    model_->AcceptInput(disposition, false);
+    return true;
+  }
+
+  if (cmd == @selector(deleteBackward:)) {
+    if (OnBackspacePressed()) {
+      return true;
+    }
+  }
+
+  if (cmd == @selector(deleteForward:)) {
+    const NSUInteger modifiers = [[NSApp currentEvent] modifierFlags];
+    if ((modifiers & NSShiftKeyMask) != 0) {
+      if (popup_view_->IsOpen()) {
+        popup_view_->GetModel()->TryDeletingCurrentItem();
+        return true;
+      }
+    }
+  }
+
+  // Capture the state before the operation changes the content.
+  // TODO(shess): Determine if this is always redundent WRT the call
+  // in -controlTextDidChange:.
+  OnBeforePossibleChange();
+  return false;
 }
 
 void AutocompleteEditViewMac::OnDidResignKey() {
   ClosePopup();
+}
+
+void AutocompleteEditViewMac::OnCopy() {
+  const NSRange selection = GetSelectedRange();
+  if (selection.length == 0)
+    return;
+
+  const std::wstring& text = GetText();
+  const string16 text16 = WideToUTF16(text);
+
+  ScopedClipboardWriter scw(g_browser_process->clipboard());
+  // If the entire contents are being copied and it looks like an URL,
+  // copy as a hyperlink.
+  if (IsSelectAll()) {
+    GURL url;
+    if (model_->GetURLForText(text, &url)) {
+      if ((url.SchemeIs("http") || url.SchemeIs("https")) &&
+          !model_->user_input_in_progress())
+        scw.WriteText(UTF8ToUTF16(url.spec()));
+      else
+        scw.WriteText(text16);
+      scw.WriteBookmark(text16, url.spec());
+
+      // This line, cargo cult copied from the Windows and GTK
+      // versions (perhaps), breaks paste of an URL into Powerpoint
+      // 2008.  http://crbug.com/41842
+      // scw.WriteHyperlink(EscapeForHTML(WideToUTF8(text)), url.spec());
+      return;
+    }
+  }
+
+  scw.WriteText(text16.substr(selection.location, selection.length));
 }
 
 void AutocompleteEditViewMac::OnPaste() {
@@ -612,10 +786,8 @@ void AutocompleteEditViewMac::OnPaste() {
   if ([editor shouldChangeTextInRange:selectedRange replacementString:s]) {
     // If this paste will be replacing all the text, record that, so
     // we can do different behaviors in such a case.
-    const NSRange allRange = NSMakeRange(0, [[field_ stringValue] length]);
-    if (NSEqualRanges(allRange, selectedRange)) {
+    if (IsSelectAll())
       model_->on_paste_replacing_all();
-    }
 
     // Force a Paste operation to trigger the text_changed code in
     // OnAfterPossibleChange(), even if identical contents are pasted
@@ -630,16 +802,6 @@ void AutocompleteEditViewMac::OnPaste() {
 bool AutocompleteEditViewMac::CanPasteAndGo() {
   return
     model_->CanPasteAndGo(GetClipboardText(g_browser_process->clipboard()));
-}
-
-void AutocompleteEditViewMac::OnSecurityIconClicked() {
-  TabContents* tab = BrowserList::GetLastActive()->GetSelectedTabContents();
-  NavigationEntry* nav_entry = tab->controller().GetActiveEntry();
-  if (!nav_entry) {
-    NOTREACHED();
-    return;
-  }
-  tab->ShowPageInfo(nav_entry->url(), nav_entry->ssl(), true);
 }
 
 int AutocompleteEditViewMac::GetPasteActionStringId() {
@@ -669,14 +831,6 @@ void AutocompleteEditViewMac::OnFrameChanged() {
   controller_->OnChanged();
 }
 
-bool AutocompleteEditViewMac::OnTabPressed() {
-  if (model_->is_keyword_hint() && !model_->keyword().empty()) {
-    model_->AcceptKeyword();
-    return true;
-  }
-  return false;
-}
-
 bool AutocompleteEditViewMac::OnBackspacePressed() {
   // Don't intercept if not in keyword search mode.
   if (model_->is_keyword_hint() || model_->keyword().empty()) {
@@ -696,26 +850,19 @@ bool AutocompleteEditViewMac::OnBackspacePressed() {
   return true;
 }
 
-bool AutocompleteEditViewMac::IsPopupOpen() const {
-  return popup_view_->IsOpen();
-}
-
-void AutocompleteEditViewMac::TryDeletingCurrentItem() {
-  popup_view_->GetModel()->TryDeletingCurrentItem();
-}
-
 void AutocompleteEditViewMac::OnControlKeyChanged(bool pressed) {
   model_->OnControlKeyChanged(pressed);
 }
 
-void AutocompleteEditViewMac::AcceptInput(
-    WindowOpenDisposition disposition, bool for_drop) {
-  model_->AcceptInput(disposition, for_drop);
-}
-
-void AutocompleteEditViewMac::FocusLocation() {
-  [[field_ window] makeFirstResponder:field_];
-  DCHECK_EQ([field_ currentEditor], [[field_ window] firstResponder]);
+void AutocompleteEditViewMac::FocusLocation(bool select_all) {
+  if ([field_ isEditable]) {
+    // If the text field has a field editor, it's the first responder, meaning
+    // that it's already focused. makeFirstResponder: will select all, so only
+    // call it if this behavior is desired.
+    if (select_all || ![field_ currentEditor])
+      [[field_ window] makeFirstResponder:field_];
+    DCHECK_EQ([field_ currentEditor], [[field_ window] firstResponder]);
+  }
 }
 
 // TODO(shess): Copied from autocomplete_edit_view_win.cc.  Could this
@@ -759,140 +906,3 @@ std::wstring AutocompleteEditViewMac::GetClipboardText(Clipboard* clipboard) {
 
   return std::wstring();
 }
-
-@implementation AutocompleteFieldDelegate
-
-- initWithEditView:(AutocompleteEditViewMac*)view {
-  self = [super init];
-  if (self) {
-    edit_view_ = view;
-  }
-  return self;
-}
-
-- (void)dealloc {
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [super dealloc];
-}
-
-- (BOOL)control:(NSControl*)control
-       textView:(NSTextView*)textView doCommandBySelector:(SEL)cmd {
-  // Don't intercept up/down-arrow if the popup isn't open.
-  if (edit_view_->IsPopupOpen()) {
-    if (cmd == @selector(moveDown:)) {
-      edit_view_->OnUpOrDownKeyPressed(false, false);
-      return YES;
-    }
-
-    if (cmd == @selector(moveUp:)) {
-      edit_view_->OnUpOrDownKeyPressed(true, false);
-      return YES;
-    }
-  }
-
-  if (cmd == @selector(scrollPageDown:)) {
-    edit_view_->OnUpOrDownKeyPressed(false, true);
-    return YES;
-  }
-
-  if (cmd == @selector(scrollPageUp:)) {
-    edit_view_->OnUpOrDownKeyPressed(true, true);
-    return YES;
-  }
-
-  if (cmd == @selector(cancelOperation:)) {
-    edit_view_->OnEscapeKeyPressed();
-    return YES;
-  }
-
-  if (cmd == @selector(insertTab:)) {
-    if (edit_view_->OnTabPressed()) {
-      return YES;
-    }
-  }
-
-  // TODO(shess): Option-tab, would normally insert a literal tab
-  // character.  Consider combining with -insertTab:
-  if (cmd == @selector(insertTabIgnoringFieldEditor:)) {
-    return YES;
-  }
-
-  // |-noop:| is sent when the user presses Cmd+Return. Override the no-op
-  // behavior with the proper WindowOpenDisposition.
-  NSEvent* event = [NSApp currentEvent];
-  if (cmd == @selector(insertNewline:) ||
-     (cmd == @selector(noop:) && [event keyCode] == kVK_Return)) {
-    WindowOpenDisposition disposition =
-        event_utils::WindowOpenDispositionFromNSEvent(event);
-    edit_view_->AcceptInput(disposition, false);
-    return YES;
-  }
-
-  // Option-Return
-  if (cmd == @selector(insertNewlineIgnoringFieldEditor:)) {
-    edit_view_->AcceptInput(NEW_FOREGROUND_TAB, false);
-    return YES;
-  }
-
-  // When the user does Control-Enter, the existing content has "www."
-  // prepended and ".com" appended.  |model_| should already have
-  // received notification when the Control key was depressed, but it
-  // is safe to tell it twice.
-  if (cmd == @selector(insertLineBreak:)) {
-    edit_view_->OnControlKeyChanged(true);
-    WindowOpenDisposition disposition =
-        event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
-    edit_view_->AcceptInput(disposition, false);
-    return YES;
-  }
-
-  if (cmd == @selector(deleteBackward:)) {
-    if (edit_view_->OnBackspacePressed()) {
-      return YES;
-    }
-  }
-
-  if (cmd == @selector(deleteForward:)) {
-    const NSUInteger modifiers = [[NSApp currentEvent] modifierFlags];
-    if ((modifiers & NSShiftKeyMask) != 0) {
-      if (edit_view_->IsPopupOpen()) {
-        edit_view_->TryDeletingCurrentItem();
-        return YES;
-      }
-    }
-  }
-
-  // Capture the state before the operation changes the content.
-  // TODO(shess): Determine if this is always redundent WRT the call
-  // in -controlTextDidChange:.
-  edit_view_->OnBeforePossibleChange();
-  return NO;
-}
-
-- (void)controlTextDidBeginEditing:(NSNotification*)aNotification {
-  edit_view_->OnWillBeginEditing();
-}
-
-- (void)controlTextDidChange:(NSNotification*)aNotification {
-  // Figure out what changed and notify the model_.
-  edit_view_->OnAfterPossibleChange();
-
-  // Then capture the new state.
-  edit_view_->OnBeforePossibleChange();
-}
-
-- (BOOL)control:(NSControl*)control textShouldEndEditing:(NSText*)fieldEditor {
-  edit_view_->OnDidEndEditing();
-
-  return YES;
-
-  // TODO(shess): Figure out where the selection belongs.  On GTK,
-  // it's set to the start of the text.
-}
-
-// Signal that we've lost focus when the window resigns key.
-- (void)windowDidResignKey:(NSNotification*)notification {
-  edit_view_->OnDidResignKey();
-}
-
-@end

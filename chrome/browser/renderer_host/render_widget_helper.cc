@@ -6,7 +6,7 @@
 
 #include "base/eintr_wrapper.h"
 #include "base/thread.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
@@ -14,24 +14,24 @@
 
 // A Task used with InvokeLater that we hold a pointer to in pending_paints_.
 // Instances are deleted by MessageLoop after it calls their Run method.
-class RenderWidgetHelper::PaintMsgProxy : public Task {
+class RenderWidgetHelper::UpdateMsgProxy : public Task {
  public:
-  PaintMsgProxy(RenderWidgetHelper* h, const IPC::Message& m)
+  UpdateMsgProxy(RenderWidgetHelper* h, const IPC::Message& m)
       : helper(h),
         message(m),
         cancelled(false) {
   }
 
-  ~PaintMsgProxy() {
+  ~UpdateMsgProxy() {
     // If the paint message was never dispatched, then we need to let the
     // helper know that we are going away.
     if (!cancelled && helper)
-      helper->OnDiscardPaintMsg(this);
+      helper->OnDiscardUpdateMsg(this);
   }
 
   virtual void Run() {
     if (!cancelled) {
-      helper->OnDispatchPaintMsg(this);
+      helper->OnDispatchUpdateMsg(this);
       helper = NULL;
     }
   }
@@ -40,12 +40,11 @@ class RenderWidgetHelper::PaintMsgProxy : public Task {
   IPC::Message message;
   bool cancelled;  // If true, then the message will not be dispatched.
 
-  DISALLOW_COPY_AND_ASSIGN(PaintMsgProxy);
+  DISALLOW_COPY_AND_ASSIGN(UpdateMsgProxy);
 };
 
 RenderWidgetHelper::RenderWidgetHelper()
     : render_process_id_(-1),
-      ui_loop_(MessageLoop::current()),
 #if defined(OS_WIN)
       event_(CreateEvent(NULL, FALSE /* auto-reset */, FALSE, NULL)),
 #elif defined(OS_POSIX)
@@ -76,35 +75,36 @@ int RenderWidgetHelper::GetNextRoutingID() {
 }
 
 void RenderWidgetHelper::CancelResourceRequests(int render_widget_id) {
-  if (g_browser_process->io_thread() && render_process_id_ != -1) {
-    g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(this,
-                          &RenderWidgetHelper::OnCancelResourceRequests,
-                          render_widget_id));
-  }
+  if (render_process_id_ == -1)
+    return;
+
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(this,
+                        &RenderWidgetHelper::OnCancelResourceRequests,
+                        render_widget_id));
 }
 
 void RenderWidgetHelper::CrossSiteClosePageACK(
     const ViewMsg_ClosePage_Params& params) {
-  if (g_browser_process->io_thread()) {
-    g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(this,
-                          &RenderWidgetHelper::OnCrossSiteClosePageACK,
-                          params));
-  }
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(this,
+                        &RenderWidgetHelper::OnCrossSiteClosePageACK,
+                        params));
 }
 
-bool RenderWidgetHelper::WaitForPaintMsg(int render_widget_id,
-                                         const base::TimeDelta& max_delay,
-                                         IPC::Message* msg) {
+bool RenderWidgetHelper::WaitForUpdateMsg(int render_widget_id,
+                                          const base::TimeDelta& max_delay,
+                                          IPC::Message* msg) {
   base::TimeTicks time_start = base::TimeTicks::Now();
 
   for (;;) {
-    PaintMsgProxy* proxy = NULL;
+    UpdateMsgProxy* proxy = NULL;
     {
       AutoLock lock(pending_paints_lock_);
 
-      PaintMsgProxyMap::iterator it = pending_paints_.find(render_widget_id);
+      UpdateMsgProxyMap::iterator it = pending_paints_.find(render_widget_id);
       if (it != pending_paints_.end()) {
         proxy = it->second;
 
@@ -134,25 +134,25 @@ bool RenderWidgetHelper::WaitForPaintMsg(int render_widget_id,
   return false;
 }
 
-void RenderWidgetHelper::DidReceivePaintMsg(const IPC::Message& msg) {
+void RenderWidgetHelper::DidReceiveUpdateMsg(const IPC::Message& msg) {
   int render_widget_id = msg.routing_id();
 
-  PaintMsgProxy* proxy;
+  UpdateMsgProxy* proxy = NULL;
   {
     AutoLock lock(pending_paints_lock_);
 
-    PaintMsgProxyMap::value_type new_value(render_widget_id, NULL);
+    UpdateMsgProxyMap::value_type new_value(render_widget_id, NULL);
 
     // We expect only a single PaintRect message at a time.  Optimize for the
     // case that we don't already have an entry by using the 'insert' method.
-    std::pair<PaintMsgProxyMap::iterator, bool> result =
+    std::pair<UpdateMsgProxyMap::iterator, bool> result =
         pending_paints_.insert(new_value);
     if (!result.second) {
       NOTREACHED() << "Unexpected PaintRect message!";
       return;
     }
 
-    result.first->second = (proxy = new PaintMsgProxy(this, msg));
+    result.first->second = (proxy = new UpdateMsgProxy(this, msg));
   }
 
   // Notify anyone waiting on the UI thread that there is a new entry in the
@@ -161,17 +161,17 @@ void RenderWidgetHelper::DidReceivePaintMsg(const IPC::Message& msg) {
   event_.Signal();
 
   // The proxy will be deleted when it is run as a task.
-  ui_loop_->PostTask(FROM_HERE, proxy);
+  ChromeThread::PostTask(ChromeThread::UI, FROM_HERE, proxy);
 }
 
-void RenderWidgetHelper::OnDiscardPaintMsg(PaintMsgProxy* proxy) {
+void RenderWidgetHelper::OnDiscardUpdateMsg(UpdateMsgProxy* proxy) {
   const IPC::Message& msg = proxy->message;
 
   // Remove the proxy from the map now that we are going to handle it normally.
   {
     AutoLock lock(pending_paints_lock_);
 
-    PaintMsgProxyMap::iterator it = pending_paints_.find(msg.routing_id());
+    UpdateMsgProxyMap::iterator it = pending_paints_.find(msg.routing_id());
     DCHECK(it != pending_paints_.end());
     DCHECK(it->second == proxy);
 
@@ -179,8 +179,8 @@ void RenderWidgetHelper::OnDiscardPaintMsg(PaintMsgProxy* proxy) {
   }
 }
 
-void RenderWidgetHelper::OnDispatchPaintMsg(PaintMsgProxy* proxy) {
-  OnDiscardPaintMsg(proxy);
+void RenderWidgetHelper::OnDispatchUpdateMsg(UpdateMsgProxy* proxy) {
+  OnDiscardUpdateMsg(proxy);
 
   // It is reasonable for the host to no longer exist.
   RenderProcessHost* host = RenderProcessHost::FromID(render_process_id_);
@@ -209,8 +209,10 @@ void RenderWidgetHelper::CreateNewWindow(int opener_id,
   resource_dispatcher_host_->BlockRequestsForRoute(
       render_process_id_, *route_id);
 
-  ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &RenderWidgetHelper::OnCreateWindowOnUI, opener_id, *route_id));
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      NewRunnableMethod(
+          this, &RenderWidgetHelper::OnCreateWindowOnUI, opener_id, *route_id));
 }
 
 void RenderWidgetHelper::OnCreateWindowOnUI(int opener_id, int route_id) {
@@ -218,7 +220,8 @@ void RenderWidgetHelper::OnCreateWindowOnUI(int opener_id, int route_id) {
   if (host)
     host->CreateNewWindow(route_id);
 
-  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
       NewRunnableMethod(this, &RenderWidgetHelper::OnCreateWindowOnIO,
                         route_id));
 }
@@ -229,19 +232,21 @@ void RenderWidgetHelper::OnCreateWindowOnIO(int route_id) {
 }
 
 void RenderWidgetHelper::CreateNewWidget(int opener_id,
-                                         bool activatable,
+                                         WebKit::WebPopupType popup_type,
                                          int* route_id) {
   *route_id = GetNextRoutingID();
-  ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &RenderWidgetHelper::OnCreateWidgetOnUI, opener_id, *route_id,
-      activatable));
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      NewRunnableMethod(
+          this, &RenderWidgetHelper::OnCreateWidgetOnUI, opener_id, *route_id,
+          popup_type));
 }
 
 void RenderWidgetHelper::OnCreateWidgetOnUI(
-    int opener_id, int route_id, bool activatable) {
+    int opener_id, int route_id, WebKit::WebPopupType popup_type) {
   RenderViewHost* host = RenderViewHost::FromID(render_process_id_, opener_id);
   if (host)
-    host->CreateNewWidget(route_id, activatable);
+    host->CreateNewWidget(route_id, popup_type);
 }
 
 #if defined(OS_MACOSX)
@@ -258,7 +263,7 @@ TransportDIB* RenderWidgetHelper::MapTransportDIB(TransportDIB::Id dib_id) {
 }
 
 void RenderWidgetHelper::AllocTransportDIB(
-    size_t size, TransportDIB::Handle* result) {
+    size_t size, bool cache_in_browser, TransportDIB::Handle* result) {
   scoped_ptr<base::SharedMemory> shared_memory(new base::SharedMemory());
   if (!shared_memory->Create(L"", false /* read write */,
                              false /* do not open existing */, size)) {
@@ -269,9 +274,11 @@ void RenderWidgetHelper::AllocTransportDIB(
 
   shared_memory->GiveToProcess(0 /* pid, not needed */, result);
 
-  // Keep a copy of the file descriptor around
-  AutoLock locked(allocated_dibs_lock_);
-  allocated_dibs_[shared_memory->id()] = dup(result->fd);
+  if (cache_in_browser) {
+    // Keep a copy of the file descriptor around
+    AutoLock locked(allocated_dibs_lock_);
+    allocated_dibs_[shared_memory->id()] = dup(result->fd);
+  }
 }
 
 void RenderWidgetHelper::FreeTransportDIB(TransportDIB::Id dib_id) {

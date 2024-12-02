@@ -96,65 +96,6 @@ def MakeCommandName(name):
   return name
 
 
-def UpdateGlobals(dict):
-  """Copies pairs from dict into GlobalDict."""
-  for i, v in dict.items():
-    GlobalsDict.__setitem__(i, v)
-
-
-def GetCallingNamespaces():
-  """Return the locals and globals for the function that called
-  into this module in the current call stack."""
-  try: 1/0
-  except ZeroDivisionError:
-    # Don't start iterating with the current stack-frame to
-    # prevent creating reference cycles (f_back is safe).
-    frame = sys.exc_info()[2].tb_frame.f_back
-
-  # Find the first frame that *isn't* from this file
-  while frame.f_globals.get("__name__") == __name__:
-    frame = frame.f_back
-
-  return frame.f_locals, frame.f_globals
-
-
-def ComputeExports(exports):
-  """Compute a dictionary of exports given one of the parameters
-  to the Export() function or the exports argument to SConscript()."""
-
-  loc, glob = GetCallingNamespaces()
-
-  retval = {}
-  try:
-    for export in exports:
-      if isinstance(export, types.DictType):
-        retval.update(export)
-      else:
-        try:
-          retval[export] = loc[export]
-        except KeyError:
-          retval[export] = glob[export]
-  except KeyError, x:
-    raise Error, "Export of non-existent variable '%s'"%x
-
-  return retval
-
-
-def Export(*vars):
-  """Copies the named variables to GlobalDict."""
-  for var in vars:
-    UpdateGlobals(ComputeExports(vars))
-
-
-def Import(filename):
-  """Imports a python file in a scope with 'Export' defined."""
-  scope = {'__builtins__': globals()['__builtins__'],
-           'Export': Export}
-  file = open(filename, 'r')
-  exec file in scope
-  file.close()
-
-
 def Execute(args):
   """Executes an external program."""
   # Comment the next line in for debugging.
@@ -220,8 +161,10 @@ def DeleteOldDocs(docs_js_outpath):
   except:
     pass
 
+
 def BuildJavaScriptForDocsFromIDLs(idl_files, output_dir):
-  RunNixysa(idl_files, 'jsheader', output_dir, ['--properties-equal-undefined'])
+  RunNixysa(idl_files, 'jsheader', output_dir,
+            ['--properties-equal-undefined', '--overloaded-function-docs'])
 
 
 def BuildJavaScriptForExternsFromIDLs(idl_files, output_dir):
@@ -290,6 +233,8 @@ def BuildCompiledO3DJS(o3djs_files,
     MakePath('..', '..', 'o3d-internal', 'jscomp', 'JSCompiler_deploy.jar'),
     '--property_renaming', 'OFF',
     '--variable_renaming', 'LOCAL',
+    '--jscomp_error=visibility',
+    '--jscomp_error=accessControls',
     '--strict',
     '--externs=%s' % externs_path,
     ('--externs=%s' % o3d_externs_js_path),
@@ -346,8 +291,8 @@ def main(argv):
 
   os.environ['PYTHONPATH'] = pythonpath
 
-  js_list_filename = MakePath('..', 'samples', 'o3djs', 'js_list.scons')
-  idl_list_filename = MakePath('..', 'plugin', 'idl_list.scons')
+  js_list_filename = MakePath('..', 'samples', 'o3djs', 'js_list.manifest')
+  idl_list_filename = MakePath('..', 'plugin', 'idl_list.manifest')
   js_list_basepath = os.path.dirname(js_list_filename)
   idl_list_basepath = os.path.dirname(idl_list_filename)
 
@@ -366,11 +311,11 @@ def main(argv):
   externs_path = MakePath('externs', 'externs.js')
   o3d_extra_externs_path = MakePath('externs', 'o3d-extra-externs.js')
 
-  Import(js_list_filename)
-  Import(idl_list_filename)
+  js_list = eval(open(js_list_filename, "r").read())
+  idl_list = eval(open(idl_list_filename, "r").read())
 
-  idl_files = AppendBasePath(idl_list_basepath, GlobalsDict['O3D_IDL_SOURCES'])
-  o3djs_files = AppendBasePath(js_list_basepath, GlobalsDict['O3D_JS_SOURCES'])
+  idl_files = AppendBasePath(idl_list_basepath, idl_list)
+  o3djs_files = AppendBasePath(js_list_basepath, js_list)
 
   # we need to put base.js first?
   o3djs_files = (
@@ -380,24 +325,29 @@ def main(argv):
   docs_js_files = [os.path.join(
                        docs_js_outpath,
                        os.path.splitext(os.path.basename(f))[0] + '.js')
-                   for f in GlobalsDict['O3D_IDL_SOURCES']]
+                   for f in idl_list]
 
-  DeleteOldDocs(MakePath(docs_outpath))
-  BuildJavaScriptForDocsFromIDLs(idl_files, docs_js_outpath)
-  BuildO3DDocsFromJavaScript([o3d_extra_externs_path] + docs_js_files,
-                             o3d_docs_ezt_outpath, o3d_docs_html_outpath)
-  BuildO3DClassHierarchy(o3d_docs_html_outpath)
-  BuildJavaScriptForExternsFromIDLs(idl_files, externs_js_outpath)
-  BuildO3DExternsFile(externs_js_outpath,
-                      o3d_extra_externs_path,
-                      o3d_externs_path)
-  BuildO3DJSDocs(o3djs_files + [o3d_externs_path], o3djs_docs_ezt_outpath,
-                 o3djs_docs_html_outpath, o3djs_exports_path)
-  CopyStaticFiles(o3d_docs_ezt_outpath, o3d_docs_html_outpath)
-  BuildCompiledO3DJS(o3djs_files + [o3djs_exports_path],
-                     externs_path,
-                     o3d_externs_path,
-                     compiled_o3djs_outpath)
+  try:
+    DeleteOldDocs(MakePath(docs_outpath))
+    BuildJavaScriptForDocsFromIDLs(idl_files, docs_js_outpath)
+    BuildO3DDocsFromJavaScript([o3d_extra_externs_path] + docs_js_files,
+                               o3d_docs_ezt_outpath, o3d_docs_html_outpath)
+    BuildO3DClassHierarchy(o3d_docs_html_outpath)
+    BuildJavaScriptForExternsFromIDLs(idl_files, externs_js_outpath)
+    BuildO3DExternsFile(externs_js_outpath,
+                        o3d_extra_externs_path,
+                        o3d_externs_path)
+    BuildO3DJSDocs(o3djs_files + [o3d_externs_path], o3djs_docs_ezt_outpath,
+                   o3djs_docs_html_outpath, o3djs_exports_path)
+    CopyStaticFiles(o3d_docs_ezt_outpath, o3d_docs_html_outpath)
+    BuildCompiledO3DJS(o3djs_files + [o3djs_exports_path],
+                       externs_path,
+                       o3d_externs_path,
+                       compiled_o3djs_outpath)
+  except Exception:
+    if os.path.exists(compiled_o3djs_outpath):
+      os.unlink(compiled_o3djs_outpath)
+    raise
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,17 @@
 
 #include <gtk/gtk.h>
 
-#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/process_util.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/gtk_util.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/result_codes.h"
+#include "gfx/gtk_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -149,19 +150,22 @@ void HungRendererDialogGtk::ShowForTabContents(TabContents* hung_contents) {
 
   GtkTreeIter tree_iter;
   for (TabContentsIterator it; !it.done(); ++it) {
-    if (it->process() == hung_contents->process()) {
+    if (it->GetRenderProcessHost() == hung_contents->GetRenderProcessHost()) {
       gtk_list_store_append(model_, &tree_iter);
       std::string title = UTF16ToUTF8(it->GetTitle());
       if (title.empty())
-        title = l10n_util::GetStringUTF8(IDS_TAB_UNTITLED_TITLE);
+        title = UTF16ToUTF8(TabContents::GetDefaultTitle());
       SkBitmap favicon = it->GetFavIcon();
 
+      GdkPixbuf* pixbuf = NULL;
+      if (favicon.width() > 0)
+        pixbuf = gfx::GdkPixbufFromSkBitmap(&favicon);
       gtk_list_store_set(model_, &tree_iter,
-          COL_FAVICON, favicon.width() > 0
-              ? gfx::GdkPixbufFromSkBitmap(&favicon)
-              : NULL,
+          COL_FAVICON, pixbuf,
           COL_TITLE, title.c_str(),
           -1);
+      if (pixbuf)
+        g_object_unref(pixbuf);
     }
   }
   gtk_widget_show_all(GTK_WIDGET(dialog_));
@@ -169,7 +173,8 @@ void HungRendererDialogGtk::ShowForTabContents(TabContents* hung_contents) {
 
 void HungRendererDialogGtk::EndForTabContents(TabContents* contents) {
   DCHECK(contents);
-  if (contents_ && contents_->process() == contents->process()) {
+  if (contents_ && contents_->GetRenderProcessHost() ==
+      contents->GetRenderProcessHost()) {
     gtk_widget_hide(GTK_WIDGET(dialog_));
     // Since we're closing, we no longer need this TabContents.
     contents_ = NULL;
@@ -183,7 +188,7 @@ void HungRendererDialogGtk::OnDialogResponse(gint response_id) {
   switch (response_id) {
     case kKillPagesButtonResponse:
       // Kill the process.
-      base::KillProcess(contents_->process()->process().handle(),
+      base::KillProcess(contents_->GetRenderProcessHost()->GetHandle(),
                         ResultCodes::HUNG, false);
       break;
 
@@ -204,9 +209,9 @@ void HungRendererDialogGtk::OnDialogResponse(gint response_id) {
 
 }  // namespace
 
+namespace hung_renderer_dialog {
 
-// static
-void HungRendererDialog::ShowForTabContents(TabContents* contents) {
+void ShowForTabContents(TabContents* contents) {
   if (!logging::DialogsAreSuppressed()) {
     if (!g_instance)
       g_instance = new HungRendererDialogGtk();
@@ -215,7 +220,9 @@ void HungRendererDialog::ShowForTabContents(TabContents* contents) {
 }
 
 // static
-void HungRendererDialog::HideForTabContents(TabContents* contents) {
+void HideForTabContents(TabContents* contents) {
   if (!logging::DialogsAreSuppressed() && g_instance)
     g_instance->EndForTabContents(contents);
 }
+
+}  // namespace hung_renderer_dialog

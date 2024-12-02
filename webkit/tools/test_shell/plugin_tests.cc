@@ -10,11 +10,11 @@
 #include "base/string_util.h"
 #include "net/base/escape.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/api/public/WebData.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebInputEvent.h"
-#include "webkit/api/public/WebScriptSource.h"
-#include "webkit/api/public/WebView.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebScriptSource.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/tools/test_shell/test_shell.h"
 #include "webkit/tools/test_shell/test_shell_test.h"
 
@@ -25,9 +25,15 @@ using WebKit::WebString;
 #if defined(OS_WIN)
 #define TEST_PLUGIN_NAME "npapi_test_plugin.dll"
 #elif defined(OS_MACOSX)
-#define TEST_PLUGIN_NAME "npapi_test_plugin.bundle"
-#elif defined(OS_LINUX)
+#define TEST_PLUGIN_NAME "npapi_test_plugin.plugin"
+#elif defined(OS_POSIX)
 #define TEST_PLUGIN_NAME "libnpapi_test_plugin.so"
+#endif
+
+#if defined(OS_MACOSX)
+#define TEST_PLUGIN_DIRECTORY "PlugIns"
+#else
+#define TEST_PLUGIN_DIRECTORY "plugins"
 #endif
 
 // Ignore these until 64-bit plugin build is fixed. http://crbug.com/18337
@@ -41,7 +47,7 @@ class PluginTest : public TestShellTest {
     plugin_src_ = executable_directory.AppendASCII(TEST_PLUGIN_NAME);
     CHECK(file_util::PathExists(plugin_src_));
 
-    plugin_file_path_ = executable_directory.AppendASCII("plugins");
+    plugin_file_path_ = executable_directory.AppendASCII(TEST_PLUGIN_DIRECTORY);
     file_util::CreateDirectory(plugin_file_path_);
 
     plugin_file_path_ = plugin_file_path_.AppendASCII(TEST_PLUGIN_NAME);

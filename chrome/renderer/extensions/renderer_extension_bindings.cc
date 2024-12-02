@@ -4,10 +4,16 @@
 
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
 
+#include <map>
+#include <string>
+
 #include "app/resource_bundle.h"
 #include "base/basictypes.h"
+#include "base/singleton.h"
 #include "base/values.h"
+#include "chrome/common/extensions/extension_message_bundle.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/renderer/extensions/bindings_utils.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/render_thread.h"
@@ -37,10 +43,21 @@ struct ExtensionData {
   };
   std::map<int, PortData> ports;  // port ID -> data
 };
-ExtensionData::PortData& GetPortData(int port_id) {
+
+static bool HasPortData(int port_id) {
+  return Singleton<ExtensionData>::get()->ports.find(port_id) !=
+      Singleton<ExtensionData>::get()->ports.end();
+}
+
+static ExtensionData::PortData& GetPortData(int port_id) {
   return Singleton<ExtensionData>::get()->ports[port_id];
 }
 
+static void ClearPortData(int port_id) {
+  Singleton<ExtensionData>::get()->ports.erase(port_id);
+}
+
+const char kPortClosedError[] = "Attempting to use a disconnected port object";
 const char* kExtensionDeps[] = { EventBindings::kName };
 
 class ExtensionImpl : public ExtensionBase {
@@ -64,6 +81,8 @@ class ExtensionImpl : public ExtensionBase {
       return v8::FunctionTemplate::New(PortAddRef);
     } else if (name->Equals(v8::String::New("PortRelease"))) {
       return v8::FunctionTemplate::New(PortRelease);
+    } else if (name->Equals(v8::String::New("GetL10nMessage"))) {
+      return v8::FunctionTemplate::New(GetL10nMessage);
     }
     return ExtensionBase::GetNativeFunction(name);
   }
@@ -99,6 +118,10 @@ class ExtensionImpl : public ExtensionBase {
 
     if (args.Length() >= 2 && args[0]->IsInt32() && args[1]->IsString()) {
       int port_id = args[0]->Int32Value();
+      if (!HasPortData(port_id)) {
+        return v8::ThrowException(v8::Exception::Error(
+          v8::String::New(kPortClosedError)));
+      }
       std::string message = *v8::String::Utf8Value(args[1]->ToString());
       renderview->Send(new ViewHostMsg_ExtensionPostMessage(
           renderview->routing_id(), port_id, message));
@@ -110,10 +133,13 @@ class ExtensionImpl : public ExtensionBase {
   static v8::Handle<v8::Value> CloseChannel(const v8::Arguments& args) {
     if (args.Length() >= 1 && args[0]->IsInt32()) {
       int port_id = args[0]->Int32Value();
+      if (!HasPortData(port_id)) {
+        return v8::Undefined();
+      }
       // Send via the RenderThread because the RenderView might be closing.
       EventBindings::GetRenderThread()->Send(
           new ViewHostMsg_ExtensionCloseChannel(port_id));
-      GetPortData(port_id).disconnected = true;
+      ClearPortData(port_id);
     }
     return v8::Undefined();
   }
@@ -134,14 +160,84 @@ class ExtensionImpl : public ExtensionBase {
   static v8::Handle<v8::Value> PortRelease(const v8::Arguments& args) {
     if (args.Length() >= 1 && args[0]->IsInt32()) {
       int port_id = args[0]->Int32Value();
-      if (!GetPortData(port_id).disconnected &&
-          --GetPortData(port_id).ref_count == 0) {
+      if (HasPortData(port_id) && --GetPortData(port_id).ref_count == 0) {
         // Send via the RenderThread because the RenderView might be closing.
         EventBindings::GetRenderThread()->Send(
             new ViewHostMsg_ExtensionCloseChannel(port_id));
+        ClearPortData(port_id);
       }
     }
     return v8::Undefined();
+  }
+
+  static v8::Handle<v8::Value> GetL10nMessage(const v8::Arguments& args) {
+    if (args.Length() != 3 || !args[0]->IsString()) {
+      NOTREACHED() << "Bad arguments";
+      return v8::Undefined();
+    }
+
+    std::string extension_id;
+    if (args[2]->IsNull() || !args[2]->IsString()) {
+      return v8::Undefined();
+    } else {
+      extension_id = *v8::String::Utf8Value(args[2]->ToString());
+      if (extension_id.empty())
+        return v8::Undefined();
+    }
+
+    L10nMessagesMap* l10n_messages = GetL10nMessagesMap(extension_id);
+    if (!l10n_messages) {
+      // Get the current RenderView so that we can send a routed IPC message
+      // from the correct source.
+      RenderView* renderview = bindings_utils::GetRenderViewForCurrentContext();
+      if (!renderview)
+        return v8::Undefined();
+
+      L10nMessagesMap messages;
+      // A sync call to load message catalogs for current extension.
+      renderview->Send(new ViewHostMsg_GetExtensionMessageBundle(
+          extension_id, &messages));
+
+      // Save messages we got.
+      ExtensionToL10nMessagesMap& l10n_messages_map =
+          *GetExtensionToL10nMessagesMap();
+      l10n_messages_map[extension_id] = messages;
+
+      l10n_messages = GetL10nMessagesMap(extension_id);
+    }
+
+    std::string message_name = *v8::String::AsciiValue(args[0]);
+    std::string message =
+        ExtensionMessageBundle::GetL10nMessage(message_name, *l10n_messages);
+
+    std::vector<std::string> substitutions;
+    if (args[1]->IsNull() || args[1]->IsUndefined()) {
+      // chrome.i18n.getMessage("message_name");
+      // chrome.i18n.getMessage("message_name", null);
+      return v8::String::New(message.c_str());
+    } else if (args[1]->IsString()) {
+      // chrome.i18n.getMessage("message_name", "one param");
+      std::string substitute = *v8::String::Utf8Value(args[1]->ToString());
+      substitutions.push_back(substitute);
+    } else if (args[1]->IsArray()) {
+      // chrome.i18n.getMessage("message_name", ["more", "params"]);
+      v8::Array* placeholders = static_cast<v8::Array*>(*args[1]);
+      uint32_t count = placeholders->Length();
+      if (count <= 0 || count > 9)
+        return v8::Undefined();
+      for (uint32_t i = 0; i < count; ++i) {
+        std::string substitute =
+            *v8::String::Utf8Value(
+                placeholders->Get(v8::Integer::New(i))->ToString());
+        substitutions.push_back(substitute);
+      }
+    } else {
+      NOTREACHED() << "Couldn't parse second parameter.";
+      return v8::Undefined();
+    }
+
+    return v8::String::New(ReplaceStringPlaceholders(
+        message, substitutions, NULL).c_str());
   }
 };
 
@@ -202,8 +298,13 @@ v8::Extension* RendererExtensionBindings::Get() {
 
 void RendererExtensionBindings::Invoke(const std::string& function_name,
                                        const ListValue& args,
-                                       RenderView* renderview) {
+                                       RenderView* renderview,
+                                       bool requires_incognito_access) {
   v8::HandleScope handle_scope;
   std::vector< v8::Handle<v8::Value> > argv = ListValueToV8(args);
-  EventBindings::CallFunction(function_name, argv.size(), &argv[0], renderview);
+  EventBindings::CallFunction(function_name,
+                              argv.size(),
+                              &argv[0],
+                              renderview,
+                              requires_incognito_access);
 }

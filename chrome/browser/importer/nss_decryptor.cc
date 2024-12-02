@@ -4,17 +4,21 @@
 
 #include "chrome/browser/importer/nss_decryptor.h"
 
+#include <string>
+#include <vector>
+
 #include "base/scoped_ptr.h"
 #include "build/build_config.h"
 #include "chrome/common/sqlite_utils.h"
 
-#if defined(OS_LINUX)
+#if defined(USE_NSS)
 #include <pk11pub.h>
 #include <pk11sdr.h>
-#endif  // defined(OS_LINUX)
+#endif  // defined(USE_NSS)
 
+#include "base/base64.h"
 #include "base/string_util.h"
-#include "net/base/base64.h"
+#include "base/utf_string_conversions.h"
 #include "webkit/glue/password_form.h"
 
 using webkit_glue::PasswordForm;
@@ -59,22 +63,22 @@ using webkit_glue::PasswordForm;
 *
 * ***** END LICENSE BLOCK ***** */
 
-std::wstring NSSDecryptor::Decrypt(const std::string& crypt) const {
+string16 NSSDecryptor::Decrypt(const std::string& crypt) const {
   // Do nothing if NSS is not loaded.
   if (!is_nss_initialized_)
-    return std::wstring();
+    return string16();
 
   // The old style password is encoded in base64. They are identified
   // by a leading '~'. Otherwise, we should decrypt the text.
   std::string plain;
   if (crypt[0] != '~') {
     std::string decoded_data;
-    net::Base64Decode(crypt, &decoded_data);
+    base::Base64Decode(crypt, &decoded_data);
     PK11SlotInfo* slot = GetKeySlotForDB();
     SECStatus result = PK11_Authenticate(slot, PR_TRUE, NULL);
     if (result != SECSuccess) {
       FreeSlot(slot);
-      return std::wstring();
+      return string16();
     }
 
     SECItem request;
@@ -84,11 +88,11 @@ std::wstring NSSDecryptor::Decrypt(const std::string& crypt) const {
     SECItem reply;
     reply.data = NULL;
     reply.len = 0;
-#if defined(OS_LINUX)
+#if defined(USE_NSS)
     result = PK11SDR_DecryptWithSlot(slot, &request, &reply, NULL);
 #else
     result = PK11SDR_Decrypt(&request, &reply, NULL);
-#endif  // defined(OS_LINUX)
+#endif  // defined(USE_NSS)
     if (result == SECSuccess)
       plain.assign(reinterpret_cast<char*>(reply.data), reply.len);
 
@@ -96,10 +100,10 @@ std::wstring NSSDecryptor::Decrypt(const std::string& crypt) const {
     FreeSlot(slot);
   } else {
     // Deletes the leading '~' before decoding.
-    net::Base64Decode(crypt.substr(1), &plain);
+    base::Base64Decode(crypt.substr(1), &plain);
   }
 
-  return UTF8ToWide(plain);
+  return UTF8ToUTF16(plain);
 }
 
 // There are three versions of password filess. They store saved user
@@ -202,11 +206,11 @@ void NSSDecryptor::ParseSignons(const std::string& content,
     // line (contains a dot).
     while (begin + 4 < end) {
       // The user name.
-      form.username_element = UTF8ToWide(lines[begin++]);
+      form.username_element = UTF8ToUTF16(lines[begin++]);
       form.username_value = Decrypt(lines[begin++]);
       // The element name has a leading '*'.
       if (lines[begin].at(0) == '*') {
-        form.password_element = UTF8ToWide(lines[begin++].substr(1));
+        form.password_element = UTF8ToUTF16(lines[begin++].substr(1));
         form.password_value = Decrypt(lines[begin++]);
       } else {
         // Maybe the file is bad, we skip to next block.
@@ -286,9 +290,9 @@ bool NSSDecryptor::ReadAndParseSignons(const FilePath& sqlite_file,
       form.signon_realm += realm;
     form.ssl_valid = form.origin.SchemeIsSecure();
     // The user name, password and action.
-    form.username_element = UTF8ToWide(s2.column_string(3));
+    form.username_element = UTF8ToUTF16(s2.column_string(3));
     form.username_value = Decrypt(s2.column_string(5));
-    form.password_element = UTF8ToWide(s2.column_string(4));
+    form.password_element = UTF8ToUTF16(s2.column_string(4));
     form.password_value = Decrypt(s2.column_string(6));
     form.action = GURL(s2.column_string(2)).ReplaceComponents(rep);
     forms->push_back(form);

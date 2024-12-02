@@ -16,7 +16,7 @@ namespace {
     Value* value;
 
     JSONFileValueSerializer serializer(path);
-    value = serializer.Deserialize(error);
+    value = serializer.Deserialize(NULL, error);
 
     return static_cast<DictionaryValue*>(value);
   }
@@ -36,7 +36,7 @@ namespace {
     Extension extension(path);
     std::string error;
 
-    FilePath manifest_path = extension_path.AppendASCII(
+    FilePath manifest_path = extension_path.Append(
         Extension::kManifestFilename);
     scoped_ptr<DictionaryValue> extension_data(DeserializeJSONTestData(
         manifest_path, &error));
@@ -50,8 +50,8 @@ namespace {
 
     // Produce test output.
     scoped_ptr<DictionaryValue> actual_output_data(
-        ExtensionsDOMHandler::CreateExtensionDetailValue(&extension, pages,
-                                                         true));
+        ExtensionsDOMHandler::CreateExtensionDetailValue(NULL, &extension,
+                                                         pages, true));
 
     // Compare the outputs.
     return expected_output_data->Equals(actual_output_data.get());

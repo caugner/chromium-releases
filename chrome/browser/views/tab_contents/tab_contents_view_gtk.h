@@ -1,19 +1,27 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved. Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_VIEWS_TAB_CONTENTS_TAB_CONTENTS_VIEW_GTK_H_
 #define CHROME_BROWSER_VIEWS_TAB_CONTENTS_TAB_CONTENTS_VIEW_GTK_H_
 
-#include "base/gfx/size.h"
+#include <vector>
+
 #include "base/scoped_ptr.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
+#include "gfx/size.h"
 #include "views/widget/widget_gtk.h"
 
-class RenderViewContextMenuWin;
+class ConstrainedWindowGtk;
+typedef struct _GtkFloatingContainer GtkFloatingContainer;
+class RenderViewContextMenuGtk;
 class SadTabView;
+class SkBitmap;
 class TabContentsDragSource;
 class WebDragDestGtk;
+namespace gfx {
+class Point;
+}
 namespace views {
 class NativeViewHost;
 }
@@ -29,6 +37,13 @@ class TabContentsViewGtk : public TabContentsView,
   // because that's what was easiest when they were split.
   explicit TabContentsViewGtk(TabContents* tab_contents);
   virtual ~TabContentsViewGtk();
+
+  // Unlike Windows, ConstrainedWindows need to collaborate with the
+  // TabContentsViewGtk to position the dialogs.
+  void AttachConstrainedWindow(ConstrainedWindowGtk* constrained_window);
+  void RemoveConstrainedWindow(ConstrainedWindowGtk* constrained_window);
+
+  gboolean OnMouseMove(GtkWidget* widget, GdkEventMotion* event);
 
   // TabContentsView implementation --------------------------------------------
 
@@ -50,11 +65,12 @@ class TabContentsViewGtk : public TabContentsView,
   // Backend implementation of RenderViewHostDelegate::View.
   virtual void ShowContextMenu(const ContextMenuParams& params);
   virtual void StartDragging(const WebDropData& drop_data,
-                             WebKit::WebDragOperationsMask ops_allowed);
+                             WebKit::WebDragOperationsMask ops_allowed,
+                             const SkBitmap& image,
+                             const gfx::Point& image_offset);
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
-  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
 
  private:
   // Signal handlers -----------------------------------------------------------
@@ -62,7 +78,9 @@ class TabContentsViewGtk : public TabContentsView,
   // Overridden from views::WidgetGtk:
   virtual gboolean OnButtonPress(GtkWidget* widget, GdkEventButton* event);
   virtual void OnSizeAllocate(GtkWidget* widget, GtkAllocation* allocation);
-  virtual void OnPaint(GtkWidget* widget, GdkEventExpose* event);
+  virtual gboolean OnPaint(GtkWidget* widget, GdkEventExpose* event);
+  virtual void OnShow(GtkWidget* widget);
+  virtual void OnHide(GtkWidget* widget);
 
   // Handles notifying the TabContents and other operations when the window was
   // shown or hidden.
@@ -73,11 +91,16 @@ class TabContentsViewGtk : public TabContentsView,
   // of the change, reposition popups, and the find in page bar.
   void WasSized(const gfx::Size& size);
 
+  // For any floating views (ConstrainedDialogs) this function centers them
+  // within this view. It's called whem a ConstrainedDialog is attached and
+  // when this view is resized.
+  void SetFloatingPosition(const gfx::Size& size);
+
   // ---------------------------------------------------------------------------
 
   // Used to render the sad tab. This will be non-NULL only when the sad tab is
   // visible.
-  scoped_ptr<SadTabView> sad_tab_;
+  SadTabView* sad_tab_;
 
   // Whether to ignore the next CHAR keyboard event.
   bool ignore_next_char_event_;
@@ -86,7 +109,7 @@ class TabContentsViewGtk : public TabContentsView,
   int last_focused_view_storage_id_;
 
   // The context menu. Callbacks are asynchronous so we need to keep it around.
-  scoped_ptr<RenderViewContextMenuWin> context_menu_;
+  scoped_ptr<RenderViewContextMenuGtk> context_menu_;
 
   // Handles drags from this TabContentsView.
   scoped_ptr<TabContentsDragSource> drag_source_;
@@ -100,6 +123,10 @@ class TabContentsViewGtk : public TabContentsView,
 
   // Current size. See comment in WidgetGtk as to why this is cached.
   gfx::Size size_;
+
+  // Each individual UI for constrained dialogs currently displayed. The
+  // objects in this vector are owned by the TabContents, not the view.
+  std::vector<ConstrainedWindowGtk*> constrained_windows_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsViewGtk);
 };

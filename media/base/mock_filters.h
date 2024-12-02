@@ -1,6 +1,6 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 //
 // A new breed of mock media filters, this time using gmock!  Feel free to add
 // actions if you need interesting side-effects (i.e., copying data to the
@@ -15,6 +15,7 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "media/base/factory.h"
 #include "media/base/filters.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -101,7 +102,7 @@ class MockDataSource : public DataSource {
   // DataSource implementation.
   MOCK_METHOD2(Initialize, void(const std::string& url,
                                 FilterCallback* callback));
-  const MediaFormat& media_format() { return media_format_; }
+  MOCK_METHOD0(media_format, const MediaFormat&());
   MOCK_METHOD4(Read, void(int64 position, size_t size, uint8* data,
                           DataSource::ReadCallback* callback));
   MOCK_METHOD1(GetSize, bool(int64* size_out));
@@ -111,8 +112,6 @@ class MockDataSource : public DataSource {
   virtual ~MockDataSource() {}
 
  private:
-  MediaFormat media_format_;
-
   DISALLOW_COPY_AND_ASSIGN(MockDataSource);
 };
 
@@ -143,14 +142,8 @@ class MockDemuxerStream : public DemuxerStream {
  public:
   MockDemuxerStream() {}
 
-  // Sets the mime type of this object's media format, which is usually checked
-  // to determine the type of decoder to create.
-  explicit MockDemuxerStream(const std::string& mime_type) {
-    media_format_.SetAsString(MediaFormat::kMimeType, mime_type);
-  }
-
   // DemuxerStream implementation.
-  const MediaFormat& media_format() { return media_format_; }
+  MOCK_METHOD0(media_format, const MediaFormat&());
   MOCK_METHOD1(Read, void(Callback1<Buffer*>::Type* read_callback));
   MOCK_METHOD1(QueryInterface, void*(const char* interface_id));
 
@@ -167,13 +160,6 @@ class MockVideoDecoder : public VideoDecoder {
  public:
   MockVideoDecoder() {}
 
-  // Sets the essential media format keys for this decoder.
-  MockVideoDecoder(const std::string& mime_type, int width, int height) {
-    media_format_.SetAsString(MediaFormat::kMimeType, mime_type);
-    media_format_.SetAsInteger(MediaFormat::kWidth, width);
-    media_format_.SetAsInteger(MediaFormat::kHeight, height);
-  }
-
   // MediaFilter implementation.
   MOCK_METHOD0(Stop, void());
   MOCK_METHOD1(SetPlaybackRate, void(float playback_rate));
@@ -183,30 +169,19 @@ class MockVideoDecoder : public VideoDecoder {
   // VideoDecoder implementation.
   MOCK_METHOD2(Initialize, void(DemuxerStream* stream,
                                 FilterCallback* callback));
-  const MediaFormat& media_format() { return media_format_; }
+  MOCK_METHOD0(media_format, const MediaFormat&());
   MOCK_METHOD1(Read, void(Callback1<VideoFrame*>::Type* read_callback));
 
  protected:
   virtual ~MockVideoDecoder() {}
 
  private:
-  MediaFormat media_format_;
-
   DISALLOW_COPY_AND_ASSIGN(MockVideoDecoder);
 };
 
 class MockAudioDecoder : public AudioDecoder {
  public:
   MockAudioDecoder() {}
-
-  // Sets the essential media format keys for this decoder.
-  MockAudioDecoder(int channels, int sample_rate, int sample_bits) {
-    media_format_.SetAsString(MediaFormat::kMimeType,
-                              mime_type::kUncompressedAudio);
-    media_format_.SetAsInteger(MediaFormat::kChannels, channels);
-    media_format_.SetAsInteger(MediaFormat::kSampleRate, sample_rate);
-    media_format_.SetAsInteger(MediaFormat::kSampleBits, sample_bits);
-  }
 
   // MediaFilter implementation.
   MOCK_METHOD0(Stop, void());
@@ -217,15 +192,13 @@ class MockAudioDecoder : public AudioDecoder {
   // AudioDecoder implementation.
   MOCK_METHOD2(Initialize, void(DemuxerStream* stream,
                                 FilterCallback* callback));
-  const MediaFormat& media_format() { return media_format_; }
+  MOCK_METHOD0(media_format, const MediaFormat&());
   MOCK_METHOD1(Read, void(Callback1<Buffer*>::Type* read_callback));
 
  protected:
   virtual ~MockAudioDecoder() {}
 
  private:
-  MediaFormat media_format_;
-
   DISALLOW_COPY_AND_ASSIGN(MockAudioDecoder);
 };
 

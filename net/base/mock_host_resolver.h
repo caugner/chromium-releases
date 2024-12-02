@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,20 +38,15 @@ class RuleBasedHostResolverProc;
 // Base class shared by MockHostResolver and MockCachingHostResolver.
 class MockHostResolverBase : public HostResolver {
  public:
-  virtual ~MockHostResolverBase() {}
-
   // HostResolver methods:
   virtual int Resolve(const RequestInfo& info,
                       AddressList* addresses,
                       CompletionCallback* callback,
                       RequestHandle* out_req,
-                      LoadLog* load_log);
+                      const BoundNetLog& net_log);
   virtual void CancelRequest(RequestHandle req);
   virtual void AddObserver(Observer* observer);
   virtual void RemoveObserver(Observer* observer);
-  virtual HostCache* GetHostCache();
-  // TODO(eroman): temp hack for http://crbug.com/18373
-  virtual void Shutdown();
 
   RuleBasedHostResolverProc* rules() { return rules_; }
 
@@ -65,8 +60,8 @@ class MockHostResolverBase : public HostResolver {
 
  protected:
   MockHostResolverBase(bool use_caching);
+  virtual ~MockHostResolverBase() {}
 
- private:
   scoped_refptr<HostResolverImpl> impl_;
   scoped_refptr<RuleBasedHostResolverProc> rules_;
   bool synchronous_mode_;
@@ -76,6 +71,9 @@ class MockHostResolverBase : public HostResolver {
 class MockHostResolver : public MockHostResolverBase {
  public:
   MockHostResolver() : MockHostResolverBase(false /*use_caching*/) {}
+
+ private:
+  virtual ~MockHostResolver() {}
 };
 
 // Same as MockHostResolver, except internally it uses a host-cache.
@@ -86,6 +84,9 @@ class MockHostResolver : public MockHostResolverBase {
 class MockCachingHostResolver : public MockHostResolverBase {
  public:
   MockCachingHostResolver() : MockHostResolverBase(true /*use_caching*/) {}
+
+ private:
+  ~MockCachingHostResolver() {}
 };
 
 // RuleBasedHostResolverProc applies a set of rules to map a host string to
@@ -95,12 +96,16 @@ class MockCachingHostResolver : public MockHostResolverBase {
 class RuleBasedHostResolverProc : public HostResolverProc {
  public:
   explicit RuleBasedHostResolverProc(HostResolverProc* previous);
-  ~RuleBasedHostResolverProc();
 
   // Any hostname matching the given pattern will be replaced with the given
   // replacement value.  Usually, replacement should be an IP address literal.
   void AddRule(const std::string& host_pattern,
                const std::string& replacement);
+
+  // Same as AddRule(), but further restricts to |address_family|.
+  void AddRuleForAddressFamily(const std::string& host_pattern,
+                               AddressFamily address_family,
+                               const std::string& replacement);
 
   // Same as AddRule(), but the replacement is expected to be an IPV6 literal.
   // You should use this in place of AddRule(), since the system's host resolver
@@ -121,9 +126,14 @@ class RuleBasedHostResolverProc : public HostResolverProc {
   void AddSimulatedFailure(const std::string& host);
 
   // HostResolverProc methods:
-  virtual int Resolve(const std::string& host, AddressList* addrlist);
+  virtual int Resolve(const std::string& host,
+                      AddressFamily address_family,
+                      HostResolverFlags host_resolver_flags,
+                      AddressList* addrlist);
 
  private:
+  ~RuleBasedHostResolverProc();
+
   struct Rule;
   typedef std::list<Rule> RuleList;
 
@@ -141,18 +151,27 @@ class WaitingHostResolverProc : public HostResolverProc {
   }
 
   // HostResolverProc methods:
-  virtual int Resolve(const std::string& host, AddressList* addrlist) {
+  virtual int Resolve(const std::string& host,
+                      AddressFamily address_family,
+                      HostResolverFlags host_resolver_flags,
+                      AddressList* addrlist) {
     event_.Wait();
-    return ResolveUsingPrevious(host, addrlist);
+    return ResolveUsingPrevious(host, address_family, host_resolver_flags,
+                                addrlist);
   }
+
+ private:
+  ~WaitingHostResolverProc() {}
 
   base::WaitableEvent event_;
 };
 
-// This class sets the HostResolverProc for a particular scope. If there are
-// multiple ScopedDefaultHostResolverProc in existence, then the last one
-// allocated will be used. However, if it does not provide a matching rule,
-// then it should delegate to the previously set HostResolverProc.
+// This class sets the default HostResolverProc for a particular scope.  The
+// chain of resolver procs starting at |proc| is placed in front of any existing
+// default resolver proc(s).  This means that if multiple
+// ScopedDefaultHostResolverProcs are declared, then resolving will start with
+// the procs given to the last-allocated one, then fall back to the procs given
+// to the previously-allocated one, and so forth.
 //
 // NOTE: Only use this as a catch-all safety net. Individual tests should use
 // MockHostResolver.

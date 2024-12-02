@@ -1,9 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/at_exit.h"
 #include "media/audio/fake_audio_output_stream.h"
+
+#include "base/at_exit.h"
 
 bool FakeAudioOutputStream::has_created_fake_stream_ = false;
 FakeAudioOutputStream* FakeAudioOutputStream::last_fake_stream_ = NULL;
@@ -22,7 +23,7 @@ FakeAudioOutputStream* FakeAudioOutputStream::GetLastFakeStream() {
   return last_fake_stream_;
 }
 
-bool FakeAudioOutputStream::Open(size_t packet_size) {
+bool FakeAudioOutputStream::Open(uint32 packet_size) {
   if (packet_size < sizeof(int16))
     return false;
   packet_size_ = packet_size;
@@ -39,14 +40,12 @@ void FakeAudioOutputStream::Start(AudioSourceCallback* callback)  {
 void FakeAudioOutputStream::Stop() {
 }
 
-void FakeAudioOutputStream::SetVolume(double left_level, double right_level) {
-  left_volume_ = left_level;
-  right_volume_ = right_level;
+void FakeAudioOutputStream::SetVolume(double volume) {
+  volume_ = volume;
 }
 
-void FakeAudioOutputStream::GetVolume(double* left_level, double* right_level) {
-  *left_level = left_volume_;
-  *right_level = right_volume_;
+void FakeAudioOutputStream::GetVolume(double* volume) {
+  *volume = volume_;
 }
 
 void FakeAudioOutputStream::Close() {
@@ -59,8 +58,7 @@ void FakeAudioOutputStream::Close() {
 }
 
 FakeAudioOutputStream::FakeAudioOutputStream()
-    : left_volume_(0),
-      right_volume_(0),
+    : volume_(0),
       callback_(NULL),
       packet_size_(0) {
 }

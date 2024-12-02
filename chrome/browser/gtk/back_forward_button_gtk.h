@@ -5,43 +5,43 @@
 #ifndef CHROME_BROWSER_GTK_BACK_FORWARD_BUTTON_GTK_H_
 #define CHROME_BROWSER_GTK_BACK_FORWARD_BUTTON_GTK_H_
 
+#include "app/gtk_signal.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "chrome/browser/gtk/custom_button.h"
+#include "chrome/browser/gtk/menu_gtk.h"
 
-class BackForwardMenuModelGtk;
+class BackForwardMenuModel;
 class Browser;
-class MenuGtk;
 
 typedef struct _GtkWidget GtkWidget;
 
 // When clicked, these buttons will navigate forward or backward. When
 // pressed and held, they show a dropdown menu of recent web sites.
-class BackForwardButtonGtk {
+class BackForwardButtonGtk : MenuGtk::Delegate {
  public:
   BackForwardButtonGtk(Browser* browser, bool is_forward);
   virtual ~BackForwardButtonGtk();
 
-  // The dropdown menu is no longer showing.
-  void StoppedShowingMenu();
+  // MenuGtk::Delegate implementation.
+  virtual void StoppedShowing();
+  bool AlwaysShowImages() const;
 
   GtkWidget* widget() { return button_->widget(); }
 
  private:
   // Executes the browser command.
-  static void OnClick(GtkWidget* widget, BackForwardButtonGtk* button);
+  CHROMEGTK_CALLBACK_0(BackForwardButtonGtk, void, OnClick);
 
   // Starts a timer to show the dropdown menu.
-  static gboolean OnButtonPress(GtkWidget* button,
-                                GdkEventButton* event,
-                                BackForwardButtonGtk* toolbar);
+  CHROMEGTK_CALLBACK_1(BackForwardButtonGtk, gboolean, OnButtonPress,
+                       GdkEventButton*);
 
   // If there is a timer to show the dropdown menu, and the mouse has moved
   // sufficiently down the screen, cancel the timer and immediately show the
   // menu.
-  static gboolean OnMouseMove(GtkWidget* widget,
-                              GdkEventMotion* event,
-                              BackForwardButtonGtk* toolbar);
+  CHROMEGTK_CALLBACK_1(BackForwardButtonGtk, gboolean, OnMouseMove,
+                       GdkEventMotion*);
 
   // Shows the dropdown menu.
   void ShowBackForwardMenu();
@@ -57,8 +57,8 @@ class BackForwardButtonGtk {
   // Whether this button is a forward button.
   bool is_forward_;
 
-  // The dropdown menu delegate.
-  scoped_ptr<BackForwardMenuModelGtk> menu_model_;
+  // The dropdown menu model.
+  scoped_ptr<BackForwardMenuModel> menu_model_;
 
   // The y position of the last mouse down event.
   int y_position_of_last_press_;

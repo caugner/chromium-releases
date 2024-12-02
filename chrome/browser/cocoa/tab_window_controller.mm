@@ -1,14 +1,41 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/cocoa/tab_window_controller.h"
 
+#include "app/theme_provider.h"
 #include "base/logging.h"
 #import "chrome/browser/cocoa/tab_strip_view.h"
+#import "chrome/browser/cocoa/themed_window.h"
 
 @interface TabWindowController(PRIVATE)
 - (void)setUseOverlay:(BOOL)useOverlay;
+@end
+
+@interface TabWindowOverlayWindow : NSWindow
+@end
+
+@implementation TabWindowOverlayWindow
+
+- (ThemeProvider*)themeProvider {
+  if ([self parentWindow])
+    return [[[self parentWindow] windowController] themeProvider];
+  return NULL;
+}
+
+- (ThemedWindowStyle)themedWindowStyle {
+  if ([self parentWindow])
+    return [[[self parentWindow] windowController] themedWindowStyle];
+  return NO;
+}
+
+- (NSPoint)themePatternPhase {
+  if ([self parentWindow])
+    return [[[self parentWindow] windowController] themePatternPhase];
+  return NSZeroPoint;
+}
+
 @end
 
 @implementation TabWindowController
@@ -23,7 +50,7 @@
 }
 
 - (void)windowDidLoad {
-  if ([self isNormalWindow]) {
+  if ([self hasTabStrip]) {
     // Place the tab bar above the content box and add it to the view hierarchy
     // as a sibling of the content view so it can overlap with the window frame.
     NSRect tabFrame = [tabContentArea_ frame];
@@ -47,16 +74,6 @@
     [[self window] orderOut:self];
     [[self window] performClose:self];  // Autoreleases the controller.
   }
-}
-
-// TODO(pinkerton): Nobody calls this, can we remove it?
-- (void)removeOverlayAfterDelay:(NSTimeInterval)delay {
-  [NSObject cancelPreviousPerformRequestsWithTarget:self
-                                           selector:@selector(removeOverlay)
-                                             object:nil];
-  [self performSelector:@selector(removeOverlay)
-             withObject:nil
-             afterDelay:delay];
 }
 
 - (void)showOverlay {
@@ -93,17 +110,18 @@
   NSWindow* window = [self window];
   if (useOverlay && !overlayWindow_) {
     DCHECK(!cachedContentView_);
-    overlayWindow_ = [[NSPanel alloc] initWithContentRect:[window frame]
-                                                styleMask:NSBorderlessWindowMask
-                                                  backing:NSBackingStoreBuffered
-                                                    defer:YES];
+    overlayWindow_ = [[TabWindowOverlayWindow alloc]
+                         initWithContentRect:[window frame]
+                                   styleMask:NSBorderlessWindowMask
+                                     backing:NSBackingStoreBuffered
+                                       defer:YES];
     [overlayWindow_ setTitle:@"overlay"];
     [overlayWindow_ setBackgroundColor:[NSColor clearColor]];
     [overlayWindow_ setOpaque:NO];
     [overlayWindow_ setDelegate:self];
     cachedContentView_ = [window contentView];
-    [self moveViewsBetweenWindowAndOverlay:useOverlay];
     [window addChildWindow:overlayWindow_ ordered:NSWindowAbove];
+    [self moveViewsBetweenWindowAndOverlay:useOverlay];
     [overlayWindow_ orderFront:nil];
   } else if (!useOverlay && overlayWindow_) {
     DCHECK(cachedContentView_);
@@ -123,6 +141,12 @@
 
 - (NSWindow*)overlayWindow {
   return overlayWindow_;
+}
+
+- (BOOL)shouldConstrainFrameRect {
+  // If we currently have an overlay window, do not attempt to change the
+  // window's size, as our overlay window doesn't know how to resize properly.
+  return overlayWindow_ == nil;
 }
 
 - (BOOL)canReceiveFrom:(TabWindowController*)source {
@@ -162,6 +186,18 @@
   [self showNewTabButton:YES];
 }
 
+- (BOOL)tabDraggingAllowed {
+  return YES;
+}
+
+- (BOOL)tabTearingAllowed {
+  return YES;
+}
+
+- (BOOL)windowMovementAllowed {
+  return YES;
+}
+
 - (BOOL)isTabFullyVisible:(TabView*)tab {
   // Subclasses should implement this, but it's not necessary.
   return YES;
@@ -183,14 +219,20 @@
   return 0;
 }
 
+- (BOOL)hasLiveTabs {
+  // subclass must implement
+  NOTIMPLEMENTED();
+  return NO;
+}
+
 - (NSString*)selectedTabTitle {
   // subclass must implement
   NOTIMPLEMENTED();
   return @"";
 }
 
-- (BOOL)isNormalWindow {
-  // subclass must implement
+- (BOOL)hasTabStrip {
+  // Subclasses should implement this.
   NOTIMPLEMENTED();
   return YES;
 }

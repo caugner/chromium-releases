@@ -1,15 +1,26 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/cocoa/clear_browsing_data_controller.h"
 
+#include "app/l10n_util.h"
 #include "base/mac_util.h"
 #include "base/scoped_nsobject.h"
+#include "base/singleton.h"
+#include "chrome/browser/browser.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/browsing_data_remover.h"
-#include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/common/pref_names.h"
+#include "grit/locale_settings.h"
+#import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
+
+NSString* const kClearBrowsingDataControllerDidDelete =
+    @"kClearBrowsingDataControllerDidDelete";
+NSString* const kClearBrowsingDataControllerRemoveMask =
+    @"kClearBrowsingDataControllerRemoveMask";
 
 @interface ClearBrowsingDataController(Private)
 - (void)initFromPrefs;
@@ -26,6 +37,12 @@ class ClearBrowsingObserver : public BrowsingDataRemover::Observer {
   ClearBrowsingDataController* controller_;
 };
 
+namespace {
+
+typedef std::map<Profile*, ClearBrowsingDataController*> ProfileControllerMap;
+
+} // namespace
+
 @implementation ClearBrowsingDataController
 
 @synthesize clearBrowsingHistory = clearBrowsingHistory_;
@@ -37,6 +54,42 @@ class ClearBrowsingObserver : public BrowsingDataRemover::Observer {
 @synthesize timePeriod = timePeriod_;
 @synthesize isClearing = isClearing_;
 
++ (void)showClearBrowsingDialogForProfile:(Profile*)profile {
+  ClearBrowsingDataController* controller =
+      [ClearBrowsingDataController controllerForProfile:profile];
+  if (![controller isWindowLoaded]) {
+    // This function needs to return instead of blocking, to match the windows
+    // api call.  It caused problems when launching the dialog from the
+    // DomUI history page.  See bug and code review for more details.
+    // http://crbug.com/37976
+    [controller performSelector:@selector(runModalDialog)
+                     withObject:nil
+                     afterDelay:0];
+  }
+}
+
++ (ClearBrowsingDataController *)controllerForProfile:(Profile*)profile {
+  // Get the original profile in case we get here from an incognito window
+  // |GetOriginalProfile()| will return the same profile if it is the original
+  // profile.
+  profile = profile->GetOriginalProfile();
+
+  ProfileControllerMap* map = Singleton<ProfileControllerMap>::get();
+  DCHECK(map != NULL);
+  ProfileControllerMap::iterator it = map->find(profile);
+  if (it == map->end()) {
+    // Since we don't currently support multiple profiles, this class
+    // has not been tested against this case.
+    if (map->size() != 0) {
+      return nil;
+    }
+
+    ClearBrowsingDataController* controller =
+        [[self alloc] initWithProfile:profile];
+    it = map->insert(std::make_pair(profile, controller)).first;
+  }
+  return it->second;
+}
 
 - (id)initWithProfile:(Profile*)profile {
   DCHECK(profile);
@@ -60,12 +113,42 @@ class ClearBrowsingObserver : public BrowsingDataRemover::Observer {
     // while clearing is in progress as the dialog is modal and not closeable).
     remover_->RemoveObserver(observer_.get());
   }
+
   [super dealloc];
 }
 
 // Run application modal.
 - (void)runModalDialog {
-  [NSApp runModalForWindow:[self window]];
+  // Check again to make sure there is only one window.  Since we use
+  // |performSelector:afterDelay:| it is possible for this to somehow be
+  // triggered twice.
+  DCHECK([NSThread isMainThread]);
+  if (![self isWindowLoaded]) {
+    // The Window size in the nib is a min size, loop over the views collecting
+    // the max they grew by, that is how much the window needs to be widened by.
+    CGFloat maxWidthGrowth = 0.0;
+    NSWindow* window = [self window];
+    NSView* contentView = [window contentView];
+    Class widthBasedTweakerClass = [GTMWidthBasedTweaker class];
+    for (id subView in [contentView subviews]) {
+      if ([subView isKindOfClass:widthBasedTweakerClass]) {
+        GTMWidthBasedTweaker* tweaker = subView;
+        CGFloat delta = [tweaker changedWidth];
+        maxWidthGrowth = std::max(maxWidthGrowth, delta);
+      }
+    }
+    if (maxWidthGrowth > 0.0) {
+      NSRect rect = [contentView convertRect:[window frame] fromView:nil];
+      rect.size.width += maxWidthGrowth;
+      rect = [contentView convertRect:rect toView:nil];
+      [window setFrame:rect display:NO];
+      // For some reason the content view is resizing, but some times not
+      // adjusting its origin, so correct it manually.
+      [contentView setFrameOrigin:NSZeroPoint];
+    }
+    // Now start the modal loop.
+    [NSApp runModalForWindow:window];
+  }
 }
 
 - (int)removeMask {
@@ -106,8 +189,30 @@ class ClearBrowsingObserver : public BrowsingDataRemover::Observer {
 // Called when the user clicks the cancel button. All we need to do is stop
 // the modal session.
 - (IBAction)cancel:(id)sender {
-  [NSApp stopModal];
+  [self closeDialog];
+}
+
+// Called when the user clicks the "Flash Player storage settings" button.
+- (IBAction)openFlashPlayerSettings:(id)sender {
+  // The "Clear Data" dialog is app-modal on OS X. Hence, close it before
+  // opening a tab with flash settings.
+  [self closeDialog];
+
+  Browser* browser = Browser::Create(profile_);
+  browser->OpenURL(GURL(l10n_util::GetStringUTF8(IDS_FLASH_STORAGE_URL)),
+                   GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+  browser->window()->Show();
+}
+
+- (void)closeDialog {
+  ProfileControllerMap* map = Singleton<ProfileControllerMap>::get();
+  ProfileControllerMap::iterator it = map->find(profile_);
+  if (it != map->end()) {
+    map->erase(it);
+  }
+  [self autorelease];
   [[self window] orderOut:self];
+  [NSApp stopModal];
 }
 
 // Initialize the bools from prefs using the setters to be KVO-compliant.
@@ -141,7 +246,16 @@ class ClearBrowsingObserver : public BrowsingDataRemover::Observer {
 // Called when the data remover object is done with its work. Close the window.
 // The remover will delete itself. End the modal session at this point.
 - (void)dataRemoverDidFinish {
-  [NSApp stopModal];
+  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+  int removeMask = [self removeMask];
+  NSDictionary* userInfo =
+      [NSDictionary dictionaryWithObject:[NSNumber numberWithInt:removeMask]
+                                forKey:kClearBrowsingDataControllerRemoveMask];
+  [center postNotificationName:kClearBrowsingDataControllerDidDelete
+                        object:self
+                      userInfo:userInfo];
+
+  [self closeDialog];
   [[self window] orderOut:self];
   [self setIsClearing:NO];
   remover_ = NULL;

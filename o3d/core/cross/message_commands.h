@@ -35,7 +35,6 @@
 #define O3D_CORE_CROSS_MESSAGE_COMMANDS_H_
 
 #include "core/cross/types.h"
-#include "core/cross/packing.h"
 
 namespace o3d {
 
@@ -45,7 +44,7 @@ namespace o3d {
 
 // Make sure the compiler does not add extra padding to any of the message
 // structures.
-O3D_PUSH_STRUCTURE_PACKING_1;
+#pragma pack(push, 1)
 
 // This macro is used to safely and convienently expand the list of possible IMC
 // messages in to various lists and never have them get out of sync. To add a
@@ -66,6 +65,7 @@ O3D_PUSH_STRUCTURE_PACKING_1;
   OP(UPDATE_TEXTURE2D_RECT, MessageUpdateTexture2DRect) \
   OP(RENDER, MessageRender) \
   OP(GET_VERSION, MessageGetVersion) \
+  OP(SET_MAX_FPS, MessageSetMaxFPS) \
 
 
 namespace imc {
@@ -358,6 +358,33 @@ struct MessageRender {
   Msg msg;
 };
 
+// Tell O3D to render on every new texture as long as not exceeding max_fps.
+// This is only used when O3D is in Render on demand mode.
+struct MessageSetMaxFPS {
+  // Message Content.
+  struct Msg {
+    static const imc::MessageId kMessageId = imc::SET_MAX_FPS;
+
+    imc::MessageId message_id;
+
+    // Maximum frames per second
+    int32 max_fps;
+  };
+
+  MessageSetMaxFPS() {
+    msg.message_id = Msg::kMessageId;
+  }
+
+  // Parameters:
+  //   max_fps: The maximum frames per second
+  explicit MessageSetMaxFPS(int32 max_fps) {
+    msg.message_id = Msg::kMessageId;
+    msg.max_fps = max_fps;
+  }
+
+  Msg msg;
+};
+
 // Get the O3D version.
 struct MessageGetVersion {
   // Message Content.
@@ -395,8 +422,7 @@ struct MessageGetVersion {
   Msg msg;
 };
 
-
-O3D_POP_STRUCTURE_PACKING;
+#pragma pack(pop)
 
 }  // namespace o3d
 

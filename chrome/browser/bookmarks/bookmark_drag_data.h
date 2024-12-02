@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,12 @@
 #include <string>
 #include <vector>
 
-#include "chrome/browser/history/history.h"
+#include "base/file_path.h"
+#include "base/string16.h"
 #include "googleurl/src/gurl.h"
 
-// TODO(port): Port this file.
 #if defined(TOOLKIT_VIEWS)
 #include "app/os_exchange_data.h"
-#else
-#include "chrome/common/temp_scaffolding_stubs.h"
 #endif
 
 class BookmarkModel;
@@ -23,6 +21,9 @@ class BookmarkNode;
 class OSExchangeData;
 class Pickle;
 class Profile;
+
+// TODO(mrossetti): Rename BookmarkDragData to BookmarkNodeData, update comment.
+// See: http://crbug.com/37891
 
 // BookmarkDragData is used to represent the following:
 //
@@ -56,11 +57,14 @@ struct BookmarkDragData {
     GURL url;
 
     // Title of the entry, used for both urls and groups/folders.
-    std::wstring title;
+    string16 title;
 
     // Children, only used for non-URL nodes.
     std::vector<Element> children;
 
+    int64 get_id() {
+      return id_;
+    }
    private:
     friend struct BookmarkDragData;
 
@@ -82,15 +86,22 @@ struct BookmarkDragData {
   explicit BookmarkDragData(const BookmarkNode* node);
   explicit BookmarkDragData(const std::vector<const BookmarkNode*>& nodes);
 
-  // TODO(estade): Port to mac. It should be as simple as removing this ifdef
-  // after the relevant Clipboard functions are implemetned.
-#if !defined(OS_MACOSX)
+  // Reads bookmarks from the given vector.
+  bool ReadFromVector(const std::vector<const BookmarkNode*>& nodes);
+
+  // Creates a single-bookmark DragData from url/title pair.
+  bool ReadFromTuple(const GURL& url, const string16& title);
+
   // Writes elements to the clipboard.
   void WriteToClipboard(Profile* profile) const;
 
-  // Reads bookmarks from the clipboard. Prefers data written via
-  // WriteToClipboard but will also attempt to read a plain bookmark.
+  // Reads bookmarks from the general copy/paste clipboard. Prefers data
+  // written via WriteToClipboard but will also attempt to read a plain bookmark.
   bool ReadFromClipboard();
+#if defined(OS_MACOSX)
+  // Reads bookmarks that are being dragged from the drag and drop
+  // pasteboard.
+  bool ReadFromDragClipboard();
 #endif
 
 #if defined(TOOLKIT_VIEWS)
@@ -130,6 +141,14 @@ struct BookmarkDragData {
   // Number of elements.
   size_t size() const { return elements.size(); }
 
+  // Clears the data.
+  void Clear();
+
+  // Sets |profile_path_| to that of |profile|. This is useful for the
+  // constructors/readers that don't set it. This should only be called if the
+  // profile path is not already set.
+  void SetOriginatingProfile(Profile* profile);
+
   // Returns true if this data is from the specified profile.
   bool IsFromProfile(Profile* profile) const;
 
@@ -139,13 +158,11 @@ struct BookmarkDragData {
   // The MIME type for the clipboard format for BookmarkDragData.
   static const char* kClipboardFormatString;
 
+  static bool ClipboardContainsBookmarks();
+
  private:
   // Path of the profile we originated from.
-#if defined(WCHAR_T_IS_UTF16)
-  std::wstring profile_path_;
-#elif defined(WCHAR_T_IS_UTF32)
-  std::string profile_path_;
-#endif
+  FilePath::StringType profile_path_;
 };
 
 #endif  // CHROME_BROWSER_BOOKMARKS_BOOKMARK_DRAG_DATA_H_

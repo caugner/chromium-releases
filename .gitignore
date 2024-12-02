@@ -1,3 +1,4 @@
+*.Makefile
 *.mk
 *.ncb
 *.pyc
@@ -8,6 +9,11 @@
 *.user
 *.vcproj
 *.xcodeproj
+*~
+.metadata
+.project
+.cproject
+/_out
 /Makefile
 /breakpad/src/
 /build/util/support
@@ -15,6 +21,8 @@
 /chrome/Hammer
 /chrome/Release
 /chrome/app/theme/google_chrome
+/chrome/browser/autofill/internal
+/chrome/browser/renderer_host/translate
 /chrome/installer/linux
 /chrome/personalization/
 /chrome/test/data/firefox2_profile/searchplugins
@@ -27,6 +35,7 @@
 /chrome/test/data/workers/LayoutTests
 /chrome/tools/memory
 /chrome/tools/test/reference_build
+/chrome_frame/tools/test/reference_build
 /data
 /googleurl
 /native_client
@@ -38,12 +47,20 @@
 /testserver.log
 /third_party/GTM
 /third_party/WebKit
+/third_party/adobe/flash/binaries
+/third_party/chromeos_login_manager
+/third_party/chromeos_text_input
+/third_party/cros
 /third_party/cygwin
 /third_party/ffmpeg/binaries
+/third_party/ffmpeg/source/patched-ffmpeg-mt
 /third_party/forge
 /third_party/googlemac
 /third_party/hunspell
 /third_party/icu
+/third_party/lighttpd
+/third_party/ots
+/third_party/pefile
 /third_party/personalization
 /third_party/pdfsqueeze
 /third_party/platformsdk_win2008_6_1
@@ -52,8 +69,11 @@
 /third_party/python_24
 /third_party/pywebsocket
 /third_party/skia
-/third_party/tcmalloc/tcmalloc
+/third_party/swig
+/third_party/valgrind
 /third_party/xdg-utils
+/third_party/xulrunner-sdk
+/third_party/yasm/source/patched-yasm
 /tools/distcc
 /tools/grit/grit/test/data
 /tools/gyp

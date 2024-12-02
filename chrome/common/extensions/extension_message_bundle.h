@@ -7,7 +7,10 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
+#include "base/linked_ptr.h"
+#include "base/string_util.h"
 #include "base/values.h"
 
 // Contains localized extension messages for one locale. Any messages that the
@@ -15,6 +18,7 @@
 class ExtensionMessageBundle {
  public:
   typedef std::map<std::string, std::string> SubstitutionMap;
+  typedef std::vector<linked_ptr<DictionaryValue> > CatalogVector;
 
   // JSON keys of interest for messages file.
   static const wchar_t* kContentKey;
@@ -27,15 +31,30 @@ class ExtensionMessageBundle {
   static const char* kMessageBegin;
   static const char* kMessageEnd;
 
-  // Extension name and description message names
-  static const char* kExtensionName;
-  static const char* kExtensionDescription;
+  // Reserved message names in the dictionary.
+  // Update i18n documentation when adding new reserved value.
+  static const char* kUILocaleKey;
+  // See http://code.google.com/apis/gadgets/docs/i18n.html#BIDI for
+  // description.
+  // TODO(cira): point to chrome docs once they are out.
+  static const char* kBidiDirectionKey;
+  static const char* kBidiReversedDirectionKey;
+  static const char* kBidiStartEdgeKey;
+  static const char* kBidiEndEdgeKey;
+  // Extension id gets added in the
+  // browser/renderer_host/resource_message_filter.cc to enable message
+  // replacement for non-localized extensions.
+  static const char* kExtensionIdKey;
+
+  // Values for some of the reserved messages.
+  static const char* kBidiLeftEdgeValue;
+  static const char* kBidiRightEdgeValue;
 
   // Creates ExtensionMessageBundle or returns NULL if there was an error.
-  static ExtensionMessageBundle* Create(
-      const DictionaryValue& default_locale_catalog,
-      const DictionaryValue& current_locale_catalog,
-      std::string* error);
+  // Expects locale_catalogs to be sorted from more specific to less specific,
+  // with default catalog at the end.
+  static ExtensionMessageBundle* Create(const CatalogVector& locale_catalogs,
+                                        std::string* error);
 
   // Get message from the catalog with given key.
   // Returned message has all of the internal placeholders resolved to their
@@ -57,6 +76,9 @@ class ExtensionMessageBundle {
   // Returns false if there is a message in text that's not defined in the
   // dictionary.
   bool ReplaceMessages(std::string* text, std::string* error) const;
+  // Static version that accepts dictionary.
+  static bool ReplaceMessagesWithExternalDictionary(
+      const SubstitutionMap& dictionary, std::string* text, std::string* error);
 
   // Replaces each occurance of variable placeholder with its value.
   // I.e. replaces __MSG_name__ with value from the catalog with the key "name".
@@ -71,24 +93,41 @@ class ExtensionMessageBundle {
 
   // Allow only ascii 0-9, a-z, A-Z, and _ in the variable name.
   // Returns false if the input is empty or if it has illegal characters.
-  // Public for easier unittesting.
   template<typename str>
-  static bool IsValidName(const str& name);
+  static bool IsValidName(const str& name) {
+    if (name.empty())
+      return false;
+
+    typename str::const_iterator it = name.begin();
+    for (; it != name.end(); ++it) {
+      // Allow only ascii 0-9, a-z, A-Z, and _ in the name.
+      if (!IsAsciiAlpha(*it) && !IsAsciiDigit(*it) && *it != '_' && *it != '@')
+        return false;
+      }
+
+    return true;
+  }
 
   // Getter for dictionary_.
   const SubstitutionMap* dictionary() const { return &dictionary_; }
 
  private:
-  // Use Create to create ExtensionMessageBundle instance.
-   ExtensionMessageBundle();
+  // Testing friend.
+  friend class ExtensionMessageBundleTest;
 
-  // Initializes the instance from the contents of two catalogs. If a key is not
-  // present in current_locale_catalog, the value from default_local_catalog is
-  // used instead.
+  // Use Create to create ExtensionMessageBundle instance.
+  ExtensionMessageBundle();
+
+  // Initializes the instance from the contents of vector of catalogs.
+  // If the key is not present in more specific catalog we fall back to next one
+  // (less specific).
   // Returns false on error.
-  bool Init(const DictionaryValue& default_locale_catalog,
-            const DictionaryValue& current_locale_catalog,
-            std::string* error);
+  bool Init(const CatalogVector& locale_catalogs, std::string* error);
+
+  // Appends locale specific reserved messages to the dictionary.
+  // Returns false if there was a conflict with user defined messages.
+  bool AppendReservedMessagesForLocale(const std::string& application_locale,
+                                       std::string* error);
 
   // Helper methods that navigate JSON tree and return simplified message.
   // They replace all $PLACEHOLDERS$ with their value, and return just key/value
@@ -113,5 +152,29 @@ class ExtensionMessageBundle {
   // Holds all messages for application locale.
   SubstitutionMap dictionary_;
 };
+
+///////////////////////////////////////////////////////////////////////////////
+//
+// Renderer helper typedefs and functions.
+//
+///////////////////////////////////////////////////////////////////////////////
+
+// A map of message name to message.
+typedef std::map<std::string, std::string> L10nMessagesMap;
+
+// A map of extension ID to l10n message map.
+typedef std::map<std::string, L10nMessagesMap > ExtensionToL10nMessagesMap;
+
+// Unique class for Singleton.
+struct ExtensionToMessagesMap {
+  // Maps extension ID to message map.
+  ExtensionToL10nMessagesMap messages_map;
+};
+
+// Returns the extension_id to messages map.
+ExtensionToL10nMessagesMap* GetExtensionToL10nMessagesMap();
+
+// Returns message map that matches given extension_id, or NULL.
+L10nMessagesMap* GetL10nMessagesMap(const std::string extension_id);
 
 #endif  // CHROME_COMMON_EXTENSIONS_EXTENSION_MESSAGE_BUNDLE_H_

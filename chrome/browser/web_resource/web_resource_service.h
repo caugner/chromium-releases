@@ -7,8 +7,8 @@
 
 #include <string>
 
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/utility_process_host.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/web_resource/web_resource_unpacker.h"
 
 class Profile;
@@ -16,9 +16,7 @@ class Profile;
 class WebResourceService
     : public UtilityProcessHost::Client {
  public:
-  WebResourceService(Profile* profile,
-                     MessageLoop* backend_loop);
-  ~WebResourceService();
+  explicit WebResourceService(Profile* profile);
 
   // Sleep until cache needs to be updated, but always for at least 5 seconds
   // so we don't interfere with startup.  Then begin updating resources.
@@ -27,9 +25,6 @@ class WebResourceService
   // We have successfully pulled data from a resource server; now launch
   // the process that will parse the JSON, and then update the cache.
   void UpdateResourceCache(const std::string& json_data);
-
-  // Get the language appropriate for delivery of the web resources.
-  static std::wstring GetWebResourceLanguage(PrefService* prefs);
 
   static const wchar_t* kTipDictionaryPrefName;
   static const wchar_t* kCurrentTipPrefName;
@@ -43,6 +38,8 @@ class WebResourceService
   friend class WebResourceFetcher;
 
   class UnpackerClient;
+
+  ~WebResourceService();
 
   void Init();
 
@@ -60,9 +57,6 @@ class WebResourceService
 
   // Server from which we are currently pulling web resource data.
   std::wstring web_resource_server_;
-
-  // Whenever we update resource cache, schedule another task.
-  MessageLoop* backend_loop_;
 
   WebResourceFetcher* web_resource_fetcher_;
 

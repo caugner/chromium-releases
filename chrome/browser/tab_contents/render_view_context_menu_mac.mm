@@ -6,10 +6,11 @@
 
 #include "app/l10n_util_mac.h"
 #include "base/compiler_specific.h"
+#include "base/message_loop.h"
+#include "base/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/profile.h"
 #include "grit/generated_resources.h"
-#include "base/scoped_nsobject.h"
 
 // Obj-C bridge class that is the target of all items in the context menu.
 // Relies on the tag being set to the command id. Uses |context_| to
@@ -59,15 +60,36 @@ RenderViewContextMenuMac::~RenderViewContextMenuMac() {
 }
 
 void RenderViewContextMenuMac::DoInit() {
-  // show the menu
-  [NSMenu popUpContextMenu:menu_
-                 withEvent:[NSApp currentEvent]
-                   forView:parent_view_];
+  // Synthesize an event for the click, as there is no certainty that
+  // [NSApp currentEvent] will return a valid event.
+  NSEvent* currentEvent = [NSApp currentEvent];
+  NSWindow* window = [parent_view_ window];
+  NSPoint position = [window mouseLocationOutsideOfEventStream];
+  NSTimeInterval eventTime = [currentEvent timestamp];
+  NSEvent* clickEvent = [NSEvent mouseEventWithType:NSRightMouseDown
+                                           location:position
+                                      modifierFlags:NSRightMouseDownMask
+                                          timestamp:eventTime
+                                       windowNumber:[window windowNumber]
+                                            context:nil
+                                        eventNumber:0
+                                         clickCount:1
+                                           pressure:1.0];
+
+  {
+    // Make sure events can be pumped while the menu is up.
+    MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
+
+    // Show the menu.
+    [NSMenu popUpContextMenu:menu_
+                   withEvent:clickEvent
+                     forView:parent_view_];
+  }
 }
 
-// Do things like remove the windows accelerators.
-// TODO(pinkerton): Do we want to do anything like make a maximum string width
-// and middle-truncate?
+// Do things like remove the windows accelerators. Since we control the
+// contents of this context menu, we don't need to worry about maximum string
+// lengths or middle-truncation.
 NSString* RenderViewContextMenuMac::PrepareLabelForDisplay(
     const string16& label) {
   NSString* title = l10n_util::FixUpWindowsStyleLabel(label);
@@ -119,6 +141,7 @@ void RenderViewContextMenuMac::StartSubMenu(int command_id,
                                      action:nil
                               keyEquivalent:@""]);
   insert_menu_ = [[[NSMenu alloc] init] autorelease];
+  [insert_menu_ setAutoenablesItems:NO];
   [submenu_item setSubmenu:insert_menu_];
   [menu_ addItem:submenu_item];
 }

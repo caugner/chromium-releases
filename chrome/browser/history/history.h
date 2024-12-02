@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,13 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/file_path.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/favicon_service.h"
-#include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/notification_registrar.h"
@@ -41,11 +41,17 @@ class Thread;
 class Time;
 }
 
+namespace browser_sync {
+class HistoryModelWorker;
+class TypedUrlDataTypeController;
+}
+
 namespace history {
 
 class InMemoryHistoryBackend;
 class HistoryBackend;
 class HistoryDatabase;
+struct HistoryDetails;
 class HistoryQueryTest;
 class URLDatabase;
 
@@ -59,8 +65,6 @@ class URLDatabase;
 // on the main thread.
 class HistoryDBTask : public base::RefCountedThreadSafe<HistoryDBTask> {
  public:
-  virtual ~HistoryDBTask() {}
-
   // Invoked on the database thread. The return value indicates whether the
   // task is done. A return value of true signals the task is done and
   // RunOnDBThread should NOT be invoked again. A return value of false
@@ -73,6 +77,11 @@ class HistoryDBTask : public base::RefCountedThreadSafe<HistoryDBTask> {
   // only invoked if the request was not canceled and returned true from
   // RunOnDBThread.
   virtual void DoneRunOnMainThread() = 0;
+
+ protected:
+  friend class base::RefCountedThreadSafe<HistoryDBTask>;
+
+  virtual ~HistoryDBTask() {}
 };
 
 // The history service records page titles, and visit times, as well as
@@ -95,13 +104,14 @@ class HistoryService : public CancelableRequestProvider,
   explicit HistoryService(Profile* profile);
   // The empty constructor is provided only for testing.
   HistoryService();
-  ~HistoryService();
 
   // Initializes the history service, returning true on success. On false, do
   // not call any other functions. The given directory will be used for storing
   // the history files. The BookmarkService is used when deleting URLs to
   // test if a URL is bookmarked; it may be NULL during testing.
-  bool Init(const FilePath& history_dir, BookmarkService* bookmark_service);
+  bool Init(const FilePath& history_dir, BookmarkService* bookmark_service) {
+    return Init(history_dir, bookmark_service, false);
+  }
 
   // Triggers the backend to load if it hasn't already, and then returns whether
   // it's finished loading.
@@ -186,8 +196,8 @@ class HistoryService : public CancelableRequestProvider,
 
   // For adding pages to history where no tracking information can be done.
   void AddPage(const GURL& url) {
-    AddPage(url, NULL, 0, GURL::EmptyGURL(), PageTransition::LINK,
-            history::RedirectList(), false);
+    AddPage(url, NULL, 0, GURL(), PageTransition::LINK, history::RedirectList(),
+            false);
   }
 
   // Sets the title for the given page. The page should be in history. If it
@@ -354,7 +364,7 @@ class HistoryService : public CancelableRequestProvider,
   // Delete all the information related to a single url.
   void DeleteURL(const GURL& url);
 
-  // Implemented by the caller of 'ExpireHistory(Since|Between)' below, and
+  // Implemented by the caller of ExpireHistoryBetween, and
   // is called when the history service has deleted the history.
   typedef Callback0::Type ExpireHistoryCallback;
 
@@ -364,7 +374,10 @@ class HistoryService : public CancelableRequestProvider,
   // if they are no longer referenced. |callback| runs when the expiration is
   // complete. You may use null Time values to do an unbounded delete in
   // either direction.
-  void ExpireHistoryBetween(base::Time begin_time, base::Time end_time,
+  // If |restrict_urls| is not empty, only visits to the URLs in this set are
+  // removed.
+  void ExpireHistoryBetween(const std::set<GURL>& restrict_urls,
+                            base::Time begin_time, base::Time end_time,
                             CancelableRequestConsumerBase* consumer,
                             ExpireHistoryCallback* callback);
 
@@ -484,8 +497,8 @@ class HistoryService : public CancelableRequestProvider,
 
   // Schedules a HistoryDBTask for running on the history backend thread. See
   // HistoryDBTask for details on what this does.
-  Handle ScheduleDBTask(HistoryDBTask* task,
-                        CancelableRequestConsumerBase* consumer);
+  virtual Handle ScheduleDBTask(HistoryDBTask* task,
+                                CancelableRequestConsumerBase* consumer);
 
   // Testing -------------------------------------------------------------------
 
@@ -517,8 +530,20 @@ class HistoryService : public CancelableRequestProvider,
   // The same as AddPageWithDetails() but takes a vector.
   void AddPagesWithDetails(const std::vector<history::URLRow>& info);
 
+ protected:
+  ~HistoryService();
+
+  // These are not currently used, hopefully we can do something in the future
+  // to ensure that the most important things happen first.
+  enum SchedulePriority {
+    PRIORITY_UI,      // The highest priority (must respond to UI events).
+    PRIORITY_NORMAL,  // Normal stuff like adding a page.
+    PRIORITY_LOW,     // Low priority things like indexing or expiration.
+  };
+
  private:
   class BackendDelegate;
+  friend class base::RefCountedThreadSafe<HistoryService>;
   friend class BackendDelegate;
   friend class FaviconService;
   friend class history::HistoryBackend;
@@ -532,18 +557,16 @@ class HistoryService : public CancelableRequestProvider,
   friend class FavIconRequest;
   friend class TestingProfile;
 
-  // These are not currently used, hopefully we can do something in the future
-  // to ensure that the most important things happen first.
-  enum SchedulePriority {
-    PRIORITY_UI,      // The highest priority (must respond to UI events).
-    PRIORITY_NORMAL,  // Normal stuff like adding a page.
-    PRIORITY_LOW,     // Low priority things like indexing or expiration.
-  };
-
   // Implementation of NotificationObserver.
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
+
+  // Low-level Init().  Same as the public version, but adds a |no_db| parameter
+  // that is only set by unittests which causes the backend to not init its DB.
+  bool Init(const FilePath& history_dir,
+            BookmarkService* bookmark_service,
+            bool no_db);
 
   // Called by the HistoryURLProvider class to schedule an autocomplete, it
   // will be called back on the internal history thread with the history
@@ -613,9 +636,9 @@ class HistoryService : public CancelableRequestProvider,
   // database is loaded to make it available.
   void SetInMemoryBackend(history::InMemoryHistoryBackend* mem_backend);
 
-  // Called by our BackendDelegate when the database version is too new to be
-  // read properly.
-  void NotifyTooNew();
+  // Called by our BackendDelegate when there is a problem reading the database.
+  // |message_id| is the relevant message in the string table to display.
+  void NotifyProfileError(int message_id);
 
   // Call to schedule a given task for running on the history thread with the
   // specified priority. The task will have ownership taken.
@@ -797,6 +820,7 @@ class HistoryService : public CancelableRequestProvider,
   // Cached values from Init(), used whenever we need to reload the backend.
   FilePath history_dir_;
   BookmarkService* bookmark_service_;
+  bool no_db_;
 
   DISALLOW_COPY_AND_ASSIGN(HistoryService);
 };

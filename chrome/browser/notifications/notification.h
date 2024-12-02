@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,22 +9,27 @@
 #include "chrome/browser/notifications/notification_object_proxy.h"
 #include "googleurl/src/gurl.h"
 
+class NotificationDelegate;
+
 // Representation of an notification to be shown to the user.  All
 // notifications at this level are HTML, although they may be
 // data: URLs representing simple text+icon notifications.
 class Notification {
  public:
   Notification(const GURL& origin_url, const GURL& content_url,
-               NotificationObjectProxy* proxy)
+               const std::wstring& display_source,
+               NotificationDelegate* delegate)
       : origin_url_(origin_url),
         content_url_(content_url),
-        proxy_(proxy) {
+        display_source_(display_source),
+        delegate_(delegate) {
   }
 
   Notification(const Notification& notification)
       : origin_url_(notification.origin_url()),
         content_url_(notification.content_url()),
-        proxy_(notification.proxy()) {
+        display_source_(notification.display_source()),
+        delegate_(notification.delegate()) {
   }
 
   // The URL (may be data:) containing the contents for the notification.
@@ -33,12 +38,19 @@ class Notification {
   // The origin URL of the script which requested the notification.
   const GURL& origin_url() const { return origin_url_; }
 
-  void Display() const { proxy()->Display(); }
-  void Error() const { proxy()->Error(); }
-  void Close(bool by_user) const { proxy()->Close(by_user); }
+  // A display string for the source of the notification.
+  const std::wstring& display_source() const { return display_source_; }
+
+  void Display() const { delegate()->Display(); }
+  void Error() const { delegate()->Error(); }
+  void Close(bool by_user) const { delegate()->Close(by_user); }
+
+  bool IsSame(const Notification& other) const {
+    return delegate()->id() == other.delegate()->id();
+  }
 
  private:
-  NotificationObjectProxy* proxy() const { return proxy_.get(); }
+  NotificationDelegate* delegate() const { return delegate_.get(); }
 
   // The Origin of the page/worker which created this notification.
   GURL origin_url_;
@@ -47,9 +59,13 @@ class Notification {
   // string-based notifications).
   GURL content_url_;
 
+  // The display string for the source of the notification.  Could be
+  // the same as origin_url_, or the name of an extension.
+  std::wstring display_source_;
+
   // A proxy object that allows access back to the JavaScript object that
   // represents the notification, for firing events.
-  scoped_refptr<NotificationObjectProxy> proxy_;
+  scoped_refptr<NotificationDelegate> delegate_;
 
   // Disallow assign.  Copy constructor written above.
   void operator=(const Notification&);

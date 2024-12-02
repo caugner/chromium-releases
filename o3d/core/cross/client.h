@@ -59,12 +59,15 @@
 #include "core/cross/event_manager.h"
 #include "core/cross/lost_resource_callback.h"
 #include "core/cross/render_event.h"
+#include "core/cross/render_surface.h"
 #include "core/cross/tick_event.h"
 #include "core/cross/timer.h"
 #include "core/cross/timingtable.h"
 #include "core/cross/transform.h"
 
 namespace o3d {
+//#define O3D_PLUGIN_SUPPORT_SET_MAX_FPS
+
 class MessageQueue;
 class Profiler;
 class State;
@@ -429,6 +432,14 @@ class Client {
     DISALLOW_COPY_AND_ASSIGN(ScopedIncrement);
   };
 
+  // Offscreen rendering methods -------------------
+
+  // Sets up this Client so that RenderClient will cause the rendering
+  // results to go into the given surfaces.
+  void SetOffscreenRenderingSurfaces(
+      RenderSurface::Ref surface,
+      RenderDepthStencilSurface::Ref depth_surface);
+
  private:
   // Renders the client.
   void RenderClientInner(bool present, bool send_callback);
@@ -455,6 +466,11 @@ class Client {
 
   // Render mode.
   RenderMode render_mode_;
+
+#ifdef O3D_PLUGIN_SUPPORT_SET_MAX_FPS
+  // Used for rendering control
+  bool texture_on_hold_;
+#endif  // O3D_PLUGIN_SUPPORT_SET_MAX_FPS
 
   // Render Callbacks.
   RenderCallbackManager render_callback_manager_;
@@ -498,6 +514,9 @@ class Client {
   Id id_;
 
   int calls_;  // Used to check reentrancy along with ScopedIncrement.
+
+  RenderSurface::Ref offscreen_render_surface_;
+  RenderDepthStencilSurface::Ref offscreen_depth_render_surface_;
 
   DISALLOW_COPY_AND_ASSIGN(Client);
 };  // Client
