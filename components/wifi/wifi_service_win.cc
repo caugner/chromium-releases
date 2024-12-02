@@ -24,9 +24,6 @@
 #include "third_party/libxml/chromium/libxml_utils.h"
 
 namespace {
-const char kWiFiServiceError[] = "Error.WiFiService";
-const char kWiFiServiceErrorNotImplemented[] =
-    "Error.WiFiService.NotImplemented";
 const wchar_t kNwCategoryWizardRegKey[] =
     L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Network\\"
     L"NwCategoryWizard";
@@ -57,9 +54,9 @@ const char kWlanScan[] = "WlanScan";
 const char kWlanSetProfile[] = "WlanSetProfile";
 
 // WlanApi function definitions
-typedef DWORD (WINAPI* WlanConnectFunction)(
+typedef DWORD(WINAPI* WlanConnectFunction)(
     HANDLE hClientHandle,
-    CONST GUID *pInterfaceGuid,
+    CONST GUID* pInterfaceGuid,
     CONST PWLAN_CONNECTION_PARAMETERS pConnectionParameters,
     PVOID pReserved);
 
@@ -67,31 +64,29 @@ typedef DWORD (WINAPI* WlanCloseHandleFunction)(
     HANDLE hClientHandle,
     PVOID pReserved);
 
-typedef DWORD (WINAPI* WlanDeleteProfileFunction)(
-    HANDLE hClientHandle,
-    const GUID *pInterfaceGuid,
-    LPCWSTR strProfileName,
-    PVOID pReserved);
+typedef DWORD(WINAPI* WlanDeleteProfileFunction)(HANDLE hClientHandle,
+                                                 const GUID* pInterfaceGuid,
+                                                 LPCWSTR strProfileName,
+                                                 PVOID pReserved);
 
-typedef DWORD (WINAPI* WlanDisconnectFunction)(
-    HANDLE hClientHandle,
-    CONST GUID *pInterfaceGuid,
-    PVOID pReserved);
+typedef DWORD(WINAPI* WlanDisconnectFunction)(HANDLE hClientHandle,
+                                              CONST GUID* pInterfaceGuid,
+                                              PVOID pReserved);
 
-typedef DWORD (WINAPI* WlanEnumInterfacesFunction)(
+typedef DWORD(WINAPI* WlanEnumInterfacesFunction)(
     HANDLE hClientHandle,
     PVOID pReserved,
-    PWLAN_INTERFACE_INFO_LIST *ppInterfaceList);
+    PWLAN_INTERFACE_INFO_LIST* ppInterfaceList);
 
 typedef VOID (WINAPI* WlanFreeMemoryFunction)(
     _In_ PVOID pMemory);
 
-typedef DWORD (WINAPI* WlanGetAvailableNetworkListFunction)(
+typedef DWORD(WINAPI* WlanGetAvailableNetworkListFunction)(
     HANDLE hClientHandle,
-    CONST GUID *pInterfaceGuid,
+    CONST GUID* pInterfaceGuid,
     DWORD dwFlags,
     PVOID pReserved,
-    PWLAN_AVAILABLE_NETWORK_LIST *ppAvailableNetworkList);
+    PWLAN_AVAILABLE_NETWORK_LIST* ppAvailableNetworkList);
 
 typedef DWORD (WINAPI* WlanGetNetworkBssListFunction)(
     HANDLE hClientHandle,
@@ -102,14 +97,13 @@ typedef DWORD (WINAPI* WlanGetNetworkBssListFunction)(
     PVOID pReserved,
     PWLAN_BSS_LIST* ppWlanBssList);
 
-typedef DWORD (WINAPI* WlanGetProfileFunction)(
-    HANDLE hClientHandle,
-    CONST GUID *pInterfaceGuid,
-    LPCWSTR strProfileName,
-    PVOID pReserved,
-    LPWSTR *pstrProfileXml,
-    DWORD *pdwFlags,
-    DWORD *pdwGrantedAccess);
+typedef DWORD(WINAPI* WlanGetProfileFunction)(HANDLE hClientHandle,
+                                              CONST GUID* pInterfaceGuid,
+                                              LPCWSTR strProfileName,
+                                              PVOID pReserved,
+                                              LPWSTR* pstrProfileXml,
+                                              DWORD* pdwFlags,
+                                              DWORD* pdwGrantedAccess);
 
 typedef DWORD (WINAPI* WlanOpenHandleFunction)(
     DWORD dwClientVersion,
@@ -117,13 +111,13 @@ typedef DWORD (WINAPI* WlanOpenHandleFunction)(
     PDWORD pdwNegotiatedVersion,
     PHANDLE phClientHandle);
 
-typedef DWORD (WINAPI* WlanQueryInterfaceFunction)(
+typedef DWORD(WINAPI* WlanQueryInterfaceFunction)(
     HANDLE hClientHandle,
-    const GUID *pInterfaceGuid,
+    const GUID* pInterfaceGuid,
     WLAN_INTF_OPCODE OpCode,
     PVOID pReserved,
     PDWORD pdwDataSize,
-    PVOID *ppData,
+    PVOID* ppData,
     PWLAN_OPCODE_VALUE_TYPE pWlanOpcodeValueType);
 
 typedef DWORD (WINAPI* WlanRegisterNotificationFunction)(
@@ -144,22 +138,20 @@ typedef DWORD (WINAPI* WlanSaveTemporaryProfileFunction)(
     BOOL bOverWrite,
     PVOID pReserved);
 
-typedef DWORD (WINAPI* WlanScanFunction)(
-    HANDLE hClientHandle,
-    CONST GUID *pInterfaceGuid,
-    CONST PDOT11_SSID pDot11Ssid,
-    CONST PWLAN_RAW_DATA pIeData,
-    PVOID pReserved);
+typedef DWORD(WINAPI* WlanScanFunction)(HANDLE hClientHandle,
+                                        CONST GUID* pInterfaceGuid,
+                                        CONST PDOT11_SSID pDot11Ssid,
+                                        CONST PWLAN_RAW_DATA pIeData,
+                                        PVOID pReserved);
 
-typedef DWORD (WINAPI* WlanSetProfileFunction)(
-    HANDLE hClientHandle,
-    const GUID *pInterfaceGuid,
-    DWORD dwFlags,
-    LPCWSTR strProfileXml,
-    LPCWSTR strAllUserProfileSecurity,
-    BOOL bOverwrite,
-    PVOID pReserved,
-    DWORD* pdwReasonCode);
+typedef DWORD(WINAPI* WlanSetProfileFunction)(HANDLE hClientHandle,
+                                              const GUID* pInterfaceGuid,
+                                              DWORD dwFlags,
+                                              LPCWSTR strProfileXml,
+                                              LPCWSTR strAllUserProfileSecurity,
+                                              BOOL bOverwrite,
+                                              PVOID pReserved,
+                                              DWORD* pdwReasonCode);
 
 // Values for WLANProfile XML.
 const char kAuthenticationOpen[] = "open";
@@ -271,9 +263,8 @@ class WiFiServiceImpl : public WiFiService {
   NetworkList::iterator FindNetwork(NetworkList& networks,
                                     const std::string& network_guid);
 
-  // Save currently connected network profile and return its
-  // |connected_network_guid|, so it can be re-connected later.
-  DWORD SaveCurrentConnectedNetwork(std::string* connected_network_guid);
+  // Save currently connected network profile so it can be re-connected later.
+  DWORD SaveCurrentConnectedNetwork(const NetworkProperties& properties);
 
   // Sort networks, so connected/connecting is up front, then by type:
   // Ethernet, WiFi, Cellular, VPN
@@ -331,6 +322,10 @@ class WiFiServiceImpl : public WiFiService {
   // Deduce |onc::wifi| security from |alg|.
   std::string SecurityFromDot11AuthAlg(DOT11_AUTH_ALGORITHM alg) const;
 
+  // Deduce |onc::connection_state| from |wlan_state|.
+  std::string ConnectionStateFromInterfaceState(
+      WLAN_INTERFACE_STATE wlan_state) const;
+
   // Convert |EncryptionType| into WPA(2) encryption type string.
   std::string WpaEncryptionFromEncryptionType(
       EncryptionType encryption_type) const;
@@ -342,18 +337,23 @@ class WiFiServiceImpl : public WiFiService {
                                   std::string* encryption,
                                   std::string* key_type) const;
 
-  // Populate |properties| based on |wlan| and its corresponding bss info from
-  // |wlan_bss_list|.
+  // Populate |properties| based on |wlan|.
   void NetworkPropertiesFromAvailableNetwork(const WLAN_AVAILABLE_NETWORK& wlan,
-                                             const WLAN_BSS_LIST& wlan_bss_list,
                                              NetworkProperties* properties);
+
+  // Update |properties| based on bss info from |wlan_bss_list|. If |bssid| in
+  // |properties| is not empty, then it is not changed and |frequency| is set
+  // based on that bssid.
+  void UpdateNetworkPropertiesFromBssList(const std::string& network_guid,
+                                          const WLAN_BSS_LIST& wlan_bss_list,
+                                          NetworkProperties* properties);
 
   // Get the list of visible wireless networks.
   DWORD GetVisibleNetworkList(NetworkList* network_list);
 
-  // Find currently connected network if any. Populate |connected_network_guid|
-  // on success.
-  DWORD FindConnectedNetwork(std::string* connected_network_guid);
+  // Get properties of the network currently used (connected or in transition)
+  // by interface. Populate |current_properties| on success.
+  DWORD GetCurrentProperties(NetworkProperties* current_properties);
 
   // Connect to network |network_guid| using previosly stored profile if exists,
   // or just network sid. If |frequency| is not |kFrequencyUnknown| then
@@ -363,10 +363,6 @@ class WiFiServiceImpl : public WiFiService {
 
   // Disconnect from currently connected network if any.
   DWORD Disconnect();
-
-  // Get Frequency of currently connected network |network_guid|. If network is
-  // not connected, then return |kFrequencyUnknown|.
-  Frequency GetConnectedFrequency(const std::string& network_guid);
 
   // Get desired connection freqency if it was set using |SetProperties|.
   // Default to |kFrequencyAny|.
@@ -511,36 +507,44 @@ void WiFiServiceImpl::GetProperties(const std::string& network_guid,
                                     base::DictionaryValue* properties,
                                     std::string* error) {
   DWORD error_code = EnsureInitialized();
-  if (error_code == ERROR_SUCCESS) {
-    NetworkList network_list;
-    error_code = GetVisibleNetworkList(&network_list);
-    if (error_code == ERROR_SUCCESS && !network_list.empty()) {
-      NetworkList::const_iterator it = FindNetwork(network_list, network_guid);
-      if (it != network_list.end()) {
-        DVLOG(1) << "Get Properties: " << network_guid << ":"
-                   << it->connection_state;
-        properties->Swap(it->ToValue(false).get());
-        return;
-      } else {
-        error_code = ERROR_NOT_FOUND;
-      }
-    }
+  if (CheckError(error_code, kErrorWiFiService, error))
+    return;
+
+  NetworkProperties connected_properties;
+  error_code = GetCurrentProperties(&connected_properties);
+  if (error_code == ERROR_SUCCESS &&
+      connected_properties.guid == network_guid) {
+    properties->Swap(connected_properties.ToValue(false).get());
+    return;
   }
 
-  CheckError(error_code, kWiFiServiceError, error);
+  NetworkList network_list;
+  error_code = GetVisibleNetworkList(&network_list);
+  if (error_code == ERROR_SUCCESS) {
+    NetworkList::const_iterator it = FindNetwork(network_list, network_guid);
+    if (it != network_list.end()) {
+      DVLOG(1) << "Get Properties: " << network_guid << ":"
+                  << it->connection_state;
+      properties->Swap(it->ToValue(false).get());
+      return;
+    }
+    error_code = ERROR_NOT_FOUND;
+  }
+
+  CheckError(error_code, kErrorWiFiService, error);
 }
 
 void WiFiServiceImpl::GetManagedProperties(
     const std::string& network_guid,
     base::DictionaryValue* managed_properties,
     std::string* error) {
-  CheckError(ERROR_CALL_NOT_IMPLEMENTED, kWiFiServiceError, error);
+  CheckError(ERROR_CALL_NOT_IMPLEMENTED, kErrorWiFiService, error);
 }
 
 void WiFiServiceImpl::GetState(const std::string& network_guid,
                                base::DictionaryValue* properties,
                                std::string* error) {
-  CheckError(ERROR_CALL_NOT_IMPLEMENTED, kWiFiServiceError, error);
+  CheckError(ERROR_CALL_NOT_IMPLEMENTED, kErrorWiFiService, error);
 }
 
 void WiFiServiceImpl::SetProperties(
@@ -552,11 +556,20 @@ void WiFiServiceImpl::SetProperties(
   DCHECK(properties.get());
   if (!properties->HasKey(onc::network_type::kWiFi)) {
     DVLOG(0) << "Missing WiFi properties:" << *properties;
-    *error = kWiFiServiceError;
+    *error = kErrorWiFiService;
     return;
   }
-  connect_properties_.SetWithoutPathExpansion(network_guid,
-                                              properties.release());
+
+  base::DictionaryValue* existing_properties;
+  // If the network properties already exist, don't override previously set
+  // properties, unless they are set in |properties|.
+  if (connect_properties_.GetDictionaryWithoutPathExpansion(
+          network_guid, &existing_properties)) {
+    existing_properties->MergeDictionary(properties.get());
+  } else {
+    connect_properties_.SetWithoutPathExpansion(network_guid,
+                                                properties.release());
+  }
 }
 
 void WiFiServiceImpl::CreateNetwork(
@@ -565,24 +578,24 @@ void WiFiServiceImpl::CreateNetwork(
     std::string* network_guid,
     std::string* error) {
   DWORD error_code = EnsureInitialized();
-  if (CheckError(error_code, kWiFiServiceError, error))
+  if (CheckError(error_code, kErrorWiFiService, error))
     return;
 
   WiFiService::NetworkProperties network_properties;
   if (!network_properties.UpdateFromValue(*properties)) {
-    CheckError(ERROR_INVALID_DATA, kWiFiServiceError, error);
+    CheckError(ERROR_INVALID_DATA, kErrorWiFiService, error);
     return;
   }
 
   network_properties.guid = network_properties.ssid;
   std::string profile_xml;
   if (!CreateProfile(network_properties, kEncryptionTypeAny, &profile_xml)) {
-    CheckError(ERROR_INVALID_DATA, kWiFiServiceError, error);
+    CheckError(ERROR_INVALID_DATA, kErrorWiFiService, error);
     return;
   }
 
   error_code = SetProfile(shared, profile_xml, false);
-  if (CheckError(error_code, kWiFiServiceError, error)) {
+  if (CheckError(error_code, kErrorWiFiService, error)) {
     DVLOG(0) << profile_xml;
     return;
   }
@@ -594,7 +607,7 @@ void WiFiServiceImpl::CreateNetwork(
   if (!CreateProfile(network_properties,
                      kEncryptionTypeTKIP,
                      &tkip_profile_xml)) {
-    CheckError(ERROR_INVALID_DATA, kWiFiServiceError, error);
+    CheckError(ERROR_INVALID_DATA, kErrorWiFiService, error);
     return;
   }
 
@@ -644,67 +657,75 @@ void WiFiServiceImpl::StartConnect(const std::string& network_guid,
                                    std::string* error) {
   DVLOG(1) << "Start Connect: " << network_guid;
   DWORD error_code = EnsureInitialized();
-  if (error_code == ERROR_SUCCESS) {
-    std::string connected_network_guid;
-    error_code = SaveCurrentConnectedNetwork(&connected_network_guid);
-    if (error_code == ERROR_SUCCESS) {
-      // Check, if the network is already connected on desired frequency.
-      bool already_connected = (network_guid == connected_network_guid);
-      Frequency frequency = GetFrequencyToConnect(network_guid);
-      if (already_connected && frequency != kFrequencyAny) {
-        Frequency connected_frequency = GetConnectedFrequency(network_guid);
-        already_connected = (frequency == connected_frequency);
-      }
-      // Connect only if network |network_guid| is not connected already.
-      if (!already_connected)
-        error_code = Connect(network_guid, frequency);
-      if (error_code == ERROR_SUCCESS) {
-        // Notify that previously connected network has changed.
-        NotifyNetworkChanged(connected_network_guid);
-        // Start waiting for network connection state change.
-        if (!networks_changed_observer_.is_null()) {
-          DisableNwCategoryWizard();
-          // Disable automatic network change notifications as they get fired
-          // when network is just connected, but not yet accessible (doesn't
-          // have valid IP address).
-          enable_notify_network_changed_ = false;
-          WaitForNetworkConnect(network_guid, 0);
-          return;
-        }
-      }
-    }
+  if (CheckError(error_code, kErrorWiFiService, error))
+    return;
+
+  // Check, if the network is already connected on desired frequency.
+  Frequency frequency = GetFrequencyToConnect(network_guid);
+  NetworkProperties properties;
+  GetCurrentProperties(&properties);
+  bool already_connected =
+      network_guid == properties.guid &&
+      properties.connection_state == onc::connection_state::kConnected &&
+      (frequency == kFrequencyAny || frequency == properties.frequency);
+
+  // Connect only if network |network_guid| is not connected already.
+  if (!already_connected) {
+    SaveCurrentConnectedNetwork(properties);
+    error_code = Connect(network_guid, frequency);
   }
-  CheckError(error_code, kWiFiServiceError, error);
+  if (error_code == ERROR_SUCCESS) {
+    // Notify that previously connected network has changed.
+    NotifyNetworkChanged(properties.guid);
+    // Start waiting for network connection state change.
+    if (!networks_changed_observer_.is_null()) {
+      DisableNwCategoryWizard();
+      // Disable automatic network change notifications as they get fired
+      // when network is just connected, but not yet accessible (doesn't
+      // have valid IP address).
+      enable_notify_network_changed_ = false;
+      WaitForNetworkConnect(network_guid, 0);
+      return;
+    }
+  } else if (error_code == ERROR_ACCESS_DENIED) {
+    CheckError(error_code, kErrorNotConfigured, error);
+  } else {
+    CheckError(error_code, kErrorWiFiService, error);
+  }
 }
 
 void WiFiServiceImpl::StartDisconnect(const std::string& network_guid,
                                       std::string* error) {
   DVLOG(1) << "Start Disconnect: " << network_guid;
   DWORD error_code = EnsureInitialized();
-  if (error_code == ERROR_SUCCESS) {
-    std::string connected_network_guid;
-    error_code = SaveCurrentConnectedNetwork(&connected_network_guid);
-    if (error_code == ERROR_SUCCESS && network_guid == connected_network_guid) {
-      error_code = Disconnect();
-      if (error_code == ERROR_SUCCESS) {
-        NotifyNetworkChanged(network_guid);
-        return;
-      }
+  if (CheckError(error_code, kErrorWiFiService, error))
+    return;
+
+  // Check, if the network is currently connected.
+  NetworkProperties properties;
+  GetCurrentProperties(&properties);
+  if (network_guid == properties.guid) {
+    if (properties.connection_state == onc::connection_state::kConnected)
+      SaveCurrentConnectedNetwork(properties);
+    error_code = Disconnect();
+    if (error_code == ERROR_SUCCESS) {
+      NotifyNetworkChanged(network_guid);
+      return;
     }
   }
-  CheckError(error_code, kWiFiServiceError, error);
+  CheckError(error_code, kErrorWiFiService, error);
 }
 
 void WiFiServiceImpl::GetKeyFromSystem(const std::string& network_guid,
                                        std::string* key_data,
                                        std::string* error) {
   DWORD error_code = EnsureInitialized();
-  if (CheckError(error_code, kWiFiServiceError, error))
+  if (CheckError(error_code, kErrorWiFiService, error))
     return;
 
   std::string profile_xml;
   error_code = GetProfile(network_guid, true, &profile_xml);
-  if (CheckError(error_code, kWiFiServiceError, error))
+  if (CheckError(error_code, kErrorWiFiService, error))
     return;
 
   const char kSharedKeyElement[] = "sharedKey";
@@ -713,7 +734,7 @@ void WiFiServiceImpl::GetKeyFromSystem(const std::string& network_guid,
 
   // Quick check to verify presence of <sharedKey> element.
   if (profile_xml.find(kSharedKeyElement) == std::string::npos) {
-    *error = kWiFiServiceError;
+    *error = kErrorWiFiService;
     return;
   }
 
@@ -733,7 +754,7 @@ void WiFiServiceImpl::GetKeyFromSystem(const std::string& network_guid,
             // |WLAN_PROFILE_GET_PLAINTEXT_KEY| flag returns success, but has
             // protected keyMaterial. Report an error in this case.
             if (protected_data != "false") {
-              *error = kWiFiServiceError;
+              *error = kErrorWiFiService;
               break;
             }
           }
@@ -744,7 +765,7 @@ void WiFiServiceImpl::GetKeyFromSystem(const std::string& network_guid,
   }
 
   // Did not find passphrase in the profile.
-  *error = kWiFiServiceError;
+  *error = kErrorWiFiService;
 }
 
 void WiFiServiceImpl::SetEventObservers(
@@ -874,14 +895,18 @@ void WiFiServiceImpl::WaitForNetworkConnect(const std::string& network_guid,
     RestoreNwCategoryWizard();
     return;
   }
-  std::string connected_network_guid;
-  DWORD error = FindConnectedNetwork(&connected_network_guid);
-  if (network_guid == connected_network_guid) {
+  NetworkProperties current_properties;
+  DWORD error = GetCurrentProperties(&current_properties);
+  if (network_guid == current_properties.guid &&
+      current_properties.connection_state ==
+          onc::connection_state::kConnected) {
     DVLOG(1) << "WiFi Connected, Reset DHCP: " << network_guid;
     // Even though wireless network is now connected, it may still be unusable,
     // e.g. after Chromecast device reset. Reset DHCP on wireless network to
     // work around this issue.
     error = ResetDHCP();
+    if (error != ERROR_SUCCESS)
+      LOG(ERROR) << error;
     // There is no need to keep created profile as network is connected.
     created_profiles_.RemoveWithoutPathExpansion(network_guid, NULL);
     // Restore previously suppressed notifications.
@@ -923,18 +948,13 @@ WiFiService::NetworkList::iterator WiFiServiceImpl::FindNetwork(
 }
 
 DWORD WiFiServiceImpl::SaveCurrentConnectedNetwork(
-    std::string* connected_network_guid) {
-  // Find currently connected network.
-  DWORD error = FindConnectedNetwork(connected_network_guid);
-  if (error == ERROR_SUCCESS && !connected_network_guid->empty()) {
-    if (error == ERROR_SUCCESS) {
-      SaveTempProfile(*connected_network_guid);
-      std::string profile_xml;
-      error = GetProfile(*connected_network_guid, false, &profile_xml);
-      if (error == ERROR_SUCCESS) {
-        saved_profiles_xml_[*connected_network_guid] = profile_xml;
-      }
-    }
+    const NetworkProperties& current_properties) {
+  DWORD error = ERROR_SUCCESS;
+  // Save currently connected network.
+  if (!current_properties.guid.empty() &&
+      current_properties.connection_state ==
+          onc::connection_state::kConnected) {
+    error = SaveTempProfile(current_properties.guid);
   }
   return error;
 }
@@ -947,14 +967,14 @@ DWORD WiFiServiceImpl::LoadWlanLibrary() {
   // Use an absolute path to load the DLL to avoid DLL preloading attacks.
   base::FilePath path;
   if (!PathService::Get(base::DIR_SYSTEM, &path)) {
-    DLOG(ERROR) << "Unable to get system path.";
+    LOG(ERROR) << "Unable to get system path.";
     return ERROR_NOT_FOUND;
   }
   wlan_api_library_ = ::LoadLibraryEx(path.Append(kWlanApiDll).value().c_str(),
                                       NULL,
                                       LOAD_WITH_ALTERED_SEARCH_PATH);
   if (!wlan_api_library_) {
-    DLOG(ERROR) << "Unable to load WlanApi.dll.";
+    LOG(ERROR) << "Unable to load WlanApi.dll.";
     return ERROR_NOT_FOUND;
   }
 
@@ -1018,7 +1038,7 @@ DWORD WiFiServiceImpl::LoadWlanLibrary() {
       !WlanRegisterNotification_function_ ||
       !WlanScan_function_ ||
       !WlanSetProfile_function_) {
-    DLOG(ERROR) << "Unable to find required WlanApi function.";
+    LOG(ERROR) << "Unable to find required WlanApi function.";
     FreeLibrary(wlan_api_library_);
     wlan_api_library_ = NULL;
     return ERROR_NOT_FOUND;
@@ -1074,12 +1094,21 @@ DWORD WiFiServiceImpl::OpenClientHandle() {
 DWORD WiFiServiceImpl::ResetDHCP() {
   IP_ADAPTER_INDEX_MAP adapter_index_map = {0};
   DWORD error = FindAdapterIndexMapByGUID(interface_guid_, &adapter_index_map);
-  if (error == ERROR_SUCCESS) {
-    error = ::IpReleaseAddress(&adapter_index_map);
-    if (error == ERROR_SUCCESS) {
-      error = ::IpRenewAddress(&adapter_index_map);
-    }
+  if (error != ERROR_SUCCESS) {
+    LOG(ERROR) << error;
+    return error;
   }
+  error = ::IpReleaseAddress(&adapter_index_map);
+  if (error != ERROR_SUCCESS) {
+    if (error != ERROR_ADDRESS_NOT_ASSOCIATED) {
+      LOG(ERROR) << error;
+      return error;
+    }
+    DVLOG(1) << "Ignoring IpReleaseAddress Error: " << error;
+  }
+  error = ::IpRenewAddress(&adapter_index_map);
+  if (error != ERROR_SUCCESS)
+    LOG(ERROR) << error;
   return error;
 }
 
@@ -1228,10 +1257,27 @@ std::string WiFiServiceImpl::SecurityFromDot11AuthAlg(
   }
 }
 
+std::string WiFiServiceImpl::ConnectionStateFromInterfaceState(
+    WLAN_INTERFACE_STATE wlan_state) const {
+  switch (wlan_state) {
+    case wlan_interface_state_connected:
+      // TODO(mef): Even if |wlan_state| is connected, the network may still
+      // not be reachable, and should be resported as |kConnecting|.
+      return onc::connection_state::kConnected;
+    case wlan_interface_state_associating:
+    case wlan_interface_state_discovering:
+    case wlan_interface_state_authenticating:
+      return onc::connection_state::kConnecting;
+    default:
+      return onc::connection_state::kNotConnected;
+  }
+}
+
 void WiFiServiceImpl::NetworkPropertiesFromAvailableNetwork(
     const WLAN_AVAILABLE_NETWORK& wlan,
-    const WLAN_BSS_LIST& wlan_bss_list,
     NetworkProperties* properties) {
+  // TODO(mef): It would be nice for the connection states in
+  // getVisibleNetworks and getProperties results to be consistent.
   if (wlan.dwFlags & WLAN_AVAILABLE_NETWORK_CONNECTED) {
     properties->connection_state = onc::connection_state::kConnected;
   } else {
@@ -1242,23 +1288,36 @@ void WiFiServiceImpl::NetworkPropertiesFromAvailableNetwork(
   properties->name = properties->ssid;
   properties->guid = GUIDFromWLAN(wlan);
   properties->type = onc::network_type::kWiFi;
-
-  for (size_t bss = 0; bss < wlan_bss_list.dwNumberOfItems; ++bss) {
-    const WLAN_BSS_ENTRY& bss_entry(wlan_bss_list.wlanBssEntries[bss]);
-    if (bss_entry.dot11Ssid.uSSIDLength == wlan.dot11Ssid.uSSIDLength &&
-        0 == memcmp(bss_entry.dot11Ssid.ucSSID,
-                    wlan.dot11Ssid.ucSSID,
-                    bss_entry.dot11Ssid.uSSIDLength)) {
-      properties->frequency = GetNormalizedFrequency(
-          bss_entry.ulChCenterFrequency / 1000);
-      properties->frequency_set.insert(properties->frequency);
-      properties->bssid = NetworkProperties::MacAddressAsString(
-          bss_entry.dot11Bssid);
-    }
-  }
   properties->security =
       SecurityFromDot11AuthAlg(wlan.dot11DefaultAuthAlgorithm);
   properties->signal_strength = wlan.wlanSignalQuality;
+}
+
+void WiFiServiceImpl::UpdateNetworkPropertiesFromBssList(
+    const std::string& network_guid,
+    const WLAN_BSS_LIST& wlan_bss_list,
+    NetworkProperties* properties) {
+  if (network_guid.empty())
+    return;
+
+  DOT11_SSID ssid = SSIDFromGUID(network_guid);
+  for (size_t bss = 0; bss < wlan_bss_list.dwNumberOfItems; ++bss) {
+    const WLAN_BSS_ENTRY& bss_entry(wlan_bss_list.wlanBssEntries[bss]);
+    if (bss_entry.dot11Ssid.uSSIDLength == ssid.uSSIDLength &&
+        0 == memcmp(bss_entry.dot11Ssid.ucSSID,
+                    ssid.ucSSID,
+                    bss_entry.dot11Ssid.uSSIDLength)) {
+      std::string bssid = NetworkProperties::MacAddressAsString(
+          bss_entry.dot11Bssid);
+      Frequency frequency = GetNormalizedFrequency(
+          bss_entry.ulChCenterFrequency / 1000);
+      properties->frequency_set.insert(frequency);
+      if (properties->bssid.empty() || properties->bssid == bssid) {
+        properties->frequency = frequency;
+        properties->bssid = bssid;
+      }
+    }
+  }
 }
 
 // Get the list of visible wireless networks
@@ -1299,8 +1358,10 @@ DWORD WiFiServiceImpl::GetVisibleNetworkList(NetworkList* network_list) {
         NetworkProperties network_properties;
         NetworkPropertiesFromAvailableNetwork(
             available_network_list->Network[i],
-            *bss_list,
             &network_properties);
+        UpdateNetworkPropertiesFromBssList(network_properties.guid,
+                                           *bss_list,
+                                           &network_properties);
         // Check for duplicate network guids.
         if (network_guids.count(network_properties.guid)) {
           // There should be no difference between properties except for
@@ -1331,51 +1392,18 @@ DWORD WiFiServiceImpl::GetVisibleNetworkList(NetworkList* network_list) {
   return error;
 }
 
-// Find currently connected network.
-DWORD WiFiServiceImpl::FindConnectedNetwork(
-    std::string* connected_network_guid) {
+DWORD WiFiServiceImpl::GetCurrentProperties(NetworkProperties* properties) {
   if (client_ == NULL) {
     NOTREACHED();
     return ERROR_NOINTERFACE;
-  }
-
-  DWORD error = ERROR_SUCCESS;
-  PWLAN_AVAILABLE_NETWORK_LIST available_network_list = NULL;
-  error = WlanGetAvailableNetworkList_function_(
-      client_, &interface_guid_, 0, NULL, &available_network_list);
-
-  if (error == ERROR_SUCCESS && NULL != available_network_list) {
-    for (DWORD i = 0; i < available_network_list->dwNumberOfItems; ++i) {
-      const WLAN_AVAILABLE_NETWORK& wlan = available_network_list->Network[i];
-      if (wlan.dwFlags & WLAN_AVAILABLE_NETWORK_CONNECTED) {
-        *connected_network_guid = GUIDFromWLAN(wlan);
-        break;
-      }
-    }
-  }
-
-  // Clean up.
-  if (available_network_list != NULL) {
-    WlanFreeMemory_function_(available_network_list);
-  }
-
-  return error;
-}
-
-WiFiService::Frequency WiFiServiceImpl::GetConnectedFrequency(
-    const std::string& network_guid) {
-  if (client_ == NULL) {
-    NOTREACHED();
-    return kFrequencyUnknown;
   }
 
   // TODO(mef): WlanGetNetworkBssList is not available on XP. If XP support is
   // needed, then different method of getting BSS (e.g. OID query) will have
   // to be used.
   if (WlanGetNetworkBssList_function_ == NULL)
-    return kFrequencyUnknown;
+    return ERROR_NOINTERFACE;
 
-  Frequency frequency = kFrequencyUnknown;
   DWORD error = ERROR_SUCCESS;
   DWORD data_size = 0;
   PWLAN_CONNECTION_ATTRIBUTES wlan_connection_attributes = NULL;
@@ -1389,46 +1417,44 @@ WiFiService::Frequency WiFiServiceImpl::GetConnectedFrequency(
       reinterpret_cast<PVOID*>(&wlan_connection_attributes),
       NULL);
   if (error == ERROR_SUCCESS &&
-      wlan_connection_attributes != NULL &&
-      wlan_connection_attributes->isState == wlan_interface_state_connected) {
+      wlan_connection_attributes != NULL) {
     WLAN_ASSOCIATION_ATTRIBUTES& connected_wlan =
         wlan_connection_attributes->wlanAssociationAttributes;
-    // Try to find connected frequency based on bss.
-    if (GUIDFromSSID(connected_wlan.dot11Ssid) == network_guid &&
-        WlanGetNetworkBssList_function_ != NULL) {
-      error = WlanGetNetworkBssList_function_(client_,
-                                              &interface_guid_,
-                                              &connected_wlan.dot11Ssid,
-                                              connected_wlan.dot11BssType,
-                                              FALSE,
-                                              NULL,
-                                              &bss_list);
-      if (error == ERROR_SUCCESS && NULL != bss_list) {
-        // Go through bss_list and find matching BSSID.
-        for (size_t bss = 0; bss < bss_list->dwNumberOfItems; ++bss) {
-          const WLAN_BSS_ENTRY& bss_entry(bss_list->wlanBssEntries[bss]);
-          if (0 == memcmp(bss_entry.dot11Bssid,
-                          connected_wlan.dot11Bssid,
-                          sizeof(bss_entry.dot11Bssid))) {
-            frequency = GetNormalizedFrequency(
-                bss_entry.ulChCenterFrequency / 1000);
-            break;
-          }
-        }
-      }
+
+    properties->connection_state = ConnectionStateFromInterfaceState(
+        wlan_connection_attributes->isState);
+    properties->ssid = GUIDFromSSID(connected_wlan.dot11Ssid);
+    properties->name = properties->ssid;
+    properties->guid = GUIDFromSSID(connected_wlan.dot11Ssid);
+    properties->type = onc::network_type::kWiFi;
+    properties->bssid = NetworkProperties::MacAddressAsString(
+        connected_wlan.dot11Bssid);
+    properties->security = SecurityFromDot11AuthAlg(
+        wlan_connection_attributes->wlanSecurityAttributes.dot11AuthAlgorithm);
+    properties->signal_strength = connected_wlan.wlanSignalQuality;
+
+    error = WlanGetNetworkBssList_function_(client_,
+                                            &interface_guid_,
+                                            &connected_wlan.dot11Ssid,
+                                            connected_wlan.dot11BssType,
+                                            FALSE,
+                                            NULL,
+                                            &bss_list);
+    if (error == ERROR_SUCCESS && NULL != bss_list) {
+      UpdateNetworkPropertiesFromBssList(properties->guid,
+                                         *bss_list,
+                                         properties);
     }
   }
 
   // Clean up.
-  if (wlan_connection_attributes != NULL) {
+  if (wlan_connection_attributes != NULL)
     WlanFreeMemory_function_(wlan_connection_attributes);
-  }
 
-  if (bss_list != NULL) {
+  if (bss_list != NULL)
     WlanFreeMemory_function_(bss_list);
-  }
 
-  return frequency;
+  return error;
 }
 
 WiFiService::Frequency WiFiServiceImpl::GetFrequencyToConnect(
@@ -1560,6 +1586,21 @@ DWORD WiFiServiceImpl::Connect(const std::string& network_guid,
       error = WlanConnect_function_(
           client_, &interface_guid_, &wlan_params, NULL);
     } else {
+      // If network is available, but is not open security, then it cannot be
+      // connected without profile, so return 'access denied' error.
+      scoped_ptr<base::DictionaryValue> properties (new base::DictionaryValue);
+      const base::DictionaryValue* wifi;
+      std::string wifi_security;
+      std::string error_string;
+      GetProperties(network_guid, properties.get(), &error_string);
+      if (error_string.empty() &&
+          properties->GetDictionary(onc::network_type::kWiFi, &wifi) &&
+          wifi->GetString(onc::wifi::kSecurity, &wifi_security) &&
+          wifi_security != onc::wifi::kNone) {
+        error = ERROR_ACCESS_DENIED;
+        LOG(ERROR) << error;
+        return error;
+      }
       WLAN_CONNECTION_PARAMETERS wlan_params = {
           wlan_connection_mode_discovery_unsecure,
           NULL,

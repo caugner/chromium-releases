@@ -13,16 +13,16 @@
 #include "base/win/windows_version.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_util.h"
-#include "chrome/browser/history/select_favicon_frames.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
-#include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
+#include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
+#include "components/favicon_base/select_favicon_frames.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -240,7 +240,7 @@ void ShowCreateChromeAppShortcutsDialog(
     gfx::NativeWindow parent_window,
     Profile* profile,
     const extensions::Extension* app,
-    const base::Closure& close_callback) {
+    const base::Callback<void(bool)>& close_callback) {
   CreateBrowserModalDialogViews(
       new CreateChromeApplicationShortcutView(profile, app, close_callback),
       parent_window)->Show();
@@ -371,13 +371,13 @@ bool CreateApplicationShortcutView::Accept() {
   if (!IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK))
     return false;
 
-  ShellIntegration::ShortcutLocations creation_locations;
+  web_app::ShortcutLocations creation_locations;
   creation_locations.on_desktop = desktop_check_box_->checked();
   if (menu_check_box_ != NULL && menu_check_box_->checked()) {
     creation_locations.applications_menu_location =
         create_in_chrome_apps_subdir_ ?
-            ShellIntegration::APP_MENU_LOCATION_SUBDIR_CHROMEAPPS :
-            ShellIntegration::APP_MENU_LOCATION_ROOT;
+            web_app::APP_MENU_LOCATION_SUBDIR_CHROMEAPPS :
+            web_app::APP_MENU_LOCATION_ROOT;
   }
 
 #if defined(OS_WIN)
@@ -389,8 +389,10 @@ bool CreateApplicationShortcutView::Accept() {
   creation_locations.in_quick_launch_bar = false;
 #endif
 
-  web_app::CreateShortcuts(shortcut_info_, creation_locations,
-                           web_app::SHORTCUT_CREATION_BY_USER);
+  web_app::CreateShortcutsForShortcutInfo(
+      web_app::SHORTCUT_CREATION_BY_USER,
+      creation_locations,
+      shortcut_info_);
   return true;
 }
 
@@ -517,9 +519,8 @@ void CreateUrlApplicationShortcutView::DidDownloadFavicon(
 CreateChromeApplicationShortcutView::CreateChromeApplicationShortcutView(
     Profile* profile,
     const extensions::Extension* app,
-    const base::Closure& close_callback)
+    const base::Callback<void(bool)>& close_callback)
         : CreateApplicationShortcutView(profile),
-          app_(app),
           close_callback_(close_callback),
           weak_ptr_factory_(this) {
   // Required by InitControls().
@@ -542,19 +543,19 @@ CreateChromeApplicationShortcutView::~CreateChromeApplicationShortcutView() {}
 
 bool CreateChromeApplicationShortcutView::Accept() {
   if (!close_callback_.is_null())
-    close_callback_.Run();
+    close_callback_.Run(true);
   return CreateApplicationShortcutView::Accept();
 }
 
 bool CreateChromeApplicationShortcutView::Cancel() {
   if (!close_callback_.is_null())
-    close_callback_.Run();
+    close_callback_.Run(false);
   return CreateApplicationShortcutView::Cancel();
 }
 
 // Called when the app's ShortcutInfo (with icon) is loaded.
 void CreateChromeApplicationShortcutView::OnShortcutInfoLoaded(
-    const ShellIntegration::ShortcutInfo& shortcut_info) {
+    const web_app::ShortcutInfo& shortcut_info) {
   shortcut_info_ = shortcut_info;
 
   CHECK(app_info_);

@@ -38,30 +38,7 @@
 
 class PrefService;
 
-// TODO(blundell): Eliminate this forward declaration once SigninManager no
-// longer needs Profile. crbug.com/334209
-class Profile;
 class SigninClient;
-
-// Details for the Notification type GOOGLE_SIGNIN_SUCCESSFUL.
-// TODO(blundell): Eliminate this struct once crbug.com/333997 is fixed.
-// A listener might use this to make note of a username / password
-// pair for encryption keys.
-struct GoogleServiceSigninSuccessDetails {
-  GoogleServiceSigninSuccessDetails(const std::string& in_username,
-                                    const std::string& in_password)
-      : username(in_username), password(in_password) {}
-  std::string username;
-  std::string password;
-};
-
-// Details for the Notification type NOTIFICATION_GOOGLE_SIGNED_OUT.
-// TODO(blundell): Eliminate this struct once crbug.com/333997 is fixed.
-struct GoogleServiceSignoutDetails {
-  explicit GoogleServiceSignoutDetails(const std::string& in_username)
-      : username(in_username) {}
-  std::string username;
-};
 
 class SigninManagerBase : public KeyedService {
  public:
@@ -85,9 +62,7 @@ class SigninManagerBase : public KeyedService {
   virtual ~SigninManagerBase();
 
   // If user was signed in, load tokens from DB if available.
-  // TODO(blundell): Eliminate the |profile| argument once SigninManager no
-  // longer needs Profile. crbug.com/334209
-  virtual void Initialize(Profile* profile, PrefService* local_state);
+  virtual void Initialize(PrefService* local_state);
   bool IsInitialized() const;
 
   // Returns true if a signin to Chrome is allowed (by policy or pref).

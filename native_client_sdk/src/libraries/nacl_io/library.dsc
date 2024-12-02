@@ -1,5 +1,5 @@
 {
-  'TOOLS': ['newlib', 'glibc', 'pnacl', 'linux'],
+  'TOOLS': ['bionic', 'newlib', 'glibc', 'pnacl', 'linux'],
   'SEARCH': [
     '.',
     'pepper',
@@ -11,7 +11,6 @@
       'NAME' : 'nacl_io',
       'TYPE' : 'lib',
       'SOURCES' : [
-        'dbgprint.c',
         "devfs/dev_fs.cc",
         "devfs/jspipe_node.cc",
         "devfs/tty_event_emitter.cc",
@@ -24,7 +23,7 @@
         "fusefs/fuse_fs.cc",
         "fusefs/fuse_fs_factory.cc",
         "getdents_helper.cc",
-        "h_errno.cc",
+        "h_errno.c",
         "host_resolver.cc",
         "html5fs/html5_fs.cc",
         "html5fs/html5_fs_node.cc",
@@ -35,10 +34,12 @@
         "kernel_intercept.cc",
         "kernel_object.cc",
         "kernel_proxy.cc",
+        "kernel_wrap_bionic.cc",
         "kernel_wrap_dummy.cc",
         "kernel_wrap_glibc.cc",
         "kernel_wrap_newlib.cc",
         "kernel_wrap_win.cc",
+        "log.c",
         "memfs/mem_fs.cc",
         "memfs/mem_fs_node.cc",
         "nacl_io.cc",
@@ -160,7 +161,6 @@
     {
       'FILES': [
         "char_node.h",
-        "dbgprint.h",
         "devfs/dev_fs.h",
         "devfs/jspipe_node.h",
         "devfs/tty_event_emitter.h",
@@ -191,6 +191,7 @@
         "kernel_proxy.h",
         "kernel_wrap.h",
         "kernel_wrap_real.h",
+        "log.h",
         "memfs/mem_fs.h",
         "memfs/mem_fs_node.h",
         "nacl_io.h",
@@ -231,6 +232,7 @@
     {
       'FILES': [
         "arpa/inet.h",
+        "memory.h",
         "netdb.h",
         "netinet/in.h",
         "netinet/tcp.h",
@@ -250,6 +252,7 @@
     {
       'FILES': [
         "arpa/inet.h",
+        "memory.h",
         "netdb.h",
         "netinet/in.h",
         "netinet/tcp.h",

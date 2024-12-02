@@ -16,9 +16,6 @@
 #include "ui/wm/core/window_util.h"
 
 namespace ash {
-
-namespace internal {
-
 namespace {
 
 // The opacity of the backdrop.
@@ -34,14 +31,21 @@ WorkspaceBackdropDelegate::WorkspaceBackdropDelegate(aura::Window* container)
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.parent = container_;
-  params.bounds = container_->bounds();
+  params.bounds = container_->GetBoundsInScreen();
   params.layer_type = aura::WINDOW_LAYER_SOLID_COLOR;
   // To disallow the MRU list from picking this window up it should not be
   // activateable.
   params.can_activate = false;
   background_->Init(params);
+  // Do not use the animation system. We don't want the bounds animation and
+  // opacity needs to get set to |kBackdropOpacity|.
+  ::wm::SetWindowVisibilityAnimationTransition(
+      background_->GetNativeView(),
+      ::wm::ANIMATE_NONE);
   background_->GetNativeView()->SetName("WorkspaceBackdropDelegate");
   background_->GetNativeView()->layer()->SetColor(SK_ColorBLACK);
+  // Make sure that the layer covers visibly everything - including the shelf.
+  background_->GetNativeView()->layer()->SetBounds(params.bounds);
   Show();
   RestackBackdrop();
   container_->AddObserver(this);
@@ -149,5 +153,4 @@ void WorkspaceBackdropDelegate::Show() {
   background_->GetNativeView()->layer()->SetOpacity(kBackdropOpacity);
 }
 
-}  // namespace internal
 }  // namespace ash

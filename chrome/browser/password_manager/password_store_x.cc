@@ -21,12 +21,15 @@
 
 using autofill::PasswordForm;
 using content::BrowserThread;
+using password_manager::PasswordStoreChange;
+using password_manager::PasswordStoreChangeList;
+using password_manager::PasswordStoreDefault;
 using std::vector;
 
 PasswordStoreX::PasswordStoreX(
     scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner,
     scoped_refptr<base::SingleThreadTaskRunner> db_thread_runner,
-    LoginDatabase* login_db,
+    password_manager::LoginDatabase* login_db,
     NativeBackend* backend)
     : PasswordStoreDefault(main_thread_runner, db_thread_runner, login_db),
       backend_(backend),
@@ -260,42 +263,3 @@ ssize_t PasswordStoreX::MigrateLogins() {
   STLDeleteElements(&forms);
   return result;
 }
-
-#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
-// static
-void PasswordStoreX::RegisterProfilePrefs(
-    user_prefs::PrefRegistrySyncable* registry) {
-  // Normally we should be on the UI thread here, but in tests we might not.
-  registry->RegisterBooleanPref(
-      prefs::kPasswordsUseLocalProfileId,
-      // default: passwords don't use local ids
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-}
-
-// static
-bool PasswordStoreX::PasswordsUseLocalProfileId(PrefService* prefs) {
-  // Normally we should be on the UI thread here, but in tests we might not.
-  return prefs->GetBoolean(prefs::kPasswordsUseLocalProfileId);
-}
-
-namespace {
-// This function is a hack to do something not entirely thread safe: the pref
-// service comes from the UI thread, but it's not ref counted. We keep a pointer
-// to it on the DB thread, and need to invoke a method on the UI thread. This
-// function does that for us without requiring ref counting the pref service.
-// TODO(mdm): Fix this if it becomes a problem. Given that this function will
-// be called once ever per profile, it probably will not cause a problem...
-void UISetPasswordsUseLocalProfileId(PrefService* prefs) {
-  prefs->SetBoolean(prefs::kPasswordsUseLocalProfileId, true);
-}
-}  // anonymous namespace
-
-// static
-void PasswordStoreX::SetPasswordsUseLocalProfileId(PrefService* prefs) {
-  // This method should work on any thread, but we expect the DB thread.
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(&UISetPasswordsUseLocalProfileId, prefs));
-}
-#endif  // !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)

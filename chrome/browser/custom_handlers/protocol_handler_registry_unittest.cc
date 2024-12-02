@@ -286,9 +286,6 @@ class TestMessageLoop : public base::MessageLoop {
   virtual ~TestMessageLoop() {}
   virtual bool IsType(base::MessageLoop::Type type) const OVERRIDE {
     switch (type) {
-#if defined(TOOLKIT_GTK)
-      case base::MessageLoop::TYPE_GPU:
-#endif
       case base::MessageLoop::TYPE_UI:
         return BrowserThread::CurrentlyOn(BrowserThread::UI);
       case base::MessageLoop::TYPE_IO:
@@ -381,7 +378,7 @@ class ProtocolHandlerRegistryTest : public testing::Test {
 
 // ProtocolHandlerRegistryTest tests are flaky on Linux & ChromeOS.
 // http://crbug.com/133023
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if defined(OS_LINUX)
 #define MAYBE_AcceptProtocolHandlerHandlesProtocol \
     DISABLED_AcceptProtocolHandlerHandlesProtocol
 #define MAYBE_DeniedProtocolIsntHandledUntilAccepted \
@@ -407,7 +404,7 @@ class ProtocolHandlerRegistryTest : public testing::Test {
 #define MAYBE_TestIsHandledProtocolWorksOnIOThread \
     TestIsHandledProtocolWorksOnIOThread
 #define MAYBE_TestInstallDefaultHandler TestInstallDefaultHandler
-#endif  // defined(OS_CHROMEOS)
+#endif  // defined(OS_LINUX)
 
 TEST_F(ProtocolHandlerRegistryTest,
        MAYBE_AcceptProtocolHandlerHandlesProtocol) {

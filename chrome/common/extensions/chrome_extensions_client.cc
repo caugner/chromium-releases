@@ -4,38 +4,61 @@
 
 #include "chrome/common/extensions/chrome_extensions_client.h"
 
+#include "apps/common/api/generated_schemas.h"
 #include "base/command_line.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/api/generated_schemas.h"
 #include "chrome/common/extensions/chrome_manifest_handlers.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/features/base_feature_provider.h"
+#include "chrome/common/extensions/features/chrome_channel_feature_filter.h"
+#include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/common/api/generated_schemas.h"
 #include "extensions/common/common_manifest_handlers.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/features/api_feature.h"
+#include "extensions/common/features/base_feature_provider.h"
+#include "extensions/common/features/json_feature_provider_source.h"
+#include "extensions/common/features/manifest_feature.h"
+#include "extensions/common/features/permission_feature.h"
+#include "extensions/common/features/simple_feature.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handler.h"
 #include "extensions/common/permissions/api_permission_set.h"
 #include "extensions/common/permissions/permission_message.h"
+#include "extensions/common/permissions/permissions_info.h"
 #include "extensions/common/switches.h"
 #include "extensions/common/url_pattern.h"
 #include "extensions/common/url_pattern_set.h"
+#include "grit/common_resources.h"
+#include "grit/extensions_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
-namespace {
-const char kThumbsWhiteListedExtension[] = "khopmbdjffemhegeeobelklnbglcdgfh";
-}  // namespace
-
 namespace extensions {
+
+namespace {
+
+const char kThumbsWhiteListedExtension[] = "khopmbdjffemhegeeobelklnbglcdgfh";
+
+template <class FeatureClass>
+SimpleFeature* CreateFeature() {
+  SimpleFeature* feature = new FeatureClass;
+  feature->AddFilter(
+      scoped_ptr<SimpleFeatureFilter>(new ChromeChannelFeatureFilter(feature)));
+  return feature;
+}
+
+}  // namespace
 
 static base::LazyInstance<ChromeExtensionsClient> g_client =
     LAZY_INSTANCE_INITIALIZER;
 
 ChromeExtensionsClient::ChromeExtensionsClient()
-    :  chrome_api_permissions_(ChromeAPIPermissions()) {
+    : chrome_api_permissions_(ChromeAPIPermissions()),
+      extensions_api_permissions_(ExtensionsAPIPermissions()) {
 }
 
 ChromeExtensionsClient::~ChromeExtensionsClient() {
@@ -49,6 +72,10 @@ void ChromeExtensionsClient::Initialize() {
     RegisterChromeManifestHandlers();
     ManifestHandler::FinalizeRegistration();
   }
+
+  // Set up permissions.
+  PermissionsInfo::GetInstance()->AddProvider(chrome_api_permissions_);
+  PermissionsInfo::GetInstance()->AddProvider(extensions_api_permissions_);
 
   // Set up the scripting whitelist.
   // Whitelist ChromeVox, an accessibility extension from Google that needs
@@ -65,19 +92,33 @@ void ChromeExtensionsClient::Initialize() {
   scripting_whitelist_.push_back("angkfkebojeancgemegoedelbnjgcgme");
 }
 
-const PermissionsProvider&
-ChromeExtensionsClient::GetPermissionsProvider() const {
-  return chrome_api_permissions_;
-}
-
 const PermissionMessageProvider&
 ChromeExtensionsClient::GetPermissionMessageProvider() const {
   return permission_message_provider_;
 }
 
-FeatureProvider* ChromeExtensionsClient::GetFeatureProviderByName(
+scoped_ptr<FeatureProvider> ChromeExtensionsClient::CreateFeatureProvider(
     const std::string& name) const {
-  return BaseFeatureProvider::GetByName(name);
+  JSONFeatureProviderSource source(name);
+  if (name == "api") {
+    source.LoadJSON(IDR_EXTENSION_API_FEATURES);
+    source.LoadJSON(IDR_CHROME_EXTENSION_API_FEATURES);
+    return scoped_ptr<FeatureProvider>(new BaseFeatureProvider(
+        source.dictionary(), CreateFeature<APIFeature>));
+  } else if (name == "manifest") {
+    source.LoadJSON(IDR_EXTENSION_MANIFEST_FEATURES);
+    source.LoadJSON(IDR_CHROME_EXTENSION_MANIFEST_FEATURES);
+    return scoped_ptr<FeatureProvider>(new BaseFeatureProvider(
+        source.dictionary(), CreateFeature<ManifestFeature>));
+  } else if (name == "permission") {
+    source.LoadJSON(IDR_EXTENSION_PERMISSION_FEATURES);
+    source.LoadJSON(IDR_CHROME_EXTENSION_PERMISSION_FEATURES);
+    return scoped_ptr<FeatureProvider>(new BaseFeatureProvider(
+        source.dictionary(), CreateFeature<PermissionFeature>));
+  } else {
+    NOTREACHED();
+  }
+  return scoped_ptr<FeatureProvider>();
 }
 
 void ChromeExtensionsClient::FilterHostPermissions(
@@ -154,15 +195,27 @@ bool ChromeExtensionsClient::IsScriptableURL(
 
 bool ChromeExtensionsClient::IsAPISchemaGenerated(
     const std::string& name) const {
-  return extensions::api::GeneratedSchemas::IsGenerated(name) ||
-         extensions::core_api::GeneratedSchemas::IsGenerated(name);
+  // Test from most common to least common.
+  return api::GeneratedSchemas::IsGenerated(name) ||
+         core_api::GeneratedSchemas::IsGenerated(name) ||
+         apps::api::GeneratedSchemas::IsGenerated(name);
 }
 
 base::StringPiece ChromeExtensionsClient::GetAPISchema(
     const std::string& name) const {
-  if (extensions::api::GeneratedSchemas::IsGenerated(name))
-    return extensions::api::GeneratedSchemas::Get(name);
-  return extensions::core_api::GeneratedSchemas::Get(name);
+  // Test from most common to least common.
+  if (api::GeneratedSchemas::IsGenerated(name))
+    return api::GeneratedSchemas::Get(name);
+
+  if (core_api::GeneratedSchemas::IsGenerated(name))
+    return core_api::GeneratedSchemas::Get(name);
+
+  return apps::api::GeneratedSchemas::Get(name);
+}
+
+bool ChromeExtensionsClient::ShouldSuppressFatalErrors() const {
+  // Suppress fatal errors only on beta and stable channels.
+  return GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV;
 }
 
 // static

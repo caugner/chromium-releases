@@ -4,8 +4,11 @@
 
 #include "android_webview/browser/scoped_app_gl_state_restore.h"
 
+#include <string>
+
 #include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
+#include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_surface_stub.h"
 
@@ -48,23 +51,124 @@ void GLEnableDisable(GLenum cap, bool enable) {
     glDisable(cap);
 }
 
+bool g_globals_initialized = false;
 GLint g_gl_max_texture_units = 0;
+bool g_supports_oes_vertex_array_object = false;
 
 }  // namespace
 
-ScopedAppGLStateRestore::ScopedAppGLStateRestore(CallMode mode) : mode_(mode) {
+namespace internal {
+
+class ScopedAppGLStateRestoreImpl {
+ public:
+  ScopedAppGLStateRestoreImpl(ScopedAppGLStateRestore::CallMode mode);
+  ~ScopedAppGLStateRestoreImpl();
+
+  bool stencil_enabled() const { return stencil_test_; }
+  GLint framebuffer_binding_ext() const { return framebuffer_binding_ext_; }
+
+ private:
+  const ScopedAppGLStateRestore::CallMode mode_;
+
+  GLint pack_alignment_;
+  GLint unpack_alignment_;
+
+  struct {
+    GLint enabled;
+    GLint size;
+    GLint type;
+    GLint normalized;
+    GLint stride;
+    GLvoid* pointer;
+    GLint vertex_attrib_array_buffer_binding;
+    GLfloat current_vertex_attrib[4];
+  } vertex_attrib_[3];
+
+  GLint vertex_array_buffer_binding_;
+  GLint index_array_buffer_binding_;
+
+  GLboolean depth_test_;
+  GLboolean cull_face_;
+  GLint cull_face_mode_;
+  GLboolean color_mask_[4];
+  GLfloat color_clear_[4];
+  GLfloat depth_clear_;
+  GLint current_program_;
+  GLint depth_func_;
+  GLboolean depth_mask_;
+  GLfloat depth_rage_[2];
+  GLint front_face_;
+  GLint hint_generate_mipmap_;
+  GLfloat line_width_;
+  GLfloat polygon_offset_factor_;
+  GLfloat polygon_offset_units_;
+  GLfloat sample_coverage_value_;
+  GLboolean sample_coverage_invert_;
+
+  GLboolean enable_dither_;
+  GLboolean enable_polygon_offset_fill_;
+  GLboolean enable_sample_alpha_to_coverage_;
+  GLboolean enable_sample_coverage_;
+
+  // Not saved/restored in MODE_DRAW.
+  GLboolean blend_enabled_;
+  GLint blend_src_rgb_;
+  GLint blend_src_alpha_;
+  GLint blend_dest_rgb_;
+  GLint blend_dest_alpha_;
+  GLint active_texture_;
+  GLint viewport_[4];
+  GLboolean scissor_test_;
+  GLint scissor_box_[4];
+
+  GLboolean stencil_test_;
+  GLint stencil_func_;
+  GLint stencil_mask_;
+  GLint stencil_ref_;
+
+  GLint framebuffer_binding_ext_;
+
+  struct TextureBindings {
+    GLint texture_2d;
+    GLint texture_cube_map;
+    GLint texture_external_oes;
+    // TODO(boliu): TEXTURE_RECTANGLE_ARB
+  };
+
+  std::vector<TextureBindings> texture_bindings_;
+
+  GLint vertex_array_bindings_oes_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedAppGLStateRestoreImpl);
+};
+
+ScopedAppGLStateRestoreImpl::ScopedAppGLStateRestoreImpl(
+    ScopedAppGLStateRestore::CallMode mode)
+    : mode_(mode) {
   TRACE_EVENT0("android_webview", "AppGLStateSave");
   MakeAppContextCurrent();
+
+  if (!g_globals_initialized) {
+    g_globals_initialized = true;
+
+    glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &g_gl_max_texture_units);
+    DCHECK_GT(g_gl_max_texture_units, 0);
+
+    std::string extensions(
+        reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS)));
+    g_supports_oes_vertex_array_object =
+        extensions.find("GL_OES_vertex_array_object") != std::string::npos;
+  }
 
   glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &vertex_array_buffer_binding_);
   glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &index_array_buffer_binding_);
 
   switch(mode_) {
-    case MODE_DRAW:
+    case ScopedAppGLStateRestore::MODE_DRAW:
       DCHECK_EQ(0, vertex_array_buffer_binding_);
       DCHECK_EQ(0, index_array_buffer_binding_);
       break;
-    case MODE_RESOURCE_MANAGEMENT:
+    case ScopedAppGLStateRestore::MODE_RESOURCE_MANAGEMENT:
       glGetBooleanv(GL_BLEND, &blend_enabled_);
       glGetIntegerv(GL_BLEND_SRC_RGB, &blend_src_rgb_);
       glGetIntegerv(GL_BLEND_SRC_ALPHA, &blend_src_alpha_);
@@ -78,21 +182,6 @@ ScopedAppGLStateRestore::ScopedAppGLStateRestore(CallMode mode) : mode_(mode) {
 
   glGetIntegerv(GL_PACK_ALIGNMENT, &pack_alignment_);
   glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpack_alignment_);
-
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(vertex_attrib_); ++i) {
-    glGetVertexAttribiv(
-        i, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &vertex_attrib_[i].enabled);
-    glGetVertexAttribiv(
-        i, GL_VERTEX_ATTRIB_ARRAY_SIZE, &vertex_attrib_[i].size);
-    glGetVertexAttribiv(
-        i, GL_VERTEX_ATTRIB_ARRAY_TYPE, &vertex_attrib_[i].type);
-    glGetVertexAttribiv(
-        i, GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, &vertex_attrib_[i].normalized);
-    glGetVertexAttribiv(
-        i, GL_VERTEX_ATTRIB_ARRAY_STRIDE, &vertex_attrib_[i].stride);
-    glGetVertexAttribPointerv(
-        i, GL_VERTEX_ATTRIB_ARRAY_POINTER, &vertex_attrib_[i].pointer);
-  }
 
   glGetBooleanv(GL_DEPTH_TEST, &depth_test_);
   glGetBooleanv(GL_CULL_FACE, &cull_face_);
@@ -124,11 +213,6 @@ ScopedAppGLStateRestore::ScopedAppGLStateRestore(CallMode mode) : mode_(mode) {
 
   glGetIntegerv(GL_FRAMEBUFFER_BINDING_EXT, &framebuffer_binding_ext_);
 
-  if (!g_gl_max_texture_units) {
-    glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &g_gl_max_texture_units);
-    DCHECK_GT(g_gl_max_texture_units, 0);
-  }
-
   glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture_);
 
   texture_bindings_.resize(g_gl_max_texture_units);
@@ -140,15 +224,68 @@ ScopedAppGLStateRestore::ScopedAppGLStateRestore(CallMode mode) : mode_(mode) {
     glGetIntegerv(GL_TEXTURE_BINDING_EXTERNAL_OES,
                   &bindings.texture_external_oes);
   }
+
+  if (g_supports_oes_vertex_array_object) {
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING_OES, &vertex_array_bindings_oes_);
+    glBindVertexArrayOES(0);
+  }
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(vertex_attrib_); ++i) {
+    glGetVertexAttribiv(
+        i, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &vertex_attrib_[i].enabled);
+    glGetVertexAttribiv(
+        i, GL_VERTEX_ATTRIB_ARRAY_SIZE, &vertex_attrib_[i].size);
+    glGetVertexAttribiv(
+        i, GL_VERTEX_ATTRIB_ARRAY_TYPE, &vertex_attrib_[i].type);
+    glGetVertexAttribiv(
+        i, GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, &vertex_attrib_[i].normalized);
+    glGetVertexAttribiv(
+        i, GL_VERTEX_ATTRIB_ARRAY_STRIDE, &vertex_attrib_[i].stride);
+    glGetVertexAttribPointerv(
+        i, GL_VERTEX_ATTRIB_ARRAY_POINTER, &vertex_attrib_[i].pointer);
+    glGetVertexAttribPointerv(
+        i, GL_VERTEX_ATTRIB_ARRAY_POINTER, &vertex_attrib_[i].pointer);
+    glGetVertexAttribiv(i,
+                        GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING,
+                        &vertex_attrib_[i].vertex_attrib_array_buffer_binding);
+    glGetVertexAttribfv(
+        i, GL_CURRENT_VERTEX_ATTRIB, vertex_attrib_[i].current_vertex_attrib);
+  }
 }
 
-ScopedAppGLStateRestore::~ScopedAppGLStateRestore() {
+ScopedAppGLStateRestoreImpl::~ScopedAppGLStateRestoreImpl() {
   TRACE_EVENT0("android_webview", "AppGLStateRestore");
   MakeAppContextCurrent();
 
   glBindFramebufferEXT(GL_FRAMEBUFFER, framebuffer_binding_ext_);
-  glBindBuffer(GL_ARRAY_BUFFER, vertex_array_buffer_binding_);
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_array_buffer_binding_);
+
+  if (g_supports_oes_vertex_array_object)
+    glBindVertexArrayOES(0);
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(vertex_attrib_); ++i) {
+    glBindBuffer(GL_ARRAY_BUFFER,
+                 vertex_attrib_[i].vertex_attrib_array_buffer_binding);
+    glVertexAttribPointer(i,
+                          vertex_attrib_[i].size,
+                          vertex_attrib_[i].type,
+                          vertex_attrib_[i].normalized,
+                          vertex_attrib_[i].stride,
+                          vertex_attrib_[i].pointer);
+
+    glVertexAttrib4fv(i, vertex_attrib_[i].current_vertex_attrib);
+
+    if (vertex_attrib_[i].enabled) {
+      glEnableVertexAttribArray(i);
+    } else {
+      glDisableVertexAttribArray(i);
+    }
+  }
+
+  if (g_supports_oes_vertex_array_object && vertex_array_bindings_oes_ != 0)
+    glBindVertexArrayOES(vertex_array_bindings_oes_);
+
+  glBindBuffer(GL_ARRAY_BUFFER, vertex_array_buffer_binding_);
 
   for (int ii = 0; ii < g_gl_max_texture_units; ++ii) {
     glActiveTexture(GL_TEXTURE0 + ii);
@@ -161,21 +298,6 @@ ScopedAppGLStateRestore::~ScopedAppGLStateRestore() {
 
   glPixelStorei(GL_PACK_ALIGNMENT, pack_alignment_);
   glPixelStorei(GL_UNPACK_ALIGNMENT, unpack_alignment_);
-
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(vertex_attrib_); ++i) {
-    glVertexAttribPointer(i,
-                          vertex_attrib_[i].size,
-                          vertex_attrib_[i].type,
-                          vertex_attrib_[i].normalized,
-                          vertex_attrib_[i].stride,
-                          vertex_attrib_[i].pointer);
-
-    if (vertex_attrib_[i].enabled) {
-      glEnableVertexAttribArray(i);
-    } else {
-      glDisableVertexAttribArray(i);
-    }
-  }
 
   GLEnableDisable(GL_DEPTH_TEST, depth_test_);
 
@@ -206,10 +328,10 @@ ScopedAppGLStateRestore::~ScopedAppGLStateRestore() {
   GLEnableDisable(GL_SAMPLE_COVERAGE, enable_sample_coverage_);
 
   switch(mode_) {
-    case MODE_DRAW:
+    case ScopedAppGLStateRestore::MODE_DRAW:
       // No-op.
       break;
-    case MODE_RESOURCE_MANAGEMENT:
+    case ScopedAppGLStateRestore::MODE_RESOURCE_MANAGEMENT:
       GLEnableDisable(GL_BLEND, blend_enabled_);
       glBlendFuncSeparate(
           blend_src_rgb_, blend_dest_rgb_, blend_src_alpha_, blend_dest_alpha_);
@@ -225,6 +347,21 @@ ScopedAppGLStateRestore::~ScopedAppGLStateRestore() {
 
   GLEnableDisable(GL_STENCIL_TEST, stencil_test_);
   glStencilFunc(stencil_func_, stencil_mask_, stencil_ref_);
+}
+
+}  // namespace internal
+
+ScopedAppGLStateRestore::ScopedAppGLStateRestore(CallMode mode)
+    : impl_(new internal::ScopedAppGLStateRestoreImpl(mode)) {
+}
+
+ScopedAppGLStateRestore::~ScopedAppGLStateRestore() {}
+
+bool ScopedAppGLStateRestore::stencil_enabled() const {
+  return impl_->stencil_enabled();
+}
+int ScopedAppGLStateRestore::framebuffer_binding_ext() const {
+  return impl_->framebuffer_binding_ext();
 }
 
 }  // namespace android_webview

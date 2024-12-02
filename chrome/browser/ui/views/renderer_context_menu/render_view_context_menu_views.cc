@@ -10,7 +10,6 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -18,7 +17,6 @@
 #include "ui/gfx/point.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_runner.h"
-
 
 using content::WebContents;
 
@@ -35,22 +33,20 @@ RenderViewContextMenuViews::RenderViewContextMenuViews(
 RenderViewContextMenuViews::~RenderViewContextMenuViews() {
 }
 
-#if !defined(OS_WIN)
 // static
 RenderViewContextMenuViews* RenderViewContextMenuViews::Create(
     content::RenderFrameHost* render_frame_host,
     const content::ContextMenuParams& params) {
   return new RenderViewContextMenuViews(render_frame_host, params);
 }
-#endif  // OS_WIN
 
 void RenderViewContextMenuViews::RunMenuAt(views::Widget* parent,
                                            const gfx::Point& point,
                                            ui::MenuSourceType type) {
-  views::MenuItemView::AnchorPosition anchor_position =
-      (type == ui::MENU_SOURCE_TOUCH ||
-          type == ui::MENU_SOURCE_TOUCH_EDIT_MENU) ?
-          views::MenuItemView::BOTTOMCENTER : views::MenuItemView::TOPLEFT;
+  views::MenuAnchorPosition anchor_position =
+      (type == ui::MENU_SOURCE_TOUCH || type == ui::MENU_SOURCE_TOUCH_EDIT_MENU)
+          ? views::MENU_ANCHOR_BOTTOMCENTER
+          : views::MENU_ANCHOR_TOPLEFT;
 
   if (menu_runner_->RunMenuAt(parent, NULL, gfx::Rect(point, gfx::Size()),
       anchor_position, type, views::MenuRunner::HAS_MNEMONICS |

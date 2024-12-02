@@ -6,11 +6,9 @@
 
 #include <string>
 
-#include "apps/app_window_registry.h"
-#include "base/command_line.h"
+#include "apps/shell/browser/api/shell/shell_api.h"
 #include "base/files/file_path.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/common/extensions/extension_file_util.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
@@ -24,6 +22,7 @@
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/quota_service.h"
 #include "extensions/browser/runtime_data.h"
+#include "extensions/common/file_util.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
@@ -39,11 +38,8 @@ ShellExtensionSystem::~ShellExtensionSystem() {
 
 bool ShellExtensionSystem::LoadAndLaunchApp(const base::FilePath& app_dir) {
   std::string load_error;
-  scoped_refptr<Extension> extension =
-      extension_file_util::LoadExtension(app_dir,
-                                         extensions::Manifest::COMMAND_LINE,
-                                         Extension::NO_FLAGS,
-                                         &load_error);
+  scoped_refptr<Extension> extension = file_util::LoadExtension(
+      app_dir, Manifest::COMMAND_LINE, Extension::NO_FLAGS, &load_error);
   if (!extension) {
     LOG(ERROR) << "Loading extension at " << app_dir.value()
         << " failed with: " << load_error;
@@ -63,7 +59,7 @@ bool ShellExtensionSystem::LoadAndLaunchApp(const base::FilePath& app_dir) {
   RegisterExtensionWithRequestContexts(extension);
 
   content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_EXTENSION_LOADED,
+      chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
       content::Source<BrowserContext>(browser_context_),
       content::Details<const Extension>(extension));
 
@@ -74,23 +70,10 @@ bool ShellExtensionSystem::LoadAndLaunchApp(const base::FilePath& app_dir) {
       content::Source<BrowserContext>(browser_context_),
       content::NotificationService::NoDetails());
 
-  // This is effectively the same behavior as
-  // extensions::AppEventRouter::DispatchOnLaunchedEvent without any dependency
-  // on ExtensionSystem or Profile.
-  scoped_ptr<base::DictionaryValue> launch_data(new base::DictionaryValue());
-  launch_data->SetBoolean("isKioskSession", false);
-  scoped_ptr<base::ListValue> event_args(new base::ListValue());
-  event_args->Append(launch_data.release());
-  scoped_ptr<Event> event(
-      new Event("app.runtime.onLaunched", event_args.Pass()));
-  event_router_->DispatchEventWithLazyListener(extension->id(), event.Pass());
+  // Send the onLaunched event.
+  apps::ShellAPI::DispatchOnLaunchedEvent(event_router_.get(), extension.get());
 
   return true;
-}
-
-void ShellExtensionSystem::CloseApp() {
-  apps::AppWindowRegistry::Get(browser_context_)
-      ->CloseAllAppWindowsForApp(app_id_);
 }
 
 void ShellExtensionSystem::Shutdown() {
@@ -185,6 +168,10 @@ void ShellExtensionSystem::UnregisterExtensionWithRequestContexts(
 
 const OneShotEvent& ShellExtensionSystem::ready() const {
   return ready_;
+}
+
+ContentVerifier* ShellExtensionSystem::content_verifier() {
+  return NULL;
 }
 
 }  // namespace extensions

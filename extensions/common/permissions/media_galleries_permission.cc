@@ -10,7 +10,7 @@
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "extensions/common/permissions/permissions_info.h"
-#include "grit/generated_resources.h"
+#include "grit/extensions_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -56,13 +56,27 @@ MediaGalleriesPermission::MediaGalleriesPermission(
 MediaGalleriesPermission::~MediaGalleriesPermission() {
 }
 
-bool MediaGalleriesPermission::FromValue(const base::Value* value,
-                                         std::string* error) {
-  if (!SetDisjunctionPermission<MediaGalleriesPermissionData,
-                                MediaGalleriesPermission>::FromValue(value,
-                                                                     error)) {
-    return false;
+bool MediaGalleriesPermission::FromValue(
+    const base::Value* value,
+    std::string* error,
+    std::vector<std::string>* unhandled_permissions) {
+  size_t unhandled_permissions_count = 0;
+  if (unhandled_permissions)
+    unhandled_permissions_count = unhandled_permissions->size();
+  bool parsed_ok =
+      SetDisjunctionPermission<MediaGalleriesPermissionData,
+                               MediaGalleriesPermission>::FromValue(
+                                   value, error, unhandled_permissions);
+  if (unhandled_permissions) {
+    for (size_t i = unhandled_permissions_count;
+         i < unhandled_permissions->size();
+         i++) {
+      (*unhandled_permissions)[i] =
+          "{\"mediaGalleries\": [" + (*unhandled_permissions)[i] + "]}";
+    }
   }
+  if (!parsed_ok)
+    return false;
 
   bool has_read = false;
   bool has_copy_to = false;

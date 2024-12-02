@@ -79,7 +79,7 @@ base::string16 DevModeBubbleDelegate::GetMessageBody() const {
 base::string16 DevModeBubbleDelegate::GetOverflowText(
     const base::string16& overflow_count) const {
   return l10n_util::GetStringFUTF16(
-            IDS_EXTENSIONS_SUSPICIOUS_DISABLED_AND_N_MORE,
+            IDS_EXTENSIONS_DISABLED_AND_N_MORE,
             overflow_count);
 }
 
@@ -146,12 +146,12 @@ DevModeBubbleController::~DevModeBubbleController() {
 }
 
 bool DevModeBubbleController::ShouldShow() {
-  return !g_shown_for_profiles.Get().count(profile_) &&
+  return !g_shown_for_profiles.Get().count(profile_->GetOriginalProfile()) &&
       !GetExtensionList().empty();
 }
 
 void DevModeBubbleController::Show(ExtensionMessageBubble* bubble) {
-  g_shown_for_profiles.Get().insert(profile_);
+  g_shown_for_profiles.Get().insert(profile_->GetOriginalProfile());
   ExtensionMessageBubbleController::Show(bubble);
 }
 

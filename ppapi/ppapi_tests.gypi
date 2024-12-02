@@ -30,6 +30,7 @@
             'tests/test_case.html.mock-http-headers',
             'tests/test_page.css',
             'tests/ppapi_nacl_tests_newlib.nmf',
+            'tests/ppapi_nacl_tests_pnacl_nonsfi.nmf',
           ],
         },
         {
@@ -125,8 +126,7 @@
       ],
       'conditions': [
         # See http://crbug.com/162998#c4 for why this is needed.
-        # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-        ['OS=="linux" and ((use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1))', {
+        ['OS=="linux" and use_allocator!="none"', {
           'dependencies': [
             '../base/allocator/allocator.gyp:allocator',
           ],
@@ -154,21 +154,8 @@
         '../testing/gtest.gyp:gtest',
         '../ui/surface/surface.gyp:surface',
       ],
-      # For the nacl_http_response_headers_unittest below.
-      'include_dirs': [
-        '../ppapi',
-      ],
       'sources': [
         'host/resource_message_filter_unittest.cc',
-        # Piggy back on ppapi_unittests for a simple NaCl unittest,
-        # which must not have dependencies on anything other than stdlibs.
-        # We add the source file, not just the test to ensure that the object
-        # is built.  Otherwise, we would need to depend on the NaCl trusted
-        # plugin being built to build the object.
-        # TODO(jvoung): move this to unit_tests instead of ppapi_unittests
-        # once this moves into chrome.
-        'native_client/src/trusted/plugin/nacl_http_response_headers.cc',
-        'native_client/src/trusted/plugin/nacl_http_response_headers_unittest.cc',
         'proxy/device_enumeration_resource_helper_unittest.cc',
         'proxy/file_chooser_resource_unittest.cc',
         'proxy/file_system_resource_unittest.cc',
@@ -203,8 +190,7 @@
       'conditions': [
         [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
           'conditions': [
-            # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-            [ '(use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1)', {
+            [ 'use_allocator!="none"', {
               'dependencies': [
                 '../base/allocator/allocator.gyp:allocator',
               ],
@@ -465,7 +451,25 @@
         'lib/gl/include',
       ],
       'sources': [
-        'examples/video_decode/video_decode.cc',
+        # TODO(bbudge) Change to new example when implementation lands.
+        'examples/video_decode/video_decode_dev.cc',
+        'examples/video_decode/testdata.h',
+      ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
+    },
+    {
+      'target_name': 'ppapi_example_video_decode_dev',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+        'ppapi.gyp:ppapi_gles2',
+      ],
+      'include_dirs': [
+        'lib/gl/include',
+      ],
+      'sources': [
+        'examples/video_decode/video_decode_dev.cc',
         'examples/video_decode/testdata.h',
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.

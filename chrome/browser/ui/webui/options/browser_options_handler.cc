@@ -34,12 +34,11 @@
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
-#include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/browser/profile_resetter/automatic_profile_resetter.h"
 #include "chrome/browser/profile_resetter/automatic_profile_resetter_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
-#include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profile_shortcut_manager.h"
@@ -51,7 +50,7 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/easy_unlock.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -67,10 +66,12 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/navigation_controller.h"
@@ -81,8 +82,8 @@
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/page_zoom.h"
+#include "extensions/browser/extension_registry.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "grit/chromium_strings.h"
@@ -99,10 +100,11 @@
 
 #if defined(OS_CHROMEOS)
 #include "ash/ash_switches.h"
+#include "ash/desktop_background/user_wallpaper_delegate.h"
 #include "ash/magnifier/magnifier_constants.h"
+#include "ash/shell.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/chromeos_utils.h"
-#include "chrome/browser/chromeos/extensions/wallpaper_manager_util.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wallpaper_manager.h"
@@ -125,6 +127,7 @@
 #if defined(OS_WIN)
 #include "chrome/browser/extensions/settings_api_helpers.h"
 #include "chrome/installer/util/auto_launch_util.h"
+#include "content/public/browser/browser_url_handler.h"
 #endif  // defined(OS_WIN)
 
 #if defined(ENABLE_SERVICE_DISCOVERY)
@@ -137,6 +140,23 @@ using content::BrowserThread;
 using content::DownloadManager;
 using content::OpenURLParams;
 using content::Referrer;
+using extensions::Extension;
+using extensions::ExtensionRegistry;
+
+namespace {
+
+#if defined(OS_WIN)
+void AppendExtensionData(const std::string& key,
+                         const Extension* extension,
+                         base::DictionaryValue* dict) {
+  scoped_ptr<base::DictionaryValue> details(new base::DictionaryValue);
+  details->SetString("id", extension ? extension->id() : std::string());
+  details->SetString("name", extension ? extension->name() : std::string());
+  dict->Set(key, details.release());
+}
+#endif  // defined(OS_WIN)
+
+}  // namespace
 
 namespace options {
 
@@ -149,21 +169,6 @@ BrowserOptionsHandler::BrowserOptionsHandler()
 #if !defined(OS_MACOSX)
   default_browser_worker_ = new ShellIntegration::DefaultBrowserWorker(this);
 #endif
-
-#if defined(ENABLE_FULL_PRINTING)
-#if !defined(GOOGLE_CHROME_BUILD) && defined(OS_WIN)
-  // On Windows, we need the PDF plugin which is only guaranteed to exist on
-  // Google Chrome builds. Use a command-line switch for Windows non-Google
-  //  Chrome builds.
-  cloud_print_connector_ui_enabled_ =
-      CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableCloudPrintProxy);
-#elif !defined(OS_CHROMEOS)
-  // Always enabled for Mac, Linux and Google Chrome Windows builds.
-  // Never enabled for Chrome OS, we don't even need to indicate it.
-  cloud_print_connector_ui_enabled_ = true;
-#endif
-#endif  // defined(ENABLE_FULL_PRINTING)
 
 #if defined(ENABLE_SERVICE_DISCOVERY)
   cloud_print_mdns_ui_enabled_ = !CommandLine::ForCurrentProcess()->HasSwitch(
@@ -193,6 +198,8 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
   static OptionsStringResource resources[] = {
     { "advancedSectionTitleCloudPrint", IDS_GOOGLE_CLOUD_PRINT },
     { "currentUserOnly", IDS_OPTIONS_CURRENT_USER_ONLY },
+    { "advancedSectionTitleCertificates",
+      IDS_OPTIONS_ADVANCED_SECTION_TITLE_CERTIFICATES },
     { "advancedSectionTitleContent",
       IDS_OPTIONS_ADVANCED_SECTION_TITLE_CONTENT },
     { "advancedSectionTitleLanguages",
@@ -201,8 +208,6 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
       IDS_OPTIONS_ADVANCED_SECTION_TITLE_NETWORK },
     { "advancedSectionTitlePrivacy",
       IDS_OPTIONS_ADVANCED_SECTION_TITLE_PRIVACY },
-    { "advancedSectionTitleSecurity",
-      IDS_OPTIONS_ADVANCED_SECTION_TITLE_SECURITY },
     { "autofillEnabled", IDS_OPTIONS_AUTOFILL_ENABLE },
     { "autologinEnabled", IDS_OPTIONS_PASSWORDS_AUTOLOGIN },
     { "autoOpenFileTypesInfo", IDS_OPTIONS_OPEN_FILE_TYPES_AUTOMATICALLY },
@@ -271,6 +276,7 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
     { "manageAutofillSettings", IDS_OPTIONS_MANAGE_AUTOFILL_SETTINGS_LINK },
     { "manageLanguages", IDS_OPTIONS_TRANSLATE_MANAGE_LANGUAGES },
     { "managePasswords", IDS_OPTIONS_PASSWORDS_MANAGE_PASSWORDS_LINK },
+    { "managedUserLabel", IDS_MANAGED_USER_AVATAR_LABEL },
     { "networkPredictionEnabledDescription",
       IDS_NETWORK_PREDICTION_ENABLED_DESCRIPTION },
     { "passwordsAndAutofillGroupName",
@@ -314,7 +320,6 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
     { "startupRestoreLastSession", IDS_OPTIONS_STARTUP_RESTORE_LAST_SESSION },
     { "settingsTitle", IDS_SETTINGS_TITLE },
     { "showAdvancedSettings", IDS_SETTINGS_SHOW_ADVANCED_SETTINGS },
-    { "sslCheckRevocation", IDS_OPTIONS_SSL_CHECKREVOCATION },
     { "startupSetPages", IDS_OPTIONS_STARTUP_SET_PAGES },
     { "startupShowNewTab", IDS_OPTIONS_STARTUP_SHOW_NEWTAB },
     { "startupShowPages", IDS_OPTIONS_STARTUP_SHOW_PAGES },
@@ -379,6 +384,10 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
       IDS_OPTIONS_SETTINGS_ACCESSIBILITY_AUTOCLICK_DELAY_LONG },
     { "autoclickDelayVeryLong",
       IDS_OPTIONS_SETTINGS_ACCESSIBILITY_AUTOCLICK_DELAY_VERY_LONG },
+    { "consumerManagementEnrollButton",
+      IDS_OPTIONS_CONSUMER_MANAGEMENT_ENROLL_BUTTON },
+    { "consumerManagementEnrollDescription",
+      IDS_OPTIONS_CONSUMER_MANAGEMENT_ENROLL_DESCRIPTION },
     { "enableContentProtectionAttestation",
       IDS_OPTIONS_ENABLE_CONTENT_PROTECTION_ATTESTATION },
     { "factoryResetHeading", IDS_OPTIONS_FACTORY_RESET_HEADING },
@@ -402,15 +411,12 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
     { "noPointingDevices", IDS_OPTIONS_NO_POINTING_DEVICES },
     { "sectionTitleDevice", IDS_OPTIONS_DEVICE_GROUP_NAME },
     { "sectionTitleInternet", IDS_OPTIONS_INTERNET_OPTIONS_GROUP_LABEL },
+    { "securityTitle", IDS_OPTIONS_SECURITY_SECTION_TITLE },
     { "syncOverview", IDS_SYNC_OVERVIEW },
     { "syncButtonTextStart", IDS_SYNC_SETUP_BUTTON_LABEL },
     { "timezone", IDS_OPTIONS_SETTINGS_TIMEZONE_DESCRIPTION },
     { "use24HourClock", IDS_OPTIONS_SETTINGS_USE_24HOUR_CLOCK_DESCRIPTION },
 #else
-    { "cloudPrintManageButton",
-      IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_ENABLED_MANAGE_BUTTON},
-    { "cloudPrintConnectorEnablingButton",
-      IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_ENABLING_BUTTON },
     { "proxiesConfigureButton", IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON },
 #endif
 #if defined(OS_CHROMEOS) && defined(USE_ASH)
@@ -592,6 +598,11 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
       l10n_util::GetStringFUTF16(
           IDS_OPTIONS_EASY_UNLOCK_CHECKBOX_LABEL_CHROMEOS,
           chromeos::GetChromeDeviceType()));
+
+  values->SetBoolean(
+      "consumerManagementEnabled",
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kEnableConsumerManagement));
 #endif
 }
 
@@ -603,27 +614,8 @@ void BrowserOptionsHandler::RegisterCloudPrintValues(
                         IDS_CLOUD_PRINT_CHROMEOS_OPTION_LABEL,
                         l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT)));
 
-#if defined(OS_CHROMEOS)
-  values->SetString("cloudPrintManageButton",
-      l10n_util::GetStringFUTF16(
-      IDS_CLOUD_PRINT_CHROMEOS_OPTION_BUTTON,
-      l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT)));
-#else
-  // TODO(noamsml): Remove all cloud print connector related code from the
-  // settings page as soon as the devices page is supported on all platforms.
-  values->SetString("cloudPrintConnectorDisabledLabel",
-      l10n_util::GetStringFUTF16(
-      IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_DISABLED_LABEL,
-      l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT)));
-  values->SetString("cloudPrintConnectorDisabledButton",
-      l10n_util::GetStringUTF16(
-      IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_DISABLED_BUTTON));
-  values->SetString("cloudPrintConnectorEnabledButton",
-      l10n_util::GetStringUTF16(
-      IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_ENABLED_BUTTON));
-#endif
-
   values->SetBoolean("showSetDefault", ShouldShowSetDefaultBrowser());
+  values->SetBoolean("allowAdvancedSettings", ShouldAllowAdvancedSettings());
 }
 #endif  // defined(ENABLE_FULL_PRINTING)
 
@@ -676,12 +668,6 @@ void BrowserOptionsHandler::RegisterMessages() {
       base::Bind(&BrowserOptionsHandler::ShowManageSSLCertificates,
                  base::Unretained(this)));
 #endif
-#if defined(ENABLE_FULL_PRINTING)
-  web_ui()->RegisterMessageCallback(
-      "showCloudPrintManagePage",
-      base::Bind(&BrowserOptionsHandler::ShowCloudPrintManagePage,
-                 base::Unretained(this)));
-#endif
 #if defined(OS_CHROMEOS)
   web_ui()->RegisterMessageCallback(
       "openWallpaperManager",
@@ -699,23 +685,15 @@ void BrowserOptionsHandler::RegisterMessages() {
       "performFactoryResetRestart",
       base::Bind(&BrowserOptionsHandler::PerformFactoryResetRestart,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "enrollConsumerManagement",
+      base::Bind(&BrowserOptionsHandler::HandleEnrollConsumerManagement,
+                 base::Unretained(this)));
 #else
   web_ui()->RegisterMessageCallback(
       "restartBrowser",
       base::Bind(&BrowserOptionsHandler::HandleRestartBrowser,
                  base::Unretained(this)));
-#if defined(ENABLE_FULL_PRINTING)
-  if (cloud_print_connector_ui_enabled_) {
-    web_ui()->RegisterMessageCallback(
-        "showCloudPrintSetupDialog",
-        base::Bind(&BrowserOptionsHandler::ShowCloudPrintSetupDialog,
-                   base::Unretained(this)));
-    web_ui()->RegisterMessageCallback(
-        "disableCloudPrintConnector",
-        base::Bind(&BrowserOptionsHandler::HandleDisableCloudPrintConnector,
-                   base::Unretained(this)));
-  }
-#endif  // defined(ENABLE_FULL_PRINTING)
   web_ui()->RegisterMessageCallback(
       "showNetworkProxySettings",
       base::Bind(&BrowserOptionsHandler::ShowNetworkProxySettings,
@@ -748,13 +726,16 @@ void BrowserOptionsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "refreshExtensionControlIndicators",
       base::Bind(
-          &BrowserOptionsHandler::SetupExtensionControlledIndicators,
+          &BrowserOptionsHandler::HandleRefreshExtensionControlIndicators,
           base::Unretained(this)));
 #endif  // defined(OS_WIN)
 }
 
 void BrowserOptionsHandler::Uninitialize() {
   registrar_.RemoveAll();
+#if defined(OS_WIN)
+  ExtensionRegistry::Get(Profile::FromWebUI(web_ui()))->RemoveObserver(this);
+#endif
 }
 
 void BrowserOptionsHandler::OnStateChanged() {
@@ -814,6 +795,8 @@ void BrowserOptionsHandler::InitializeHandler() {
   AddTemplateUrlServiceObserver();
 
 #if defined(OS_WIN)
+  ExtensionRegistry::Get(Profile::FromWebUI(web_ui()))->AddObserver(this);
+
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (!command_line.HasSwitch(switches::kUserDataDir)) {
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
@@ -821,15 +804,6 @@ void BrowserOptionsHandler::InitializeHandler() {
                    weak_ptr_factory_.GetWeakPtr(),
                    profile->GetPath()));
   }
-#endif
-
-#if defined(ENABLE_FULL_PRINTING) && !defined(OS_CHROMEOS)
-  base::Closure cloud_print_callback = base::Bind(
-      &BrowserOptionsHandler::OnCloudPrintPrefsChanged, base::Unretained(this));
-  cloud_print_connector_email_.Init(
-      prefs::kCloudPrintEmail, prefs, cloud_print_callback);
-  cloud_print_connector_enabled_.Init(
-      prefs::kCloudPrintProxyEnabled, prefs, cloud_print_callback);
 #endif
 
   auto_open_files_.Init(
@@ -863,17 +837,14 @@ void BrowserOptionsHandler::InitializeHandler() {
                  base::Unretained(this)));
 
 #if defined(OS_WIN)
-  const base::ListValue* empty = NULL;
   profile_pref_registrar_.Add(
       prefs::kURLsToRestoreOnStartup,
       base::Bind(&BrowserOptionsHandler::SetupExtensionControlledIndicators,
-                 base::Unretained(this),
-                 empty));
+                 base::Unretained(this)));
   profile_pref_registrar_.Add(
       prefs::kHomePage,
       base::Bind(&BrowserOptionsHandler::SetupExtensionControlledIndicators,
-                 base::Unretained(this),
-                 empty));
+                 base::Unretained(this)));
 #endif  // defined(OS_WIN)
 
 #if defined(OS_CHROMEOS)
@@ -916,21 +887,7 @@ void BrowserOptionsHandler::InitializePage() {
   SetupManageCertificatesSection();
   SetupManagingSupervisedUsers();
   SetupEasyUnlock();
-
-#if defined(ENABLE_FULL_PRINTING) && !defined(OS_CHROMEOS)
-  if (!cloud_print_mdns_ui_enabled_) {
-    if (cloud_print_connector_ui_enabled_) {
-      SetupCloudPrintConnectorSection();
-      RefreshCloudPrintStatusFromService();
-    } else {
-      RemoveCloudPrintConnectorSection();
-    }
-  }
-#endif
-
-#if defined(OS_WIN)
-  SetupExtensionControlledIndicators(NULL);
-#endif  // defined(OS_WIN)
+  SetupExtensionControlledIndicators();
 
 #if defined(OS_CHROMEOS)
   SetupAccessibilityFeatures();
@@ -962,7 +919,7 @@ void BrowserOptionsHandler::CheckAutoLaunch(
     base::WeakPtr<BrowserOptionsHandler> weak_this,
     const base::FilePath& profile_path) {
 #if defined(OS_WIN)
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
 
   // Auto-launch is not supported for secondary profiles yet.
   if (profile_path.BaseName().value() !=
@@ -987,7 +944,7 @@ void BrowserOptionsHandler::CheckAutoLaunchCallback(
     bool is_in_auto_launch_group,
     bool will_launch_at_login) {
 #if defined(OS_WIN)
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (is_in_auto_launch_group) {
     web_ui()->RegisterMessageCallback("toggleAutoLaunch",
@@ -1022,6 +979,15 @@ bool BrowserOptionsHandler::ShouldShowMultiProfilesUserList() {
   if (profile->IsGuestSession())
     return false;
   return profiles::IsMultipleProfilesEnabled();
+#endif
+}
+
+bool BrowserOptionsHandler::ShouldAllowAdvancedSettings() {
+#if defined(OS_CHROMEOS)
+  // ChromeOS handles guest-mode restrictions in a different manner.
+  return true;
+#else
+  return !Profile::FromWebUI(web_ui())->IsGuestSession();
 #endif
 }
 
@@ -1148,9 +1114,7 @@ void BrowserOptionsHandler::OnTemplateURLServiceChanged() {
           template_url_service_->is_default_search_managed() ||
           template_url_service_->IsExtensionControlledDefaultSearch()));
 
-#if defined(OS_WIN)
-  SetupExtensionControlledIndicators(NULL);
-#endif  // defined(OS_WIN)
+  SetupExtensionControlledIndicators();
 }
 
 void BrowserOptionsHandler::SetDefaultSearchEngine(
@@ -1165,7 +1129,8 @@ void BrowserOptionsHandler::SetDefaultSearchEngine(
       template_url_service_->GetTemplateURLs());
   if (selected_index >= 0 &&
       selected_index < static_cast<int>(model_urls.size()))
-    template_url_service_->SetDefaultSearchProvider(model_urls[selected_index]);
+    template_url_service_->SetUserSelectedDefaultSearchProvider(
+        model_urls[selected_index]);
 
   content::RecordAction(UserMetricsAction("Options_SearchEngineChanged"));
 }
@@ -1177,6 +1142,19 @@ void BrowserOptionsHandler::AddTemplateUrlServiceObserver() {
     template_url_service_->Load();
     template_url_service_->AddObserver(this);
   }
+}
+
+void BrowserOptionsHandler::OnExtensionLoaded(
+    content::BrowserContext* browser_context,
+    const Extension* extension) {
+  SetupExtensionControlledIndicators();
+}
+
+void BrowserOptionsHandler::OnExtensionUnloaded(
+    content::BrowserContext* browser_context,
+    const Extension* extension,
+    extensions::UnloadedExtensionInfo::Reason reason) {
+  SetupExtensionControlledIndicators();
 }
 
 void BrowserOptionsHandler::Observe(
@@ -1210,13 +1188,6 @@ void BrowserOptionsHandler::Observe(
       NOTREACHED();
   }
 }
-
-#if defined(ENABLE_FULL_PRINTING) && !defined(OS_CHROMEOS)
-void BrowserOptionsHandler::OnCloudPrintPrefsChanged() {
-  if (cloud_print_connector_ui_enabled_)
-    SetupCloudPrintConnectorSection();
-}
-#endif
 
 void BrowserOptionsHandler::ToggleAutoLaunch(const base::ListValue* args) {
 #if defined(OS_WIN)
@@ -1265,7 +1236,7 @@ scoped_ptr<base::ListValue> BrowserOptionsHandler::GetProfilesInfoList() {
     } else {
       size_t icon_index = cache.GetAvatarIconIndexOfProfileAtIndex(i);
       profile_value->SetString("iconURL",
-                               cache.GetDefaultAvatarIconUrl(icon_index));
+                               profiles::GetDefaultAvatarIconUrl(icon_index));
     }
 
     profile_info_list->Append(profile_value);
@@ -1400,11 +1371,6 @@ BrowserOptionsHandler::GetSyncStateDictionary() {
                           !signin->GetAuthenticatedUsername().empty());
   sync_status->SetBoolean("hasUnrecoverableError",
                           service && service->HasUnrecoverableError());
-  sync_status->SetBoolean(
-      "autoLoginVisible",
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableAutologin) &&
-      service && service->IsSyncEnabledAndLoggedIn() &&
-      service->IsOAuthRefreshTokenAvailable());
 
   return sync_status.Pass();
 }
@@ -1423,7 +1389,7 @@ void BrowserOptionsHandler::HandleSelectDownloadLocation(
       &info,
       0,
       base::FilePath::StringType(),
-      web_ui()->GetWebContents()->GetView()->GetTopLevelNativeWindow(),
+      web_ui()->GetWebContents()->GetTopLevelNativeWindow(),
       NULL);
 }
 
@@ -1566,90 +1532,6 @@ void BrowserOptionsHandler::ShowCloudPrintDevicesPage(
 
 #endif
 
-#if defined(ENABLE_FULL_PRINTING)
-void BrowserOptionsHandler::ShowCloudPrintManagePage(
-    const base::ListValue* args) {
-  content::RecordAction(UserMetricsAction("Options_ManageCloudPrinters"));
-  // Open a new tab in the current window for the management page.
-  Profile* profile = Profile::FromWebUI(web_ui());
-  OpenURLParams params(
-      CloudPrintURL(profile).GetCloudPrintServiceManageURL(), Referrer(),
-      NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK, false);
-  web_ui()->GetWebContents()->OpenURL(params);
-}
-
-#if !defined(OS_CHROMEOS)
-void BrowserOptionsHandler::ShowCloudPrintSetupDialog(
-    const base::ListValue* args) {
-  content::RecordAction(UserMetricsAction("Options_EnableCloudPrintProxy"));
-  // Open the connector enable page in the current tab.
-  Profile* profile = Profile::FromWebUI(web_ui());
-  OpenURLParams params(
-      CloudPrintURL(profile).GetCloudPrintServiceEnableURL(
-          CloudPrintProxyServiceFactory::GetForProfile(profile)->proxy_id()),
-      Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_LINK, false);
-  web_ui()->GetWebContents()->OpenURL(params);
-}
-
-void BrowserOptionsHandler::HandleDisableCloudPrintConnector(
-    const base::ListValue* args) {
-  content::RecordAction(
-      UserMetricsAction("Options_DisableCloudPrintProxy"));
-  CloudPrintProxyServiceFactory::GetForProfile(Profile::FromWebUI(web_ui()))->
-      DisableForUser();
-}
-
-void BrowserOptionsHandler::RefreshCloudPrintStatusFromService() {
-  if (cloud_print_connector_ui_enabled_)
-    CloudPrintProxyServiceFactory::GetForProfile(Profile::FromWebUI(web_ui()))->
-        RefreshStatusFromService();
-}
-
-void BrowserOptionsHandler::SetupCloudPrintConnectorSection() {
-  Profile* profile = Profile::FromWebUI(web_ui());
-  if (!CloudPrintProxyServiceFactory::GetForProfile(profile)) {
-    cloud_print_connector_ui_enabled_ = false;
-    RemoveCloudPrintConnectorSection();
-    return;
-  }
-
-  bool cloud_print_connector_allowed =
-      !cloud_print_connector_enabled_.IsManaged() ||
-      cloud_print_connector_enabled_.GetValue();
-  base::FundamentalValue allowed(cloud_print_connector_allowed);
-
-  std::string email;
-  if (profile->GetPrefs()->HasPrefPath(prefs::kCloudPrintEmail) &&
-      cloud_print_connector_allowed) {
-    email = profile->GetPrefs()->GetString(prefs::kCloudPrintEmail);
-  }
-  base::FundamentalValue disabled(email.empty());
-
-  base::string16 label_str;
-  if (email.empty()) {
-    label_str = l10n_util::GetStringFUTF16(
-        IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_DISABLED_LABEL,
-        l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT));
-  } else {
-    label_str = l10n_util::GetStringFUTF16(
-        IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_ENABLED_LABEL,
-        l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT),
-        base::UTF8ToUTF16(email));
-  }
-  base::StringValue label(label_str);
-
-  web_ui()->CallJavascriptFunction(
-      "BrowserOptions.setupCloudPrintConnectorSection", disabled, label,
-      allowed);
-}
-
-void BrowserOptionsHandler::RemoveCloudPrintConnectorSection() {
-  web_ui()->CallJavascriptFunction(
-      "BrowserOptions.removeCloudPrintConnectorSection");
-}
-#endif  // defined(OS_CHROMEOS)
-#endif  // defined(ENABLE_FULL_PRINTING)
-
 void BrowserOptionsHandler::HandleRequestHotwordAvailable(
     const base::ListValue* args) {
   Profile* profile = Profile::FromWebUI(web_ui());
@@ -1662,7 +1544,7 @@ void BrowserOptionsHandler::HandleRequestHotwordAvailable(
 
 void BrowserOptionsHandler::HandleLaunchEasyUnlockSetup(
     const base::ListValue* args) {
-  // TODO(tengs): launch Easy Unlock setup flow.
+  easy_unlock::LaunchEasyUnlockSetup(Profile::FromWebUI(web_ui()));
 }
 
 void BrowserOptionsHandler::HandleRequestHotwordSetupRetry(
@@ -1672,10 +1554,15 @@ void BrowserOptionsHandler::HandleRequestHotwordSetupRetry(
   HotwordServiceFactory::RetryHotwordExtension(Profile::FromWebUI(web_ui()));
 }
 
+void BrowserOptionsHandler::HandleRefreshExtensionControlIndicators(
+    const base::ListValue* args) {
+  SetupExtensionControlledIndicators();
+}
+
 #if defined(OS_CHROMEOS)
 void BrowserOptionsHandler::HandleOpenWallpaperManager(
     const base::ListValue* args) {
-  wallpaper_manager_util::OpenWallpaperManager();
+  ash::Shell::GetInstance()->user_wallpaper_delegate()->OpenSetWallpaperPage();
 }
 
 void BrowserOptionsHandler::VirtualKeyboardChangeCallback(
@@ -1700,6 +1587,11 @@ void BrowserOptionsHandler::PerformFactoryResetRestart(
   // Perform sign out. Current chrome process will then terminate, new one will
   // be launched (as if it was a restart).
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RequestRestart();
+}
+
+void BrowserOptionsHandler::HandleEnrollConsumerManagement(
+    const base::ListValue* args) {
+  // TODO(davidyu): Implement. http://crbug.com/353050.
 }
 
 void BrowserOptionsHandler::SetupAccessibilityFeatures() {
@@ -1859,38 +1751,44 @@ void BrowserOptionsHandler::SetupEasyUnlock() {
       has_pairing_value);
 }
 
+void BrowserOptionsHandler::SetupExtensionControlledIndicators() {
 #if defined(OS_WIN)
-// Setup the UI for showing which settings are extension controlled.
-void BrowserOptionsHandler::SetupExtensionControlledIndicators(
-    const base::ListValue* args) {
+  base::DictionaryValue extension_controlled;
+
+  // Check if an extension is overriding the Search Engine.
   const extensions::Extension* extension = extensions::OverridesSearchEngine(
       Profile::FromWebUI(web_ui()), NULL);
-  base::StringValue extension_id(extension ? extension->id() : std::string());
-  base::StringValue extension_name(
-      extension ? extension->name() : std::string());
-  web_ui()->CallJavascriptFunction(
-      "BrowserOptions.toggleSearchEngineControlled",
-      extension_id,
-      extension_name);
+  AppendExtensionData("searchEngine", extension, &extension_controlled);
 
+  // Check if an extension is overriding the Home page.
   extension = extensions::OverridesHomepage(Profile::FromWebUI(web_ui()), NULL);
-  extension_id = base::StringValue(extension ? extension->id() : std::string());
-  extension_name = base::StringValue(
-      extension ? extension->name() : std::string());
-  web_ui()->CallJavascriptFunction("BrowserOptions.toggleHomepageControlled",
-                                   extension_id,
-                                   extension_name);
+  AppendExtensionData("homePage", extension, &extension_controlled);
 
+  // Check if an extension is overriding the Startup pages.
   extension = extensions::OverridesStartupPages(
       Profile::FromWebUI(web_ui()), NULL);
-  extension_id = base::StringValue(extension ? extension->id() : std::string());
-  extension_name = base::StringValue(
-      extension ? extension->name() : std::string());
-  web_ui()->CallJavascriptFunction(
-      "BrowserOptions.toggleStartupPagesControlled",
-      extension_id,
-      extension_name);
-}
+  AppendExtensionData("startUpPage", extension, &extension_controlled);
+
+  // Check if an extension is overriding the NTP page.
+  GURL ntp_url(chrome::kChromeUINewTabURL);
+  bool ignored_param;
+  extension = NULL;
+  content::BrowserURLHandler::GetInstance()->RewriteURLIfNecessary(
+      &ntp_url,
+      web_ui()->GetWebContents()->GetBrowserContext(),
+      &ignored_param);
+  if (ntp_url.SchemeIs("chrome-extension")) {
+    using extensions::ExtensionRegistry;
+    ExtensionRegistry* registry = ExtensionRegistry::Get(
+        Profile::FromWebUI(web_ui()));
+    extension = registry->GetExtensionById(ntp_url.host(),
+                                           ExtensionRegistry::ENABLED);
+  }
+  AppendExtensionData("newTabPage", extension, &extension_controlled);
+
+  web_ui()->CallJavascriptFunction("BrowserOptions.toggleExtensionIndicators",
+                                   extension_controlled);
 #endif  // defined(OS_WIN)
+}
 
 }  // namespace options

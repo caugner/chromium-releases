@@ -33,8 +33,6 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/extension_icon_set.h"
-#include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/site_instance.h"
@@ -43,8 +41,10 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_icon_set.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest_handlers/background_info.h"
+#include "extensions/common/manifest_handlers/icons_handler.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ipc/ipc_message.h"
@@ -54,7 +54,6 @@
 
 #if defined(ENABLE_NOTIFICATIONS)
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/message_center_util.h"
 #endif
 
 using content::SiteInstance;
@@ -72,7 +71,7 @@ void CloseBalloon(const std::string& balloon_id) {
       g_browser_process->notification_ui_manager();
   bool cancelled ALLOW_UNUSED = notification_ui_manager->CancelById(balloon_id);
 #if defined(ENABLE_NOTIFICATIONS)
-  if (cancelled && message_center::IsRichNotificationEnabled()) {
+  if (cancelled) {
     // TODO(dewittj): Add this functionality to the notification UI manager's
     // API.
     g_browser_process->message_center()->SetVisibility(
@@ -144,7 +143,7 @@ class CrashNotificationDelegate : public NotificationDelegate {
     return kNotificationPrefix + extension_id_;
   }
 
-  virtual content::RenderViewHost* GetRenderViewHost() const OVERRIDE {
+  virtual content::WebContents* GetWebContents() const OVERRIDE {
     return NULL;
   }
 
@@ -334,7 +333,8 @@ void BackgroundContentsService::StartObserving(Profile* profile) {
 
   // Listen for new extension installs so that we can load any associated
   // background page.
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
                  content::Source<Profile>(profile));
 
   // Track when the extensions crash so that the user can be notified
@@ -402,7 +402,7 @@ void BackgroundContentsService::Observe(
       RegisterBackgroundContents(bgcontents);
       break;
     }
-    case chrome::NOTIFICATION_EXTENSION_LOADED: {
+    case chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED: {
       const Extension* extension =
           content::Details<const Extension>(details).ptr();
       Profile* profile = content::Source<Profile>(source).ptr();

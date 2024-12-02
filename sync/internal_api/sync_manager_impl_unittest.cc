@@ -42,10 +42,8 @@
 #include "sync/internal_api/sync_encryption_handler_impl.h"
 #include "sync/internal_api/sync_manager_impl.h"
 #include "sync/internal_api/syncapi_internal.h"
-#include "sync/js/js_arg_list.h"
 #include "sync/js/js_backend.h"
 #include "sync/js/js_event_handler.h"
-#include "sync/js/js_reply_handler.h"
 #include "sync/js/js_test_util.h"
 #include "sync/notifier/fake_invalidation_handler.h"
 #include "sync/notifier/invalidation_handler.h"
@@ -212,22 +210,94 @@ class SyncApiTest : public testing::Test {
   }
 
  protected:
+  // Create an entry with the given |model_type|, |client_tag| and
+  // |attachment_metadata|.
+  void CreateEntryWithAttachmentMetadata(
+      const ModelType& model_type,
+      const std::string& client_tag,
+      const sync_pb::AttachmentMetadata& attachment_metadata);
+
+  // Attempts to load the entry specified by |model_type| and |client_tag| and
+  // returns the lookup result code.
+  BaseNode::InitByLookupResult LookupEntryByClientTag(
+      const ModelType& model_type,
+      const std::string& client_tag);
+
+  // Replace the entry specified by |model_type| and |client_tag| with a
+  // tombstone.
+  void ReplaceWithTombstone(const ModelType& model_type,
+                            const std::string& client_tag);
+
+  // Save changes to the Directory, destroy it then reload it.
+  bool ReloadDir();
+
+  UserShare* user_share();
+  syncable::Directory* dir();
+  SyncEncryptionHandler* encryption_handler();
+
+ private:
   base::MessageLoop message_loop_;
   TestUserShare test_user_share_;
 };
 
+UserShare* SyncApiTest::user_share() {
+  return test_user_share_.user_share();
+}
+
+syncable::Directory* SyncApiTest::dir() {
+  return test_user_share_.user_share()->directory.get();
+}
+
+SyncEncryptionHandler* SyncApiTest::encryption_handler() {
+  return test_user_share_.encryption_handler();
+}
+
+bool SyncApiTest::ReloadDir() {
+  return test_user_share_.Reload();
+}
+
+void SyncApiTest::CreateEntryWithAttachmentMetadata(
+    const ModelType& model_type,
+    const std::string& client_tag,
+    const sync_pb::AttachmentMetadata& attachment_metadata) {
+  syncer::WriteTransaction trans(FROM_HERE, user_share());
+  syncer::ReadNode root_node(&trans);
+  root_node.InitByRootLookup();
+  syncer::WriteNode node(&trans);
+  ASSERT_EQ(node.InitUniqueByCreation(model_type, root_node, client_tag),
+            syncer::WriteNode::INIT_SUCCESS);
+  node.SetAttachmentMetadata(attachment_metadata);
+}
+
+BaseNode::InitByLookupResult SyncApiTest::LookupEntryByClientTag(
+    const ModelType& model_type,
+    const std::string& client_tag) {
+  syncer::ReadTransaction trans(FROM_HERE, user_share());
+  syncer::ReadNode node(&trans);
+  return node.InitByClientTagLookup(model_type, client_tag);
+}
+
+void SyncApiTest::ReplaceWithTombstone(const ModelType& model_type,
+                                       const std::string& client_tag) {
+  syncer::WriteTransaction trans(FROM_HERE, user_share());
+  syncer::WriteNode node(&trans);
+  ASSERT_EQ(node.InitByClientTagLookup(model_type, client_tag),
+            syncer::WriteNode::INIT_OK);
+  node.Tombstone();
+}
+
 TEST_F(SyncApiTest, SanityCheckTest) {
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     EXPECT_TRUE(trans.GetWrappedTrans());
   }
   {
-    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, user_share());
     EXPECT_TRUE(trans.GetWrappedTrans());
   }
   {
     // No entries but root should exist
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     ReadNode node(&trans);
     // Metahandle 1 can be root, sanity check 2
     EXPECT_EQ(BaseNode::INIT_FAILED_ENTRY_NOT_GOOD, node.InitByIdLookup(2));
@@ -236,17 +306,16 @@ TEST_F(SyncApiTest, SanityCheckTest) {
 
 TEST_F(SyncApiTest, BasicTagWrite) {
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
     EXPECT_EQ(root_node.GetFirstChildId(), 0);
   }
 
-  ignore_result(MakeNode(test_user_share_.user_share(),
-                         BOOKMARKS, "testtag"));
+  ignore_result(MakeNode(user_share(), BOOKMARKS, "testtag"));
 
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     ReadNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(BOOKMARKS, "testtag"));
@@ -260,21 +329,18 @@ TEST_F(SyncApiTest, BasicTagWrite) {
 
 TEST_F(SyncApiTest, ModelTypesSiloed) {
   {
-    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, user_share());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
     EXPECT_EQ(root_node.GetFirstChildId(), 0);
   }
 
-  ignore_result(MakeNode(test_user_share_.user_share(),
-                         BOOKMARKS, "collideme"));
-  ignore_result(MakeNode(test_user_share_.user_share(),
-                         PREFERENCES, "collideme"));
-  ignore_result(MakeNode(test_user_share_.user_share(),
-                         AUTOFILL, "collideme"));
+  ignore_result(MakeNode(user_share(), BOOKMARKS, "collideme"));
+  ignore_result(MakeNode(user_share(), PREFERENCES, "collideme"));
+  ignore_result(MakeNode(user_share(), AUTOFILL, "collideme"));
 
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
 
     ReadNode bookmarknode(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
@@ -299,14 +365,14 @@ TEST_F(SyncApiTest, ModelTypesSiloed) {
 
 TEST_F(SyncApiTest, ReadMissingTagsFails) {
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     ReadNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_FAILED_ENTRY_NOT_GOOD,
               node.InitByClientTagLookup(BOOKMARKS,
                   "testtag"));
   }
   {
-    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, user_share());
     WriteNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_FAILED_ENTRY_NOT_GOOD,
               node.InitByClientTagLookup(BOOKMARKS,
@@ -322,7 +388,7 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
   std::string test_title("test1");
 
   {
-    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, user_share());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
 
@@ -336,14 +402,14 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
         wnode.InitUniqueByCreation(BOOKMARKS, root_node, "testtag");
     EXPECT_EQ(WriteNode::INIT_SUCCESS, result);
     wnode.SetIsFolder(false);
-    wnode.SetTitle(base::UTF8ToWide(test_title));
+    wnode.SetTitle(test_title);
 
     node_id = wnode.GetId();
   }
 
   // Ensure we can delete something with a tag.
   {
-    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, user_share());
     WriteNode wnode(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               wnode.InitByClientTagLookup(BOOKMARKS,
@@ -357,7 +423,7 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
   // Lookup of a node which was deleted should return failure,
   // but have found some data about the node.
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     ReadNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_FAILED_ENTRY_IS_DEL,
               node.InitByClientTagLookup(BOOKMARKS,
@@ -368,7 +434,7 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
   }
 
   {
-    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, user_share());
     ReadNode folder_node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK, folder_node.InitByIdLookup(folder_id));
 
@@ -381,12 +447,12 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
     EXPECT_EQ(wnode.GetParentId(), folder_node.GetId());
     EXPECT_EQ(wnode.GetId(), node_id);
     EXPECT_NE(wnode.GetTitle(), test_title);  // Title should be cleared
-    wnode.SetTitle(base::UTF8ToWide(test_title));
+    wnode.SetTitle(test_title);
   }
 
   // Now look up should work.
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     ReadNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(BOOKMARKS,
@@ -399,11 +465,11 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
 TEST_F(SyncApiTest, WriteAndReadPassword) {
   KeyParams params = {"localhost", "username", "passphrase"};
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     trans.GetCryptographer()->AddKey(params);
   }
   {
-    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, user_share());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
 
@@ -417,7 +483,7 @@ TEST_F(SyncApiTest, WriteAndReadPassword) {
     password_node.SetPasswordSpecifics(data);
   }
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
 
@@ -433,29 +499,29 @@ TEST_F(SyncApiTest, WriteAndReadPassword) {
 TEST_F(SyncApiTest, WriteEncryptedTitle) {
   KeyParams params = {"localhost", "username", "passphrase"};
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     trans.GetCryptographer()->AddKey(params);
   }
-  test_user_share_.encryption_handler()->EnableEncryptEverything();
+  encryption_handler()->EnableEncryptEverything();
   int bookmark_id;
   {
-    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, user_share());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
 
     WriteNode bookmark_node(&trans);
     ASSERT_TRUE(bookmark_node.InitBookmarkByCreation(root_node, NULL));
     bookmark_id = bookmark_node.GetId();
-    bookmark_node.SetTitle(base::UTF8ToWide("foo"));
+    bookmark_node.SetTitle("foo");
 
     WriteNode pref_node(&trans);
     WriteNode::InitUniqueByCreationResult result =
         pref_node.InitUniqueByCreation(PREFERENCES, root_node, "bar");
     ASSERT_EQ(WriteNode::INIT_SUCCESS, result);
-    pref_node.SetTitle(base::UTF8ToWide("bar"));
+    pref_node.SetTitle("bar");
   }
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
 
@@ -474,9 +540,8 @@ TEST_F(SyncApiTest, WriteEncryptedTitle) {
 }
 
 TEST_F(SyncApiTest, BaseNodeSetSpecifics) {
-  int64 child_id = MakeNode(test_user_share_.user_share(),
-                            BOOKMARKS, "testtag");
-  WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+  int64 child_id = MakeNode(user_share(), BOOKMARKS, "testtag");
+  WriteTransaction trans(FROM_HERE, user_share());
   WriteNode node(&trans);
   EXPECT_EQ(BaseNode::INIT_OK, node.InitByIdLookup(child_id));
 
@@ -491,9 +556,8 @@ TEST_F(SyncApiTest, BaseNodeSetSpecifics) {
 }
 
 TEST_F(SyncApiTest, BaseNodeSetSpecificsPreservesUnknownFields) {
-  int64 child_id = MakeNode(test_user_share_.user_share(),
-                            BOOKMARKS, "testtag");
-  WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+  int64 child_id = MakeNode(user_share(), BOOKMARKS, "testtag");
+  WriteTransaction trans(FROM_HERE, user_share());
   WriteNode node(&trans);
   EXPECT_EQ(BaseNode::INIT_OK, node.InitByIdLookup(child_id));
   EXPECT_TRUE(node.GetEntitySpecifics().unknown_fields().empty());
@@ -510,7 +574,7 @@ TEST_F(SyncApiTest, BaseNodeSetSpecificsPreservesUnknownFields) {
 }
 
 TEST_F(SyncApiTest, EmptyTags) {
-  WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+  WriteTransaction trans(FROM_HERE, user_share());
   ReadNode root_node(&trans);
   root_node.InitByRootLookup();
   WriteNode node(&trans);
@@ -524,10 +588,9 @@ TEST_F(SyncApiTest, EmptyTags) {
 
 // Test counting nodes when the type's root node has no children.
 TEST_F(SyncApiTest, GetTotalNodeCountEmpty) {
-  int64 type_root = MakeServerNodeForType(test_user_share_.user_share(),
-                                          BOOKMARKS);
+  int64 type_root = MakeServerNodeForType(user_share(), BOOKMARKS);
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     ReadNode type_root_node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               type_root_node.InitByIdLookup(type_root));
@@ -537,14 +600,10 @@ TEST_F(SyncApiTest, GetTotalNodeCountEmpty) {
 
 // Test counting nodes when there is one child beneath the type's root.
 TEST_F(SyncApiTest, GetTotalNodeCountOneChild) {
-  int64 type_root = MakeServerNodeForType(test_user_share_.user_share(),
-                                          BOOKMARKS);
-  int64 parent = MakeFolderWithParent(test_user_share_.user_share(),
-                                      BOOKMARKS,
-                                      type_root,
-                                      NULL);
+  int64 type_root = MakeServerNodeForType(user_share(), BOOKMARKS);
+  int64 parent = MakeFolderWithParent(user_share(), BOOKMARKS, type_root, NULL);
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     ReadNode type_root_node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               type_root_node.InitByIdLookup(type_root));
@@ -559,32 +618,15 @@ TEST_F(SyncApiTest, GetTotalNodeCountOneChild) {
 // Test counting nodes when there are multiple children beneath the type root,
 // and one of those children has children of its own.
 TEST_F(SyncApiTest, GetTotalNodeCountMultipleChildren) {
-  int64 type_root = MakeServerNodeForType(test_user_share_.user_share(),
-                                          BOOKMARKS);
-  int64 parent = MakeFolderWithParent(test_user_share_.user_share(),
-                                      BOOKMARKS,
-                                      type_root,
-                                      NULL);
-  ignore_result(MakeFolderWithParent(test_user_share_.user_share(),
-                                     BOOKMARKS,
-                                     type_root,
-                                     NULL));
-  int64 child1 = MakeFolderWithParent(
-      test_user_share_.user_share(),
-      BOOKMARKS,
-      parent,
-      NULL);
-  ignore_result(MakeBookmarkWithParent(
-      test_user_share_.user_share(),
-      parent,
-      NULL));
-  ignore_result(MakeBookmarkWithParent(
-      test_user_share_.user_share(),
-      child1,
-      NULL));
+  int64 type_root = MakeServerNodeForType(user_share(), BOOKMARKS);
+  int64 parent = MakeFolderWithParent(user_share(), BOOKMARKS, type_root, NULL);
+  ignore_result(MakeFolderWithParent(user_share(), BOOKMARKS, type_root, NULL));
+  int64 child1 = MakeFolderWithParent(user_share(), BOOKMARKS, parent, NULL);
+  ignore_result(MakeBookmarkWithParent(user_share(), parent, NULL));
+  ignore_result(MakeBookmarkWithParent(user_share(), child1, NULL));
 
   {
-    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, user_share());
     ReadNode type_root_node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               type_root_node.InitByIdLookup(type_root));
@@ -594,6 +636,57 @@ TEST_F(SyncApiTest, GetTotalNodeCountMultipleChildren) {
               node.InitByIdLookup(parent));
     EXPECT_EQ(4, node.GetTotalNodeCount());
   }
+}
+
+// Verify that Directory keeps track of which attachments are referenced by
+// which entries.
+TEST_F(SyncApiTest, AttachmentLinking) {
+  // Add an entry with an attachment.
+  std::string tag1("some tag");
+  syncer::AttachmentId attachment_id(syncer::AttachmentId::Create());
+  sync_pb::AttachmentMetadata attachment_metadata;
+  sync_pb::AttachmentMetadataRecord* record = attachment_metadata.add_record();
+  *record->mutable_id() = attachment_id.GetProto();
+  ASSERT_FALSE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
+  CreateEntryWithAttachmentMetadata(PREFERENCES, tag1, attachment_metadata);
+
+  // See that the directory knows it's linked.
+  ASSERT_TRUE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
+
+  // Add a second entry referencing the same attachment.
+  std::string tag2("some other tag");
+  CreateEntryWithAttachmentMetadata(PREFERENCES, tag2, attachment_metadata);
+
+  // See that the directory knows it's still linked.
+  ASSERT_TRUE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
+
+  // Tombstone the first entry.
+  ReplaceWithTombstone(syncer::PREFERENCES, tag1);
+
+  // See that the attachment is still considered linked because the entry hasn't
+  // been purged from the Directory.
+  ASSERT_TRUE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
+
+  // Save changes and see that the entry is truly gone.
+  ASSERT_TRUE(dir()->SaveChanges());
+  ASSERT_EQ(LookupEntryByClientTag(PREFERENCES, tag1),
+            syncer::WriteNode::INIT_FAILED_ENTRY_NOT_GOOD);
+
+  // However, the attachment is still linked.
+  ASSERT_TRUE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
+
+  // Save, destroy, and recreate the directory.  See that it's still linked.
+  ASSERT_TRUE(ReloadDir());
+  ASSERT_TRUE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
+
+  // Tombstone the second entry, save changes, see that it's truly gone.
+  ReplaceWithTombstone(syncer::PREFERENCES, tag2);
+  ASSERT_TRUE(dir()->SaveChanges());
+  ASSERT_EQ(LookupEntryByClientTag(PREFERENCES, tag2),
+            syncer::WriteNode::INIT_FAILED_ENTRY_NOT_GOOD);
+
+  // Finally, the attachment is no longer linked.
+  ASSERT_FALSE(dir()->IsAttachmentLinked(attachment_id.GetProto()));
 }
 
 namespace {
@@ -754,6 +847,7 @@ class SyncManagerTest : public testing::Test,
             sync_manager_.GetUserShare(), i->first);
       }
     }
+
     PumpLoop();
   }
 
@@ -834,13 +928,6 @@ class SyncManagerTest : public testing::Test,
 
   void PumpLoop() {
     message_loop_.RunUntilIdle();
-  }
-
-  void SendJsMessage(const std::string& name, const JsArgList& args,
-                     const WeakHandle<JsReplyHandler>& reply_handler) {
-    js_backend_.Call(FROM_HERE, &JsBackend::ProcessJsMessage,
-                     name, args, reply_handler);
-    PumpLoop();
   }
 
   void SetJsEventHandler(const WeakHandle<JsEventHandler>& event_handler) {
@@ -938,42 +1025,18 @@ class SyncManagerTest : public testing::Test,
   InternalComponentsFactory::Switches switches_;
 };
 
-TEST_F(SyncManagerTest, GetAllNodesTest) {
-  StrictMock<MockJsReplyHandler> reply_handler;
-  JsArgList return_args;
+TEST_F(SyncManagerTest, GetAllNodesForTypeTest) {
+  ModelSafeRoutingInfo routing_info;
+  GetModelSafeRoutingInfo(&routing_info);
+  sync_manager_.StartSyncingNormally(routing_info);
 
-  EXPECT_CALL(reply_handler,
-              HandleJsReply("getAllNodes", _))
-      .Times(1).WillRepeatedly(SaveArg<1>(&return_args));
+  scoped_ptr<base::ListValue> node_list(
+      sync_manager_.GetAllNodesForType(syncer::PREFERENCES));
 
-  {
-    base::ListValue args;
-    SendJsMessage("getAllNodes",
-                  JsArgList(&args), reply_handler.AsWeakHandle());
-  }
+  // Should have one node: the type root node.
+  ASSERT_EQ(1U, node_list->GetSize());
 
-  // There's not much value in verifying every attribute on every node here.
-  // Most of the value of this test has already been achieved: we've verified we
-  // can call the above function without crashing or leaking memory.
-  //
-  // Let's just check the list size and a few of its elements.  Anything more
-  // would make this test brittle without greatly increasing our chances of
-  // catching real bugs.
-
-  const base::ListValue* node_list;
   const base::DictionaryValue* first_result;
-
-  // The resulting argument list should have one argument, a list of nodes.
-  ASSERT_EQ(1U, return_args.Get().GetSize());
-  ASSERT_TRUE(return_args.Get().GetList(0, &node_list));
-
-  // The database creation logic depends on the routing info.
-  // Refer to setup methods for more information.
-  ModelSafeRoutingInfo routes;
-  GetModelSafeRoutingInfo(&routes);
-  size_t directory_size = routes.size() + 1;
-
-  ASSERT_EQ(directory_size, node_list->GetSize());
   ASSERT_TRUE(node_list->GetDictionary(0, &first_result));
   EXPECT_TRUE(first_result->HasKey("ID"));
   EXPECT_TRUE(first_result->HasKey("NON_UNIQUE_NAME"));
@@ -1685,7 +1748,7 @@ TEST_F(SyncManagerTest, CreateLocalBookmark) {
     WriteNode node(&trans);
     ASSERT_TRUE(node.InitBookmarkByCreation(bookmark_root, NULL));
     node.SetIsFolder(false);
-    node.SetTitle(base::UTF8ToWide(title));
+    node.SetTitle(title);
 
     sync_pb::BookmarkSpecifics bookmark_specifics(node.GetBookmarkSpecifics());
     bookmark_specifics.set_url(url);
@@ -2024,7 +2087,7 @@ TEST_F(SyncManagerTest, SetBookmarkTitle) {
     WriteNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(BOOKMARKS, client_tag));
-    node.SetTitle(base::UTF8ToWide(client_tag));
+    node.SetTitle(client_tag);
   }
   EXPECT_FALSE(ResetUnsyncedEntry(BOOKMARKS, client_tag));
 
@@ -2034,7 +2097,7 @@ TEST_F(SyncManagerTest, SetBookmarkTitle) {
     WriteNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(BOOKMARKS, client_tag));
-    node.SetTitle(base::UTF8ToWide("title2"));
+    node.SetTitle("title2");
   }
   EXPECT_TRUE(ResetUnsyncedEntry(BOOKMARKS, client_tag));
 }
@@ -2073,7 +2136,7 @@ TEST_F(SyncManagerTest, SetBookmarkTitleWithEncryption) {
     WriteNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(BOOKMARKS, client_tag));
-    node.SetTitle(base::UTF8ToWide(client_tag));
+    node.SetTitle(client_tag);
     const syncable::Entry* node_entry = node.GetEntry();
     const sync_pb::EntitySpecifics& specifics = node_entry->GetSpecifics();
     EXPECT_TRUE(specifics.has_encrypted());
@@ -2088,7 +2151,7 @@ TEST_F(SyncManagerTest, SetBookmarkTitleWithEncryption) {
     WriteNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(BOOKMARKS, client_tag));
-    node.SetTitle(base::UTF8ToWide("title2"));
+    node.SetTitle("title2");
     const syncable::Entry* node_entry = node.GetEntry();
     const sync_pb::EntitySpecifics& specifics = node_entry->GetSpecifics();
     EXPECT_TRUE(specifics.has_encrypted());
@@ -2119,7 +2182,7 @@ TEST_F(SyncManagerTest, SetNonBookmarkTitle) {
     WriteNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(PREFERENCES, client_tag));
-    node.SetTitle(base::UTF8ToWide(client_tag));
+    node.SetTitle(client_tag);
   }
   EXPECT_FALSE(ResetUnsyncedEntry(PREFERENCES, client_tag));
 
@@ -2129,7 +2192,7 @@ TEST_F(SyncManagerTest, SetNonBookmarkTitle) {
     WriteNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(PREFERENCES, client_tag));
-    node.SetTitle(base::UTF8ToWide("title2"));
+    node.SetTitle("title2");
   }
   EXPECT_TRUE(ResetUnsyncedEntry(PREFERENCES, client_tag));
 }
@@ -2170,7 +2233,7 @@ TEST_F(SyncManagerTest, SetNonBookmarkTitleWithEncryption) {
     WriteNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(PREFERENCES, client_tag));
-    node.SetTitle(base::UTF8ToWide(client_tag));
+    node.SetTitle(client_tag);
     const syncable::Entry* node_entry = node.GetEntry();
     const sync_pb::EntitySpecifics& specifics = node_entry->GetSpecifics();
     EXPECT_TRUE(specifics.has_encrypted());
@@ -2185,7 +2248,7 @@ TEST_F(SyncManagerTest, SetNonBookmarkTitleWithEncryption) {
     WriteNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(PREFERENCES, client_tag));
-    node.SetTitle(base::UTF8ToWide("title2"));
+    node.SetTitle("title2");
     const syncable::Entry* node_entry = node.GetEntry();
     const sync_pb::EntitySpecifics& specifics = node_entry->GetSpecifics();
     EXPECT_TRUE(specifics.has_encrypted());
@@ -2218,7 +2281,7 @@ TEST_F(SyncManagerTest, SetLongTitle) {
     WriteNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(PREFERENCES, kClientTag));
-    node.SetTitle(base::UTF8ToWide(title));
+    node.SetTitle(title);
     EXPECT_EQ(node.GetTitle(), title.substr(0, 255));
   }
   EXPECT_TRUE(ResetUnsyncedEntry(PREFERENCES, kClientTag));
@@ -2229,7 +2292,7 @@ TEST_F(SyncManagerTest, SetLongTitle) {
     WriteNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(PREFERENCES, kClientTag));
-    node.SetTitle(base::UTF8ToWide(title));
+    node.SetTitle(title);
     EXPECT_EQ(node.GetTitle(), title.substr(0, 255));
   }
   EXPECT_FALSE(ResetUnsyncedEntry(PREFERENCES, kClientTag));
@@ -2240,7 +2303,7 @@ TEST_F(SyncManagerTest, SetLongTitle) {
     WriteNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(PREFERENCES, kClientTag));
-    node.SetTitle(base::UTF8ToWide("title2"));
+    node.SetTitle("title2");
   }
   EXPECT_TRUE(ResetUnsyncedEntry(PREFERENCES, kClientTag));
 }
@@ -2687,7 +2750,7 @@ TEST_F(SyncManagerTest, PurgeUnappliedTypes) {
   // Take a snapshot to clear all the dirty bits.
   share->directory.get()->SaveChanges();
 
-   // Now request a purge for the unapplied types.
+  // Now request a purge for the unapplied types.
   disabled_types.PutAll(unapplied_types);
   sync_manager_.PurgeDisabledTypes(disabled_types,
                                    ModelTypeSet(),
@@ -2960,7 +3023,6 @@ TEST_F(SyncManagerChangeProcessingTest, MoveIntoPopulatedFolder) {
                                    "childB");
     SetNodeProperties(&child_b);
     child_b_id = child_b.GetMetahandle();
-
   }
 
   // Close that transaction.  The above was to setup the initial scenario.  The
@@ -3079,4 +3141,4 @@ TEST_F(SyncManagerInitInvalidStorageTest, FailToOpenDatabase) {
   EXPECT_FALSE(initialization_succeeded_);
 }
 
-}  // namespace
+}  // namespace syncer

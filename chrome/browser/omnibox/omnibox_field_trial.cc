@@ -366,39 +366,6 @@ void OmniboxFieldTrial::GetDemotionsByType(
   }
 }
 
-OmniboxFieldTrial::UndemotableTopMatchTypes
-OmniboxFieldTrial::GetUndemotableTopTypes(
-    AutocompleteInput::PageClassification current_page_classification) {
-  UndemotableTopMatchTypes undemotable_types;
-  const std::string types_rule =
-      OmniboxFieldTrial::GetValueForRuleInContext(
-          kUndemotableTopTypeRule,
-          current_page_classification);
-  // The value of the UndemotableTopTypes rule is a comma-separated list of
-  // AutocompleteMatchType::Type enums represented as an integer. The
-  // DemoteByType rule does not apply to the top match if the type of the top
-  // match is in this list.
-  std::vector<std::string> types;
-  base::SplitString(types_rule, ',', &types);
-  for (std::vector<std::string>::const_iterator it = types.begin();
-       it != types.end(); ++it) {
-    // This is a best-effort conversion; we trust the hand-crafted parameters
-    // downloaded from the server to be perfect.  There's no need to handle
-    // errors smartly.
-    int t;
-    base::StringToInt(*it, &t);
-    undemotable_types.insert(static_cast<AutocompleteMatchType::Type>(t));
-  }
-  return undemotable_types;
-}
-
-bool OmniboxFieldTrial::ReorderForLegalDefaultMatch(
-    AutocompleteInput::PageClassification current_page_classification) {
-  return OmniboxFieldTrial::GetValueForRuleInContext(
-      kReorderForLegalDefaultMatchRule, current_page_classification) !=
-      kReorderForLegalDefaultMatchRuleDisabled;
-}
-
 void OmniboxFieldTrial::GetExperimentalHUPScoringParams(
     HUPScoringParams* scoring_params) {
   scoring_params->experimental_scoring_enabled = false;
@@ -439,12 +406,6 @@ int OmniboxFieldTrial::HQPBookmarkValue() {
   return bookmark_value;
 }
 
-bool OmniboxFieldTrial::HQPDiscountFrecencyWhenFewVisits() {
-  return chrome_variations::GetVariationParamValue(
-      kBundledExperimentFieldTrialName,
-      kHQPDiscountFrecencyWhenFewVisitsRule) == "true";
-}
-
 bool OmniboxFieldTrial::HQPAllowMatchInTLDValue() {
   return chrome_variations::GetVariationParamValue(
       kBundledExperimentFieldTrialName,
@@ -457,26 +418,26 @@ bool OmniboxFieldTrial::HQPAllowMatchInSchemeValue() {
       kHQPAllowMatchInSchemeRule) == "true";
 }
 
+bool OmniboxFieldTrial::BookmarksIndexURLsValue() {
+  return chrome_variations::GetVariationParamValue(
+      kBundledExperimentFieldTrialName,
+      kBookmarksIndexURLsRule) == "true";
+}
+
 const char OmniboxFieldTrial::kBundledExperimentFieldTrialName[] =
     "OmniboxBundledExperimentV1";
 const char OmniboxFieldTrial::kShortcutsScoringMaxRelevanceRule[] =
     "ShortcutsScoringMaxRelevance";
 const char OmniboxFieldTrial::kSearchHistoryRule[] = "SearchHistory";
 const char OmniboxFieldTrial::kDemoteByTypeRule[] = "DemoteByType";
-const char OmniboxFieldTrial::kUndemotableTopTypeRule[] = "UndemotableTopTypes";
-const char OmniboxFieldTrial::kReorderForLegalDefaultMatchRule[] =
-    "ReorderForLegalDefaultMatch";
 const char OmniboxFieldTrial::kHQPBookmarkValueRule[] =
     "HQPBookmarkValue";
-const char OmniboxFieldTrial::kHQPDiscountFrecencyWhenFewVisitsRule[] =
-    "HQPDiscountFrecencyWhenFewVisits";
 const char OmniboxFieldTrial::kHQPAllowMatchInTLDRule[] = "HQPAllowMatchInTLD";
 const char OmniboxFieldTrial::kHQPAllowMatchInSchemeRule[] =
     "HQPAllowMatchInScheme";
 const char OmniboxFieldTrial::kZeroSuggestRule[] = "ZeroSuggest";
 const char OmniboxFieldTrial::kZeroSuggestVariantRule[] = "ZeroSuggestVariant";
-const char OmniboxFieldTrial::kReorderForLegalDefaultMatchRuleDisabled[] =
-    "DontReorderForLegalDefaultMatch";
+const char OmniboxFieldTrial::kBookmarksIndexURLsRule[] = "BookmarksIndexURLs";
 
 const char OmniboxFieldTrial::kHUPNewScoringEnabledParam[] =
     "HUPExperimentalScoringEnabled";

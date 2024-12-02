@@ -10,10 +10,10 @@
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/renderer_host/dip_util.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
-#include "content/port/browser/render_widget_host_view_frame_subscriber.h"
-#include "content/port/browser/render_widget_host_view_port.h"
+#include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view_frame_subscriber.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
@@ -24,7 +24,7 @@
 #include "content/shell/browser/shell.h"
 #include "media/base/video_frame.h"
 #include "media/filters/skcanvas_video_renderer.h"
-#include "net/base/net_util.h"
+#include "net/base/filename_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/base/ui_base_switches.h"
@@ -58,7 +58,7 @@ namespace {
 // high-DPI fails.
 #define PASS_TEST_IF_SCALE_FACTOR_NOT_SUPPORTED(factor) \
   if (ui::GetScaleForScaleFactor( \
-          GetScaleFactorForView(GetRenderWidgetHostViewPort())) != factor) {  \
+          GetScaleFactorForView(GetRenderWidgetHostView())) != factor) {  \
     LOG(WARNING) << "Blindly passing this test: failed to set up "  \
                     "scale factor: " << factor;  \
     return false;  \
@@ -112,11 +112,9 @@ class RenderWidgetHostViewBrowserTest : public ContentBrowserTest {
     return rwh;
   }
 
-  RenderWidgetHostViewPort* GetRenderWidgetHostViewPort() const {
-    RenderWidgetHostViewPort* const view =
-        RenderWidgetHostViewPort::FromRWHV(GetRenderViewHost()->GetView());
-    CHECK(view);
-    return view;
+  RenderWidgetHostViewBase* GetRenderWidgetHostView() const {
+    return static_cast<RenderWidgetHostViewBase*>(
+        GetRenderViewHost()->GetView());
   }
 
   // Callback when using CopyFromBackingStore() API.
@@ -188,7 +186,7 @@ class RenderWidgetHostViewBrowserTest : public ContentBrowserTest {
  protected:
   // Waits until the source is available for copying.
   void WaitForCopySourceReady() {
-    while (!GetRenderWidgetHostViewPort()->IsSurfaceAvailableForCopy())
+    while (!GetRenderWidgetHostView()->IsSurfaceAvailableForCopy())
       GiveItSomeTime();
   }
 
@@ -228,24 +226,12 @@ class CompositingRenderWidgetHostViewBrowserTest
     RenderWidgetHostViewBrowserTest::SetUp();
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    // Note: Not appending kForceCompositingMode switch here, since not all bots
-    // support compositing.  Some bots will run with compositing on, and others
-    // won't.  Therefore, the call to SetUpSourceSurface() later on will detect
-    // whether compositing mode is actually on or not.  If not, the tests will
-    // pass blindly, logging a warning message, since we cannot test what the
-    // platform/implementation does not support.
-    RenderWidgetHostViewBrowserTest::SetUpCommandLine(command_line);
-  }
-
   virtual GURL TestUrl() {
     return net::FilePathToFileURL(
         test_dir().AppendASCII("rwhv_compositing_animation.html"));
   }
 
   virtual bool SetUpSourceSurface(const char* wait_message) OVERRIDE {
-    if (!IsForceCompositingModeEnabled())
-      return false;  // See comment in SetUpCommandLine().
 #if defined(OS_MACOSX)
     CHECK(IOSurfaceSupport::Initialize());
 #endif
@@ -275,49 +261,6 @@ class CompositingRenderWidgetHostViewBrowserTest
   const CompositingMode compositing_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(CompositingRenderWidgetHostViewBrowserTest);
-};
-
-class NonCompositingRenderWidgetHostViewBrowserTest
-    : public RenderWidgetHostViewBrowserTest {
- public:
-  NonCompositingRenderWidgetHostViewBrowserTest() {}
-
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    // Note: Appending the kDisableAcceleratedCompositing switch here, but there
-    // are some builds that only use compositing and will ignore this switch.
-    // Therefore, the call to SetUpSourceSurface() later on will detect whether
-    // compositing mode is actually off.  If it's on, the tests will pass
-    // blindly, logging a warning message, since we cannot test what the
-    // platform/implementation does not support.
-    command_line->AppendSwitch(switches::kDisableAcceleratedCompositing);
-    RenderWidgetHostViewBrowserTest::SetUpCommandLine(command_line);
-  }
-
-  virtual GURL TestUrl() {
-    return GURL(kAboutBlankURL);
-  }
-
-  virtual bool SetUpSourceSurface(const char* wait_message) OVERRIDE {
-    if (IsForceCompositingModeEnabled())
-      return false;  // See comment in SetUpCommandLine().
-
-    content::DOMMessageQueue message_queue;
-    NavigateToURL(shell(), TestUrl());
-    if (wait_message != NULL) {
-      std::string result(wait_message);
-      if (!message_queue.WaitForMessage(&result)) {
-        EXPECT_TRUE(false) << "WaitForMessage " << result << " failed.";
-        return false;
-      }
-    }
-
-    WaitForCopySourceReady();
-    // Return whether the renderer left accelerated compositing turned off.
-    return !GetRenderWidgetHost()->is_accelerated_compositing_active();
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(NonCompositingRenderWidgetHostViewBrowserTest);
 };
 
 class FakeFrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
@@ -358,13 +301,6 @@ IN_PROC_BROWSER_TEST_P(CompositingRenderWidgetHostViewBrowserTest,
   RunBasicCopyFromBackingStoreTest();
 }
 
-// The CopyFromBackingStore() API should work on all platforms when compositing
-// is disabled.
-IN_PROC_BROWSER_TEST_F(NonCompositingRenderWidgetHostViewBrowserTest,
-                       CopyFromBackingStore) {
-  RunBasicCopyFromBackingStoreTest();
-}
-
 // Tests that the callback passed to CopyFromBackingStore is always called,
 // even when the RenderWidgetHost is deleting in the middle of an async copy.
 IN_PROC_BROWSER_TEST_P(CompositingRenderWidgetHostViewBrowserTest,
@@ -380,7 +316,7 @@ IN_PROC_BROWSER_TEST_P(CompositingRenderWidgetHostViewBrowserTest,
                  run_loop.QuitClosure()),
       SkBitmap::kARGB_8888_Config);
   // Delete the surface before the callback is run.
-  GetRenderWidgetHostViewPort()->AcceleratedSurfaceRelease();
+  GetRenderWidgetHostView()->AcceleratedSurfaceRelease();
   run_loop.Run();
 
   EXPECT_EQ(1, callback_invoke_count());
@@ -401,7 +337,7 @@ IN_PROC_BROWSER_TEST_P(CompositingRenderWidgetHostViewBrowserTest,
 IN_PROC_BROWSER_TEST_P(CompositingRenderWidgetHostViewBrowserTest,
                        MAYBE_CopyFromCompositingSurface_CallbackDespiteDelete) {
   SET_UP_SURFACE_OR_PASS_TEST(NULL);
-  RenderWidgetHostViewPort* const view = GetRenderWidgetHostViewPort();
+  RenderWidgetHostViewBase* const view = GetRenderWidgetHostView();
   if (!view->CanCopyToVideoFrame()) {
     LOG(WARNING) <<
         ("Blindly passing this test: CopyFromCompositingSurfaceToVideoFrame() "
@@ -423,20 +359,12 @@ IN_PROC_BROWSER_TEST_P(CompositingRenderWidgetHostViewBrowserTest,
   EXPECT_EQ(1, callback_invoke_count());
 }
 
-// With compositing turned off, no platforms should support the
-// CopyFromCompositingSurfaceToVideoFrame() API.
-IN_PROC_BROWSER_TEST_F(NonCompositingRenderWidgetHostViewBrowserTest,
-                       CopyFromCompositingSurfaceToVideoFrameCallbackTest) {
-  SET_UP_SURFACE_OR_PASS_TEST(NULL);
-  EXPECT_FALSE(GetRenderWidgetHostViewPort()->CanCopyToVideoFrame());
-}
-
 // Test basic frame subscription functionality.  We subscribe, and then run
 // until at least one DeliverFrameCallback has been invoked.
 IN_PROC_BROWSER_TEST_P(CompositingRenderWidgetHostViewBrowserTest,
                        FrameSubscriberTest) {
   SET_UP_SURFACE_OR_PASS_TEST(NULL);
-  RenderWidgetHostViewPort* const view = GetRenderWidgetHostViewPort();
+  RenderWidgetHostViewBase* const view = GetRenderWidgetHostView();
   if (!view->CanSubscribeFrame()) {
     LOG(WARNING) << ("Blindly passing this test: Frame subscription not "
                      "supported on this platform.");
@@ -461,7 +389,7 @@ IN_PROC_BROWSER_TEST_P(CompositingRenderWidgetHostViewBrowserTest,
 // Test that we can copy twice from an accelerated composited page.
 IN_PROC_BROWSER_TEST_P(CompositingRenderWidgetHostViewBrowserTest, CopyTwice) {
   SET_UP_SURFACE_OR_PASS_TEST(NULL);
-  RenderWidgetHostViewPort* const view = GetRenderWidgetHostViewPort();
+  RenderWidgetHostViewBase* const view = GetRenderWidgetHostView();
   if (!view->CanCopyToVideoFrame()) {
     LOG(WARNING) << ("Blindly passing this test: "
                      "CopyFromCompositingSurfaceToVideoFrame() not supported "
@@ -663,7 +591,7 @@ class CompositingRenderWidgetHostViewBrowserTestTabCapture
     if (!ShouldContinueAfterTestURLLoad())
       return;
 
-    RenderWidgetHostViewPort* rwhvp = GetRenderWidgetHostViewPort();
+    RenderWidgetHostViewBase* rwhvp = GetRenderWidgetHostView();
     if (video_frame && !rwhvp->CanCopyToVideoFrame()) {
       // This should only happen on Mac when using the software compositor.
       // Otherwise, raise an error. This can be removed when Mac is moved to a

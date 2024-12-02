@@ -69,11 +69,13 @@ SynchronousCompositorOutputSurface::SynchronousCompositorOutputSurface(
     : cc::OutputSurface(
           scoped_ptr<cc::SoftwareOutputDevice>(new SoftwareDevice(this))),
       routing_id_(routing_id),
+      needs_begin_frame_(false),
       invoking_composite_(false),
       did_swap_buffer_(false),
       current_sw_canvas_(NULL),
       memory_policy_(0),
-      output_surface_client_(NULL) {
+      output_surface_client_(NULL),
+      weak_ptr_factory_(this) {
   capabilities_.deferred_gl_initialization = true;
   capabilities_.draw_and_swap_full_viewport_every_frame = true;
   capabilities_.adjust_deadline_for_parent = false;
@@ -122,14 +124,12 @@ void SynchronousCompositorOutputSurface::Reshape(
   // Intentional no-op: surface size is controlled by the embedder.
 }
 
-void SynchronousCompositorOutputSurface::SetNeedsBeginImplFrame(
-    bool enable) {
+void SynchronousCompositorOutputSurface::SetNeedsBeginFrame(bool enable) {
   DCHECK(CalledOnValidThread());
-  needs_begin_impl_frame_ = enable;
-  client_ready_for_begin_impl_frame_ = true;
+  needs_begin_frame_ = enable;
   SynchronousCompositorOutputSurfaceDelegate* delegate = GetDelegate();
   if (delegate && !invoking_composite_)
-    delegate->SetContinuousInvalidate(needs_begin_impl_frame_);
+    delegate->SetContinuousInvalidate(needs_begin_frame_);
 }
 
 void SynchronousCompositorOutputSurface::SwapBuffers(
@@ -139,12 +139,27 @@ void SynchronousCompositorOutputSurface::SwapBuffers(
     DCHECK(context_provider_);
     context_provider_->ContextGL()->ShallowFlushCHROMIUM();
   }
-  SynchronousCompositorOutputSurfaceDelegate* delegate = GetDelegate();
-  if (delegate)
-    delegate->UpdateFrameMetaData(frame->metadata);
+  UpdateFrameMetaData(frame->metadata);
 
   did_swap_buffer_ = true;
-  DidSwapBuffers();
+  client_->DidSwapBuffers();
+}
+
+void SynchronousCompositorOutputSurface::UpdateFrameMetaData(
+    const cc::CompositorFrameMetadata& frame_info) {
+  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    BrowserThread::PostTask(
+        BrowserThread::UI,
+        FROM_HERE,
+        base::Bind(&SynchronousCompositorOutputSurface::UpdateFrameMetaData,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   frame_info));
+    return;
+  }
+
+  SynchronousCompositorOutputSurfaceDelegate* delegate = GetDelegate();
+  if (delegate)
+    delegate->UpdateFrameMetaData(frame_info);
 }
 
 namespace {
@@ -155,14 +170,12 @@ void AdjustTransform(gfx::Transform* transform, gfx::Rect viewport) {
 } // namespace
 
 bool SynchronousCompositorOutputSurface::InitializeHwDraw(
-    scoped_refptr<cc::ContextProvider> onscreen_context_provider,
-    scoped_refptr<cc::ContextProvider> offscreen_context_provider) {
+    scoped_refptr<cc::ContextProvider> onscreen_context_provider) {
   DCHECK(CalledOnValidThread());
   DCHECK(HasClient());
   DCHECK(!context_provider_);
 
-  return InitializeAndSetContext3d(onscreen_context_provider,
-                                   offscreen_context_provider);
+  return InitializeAndSetContext3d(onscreen_context_provider);
 }
 
 void SynchronousCompositorOutputSurface::ReleaseHwDraw() {
@@ -223,7 +236,7 @@ void SynchronousCompositorOutputSurface::InvokeComposite(
   SetExternalDrawConstraints(
       adjusted_transform, viewport, clip, valid_for_tile_management);
   SetNeedsRedrawRect(gfx::Rect(viewport.size()));
-  BeginImplFrame(cc::BeginFrameArgs::CreateForSynchronousCompositor());
+  client_->BeginFrame(cc::BeginFrameArgs::CreateForSynchronousCompositor());
 
   // After software draws (which might move the viewport arbitrarily), restore
   // the previous hardware viewport to allow CC's tile manager to prioritize
@@ -238,17 +251,11 @@ void SynchronousCompositorOutputSurface::InvokeComposite(
   }
 
   if (did_swap_buffer_)
-    OnSwapBuffersComplete();
+    client_->DidSwapBuffersComplete();
 
   SynchronousCompositorOutputSurfaceDelegate* delegate = GetDelegate();
   if (delegate)
-    delegate->SetContinuousInvalidate(needs_begin_impl_frame_);
-}
-
-void
-SynchronousCompositorOutputSurface::PostCheckForRetroactiveBeginImplFrame() {
-  // Synchronous compositor cannot perform retroactive BeginImplFrames, so
-  // intentionally no-op here.
+    delegate->SetContinuousInvalidate(needs_begin_frame_);
 }
 
 void SynchronousCompositorOutputSurface::SetMemoryPolicy(

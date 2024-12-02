@@ -6,7 +6,7 @@
 
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "chrome/browser/devtools/devtools_adb_bridge.h"
+#include "chrome/browser/devtools/devtools_target_impl.h"
 #include "chrome/browser/devtools/devtools_targets_ui.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -202,38 +202,40 @@ void InspectUI::InitUI() {
 
 void InspectUI::Inspect(const std::string& source_id,
                         const std::string& target_id) {
-  DevToolsTargetsUIHandler* handler = FindTargetHandler(source_id);
-  if (handler)
-    handler->Inspect(target_id, Profile::FromWebUI(web_ui()));
+  DevToolsTargetImpl* target = FindTarget(source_id, target_id);
+  if (target)
+    target->Inspect(Profile::FromWebUI(web_ui()));
 }
 
 void InspectUI::Activate(const std::string& source_id,
                          const std::string& target_id) {
-  DevToolsTargetsUIHandler* handler = FindTargetHandler(source_id);
-  if (handler)
-    handler->Activate(target_id);
+  DevToolsTargetImpl* target = FindTarget(source_id, target_id);
+  if (target)
+    target->Activate();
 }
 
 void InspectUI::Close(const std::string& source_id,
                       const std::string& target_id) {
-  DevToolsTargetsUIHandler* handler = FindTargetHandler(source_id);
-  if (handler)
-    handler->Close(target_id);
+  DevToolsTargetImpl* target = FindTarget(source_id, target_id);
+  if (target)
+    target->Close();
 }
 
 void InspectUI::Reload(const std::string& source_id,
                        const std::string& target_id) {
-  DevToolsTargetsUIHandler* handler = FindTargetHandler(source_id);
-  if (handler)
-    handler->Reload(target_id);
+  DevToolsTargetImpl* target = FindTarget(source_id, target_id);
+  if (target)
+    target->Reload();
 }
+
+static void NoOp(DevToolsTargetImpl*) {}
 
 void InspectUI::Open(const std::string& source_id,
                      const std::string& browser_id,
                      const std::string& url) {
-  DevToolsRemoteTargetsUIHandler* handler = FindRemoteTargetHandler(source_id);
+  DevToolsTargetsUIHandler* handler = FindTargetHandler(source_id);
   if (handler)
-    handler->Open(browser_id, url);
+    handler->Open(browser_id, url, base::Bind(&NoOp));
 }
 
 void InspectUI::InspectDevices(Browser* browser) {
@@ -264,8 +266,13 @@ void InspectUI::StartListeningNotifications() {
       DevToolsTargetsUIHandler::CreateForRenderers(callback));
   AddTargetUIHandler(
       DevToolsTargetsUIHandler::CreateForWorkers(callback));
-  AddRemoteTargetUIHandler(
-      DevToolsRemoteTargetsUIHandler::CreateForAdb(callback, profile));
+  AddTargetUIHandler(
+      DevToolsTargetsUIHandler::CreateForAdb(callback, profile));
+
+  port_status_serializer_.reset(
+      new PortForwardingStatusSerializer(
+          base::Bind(&InspectUI::PopulatePortStatus, base::Unretained(this)),
+          profile));
 
   notification_registrar_.Add(this,
                               content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED,
@@ -288,7 +295,8 @@ void InspectUI::StopListeningNotifications() {
     return;
 
   STLDeleteValues(&target_handlers_);
-  STLDeleteValues(&remote_target_handlers_);
+
+  port_status_serializer_.reset();
 
   notification_registrar_.RemoveAll();
   pref_change_registrar_.RemoveAll();
@@ -304,44 +312,20 @@ content::WebUIDataSource* InspectUI::CreateInspectUIHTMLSource() {
 }
 
 void InspectUI::UpdateDiscoverUsbDevicesEnabled() {
-  const base::Value* value =
-      GetPrefValue(prefs::kDevToolsDiscoverUsbDevicesEnabled);
-  web_ui()->CallJavascriptFunction("updateDiscoverUsbDevicesEnabled", *value);
-
-  // Configure adb bridge.
-  Profile* profile = Profile::FromWebUI(web_ui());
-  DevToolsAdbBridge* adb_bridge =
-      DevToolsAdbBridge::Factory::GetForProfile(profile);
-  if (adb_bridge) {
-    bool enabled = false;
-    value->GetAsBoolean(&enabled);
-
-    DevToolsAdbBridge::DeviceProviders device_providers;
-
-#if defined(DEBUG_DEVTOOLS)
-    device_providers.push_back(
-        AndroidDeviceProvider::GetSelfAsDeviceProvider());
-#endif
-
-    device_providers.push_back(AndroidDeviceProvider::GetAdbDeviceProvider());
-
-    if (enabled) {
-      device_providers.push_back(
-          AndroidDeviceProvider::GetUsbDeviceProvider(profile));
-    }
-
-    adb_bridge->set_device_providers(device_providers);
-  }
+  web_ui()->CallJavascriptFunction(
+      "updateDiscoverUsbDevicesEnabled",
+      *GetPrefValue(prefs::kDevToolsDiscoverUsbDevicesEnabled));
 }
 
 void InspectUI::UpdatePortForwardingEnabled() {
-  web_ui()->CallJavascriptFunction("updatePortForwardingEnabled",
+  web_ui()->CallJavascriptFunction(
+      "updatePortForwardingEnabled",
       *GetPrefValue(prefs::kDevToolsPortForwardingEnabled));
-
 }
 
 void InspectUI::UpdatePortForwardingConfig() {
-  web_ui()->CallJavascriptFunction("updatePortForwardingConfig",
+  web_ui()->CallJavascriptFunction(
+      "updatePortForwardingConfig",
       *GetPrefValue(prefs::kDevToolsPortForwardingConfig));
 }
 
@@ -389,24 +373,17 @@ void InspectUI::AddTargetUIHandler(
   target_handlers_[handler_ptr->source_id()] = handler_ptr;
 }
 
-void InspectUI::AddRemoteTargetUIHandler(
-    scoped_ptr<DevToolsRemoteTargetsUIHandler> handler) {
-  DevToolsRemoteTargetsUIHandler* handler_ptr = handler.release();
-  remote_target_handlers_[handler_ptr->source_id()] = handler_ptr;
-}
-
 DevToolsTargetsUIHandler* InspectUI::FindTargetHandler(
     const std::string& source_id) {
   TargetHandlerMap::iterator it = target_handlers_.find(source_id);
-  return it != target_handlers_.end() ?
-         it->second :
-         FindRemoteTargetHandler(source_id);
+     return it != target_handlers_.end() ? it->second : NULL;
 }
 
-DevToolsRemoteTargetsUIHandler* InspectUI::FindRemoteTargetHandler(
-    const std::string& source_id) {
-  RemoteTargetHandlerMap::iterator it = remote_target_handlers_.find(source_id);
-  return it != remote_target_handlers_.end() ? it->second : NULL;
+DevToolsTargetImpl* InspectUI::FindTarget(
+    const std::string& source_id, const std::string& target_id) {
+  TargetHandlerMap::iterator it = target_handlers_.find(source_id);
+  return it != target_handlers_.end() ?
+         it->second->GetTarget(target_id) : NULL;
 }
 
 void InspectUI::PopulateTargets(const std::string& source,
@@ -416,4 +393,8 @@ void InspectUI::PopulateTargets(const std::string& source,
       "populateTargets",
       *source_value.get(),
       *targets.get());
+}
+
+void InspectUI::PopulatePortStatus(const base::Value& status) {
+  web_ui()->CallJavascriptFunction("populatePortStatus", status);
 }

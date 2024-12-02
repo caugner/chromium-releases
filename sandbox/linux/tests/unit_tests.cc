@@ -8,9 +8,11 @@
 #include <stdio.h>
 #include <sys/resource.h>
 #include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "base/file_util.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/third_party/valgrind/valgrind.h"
 #include "build/build_config.h"
 #include "sandbox/linux/tests/unit_tests.h"
@@ -40,6 +42,8 @@ int CountThreads() {
 }  // namespace
 
 namespace sandbox {
+
+extern bool kAllowForkWithThreads;
 
 bool IsAndroid() {
 #if defined(OS_ANDROID)
@@ -102,24 +106,49 @@ static void SetProcessTimeout(int time_in_seconds) {
 // in the BPF sandbox, as it potentially makes global state changes and as
 // it also tends to raise fatal errors, if the code has been used in an
 // insecure manner.
-void UnitTests::RunTestInProcess(UnitTests::Test test,
-                                 void* arg,
+void UnitTests::RunTestInProcess(SandboxTestRunner* test_runner,
                                  DeathCheck death,
                                  const void* death_aux) {
+  CHECK(test_runner);
   // We need to fork(), so we can't be multi-threaded, as threads could hold
   // locks.
   int num_threads = CountThreads();
-#if defined(THREAD_SANITIZER)
+#if !defined(THREAD_SANITIZER)
+  const int kNumExpectedThreads = 1;
+#else
   // Under TSAN, there is a special helper thread. It should be completely
   // invisible to our testing, so we ignore it. It should be ok to fork()
   // with this thread. It's currently buggy, but it's the best we can do until
   // there is a way to delay the start of the thread
   // (https://code.google.com/p/thread-sanitizer/issues/detail?id=19).
-  num_threads--;
+  const int kNumExpectedThreads = 2;
 #endif
-  ASSERT_EQ(1, num_threads) << "Running sandbox tests with multiple threads "
-                            << "is not supported and will make the tests "
-                            << "flaky.\n";
+
+  // The kernel is at liberty to wake a thread id futex before updating /proc.
+  // If another test running in the same process has stopped a thread, it may
+  // appear as still running in /proc.
+  // We poll /proc, with an exponential back-off. At most, we'll sleep around
+  // 2^iterations nanoseconds in nanosleep().
+  if (!kAllowForkWithThreads) {
+    for (unsigned int iteration = 0; iteration < 30; iteration++) {
+      struct timespec ts = {0, 1L << iteration /* nanoseconds */};
+      PCHECK(0 == HANDLE_EINTR(nanosleep(&ts, &ts)));
+      num_threads = CountThreads();
+      if (kNumExpectedThreads == num_threads)
+        break;
+    }
+  }
+
+  const std::string multiple_threads_error =
+      "Running sandbox tests with multiple threads "
+      "is not supported and will make the tests flaky.";
+  if (!kAllowForkWithThreads) {
+    ASSERT_EQ(kNumExpectedThreads, num_threads) << multiple_threads_error;
+  } else {
+    if (kNumExpectedThreads != num_threads)
+      LOG(ERROR) << multiple_threads_error;
+  }
+
   int fds[2];
   ASSERT_EQ(0, pipe(fds));
   // Check that our pipe is not on one of the standard file descriptor.
@@ -146,7 +175,7 @@ void UnitTests::RunTestInProcess(UnitTests::Test test,
     struct rlimit no_core = {0};
     setrlimit(RLIMIT_CORE, &no_core);
 
-    test(arg);
+    test_runner->Run();
     _exit(kExpectedValue);
   }
 
@@ -206,6 +235,17 @@ void UnitTests::DeathSuccess(int status, const std::string& msg, const void*) {
   ASSERT_EQ(kExpectedValue, subprocess_exit_status) << details;
   bool subprocess_exited_but_printed_messages = !msg.empty();
   EXPECT_FALSE(subprocess_exited_but_printed_messages) << details;
+}
+
+void UnitTests::DeathSuccessAllowNoise(int status,
+                                       const std::string& msg,
+                                       const void*) {
+  std::string details(TestFailedMessage(msg));
+
+  bool subprocess_terminated_normally = WIFEXITED(status);
+  ASSERT_TRUE(subprocess_terminated_normally) << details;
+  int subprocess_exit_status = WEXITSTATUS(status);
+  ASSERT_EQ(kExpectedValue, subprocess_exit_status) << details;
 }
 
 void UnitTests::DeathMessage(int status,

@@ -82,7 +82,7 @@ const AcceleratorData kAcceleratorData[] = {
     SWITCH_TO_NEXT_USER },
   // Turning the TouchView maximizing mode on via hotkey for the time being.
   // TODO(skuhne): Remove once the test isn't needed anymore.
-  { true, ui::VKEY_D, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN,
+  { true, ui::VKEY_8, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN,
     TOGGLE_TOUCH_VIEW_TESTING },
   // Single shift release turns off caps lock.
   { false, ui::VKEY_LSHIFT, ui::EF_NONE, DISABLE_CAPS_LOCK },
@@ -289,6 +289,7 @@ const AcceleratorAction kActionsAllowedAtLoginOrLockScreen[] = {
   VOLUME_MUTE,
   VOLUME_UP,
 #if defined(OS_CHROMEOS)
+  TOGGLE_TOUCH_VIEW_TESTING,
   TOGGLE_SPOKEN_FEEDBACK,
   ADD_REMOVE_DISPLAY,
   DISABLE_GPU_WATCHDOG,
@@ -328,6 +329,10 @@ const AcceleratorAction kActionsAllowedAtModalWindow[] = {
   POWER_RELEASED,
   PREVIOUS_IME,
   PRINT_UI_HIERARCHIES,
+  ROTATE_SCREEN,
+  SCALE_UI_UP,
+  SCALE_UI_DOWN,
+  SCALE_UI_RESET,
   SHOW_KEYBOARD_OVERLAY,
   SWITCH_IME,
   TAKE_PARTIAL_SCREENSHOT,

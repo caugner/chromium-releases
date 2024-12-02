@@ -8,6 +8,7 @@
   </outputs>
   <release seq="1">
     <includes>
+      <include name="IDR_EXTENSION_API_JSON_ACCESSIBILITYPRIVATE" file="extensions\api\accessibility_private.json" type="BINDATA" />
       <include name="IDR_EXTENSION_API_JSON_APP" file="extensions\api\app.json" type="BINDATA" />
       <include name="IDR_EXTENSION_API_JSON_BROWSERACTION" file="extensions\api\browser_action.json" type="BINDATA" />
       <include name="IDR_EXTENSION_API_JSON_COMMANDS" file="extensions\api\commands.json" type="BINDATA" />
@@ -25,7 +26,6 @@
       <include name="IDR_EXTENSION_API_JSON_TTSENGINE" file="extensions\api\tts_engine.json" type="BINDATA" />
       <include name="IDR_EXTENSION_API_JSON_TYPES" file="extensions\api\types.json" type="BINDATA" />
       <include name="IDR_EXTENSION_API_JSON_TYPES_PRIVATE" file="extensions\api\types_private.json" type="BINDATA" />
-      <include name="IDR_EXTENSION_API_JSON_WEBREQUESTINTERNAL" file="extensions\api\web_request_internal.json" type="BINDATA" />
       <include name="IDR_EXTENSION_API_JSON_WEBSTORE" file="extensions\api\webstore.json" type="BINDATA" />
       <include name="IDR_EXTENSION_API_JSON_WEBVIEW_REQUEST" file="extensions\api\webview_request.json" type="BINDATA" />
     </includes>

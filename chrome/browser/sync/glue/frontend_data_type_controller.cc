@@ -6,10 +6,10 @@
 
 #include "base/logging.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/chrome_report_unrecoverable_error.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "components/sync_driver/change_processor.h"
 #include "components/sync_driver/model_associator.h"
 #include "content/public/browser/browser_thread.h"
 #include "sync/api/sync_error.h"
@@ -200,8 +200,6 @@ bool FrontendDataTypeController::Associate() {
     return false;
   }
 
-  sync_service_->ActivateDataType(type(), model_safe_group(),
-                                  change_processor());
   state_ = RUNNING;
   // FinishStart() invokes the DataTypeManager callback, which can lead to a
   // call to Stop() if one of the other data types being started generates an
@@ -295,7 +293,7 @@ void FrontendDataTypeController::set_model_associator(
   model_associator_.reset(model_associator);
 }
 
-ChangeProcessor* FrontendDataTypeController::change_processor() const {
+ChangeProcessor* FrontendDataTypeController::GetChangeProcessor() const {
   return change_processor_.get();
 }
 

@@ -13,7 +13,6 @@
 #include "base/strings/string_piece.h"
 #include "net/quic/congestion_control/loss_detection_interface.h"
 #include "net/quic/congestion_control/send_algorithm_interface.h"
-#include "net/quic/crypto/quic_crypto_client_config.h"
 #include "net/quic/quic_ack_notifier.h"
 #include "net/quic/quic_client_session_base.h"
 #include "net/quic/quic_connection.h"
@@ -30,6 +29,7 @@ namespace test {
 
 static const QuicConnectionId kTestConnectionId = 42;
 static const int kTestPort = 123;
+static const uint32 kInitialFlowControlWindowForTest = 32 * 1024;  // 32 KB
 
 // Returns the test peer IP address.
 IPAddressNumber TestPeerIPAddress();
@@ -42,6 +42,8 @@ QuicVersion QuicVersionMin();
 
 // Returns an address for 127.0.0.1.
 IPAddressNumber Loopback4();
+
+void GenerateBody(std::string* body, int length);
 
 // Create an encrypted packet for testing.
 QuicEncryptedPacket* ConstructEncryptedPacket(
@@ -74,6 +76,11 @@ QuicConfig DefaultQuicConfig();
 
 // Returns a version vector consisting of |version|.
 QuicVersionVector SupportedVersions(QuicVersion version);
+
+// Testing convenience method to construct a QuicAckFrame with all packets
+// from least_unacked to largest_observed acked.
+QuicAckFrame MakeAckFrame(QuicPacketSequenceNumber largest_observed,
+                          QuicPacketSequenceNumber least_unacked);
 
 template<typename SaveType>
 class ValueRestore {
@@ -112,6 +119,7 @@ class MockFramerVisitor : public QuicFramerVisitorInterface {
   // The constructor sets this up to return true by default.
   MOCK_METHOD1(OnUnauthenticatedPublicHeader, bool(
       const QuicPacketPublicHeader& header));
+  MOCK_METHOD1(OnDecryptedPacket, void(EncryptionLevel level));
   MOCK_METHOD1(OnPacketHeader, bool(const QuicPacketHeader& header));
   MOCK_METHOD1(OnFecProtectedPayload, void(base::StringPiece payload));
   MOCK_METHOD1(OnStreamFrame, bool(const QuicStreamFrame& frame));
@@ -119,6 +127,7 @@ class MockFramerVisitor : public QuicFramerVisitorInterface {
   MOCK_METHOD1(OnCongestionFeedbackFrame,
                bool(const QuicCongestionFeedbackFrame& frame));
   MOCK_METHOD1(OnStopWaitingFrame, bool(const QuicStopWaitingFrame& frame));
+  MOCK_METHOD1(OnPingFrame, bool(const QuicPingFrame& frame));
   MOCK_METHOD1(OnFecData, void(const QuicFecData& fec));
   MOCK_METHOD1(OnRstStreamFrame, bool(const QuicRstStreamFrame& frame));
   MOCK_METHOD1(OnConnectionCloseFrame,
@@ -147,6 +156,7 @@ class NoOpFramerVisitor : public QuicFramerVisitorInterface {
   virtual bool OnUnauthenticatedHeader(const QuicPacketHeader& header) OVERRIDE;
   virtual bool OnUnauthenticatedPublicHeader(
       const QuicPacketPublicHeader& header) OVERRIDE;
+  virtual void OnDecryptedPacket(EncryptionLevel level) OVERRIDE {}
   virtual bool OnPacketHeader(const QuicPacketHeader& header) OVERRIDE;
   virtual void OnFecProtectedPayload(base::StringPiece payload) OVERRIDE {}
   virtual bool OnStreamFrame(const QuicStreamFrame& frame) OVERRIDE;
@@ -155,6 +165,7 @@ class NoOpFramerVisitor : public QuicFramerVisitorInterface {
       const QuicCongestionFeedbackFrame& frame) OVERRIDE;
   virtual bool OnStopWaitingFrame(
       const QuicStopWaitingFrame& frame) OVERRIDE;
+  virtual bool OnPingFrame(const QuicPingFrame& frame) OVERRIDE;
   virtual void OnFecData(const QuicFecData& fec) OVERRIDE {}
   virtual bool OnRstStreamFrame(const QuicRstStreamFrame& frame) OVERRIDE;
   virtual bool OnConnectionCloseFrame(
@@ -168,85 +179,12 @@ class NoOpFramerVisitor : public QuicFramerVisitorInterface {
   DISALLOW_COPY_AND_ASSIGN(NoOpFramerVisitor);
 };
 
-class FramerVisitorCapturingPublicReset : public NoOpFramerVisitor {
- public:
-  FramerVisitorCapturingPublicReset();
-  virtual ~FramerVisitorCapturingPublicReset();
-
-  virtual void OnPublicResetPacket(
-      const QuicPublicResetPacket& packet) OVERRIDE;
-
-  const QuicPublicResetPacket public_reset_packet() {
-    return public_reset_packet_;
-  }
-
- private:
-  QuicPublicResetPacket public_reset_packet_;
-};
-
-class FramerVisitorCapturingFrames : public NoOpFramerVisitor {
- public:
-  FramerVisitorCapturingFrames();
-  virtual ~FramerVisitorCapturingFrames();
-
-  // Reset the visitor to it's initial state.
-  void Reset();
-
-  // NoOpFramerVisitor
-  virtual void OnVersionNegotiationPacket(
-      const QuicVersionNegotiationPacket& packet) OVERRIDE;
-  virtual bool OnPacketHeader(const QuicPacketHeader& header) OVERRIDE;
-  virtual bool OnStreamFrame(const QuicStreamFrame& frame) OVERRIDE;
-  virtual bool OnAckFrame(const QuicAckFrame& frame) OVERRIDE;
-  virtual bool OnCongestionFeedbackFrame(
-      const QuicCongestionFeedbackFrame& frame) OVERRIDE;
-  virtual bool OnStopWaitingFrame(
-      const QuicStopWaitingFrame& frame) OVERRIDE;
-  virtual bool OnRstStreamFrame(const QuicRstStreamFrame& frame) OVERRIDE;
-  virtual bool OnConnectionCloseFrame(
-      const QuicConnectionCloseFrame& frame) OVERRIDE;
-  virtual bool OnGoAwayFrame(const QuicGoAwayFrame& frame) OVERRIDE;
-
-  size_t frame_count() const { return frame_count_; }
-  QuicPacketHeader* header() { return &header_; }
-  const std::vector<QuicStreamFrame>* stream_frames() const {
-    return &stream_frames_;
-  }
-  const std::vector<string*>& stream_data() const {
-    return stream_data_;
-  }
-  QuicAckFrame* ack() { return ack_.get(); }
-  QuicCongestionFeedbackFrame* feedback() { return feedback_.get(); }
-  QuicStopWaitingFrame* stop_waiting() { return stop_waiting_.get(); }
-  QuicRstStreamFrame* rst() { return rst_.get(); }
-  QuicConnectionCloseFrame* close() { return close_.get(); }
-  QuicGoAwayFrame* goaway() { return goaway_.get(); }
-  QuicVersionNegotiationPacket* version_negotiation_packet() {
-    return version_negotiation_packet_.get();
-  }
-
- private:
-  size_t frame_count_;
-  QuicPacketHeader header_;
-  std::vector<QuicStreamFrame> stream_frames_;
-  std::vector<std::string*> stream_data_;
-  scoped_ptr<QuicAckFrame> ack_;
-  scoped_ptr<QuicCongestionFeedbackFrame> feedback_;
-  scoped_ptr<QuicStopWaitingFrame> stop_waiting_;
-  scoped_ptr<QuicRstStreamFrame> rst_;
-  scoped_ptr<QuicConnectionCloseFrame> close_;
-  scoped_ptr<QuicGoAwayFrame> goaway_;
-  scoped_ptr<QuicVersionNegotiationPacket> version_negotiation_packet_;
-
-  DISALLOW_COPY_AND_ASSIGN(FramerVisitorCapturingFrames);
-};
-
 class MockConnectionVisitor : public QuicConnectionVisitorInterface {
  public:
   MockConnectionVisitor();
   virtual ~MockConnectionVisitor();
 
-  MOCK_METHOD1(OnStreamFrames, bool(const std::vector<QuicStreamFrame>& frame));
+  MOCK_METHOD1(OnStreamFrames, void(const std::vector<QuicStreamFrame>& frame));
   MOCK_METHOD1(OnWindowUpdateFrames,
                void(const std::vector<QuicWindowUpdateFrame>& frame));
   MOCK_METHOD1(OnBlockedFrames,
@@ -258,6 +196,7 @@ class MockConnectionVisitor : public QuicConnectionVisitorInterface {
   MOCK_METHOD0(OnCanWrite, void());
   MOCK_CONST_METHOD0(HasPendingWrites, bool());
   MOCK_CONST_METHOD0(HasPendingHandshake, bool());
+  MOCK_CONST_METHOD0(HasOpenDataStreams, bool());
   MOCK_METHOD1(OnSuccessfulVersionNegotiation,
                void(const QuicVersion& version));
   MOCK_METHOD0(OnConfigNegotiated, void());
@@ -278,6 +217,8 @@ class MockHelper : public QuicConnectionHelperInterface {
  private:
   MockClock clock_;
   MockRandom random_generator_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockHelper);
 };
 
 class MockConnection : public QuicConnection {
@@ -402,6 +343,7 @@ class TestSession : public QuicSession {
 
  private:
   QuicCryptoStream* crypto_stream_;
+
   DISALLOW_COPY_AND_ASSIGN(TestSession);
 };
 
@@ -426,6 +368,7 @@ class TestClientSession : public QuicClientSessionBase {
 
  private:
   QuicCryptoStream* crypto_stream_;
+
   DISALLOW_COPY_AND_ASSIGN(TestClientSession);
 };
 
@@ -442,6 +385,9 @@ class MockPacketWriter : public QuicPacketWriter {
   MOCK_CONST_METHOD0(IsWriteBlockedDataBuffered, bool());
   MOCK_CONST_METHOD0(IsWriteBlocked, bool());
   MOCK_METHOD0(SetWritable, void());
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockPacketWriter);
 };
 
 class MockSendAlgorithm : public SendAlgorithmInterface {
@@ -454,20 +400,19 @@ class MockSendAlgorithm : public SendAlgorithmInterface {
   MOCK_METHOD2(OnIncomingQuicCongestionFeedbackFrame,
                void(const QuicCongestionFeedbackFrame&,
                     QuicTime feedback_receive_time));
-  MOCK_METHOD2(OnPacketAcked,
-               void(QuicPacketSequenceNumber, QuicByteCount));
-  MOCK_METHOD2(OnPacketLost, void(QuicPacketSequenceNumber, QuicTime));
+  MOCK_METHOD4(OnCongestionEvent, void(bool rtt_updated,
+                                       QuicByteCount bytes_in_flight,
+                                       const CongestionMap& acked_packets,
+                                       const CongestionMap& lost_packets));
   MOCK_METHOD5(OnPacketSent,
-               bool(QuicTime sent_time, QuicPacketSequenceNumber, QuicByteCount,
-                    TransmissionType, HasRetransmittableData));
+               bool(QuicTime, QuicByteCount, QuicPacketSequenceNumber,
+                    QuicByteCount, HasRetransmittableData));
   MOCK_METHOD1(OnRetransmissionTimeout, void(bool));
-  MOCK_METHOD2(OnPacketAbandoned, void(QuicPacketSequenceNumber sequence_number,
-                                      QuicByteCount abandoned_bytes));
-  MOCK_METHOD4(TimeUntilSend, QuicTime::Delta(QuicTime now, TransmissionType,
-                                              HasRetransmittableData,
-                                              IsHandshake));
+  MOCK_METHOD3(TimeUntilSend, QuicTime::Delta(QuicTime now,
+                                              QuicByteCount bytes_in_flight,
+                                              HasRetransmittableData));
   MOCK_CONST_METHOD0(BandwidthEstimate, QuicBandwidth(void));
-  MOCK_METHOD1(UpdateRtt, void(QuicTime::Delta rtt_sample));
+  MOCK_METHOD1(OnRttUpdated, void(QuicPacketSequenceNumber));
   MOCK_CONST_METHOD0(RetransmissionDelay, QuicTime::Delta(void));
   MOCK_CONST_METHOD0(GetCongestionWindow, QuicByteCount());
 
@@ -480,12 +425,16 @@ class MockLossAlgorithm : public LossDetectionInterface {
   MockLossAlgorithm();
   virtual ~MockLossAlgorithm();
 
+  MOCK_CONST_METHOD0(GetLossDetectionType, LossDetectionType());
   MOCK_METHOD4(DetectLostPackets,
                SequenceNumberSet(const QuicUnackedPacketMap& unacked_packets,
                                  const QuicTime& time,
                                  QuicPacketSequenceNumber largest_observed,
                                  const RttStats& rtt_stats));
   MOCK_CONST_METHOD0(GetLossTimeout, QuicTime());
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockLossAlgorithm);
 };
 
 class TestEntropyCalculator :
@@ -496,6 +445,9 @@ class TestEntropyCalculator :
 
   virtual QuicPacketEntropyHash EntropyHash(
       QuicPacketSequenceNumber sequence_number) const OVERRIDE;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestEntropyCalculator);
 };
 
 class MockEntropyCalculator : public TestEntropyCalculator {
@@ -506,20 +458,27 @@ class MockEntropyCalculator : public TestEntropyCalculator {
   MOCK_CONST_METHOD1(
       EntropyHash,
       QuicPacketEntropyHash(QuicPacketSequenceNumber sequence_number));
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockEntropyCalculator);
 };
 
 class MockAckNotifierDelegate : public QuicAckNotifier::DelegateInterface {
  public:
   MockAckNotifierDelegate();
 
-  MOCK_METHOD4(OnAckNotification, void(int num_original_packets,
+  MOCK_METHOD5(OnAckNotification, void(int num_original_packets,
                                        int num_original_bytes,
                                        int num_retransmitted_packets,
-                                       int num_retransmitted_bytes));
+                                       int num_retransmitted_bytes,
+                                       QuicTime::Delta delta_largest_observed));
 
  protected:
   // Object is ref counted.
   virtual ~MockAckNotifierDelegate();
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockAckNotifierDelegate);
 };
 
 }  // namespace test

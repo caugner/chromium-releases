@@ -4,10 +4,9 @@
 
 #include "chrome/browser/extensions/signin/gaia_auth_extension_loader.h"
 
-#include <string>
-
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -40,7 +39,7 @@ extensions::ComponentLoader* GetComponentLoader(BrowserContext* context) {
 }
 
 void LoadGaiaAuthExtension(BrowserContext* context) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   extensions::ComponentLoader* component_loader = GetComponentLoader(context);
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -52,17 +51,6 @@ void LoadGaiaAuthExtension(BrowserContext* context) {
   }
 
 #if defined(OS_CHROMEOS)
-  if (command_line->HasSwitch(chromeos::switches::kGAIAAuthExtensionManifest)) {
-    const base::FilePath manifest_path = command_line->GetSwitchValuePath(
-        chromeos::switches::kGAIAAuthExtensionManifest);
-    std::string manifest;
-    if (!base::ReadFileToString(manifest_path, &manifest))
-      NOTREACHED();
-    component_loader->Add(manifest,
-                          base::FilePath(FILE_PATH_LITERAL("gaia_auth")));
-    return;
-  }
-
   int manifest_resource_id = IDR_GAIA_AUTH_MANIFEST;
   if (chromeos::system::InputDeviceSettings::Get()
           ->ForceKeyboardDrivenUINavigation()) {
@@ -71,7 +59,7 @@ void LoadGaiaAuthExtension(BrowserContext* context) {
     manifest_resource_id = IDR_GAIA_AUTH_SAML_MANIFEST;
   }
 #else
-  int manifest_resource_id = IDR_GAIA_AUTH_DESKTOP_MANIFEST;
+  int manifest_resource_id = IDR_GAIA_AUTH_SAML_MANIFEST;
 #endif
 
   component_loader->Add(manifest_resource_id,
@@ -79,7 +67,7 @@ void LoadGaiaAuthExtension(BrowserContext* context) {
 }
 
 void UnloadGaiaAuthExtension(BrowserContext* context) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   content::StoragePartition* partition =
       content::BrowserContext::GetStoragePartitionForSite(

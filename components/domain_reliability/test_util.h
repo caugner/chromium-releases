@@ -43,9 +43,10 @@ class MockUploader : public DomainReliabilityUploader {
       UploadRequestCallback;
 
   MockUploader(const UploadRequestCallback& callback);
+
   virtual ~MockUploader();
 
-  // DomainREliabilityUploader implementation:
+  // DomainReliabilityUploader implementation:
   virtual void UploadReport(const std::string& report_json,
                             const GURL& upload_url,
                             const UploadCallback& callback) OVERRIDE;
@@ -57,13 +58,15 @@ class MockUploader : public DomainReliabilityUploader {
 class MockTime : public MockableTime {
  public:
   MockTime();
+
   // N.B.: Tasks (and therefore Timers) scheduled to run in the future will
   // never be run if MockTime is destroyed before the mock time is advanced
   // to their scheduled time.
   virtual ~MockTime();
 
   // MockableTime implementation:
-  virtual base::TimeTicks Now() OVERRIDE;
+  virtual base::Time Now() OVERRIDE;
+  virtual base::TimeTicks NowTicks() OVERRIDE;
   virtual scoped_ptr<MockableTime::Timer> CreateTimer() OVERRIDE;
 
   // Pretends that |delta| has passed, and runs tasks that would've happened
@@ -98,10 +101,13 @@ class MockTime : public MockableTime {
 
   typedef std::map<TaskKey, base::Closure, TaskKeyCompare> TaskMap;
 
-  int elapsed_sec() { return (now_ - epoch_).InSeconds(); }
+  void AdvanceToInternal(base::TimeTicks target_ticks);
 
-  base::TimeTicks now_;
-  base::TimeTicks epoch_;
+  int elapsed_sec() { return (now_ticks_ - epoch_ticks_).InSeconds(); }
+
+  base::Time now_;
+  base::TimeTicks now_ticks_;
+  base::TimeTicks epoch_ticks_;
   int task_sequence_number_;
   TaskMap tasks_;
 };

@@ -13,7 +13,7 @@
 #include "chrome/common/extensions/api/app_current_window_internal.h"
 #include "chrome/common/extensions/api/app_window.h"
 #include "chrome/common/extensions/features/feature_channel.h"
-#include "chrome/common/extensions/features/simple_feature.h"
+#include "extensions/common/features/simple_feature.h"
 #include "extensions/common/switches.h"
 #include "third_party/skia/include/core/SkRegion.h"
 
@@ -44,6 +44,9 @@ const char kNoAssociatedAppWindow[] =
 
 const char kDevChannelOnly[] =
     "This function is currently only available in the Dev channel.";
+
+const char kBetaChannelOnly[] =
+    "This function is currently only available in the Beta or Dev channel.";
 
 const char kRequiresFramelessWindow[] =
     "This function requires a frameless window (frame:none).";
@@ -117,7 +120,7 @@ BoundsType GetBoundsType(const std::string& type_as_string) {
 
 }  // namespace bounds
 
-bool AppCurrentWindowInternalExtensionFunction::RunImpl() {
+bool AppCurrentWindowInternalExtensionFunction::RunSync() {
   apps::AppWindowRegistry* registry =
       apps::AppWindowRegistry::Get(GetProfile());
   DCHECK(registry);
@@ -201,12 +204,6 @@ bool AppCurrentWindowInternalSetBoundsFunction::RunWithWindow(
     return false;
   }
 
-  if (bounds_type != bounds::DEPRECATED_BOUNDS &&
-      GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV) {
-    error_ = kDevChannelOnly;
-    return false;
-  }
-
   // Start with the current bounds, and change any values that are specified in
   // the incoming parameters.
   gfx::Rect original_window_bounds = window->GetBaseWindow()->GetBounds();
@@ -262,11 +259,6 @@ bool AppCurrentWindowInternalSetBoundsFunction::RunWithWindow(
 
 bool AppCurrentWindowInternalSetSizeConstraintsFunction::RunWithWindow(
     AppWindow* window) {
-  if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV) {
-    error_ = kDevChannelOnly;
-    return false;
-  }
-
   scoped_ptr<SetSizeConstraints::Params> params(
       SetSizeConstraints::Params::Create(*args_));
   CHECK(params.get());
@@ -395,12 +387,12 @@ bool AppCurrentWindowInternalSetShapeFunction::RunWithWindow(
     "8B344D9E8A4C505EF82A0DBBC25B8BD1F984E777",
     "E06AFCB1EB0EFD237824CC4AC8FDD3D43E8BC868"
   };
-  if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV &&
-      !SimpleFeature::IsIdInWhitelist(
+  if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_BETA &&
+      !SimpleFeature::IsIdInList(
           GetExtension()->id(),
           std::set<std::string>(whitelist,
                                 whitelist + arraysize(whitelist)))) {
-    error_ = kDevChannelOnly;
+    error_ = kBetaChannelOnly;
     return false;
   }
 

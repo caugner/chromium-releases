@@ -12,7 +12,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
@@ -21,6 +20,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/infobars/core/infobar.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/page_navigator.h"
@@ -63,8 +63,7 @@ class AutoLoginRedirector : public UbertokenConsumer,
   virtual void OnUbertokenFailure(const GoogleServiceAuthError& error) OVERRIDE;
 
   // Implementation of content::WebContentsObserver
-  virtual void WebContentsDestroyed(
-      content::WebContents* web_contents) OVERRIDE;
+  virtual void WebContentsDestroyed() OVERRIDE;
 
   // Redirect tab to MergeSession URL, logging the user in and navigating
   // to the desired page.
@@ -97,8 +96,7 @@ AutoLoginRedirector::AutoLoginRedirector(
 AutoLoginRedirector::~AutoLoginRedirector() {
 }
 
-void AutoLoginRedirector::WebContentsDestroyed(
-    content::WebContents* web_contents) {
+void AutoLoginRedirector::WebContentsDestroyed() {
   // The WebContents that started this has been destroyed. The request must be
   // cancelled and this object must be deleted.
   ubertoken_fetcher_.reset();
@@ -179,6 +177,11 @@ AutoLoginInfoBarDelegate::~AutoLoginInfoBarDelegate() {
     RecordHistogramAction(IGNORED);
 }
 
+void AutoLoginInfoBarDelegate::RecordHistogramAction(Actions action) {
+  UMA_HISTOGRAM_ENUMERATION("AutoLogin.Regular", action,
+                            HISTOGRAM_BOUNDING_VALUE);
+}
+
 void AutoLoginInfoBarDelegate::InfoBarDismissed() {
   RecordHistogramAction(DISMISSED);
   button_pressed_ = true;
@@ -188,7 +191,8 @@ int AutoLoginInfoBarDelegate::GetIconID() const {
   return IDR_INFOBAR_AUTOLOGIN;
 }
 
-InfoBarDelegate::Type AutoLoginInfoBarDelegate::GetInfoBarType() const {
+infobars::InfoBarDelegate::Type AutoLoginInfoBarDelegate::GetInfoBarType()
+    const {
   return PAGE_ACTION_TYPE;
 }
 
@@ -210,15 +214,19 @@ base::string16 AutoLoginInfoBarDelegate::GetButtonLabel(
 
 bool AutoLoginInfoBarDelegate::Accept() {
   // AutoLoginRedirector deletes itself.
-  new AutoLoginRedirector(web_contents(), params_.header.args);
+  content::WebContents* web_contents =
+      InfoBarService::WebContentsFromInfoBar(infobar());
+  new AutoLoginRedirector(web_contents, params_.header.args);
   RecordHistogramAction(ACCEPTED);
   button_pressed_ = true;
   return true;
 }
 
 bool AutoLoginInfoBarDelegate::Cancel() {
+  content::WebContents* web_contents =
+      InfoBarService::WebContentsFromInfoBar(infobar());
   PrefService* pref_service = Profile::FromBrowserContext(
-      web_contents()->GetBrowserContext())->GetPrefs();
+      web_contents->GetBrowserContext())->GetPrefs();
   pref_service->SetBoolean(prefs::kAutologinEnabled, false);
   RecordHistogramAction(REJECTED);
   button_pressed_ = true;
@@ -227,9 +235,4 @@ bool AutoLoginInfoBarDelegate::Cancel() {
 
 void AutoLoginInfoBarDelegate::GoogleSignedOut(const std::string& username) {
   infobar()->RemoveSelf();
-}
-
-void AutoLoginInfoBarDelegate::RecordHistogramAction(Actions action) {
-  UMA_HISTOGRAM_ENUMERATION("AutoLogin.Regular", action,
-                            HISTOGRAM_BOUNDING_VALUE);
 }

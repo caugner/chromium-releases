@@ -11,8 +11,10 @@
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
+#include "chrome/common/instant_types.h"
 #include "chrome/common/omnibox_focus_state.h"
 #include "content/public/common/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
@@ -59,7 +61,8 @@ class OmniboxEditModel {
           bool is_keyword_hint,
           bool url_replacement_enabled,
           OmniboxFocusState focus_state,
-          FocusSource focus_source);
+          FocusSource focus_source,
+          const AutocompleteInput& autocomplete_input);
     ~State();
 
     bool user_input_in_progress;
@@ -70,6 +73,7 @@ class OmniboxEditModel {
     bool url_replacement_enabled;
     OmniboxFocusState focus_state;
     FocusSource focus_source;
+    const AutocompleteInput autocomplete_input;
   };
 
   OmniboxEditModel(OmniboxView* view,
@@ -170,7 +174,7 @@ class OmniboxEditModel {
 
   // Directs the popup to start autocomplete.
   void StartAutocomplete(bool has_selected_text,
-                         bool prevent_inline_autocomplete) const;
+                         bool prevent_inline_autocomplete);
 
   // Closes the popup and cancels any pending asynchronous queries.
   void StopAutocomplete();
@@ -328,15 +332,8 @@ class OmniboxEditModel {
   // Called when the current match has changed in the OmniboxController.
   void OnCurrentMatchChanged();
 
-  // TODO(beaudoin): We need this to allow OmniboxController access the
-  // InstantController via OmniboxEditController, because the only valid pointer
-  // to InstantController is kept in Browser. We should try to get rid of this,
-  // maybe by ensuring InstantController lives as long as Browser.
-  //
-  // TODO(kmadhusu): Remove this function and update the callers.
-  //
-  // This method is deprecated and should not be used in new code.
-  InstantController* GetInstantController() const;
+  // Sends the current SearchProvider suggestion to the Instant page if any.
+  void SetSuggestionToPrefetch(const InstantSuggestion& suggestion);
 
   // Name of the histogram tracking cut or copy omnibox commands.
   static const char kCutOrCopyAllTextHistogram[];
@@ -556,6 +553,11 @@ class OmniboxEditModel {
   // allow this when CreatedKeywordSearchByInsertingSpaceInMiddle() is true.
   // This has no effect if we're already in keyword mode.
   bool allow_exact_keyword_match_;
+
+  // The input that was sent to the AutocompleteController. Since no
+  // autocomplete query is started after a tab switch, it is possible for this
+  // |input_| to differ from the one currently stored in AutocompleteController.
+  AutocompleteInput input_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxEditModel);
 };

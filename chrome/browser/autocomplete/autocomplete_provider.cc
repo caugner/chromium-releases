@@ -9,11 +9,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/net_util.h"
 #include "url/gurl.h"
@@ -156,7 +156,7 @@ bool AutocompleteProvider::FixupUserInput(AutocompleteInput* input) {
     std::string original_hostname =
         base::UTF16ToUTF8(input_text.substr(input->parts().host.begin,
                                             input->parts().host.len));
-    const url_parse::Parsed& parts =
+    const url::Parsed& parts =
         canonical_gurl.parsed_for_possibly_invalid_spec();
     // parts.host must not be empty when HostIsIPAddress() is true.
     DCHECK(parts.host.is_nonempty());
@@ -198,7 +198,7 @@ bool AutocompleteProvider::FixupUserInput(AutocompleteInput* input) {
   else if (num_output_slashes > num_input_slashes)
     output.erase(output.length() - num_output_slashes + num_input_slashes);
 
-  url_parse::Parsed parts;
+  url::Parsed parts;
   URLFixerUpper::SegmentURL(output, &parts);
   input->UpdateText(output, base::string16::npos, parts);
   return !output.empty();
@@ -210,11 +210,11 @@ size_t AutocompleteProvider::TrimHttpPrefix(base::string16* url) {
   if (!AutocompleteInput::HasHTTPScheme(*url))
     return 0;
   size_t scheme_pos =
-      url->find(base::ASCIIToUTF16(content::kHttpScheme) + base::char16(':'));
+      url->find(base::ASCIIToUTF16(url::kHttpScheme) + base::char16(':'));
   DCHECK_NE(base::string16::npos, scheme_pos);
 
   // Erase scheme plus up to two slashes.
-  size_t prefix_end = scheme_pos + strlen(content::kHttpScheme) + 1;
+  size_t prefix_end = scheme_pos + strlen(url::kHttpScheme) + 1;
   const size_t after_slashes = std::min(url->length(), prefix_end + 2);
   while ((prefix_end < after_slashes) && ((*url)[prefix_end] == '/'))
     ++prefix_end;

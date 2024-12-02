@@ -45,8 +45,8 @@
         'chrome_gtk_menu_subclasses.h',
         'g_object_destructor_filo.cc',
         'g_object_destructor_filo.h',
-        'gconf_titlebar_listener.cc',
-        'gconf_titlebar_listener.h',
+        'gconf_listener.cc',
+        'gconf_listener.h',
         'gtk2_border.cc',
         'gtk2_border.h',
         'gtk2_event_loop.cc',
@@ -84,8 +84,15 @@
       'conditions': [
         ['use_gconf==0', {
           'sources!': [
-            'gconf_titlebar_listener.cc',
-            'gconf_titlebar_listener.h',
+            'gconf_listener.cc',
+            'gconf_listener.h',
+          ],
+        }],
+        [ 'clang==1', {
+          # G_DEFINE_TYPE automatically generates a *get_instance_private inline function after glib 2.37.
+          # That's unused. Prevent to complain about it.
+          'cflags': [
+            '-Wno-unused-function',
           ],
         }],
       ],

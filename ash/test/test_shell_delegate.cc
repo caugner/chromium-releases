@@ -8,10 +8,9 @@
 
 #include "ash/default_accessibility_delegate.h"
 #include "ash/gpu_support_stub.h"
-#include "ash/host/window_tree_host_factory.h"
 #include "ash/media_delegate.h"
 #include "ash/new_window_delegate.h"
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell/keyboard_controller_proxy_stub.h"
 #include "ash/shell_window_ids.h"
@@ -28,11 +27,21 @@
 #include "ui/app_list/test/app_list_test_view_delegate.h"
 #include "ui/aura/window.h"
 
+#if defined(OS_CHROMEOS)
+#include "ash/system/tray/system_tray_notifier.h"
+#endif
+
 namespace ash {
 namespace test {
 namespace {
 
 class NewWindowDelegateImpl : public NewWindowDelegate {
+ public:
+  NewWindowDelegateImpl() {}
+  virtual ~NewWindowDelegateImpl() {}
+
+ private:
+  // NewWindowDelegate:
   virtual void NewTab() OVERRIDE {}
   virtual void NewWindow(bool incognito) OVERRIDE {}
   virtual void OpenFileManager() OVERRIDE {}
@@ -41,13 +50,30 @@ class NewWindowDelegateImpl : public NewWindowDelegate {
   virtual void ShowKeyboardOverlay() OVERRIDE {}
   virtual void ShowTaskManager() OVERRIDE {}
   virtual void OpenFeedbackPage() OVERRIDE {}
+
+  DISALLOW_COPY_AND_ASSIGN(NewWindowDelegateImpl);
 };
 
 class MediaDelegateImpl : public MediaDelegate {
  public:
+  MediaDelegateImpl() : state_(MEDIA_CAPTURE_NONE) {}
+  virtual ~MediaDelegateImpl() {}
+
+  void set_media_capture_state(MediaCaptureState state) { state_ = state; }
+
+ private:
+  // MediaDelegate:
   virtual void HandleMediaNextTrack() OVERRIDE {}
   virtual void HandleMediaPlayPause() OVERRIDE {}
   virtual void HandleMediaPrevTrack() OVERRIDE {}
+  virtual MediaCaptureState GetMediaCaptureState(
+      content::BrowserContext* context) OVERRIDE {
+    return state_;
+  }
+
+  MediaCaptureState state_;
+
+  DISALLOW_COPY_AND_ASSIGN(MediaDelegateImpl);
 };
 
 }  // namespace
@@ -77,6 +103,10 @@ bool TestShellDelegate::IsRunningInForcedAppMode() const {
   return false;
 }
 
+bool TestShellDelegate::IsMultiAccountEnabled() const {
+  return false;
+}
+
 void TestShellDelegate::PreInit() {
 }
 
@@ -90,6 +120,17 @@ void TestShellDelegate::Exit() {
 keyboard::KeyboardControllerProxy*
     TestShellDelegate::CreateKeyboardControllerProxy() {
   return new KeyboardControllerProxyStub();
+}
+
+void TestShellDelegate::VirtualKeyboardActivated(bool activated) {
+}
+
+void TestShellDelegate::AddVirtualKeyboardStateObserver(
+    VirtualKeyboardStateObserver* observer) {
+}
+
+void TestShellDelegate::RemoveVirtualKeyboardStateObserver(
+    VirtualKeyboardStateObserver* observer) {
 }
 
 content::BrowserContext* TestShellDelegate::GetActiveBrowserContext() {
@@ -120,7 +161,7 @@ SessionStateDelegate* TestShellDelegate::CreateSessionStateDelegate() {
 }
 
 AccessibilityDelegate* TestShellDelegate::CreateAccessibilityDelegate() {
-  return new internal::DefaultAccessibilityDelegate();
+  return new DefaultAccessibilityDelegate();
 }
 
 NewWindowDelegate* TestShellDelegate::CreateNewWindowDelegate() {
@@ -138,10 +179,6 @@ ui::MenuModel* TestShellDelegate::CreateContextMenu(
   return NULL;
 }
 
-WindowTreeHostFactory* TestShellDelegate::CreateWindowTreeHostFactory() {
-  return WindowTreeHostFactory::Create();
-}
-
 GPUSupport* TestShellDelegate::CreateGPUSupport() {
   // Real GPU support depends on src/content, so just use a stub.
   return new GPUSupportStub;
@@ -151,8 +188,13 @@ base::string16 TestShellDelegate::GetProductName() const {
   return base::string16();
 }
 
-TestSessionStateDelegate* TestShellDelegate::test_session_state_delegate() {
-  return test_session_state_delegate_;
+void TestShellDelegate::SetMediaCaptureState(MediaCaptureState state) {
+#if defined(OS_CHROMEOS)
+  Shell* shell = Shell::GetInstance();
+  static_cast<MediaDelegateImpl*>(shell->media_delegate())
+      ->set_media_capture_state(state);
+  shell->system_tray_notifier()->NotifyMediaCaptureChanged();
+#endif
 }
 
 }  // namespace test

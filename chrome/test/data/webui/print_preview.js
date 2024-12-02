@@ -80,9 +80,9 @@ PrintPreviewWebUITest.prototype = {
       cloudprint.CloudPrintInterface = CloudPrintInterfaceStub;
       cloudprint.CloudPrintInterface.EventType = oldCpInterfaceEventType;
 
-      print_preview.PreviewArea.prototype.checkPluginCompatibility_ =
+      print_preview.PreviewArea.prototype.getPluginType_ =
           function() {
-        return false;
+        return print_preview.PreviewArea.PluginType_.NONE;
       };
     }.bind(this));
   },
@@ -721,7 +721,7 @@ TEST_F('PrintPreviewWebUITest', 'TestPrinterChangeUpdatesPreview', function() {
   previewGenerator.expects(exactly(6)).requestPreview();
 
   var barDestination;
-  var destinations = printPreview.destinationStore_.destinations;
+  var destinations = printPreview.destinationStore_.destinations();
   for (var destination, i = 0; destination = destinations[i]; i++) {
     if (destination.id == 'BarDevice') {
       barDestination = destination;

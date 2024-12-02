@@ -22,9 +22,6 @@ public class TraceEvent {
     private static volatile boolean sEnabled = false;
 
     private static class BasicLooperMonitor implements Printer {
-        private static final String DISPATCH_EVENT_NAME =
-                "Looper.dispatchMessage";
-
         @Override
         public void println(final String line) {
             if (line.startsWith(">")) {
@@ -36,11 +33,11 @@ public class TraceEvent {
         }
 
         void beginHandling(final String line) {
-            TraceEvent.begin(DISPATCH_EVENT_NAME, line);
+            if (sEnabled) nativeBeginToplevel();
         }
 
         void endHandling(final String line) {
-            TraceEvent.end(DISPATCH_EVENT_NAME);
+            if (sEnabled) nativeEndToplevel();
         }
     }
 
@@ -165,16 +162,22 @@ public class TraceEvent {
                         new IdleTracingLooperMonitor() : new BasicLooperMonitor();
     }
 
+
     /**
-     * Calling this will cause enabled() to be updated to match that set on the native side.
-     * The native library must be loaded before calling this method.
+     * Register an enabled observer, such that java traces are always enabled with native.
      */
-    public static void setEnabledToMatchNative() {
-        boolean enabled = nativeTraceEnabled();
-        if (sEnabled == enabled) return;
-        sEnabled = enabled;
-        ThreadUtils.getUiThreadLooper().setMessageLogging(
-            enabled() ? LooperMonitorHolder.sInstance : null);
+    public static void registerNativeEnabledObserver() {
+        nativeRegisterEnabledObserver();
+    }
+
+    /**
+     * Notification from native that tracing is enabled/disabled.
+     */
+    @CalledByNative
+    public static void setEnabled(boolean enabled) {
+       sEnabled = enabled;
+       ThreadUtils.getUiThreadLooper().setMessageLogging(
+           enabled ? LooperMonitorHolder.sInstance : null);
     }
 
     /**
@@ -183,12 +186,12 @@ public class TraceEvent {
      * systrace, this is for WebView only.
      */
     public static void setATraceEnabled(boolean enabled) {
+        if (sEnabled == enabled) return;
         if (enabled) {
             nativeStartATrace();
         } else {
             nativeStopATrace();
         }
-        setEnabledToMatchNative();
     }
 
     /**
@@ -343,12 +346,14 @@ public class TraceEvent {
         return stack[4].getClassName() + "." + stack[4].getMethodName();
     }
 
-    private static native boolean nativeTraceEnabled();
+    private static native void nativeRegisterEnabledObserver();
     private static native void nativeStartATrace();
     private static native void nativeStopATrace();
     private static native void nativeInstant(String name, String arg);
     private static native void nativeBegin(String name, String arg);
     private static native void nativeEnd(String name, String arg);
+    private static native void nativeBeginToplevel();
+    private static native void nativeEndToplevel();
     private static native void nativeStartAsync(String name, long id, String arg);
     private static native void nativeFinishAsync(String name, long id, String arg);
 }

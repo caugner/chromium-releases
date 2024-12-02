@@ -16,8 +16,9 @@
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/layout.h"
-#include "ui/base/x/x11_util.h"
-#include "ui/display/x11/edid_parser_x11.h"
+#include "ui/display/util/display_util.h"
+#include "ui/display/util/x11/edid_parser_x11.h"
+#include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/display_observer.h"
 #include "ui/gfx/native_widget_types.h"
@@ -25,6 +26,7 @@
 #include "ui/gfx/x/x11_types.h"
 #include "ui/views/widget/desktop_aura/desktop_screen.h"
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host_x11.h"
+#include "ui/views/widget/desktop_aura/x11_topmost_window_finder.h"
 
 namespace {
 
@@ -48,68 +50,20 @@ std::vector<gfx::Display> GetFallbackDisplayList() {
   ::Screen* screen = DefaultScreenOfDisplay(display);
   int width = WidthOfScreen(screen);
   int height = HeightOfScreen(screen);
-  int mm_width = WidthMMOfScreen(screen);
-  int mm_height = HeightMMOfScreen(screen);
+  gfx::Size physical_size(WidthMMOfScreen(screen), HeightMMOfScreen(screen));
 
   gfx::Rect bounds_in_pixels(0, 0, width, height);
   gfx::Display gfx_display(0, bounds_in_pixels);
   if (!gfx::Display::HasForceDeviceScaleFactor() &&
-      !ui::IsXDisplaySizeBlackListed(mm_width, mm_height)) {
-    float device_scale_factor = GetDeviceScaleFactor(width, mm_width);
+      !ui::IsDisplaySizeBlackListed(physical_size)) {
+    float device_scale_factor = GetDeviceScaleFactor(
+        width, physical_size.width());
     DCHECK_LE(1.0f, device_scale_factor);
     gfx_display.SetScaleAndBounds(device_scale_factor, bounds_in_pixels);
   }
 
   return std::vector<gfx::Display>(1, gfx_display);
 }
-
-// Helper class to GetWindowAtScreenPoint() which returns the topmost window at
-// the location passed to FindAt(). NULL is returned if a window which does not
-// belong to Chromium is topmost at the passed in location.
-class ToplevelWindowFinder : public ui::EnumerateWindowsDelegate {
- public:
-  ToplevelWindowFinder() : toplevel_(NULL) {
-  }
-
-  virtual ~ToplevelWindowFinder() {
-  }
-
-  aura::Window* FindAt(const gfx::Point& screen_loc) {
-    screen_loc_ = screen_loc;
-    ui::EnumerateTopLevelWindows(this);
-    return toplevel_;
-  }
-
- protected:
-  virtual bool ShouldStopIterating(XID xid) OVERRIDE {
-   if (!ui::IsWindowVisible(xid))
-     return false;
-
-    aura::Window* window =
-        views::DesktopWindowTreeHostX11::GetContentWindowForXID(xid);
-    if (window) {
-      // Currently |window|->IsVisible() always returns true.
-      // TODO(pkotwicz): Fix this. crbug.com/353038
-      if (window->IsVisible() &&
-          window->GetBoundsInScreen().Contains(screen_loc_)) {
-        toplevel_ = window;
-        return true;
-      }
-      return false;
-    }
-
-    if (ui::WindowContainsPoint(xid, screen_loc_)) {
-      // toplevel_ = NULL
-      return true;
-    }
-    return false;
-  }
-
-  gfx::Point screen_loc_;
-  aura::Window* toplevel_;
-
-  DISALLOW_COPY_AND_ASSIGN(ToplevelWindowFinder);
-};
 
 }  // namespace
 
@@ -119,7 +73,7 @@ namespace views {
 // DesktopScreenX11, public:
 
 DesktopScreenX11::DesktopScreenX11()
-    : xdisplay_(base::MessagePumpX11::GetDefaultXDisplay()),
+    : xdisplay_(gfx::GetXDisplay()),
       x_root_window_(DefaultRootWindow(xdisplay_)),
       has_xrandr_(false),
       xrandr_event_base_(0) {
@@ -136,7 +90,8 @@ DesktopScreenX11::DesktopScreenX11()
     int error_base_ignored = 0;
     XRRQueryExtension(xdisplay_, &xrandr_event_base_, &error_base_ignored);
 
-    base::MessagePumpX11::Current()->AddDispatcherForRootWindow(this);
+    if (ui::PlatformEventSource::GetInstance())
+      ui::PlatformEventSource::GetInstance()->AddPlatformEventDispatcher(this);
     XRRSelectInput(xdisplay_,
                    x_root_window_,
                    RRScreenChangeNotifyMask |
@@ -150,8 +105,8 @@ DesktopScreenX11::DesktopScreenX11()
 }
 
 DesktopScreenX11::~DesktopScreenX11() {
-  if (has_xrandr_)
-    base::MessagePumpX11::Current()->RemoveDispatcherForRootWindow(this);
+  if (has_xrandr_ && ui::PlatformEventSource::GetInstance())
+    ui::PlatformEventSource::GetInstance()->RemovePlatformEventDispatcher(this);
 }
 
 void DesktopScreenX11::ProcessDisplayChange(
@@ -234,8 +189,8 @@ gfx::NativeWindow DesktopScreenX11::GetWindowUnderCursor() {
 
 gfx::NativeWindow DesktopScreenX11::GetWindowAtScreenPoint(
     const gfx::Point& point) {
-  ToplevelWindowFinder finder;
-  return finder.FindAt(point);
+  X11TopmostWindowFinder finder;
+  return finder.FindLocalProcessWindowAt(point, std::set<aura::Window*>());
 }
 
 int DesktopScreenX11::GetNumDisplays() const {
@@ -308,7 +263,12 @@ void DesktopScreenX11::RemoveObserver(gfx::DisplayObserver* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
-uint32_t DesktopScreenX11::Dispatch(const base::NativeEvent& event) {
+bool DesktopScreenX11::CanDispatchEvent(const ui::PlatformEvent& event) {
+  return event->type - xrandr_event_base_ == RRScreenChangeNotify ||
+         event->type - xrandr_event_base_ == RRNotify;
+}
+
+uint32_t DesktopScreenX11::DispatchEvent(const ui::PlatformEvent& event) {
   if (event->type - xrandr_event_base_ == RRScreenChangeNotify) {
     // Pass the event through to xlib.
     XRRUpdateConfiguration(event);
@@ -325,9 +285,11 @@ uint32_t DesktopScreenX11::Dispatch(const base::NativeEvent& event) {
           this,
           &DesktopScreenX11::ConfigureTimerFired);
     }
+  } else {
+    NOTREACHED();
   }
 
-  return POST_DISPATCH_NONE;
+  return ui::POST_DISPATCH_NONE;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -335,7 +297,7 @@ uint32_t DesktopScreenX11::Dispatch(const base::NativeEvent& event) {
 
 DesktopScreenX11::DesktopScreenX11(
     const std::vector<gfx::Display>& test_displays)
-    : xdisplay_(base::MessagePumpX11::GetDefaultXDisplay()),
+    : xdisplay_(gfx::GetXDisplay()),
       x_root_window_(DefaultRootWindow(xdisplay_)),
       has_xrandr_(false),
       xrandr_event_base_(0),
@@ -388,8 +350,8 @@ std::vector<gfx::Display> DesktopScreenX11::BuildDisplaysFromXRandRInfo() {
       gfx::Display display(display_id, crtc_bounds);
 
       if (!gfx::Display::HasForceDeviceScaleFactor()) {
-        if (i == 0 && !ui::IsXDisplaySizeBlackListed(output_info->mm_width,
-                                                     output_info->mm_height)) {
+        if (i == 0 && !ui::IsDisplaySizeBlackListed(
+            gfx::Size(output_info->mm_width, output_info->mm_height))) {
           // As per display scale factor is not supported right now,
           // the primary display's scale factor is always used.
           device_scale_factor = GetDeviceScaleFactor(crtc->width,

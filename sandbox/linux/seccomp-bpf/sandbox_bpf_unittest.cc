@@ -21,6 +21,7 @@
 #include <ostream>
 
 #include "base/bind.h"
+#include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "sandbox/linux/seccomp-bpf/bpf_tests.h"
@@ -99,7 +100,7 @@ SANDBOX_TEST(SandboxBPF, DISABLE_ON_TSAN(VerboseAPITesting)) {
     pid_t test_var = 0;
     SandboxBPF sandbox;
     sandbox.SetSandboxPolicyDeprecated(VerboseAPITestingPolicy, &test_var);
-    sandbox.StartSandbox();
+    BPF_ASSERT(sandbox.StartSandbox(SandboxBPF::PROCESS_SINGLE_THREADED));
 
     BPF_ASSERT(test_var == 0);
     BPF_ASSERT(syscall(__NR_getpid) == 0);
@@ -115,7 +116,10 @@ SANDBOX_TEST(SandboxBPF, DISABLE_ON_TSAN(VerboseAPITesting)) {
 
 // A simple blacklist test
 
-ErrorCode BlacklistNanosleepPolicy(SandboxBPF*, int sysno, void*) {
+ErrorCode BlacklistNanosleepPolicy(SandboxBPF*, int sysno, void* aux) {
+  // Since no type was specified in BPF_TEST as a fourth argument,
+  // |aux| must be NULL here.
+  BPF_ASSERT(NULL == aux);
   if (!SandboxBPF::IsValidSyscallNumber(sysno)) {
     // FIXME: we should really not have to do that in a trivial policy
     return ErrorCode(ENOSYS);
@@ -136,7 +140,6 @@ BPF_TEST(SandboxBPF, ApplyBasicBlacklistPolicy, BlacklistNanosleepPolicy) {
   BPF_ASSERT(syscall(__NR_nanosleep, &ts, NULL) == -1);
   BPF_ASSERT(errno == EACCES);
 }
-
 // Now do a simple whitelist test
 
 ErrorCode WhitelistGetpidPolicy(SandboxBPF*, int sysno, void*) {
@@ -161,7 +164,6 @@ BPF_TEST(SandboxBPF, ApplyBasicWhitelistPolicy, WhitelistGetpidPolicy) {
 }
 
 // A simple blacklist policy, with a SIGSYS handler
-
 intptr_t EnomemHandler(const struct arch_seccomp_data& args, void* aux) {
   // We also check that the auxiliary data is correct
   SANDBOX_ASSERT(aux);
@@ -171,7 +173,7 @@ intptr_t EnomemHandler(const struct arch_seccomp_data& args, void* aux) {
 
 ErrorCode BlacklistNanosleepPolicySigsys(SandboxBPF* sandbox,
                                          int sysno,
-                                         void* aux) {
+                                         int* aux) {
   if (!SandboxBPF::IsValidSyscallNumber(sysno)) {
     // FIXME: we should really not have to do that in a trivial policy
     return ErrorCode(ENOSYS);
@@ -188,20 +190,20 @@ ErrorCode BlacklistNanosleepPolicySigsys(SandboxBPF* sandbox,
 BPF_TEST(SandboxBPF,
          BasicBlacklistWithSigsys,
          BlacklistNanosleepPolicySigsys,
-         int /* BPF_AUX */) {
+         int /* (*BPF_AUX) */) {
   // getpid() should work properly
   errno = 0;
   BPF_ASSERT(syscall(__NR_getpid) > 0);
   BPF_ASSERT(errno == 0);
 
   // Our Auxiliary Data, should be reset by the signal handler
-  BPF_AUX = -1;
+  *BPF_AUX = -1;
   const struct timespec ts = {0, 0};
   BPF_ASSERT(syscall(__NR_nanosleep, &ts, NULL) == -1);
   BPF_ASSERT(errno == ENOMEM);
 
   // We expect the signal handler to modify AuxData
-  BPF_ASSERT(BPF_AUX == kExpectedReturnValue);
+  BPF_ASSERT(*BPF_AUX == kExpectedReturnValue);
 }
 
 // A simple test that verifies we can return arbitrary errno values.
@@ -213,7 +215,11 @@ ErrorCode ErrnoTestPolicy(SandboxBPF*, int sysno, void*) {
   }
 
   switch (sysno) {
+#if defined(ANDROID)
+    case __NR_dup3:    // dup2 is a wrapper of dup3 in android
+#else
     case __NR_dup2:
+#endif
       // Pretend that dup2() worked, but don't actually do anything.
       return ErrorCode(0);
     case __NR_setuid:
@@ -326,7 +332,7 @@ BPF_TEST(SandboxBPF, StackingPolicy, StackingPolicyPartOne) {
   // restrict filters, but we cannot relax existing filters.
   SandboxBPF sandbox;
   sandbox.SetSandboxPolicyDeprecated(StackingPolicyPartTwo, NULL);
-  sandbox.StartSandbox();
+  BPF_ASSERT(sandbox.StartSandbox(SandboxBPF::PROCESS_SINGLE_THREADED));
 
   errno = 0;
   BPF_ASSERT(syscall(__NR_getppid, 0) == -1);
@@ -356,13 +362,6 @@ ErrorCode SyntheticPolicy(SandboxBPF*, int sysno, void*) {
     // FIXME: we should really not have to do that in a trivial policy
     return ErrorCode(ENOSYS);
   }
-
-// TODO(jorgelo): remove this once the new code generator lands.
-#if defined(__arm__)
-  if (sysno > static_cast<int>(MAX_PUBLIC_SYSCALL)) {
-    return ErrorCode(ENOSYS);
-  }
-#endif
 
   if (sysno == __NR_exit_group || sysno == __NR_write) {
     // exit_group() is special, we really need it to work.
@@ -447,7 +446,7 @@ intptr_t CountSyscalls(const struct arch_seccomp_data& args, void* aux) {
   return SandboxBPF::ForwardSyscall(args);
 }
 
-ErrorCode GreyListedPolicy(SandboxBPF* sandbox, int sysno, void* aux) {
+ErrorCode GreyListedPolicy(SandboxBPF* sandbox, int sysno, int* aux) {
   // The use of UnsafeTrap() causes us to print a warning message. This is
   // generally desirable, but it results in the unittest failing, as it doesn't
   // expect any messages on "stderr". So, temporarily disable messages. The
@@ -480,12 +479,12 @@ ErrorCode GreyListedPolicy(SandboxBPF* sandbox, int sysno, void* aux) {
   }
 }
 
-BPF_TEST(SandboxBPF, GreyListedPolicy, GreyListedPolicy, int /* BPF_AUX */) {
+BPF_TEST(SandboxBPF, GreyListedPolicy, GreyListedPolicy, int /* (*BPF_AUX) */) {
   BPF_ASSERT(syscall(__NR_getpid) == -1);
   BPF_ASSERT(errno == EPERM);
-  BPF_ASSERT(BPF_AUX == 0);
+  BPF_ASSERT(*BPF_AUX == 0);
   BPF_ASSERT(syscall(__NR_geteuid) == syscall(__NR_getuid));
-  BPF_ASSERT(BPF_AUX == 2);
+  BPF_ASSERT(*BPF_AUX == 2);
   char name[17] = {};
   BPF_ASSERT(!syscall(__NR_prctl,
                       PR_GET_NAME,
@@ -493,7 +492,7 @@ BPF_TEST(SandboxBPF, GreyListedPolicy, GreyListedPolicy, int /* BPF_AUX */) {
                       (void*)NULL,
                       (void*)NULL,
                       (void*)NULL));
-  BPF_ASSERT(BPF_AUX == 3);
+  BPF_ASSERT(*BPF_AUX == 3);
   BPF_ASSERT(*name);
 }
 
@@ -703,9 +702,15 @@ intptr_t BrokerOpenTrapHandler(const struct arch_seccomp_data& args,
   BPF_ASSERT(aux);
   BrokerProcess* broker_process = static_cast<BrokerProcess*>(aux);
   switch (args.nr) {
+#if defined(ANDROID)
+    case __NR_faccessat:    // access is a wrapper of faccessat in android
+      return broker_process->Access(reinterpret_cast<const char*>(args.args[1]),
+                                    static_cast<int>(args.args[2]));
+#else
     case __NR_access:
       return broker_process->Access(reinterpret_cast<const char*>(args.args[0]),
                                     static_cast<int>(args.args[1]));
+#endif
     case __NR_open:
       return broker_process->Open(reinterpret_cast<const char*>(args.args[0]),
                                   static_cast<int>(args.args[1]));
@@ -721,14 +726,19 @@ intptr_t BrokerOpenTrapHandler(const struct arch_seccomp_data& args,
   }
 }
 
-ErrorCode DenyOpenPolicy(SandboxBPF* sandbox, int sysno, void* aux) {
-  InitializedOpenBroker* iob = static_cast<InitializedOpenBroker*>(aux);
+ErrorCode DenyOpenPolicy(SandboxBPF* sandbox,
+                         int sysno,
+                         InitializedOpenBroker* iob) {
   if (!SandboxBPF::IsValidSyscallNumber(sysno)) {
     return ErrorCode(ENOSYS);
   }
 
   switch (sysno) {
+#if defined(ANDROID)
+    case __NR_faccessat:
+#else
     case __NR_access:
+#endif
     case __NR_open:
     case __NR_openat:
       // We get a InitializedOpenBroker class, but our trap handler wants
@@ -745,9 +755,9 @@ ErrorCode DenyOpenPolicy(SandboxBPF* sandbox, int sysno, void* aux) {
 BPF_TEST(SandboxBPF,
          UseOpenBroker,
          DenyOpenPolicy,
-         InitializedOpenBroker /* BPF_AUX */) {
-  BPF_ASSERT(BPF_AUX.initialized());
-  BrokerProcess* broker_process = BPF_AUX.broker_process();
+         InitializedOpenBroker /* (*BPF_AUX) */) {
+  BPF_ASSERT(BPF_AUX->initialized());
+  BrokerProcess* broker_process = BPF_AUX->broker_process();
   BPF_ASSERT(broker_process != NULL);
 
   // First, use the broker "manually"
@@ -799,6 +809,17 @@ ErrorCode SimpleCondTestPolicy(SandboxBPF* sandbox, int sysno, void*) {
   // can uniquely test for these values. In a "real" policy, you would want
   // to return more traditional values.
   switch (sysno) {
+#if defined(ANDROID)
+    case __NR_openat:    // open is a wrapper of openat in android
+      // Allow opening files for reading, but don't allow writing.
+      COMPILE_ASSERT(O_RDONLY == 0, O_RDONLY_must_be_all_zero_bits);
+      return sandbox->Cond(2,
+                           ErrorCode::TP_32BIT,
+                           ErrorCode::OP_HAS_ANY_BITS,
+                           O_ACCMODE /* 0x3 */,
+                           ErrorCode(EROFS),
+                           ErrorCode(ErrorCode::ERR_ALLOWED));
+#else
     case __NR_open:
       // Allow opening files for reading, but don't allow writing.
       COMPILE_ASSERT(O_RDONLY == 0, O_RDONLY_must_be_all_zero_bits);
@@ -808,6 +829,7 @@ ErrorCode SimpleCondTestPolicy(SandboxBPF* sandbox, int sysno, void*) {
                            O_ACCMODE /* 0x3 */,
                            ErrorCode(EROFS),
                            ErrorCode(ErrorCode::ERR_ALLOWED));
+#endif
     case __NR_prctl:
       // Allow prctl(PR_SET_DUMPABLE) and prctl(PR_GET_DUMPABLE), but
       // disallow everything else.
@@ -1142,15 +1164,18 @@ class EqualityStressTest {
   static const int kMaxArgs = 6;
 };
 
-ErrorCode EqualityStressTestPolicy(SandboxBPF* sandbox, int sysno, void* aux) {
-  return reinterpret_cast<EqualityStressTest*>(aux)->Policy(sandbox, sysno);
+ErrorCode EqualityStressTestPolicy(SandboxBPF* sandbox,
+                                   int sysno,
+                                   EqualityStressTest* aux) {
+  DCHECK(aux);
+  return aux->Policy(sandbox, sysno);
 }
 
 BPF_TEST(SandboxBPF,
          EqualityTests,
          EqualityStressTestPolicy,
-         EqualityStressTest /* BPF_AUX */) {
-  BPF_AUX.VerifyFilter();
+         EqualityStressTest /* (*BPF_AUX) */) {
+  BPF_AUX->VerifyFilter();
 }
 
 ErrorCode EqualityArgumentWidthPolicy(SandboxBPF* sandbox, int sysno, void*) {

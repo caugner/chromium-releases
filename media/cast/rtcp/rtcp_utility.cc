@@ -613,7 +613,9 @@ bool RtcpParser::ParseCastReceiverLogEventItem() {
 
   field_.cast_receiver_log.event =
       static_cast<uint8>(event_type_and_timestamp_delta >> 12);
-  field_.cast_receiver_log.delay_delta_or_packet_id = delay_delta_or_packet_id;
+  // delay_delta is in union'ed with packet_id.
+  field_.cast_receiver_log.delay_delta_or_packet_id.packet_id =
+      delay_delta_or_packet_id;
   field_.cast_receiver_log.event_timestamp_delta =
       event_type_and_timestamp_delta & 0xfff;
 
@@ -1047,6 +1049,64 @@ bool RtcpParser::ParseExtendedReportDelaySinceLastReceiverReport() {
   number_of_blocks_--;
   field_type_ = kRtcpXrDlrrCode;
   return true;
+}
+
+uint8 ConvertEventTypeToWireFormat(CastLoggingEvent event) {
+  switch (event) {
+    case kAudioAckSent:
+      return 1;
+    case kAudioPlayoutDelay:
+      return 2;
+    case kAudioFrameDecoded:
+      return 3;
+    case kAudioPacketReceived:
+      return 4;
+    case kVideoAckSent:
+      return 5;
+    case kVideoFrameDecoded:
+      return 6;
+    case kVideoRenderDelay:
+      return 7;
+    case kVideoPacketReceived:
+      return 8;
+    case kDuplicateAudioPacketReceived:
+      return 9;
+    case kDuplicateVideoPacketReceived:
+      return 10;
+    default:
+      return 0;  // Not an interesting event.
+  }
+}
+
+CastLoggingEvent TranslateToLogEventFromWireFormat(uint8 event) {
+  switch (event) {
+    case 1:
+      return media::cast::kAudioAckSent;
+    case 2:
+      return media::cast::kAudioPlayoutDelay;
+    case 3:
+      return media::cast::kAudioFrameDecoded;
+    case 4:
+      return media::cast::kAudioPacketReceived;
+    case 5:
+      return media::cast::kVideoAckSent;
+    case 6:
+      return media::cast::kVideoFrameDecoded;
+    case 7:
+      return media::cast::kVideoRenderDelay;
+    case 8:
+      return media::cast::kVideoPacketReceived;
+    case 9:
+      return media::cast::kDuplicateAudioPacketReceived;
+    case 10:
+      return media::cast::kDuplicateVideoPacketReceived;
+    default:
+      // If the sender adds new log messages we will end up here until we add
+      // the new messages in the receiver.
+      VLOG(1) << "Unexpected log message received: " << static_cast<int>(event);
+      NOTREACHED();
+      return media::cast::kUnknown;
+  }
 }
 
 }  // namespace cast

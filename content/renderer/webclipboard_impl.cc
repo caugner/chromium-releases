@@ -155,8 +155,15 @@ void WebClipboardImpl::writeImage(const WebImage& image,
 
   if (!image.isNull()) {
     const SkBitmap& bitmap = image.getSkBitmap();
+    // WriteBitmapFromPixels expects 32-bit data.
+    DCHECK_EQ(bitmap.config(), SkBitmap::kARGB_8888_Config);
+
     SkAutoLockPixels locked(bitmap);
-    scw.WriteBitmapFromPixels(bitmap.getPixels(), image.size());
+    void *pixels = bitmap.getPixels();
+    // TODO(piman): this should not be NULL, but it is. crbug.com/369621
+    if (!pixels)
+      return;
+    scw.WriteBitmapFromPixels(pixels, image.size());
   }
 
   if (!url.isEmpty()) {
@@ -203,15 +210,14 @@ bool WebClipboardImpl::ConvertBufferType(Buffer buffer,
     case BufferStandard:
       break;
     case BufferSelection:
-#if defined(USE_X11)
-#if defined(OS_CHROMEOS)
-      //  Chrome OS only supports the standard clipboard,
-      //  but not the X selection clipboad.
-      return false;
-#else
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
       *result = ui::CLIPBOARD_TYPE_SELECTION;
       break;
-#endif
+#else
+      // Chrome OS and non-X11 unix builds do not support
+      // the X selection clipboad.
+      // TODO: remove the need for this case, see http://crbug.com/361753
+      return false;
 #endif
     default:
       NOTREACHED();

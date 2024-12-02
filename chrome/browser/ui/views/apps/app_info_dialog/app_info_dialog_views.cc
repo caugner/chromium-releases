@@ -45,9 +45,7 @@ AppInfoDialog::AppInfoDialog(gfx::NativeWindow parent_window,
       l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_PERMISSIONS_TAB_TITLE),
       new AppInfoPermissionsTab(
           parent_window_, profile_, app_, close_callback_));
-  tabbed_pane->AddTab(
-      l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_MANAGE_TAB_TITLE),
-      new AppInfoManageTab(parent_window_, profile_, app_, close_callback_));
+  // TODO(sashab): Add the manage tab back once there is content for it.
 }
 
 AppInfoDialog::~AppInfoDialog() {}
@@ -59,25 +57,15 @@ bool AppInfoDialog::Cancel() {
 }
 
 gfx::Size AppInfoDialog::GetPreferredSize() {
+  // These numbers represent the size of the view, not the total size of the
+  // dialog. The actual dialog will be slightly taller (have a larger height)
+  // than what is specified here.
   static const int kDialogWidth = 360;
-  int height =
-      GetLayoutManager()->GetPreferredHeightForWidth(this, kDialogWidth);
-  return gfx::Size(kDialogWidth, height);
+  static const int kDialogHeight = 360;
+  return gfx::Size(kDialogWidth, kDialogHeight);
 }
 
-base::string16 AppInfoDialog::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  if (button == ui::DIALOG_BUTTON_CANCEL) {
-    return l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_CLOSE_BUTTON);
-  }
-  return views::DialogDelegateView::GetDialogButtonLabel(button);
-}
-
-int AppInfoDialog::GetDialogButtons() const { return ui::DIALOG_BUTTON_CANCEL; }
-
-bool AppInfoDialog::IsDialogButtonEnabled(ui::DialogButton button) const {
-  return true;
-}
+int AppInfoDialog::GetDialogButtons() const { return ui::DIALOG_BUTTON_NONE; }
 
 ui::ModalType AppInfoDialog::GetModalType() const {
   return ui::MODAL_TYPE_WINDOW;

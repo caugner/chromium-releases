@@ -12,6 +12,8 @@
 #include "chrome/browser/extensions/test_extension_service.h"
 #include "chrome/browser/sync_file_system/drive_backend/metadata_database.h"
 #include "chrome/browser/sync_file_system/drive_backend/metadata_database.pb.h"
+#include "chrome/browser/sync_file_system/drive_backend/sync_task.h"
+#include "chrome/browser/sync_file_system/drive_backend/sync_task_manager.h"
 #include "chrome/browser/sync_file_system/sync_file_system_test_util.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/common/extension.h"
@@ -36,14 +38,14 @@ void EmptyTask(SyncStatusCode status, const SyncStatusCallback& callback) {
 
 }  // namespace
 
-class MockSyncTask : public SequentialSyncTask {
+class MockSyncTask : public ExclusiveTask {
  public:
   explicit MockSyncTask(bool used_network) {
     set_used_network(used_network);
   }
   virtual ~MockSyncTask() {}
 
-  virtual void RunSequential(const SyncStatusCallback& callback) OVERRIDE {
+  virtual void RunExclusive(const SyncStatusCallback& callback) OVERRIDE {
     callback.Run(SYNC_STATUS_OK);
   }
 
@@ -106,23 +108,19 @@ class SyncEngineTest
     in_memory_env_.reset(leveldb::NewMemEnv(leveldb::Env::Default()));
 
     extension_service_.reset(new MockExtensionService);
-    scoped_ptr<drive::FakeDriveService> fake_drive_service(
-        new drive::FakeDriveService);
+    scoped_ptr<drive::DriveServiceInterface>
+        fake_drive_service(new drive::FakeDriveService);
 
-    ASSERT_TRUE(fake_drive_service->LoadAccountMetadataForWapi(
-        "sync_file_system/account_metadata.json"));
-    ASSERT_TRUE(fake_drive_service->LoadResourceListForWapi(
-        "gdata/empty_feed.json"));
     sync_engine_.reset(new drive_backend::SyncEngine(
-        profile_dir_.path(),
-        base::MessageLoopProxy::current(),
-        fake_drive_service.PassAs<drive::DriveServiceInterface>(),
+        fake_drive_service.Pass(),
         scoped_ptr<drive::DriveUploaderInterface>(),
+        base::MessageLoopProxy::current(),
         NULL /* notification_manager */,
         extension_service_.get(),
-        NULL /* signin_manager */,
-        in_memory_env_.get()));
-    sync_engine_->Initialize();
+        NULL /* signin_manager */));
+    sync_engine_->Initialize(profile_dir_.path(),
+                             base::MessageLoopProxy::current(),
+                             in_memory_env_.get());
     sync_engine_->SetSyncEnabled(true);
     base::RunLoop().RunUntilIdle();
   }
@@ -141,7 +139,7 @@ class SyncEngineTest
   }
 
   SyncTaskManager* GetSyncEngineTaskManager() {
-    return sync_engine_->task_manager_.get();
+    return sync_engine_->GetSyncTaskManagerForTesting();
   }
 
   void CheckServiceState(SyncStatusCode expected_sync_status,

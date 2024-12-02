@@ -7,7 +7,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "chrome/browser/translate/translate_service.h"
@@ -16,6 +15,8 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/infobars/core/infobar.h"
+#include "components/translate/core/browser/translate_manager.h"
 #include "components/translate/core/browser/translate_script.h"
 #include "components/translate/core/common/translate_switches.h"
 #include "content/public/browser/notification_service.h"
@@ -96,13 +97,14 @@ class TranslateBrowserTest : public InProcessBrowserTest {
       // |kTranslateSecurityOrigin| flag specified in SetUpCommandLine().
       // This infobar appears in all tests of TranslateBrowserTest and can be
       // ignored here.
-      ConfirmInfoBarDelegate* confirm = infobar_service_->infobar_at(i)->
-          delegate()->AsConfirmInfoBarDelegate();
-      if (confirm)
+      if (infobar_service_->infobar_at(i)->delegate()->
+              AsConfirmInfoBarDelegate()) {
         continue;
+      }
 
-      TranslateInfoBarDelegate* translate = infobar_service_->infobar_at(i)->
-          delegate()->AsTranslateInfoBarDelegate();
+      TranslateInfoBarDelegate* translate =
+          infobar_service_->infobar_at(i)->delegate()->
+              AsTranslateInfoBarDelegate();
       if (translate) {
         EXPECT_FALSE(delegate) << "multiple infobars are shown unexpectedly";
         delegate = translate;

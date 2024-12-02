@@ -28,37 +28,37 @@ class ArrayBufferView;
 class Arguments;
 }
 
-namespace WebTestRunner {
+namespace content {
+
+class InvokeCallbackTask;
+class NotificationPresenter;
 class TestInterfaces;
+class TestPageOverlay;
 class WebPermissions;
 class WebTestDelegate;
 class WebTestProxyBase;
-}
 
-namespace content {
-
-class NotificationPresenter;
-class TestPageOverlay;
-
-class TestRunner : public ::WebTestRunner::WebTestRunner,
+class TestRunner : public WebTestRunner,
                    public base::SupportsWeakPtr<TestRunner> {
  public:
-  explicit TestRunner(::WebTestRunner::TestInterfaces*);
+  explicit TestRunner(TestInterfaces*);
   virtual ~TestRunner();
 
   void Install(blink::WebFrame* frame);
 
-  void SetDelegate(::WebTestRunner::WebTestDelegate*);
-  void SetWebView(blink::WebView*, ::WebTestRunner::WebTestProxyBase*);
+  void SetDelegate(WebTestDelegate*);
+  void SetWebView(blink::WebView*, WebTestProxyBase*);
 
   void Reset();
 
-  ::WebTestRunner::WebTaskList* taskList() { return &task_list_; }
+  WebTaskList* taskList() { return &task_list_; }
 
   void SetTestIsRunning(bool);
   bool TestIsRunning() const { return test_is_running_; }
 
   bool UseMockTheme() const { return use_mock_theme_; }
+
+  void InvokeCallback(scoped_ptr<InvokeCallbackTask> callback);
 
   // WebTestRunner implementation.
   virtual bool shouldGeneratePixelResults() OVERRIDE;
@@ -70,18 +70,20 @@ class TestRunner : public ::WebTestRunner::WebTestRunner,
 
   // Methods used by WebTestProxyBase.
   bool shouldDumpSelectionRect() const;
-  bool testRepaint() const;
-  bool sweepHorizontally() const;
   bool isPrinting() const;
   bool shouldDumpAsText();
   bool shouldDumpAsTextWithPixelResults();
+  bool shouldDumpAsCustomText() const;
+  std:: string customDumpText() const;
   bool shouldDumpAsMarkup();
   bool shouldDumpChildFrameScrollPositions() const;
   bool shouldDumpChildFramesAsText() const;
-  void showDevTools(const std::string& settings);
+  void showDevTools(const std::string& settings,
+                    const std::string& frontend_url);
   void clearDevToolsLocalStorage();
   void setShouldDumpAsText(bool);
   void setShouldDumpAsMarkup(bool);
+  void setCustomTextOutput(std::string text);
   void setShouldGeneratePixelResults(bool);
   void setShouldDumpFrameLoadCallbacks(bool);
   void setShouldDumpPingLoaderCallbacks(bool);
@@ -125,7 +127,7 @@ class TestRunner : public ::WebTestRunner::WebTestRunner,
     virtual ~WorkItem() {}
 
     // Returns true if this started a load.
-    virtual bool Run(::WebTestRunner::WebTestDelegate*, blink::WebView*) = 0;
+    virtual bool Run(WebTestDelegate*, blink::WebView*) = 0;
   };
 
  private:
@@ -148,20 +150,19 @@ class TestRunner : public ::WebTestRunner::WebTestRunner,
 
     void set_frozen(bool frozen) { frozen_ = frozen; }
     bool is_empty() { return queue_.empty(); }
-    ::WebTestRunner::WebTaskList* taskList() { return &task_list_; }
+    WebTaskList* taskList() { return &task_list_; }
 
    private:
     void ProcessWork();
 
-    class WorkQueueTask : public ::WebTestRunner::WebMethodTask<WorkQueue> {
+    class WorkQueueTask : public WebMethodTask<WorkQueue> {
      public:
-      WorkQueueTask(WorkQueue* object) :
-          ::WebTestRunner::WebMethodTask<WorkQueue>(object) { }
+      WorkQueueTask(WorkQueue* object) : WebMethodTask<WorkQueue>(object) {}
 
       virtual void runIfValid() OVERRIDE;
     };
 
-    ::WebTestRunner::WebTaskList task_list_;
+    WebTaskList task_list_;
     std::deque<WorkItem*> queue_;
     bool frozen_;
     TestRunner* controller_;
@@ -421,8 +422,6 @@ class TestRunner : public ::WebTestRunner::WebTestRunner,
   void DumpBackForwardList();
 
   void DumpSelectionRect();
-  void TestRepaint();
-  void RepaintSweepHorizontally();
 
   // Causes layout to happen as if targetted to printed pages.
   void SetPrinting();
@@ -451,7 +450,8 @@ class TestRunner : public ::WebTestRunner::WebTestRunner,
   // Methods forwarding to the WebTestDelegate
 
   // Shows DevTools window.
-  void ShowWebInspector(const std::string& str);
+  void ShowWebInspector(const std::string& str,
+                        const std::string& frontend_url);
   void CloseWebInspector();
 
   // Inspect chooser state
@@ -477,6 +477,10 @@ class TestRunner : public ::WebTestRunner::WebTestRunner,
   // Used to set the device scale factor.
   void SetBackingScaleFactor(double value, v8::Handle<v8::Function> callback);
 
+  // Change the device color profile while running a layout test.
+  void SetColorProfile(const std::string& name,
+                       v8::Handle<v8::Function> callback);
+
   // Calls setlocale(LC_ALL, ...) for a specified locale.
   // Resets between tests.
   void SetPOSIXLocale(const std::string& locale);
@@ -491,11 +495,7 @@ class TestRunner : public ::WebTestRunner::WebTestRunner,
   // Simulates a click on a desktop notification.
   bool SimulateWebNotificationClick(const std::string& value);
 
-  // Speech input related functions.
-  void AddMockSpeechInputResult(const std::string& result,
-                                double confidence,
-                                const std::string& language);
-  void SetMockSpeechInputDumpRect(bool value);
+  // Speech recognition related functions.
   void AddMockSpeechRecognitionResult(const std::string& transcript,
                                       double confidence);
   void SetMockSpeechRecognitionError(const std::string& error,
@@ -507,8 +507,8 @@ class TestRunner : public ::WebTestRunner::WebTestRunner,
   void AddWebPageOverlay();
   void RemoveWebPageOverlay();
 
-  void Display();
-  void DisplayInvalidatedRegion();
+  void DisplayAsync();
+  void DisplayAsyncThen(v8::Handle<v8::Function> callback);
 
   ///////////////////////////////////////////////////////////////////////////
   // Internal helpers
@@ -675,27 +675,30 @@ class TestRunner : public ::WebTestRunner::WebTestRunner,
 
   bool should_dump_resource_priorities_;
 
+  bool has_custom_text_output_;
+  std::string custom_text_output_;
+
   std::set<std::string> http_headers_to_clear_;
 
   // WAV audio data is stored here.
   std::vector<unsigned char> audio_data_;
 
   // Used for test timeouts.
-  ::WebTestRunner::WebTaskList task_list_;
+  WebTaskList task_list_;
 
-  ::WebTestRunner::TestInterfaces* test_interfaces_;
-  ::WebTestRunner::WebTestDelegate* delegate_;
+  TestInterfaces* test_interfaces_;
+  WebTestDelegate* delegate_;
   blink::WebView* web_view_;
   TestPageOverlay* page_overlay_;
-  ::WebTestRunner::WebTestProxyBase* proxy_;
+  WebTestProxyBase* proxy_;
 
   // This is non-0 IFF a load is in progress.
   blink::WebFrame* top_loading_frame_;
 
   // WebPermissionClient mock object.
-  scoped_ptr< ::WebTestRunner::WebPermissions> web_permissions_;
+  scoped_ptr<WebPermissions> web_permissions_;
 
-  scoped_ptr<content::NotificationPresenter> notification_presenter_;
+  scoped_ptr<NotificationPresenter> notification_presenter_;
 
   bool pointer_locked_;
   enum {

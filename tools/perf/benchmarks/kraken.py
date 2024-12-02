@@ -28,9 +28,9 @@ class _KrakenMeasurement(page_measurement.PageMeasurement):
     self._power_metric.Start(page, tab)
 
   def MeasurePage(self, page, tab, results):
-    tab.WaitForDocumentReadyStateToBeComplete()
     tab.WaitForJavaScriptExpression(
         'document.title.indexOf("Results") != -1', 700)
+    tab.WaitForDocumentReadyStateToBeComplete()
 
     self._power_metric.Stop(page, tab)
     self._power_metric.AddResults(tab, results)
@@ -54,9 +54,9 @@ class Kraken(test.Test):
   test = _KrakenMeasurement
 
   def CreatePageSet(self, options):
-    return page_set.PageSet.FromDict({
-        'archive_data_file': '../page_sets/data/kraken.json',
-        'pages': [
-          { 'url': 'http://krakenbenchmark.mozilla.org/kraken-1.1/driver.html' }
-          ]
-        }, os.path.abspath(__file__))
+    ps = page_set.PageSet(
+      archive_data_file='../page_sets/data/kraken.json',
+      file_path=os.path.abspath(__file__))
+    ps.AddPageWithDefaultRunNavigate(
+      'http://krakenbenchmark.mozilla.org/kraken-1.1/driver.html')
+    return ps

@@ -19,7 +19,6 @@ namespace extensions {
 namespace {
 
 const char kDefaultAlarmName[] = "";
-const char kAlarmNotFound[] = "No alarm named '*' exists.";
 const char kBothRelativeAndAbsoluteTime[] =
     "Cannot set both when and delayInMinutes.";
 const char kNoScheduledTime[] =
@@ -99,7 +98,7 @@ AlarmsCreateFunction::~AlarmsCreateFunction() {
     delete clock_;
 }
 
-bool AlarmsCreateFunction::RunImpl() {
+bool AlarmsCreateFunction::RunAsync() {
   scoped_ptr<alarms::Create::Params> params(
       alarms::Create::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -130,7 +129,7 @@ void AlarmsCreateFunction::Callback() {
   SendResponse(true);
 }
 
-bool AlarmsGetFunction::RunImpl() {
+bool AlarmsGetFunction::RunAsync() {
   scoped_ptr<alarms::Get::Params> params(alarms::Get::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -147,14 +146,11 @@ void AlarmsGetFunction::Callback(
     const std::string& name, extensions::Alarm* alarm) {
   if (alarm) {
     results_ = alarms::Get::Results::Create(*alarm->js_alarm);
-    SendResponse(true);
-  } else {
-    error_ = ErrorUtils::FormatErrorMessage(kAlarmNotFound, name);
-    SendResponse(false);
   }
+  SendResponse(true);
 }
 
-bool AlarmsGetAllFunction::RunImpl() {
+bool AlarmsGetAllFunction::RunAsync() {
   AlarmManager::Get(GetProfile())->GetAllAlarms(
       extension_id(), base::Bind(&AlarmsGetAllFunction::Callback, this));
   return true;
@@ -174,7 +170,7 @@ void AlarmsGetAllFunction::Callback(const AlarmList* alarms) {
   SendResponse(true);
 }
 
-bool AlarmsClearFunction::RunImpl() {
+bool AlarmsClearFunction::RunAsync() {
   scoped_ptr<alarms::Clear::Params> params(
       alarms::Clear::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -193,7 +189,7 @@ void AlarmsClearFunction::Callback(const std::string& name, bool success) {
   SendResponse(true);
 }
 
-bool AlarmsClearAllFunction::RunImpl() {
+bool AlarmsClearAllFunction::RunAsync() {
   AlarmManager::Get(GetProfile())->RemoveAllAlarms(
       extension_id(), base::Bind(&AlarmsClearAllFunction::Callback, this));
   return true;

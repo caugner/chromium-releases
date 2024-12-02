@@ -38,24 +38,13 @@ const char kAshDefaultWallpaperIsOem[] = "ash-default-wallpaper-is-oem";
 const char kAshDefaultWallpaperLarge[] = "ash-default-wallpaper-large";
 const char kAshDefaultWallpaperSmall[] = "ash-default-wallpaper-small";
 
-// Use the normal visual style for the caption buttons (minimize, maximize,
-// restore, close).
-const char kAshDisableAlternateFrameCaptionButtonStyle[] =
-    "ash-disable-alternate-caption-button";
-
-// Disable the alternate shelf layout.
-const char kAshDisableAlternateShelfLayout[] =
-    "ash-disable-alternate-shelf-layout";
-
 // Disable ability to dock windows at the desktop edge.
 const char kAshDisableDockedWindows[] = "ash-disable-docked-windows";
 
-// Use alternate visual style for the caption buttons (minimize, maximize,
-// restore, close). The alternate style:
-// - Adds a dedicated button for minimize.
-// - Removes the maximize button's help bubble.
-const char kAshEnableAlternateFrameCaptionButtonStyle[] =
-    "ash-enable-alternate-caption-button";
+// Enable the Touch Exploration Mode. Touch Exploration Mode will be turned on
+// automatically when spoken feedback is enabled when this flag is set.
+const char kAshEnableTouchExplorationMode[] =
+    "ash-enable-touch-exploration-mode";
 
 #if defined(OS_CHROMEOS)
 // Enables key bindings to scroll magnified screen.
@@ -67,6 +56,8 @@ const char kAshEnableMagnifierKeyScroller[] =
 const char kAshEnableSoftwareMirroring[] = "ash-enable-software-mirroring";
 
 // Enables touch view testing.
+// TODO(skuhne): Remove TOGGLE_TOUCH_VIEW_TESTING accelerator once this
+// flag is removed.
 const char kAshEnableTouchViewTesting[] = "ash-enable-touch-view-testing";
 
 // When this flag is set, system sounds will be played whether the
@@ -101,14 +92,6 @@ const char kAshSecondaryDisplayLayout[] = "ash-secondary-display-layout";
 // Enables the heads-up display for tracking touch points.
 const char kAshTouchHud[] = "ash-touch-hud";
 
-// Use alternate layout of the shelf for testing a new look and feel:
-// Slightly smaller profile, only 2 states for the "bar highlight" on
-// launcher buttons, app list icon with more visible state indication,
-// app list icon repositionable and defaulting as 1st item in shelf,
-// more visible state indication for background on status area.
-// crbug's [244983, 244990, 244994, 245005, 245012]
-const char kAshUseAlternateShelfLayout[] = "ash-use-alternate-shelf";
-
 // Uses the 1st display in --ash-host-window-bounds as internal display.
 // This is for debugging on linux desktop.
 const char kAshUseFirstDisplayAsInternal[] =
@@ -126,16 +109,6 @@ const char kAuraLegacyPowerButton[] = "aura-legacy-power-button";
 const char kForceAshToDesktop[] = "ash-force-desktop";
 
 #endif
-
-bool UseAlternateFrameCaptionButtonStyle() {
-  return !CommandLine::ForCurrentProcess()->
-      HasSwitch(kAshDisableAlternateFrameCaptionButtonStyle);
-}
-
-bool UseAlternateShelfLayout() {
-  return !CommandLine::ForCurrentProcess()->
-      HasSwitch(kAshDisableAlternateShelfLayout);
-}
 
 bool UseDockedWindows() {
   return !CommandLine::ForCurrentProcess()->HasSwitch(kAshDisableDockedWindows);

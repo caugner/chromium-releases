@@ -8,7 +8,6 @@
 #include <set>
 #include <vector>
 
-#include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -88,7 +87,7 @@ class AutofillDialogControllerImpl
       content::WebContents* contents,
       const FormData& form_structure,
       const GURL& source_url,
-      const base::Callback<void(const FormStructure*)>& callback);
+      const AutofillManagerDelegate::ResultCallback& callback);
 
   // AutofillDialogController implementation.
   virtual void Show() OVERRIDE;
@@ -164,7 +163,6 @@ class AutofillDialogControllerImpl
   // AutofillPopupDelegate implementation.
   virtual void OnPopupShown() OVERRIDE;
   virtual void OnPopupHidden() OVERRIDE;
-  virtual bool ShouldRepostEvent(const ui::MouseEvent& event) OVERRIDE;
   virtual void DidSelectSuggestion(const base::string16& value,
                                    int identifier) OVERRIDE;
   virtual void DidAcceptSuggestion(const base::string16& value,
@@ -179,7 +177,6 @@ class AutofillDialogControllerImpl
                        const content::NotificationDetails& details) OVERRIDE;
 
   // SuggestionsMenuModelDelegate implementation.
-  virtual void SuggestionsMenuWillShow() OVERRIDE;
   virtual void SuggestionItemSelected(SuggestionsMenuModel* model,
                                       size_t index) OVERRIDE;
 
@@ -206,7 +203,6 @@ class AutofillDialogControllerImpl
   virtual void OnPersonalDataChanged() OVERRIDE;
 
   // AccountChooserModelDelegate implementation.
-  virtual void AccountChooserWillShow() OVERRIDE;
   virtual void AccountChoiceChanged() OVERRIDE;
   virtual void AddAccount() OVERRIDE;
   virtual void UpdateAccountChooserView() OVERRIDE;
@@ -241,7 +237,7 @@ class AutofillDialogControllerImpl
       content::WebContents* contents,
       const FormData& form_structure,
       const GURL& source_url,
-      const base::Callback<void(const FormStructure*)>& callback);
+      const AutofillManagerDelegate::ResultCallback& callback);
 
   // Exposed for testing.
   AutofillDialogView* view() { return view_.get(); }
@@ -479,6 +475,15 @@ class AutofillDialogControllerImpl
   // Like RequestedFieldsForSection, but returns a pointer.
   DetailInputs* MutableRequestedFieldsForSection(DialogSection section);
 
+  // Returns a pointer to the language code that should be used for formatting
+  // the address in |section| for display. Returns NULL for a non-address
+  // |section|.
+  std::string* MutableAddressLanguageCodeForSection(DialogSection section);
+
+  // Returns the language code that should be used for formatting the address in
+  // |section|. Returns an empty string for a non-address |section|.
+  std::string AddressLanguageCodeForSection(DialogSection section);
+
   // Returns just the |type| attributes of RequestedFieldsForSection(section).
   std::vector<ServerFieldType> RequestedTypesForSection(DialogSection section)
       const;
@@ -631,7 +636,7 @@ class AutofillDialogControllerImpl
   GURL source_url_;
 
   // The callback via which we return the collected data.
-  base::Callback<void(const FormStructure*)> callback_;
+  AutofillManagerDelegate::ResultCallback callback_;
 
   // The AccountChooserModel acts as the MenuModel for the account chooser,
   // and also tracks which data source the dialog is using.
@@ -695,6 +700,10 @@ class AutofillDialogControllerImpl
   DetailInputs requested_billing_fields_;
   DetailInputs requested_cc_billing_fields_;
   DetailInputs requested_shipping_fields_;
+
+  // The BCP 47 language codes used for formatting the addresses for display.
+  std::string billing_address_language_code_;
+  std::string shipping_address_language_code_;
 
   // Models for the credit card expiration inputs.
   MonthComboboxModel cc_exp_month_combobox_model_;

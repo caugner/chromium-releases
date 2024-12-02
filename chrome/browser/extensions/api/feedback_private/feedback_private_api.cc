@@ -11,14 +11,15 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/feedback_private/feedback_service.h"
-#include "chrome/browser/feedback/tracing_manager.h"
 #include "chrome/browser/profiles/profile.h"
+#include "components/feedback/tracing_manager.h"
 #include "extensions/browser/event_router.h"
-#include "extensions/browser/extension_system.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "url/url_util.h"
+
+using feedback::FeedbackData;
 
 namespace {
 
@@ -69,8 +70,7 @@ void FeedbackPrivateAPI::RequestFeedback(
     const GURL& page_url) {
   // TODO(rkc): Remove logging once crbug.com/284662 is closed.
   LOG(WARNING) << "FEEDBACK_DEBUG: Feedback requested.";
-  if (browser_context_ &&
-      ExtensionSystem::Get(browser_context_)->event_router()) {
+  if (browser_context_ && EventRouter::Get(browser_context_)) {
     FeedbackInfo info;
     info.description = description_template;
     info.category_tag = make_scoped_ptr(new std::string(category_tag));
@@ -90,8 +90,7 @@ void FeedbackPrivateAPI::RequestFeedback(
 
     // TODO(rkc): Remove logging once crbug.com/284662 is closed.
     LOG(WARNING) << "FEEDBACK_DEBUG: Dispatching onFeedbackRequested event.";
-    ExtensionSystem::Get(browser_context_)
-        ->event_router()
+    EventRouter::Get(browser_context_)
         ->DispatchEventToExtension(kFeedbackExtensionId, event.Pass());
   }
 }
@@ -99,7 +98,7 @@ void FeedbackPrivateAPI::RequestFeedback(
 // static
 base::Closure* FeedbackPrivateGetStringsFunction::test_callback_ = NULL;
 
-bool FeedbackPrivateGetStringsFunction::RunImpl() {
+bool FeedbackPrivateGetStringsFunction::RunSync() {
   base::DictionaryValue* dict = new base::DictionaryValue();
   SetResult(dict);
 
@@ -135,7 +134,7 @@ bool FeedbackPrivateGetStringsFunction::RunImpl() {
   return true;
 }
 
-bool FeedbackPrivateGetUserEmailFunction::RunImpl() {
+bool FeedbackPrivateGetUserEmailFunction::RunSync() {
   // TODO(rkc): Remove logging once crbug.com/284662 is closed.
   LOG(WARNING) << "FEEDBACK_DEBUG: User e-mail requested.";
   FeedbackService* service =
@@ -145,7 +144,7 @@ bool FeedbackPrivateGetUserEmailFunction::RunImpl() {
   return true;
 }
 
-bool FeedbackPrivateGetSystemInformationFunction::RunImpl() {
+bool FeedbackPrivateGetSystemInformationFunction::RunAsync() {
   // TODO(rkc): Remove logging once crbug.com/284662 is closed.
   LOG(WARNING) << "FEEDBACK_DEBUG: System information requested.";
   FeedbackService* service =
@@ -164,7 +163,7 @@ void FeedbackPrivateGetSystemInformationFunction::OnCompleted(
   SendResponse(true);
 }
 
-bool FeedbackPrivateSendFeedbackFunction::RunImpl() {
+bool FeedbackPrivateSendFeedbackFunction::RunAsync() {
   scoped_ptr<feedback_private::SendFeedback::Params> params(
       feedback_private::SendFeedback::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -183,7 +182,7 @@ bool FeedbackPrivateSendFeedbackFunction::RunImpl() {
 
   // Populate feedback data.
   scoped_refptr<FeedbackData> feedback_data(new FeedbackData());
-  feedback_data->set_profile(GetProfile());
+  feedback_data->set_context(GetProfile());
   feedback_data->set_description(feedback_info.description);
 
   if (feedback_info.category_tag.get())

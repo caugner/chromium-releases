@@ -565,6 +565,7 @@ TEST_F(TemplateURLTest, ReplaceCursorPosition) {
       "{google:baseURL}?{searchTerms}&{google:cursorPosition}",
       "http://www.google.com/?foo&cp=15&" },
   };
+  UIThreadSearchTermsData::SetGoogleBaseURL("http://www.google.com/");
   TemplateURLData data;
   data.input_encodings.push_back("UTF-8");
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_data); ++i) {
@@ -601,6 +602,7 @@ TEST_F(TemplateURLTest, ReplaceCurrentPageUrl) {
       "{google:baseURL}?{searchTerms}&{google:currentPageUrl}",
       "http://www.google.com/?foo&url=http%3A%2F%2Fg.com%2F%2B-%2F*%26%3D&" },
   };
+  UIThreadSearchTermsData::SetGoogleBaseURL("http://www.google.com/");
   TemplateURLData data;
   data.input_encodings.push_back("UTF-8");
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_data); ++i) {
@@ -680,6 +682,34 @@ TEST_F(TemplateURLTest, RLZ) {
   expected_url += "x";
   EXPECT_EQ(expected_url, result.spec());
 }
+
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+TEST_F(TemplateURLTest, RLZFromAppList) {
+  base::string16 rlz_string;
+#if defined(ENABLE_RLZ)
+  std::string brand;
+  if (google_util::GetBrand(&brand) && !brand.empty() &&
+      !google_util::IsOrganic(brand)) {
+    RLZTracker::GetAccessPointRlz(RLZTracker::CHROME_APP_LIST, &rlz_string);
+  }
+#endif
+
+  TemplateURLData data;
+  data.SetURL("http://bar/?{google:RLZ}{searchTerms}");
+  TemplateURL url(NULL, data);
+  EXPECT_TRUE(url.url_ref().IsValid());
+  ASSERT_TRUE(url.url_ref().SupportsReplacement());
+  TemplateURLRef::SearchTermsArgs args(ASCIIToUTF16("x"));
+  args.from_app_list = true;
+  GURL result(url.url_ref().ReplaceSearchTerms(args));
+  ASSERT_TRUE(result.is_valid());
+  std::string expected_url = "http://bar/?";
+  if (!rlz_string.empty())
+    expected_url += "rlz=" + base::UTF16ToUTF8(rlz_string) + "&";
+  expected_url += "x";
+  EXPECT_EQ(expected_url, result.spec());
+}
+#endif
 
 TEST_F(TemplateURLTest, HostAndSearchTermKey) {
   struct TestData {
@@ -1269,6 +1299,7 @@ TEST_F(TemplateURLTest, IsSearchResults) {
 }
 
 TEST_F(TemplateURLTest, ReflectsBookmarkBarPinned) {
+  UIThreadSearchTermsData::SetGoogleBaseURL("http://www.google.com/");
   TemplateURLData data;
   data.input_encodings.push_back("UTF-8");
   data.SetURL("{google:baseURL}?{google:bookmarkBarPinned}q={searchTerms}");

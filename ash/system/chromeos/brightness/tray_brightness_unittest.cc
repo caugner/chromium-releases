@@ -8,19 +8,10 @@
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_item.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/status_area_widget_test_helper.h"
 #include "ui/views/view.h"
 
 namespace ash {
-
-namespace {
-
-user::LoginStatus GetUserLoginStatus() {
-  return Shell::GetInstance()->system_tray_delegate()->GetUserLoginStatus();
-}
-
-}  // namespace
-
-namespace internal {
 
 class TrayBrightnessTest : public test::AshTestBase {
  public:
@@ -30,12 +21,14 @@ class TrayBrightnessTest : public test::AshTestBase {
  protected:
   views::View* CreateDefaultView() {
     TrayBrightness tray(NULL);
-    return tray.CreateDefaultView(GetUserLoginStatus());
+    return tray.CreateDefaultView(
+        StatusAreaWidgetTestHelper::GetUserLoginStatus());
   }
 
   views::View* CreateDetailedView() {
     TrayBrightness tray(NULL);
-    return tray.CreateDetailedView(GetUserLoginStatus());
+    return tray.CreateDetailedView(
+        StatusAreaWidgetTestHelper::GetUserLoginStatus());
   }
 
  private:
@@ -94,8 +87,6 @@ TEST_F(TrayBrightnessTest, DetailedViewVisibilityChangesDuringMaximizeMode) {
   Shell::GetInstance()->EnableMaximizeModeWindowManager(false);
   EXPECT_TRUE(tray->visible());
 }
-
-}  // namespace internal
 
 }  // namespace ash
 

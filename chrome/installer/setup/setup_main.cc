@@ -855,10 +855,8 @@ installer::InstallStatus ShowEULADialog(const base::string16& inner_frame) {
 // accepted.
 bool CreateEULASentinel(BrowserDistribution* dist) {
   base::FilePath eula_sentinel;
-  if (!InstallUtil::GetSentinelFilePath(installer::kEULASentinelFile, dist,
-                                        &eula_sentinel)) {
+  if (!InstallUtil::GetEULASentinelFilePath(&eula_sentinel))
     return false;
-  }
 
   return (base::CreateDirectory(eula_sentinel.DirName()) &&
           base::WriteFile(eula_sentinel, "", 0) != -1);
@@ -1355,8 +1353,10 @@ void UninstallMultiChromeFrameIfPresent(const CommandLine& cmd_line,
   MasterPreferences uninstall_prefs(uninstall_cmd);
   InstallerState uninstall_state;
   uninstall_state.Initialize(uninstall_cmd, uninstall_prefs, *original_state);
-  const Product* chrome_frame_product = uninstall_state.FindProduct(
-      BrowserDistribution::CHROME_FRAME);
+  // Post M32, uninstall_prefs and uninstall_state won't have Chrome Frame in
+  // them since they've lost the power to do Chrome Frame installs.
+  const Product* chrome_frame_product = uninstall_state.AddProductFromState(
+      BrowserDistribution::CHROME_FRAME, *chrome_frame_state);
   if (chrome_frame_product) {
     // No shared state should be left behind.
     const bool remove_all = true;

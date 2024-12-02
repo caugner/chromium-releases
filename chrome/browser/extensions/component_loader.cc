@@ -19,12 +19,12 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/plugin_service.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/file_util.h"
 #include "extensions/common/id_util.h"
 #include "extensions/common/manifest_constants.h"
 #include "grit/browser_resources.h"
@@ -34,6 +34,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "grit/keyboard_resources.h"
+#include "ui/file_manager/grit/file_manager_resources.h"
 #include "ui/keyboard/keyboard_util.h"
 #endif
 
@@ -196,7 +197,7 @@ std::string ComponentLoader::AddOrReplace(const base::FilePath& path) {
   base::FilePath absolute_path = base::MakeAbsoluteFilePath(path);
   std::string error;
   scoped_ptr<base::DictionaryValue> manifest(
-      extension_file_util::LoadManifest(absolute_path, &error));
+      file_util::LoadManifest(absolute_path, &error));
   if (!manifest) {
     LOG(ERROR) << "Could not load extension from '" <<
                   absolute_path.value() << "'. " << error;
@@ -288,8 +289,14 @@ void ComponentLoader::AddFileManagerExtension() {
 }
 
 void ComponentLoader::AddVideoPlayerExtension() {
-  Add(IDR_VIDEOPLAYER_MANIFEST,
+#if defined(OS_CHROMEOS)
+  Add(IDR_VIDEO_PLAYER_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("video_player")));
+#endif  // defined(OS_CHROMEOS)
+}
+
+void ComponentLoader::AddGalleryExtension() {
+  // TODO(hirono): Disable the new experimental gallery in M36 temporarily.
 }
 
 void ComponentLoader::AddHangoutServicesExtension() {
@@ -308,15 +315,6 @@ void ComponentLoader::AddHotwordHelperExtension() {
 
 void ComponentLoader::AddImageLoaderExtension() {
 #if defined(IMAGE_LOADER_EXTENSION)
-#ifndef NDEBUG
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kImageLoaderExtensionPath)) {
-    base::FilePath image_loader_extension_path(
-        command_line->GetSwitchValuePath(switches::kImageLoaderExtensionPath));
-    Add(IDR_IMAGE_LOADER_MANIFEST, image_loader_extension_path);
-    return;
-  }
-#endif  // NDEBUG
   Add(IDR_IMAGE_LOADER_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("image_loader")));
 #endif  // defined(IMAGE_LOADER_EXTENSION)
@@ -442,6 +440,7 @@ void ComponentLoader::AddDefaultComponentExtensionsForKioskMode(
   // Component extensions needed for kiosk apps.
   AddVideoPlayerExtension();
   AddFileManagerExtension();
+  AddGalleryExtension();
 
   // Add virtual keyboard.
   AddKeyboardApp();
@@ -473,6 +472,7 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
   if (!skip_session_components) {
     AddVideoPlayerExtension();
     AddFileManagerExtension();
+    AddGalleryExtension();
 
     AddHangoutServicesExtension();
     AddHotwordHelperExtension();
@@ -545,29 +545,16 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
   std::string field_trial_result =
       base::FieldTrialList::FindFullName(kFieldTrialName);
 
-  bool enabled_via_field_trial = field_trial_result.compare(
-      0,
-      enable_prefix.length(),
-      enable_prefix) == 0;
+  bool enabled_via_field_trial =
+      field_trial_result.compare(0, enable_prefix.length(), enable_prefix) == 0;
 
-  // Enable the feature on trybots.
-  bool enabled_via_trunk_build = chrome::VersionInfo::GetChannel() ==
-      chrome::VersionInfo::CHANNEL_UNKNOWN;
+  // Enable the feature on trybots and trunk builds.
+  bool enabled_via_trunk_build =
+      chrome::VersionInfo::GetChannel() == chrome::VersionInfo::CHANNEL_UNKNOWN;
 
-  bool enabled_via_flag =
-      chrome::VersionInfo::GetChannel() !=
-          chrome::VersionInfo::CHANNEL_STABLE &&
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableGoogleNowIntegration);
+  bool enabled = enabled_via_field_trial || enabled_via_trunk_build;
 
-  bool enabled =
-      enabled_via_field_trial || enabled_via_trunk_build || enabled_via_flag;
-
-  bool disabled_via_flag =
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableGoogleNowIntegration);
-
-  if (!skip_session_components && enabled && !disabled_via_flag) {
+  if (!skip_session_components && enabled) {
     Add(IDR_GOOGLE_NOW_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("google_now")));
   }
@@ -577,6 +564,21 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 #if !defined(OS_CHROMEOS)  // http://crbug.com/314799
   AddNetworkSpeechSynthesisExtension();
 #endif
+
+  if (!skip_session_components &&
+      command_line->HasSwitch(switches::kEnableEasyUnlock)) {
+    if (command_line->HasSwitch(switches::kEasyUnlockAppPath)) {
+      base::FilePath easy_unlock_path(
+          command_line->GetSwitchValuePath(switches::kEasyUnlockAppPath));
+      Add(IDR_EASY_UNLOCK_MANIFEST, easy_unlock_path);
+    } else {
+#if defined(OS_CHROMEOS)
+      Add(IDR_EASY_UNLOCK_MANIFEST,
+          base::FilePath(
+              FILE_PATH_LITERAL("/usr/share/chromeos-assets/easy_unlock")));
+#endif
+    }
+  }
 #endif  // defined(GOOGLE_CHROME_BUILD)
 
 #if defined(ENABLE_PLUGINS)
@@ -589,6 +591,9 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
     Add(IDR_PDF_MANIFEST, base::FilePath(FILE_PATH_LITERAL("pdf")));
   }
 #endif
+
+  Add(IDR_CRYPTOTOKEN_MANIFEST,
+      base::FilePath(FILE_PATH_LITERAL("cryptotoken")));
 }
 
 void ComponentLoader::UnloadComponent(ComponentExtensionInfo* component) {

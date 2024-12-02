@@ -5,11 +5,14 @@
 #include "chrome/browser/ui/webui/chromeos/login/core_oobe_handler.h"
 
 #include "ash/magnifier/magnifier_constants.h"
+#include "ash/shell.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
+#include "chrome/browser/chromeos/login/helper.h"
+#include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
@@ -22,6 +25,10 @@
 #include "chromeos/chromeos_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "ui/gfx/display.h"
+#include "ui/gfx/screen.h"
+#include "ui/gfx/size.h"
+#include "ui/keyboard/keyboard_controller.h"
 
 namespace {
 
@@ -34,8 +41,8 @@ const char kJsApiEnableScreenMagnifier[] = "enableScreenMagnifier";
 const char kJsApiEnableLargeCursor[] = "enableLargeCursor";
 const char kJsApiEnableSpokenFeedback[] = "enableSpokenFeedback";
 const char kJsApiScreenStateInitialize[] = "screenStateInitialize";
-const char kJsApiSkipUpdateEnrollAfterEula[] = "skipUpdateEnrollAfterEula";
 const char kJsApiScreenAssetsLoaded[] = "screenAssetsLoaded";
+const char kJsApiHeaderBarVisible[] = "headerBarVisible";
 
 }  // namespace
 
@@ -101,13 +108,13 @@ void CoreOobeHandler::Initialize() {
   version_info_updater_.StartUpdate(false);
 #endif
   UpdateDeviceRequisition();
+  UpdateKeyboardState();
+  UpdateClientAreaSize();
 }
 
 void CoreOobeHandler::RegisterMessages() {
   AddCallback(kJsApiScreenStateInitialize,
               &CoreOobeHandler::HandleInitialized);
-  AddCallback(kJsApiSkipUpdateEnrollAfterEula,
-              &CoreOobeHandler::HandleSkipUpdateEnrollAfterEula);
   AddCallback("updateCurrentScreen",
               &CoreOobeHandler::HandleUpdateCurrentScreen);
   AddCallback(kJsApiEnableHighContrast,
@@ -128,6 +135,9 @@ void CoreOobeHandler::RegisterMessages() {
                  &CoreOobeHandler::HandleSkipToLoginForTesting);
   AddCallback("launchHelpApp",
               &CoreOobeHandler::HandleLaunchHelpApp);
+  AddCallback("toggleResetScreen", &CoreOobeHandler::HandleToggleResetScreen);
+  AddCallback(kJsApiHeaderBarVisible,
+              &CoreOobeHandler::HandleHeaderBarVisible);
 }
 
 void CoreOobeHandler::ShowSignInError(
@@ -142,6 +152,26 @@ void CoreOobeHandler::ShowSignInError(
 
 void CoreOobeHandler::ShowTpmError() {
   CallJS("showTpmError");
+}
+
+void CoreOobeHandler::ShowDeviceResetScreen() {
+  policy::BrowserPolicyConnectorChromeOS* connector =
+      g_browser_process->platform_part()->browser_policy_connector_chromeos();
+  if (!connector->IsEnterpriseManaged()) {
+    // Don't recreate WizardController if it already exists.
+    WizardController* wizard_controller =
+        WizardController::default_controller();
+    if (wizard_controller && !wizard_controller->login_screen_started()) {
+      wizard_controller->AdvanceToScreen(WizardController::kResetScreenName);
+    } else {
+      scoped_ptr<base::DictionaryValue> params(new base::DictionaryValue());
+      DCHECK(LoginDisplayHostImpl::default_host());
+      if (LoginDisplayHostImpl::default_host()) {
+        LoginDisplayHostImpl::default_host()->StartWizard(
+            WizardController::kResetScreenName, params.Pass());
+      }
+    }
+  }
 }
 
 void CoreOobeHandler::ShowSignInUI(const std::string& email) {
@@ -188,15 +218,20 @@ void CoreOobeHandler::ReloadContent(const base::DictionaryValue& dictionary) {
   CallJS("reloadContent", dictionary);
 }
 
-void CoreOobeHandler::HandleInitialized() {
-  oobe_ui_->InitializeHandlers();
+void CoreOobeHandler::ShowControlBar(bool show) {
+  CallJS("showControlBar", show);
 }
 
-void CoreOobeHandler::HandleSkipUpdateEnrollAfterEula() {
-  WizardController* controller = WizardController::default_controller();
-  DCHECK(controller);
-  if (controller)
-    controller->SkipUpdateEnrollAfterEula();
+void CoreOobeHandler::SetKeyboardState(bool shown, const gfx::Rect& bounds) {
+  CallJS("setKeyboardState", shown, bounds.width(), bounds.height());
+}
+
+void CoreOobeHandler::SetClientAreaSize(int width, int height) {
+  CallJS("setClientAreaSize", width, height);
+}
+
+void CoreOobeHandler::HandleInitialized() {
+  oobe_ui_->InitializeHandlers();
 }
 
 void CoreOobeHandler::HandleUpdateCurrentScreen(const std::string& screen) {
@@ -254,6 +289,8 @@ void CoreOobeHandler::HandleSkipToLoginForTesting(
   if (WizardController::default_controller())
       WizardController::default_controller()->SkipToLoginForTesting(context);
 }
+
+void CoreOobeHandler::HandleToggleResetScreen() { ShowDeviceResetScreen(); }
 
 void CoreOobeHandler::ShowOobeUI(bool show) {
   if (show == show_oobe_ui_)
@@ -317,6 +354,33 @@ void CoreOobeHandler::UpdateDeviceRequisition() {
          connector->GetDeviceCloudPolicyManager()->GetDeviceRequisition());
 }
 
+void CoreOobeHandler::UpdateKeyboardState() {
+  const std::string& ui_type = oobe_ui_->display_type();
+  if ((ui_type != OobeUI::kLockDisplay &&
+          login::LoginScrollIntoViewEnabled()) ||
+      (ui_type == OobeUI::kLockDisplay &&
+          login::LockScrollIntoViewEnabled())) {
+    keyboard::KeyboardController* keyboard_controller =
+        keyboard::KeyboardController::GetInstance();
+    if (keyboard_controller) {
+      gfx::Rect bounds = keyboard_controller->current_keyboard_bounds();
+      SetKeyboardState(!bounds.IsEmpty(), bounds);
+    }
+  }
+}
+
+void CoreOobeHandler::UpdateClientAreaSize() {
+  // Special case for screen lock. http://crbug.com/377904
+  // No need to update client area size so that virtual keyboard works.
+  if (oobe_ui_->display_type() == OobeUI::kLockDisplay &&
+      login::LockScrollIntoViewEnabled()) {
+    return;
+  }
+
+  const gfx::Size& size = ash::Shell::GetScreen()->GetPrimaryDisplay().size();
+  SetClientAreaSize(size.width(), size.height());
+}
+
 void CoreOobeHandler::OnAccessibilityStatusChanged(
     const AccessibilityStatusEventDetails& details) {
   if (details.notification_type == ACCESSIBILITY_MANAGER_SHUTDOWN)
@@ -330,6 +394,12 @@ void CoreOobeHandler::HandleLaunchHelpApp(double help_topic_id) {
     help_app_ = new HelpAppLauncher(GetNativeWindow());
   help_app_->ShowHelpTopic(
       static_cast<HelpAppLauncher::HelpTopic>(help_topic_id));
+}
+
+void CoreOobeHandler::HandleHeaderBarVisible() {
+  LoginDisplayHost* login_display_host = LoginDisplayHostImpl::default_host();
+  if (login_display_host)
+    login_display_host->SetStatusAreaVisible(true);
 }
 
 }  // namespace chromeos

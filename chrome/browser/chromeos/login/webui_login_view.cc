@@ -22,6 +22,8 @@
 #include "chrome/browser/media/media_stream_infobar_delegate.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/renderer_preferences_util.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
+#include "chrome/browser/ui/autofill/tab_autofill_manager_delegate.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/render_messages.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -34,7 +36,6 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/gfx/rect.h"
@@ -171,8 +172,15 @@ void WebUILoginView::Init() {
 
   WebContents* web_contents = webui_login_->GetWebContents();
 
+  // Ensure that the login UI has a tab ID, which will allow the GAIA auth
+  // extension's background script to tell it apart from a captive portal window
+  // that may be opened on top of this UI.
+  SessionTabHelper::CreateForWebContents(web_contents);
+
   // Create the password manager that is needed for the proxy.
-  ChromePasswordManagerClient::CreateForWebContents(web_contents);
+  ChromePasswordManagerClient::CreateForWebContentsWithAutofillManagerDelegate(
+      web_contents,
+      autofill::TabAutofillManagerDelegate::FromWebContents(web_contents));
 
   // LoginHandlerViews uses a constrained window for the password manager view.
   WebContentsModalDialogManager::CreateForWebContents(web_contents);
@@ -328,7 +336,7 @@ void WebUILoginView::AboutToRequestFocusFromTabTraversal(bool reverse) {
   // Return the focus to the web contents.
   webui_login_->web_contents()->FocusThroughTabTraversal(reverse);
   GetWidget()->Activate();
-  webui_login_->web_contents()->GetView()->Focus();
+  webui_login_->web_contents()->Focus();
 }
 
 void WebUILoginView::Observe(int type,

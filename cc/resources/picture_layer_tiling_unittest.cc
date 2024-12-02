@@ -13,6 +13,7 @@
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/fake_picture_layer_tiling_client.h"
 #include "cc/test/test_context_provider.h"
+#include "cc/test/test_shared_bitmap_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/size_conversions.h"
@@ -155,7 +156,7 @@ class PictureLayerTilingIteratorTest : public testing::Test {
                                         const gfx::Rect& dest_rect) {
     float dest_to_contents_scale = tiling_->contents_scale() / rect_scale;
     gfx::Rect clamped_rect = gfx::ScaleToEnclosingRect(
-        tiling_->ContentRect(), 1.f / dest_to_contents_scale);
+        tiling_->TilingRect(), 1.f / dest_to_contents_scale);
     clamped_rect.Intersect(dest_rect);
     VerifyTilesExactlyCoverRect(rect_scale, dest_rect, clamped_rect);
   }
@@ -419,14 +420,14 @@ TEST(PictureLayerTilingTest, ViewportDistanceWithScale) {
   scoped_ptr<TestablePictureLayerTiling> tiling;
 
   gfx::Rect viewport(0, 0, 100, 100);
-  gfx::Size layer_bounds(200, 200);
+  gfx::Size layer_bounds(1500, 1500);
 
   client.SetTileSize(gfx::Size(10, 10));
 
-  // Tiling at 0.25 scale: this should create 36 tiles (6x6) of size 10x10.
+  // Tiling at 0.25 scale: this should create 47x47 tiles of size 10x10.
   // The reason is that each tile has a one pixel border, so tile at (1, 2)
-  // for instance begins at (8, 16) pixels. So tile at (5, 5) will begin at
-  // (40, 40) and extend right to the end of 200 * 0.25 = 50 edge of the
+  // for instance begins at (8, 16) pixels. So tile at (46, 46) will begin at
+  // (368, 368) and extend to the end of 1500 * 0.25 = 375 edge of the
   // tiling.
   tiling = TestablePictureLayerTiling::Create(0.25f, layer_bounds, &client);
   gfx::Rect viewport_in_content_space =
@@ -434,23 +435,30 @@ TEST(PictureLayerTilingTest, ViewportDistanceWithScale) {
 
   tiling->UpdateTilePriorities(ACTIVE_TREE, viewport, 1.f, 1.0);
 
+  gfx::Rect soon_rect = viewport;
+  soon_rect.Inset(-312.f, -312.f, -312.f, -312.f);
+  gfx::Rect soon_rect_in_content_space =
+      gfx::ToEnclosedRect(gfx::ScaleRect(soon_rect, 0.25f));
+
   // Sanity checks.
-  for (int i = 0; i < 6; ++i) {
-    for (int j = 0; j < 6; ++j) {
+  for (int i = 0; i < 47; ++i) {
+    for (int j = 0; j < 47; ++j) {
       EXPECT_TRUE(tiling->TileAt(i, j)) << "i: " << i << " j: " << j;
     }
   }
-  for (int i = 0; i < 7; ++i) {
-    EXPECT_FALSE(tiling->TileAt(i, 6)) << "i: " << i;
-    EXPECT_FALSE(tiling->TileAt(6, i)) << "i: " << i;
+  for (int i = 0; i < 47; ++i) {
+    EXPECT_FALSE(tiling->TileAt(i, 47)) << "i: " << i;
+    EXPECT_FALSE(tiling->TileAt(47, i)) << "i: " << i;
   }
 
   // No movement in the viewport implies that tiles will either be NOW
-  // or EVENTUALLY.
+  // or EVENTUALLY, with the exception of tiles that are between 0 and 312
+  // pixels away from the viewport, which will be in the SOON bin.
   bool have_now = false;
   bool have_eventually = false;
-  for (int i = 0; i < 6; ++i) {
-    for (int j = 0; j < 6; ++j) {
+  bool have_soon = false;
+  for (int i = 0; i < 47; ++i) {
+    for (int j = 0; j < 47; ++j) {
       Tile* tile = tiling->TileAt(i, j);
       TilePriority priority = tile->priority(ACTIVE_TREE);
 
@@ -458,6 +466,9 @@ TEST(PictureLayerTilingTest, ViewportDistanceWithScale) {
         EXPECT_EQ(TilePriority::NOW, priority.priority_bin);
         EXPECT_FLOAT_EQ(0.f, priority.distance_to_visible);
         have_now = true;
+      } else if (soon_rect_in_content_space.Intersects(tile->content_rect())) {
+        EXPECT_EQ(TilePriority::SOON, priority.priority_bin);
+        have_soon = true;
       } else {
         EXPECT_EQ(TilePriority::EVENTUALLY, priority.priority_bin);
         EXPECT_GT(priority.distance_to_visible, 0.f);
@@ -467,6 +478,7 @@ TEST(PictureLayerTilingTest, ViewportDistanceWithScale) {
   }
 
   EXPECT_TRUE(have_now);
+  EXPECT_TRUE(have_soon);
   EXPECT_TRUE(have_eventually);
 
   // Spot check some distances.
@@ -494,6 +506,11 @@ TEST(PictureLayerTilingTest, ViewportDistanceWithScale) {
       gfx::ToEnclosedRect(gfx::ScaleRect(viewport, 0.25f));
   gfx::Rect skewport = tiling->ComputeSkewport(2.0, viewport_in_content_space);
 
+  soon_rect = viewport;
+  soon_rect.Inset(-312.f, -312.f, -312.f, -312.f);
+  soon_rect_in_content_space =
+      gfx::ToEnclosedRect(gfx::ScaleRect(soon_rect, 0.25f));
+
   EXPECT_EQ(0, skewport.x());
   EXPECT_EQ(10, skewport.y());
   EXPECT_EQ(25, skewport.width());
@@ -503,12 +520,12 @@ TEST(PictureLayerTilingTest, ViewportDistanceWithScale) {
 
   have_now = false;
   have_eventually = false;
-  bool have_soon = false;
+  have_soon = false;
 
   // Viewport moved, so we expect to find some NOW tiles, some SOON tiles and
   // some EVENTUALLY tiles.
-  for (int i = 0; i < 6; ++i) {
-    for (int j = 0; j < 6; ++j) {
+  for (int i = 0; i < 47; ++i) {
+    for (int j = 0; j < 47; ++j) {
       Tile* tile = tiling->TileAt(i, j);
       TilePriority priority = tile->priority(ACTIVE_TREE);
 
@@ -518,7 +535,8 @@ TEST(PictureLayerTilingTest, ViewportDistanceWithScale) {
         EXPECT_FLOAT_EQ(0.f, priority.distance_to_visible) << "i: " << i
                                                            << " j: " << j;
         have_now = true;
-      } else if (skewport.Intersects(tile->content_rect())) {
+      } else if (skewport.Intersects(tile->content_rect()) ||
+                 soon_rect_in_content_space.Intersects(tile->content_rect())) {
         EXPECT_EQ(TilePriority::SOON, priority.priority_bin) << "i: " << i
                                                              << " j: " << j;
         EXPECT_GT(priority.distance_to_visible, 0.f) << "i: " << i
@@ -783,7 +801,10 @@ TEST(PictureLayerTilingTest, TilingRasterTileIteratorStaticViewport) {
   scoped_ptr<TestablePictureLayerTiling> tiling;
 
   gfx::Rect viewport(50, 50, 100, 100);
-  gfx::Size layer_bounds(200, 200);
+  gfx::Size layer_bounds(800, 800);
+
+  gfx::Rect soon_rect = viewport;
+  soon_rect.Inset(-312.f, -312.f, -312.f, -312.f);
 
   client.SetTileSize(gfx::Size(30, 30));
 
@@ -796,7 +817,7 @@ TEST(PictureLayerTilingTest, TilingRasterTileIteratorStaticViewport) {
   std::vector<Tile*> all_tiles = tiling->AllTilesForTesting();
 
   // Sanity check.
-  EXPECT_EQ(64u, all_tiles.size());
+  EXPECT_EQ(841u, all_tiles.size());
 
   // The explanation of each iteration is as follows:
   // 1. First iteration tests that we can get all of the tiles correctly.
@@ -848,9 +869,13 @@ TEST(PictureLayerTilingTest, TilingRasterTileIteratorStaticViewport) {
                                new_priority.distance_to_visible;
           eventually_bin_order_correct_count += order_correct;
           eventually_bin_order_incorrect_count += !order_correct;
-        } else {
+        } else if (!soon_rect.Intersects(new_tile->content_rect()) &&
+                   !soon_rect.Intersects(last_tile->content_rect())) {
           EXPECT_LE(last_priority.distance_to_visible,
                     new_priority.distance_to_visible);
+          EXPECT_EQ(TilePriority::NOW, new_priority.priority_bin);
+        } else if (new_priority.distance_to_visible > 0.f) {
+          EXPECT_EQ(TilePriority::SOON, new_priority.priority_bin);
         }
       }
       have_tiles[new_priority.priority_bin] = true;
@@ -870,10 +895,10 @@ TEST(PictureLayerTilingTest, TilingRasterTileIteratorStaticViewport) {
     EXPECT_GT(eventually_bin_order_correct_count,
               eventually_bin_order_incorrect_count);
 
-    // We should have now and eventually tiles, but not soon tiles because the
-    // viewport is static.
+    // We should have now and eventually tiles, as well as soon tiles from
+    // the border region.
     EXPECT_TRUE(have_tiles[TilePriority::NOW]);
-    EXPECT_FALSE(have_tiles[TilePriority::SOON]);
+    EXPECT_TRUE(have_tiles[TilePriority::SOON]);
     EXPECT_TRUE(have_tiles[TilePriority::EVENTUALLY]);
 
     EXPECT_EQ(unique_tiles.size(), all_tiles.size());
@@ -885,14 +910,17 @@ TEST(PictureLayerTilingTest, TilingRasterTileIteratorMovingViewport) {
   scoped_ptr<TestablePictureLayerTiling> tiling;
 
   gfx::Rect viewport(50, 0, 100, 100);
-  gfx::Rect moved_viewport(50, 0, 100, 250);
-  gfx::Size layer_bounds(500, 500);
+  gfx::Rect moved_viewport(50, 0, 100, 500);
+  gfx::Size layer_bounds(1000, 1000);
 
   client.SetTileSize(gfx::Size(30, 30));
 
   tiling = TestablePictureLayerTiling::Create(1.f, layer_bounds, &client);
   tiling->UpdateTilePriorities(ACTIVE_TREE, viewport, 1.0f, 1.0);
   tiling->UpdateTilePriorities(ACTIVE_TREE, moved_viewport, 1.0f, 2.0);
+
+  gfx::Rect soon_rect = moved_viewport;
+  soon_rect.Inset(-312.f, -312.f, -312.f, -312.f);
 
   // There are 3 bins in TilePriority.
   bool have_tiles[3] = {};
@@ -920,9 +948,12 @@ TEST(PictureLayerTilingTest, TilingRasterTileIteratorMovingViewport) {
                              new_priority.distance_to_visible;
         eventually_bin_order_correct_count += order_correct;
         eventually_bin_order_incorrect_count += !order_correct;
-      } else {
+      } else if (!soon_rect.Intersects(new_tile->content_rect()) &&
+                 !soon_rect.Intersects(last_tile->content_rect())) {
         EXPECT_LE(last_priority.distance_to_visible,
                   new_priority.distance_to_visible);
+      } else if (new_priority.distance_to_visible > 0.f) {
+        EXPECT_EQ(TilePriority::SOON, new_priority.priority_bin);
       }
     }
     last_tile = new_tile;
@@ -939,6 +970,67 @@ TEST(PictureLayerTilingTest, TilingRasterTileIteratorMovingViewport) {
 static void TileExists(bool exists, Tile* tile,
                        const gfx::Rect& geometry_rect) {
   EXPECT_EQ(exists, tile != NULL) << geometry_rect.ToString();
+}
+
+TEST(PictureLayerTilingTest, TilingEvictionTileIteratorStaticViewport) {
+  FakeOutputSurfaceClient output_surface_client;
+  scoped_ptr<FakeOutputSurface> output_surface = FakeOutputSurface::Create3d();
+  CHECK(output_surface->BindToClient(&output_surface_client));
+  TestSharedBitmapManager shared_bitmap_manager;
+  scoped_ptr<ResourceProvider> resource_provider = ResourceProvider::Create(
+      output_surface.get(), &shared_bitmap_manager, 0, false, 1, false);
+
+  FakePictureLayerTilingClient client(resource_provider.get());
+  scoped_ptr<TestablePictureLayerTiling> tiling;
+
+  gfx::Rect viewport(50, 50, 100, 100);
+  gfx::Size layer_bounds(200, 200);
+
+  client.SetTileSize(gfx::Size(30, 30));
+
+  tiling = TestablePictureLayerTiling::Create(1.0f, layer_bounds, &client);
+  tiling->UpdateTilePriorities(ACTIVE_TREE, viewport, 1.0f, 1.0);
+
+  PictureLayerTiling::TilingRasterTileIterator empty_iterator;
+  EXPECT_FALSE(empty_iterator);
+
+  std::vector<Tile*> all_tiles = tiling->AllTilesForTesting();
+
+  PictureLayerTiling::TilingEvictionTileIterator it(tiling.get(),
+                                                    SMOOTHNESS_TAKES_PRIORITY);
+
+  // Tiles don't have resources to evict.
+  EXPECT_FALSE(it);
+
+  // Sanity check.
+  EXPECT_EQ(64u, all_tiles.size());
+
+  client.tile_manager()->InitializeTilesWithResourcesForTesting(all_tiles);
+
+  std::set<Tile*> all_tiles_set(all_tiles.begin(), all_tiles.end());
+
+  it = PictureLayerTiling::TilingEvictionTileIterator(
+      tiling.get(), SMOOTHNESS_TAKES_PRIORITY);
+  EXPECT_TRUE(it);
+
+  std::set<Tile*> eviction_tiles;
+  Tile* last_tile = *it;
+  for (; it; ++it) {
+    Tile* tile = *it;
+    EXPECT_TRUE(tile);
+    EXPECT_LE(tile->priority(ACTIVE_TREE).priority_bin,
+              last_tile->priority(ACTIVE_TREE).priority_bin);
+    if (tile->priority(ACTIVE_TREE).priority_bin ==
+        last_tile->priority(ACTIVE_TREE).priority_bin) {
+      EXPECT_LE(tile->priority(ACTIVE_TREE).distance_to_visible,
+                last_tile->priority(ACTIVE_TREE).distance_to_visible);
+    }
+    last_tile = tile;
+    eviction_tiles.insert(tile);
+  }
+
+  EXPECT_GT(all_tiles_set.size(), 0u);
+  EXPECT_EQ(all_tiles_set, eviction_tiles);
 }
 
 TEST_F(PictureLayerTilingIteratorTest, TilesExist) {

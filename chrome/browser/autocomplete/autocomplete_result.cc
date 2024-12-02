@@ -64,11 +64,38 @@ bool CompareWithDemoteByType::operator()(const AutocompleteMatch& elem1,
       (demoted_relevance1 > demoted_relevance2);
 }
 
+class DestinationSort {
+ public:
+  DestinationSort(
+      AutocompleteInput::PageClassification current_page_classification);
+  bool operator()(const AutocompleteMatch& elem1,
+                  const AutocompleteMatch& elem2);
+
+ private:
+  CompareWithDemoteByType demote_by_type_;
+};
+
+DestinationSort::DestinationSort(
+    AutocompleteInput::PageClassification current_page_classification) :
+    demote_by_type_(current_page_classification) {}
+
+bool DestinationSort::operator()(const AutocompleteMatch& elem1,
+                                 const AutocompleteMatch& elem2) {
+  // Sort identical destination_urls together.  Place the most relevant matches
+  // first, so that when we call std::unique(), these are the ones that get
+  // preserved.
+  if (AutocompleteMatch::DestinationsEqual(elem1, elem2) ||
+      (elem1.stripped_destination_url.is_empty() &&
+       elem2.stripped_destination_url.is_empty())) {
+    return demote_by_type_(elem1, elem2);
+  }
+  return elem1.stripped_destination_url < elem2.stripped_destination_url;
+}
+
 };  // namespace
 
 // static
 const size_t AutocompleteResult::kMaxMatches = 6;
-const int AutocompleteResult::kLowestDefaultScore = 1200;
 
 void AutocompleteResult::Selection::Clear() {
   destination_url = GURL();
@@ -147,47 +174,14 @@ void AutocompleteResult::SortAndCull(const AutocompleteInput& input,
   for (ACMatches::iterator i(matches_.begin()); i != matches_.end(); ++i)
     i->ComputeStrippedDestinationURL(profile);
 
-  // Sort matches such that duplicate matches are consecutive.
-  std::sort(matches_.begin(), matches_.end(),
-            &AutocompleteMatch::DestinationSortFunc);
-
-  // Set duplicate_matches for the first match before erasing duplicate matches.
-  for (ACMatches::iterator i(matches_.begin()); i != matches_.end(); ++i) {
-    for (int j = 1; (i + j != matches_.end()) &&
-         AutocompleteMatch::DestinationsEqual(*i, *(i + j)); ++j) {
-      AutocompleteMatch& dup_match(*(i + j));
-      i->duplicate_matches.insert(i->duplicate_matches.end(),
-                                  dup_match.duplicate_matches.begin(),
-                                  dup_match.duplicate_matches.end());
-      dup_match.duplicate_matches.clear();
-      i->duplicate_matches.push_back(dup_match);
-    }
-  }
-
-  // Erase duplicate matches.
-  matches_.erase(std::unique(matches_.begin(), matches_.end(),
-                             &AutocompleteMatch::DestinationsEqual),
-                 matches_.end());
-
-  // Find the top match before possibly applying demotions.
-  if (!matches_.empty())
-    std::partial_sort(matches_.begin(), matches_.begin() +  1, matches_.end(),
-                      &AutocompleteMatch::MoreRelevant);
-  // Don't demote the top match if applicable.
-  OmniboxFieldTrial::UndemotableTopMatchTypes undemotable_top_types =
-      OmniboxFieldTrial::GetUndemotableTopTypes(
-          input.current_page_classification());
-  const bool preserve_top_match = !matches_.empty() &&
-      (undemotable_top_types.count(matches_.begin()->type) != 0);
+  DedupMatchesByDestination(input.current_page_classification(), true,
+                            &matches_);
 
   // Sort and trim to the most relevant kMaxMatches matches.
   size_t max_num_matches = std::min(kMaxMatches, matches_.size());
   CompareWithDemoteByType comparing_object(input.current_page_classification());
-  std::sort(matches_.begin() + (preserve_top_match ? 1 : 0), matches_.end(),
-            comparing_object);
-  if (!matches_.empty() && !matches_.begin()->allowed_to_be_default_match &&
-      OmniboxFieldTrial::ReorderForLegalDefaultMatch(
-          input.current_page_classification())) {
+  std::sort(matches_.begin(), matches_.end(), comparing_object);
+  if (!matches_.empty() && !matches_.begin()->allowed_to_be_default_match) {
     // Top match is not allowed to be the default match.  Find the most
     // relevant legal match and shift it to the front.
     for (AutocompleteResult::iterator it = matches_.begin() + 1;
@@ -333,6 +327,36 @@ GURL AutocompleteResult::ComputeAlternateNavUrl(
       input.canonicalized_url() : GURL();
 }
 
+void AutocompleteResult::DedupMatchesByDestination(
+      AutocompleteInput::PageClassification page_classification,
+      bool set_duplicate_matches,
+      ACMatches* matches) {
+  DestinationSort destination_sort(page_classification);
+  // Sort matches such that duplicate matches are consecutive.
+  std::sort(matches->begin(), matches->end(), destination_sort);
+
+  if (set_duplicate_matches) {
+    // Set duplicate_matches for the first match before erasing duplicate
+    // matches.
+    for (ACMatches::iterator i(matches->begin()); i != matches->end(); ++i) {
+      for (int j = 1; (i + j != matches->end()) &&
+               AutocompleteMatch::DestinationsEqual(*i, *(i + j)); ++j) {
+        AutocompleteMatch& dup_match(*(i + j));
+        i->duplicate_matches.insert(i->duplicate_matches.end(),
+                                    dup_match.duplicate_matches.begin(),
+                                    dup_match.duplicate_matches.end());
+        dup_match.duplicate_matches.clear();
+        i->duplicate_matches.push_back(dup_match);
+      }
+    }
+  }
+
+  // Erase duplicate matches.
+  matches->erase(std::unique(matches->begin(), matches->end(),
+                             &AutocompleteMatch::DestinationsEqual),
+                 matches->end());
+}
+
 void AutocompleteResult::CopyFrom(const AutocompleteResult& rhs) {
   if (this == &rhs)
     return;
@@ -353,8 +377,6 @@ void AutocompleteResult::AddMatch(
   DCHECK_EQ(AutocompleteMatch::SanitizeString(match.contents), match.contents);
   DCHECK_EQ(AutocompleteMatch::SanitizeString(match.description),
             match.description);
-  // GetUndemotableTopTypes() is not used here because it's done in
-  // SortAndCull(), and we depend on SortAndCull() to be called afterwards.
   CompareWithDemoteByType comparing_object(page_classification);
   ACMatches::iterator insertion_point =
       std::upper_bound(begin(), end(), match, comparing_object);

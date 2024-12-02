@@ -185,13 +185,12 @@ GpuIDResult CollectGpuID(uint32* vendor_id, uint32* device_id) {
 CollectInfoResult CollectBasicGraphicsInfo(GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
-  std::string model_name;
   int32 model_major = 0, model_minor = 0;
   base::mac::ParseModelIdentifier(base::mac::GetModelIdentifier(),
-                                  &model_name, &model_major, &model_minor);
-  base::ReplaceChars(model_name, " ", "_", &gpu_info->machine_model);
-  gpu_info->machine_model += " " + base::IntToString(model_major) +
-                             "." + base::IntToString(model_minor);
+                                  &gpu_info->machine_model_name,
+                                  &model_major, &model_minor);
+  gpu_info->machine_model_version =
+      base::IntToString(model_major) + "." + base::IntToString(model_minor);
 
   bool result = CollectPCIVideoCardInfo(gpu_info);
   return result ? kCollectInfoSuccess : kCollectInfoNonFatalFailure;
@@ -204,11 +203,10 @@ CollectInfoResult CollectDriverInfoGL(GPUInfo* gpu_info) {
   // Mac OpenGL drivers have the driver version
   // at the end of the gl version string preceded by a dash.
   // Use some jiggery-pokery to turn that utf8 string into a std::wstring.
-  std::string gl_version_string = gpu_info->gl_version_string;
-  size_t pos = gl_version_string.find_last_of('-');
+  size_t pos = gpu_info->gl_version.find_last_of('-');
   if (pos == std::string::npos)
     return kCollectInfoNonFatalFailure;
-  gpu_info->driver_version = gl_version_string.substr(pos + 1);
+  gpu_info->driver_version = gpu_info->gl_version.substr(pos + 1);
   return kCollectInfoSuccess;
 }
 

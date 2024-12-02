@@ -30,6 +30,7 @@ using autofill::PasswordForm;
 using base::UTF8ToUTF16;
 using base::UTF16ToUTF8;
 using content::BrowserThread;
+using password_manager::PSLMatchingHelper;
 
 #define GNOME_KEYRING_DEFINE_POINTER(name) \
   typeof(&::gnome_keyring_##name) GnomeKeyringLoader::gnome_keyring_##name;
@@ -142,11 +143,14 @@ scoped_ptr<PasswordForm> FormFromAttributes(GnomeKeyringAttributeList* attrs) {
 
 // Parse all the results from the given GList into a PasswordFormList, and free
 // the GList. PasswordForms are allocated on the heap, and should be deleted by
-// the consumer. If not empty, |filter_by_signon_realm| is used to filter out
-// results -- only credentials with signon realms passing the PSL matching
-// (done by |helper|) against |filter_by_signon_realm| will be kept.
+// the consumer. If not NULL, |lookup_form| is used to filter out results --
+// only credentials with signon realms passing the PSL matching (done by
+// |helper|) against |lookup_form->signon_realm| will be kept. PSL matched
+// results get their signon_realm, origin, and action rewritten to those of
+// |lookup_form_|, with the original signon_realm saved into the result's
+// original_signon_realm data member.
 void ConvertFormList(GList* found,
-                     const std::string& filter_by_signon_realm,
+                     const PasswordForm* lookup_form,
                      const PSLMatchingHelper& helper,
                      NativeBackendGnome::PasswordFormList* forms) {
   PSLMatchingHelper::PSLDomainMatchMetric psl_domain_match_metric =
@@ -158,15 +162,19 @@ void ConvertFormList(GList* found,
 
     scoped_ptr<PasswordForm> form(FormFromAttributes(attrs));
     if (form) {
-      if (!filter_by_signon_realm.empty() &&
-          form->signon_realm != filter_by_signon_realm) {
+      if (lookup_form && form->signon_realm != lookup_form->signon_realm) {
         // This is not an exact match, we try PSL matching.
-        if (!(PSLMatchingHelper::IsPublicSuffixDomainMatch(
-                 filter_by_signon_realm, form->signon_realm))) {
+        if (lookup_form->scheme != PasswordForm::SCHEME_HTML ||
+            form->scheme != PasswordForm::SCHEME_HTML ||
+            !(PSLMatchingHelper::IsPublicSuffixDomainMatch(
+                lookup_form->signon_realm, form->signon_realm))) {
           continue;
         }
         psl_domain_match_metric = PSLMatchingHelper::PSL_DOMAIN_MATCH_FOUND;
         form->original_signon_realm = form->signon_realm;
+        form->signon_realm = lookup_form->signon_realm;
+        form->origin = lookup_form->origin;
+        form->action = lookup_form->action;
       }
       if (data->secret) {
         form->password_value = UTF8ToUTF16(data->secret);
@@ -178,7 +186,7 @@ void ConvertFormList(GList* found,
       LOG(WARNING) << "Could not initialize PasswordForm from attributes!";
     }
   }
-  if (!filter_by_signon_realm.empty()) {
+  if (lookup_form) {
     UMA_HISTOGRAM_ENUMERATION(
         "PasswordManager.PslDomainMatchTriggering",
         helper.IsMatchingEnabled()
@@ -286,11 +294,14 @@ class GKRMethod : public GnomeKeyringLoader {
   base::WaitableEvent event_;
   GnomeKeyringResult result_;
   NativeBackendGnome::PasswordFormList forms_;
-  // Two additional arguments to OnOperationGetList:
-  // If the credential search is related to a particular form,
-  // |original_signon_realm_| contains the signon realm of that form. It is used
-  // to filter the relevant results out of all the found ones.
-  std::string original_signon_realm_;
+  // If the credential search is specified by a single form and needs to use PSL
+  // matching, then the specifying form is stored in |lookup_form_|. If PSL
+  // matching is used to find a result, then the results signon realm, origin
+  // and action are stored are replaced by those of |lookup_form_|.
+  // Additionally, |lookup_form_->signon_realm| is also used to narrow down the
+  // found logins to those which indeed PSL-match the look-up. And finally,
+  // |lookup_form_| set to NULL means that PSL matching is not required.
+  scoped_ptr<PasswordForm> lookup_form_;
   const PSLMatchingHelper helper_;
 };
 
@@ -330,7 +341,7 @@ void GKRMethod::AddLogin(const PasswordForm& form, const char* app_string) {
 void GKRMethod::AddLoginSearch(const PasswordForm& form,
                                const char* app_string) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  original_signon_realm_ = form.signon_realm;
+  lookup_form_.reset(NULL);
   // Search GNOME Keyring for matching passwords to update.
   ScopedAttributeList attrs(gnome_keyring_attribute_list_new());
   AppendString(&attrs, "origin_url", form.origin.spec());
@@ -350,7 +361,7 @@ void GKRMethod::AddLoginSearch(const PasswordForm& form,
 void GKRMethod::UpdateLoginSearch(const PasswordForm& form,
                                   const char* app_string) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  original_signon_realm_ = form.signon_realm;
+  lookup_form_.reset(NULL);
   // Search GNOME Keyring for matching passwords to update.
   ScopedAttributeList attrs(gnome_keyring_attribute_list_new());
   AppendString(&attrs, "origin_url", form.origin.spec());
@@ -387,7 +398,7 @@ void GKRMethod::RemoveLogin(const PasswordForm& form, const char* app_string) {
 
 void GKRMethod::GetLogins(const PasswordForm& form, const char* app_string) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  original_signon_realm_ = form.signon_realm;
+  lookup_form_.reset(new PasswordForm(form));
   // Search GNOME Keyring for matching passwords.
   ScopedAttributeList attrs(gnome_keyring_attribute_list_new());
   if (!helper_.ShouldPSLDomainMatchingApply(
@@ -406,7 +417,7 @@ void GKRMethod::GetLogins(const PasswordForm& form, const char* app_string) {
 void GKRMethod::GetLoginsList(uint32_t blacklisted_by_user,
                               const char* app_string) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  original_signon_realm_.clear();
+  lookup_form_.reset(NULL);
   // Search GNOME Keyring for matching passwords.
   ScopedAttributeList attrs(gnome_keyring_attribute_list_new());
   AppendUint32(&attrs, "blacklisted_by_user", blacklisted_by_user);
@@ -420,7 +431,7 @@ void GKRMethod::GetLoginsList(uint32_t blacklisted_by_user,
 
 void GKRMethod::GetAllLogins(const char* app_string) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  original_signon_realm_.clear();
+  lookup_form_.reset(NULL);
   // We need to search for something, otherwise we get no results - so
   // we search for the fixed application string.
   ScopedAttributeList attrs(gnome_keyring_attribute_list_new());
@@ -488,26 +499,16 @@ void GKRMethod::OnOperationGetList(GnomeKeyringResult result, GList* list,
   method->forms_.clear();
   // |list| will be freed after this callback returns, so convert it now.
   ConvertFormList(
-      list, method->original_signon_realm_, method->helper_, &method->forms_);
-  method->original_signon_realm_.clear();
+      list, method->lookup_form_.get(), method->helper_, &method->forms_);
+  method->lookup_form_.reset(NULL);
   method->event_.Signal();
 }
 
 }  // namespace
 
-NativeBackendGnome::NativeBackendGnome(LocalProfileId id, PrefService* prefs)
-    : profile_id_(id), prefs_(prefs) {
-  // TODO(mdm): after a few more releases, remove the code which is now dead due
-  // to the true || here, and simplify this code. We don't do it yet to make it
-  // easier to revert if necessary.
-  if (true || PasswordStoreX::PasswordsUseLocalProfileId(prefs)) {
-    app_string_ = GetProfileSpecificAppString();
-    // We already did the migration previously. Don't try again.
-    migrate_tried_ = true;
-  } else {
-    app_string_ = kGnomeKeyringAppString;
-    migrate_tried_ = false;
-  }
+NativeBackendGnome::NativeBackendGnome(LocalProfileId id)
+    : profile_id_(id) {
+  app_string_ = GetProfileSpecificAppString();
 }
 
 NativeBackendGnome::~NativeBackendGnome() {
@@ -530,9 +531,6 @@ bool NativeBackendGnome::RawAddLogin(const PasswordForm& form) {
                << gnome_keyring_result_to_message(result);
     return false;
   }
-  // Successful write. Try migration if necessary.
-  if (!migrate_tried_)
-    MigrateToProfileSpecificLogins();
   return true;
 }
 
@@ -562,11 +560,6 @@ bool NativeBackendGnome::AddLogin(const PasswordForm& form) {
                    << " matching logins already! Will replace only the first.";
     }
 
-    // We try migration before updating the existing logins, since otherwise
-    // we'd do it after making some but not all of the changes below.
-    if (forms.size() > 0 && !migrate_tried_)
-      MigrateToProfileSpecificLogins();
-
     RemoveLogin(*forms[0]);
     for (size_t i = 0; i < forms.size(); ++i)
       delete forms[i];
@@ -594,11 +587,6 @@ bool NativeBackendGnome::UpdateLogin(const PasswordForm& form) {
                << gnome_keyring_result_to_message(result);
     return false;
   }
-
-  // We try migration before updating the existing logins, since otherwise
-  // we'd do it after making some but not all of the changes below.
-  if (forms.size() > 0 && !migrate_tried_)
-    MigrateToProfileSpecificLogins();
 
   bool ok = true;
   for (size_t i = 0; i < forms.size(); ++i) {
@@ -637,11 +625,6 @@ bool NativeBackendGnome::RemoveLogin(const PasswordForm& form) {
                  << gnome_keyring_result_to_message(result);
     return false;
   }
-  // Successful write. Try migration if necessary. Note that presumably if we've
-  // been asked to delete a login, it's because we returned it previously; thus,
-  // this will probably never happen since we'd have already tried migration.
-  if (!migrate_tried_)
-    MigrateToProfileSpecificLogins();
   return true;
 }
 
@@ -655,7 +638,6 @@ bool NativeBackendGnome::RemoveLoginsCreatedBetween(
   PasswordFormList forms;
   if (!GetAllLogins(&forms))
     return false;
-  // No need to try migration here: GetAllLogins() does it.
 
   for (size_t i = 0; i < forms.size(); ++i) {
     if (delete_begin <= forms[i]->date_created &&
@@ -684,9 +666,6 @@ bool NativeBackendGnome::GetLogins(const PasswordForm& form,
                << gnome_keyring_result_to_message(result);
     return false;
   }
-  // Successful read of actual data. Try migration if necessary.
-  if (!migrate_tried_)
-    MigrateToProfileSpecificLogins();
   return true;
 }
 
@@ -699,7 +678,6 @@ bool NativeBackendGnome::GetLoginsCreatedBetween(const base::Time& get_begin,
   PasswordFormList all_forms;
   if (!GetAllLogins(&all_forms))
     return false;
-  // No need to try migration here: GetAllLogins() does it.
 
   forms->reserve(forms->size() + all_forms.size());
   for (size_t i = 0; i < all_forms.size(); ++i) {
@@ -741,9 +719,6 @@ bool NativeBackendGnome::GetLoginsList(PasswordFormList* forms,
                << gnome_keyring_result_to_message(result);
     return false;
   }
-  // Successful read of actual data. Try migration if necessary.
-  if (!migrate_tried_)
-    MigrateToProfileSpecificLogins();
   return true;
 }
 
@@ -761,9 +736,6 @@ bool NativeBackendGnome::GetAllLogins(PasswordFormList* forms) {
                << gnome_keyring_result_to_message(result);
     return false;
   }
-  // Successful read of actual data. Try migration if necessary.
-  if (!migrate_tried_)
-    MigrateToProfileSpecificLogins();
   return true;
 }
 
@@ -772,45 +744,4 @@ std::string NativeBackendGnome::GetProfileSpecificAppString() const {
   // so that we had *something* to search for since GNOME Keyring won't search
   // for nothing. Now we use it to distinguish passwords for different profiles.
   return base::StringPrintf("%s-%d", kGnomeKeyringAppString, profile_id_);
-}
-
-void NativeBackendGnome::MigrateToProfileSpecificLogins() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-
-  DCHECK(!migrate_tried_);
-  DCHECK_EQ(app_string_, kGnomeKeyringAppString);
-
-  // Record the fact that we've attempted migration already right away, so that
-  // we don't get recursive calls back to MigrateToProfileSpecificLogins().
-  migrate_tried_ = true;
-
-  // First get all the logins, using the old app string.
-  PasswordFormList forms;
-  if (!GetAllLogins(&forms))
-    return;
-
-  // Now switch to a profile-specific app string.
-  app_string_ = GetProfileSpecificAppString();
-
-  // Try to add all the logins with the new app string.
-  bool ok = true;
-  for (size_t i = 0; i < forms.size(); ++i) {
-    if (!RawAddLogin(*forms[i]))
-      ok = false;
-    delete forms[i];
-  }
-
-  if (ok) {
-    // All good! Keep the new app string and set a persistent pref.
-    // NOTE: We explicitly don't delete the old passwords yet. They are
-    // potentially shared with other profiles and other user data dirs!
-    // Each other profile must be able to migrate the shared data as well,
-    // so we must leave it alone. After a few releases, we'll add code to
-    // delete them, and eventually remove this migration code.
-    // TODO(mdm): follow through with the plan above.
-    PasswordStoreX::SetPasswordsUseLocalProfileId(prefs_);
-  } else {
-    // We failed to migrate for some reason. Use the old app string.
-    app_string_ = kGnomeKeyringAppString;
-  }
 }

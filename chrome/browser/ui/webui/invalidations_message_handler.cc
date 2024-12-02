@@ -5,10 +5,10 @@
 #include "chrome/browser/ui/webui/invalidations_message_handler.h"
 
 #include "base/bind.h"
-#include "chrome/browser/invalidation/invalidation_logger.h"
-#include "chrome/browser/invalidation/invalidation_service.h"
 #include "chrome/browser/invalidation/invalidation_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "components/invalidation/invalidation_logger.h"
+#include "components/invalidation/invalidation_service.h"
 #include "content/public/browser/web_ui.h"
 #include "sync/notifier/invalidation_handler.h"
 
@@ -80,21 +80,25 @@ void InvalidationsMessageHandler::OnRegistrationChange(
 }
 
 void InvalidationsMessageHandler::OnStateChange(
-    const syncer::InvalidatorState& new_state) {
+    const syncer::InvalidatorState& new_state,
+    const base::Time& last_changed_timestamp) {
   std::string state(syncer::InvalidatorStateToString(new_state));
   web_ui()->CallJavascriptFunction(
-      "chrome.invalidations.updateInvalidatorState", base::StringValue(state));
+      "chrome.invalidations.updateInvalidatorState", base::StringValue(state),
+      base::FundamentalValue(last_changed_timestamp.ToJsTime()));
 }
 
 void InvalidationsMessageHandler::OnUpdateIds(
     const std::string& handler_name,
-    const syncer::ObjectIdSet& ids_set) {
+    const syncer::ObjectIdCountMap& ids) {
   base::ListValue list_of_objects;
-  for (syncer::ObjectIdSet::const_iterator it = ids_set.begin();
-       it != ids_set.end(); ++it) {
+  for (syncer::ObjectIdCountMap::const_iterator it = ids.begin();
+       it != ids.end();
+       ++it) {
     scoped_ptr<base::DictionaryValue> dic(new base::DictionaryValue());
-    dic->SetString("name", it->name());
-    dic->SetInteger("source", it->source());
+    dic->SetString("name", (it->first).name());
+    dic->SetInteger("source", (it->first).source());
+    dic->SetInteger("totalCount", it->second);
     list_of_objects.Append(dic.release());
   }
   web_ui()->CallJavascriptFunction("chrome.invalidations.updateIds",

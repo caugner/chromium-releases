@@ -6,14 +6,18 @@
 #define UI_OZONE_OZONE_PLATFORM_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "ui/events/ozone/event_factory_ozone.h"
-#include "ui/gfx/ozone/surface_factory_ozone.h"
-#include "ui/ozone/ime/input_method_context_factory_ozone.h"
 #include "ui/ozone/ozone_export.h"
+
+namespace gfx {
+class SurfaceFactoryOzone;
+}
 
 namespace ui {
 
 class CursorFactoryOzone;
+class EventFactoryOzone;
+class InputMethodContextFactoryOzone;
+class NativeDisplayDelegate;
 
 // Base class for Ozone platform implementations.
 //
@@ -38,6 +42,8 @@ class OZONE_EXPORT OzonePlatform {
   // EventFactoryOzone will be set.
   static void Initialize();
 
+  static OzonePlatform* GetInstance();
+
   // Factory getters to override in subclasses. The returned objects will be
   // injected into the appropriate layer at startup. Subclasses should not
   // inject these objects themselves. Ownership is retained by OzonePlatform.
@@ -46,6 +52,10 @@ class OZONE_EXPORT OzonePlatform {
   virtual ui::InputMethodContextFactoryOzone*
       GetInputMethodContextFactoryOzone() = 0;
   virtual ui::CursorFactoryOzone* GetCursorFactoryOzone() = 0;
+#if defined(OS_CHROMEOS)
+  virtual scoped_ptr<ui::NativeDisplayDelegate>
+      CreateNativeDisplayDelegate() = 0;
+#endif
 
  private:
   static OzonePlatform* instance_;

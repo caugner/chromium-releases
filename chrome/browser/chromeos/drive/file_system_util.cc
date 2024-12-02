@@ -136,7 +136,7 @@ base::FilePath GetDriveMountPointPathForUserIdHash(
 
 base::FilePath GetDriveMountPointPath(Profile* profile) {
   std::string id = chromeos::ProfileHelper::GetUserIdHashFromProfile(profile);
-  if (id.empty()) {
+  if (id.empty() || id == chrome::kLegacyProfileDir) {
     // ProfileHelper::GetUserIdHashFromProfile works only when multi-profile is
     // enabled. In that case, we fall back to use UserManager (it basically just
     // returns currently active users's hash in such a case.) I still try
@@ -299,7 +299,7 @@ std::string UnescapeCacheFileName(const std::string& filename) {
 }
 
 std::string NormalizeFileName(const std::string& input) {
-  DCHECK(IsStringUTF8(input));
+  DCHECK(base::IsStringUTF8(input));
 
   std::string output;
   if (!base::ConvertToUtf8AndNormalize(input, base::kCodepageUTF8, &output))

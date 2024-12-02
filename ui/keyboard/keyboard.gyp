@@ -48,7 +48,7 @@
         '../events/events.gyp:events',
         '../gfx/gfx.gyp:gfx',
         '../gfx/gfx.gyp:gfx_geometry',
-        '../wm/wm.gyp:wm_core',
+        '../wm/wm.gyp:wm',
         'keyboard_resources',
       ],
       'defines': [
@@ -91,6 +91,7 @@
         '../gfx/gfx.gyp:gfx',
         '../gfx/gfx.gyp:gfx_geometry',
         '../resources/ui_resources.gyp:ui_test_pak',
+        '../wm/wm.gyp:wm',
         'keyboard',
       ],
       'sources': [
@@ -98,8 +99,7 @@
         'keyboard_controller_unittest.cc',
       ],
       'conditions': [
-        # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-        ['OS=="linux" and ((use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1))', {
+        ['OS=="linux" and use_allocator!="none"', {
           'dependencies': [
             '<(DEPTH)/base/allocator/allocator.gyp:allocator',
           ],

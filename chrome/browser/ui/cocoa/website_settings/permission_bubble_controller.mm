@@ -6,64 +6,171 @@
 
 #include <algorithm>
 
+#include "base/mac/bind_objc_block.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #import "chrome/browser/ui/chrome_style.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_button.h"
 #import "chrome/browser/ui/cocoa/hover_close_button.h"
 #import "chrome/browser/ui/cocoa/hyperlink_text_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
 #include "chrome/browser/ui/cocoa/website_settings/permission_bubble_cocoa.h"
+#include "chrome/browser/ui/cocoa/website_settings/permission_selector_button.h"
+#include "chrome/browser/ui/cocoa/website_settings/split_block_button.h"
+#include "chrome/browser/ui/cocoa/website_settings/website_settings_utils_cocoa.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_request.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_view.h"
+#include "chrome/browser/ui/website_settings/permission_menu_model.h"
+#include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "skia/ext/skia_utils_mac.h"
+#import "ui/base/cocoa/menu_controller.h"
 #include "ui/base/cocoa/window_size_constants.h"
+#import "ui/base/cocoa/menu_controller.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/base/models/simple_menu_model.h"
 
 using base::UserMetricsAction;
 
 namespace {
+
 const CGFloat kHorizontalPadding = 20.0f;
 const CGFloat kVerticalPadding = 20.0f;
 const CGFloat kButtonPadding = 10.0f;
-const CGFloat kCheckboxYAdjustment = 2.0f;
+const CGFloat kTitlePaddingX = 50.0f;
+const CGFloat kTitleFontSize = 15.0f;
+const CGFloat kPermissionFontSize = 12.0f;
 
-const CGFloat kFontSize = 15.0f;
-const base::char16 kBulletPoint = 0x2022;
+class MenuDelegate : public ui::SimpleMenuModel::Delegate {
+ public:
+  explicit MenuDelegate(PermissionBubbleController* bubble)
+      : bubble_controller_(bubble) {}
+  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE {
+    return false;
+  }
+  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE {
+    return true;
+  }
+  virtual bool GetAcceleratorForCommandId(
+      int command_id,
+      ui::Accelerator* accelerator) OVERRIDE {
+    return false;
+  }
+  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE {
+    [bubble_controller_ onMenuItemClicked:command_id];
+  }
+ private:
+  PermissionBubbleController* bubble_controller_;  // Weak, owns us.
+  DISALLOW_COPY_AND_ASSIGN(MenuDelegate);
+};
 
 }  // namespace
 
+// NSPopUpButton with a menu containing two items: allow and block.
+// One AllowBlockMenuButton is used for each requested permission, but only when
+// the permission bubble is in 'customize' mode.
+@interface AllowBlockMenuButton : NSPopUpButton {
+ @private
+  scoped_ptr<PermissionMenuModel> menuModel_;
+  base::scoped_nsobject<MenuController> menuController_;
+}
+
+- (id)initForURL:(const GURL&)url
+         allowed:(BOOL)allow
+           index:(int)index
+        delegate:(PermissionBubbleView::Delegate*)delegate;
+@end
+
+@implementation AllowBlockMenuButton
+
+- (id)initForURL:(const GURL&)url
+         allowed:(BOOL)allow
+           index:(int)index
+        delegate:(PermissionBubbleView::Delegate*)delegate {
+  if (self = [super initWithFrame:NSZeroRect pullsDown:NO]) {
+    ContentSetting setting =
+        allow ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK;
+    [self setFont:[NSFont systemFontOfSize:kPermissionFontSize]];
+    [self setBordered:NO];
+
+    __block PermissionBubbleView::Delegate* blockDelegate = delegate;
+    __block AllowBlockMenuButton* blockSelf = self;
+    PermissionMenuModel::ChangeCallback changeCallback =
+        base::BindBlock(^(const WebsiteSettingsUI::PermissionInfo& permission) {
+            blockDelegate->ToggleAccept(
+                index, permission.setting == CONTENT_SETTING_ALLOW);
+            [blockSelf setFrameSize:
+                SizeForWebsiteSettingsButtonTitle(blockSelf,
+                                                  [blockSelf title])];
+        });
+
+    menuModel_.reset(new PermissionMenuModel(url, setting, changeCallback));
+    menuController_.reset([[MenuController alloc] initWithModel:menuModel_.get()
+                                         useWithPopUpButtonCell:NO]);
+    [self setMenu:[menuController_ menu]];
+    [self selectItemAtIndex:menuModel_->GetIndexOfCommandId(setting)];
+    // Although the frame is reset, below, this sizes the cell properly.
+    [self sizeToFit];
+    // Adjust the size to fit the current title.  Using only -sizeToFit leaves
+    // an ugly amount of whitespace between the title and the arrows because it
+    // will fit to the largest element in the menu, not just the selected item.
+    [self setFrameSize:SizeForWebsiteSettingsButtonTitle(self, [self title])];
+  }
+  return self;
+}
+
+@end
+
+// The window used for the permission bubble controller.
+// Subclassed to allow browser-handled keyboard events to be passed from the
+// permission bubble to its parent window, which is a browser window.
+@interface PermissionBubbleWindow : InfoBubbleWindow
+@end
+
+@implementation PermissionBubbleWindow
+- (BOOL)performKeyEquivalent:(NSEvent*)event {
+  content::NativeWebKeyboardEvent wrappedEvent(event);
+  if ([BrowserWindowUtils shouldHandleKeyboardEvent:wrappedEvent]) {
+    return [BrowserWindowUtils handleKeyboardEvent:event
+                                          inWindow:[self parentWindow]];
+  }
+  return [super performKeyEquivalent:event];
+}
+@end
+
 @interface PermissionBubbleController ()
 
-// Returns an autoreleased NSView displaying the label for |request|.
-- (NSView*)labelForRequest:(PermissionBubbleRequest*)request
-           isSingleRequest:(BOOL)singleRequest;
+// Returns an autoreleased NSView displaying the icon and label for |request|.
+- (NSView*)labelForRequest:(PermissionBubbleRequest*)request;
 
-// Returns an autoreleased NSView displaying the title for the bubble if
-// there are multiple requests.
-- (NSView*)titleForMultipleRequests;
+// Returns an autoreleased NSView displaying the title for the bubble
+// requesting settings for |host|.
+- (NSView*)titleWithHostname:(const std::string&)host;
 
-// Returns an autoreleased NSView displaying a checkbox for |request|.  The
-// checkbox will be initialized as checked if |checked| is YES.
-- (NSView*)checkboxForRequest:(PermissionBubbleRequest*)request
-                      checked:(BOOL)checked;
-
-// Returns an autoreleased NSView displaying the customize button.
-- (NSView*)customizationButton;
+// Returns an autoreleased NSView displaying a menu for |request|.  The
+// menu will be initialized as 'allow' if |allow| is YES.
+- (NSView*)menuForRequest:(PermissionBubbleRequest*)request
+                  atIndex:(int)index
+                    allow:(BOOL)allow;
 
 // Returns an autoreleased NSView of a button with |title| and |action|.
-// If |pairedButton| is non-nil, the size of both buttons will be set to be
-// equal to the size of the larger of the two.
 - (NSView*)buttonWithTitle:(NSString*)title
-                    action:(SEL)action
-                pairedWith:(NSView*)pairedButton;
+                    action:(SEL)action;
+
+// Returns an autoreleased NSView displaying a block button.
+- (NSView*)blockButton;
+
+// Returns an autoreleased NSView with a block button and a drop-down menu
+// with one item, which will change the UI to allow customizing the permissions.
+- (NSView*)blockButtonWithCustomizeMenu;
 
 // Returns an autoreleased NSView displaying the close 'x' button.
 - (NSView*)closeButton;
@@ -83,9 +190,13 @@ const base::char16 kBulletPoint = 0x2022;
 // Called when the 'customize' button is pressed.
 - (void)onCustomize:(id)sender;
 
-// Called when a checkbox changes from checked to unchecked, or vice versa.
-- (void)onCheckboxChanged:(id)sender;
+// Sets the width of both |viewA| and |viewB| to be the larger of the
+// two views' widths.  Does not change either view's origin or height.
++ (CGFloat)matchWidthsOf:(NSView*)viewA andOf:(NSView*)viewB;
 
+// Sets the offset of |viewA| so that its vertical center is aligned with the
+// vertical center of |viewB|.
++ (void)alignCenterOf:(NSView*)viewA verticallyToCenterOf:(NSView*)viewB;
 
 @end
 
@@ -95,11 +206,12 @@ const base::char16 kBulletPoint = 0x2022;
                     bridge:(PermissionBubbleCocoa*)bridge {
   DCHECK(parentWindow);
   DCHECK(bridge);
-  base::scoped_nsobject<InfoBubbleWindow> window([[InfoBubbleWindow alloc]
-      initWithContentRect:ui::kWindowSizeDeterminedLater
-                styleMask:NSBorderlessWindowMask
-                  backing:NSBackingStoreBuffered
-                    defer:NO]);
+  base::scoped_nsobject<PermissionBubbleWindow> window(
+      [[PermissionBubbleWindow alloc]
+          initWithContentRect:ui::kWindowSizeDeterminedLater
+                    styleMask:NSBorderlessWindowMask
+                      backing:NSBackingStoreBuffered
+                        defer:NO]);
   [window setAllowedAnimations:info_bubble::kAnimateNone];
   if ((self = [super initWithWindow:window
                        parentWindow:parentWindow
@@ -117,53 +229,58 @@ const base::char16 kBulletPoint = 0x2022;
 }
 
 - (void)showAtAnchor:(NSPoint)anchorPoint
-        withDelegate:(PermissionBubbleView::Delegate*)delegate
-         forRequests:(const std::vector<PermissionBubbleRequest*>&)requests
+         withDelegate:(PermissionBubbleView::Delegate*)delegate
+          forRequests:(const std::vector<PermissionBubbleRequest*>&)requests
          acceptStates:(const std::vector<bool>&)acceptStates
     customizationMode:(BOOL)customizationMode {
+  DCHECK(!requests.empty());
   DCHECK(delegate);
   DCHECK(!customizationMode || (requests.size() == acceptStates.size()));
   delegate_ = delegate;
 
   NSView* contentView = [[self window] contentView];
-  DCHECK([[contentView subviews] count] == 0);
+  [contentView setSubviews:@[]];
 
   // Create one button to use as a guide for the permissions' y-offsets.
   base::scoped_nsobject<NSView> allowOrOkButton;
   if (customizationMode) {
     NSString* okTitle = l10n_util::GetNSString(IDS_OK);
     allowOrOkButton.reset([[self buttonWithTitle:okTitle
-                                          action:@selector(ok:)
-                                      pairedWith:nil] retain]);
+                                          action:@selector(ok:)] retain]);
   } else {
     NSString* allowTitle = l10n_util::GetNSString(IDS_PERMISSION_ALLOW);
     allowOrOkButton.reset([[self buttonWithTitle:allowTitle
-                                          action:@selector(onAllow:)
-                                      pairedWith:nil] retain]);
+                                          action:@selector(onAllow:)] retain]);
   }
   CGFloat yOffset = 2 * kVerticalPadding + NSMaxY([allowOrOkButton frame]);
   BOOL singlePermission = requests.size() == 1;
 
-  checkboxes_.reset(customizationMode ? [[NSMutableArray alloc] init] : nil);
+  base::scoped_nsobject<NSMutableArray> permissionMenus;
+  if (customizationMode)
+    permissionMenus.reset([[NSMutableArray alloc] init]);
+
   for (auto it = requests.begin(); it != requests.end(); it++) {
-    base::scoped_nsobject<NSView> permissionView;
-    if (customizationMode) {
-      int index = it - requests.begin();
-      permissionView.reset(
-          [[self checkboxForRequest:(*it)
-                            checked:acceptStates[index] ? YES : NO] retain]);
-      [base::mac::ObjCCastStrict<NSButton>(permissionView) setTag:index];
-      [checkboxes_ addObject:permissionView];
-    } else {
-      permissionView.reset([[self labelForRequest:(*it)
-                                  isSingleRequest:singlePermission] retain]);
-    }
+    base::scoped_nsobject<NSView> permissionView(
+        [[self labelForRequest:(*it)] retain]);
     NSPoint origin = [permissionView frame].origin;
     origin.x += kHorizontalPadding;
     origin.y += yOffset;
     [permissionView setFrameOrigin:origin];
     [contentView addSubview:permissionView];
 
+    if (customizationMode) {
+      int index = it - requests.begin();
+      base::scoped_nsobject<NSView> menu(
+          [[self menuForRequest:(*it)
+                        atIndex:index
+                          allow:acceptStates[index] ? YES : NO] retain]);
+      // Align vertically.  Horizontal alignment will be adjusted once the
+      // widest permission is know.
+      [PermissionBubbleController alignCenterOf:menu
+                           verticallyToCenterOf:permissionView];
+      [permissionMenus addObject:menu];
+      [contentView addSubview:menu];
+    }
     yOffset += NSHeight([permissionView frame]);
   }
 
@@ -175,6 +292,30 @@ const base::char16 kBulletPoint = 0x2022;
     bubbleFrame = NSUnionRect(
         bubbleFrame, NSInsetRect([view frame], -kHorizontalPadding, 0));
   }
+
+  if (customizationMode) {
+    // Adjust the horizontal origin for each menu.
+    CGFloat xOffset = NSWidth(bubbleFrame) - kHorizontalPadding;
+    CGFloat maxMenuWidth = 0;
+    for (NSView* view in permissionMenus.get()) {
+      [view setFrameOrigin:NSMakePoint(xOffset, NSMinY([view frame]))];
+      maxMenuWidth = std::max(maxMenuWidth, NSWidth([view frame]));
+    }
+    // And add the menu width to the bubble's width.
+    bubbleFrame.size.width += maxMenuWidth;
+  }
+
+  base::scoped_nsobject<NSView> titleView(
+      [[self titleWithHostname:requests[0]->GetRequestingHostname().host()]
+          retain]);
+  [contentView addSubview:titleView];
+  [titleView setFrameOrigin:NSMakePoint(kHorizontalPadding,
+                                        kVerticalPadding + yOffset)];
+  yOffset += NSHeight([titleView frame]) + kVerticalPadding;
+
+  // The title must fit within the bubble.
+  bubbleFrame.size.width = std::max(NSWidth(bubbleFrame),
+                                    NSWidth([titleView frame]));
 
   // 'x' button in the upper-right-hand corner.
   base::scoped_nsobject<NSView> closeButton([[self closeButton] retain]);
@@ -194,73 +335,88 @@ const base::char16 kBulletPoint = 0x2022;
   [contentView addSubview:allowOrOkButton];
 
   if (!customizationMode) {
-    NSString* blockTitle = l10n_util::GetNSString(IDS_PERMISSION_DENY);
-    base::scoped_nsobject<NSView> blockButton(
-        [[self buttonWithTitle:blockTitle
-                        action:@selector(onBlock:)
-                    pairedWith:allowOrOkButton] retain]);
-    xOrigin = NSMinX([allowOrOkButton frame]) - NSWidth([blockButton frame]) -
-        kButtonPadding;
+    base::scoped_nsobject<NSView> blockButton;
+    if (singlePermission)
+      blockButton.reset([[self blockButton] retain]);
+    else
+      blockButton.reset([[self blockButtonWithCustomizeMenu] retain]);
+    CGFloat width = [PermissionBubbleController matchWidthsOf:blockButton
+                                                        andOf:allowOrOkButton];
+    // Ensure the allow/ok button is still in the correct position.
+    xOrigin = NSWidth(bubbleFrame) - width - kHorizontalPadding;
+    [allowOrOkButton setFrameOrigin:NSMakePoint(xOrigin, kVerticalPadding)];
+    // Line up the block button.
+    xOrigin = NSMinX([allowOrOkButton frame]) - width - kButtonPadding;
     [blockButton setFrameOrigin:NSMakePoint(xOrigin, kVerticalPadding)];
     [contentView addSubview:blockButton];
   }
 
-  if (!singlePermission && !customizationMode) {
-    base::scoped_nsobject<NSView> customizeButton(
-        [[self customizationButton] retain]);
-    // The Y center should match the Y centers of the buttons.
-    CGFloat customizeButtonYOffset = kVerticalPadding +
-      std::ceil(0.5f * (NSHeight([allowOrOkButton frame]) -
-                        NSHeight([customizeButton frame])));
-    [customizeButton setFrameOrigin:NSMakePoint(kHorizontalPadding,
-                                                customizeButtonYOffset)];
-    [contentView addSubview:customizeButton];
-  }
-
-  if (!singlePermission) {
-    base::scoped_nsobject<NSView> titleView(
-       [[self titleForMultipleRequests] retain]);
-    [contentView addSubview:titleView];
-    [titleView setFrameOrigin:NSMakePoint(kHorizontalPadding,
-                                          kVerticalPadding + yOffset)];
-    yOffset += NSHeight([titleView frame]) + kVerticalPadding;
-  }
-
   bubbleFrame.size.height = yOffset + kVerticalPadding;
   bubbleFrame = [[self window] frameRectForContentRect:bubbleFrame];
-  [[self window] setFrame:bubbleFrame display:NO];
 
-  [self setAnchorPoint:anchorPoint];
-  [self showWindow:nil];
+  if ([[self window] isVisible]) {
+    // Unfortunately, calling -setFrame followed by -setFrameOrigin  (called
+    // within -setAnchorPoint) causes flickering.  Avoid the flickering by
+    // manually adjusting the new frame's origin so that the top left stays the
+    // same, and only calling -setFrame.
+    NSRect currentWindowFrame = [[self window] frame];
+    bubbleFrame.origin = currentWindowFrame.origin;
+    bubbleFrame.origin.y = bubbleFrame.origin.y +
+        currentWindowFrame.size.height - bubbleFrame.size.height;
+    [[self window] setFrame:bubbleFrame display:YES];
+  } else {
+    [[self window] setFrame:bubbleFrame display:NO];
+    [self setAnchorPoint:anchorPoint];
+    [self showWindow:nil];
+  }
 }
 
-- (NSView*)labelForRequest:(PermissionBubbleRequest*)request
-           isSingleRequest:(BOOL)singleRequest {
+- (NSView*)labelForRequest:(PermissionBubbleRequest*)request {
   DCHECK(request);
+  base::scoped_nsobject<NSView> permissionView(
+      [[NSView alloc] initWithFrame:NSZeroRect]);
+  base::scoped_nsobject<NSImageView> permissionIcon(
+      [[NSImageView alloc] initWithFrame:NSZeroRect]);
+  [permissionIcon setImage:ui::ResourceBundle::GetSharedInstance().
+      GetNativeImageNamed(request->GetIconID()).ToNSImage()];
+  [permissionIcon setFrameSize:[[permissionIcon image] size]];
+  [permissionView addSubview:permissionIcon];
+
   base::scoped_nsobject<NSTextField> permissionLabel(
       [[NSTextField alloc] initWithFrame:NSZeroRect]);
-  base::string16 label;
-  if (!singleRequest) {
-    label.push_back(kBulletPoint);
-    label.push_back(' ');
-  }
-  if (singleRequest) {
-    // TODO(leng):  Make the appropriate call when it's working.  It should call
-    // GetMessageText(), but it's not returning the correct string yet.
-    label += request->GetMessageTextFragment();
-  } else {
-    label += request->GetMessageTextFragment();
-  }
+  base::string16 label = request->GetMessageTextFragment();
   [permissionLabel setDrawsBackground:NO];
   [permissionLabel setBezeled:NO];
   [permissionLabel setEditable:NO];
   [permissionLabel setSelectable:NO];
+  [permissionLabel setFont:[NSFont systemFontOfSize:kPermissionFontSize]];
   [permissionLabel setStringValue:base::SysUTF16ToNSString(label)];
   [permissionLabel sizeToFit];
-  return permissionLabel.autorelease();
+  [permissionLabel setFrameOrigin:
+      NSMakePoint(NSWidth([permissionIcon frame]), 0)];
+  [permissionView addSubview:permissionLabel];
+
+  // Match the horizontal centers of the two subviews.  Note that the label's
+  // center is rounded down, and the icon's center, up.  It looks better that
+  // way - with the text's center slightly lower than the icon's center - if the
+  // height delta is not evenly split.
+  NSRect iconFrame = [permissionIcon frame];
+  NSRect labelFrame = [permissionLabel frame];
+  NSRect unionFrame = NSUnionRect(iconFrame, labelFrame);
+
+  iconFrame.origin.y =
+      std::ceil((NSHeight(unionFrame) - NSHeight(iconFrame)) / 2);
+  labelFrame.origin.y =
+      std::floor((NSHeight(unionFrame) - NSHeight(labelFrame)) / 2);
+
+  [permissionLabel setFrame:labelFrame];
+  [permissionIcon setFrame:iconFrame];
+  [permissionView setFrame:unionFrame];
+
+  return permissionView.autorelease();
 }
 
-- (NSView*)titleForMultipleRequests {
+- (NSView*)titleWithHostname:(const std::string&)host {
   base::scoped_nsobject<NSTextField> titleView(
       [[NSTextField alloc] initWithFrame:NSZeroRect]);
   [titleView setDrawsBackground:NO];
@@ -268,47 +424,31 @@ const base::char16 kBulletPoint = 0x2022;
   [titleView setEditable:NO];
   [titleView setSelectable:NO];
   [titleView setStringValue:
-      l10n_util::GetNSString(IDS_PERMISSIONS_BUBBLE_PROMPT)];
-  [titleView setFont:[NSFont systemFontOfSize:kFontSize]];
+      l10n_util::GetNSStringF(IDS_PERMISSIONS_BUBBLE_PROMPT,
+                              base::UTF8ToUTF16(host))];
+  [titleView setFont:[NSFont systemFontOfSize:kTitleFontSize]];
   [titleView sizeToFit];
+  NSRect titleFrame = [titleView frame];
+  [titleView setFrameSize:NSMakeSize(NSWidth(titleFrame) + kTitlePaddingX,
+                                     NSHeight(titleFrame))];
   return titleView.autorelease();
 }
 
-- (NSView*)checkboxForRequest:(PermissionBubbleRequest*)request
-                      checked:(BOOL)checked {
+- (NSView*)menuForRequest:(PermissionBubbleRequest*)request
+                  atIndex:(int)index
+                    allow:(BOOL)allow {
   DCHECK(request);
-  base::scoped_nsobject<NSButton> checkbox(
-      [[NSButton alloc] initWithFrame:NSZeroRect]);
-  [checkbox setButtonType:NSSwitchButton];
-  base::string16 permission = request->GetMessageTextFragment();
-  [checkbox setTitle:base::SysUTF16ToNSString(permission)];
-  [checkbox setState:(checked ? NSOnState : NSOffState)];
-  [checkbox setTarget:self];
-  [checkbox setAction:@selector(onCheckboxChanged:)];
-  [checkbox sizeToFit];
-  [checkbox setFrameOrigin:NSMakePoint(0, kCheckboxYAdjustment)];
-  return checkbox.autorelease();
-}
-
-- (NSView*)customizationButton {
-  NSColor* linkColor =
-      gfx::SkColorToCalibratedNSColor(chrome_style::GetLinkColor());
-  base::scoped_nsobject<NSButton> customizeButton(
-      [[NSButton alloc] initWithFrame:NSZeroRect]);
-  [customizeButton setButtonType:NSMomentaryChangeButton];
-  [customizeButton setAttributedTitle:[[NSAttributedString alloc]
-      initWithString:l10n_util::GetNSString(IDS_PERMISSION_CUSTOMIZE)
-          attributes:@{ NSForegroundColorAttributeName : linkColor }]];
-  [customizeButton setTarget:self];
-  [customizeButton setAction:@selector(onCustomize:)];
-  [customizeButton setBordered:NO];
-  [customizeButton sizeToFit];
-  return customizeButton.autorelease();
+  DCHECK(delegate_);
+  base::scoped_nsobject<AllowBlockMenuButton> button(
+      [[AllowBlockMenuButton alloc] initForURL:request->GetRequestingHostname()
+                                       allowed:allow
+                                         index:index
+                                      delegate:delegate_]);
+  return button.autorelease();
 }
 
 - (NSView*)buttonWithTitle:(NSString*)title
-                    action:(SEL)action
-                pairedWith:(NSView*)pairedButton {
+                    action:(SEL)action {
   base::scoped_nsobject<NSButton> button(
       [[ConstrainedWindowButton alloc] initWithFrame:NSZeroRect]);
   [button setButtonType:NSMomentaryPushInButton];
@@ -316,14 +456,24 @@ const base::char16 kBulletPoint = 0x2022;
   [button setTarget:self];
   [button setAction:action];
   [button sizeToFit];
-  if (pairedButton) {
-    NSRect buttonFrame = [button frame];
-    NSRect pairedFrame = [pairedButton frame];
-    CGFloat width = std::max(NSWidth(buttonFrame), NSWidth(pairedFrame));
-    [button setFrameSize:NSMakeSize(width, buttonFrame.size.height)];
-    [pairedButton setFrameSize:NSMakeSize(width, pairedFrame.size.height)];
-  }
   return button.autorelease();
+}
+
+- (NSView*)blockButton {
+  NSString* blockTitle = l10n_util::GetNSString(IDS_PERMISSION_DENY);
+  return [self buttonWithTitle:blockTitle
+                        action:@selector(onBlock:)];
+}
+
+- (NSView*)blockButtonWithCustomizeMenu {
+  menuDelegate_.reset(new MenuDelegate(self));
+  base::scoped_nsobject<SplitBlockButton> blockButton([[SplitBlockButton alloc]
+      initWithMenuDelegate:menuDelegate_.get()]);
+  [blockButton sizeToFit];
+  [blockButton setEnabled:YES];
+  [blockButton setAction:@selector(onBlock:)];
+  [blockButton setTarget:self];
+  return blockButton.autorelease();
 }
 
 - (NSView*)closeButton {
@@ -361,10 +511,34 @@ const base::char16 kBulletPoint = 0x2022;
   delegate_->SetCustomizationMode();
 }
 
-- (void)onCheckboxChanged:(id)sender {
-  DCHECK(delegate_);
-  NSButton* checkbox = base::mac::ObjCCastStrict<NSButton>(sender);
-  delegate_->ToggleAccept([checkbox tag], [checkbox state] == NSOnState);
+- (void)onMenuItemClicked:(int)commandId {
+  DCHECK(commandId == 0);
+  [self onCustomize:nil];
+}
+
+- (void)activateTabWithContents:(content::WebContents*)newContents
+               previousContents:(content::WebContents*)oldContents
+                        atIndex:(NSInteger)index
+                         reason:(int)reason {
+  // The show/hide of this bubble is handled by the PermissionBubbleManager.
+  // So bypass the base class, which would close the bubble here.
+}
+
++ (CGFloat)matchWidthsOf:(NSView*)viewA andOf:(NSView*)viewB {
+  NSRect frameA = [viewA frame];
+  NSRect frameB = [viewB frame];
+  CGFloat width = std::max(NSWidth(frameA), NSWidth(frameB));
+  [viewA setFrameSize:NSMakeSize(width, NSHeight(frameA))];
+  [viewB setFrameSize:NSMakeSize(width, NSHeight(frameB))];
+  return width;
+}
+
++ (void)alignCenterOf:(NSView*)viewA verticallyToCenterOf:(NSView*)viewB {
+  NSRect frameA = [viewA frame];
+  NSRect frameB = [viewB frame];
+  frameA.origin.y =
+      NSMinY(frameB) + std::floor((NSHeight(frameB) - NSHeight(frameA)) / 2);
+  [viewA setFrameOrigin:frameA.origin];
 }
 
 @end  // implementation PermissionBubbleController

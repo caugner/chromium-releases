@@ -6,7 +6,6 @@
 
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_drag_drop.h"
@@ -16,6 +15,7 @@
 #include "chrome/browser/ui/views/bookmarks/bookmark_drag_drop_views.h"
 #include "chrome/browser/ui/views/event_utils.h"
 #include "chrome/common/pref_names.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
@@ -48,7 +48,6 @@ BookmarkMenuDelegate::BookmarkMenuDelegate(Browser* browser,
       page_navigator_(navigator),
       parent_(parent),
       menu_(NULL),
-      for_drop_(false),
       parent_menu_item_(NULL),
       next_menu_id_(first_menu_id),
       min_menu_id_(first_menu_id),
@@ -174,7 +173,8 @@ bool BookmarkMenuDelegate::CanDrop(MenuItemView* menu,
   if (drop_data_.has_single_url())
     return true;
 
-  const BookmarkNode* drag_node = drop_data_.GetFirstNode(profile_);
+  const BookmarkNode* drag_node =
+      drop_data_.GetFirstNode(GetBookmarkModel(), profile_->GetPath());
   if (!drag_node) {
     // Dragging a folder from another profile, always accept.
     return true;
@@ -231,8 +231,8 @@ int BookmarkMenuDelegate::GetDropOperation(
       break;
   }
   DCHECK(drop_parent);
-  return chrome::GetBookmarkDropOperation(profile_, event, drop_data_,
-                                          drop_parent, index_to_drop_at);
+  return chrome::GetBookmarkDropOperation(
+      profile_, event, drop_data_, drop_parent, index_to_drop_at);
 }
 
 int BookmarkMenuDelegate::OnPerformDrop(
@@ -312,7 +312,7 @@ void BookmarkMenuDelegate::WriteDragData(MenuItemView* sender,
   content::RecordAction(UserMetricsAction("BookmarkBar_DragFromFolder"));
 
   BookmarkNodeData drag_data(menu_id_to_node_map_[sender->GetCommand()]);
-  drag_data.Write(profile_, data);
+  drag_data.Write(profile_->GetPath(), data);
 }
 
 int BookmarkMenuDelegate::GetDragOperations(MenuItemView* sender) {

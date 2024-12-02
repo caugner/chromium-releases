@@ -35,11 +35,14 @@ TEST(IndexedDBDatabaseTest, BackingStoreRetention) {
   EXPECT_TRUE(backing_store->HasOneRef());
 
   IndexedDBFactory* factory = 0;
-  scoped_refptr<IndexedDBDatabase> db = IndexedDBDatabase::Create(
-      ASCIIToUTF16("db"),
-      backing_store,
-      factory,
-      IndexedDBDatabase::Identifier());
+  leveldb::Status s;
+  scoped_refptr<IndexedDBDatabase> db =
+      IndexedDBDatabase::Create(ASCIIToUTF16("db"),
+                                backing_store,
+                                factory,
+                                IndexedDBDatabase::Identifier(),
+                                &s);
+  ASSERT_TRUE(s.ok());
   EXPECT_FALSE(backing_store->HasOneRef());  // local and db
   db = NULL;
   EXPECT_TRUE(backing_store->HasOneRef());  // local
@@ -51,12 +54,14 @@ TEST(IndexedDBDatabaseTest, ConnectionLifecycle) {
   EXPECT_TRUE(backing_store->HasOneRef());  // local
 
   IndexedDBFactory* factory = 0;
+  leveldb::Status s;
   scoped_refptr<IndexedDBDatabase> db =
       IndexedDBDatabase::Create(ASCIIToUTF16("db"),
                                 backing_store,
                                 factory,
-                                IndexedDBDatabase::Identifier());
-
+                                IndexedDBDatabase::Identifier(),
+                                &s);
+  ASSERT_TRUE(s.ok());
   EXPECT_FALSE(backing_store->HasOneRef());  // local and db
 
   scoped_refptr<MockIndexedDBCallbacks> request1(new MockIndexedDBCallbacks());
@@ -107,12 +112,14 @@ TEST(IndexedDBDatabaseTest, ForcedClose) {
   EXPECT_TRUE(backing_store->HasOneRef());
 
   IndexedDBFactory* factory = 0;
+  leveldb::Status s;
   scoped_refptr<IndexedDBDatabase> database =
       IndexedDBDatabase::Create(ASCIIToUTF16("db"),
                                 backing_store,
                                 factory,
-                                IndexedDBDatabase::Identifier());
-
+                                IndexedDBDatabase::Identifier(),
+                                &s);
+  ASSERT_TRUE(s.ok());
   EXPECT_FALSE(backing_store->HasOneRef());  // local and db
 
   scoped_refptr<MockIndexedDBDatabaseCallbacks> callbacks(
@@ -146,20 +153,21 @@ class MockDeleteCallbacks : public IndexedDBCallbacks {
   MockDeleteCallbacks()
       : IndexedDBCallbacks(NULL, 0, 0),
         blocked_called_(false),
-        success_void_called_(false) {}
+        success_called_(false) {}
 
   virtual void OnBlocked(int64 existing_version) OVERRIDE {
     blocked_called_ = true;
   }
-  virtual void OnSuccess() OVERRIDE { success_void_called_ = true; }
+  virtual void OnSuccess(int64) OVERRIDE { success_called_ = true; }
 
   bool blocked_called() const { return blocked_called_; }
+  bool success_called() const { return success_called_; }
 
  private:
-  virtual ~MockDeleteCallbacks() { EXPECT_TRUE(success_void_called_); }
+  virtual ~MockDeleteCallbacks() {}
 
   bool blocked_called_;
-  bool success_void_called_;
+  bool success_called_;
 };
 
 TEST(IndexedDBDatabaseTest, PendingDelete) {
@@ -168,12 +176,14 @@ TEST(IndexedDBDatabaseTest, PendingDelete) {
   EXPECT_TRUE(backing_store->HasOneRef());  // local
 
   IndexedDBFactory* factory = 0;
+  leveldb::Status s;
   scoped_refptr<IndexedDBDatabase> db =
       IndexedDBDatabase::Create(ASCIIToUTF16("db"),
                                 backing_store,
                                 factory,
-                                IndexedDBDatabase::Identifier());
-
+                                IndexedDBDatabase::Identifier(),
+                                &s);
+  ASSERT_TRUE(s.ok());
   EXPECT_FALSE(backing_store->HasOneRef());  // local and db
 
   scoped_refptr<MockIndexedDBCallbacks> request1(new MockIndexedDBCallbacks());
@@ -200,6 +210,7 @@ TEST(IndexedDBDatabaseTest, PendingDelete) {
 
   EXPECT_FALSE(db->backing_store());
   EXPECT_TRUE(backing_store->HasOneRef());  // local
+  EXPECT_TRUE(request2->success_called());
 }
 
 }  // namespace content

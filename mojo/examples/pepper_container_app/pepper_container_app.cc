@@ -11,13 +11,12 @@
 #include "mojo/examples/pepper_container_app/plugin_instance.h"
 #include "mojo/examples/pepper_container_app/plugin_module.h"
 #include "mojo/examples/pepper_container_app/type_converters.h"
-#include "mojo/public/bindings/allocation_scope.h"
-#include "mojo/public/bindings/remote_ptr.h"
-#include "mojo/public/c/system/core.h"
-#include "mojo/public/environment/environment.h"
-#include "mojo/public/gles2/gles2_cpp.h"
-#include "mojo/public/shell/application.h"
-#include "mojo/public/shell/shell.mojom.h"
+#include "mojo/public/cpp/bindings/allocation_scope.h"
+#include "mojo/public/cpp/environment/environment.h"
+#include "mojo/public/cpp/gles2/gles2.h"
+#include "mojo/public/cpp/shell/application.h"
+#include "mojo/public/cpp/system/core.h"
+#include "mojo/public/interfaces/shell/shell.mojom.h"
 #include "mojo/services/native_viewport/native_viewport.mojom.h"
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/shared_impl/proxy_lock.h"
@@ -43,11 +42,11 @@ class PepperContainerApp: public Application,
       : Application(shell_handle),
         ppapi_globals_(this),
         plugin_module_(new PluginModule) {
-    InterfacePipe<NativeViewport, AnyInterface> viewport_pipe;
     mojo::AllocationScope scope;
-    shell()->Connect("mojo:mojo_native_viewport_service",
-                     viewport_pipe.handle_to_peer.Pass());
-    viewport_.reset(viewport_pipe.handle_to_self.Pass(), this);
+
+    ConnectTo("mojo:mojo_native_viewport_service", &viewport_);
+    viewport_->SetClient(this);
+
     Rect::Builder rect;
     Point::Builder point;
     point.set_x(10);
@@ -90,16 +89,14 @@ class PepperContainerApp: public Application,
       plugin_instance_->DidChangeView(bounds);
   }
 
-  virtual void OnEvent(const Event& event) OVERRIDE {
-    if (event.location().is_null())
-      return;
-
-    {
+  virtual void OnEvent(const Event& event,
+                       const mojo::Callback<void()>& callback) OVERRIDE {
+    if (!event.location().is_null()) {
       ppapi::ProxyAutoLock lock;
 
       // TODO(yzshen): Handle events.
     }
-    viewport_->AckEvent(event);
+    callback.Run();
   }
 
   // MojoPpapiGlobals::Delegate implementation.
@@ -112,7 +109,7 @@ class PepperContainerApp: public Application,
  private:
   MojoPpapiGlobals ppapi_globals_;
 
-  RemotePtr<NativeViewport> viewport_;
+  NativeViewportPtr viewport_;
   scoped_refptr<PluginModule> plugin_module_;
   scoped_ptr<PluginInstance> plugin_instance_;
 

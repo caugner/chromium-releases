@@ -14,11 +14,10 @@ import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.shell.ChromeShellActivity;
 import org.chromium.chrome.shell.ChromeShellActivity.ActivityWindowAndroidFactory;
 import org.chromium.chrome.shell.ChromeShellTestBase;
-import org.chromium.content.browser.ContentView;
+import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.content.browser.test.util.UiUtils;
 import org.chromium.ui.base.ActivityWindowAndroid;
 
@@ -36,8 +35,7 @@ public class SelectFileDialogTest extends ChromeShellTestBase {
             "</form>" +
             "</body></html>");
 
-    private ContentView mContentView;
-    private TestCallbackHelperContainer mCallbackContainer;
+    private ContentViewCore mContentViewCore;
     private ActivityWindowAndroidForTest mActivityWindowAndroidForTest;
 
     private static class ActivityWindowAndroidForTest extends ActivityWindowAndroid {
@@ -79,12 +77,11 @@ public class SelectFileDialogTest extends ChromeShellTestBase {
         launchChromeShellWithUrl(DATA_URL);
         assertTrue("Page failed to load", waitForActiveShellToBeDoneLoading());
 
-        mContentView = getActivity().getActiveContentView();
-        mCallbackContainer = new TestCallbackHelperContainer(mContentView);
+        mContentViewCore = getActivity().getActiveContentViewCore();
         // TODO(aurimas) remove this wait once crbug.com/179511 is fixed.
         assertWaitForPageScaleFactorMatch(2);
         assertTrue(
-                DOMUtils.waitForNonZeroNodeBounds(mContentView, mCallbackContainer, "input_file"));
+                DOMUtils.waitForNonZeroNodeBounds(mContentViewCore, "input_file"));
     }
 
     /**
@@ -93,20 +90,20 @@ public class SelectFileDialogTest extends ChromeShellTestBase {
     @MediumTest
     @Feature({"TextInput", "Main"})
     public void testSelectFileAndCancelRequest() throws Throwable {
-        DOMUtils.clickNode(this, mContentView, mCallbackContainer, "input_file");
+        DOMUtils.clickNode(this, mContentViewCore, "input_file");
         assertTrue("SelectFileDialog never sent an intent.",
                 CriteriaHelper.pollForCriteria(new IntentSentCriteria()));
         assertEquals(Intent.ACTION_CHOOSER, mActivityWindowAndroidForTest.lastIntent.getAction());
         resetActivityWindowAndroidForTest();
 
-        DOMUtils.clickNode(this, mContentView, mCallbackContainer, "input_image");
+        DOMUtils.clickNode(this, mContentViewCore, "input_image");
         assertTrue("SelectFileDialog never sent an intent.",
                 CriteriaHelper.pollForCriteria(new IntentSentCriteria()));
         assertEquals(MediaStore.ACTION_IMAGE_CAPTURE,
                 mActivityWindowAndroidForTest.lastIntent.getAction());
         resetActivityWindowAndroidForTest();
 
-        DOMUtils.clickNode(this, mContentView, mCallbackContainer, "input_audio");
+        DOMUtils.clickNode(this, mContentViewCore, "input_audio");
         assertTrue("SelectFileDialog never sent an intent.",
                 CriteriaHelper.pollForCriteria(new IntentSentCriteria()));
         assertEquals(MediaStore.Audio.Media.RECORD_SOUND_ACTION,

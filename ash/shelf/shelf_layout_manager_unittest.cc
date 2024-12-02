@@ -10,7 +10,7 @@
 #include "ash/display/display_manager.h"
 #include "ash/focus_cycler.h"
 #include "ash/root_window_controller.h"
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_layout_manager_observer.h"
 #include "ash/shelf/shelf_view.h"
@@ -47,8 +47,6 @@
 #endif
 
 namespace ash {
-namespace internal {
-
 namespace {
 
 void StepWidgetLayerAnimatorToEnd(views::Widget* widget) {
@@ -1015,8 +1013,7 @@ TEST_F(ShelfLayoutManagerTest, VisibleWhenLockScreenShowing) {
             GetShelfWidget()->GetWindowBoundsInScreen().y());
 
   aura::Window* lock_container = Shell::GetContainer(
-      Shell::GetPrimaryRootWindow(),
-      internal::kShellWindowId_LockScreenContainer);
+      Shell::GetPrimaryRootWindow(), kShellWindowId_LockScreenContainer);
 
   views::Widget* lock_widget = new views::Widget;
   views::Widget::InitParams lock_params(
@@ -1525,8 +1522,7 @@ TEST_F(ShelfLayoutManagerTest, MAYBE_SetAlignment) {
             display.work_area().y() - display.bounds().y());
 }
 
-//  https://code.google.com/p/chromium/issues/detail?id=356419
-TEST_F(ShelfLayoutManagerTest, DISABLED_GestureEdgeSwipe) {
+TEST_F(ShelfLayoutManagerTest, GestureEdgeSwipe) {
   ShelfLayoutManager* shelf = GetShelfLayoutManager();
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_NEVER);
   views::Widget* widget = new views::Widget;
@@ -1537,35 +1533,74 @@ TEST_F(ShelfLayoutManagerTest, DISABLED_GestureEdgeSwipe) {
   widget->Show();
   widget->Maximize();
 
+  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow());
+
   aura::Window* window = widget->GetNativeWindow();
   shelf->LayoutShelf();
 
   gfx::Rect shelf_shown = GetShelfWidget()->GetWindowBoundsInScreen();
   gfx::Rect bounds_shelf = window->bounds();
+
+  // Edge swipe when SHELF_VISIBLE should not change visibility state.
+  EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
+  generator.GestureEdgeSwipe();
   EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
 
+  // Edge swipe when AUTO_HIDE_HIDDEN should change to AUTO_HIDE_SHOWN.
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
   shelf->LayoutShelf();
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
-
-  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow());
   generator.GestureEdgeSwipe();
-
-  EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
-  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
 
   widget->SetFullscreen(true);
   wm::GetWindowState(window)->set_hide_shelf_when_fullscreen(false);
   shelf->UpdateVisibilityState();
 
-  gfx::Rect bounds_fullscreen = window->bounds();
+  // Edge swipe in fullscreen + AUTO_HIDE_HIDDEN should show the shelf and
+  // remain fullscreen.
   EXPECT_TRUE(widget->IsFullscreen());
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
-
   generator.GestureEdgeSwipe();
-  EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
-  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
-  EXPECT_FALSE(widget->IsFullscreen());
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
+  EXPECT_TRUE(widget->IsFullscreen());
+}
+
+// Test that starting the maximize mode does still allow the shelf to be made
+// visible when an (immersive mode) full screen app is running.
+TEST_F(ShelfLayoutManagerTest, GestureEdgeSwipeInMaximizeMode) {
+  ShelfLayoutManager* shelf = GetShelfLayoutManager();
+  shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  views::Widget* widget = new views::Widget;
+  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+  params.bounds = gfx::Rect(0, 0, 200, 200);
+  params.context = CurrentContext();
+  widget->Init(params);
+  widget->Show();
+  aura::Window* window = widget->GetNativeWindow();
+  wm::GetWindowState(window)->set_hide_shelf_when_fullscreen(false);
+  widget->SetFullscreen(true);
+
+  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow());
+
+  // The maximize mode gets started.
+  shelf->OnMaximizeModeStarted();
+  shelf->LayoutShelf();
+  shelf->UpdateVisibilityState();
+
+  // Edge swipe in fullscreen + AUTO_HIDE_HIDDEN should show the shelf and
+  // remain fullscreen.
+  EXPECT_TRUE(widget->IsFullscreen());
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
+  generator.GestureEdgeSwipe();
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
+  EXPECT_TRUE(widget->IsFullscreen());
 }
 
 // Check that in maximize mode gesture swipes on the shelf have no effect.
@@ -2056,5 +2091,4 @@ TEST_F(ShelfLayoutManagerTest, MAYBE_StatusAreaHitBoxCoversEdge) {
   EXPECT_FALSE(status_area_widget->IsMessageBubbleShown());
 }
 
-}  // namespace internal
 }  // namespace ash

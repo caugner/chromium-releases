@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ash/accessibility_delegate.h"
 #include "ash/drag_drop/drag_drop_controller.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
+#include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/shelf_test_api.h"
 #include "ash/test/shelf_view_test_api.h"
@@ -16,6 +18,7 @@
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/overview/window_selector.h"
 #include "ash/wm/overview/window_selector_controller.h"
+#include "ash/wm/overview/window_selector_item.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
@@ -35,12 +38,12 @@
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/transform.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/widget/native_widget_aura.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_delegate.h"
 
 namespace ash {
-namespace internal {
-
 namespace {
 
 class NonActivatableActivationDelegate
@@ -227,6 +230,15 @@ class WindowSelectorTest : public test::AshTestBase {
   aura::Window* GetFocusedWindow() {
     return aura::client::GetFocusClient(
         Shell::GetPrimaryRootWindow())->GetFocusedWindow();
+    }
+
+  ScopedVector<WindowSelectorItem>* GetWindowItems() {
+    return &(ash::Shell::GetInstance()->window_selector_controller()->
+        window_selector_->windows_);
+    }
+
+  views::Widget* GetLabelWidget(ash::WindowSelectorItem* window) {
+    return window->window_label_.get();
   }
 
   test::ShelfViewTestAPI* shelf_view_test() {
@@ -240,6 +252,19 @@ class WindowSelectorTest : public test::AshTestBase {
 
   DISALLOW_COPY_AND_ASSIGN(WindowSelectorTest);
 };
+
+// Tests that an a11y alert is sent on entering overview mode.
+TEST_F(WindowSelectorTest, A11yAlertOnOverviewMode) {
+  gfx::Rect bounds(0, 0, 400, 400);
+  AccessibilityDelegate* delegate =
+      ash::Shell::GetInstance()->accessibility_delegate();
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  EXPECT_NE(delegate->GetLastAccessibilityAlert(),
+            A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED);
+  ToggleOverview();
+  EXPECT_EQ(delegate->GetLastAccessibilityAlert(),
+            A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED);
+}
 
 // Tests entering overview mode with two windows and selecting one.
 TEST_F(WindowSelectorTest, Basic) {
@@ -1038,7 +1063,7 @@ TEST_F(WindowSelectorTest, DISABLED_DragDropInProgress) {
   gfx::Rect bounds(0, 0, 400, 400);
   scoped_ptr<aura::Window> window(CreateWindow(bounds));
   test::ShellTestApi shell_test_api(Shell::GetInstance());
-  ash::internal::DragDropController* drag_drop_controller =
+  ash::DragDropController* drag_drop_controller =
       shell_test_api.drag_drop_controller();
   ui::OSExchangeData data;
   base::MessageLoopForUI::current()->PostTask(FROM_HERE,
@@ -1089,5 +1114,81 @@ TEST_F(WindowSelectorTest, HitTestingInOverview) {
   }
 }
 
-}  // namespace internal
+// Test that a label is created under the window on entering overview mode.
+TEST_F(WindowSelectorTest, CreateLabelUnderWindow) {
+  scoped_ptr<aura::Window> window(CreateWindow(gfx::Rect(0, 0, 100, 100)));
+  base::string16 window_title = base::UTF8ToUTF16("My window");
+  window->set_title(window_title);
+  ToggleOverview();
+  WindowSelectorItem* window_item = GetWindowItems()->back();
+  views::Widget* widget = GetLabelWidget(window_item);
+  // Has the label widget been created?
+  ASSERT_TRUE(widget);
+  views::Label* label = static_cast<views::Label*>(widget->GetContentsView());
+  // Verify the label matches the window title.
+  EXPECT_EQ(label->text(), window_title);
+  // Labels are located based on target_bounds, not the actual window item
+  // bounds.
+  gfx::Rect target_bounds(window_item->target_bounds());
+  gfx::Rect expected_label_bounds(target_bounds.x(),
+                                  target_bounds.bottom(),
+                                  target_bounds.width(),
+                                  label->GetPreferredSize().height());
+  gfx::Rect real_label_bounds = widget->GetNativeWindow()->bounds();
+  EXPECT_EQ(widget->GetNativeWindow()->bounds(), real_label_bounds);
+}
+
+// Tests that a label is created for the active panel in a group of panels in
+// overview mode.
+TEST_F(WindowSelectorTest, CreateLabelUnderPanel) {
+  scoped_ptr<aura::Window> panel1(CreatePanelWindow(gfx::Rect(0, 0, 100, 100)));
+  scoped_ptr<aura::Window> panel2(CreatePanelWindow(gfx::Rect(0, 0, 100, 100)));
+  base::string16 panel1_title = base::UTF8ToUTF16("My panel");
+  base::string16 panel2_title = base::UTF8ToUTF16("Another panel");
+  panel1->set_title(panel1_title);
+  panel2->set_title(panel2_title);
+  wm::ActivateWindow(panel1.get());
+  ToggleOverview();
+  WindowSelectorItem* window_item = GetWindowItems()->back();
+  views::Widget* widget = GetLabelWidget(window_item);
+  // Has the label widget been created?
+  ASSERT_TRUE(widget);
+  views::Label* label = static_cast<views::Label*>(widget->GetContentsView());
+  // Verify the label matches the active window title.
+  EXPECT_EQ(label->text(), panel1_title);
+}
+
+// Tests that overview updates the window postions if the display orientation
+// changes.
+TEST_F(WindowSelectorTest, DisplayOrientationChanged) {
+  if (!SupportsHostWindowResize())
+    return;
+
+  aura::Window* root_window = Shell::GetInstance()->GetPrimaryRootWindow();
+  UpdateDisplay("600x200");
+  EXPECT_EQ("0,0 600x200", root_window->bounds().ToString());
+  gfx::Rect window_bounds(0, 0, 150, 150);
+  ScopedVector<aura::Window> windows;
+  for (int i = 0; i < 3; i++) {
+    windows.push_back(CreateWindow(window_bounds));
+  }
+
+  ToggleOverview();
+  for (ScopedVector<aura::Window>::iterator iter = windows.begin();
+       iter != windows.end(); ++iter) {
+    EXPECT_TRUE(root_window->bounds().Contains(
+        ToEnclosingRect(GetTransformedTargetBounds(*iter))));
+  }
+
+  // Rotate the display, windows should be repositioned to be within the screen
+  // bounds.
+  UpdateDisplay("600x200/r");
+  EXPECT_EQ("0,0 200x600", root_window->bounds().ToString());
+  for (ScopedVector<aura::Window>::iterator iter = windows.begin();
+       iter != windows.end(); ++iter) {
+    EXPECT_TRUE(root_window->bounds().Contains(
+        ToEnclosingRect(GetTransformedTargetBounds(*iter))));
+  }
+}
+
 }  // namespace ash

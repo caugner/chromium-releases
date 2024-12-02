@@ -5,7 +5,7 @@
 #ifndef GPU_COMMAND_BUFFER_COMMON_COMMAND_BUFFER_MOCK_H_
 #define GPU_COMMAND_BUFFER_COMMON_COMMAND_BUFFER_MOCK_H_
 
-#include "gpu/command_buffer/common/command_buffer.h"
+#include "gpu/command_buffer/service/command_buffer_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace base {
@@ -16,13 +16,12 @@ namespace gpu {
 
 // An NPObject that implements a shared memory command buffer and a synchronous
 // API to manage the put and get pointers.
-class MockCommandBuffer : public CommandBuffer {
+class MockCommandBuffer : public CommandBufferServiceBase {
  public:
   MockCommandBuffer();
   virtual ~MockCommandBuffer();
 
   MOCK_METHOD0(Initialize, bool());
-  MOCK_METHOD0(GetState, State());
   MOCK_METHOD0(GetLastState, State());
   MOCK_METHOD0(GetLastToken, int32());
   MOCK_METHOD1(Flush, void(int32 put_offset));

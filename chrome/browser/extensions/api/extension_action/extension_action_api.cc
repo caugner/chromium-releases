@@ -27,7 +27,9 @@
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_host.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/image_util.h"
 #include "extensions/common/error_utils.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image.h"
@@ -349,14 +351,14 @@ void ExtensionActionAPI::DispatchEventToExtension(
     const std::string& extension_id,
     const std::string& event_name,
     scoped_ptr<base::ListValue> event_args) {
-  if (!extensions::ExtensionSystem::Get(context)->event_router())
+  if (!extensions::EventRouter::Get(context))
     return;
 
   scoped_ptr<Event> event(new Event(event_name, event_args.Pass()));
   event->restrict_to_browser_context = context;
   event->user_gesture = EventRouter::USER_GESTURE_ENABLED;
-  ExtensionSystem::Get(context)->event_router()->DispatchEventToExtension(
-      extension_id, event.Pass());
+  EventRouter::Get(context)
+      ->DispatchEventToExtension(extension_id, event.Pass());
 }
 
 // static
@@ -414,9 +416,8 @@ void ExtensionActionAPI::ExtensionActionExecuted(
 //
 
 ExtensionActionStorageManager::ExtensionActionStorageManager(Profile* profile)
-    : profile_(profile) {
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                 content::Source<Profile>(profile_));
+    : profile_(profile), extension_registry_observer_(this) {
+  extension_registry_observer_.Add(ExtensionRegistry::Get(profile_));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
                  content::NotificationService::AllBrowserContextsAndSources());
 
@@ -428,41 +429,36 @@ ExtensionActionStorageManager::ExtensionActionStorageManager(Profile* profile)
 ExtensionActionStorageManager::~ExtensionActionStorageManager() {
 }
 
+void ExtensionActionStorageManager::OnExtensionLoaded(
+    content::BrowserContext* browser_context,
+    const Extension* extension) {
+  if (!ExtensionActionManager::Get(profile_)->GetBrowserAction(*extension)) {
+    return;
+  }
+
+  StateStore* storage = ExtensionSystem::Get(profile_)->state_store();
+  if (storage) {
+    storage->GetExtensionValue(
+        extension->id(),
+        kBrowserActionStorageKey,
+        base::Bind(&ExtensionActionStorageManager::ReadFromStorage,
+                   AsWeakPtr(),
+                   extension->id()));
+  }
+};
+
 void ExtensionActionStorageManager::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_EXTENSION_LOADED: {
-      const Extension* extension =
-          content::Details<const Extension>(details).ptr();
-      if (!ExtensionActionManager::Get(profile_)->
-          GetBrowserAction(*extension)) {
-        break;
-      }
+  DCHECK_EQ(type, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED);
+  ExtensionAction* extension_action =
+      content::Source<ExtensionAction>(source).ptr();
+  Profile* profile = content::Details<Profile>(details).ptr();
+  if (profile != profile_)
+    return;
 
-      StateStore* storage = ExtensionSystem::Get(profile_)->state_store();
-      if (storage) {
-        storage->GetExtensionValue(extension->id(), kBrowserActionStorageKey,
-            base::Bind(&ExtensionActionStorageManager::ReadFromStorage,
-                       AsWeakPtr(), extension->id()));
-      }
-      break;
-    }
-    case chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED: {
-      ExtensionAction* extension_action =
-          content::Source<ExtensionAction>(source).ptr();
-      Profile* profile = content::Details<Profile>(details).ptr();
-      if (profile != profile_)
-        break;
-
-      WriteToStorage(extension_action);
-      break;
-    }
-    default:
-      NOTREACHED();
-      break;
-  }
+  WriteToStorage(extension_action);
 }
 
 void ExtensionActionStorageManager::WriteToStorage(
@@ -516,7 +512,7 @@ ExtensionActionFunction::ExtensionActionFunction()
 ExtensionActionFunction::~ExtensionActionFunction() {
 }
 
-bool ExtensionActionFunction::RunImpl() {
+bool ExtensionActionFunction::RunSync() {
   ExtensionActionManager* manager = ExtensionActionManager::Get(GetProfile());
   const Extension* extension = GetExtension();
   if (StartsWithASCII(name(), "systemIndicator.", false)) {
@@ -647,38 +643,6 @@ void ExtensionActionFunction::NotifySystemIndicatorChange() {
       content::Details<ExtensionAction>(extension_action_));
 }
 
-// static
-bool ExtensionActionFunction::ParseCSSColorString(
-    const std::string& color_string,
-    SkColor* result) {
-  std::string formatted_color;
-  // Check the string for incorrect formatting.
-  if (color_string.empty() || color_string[0] != '#')
-    return false;
-
-  // Convert the string from #FFF format to #FFFFFF format.
-  if (color_string.length() == 4) {
-    for (size_t i = 1; i < 4; ++i) {
-      formatted_color += color_string[i];
-      formatted_color += color_string[i];
-    }
-  } else if (color_string.length() == 7) {
-    formatted_color = color_string.substr(1, 6);
-  } else {
-    return false;
-  }
-
-  // Convert the string to an integer and make sure it is in the correct value
-  // range.
-  std::vector<uint8> color_bytes;
-  if (!base::HexStringToBytes(formatted_color, &color_bytes))
-    return false;
-
-  DCHECK_EQ(3u, color_bytes.size());
-  *result = SkColorSetARGB(255, color_bytes[0], color_bytes[1], color_bytes[2]);
-  return true;
-}
-
 bool ExtensionActionFunction::SetVisible(bool visible) {
   if (extension_action_->GetIsVisible(tab_id_) == visible)
     return true;
@@ -786,7 +750,7 @@ bool ExtensionActionSetBadgeBackgroundColorFunction::RunExtensionAction() {
   } else if (color_value->IsType(base::Value::TYPE_STRING)) {
     std::string color_string;
     EXTENSION_FUNCTION_VALIDATE(details_->GetString("color", &color_string));
-    if (!ParseCSSColorString(color_string, &color))
+    if (!image_util::ParseCSSColorString(color_string, &color))
       return false;
   }
 
@@ -830,7 +794,7 @@ BrowserActionOpenPopupFunction::BrowserActionOpenPopupFunction()
     : response_sent_(false) {
 }
 
-bool BrowserActionOpenPopupFunction::RunImpl() {
+bool BrowserActionOpenPopupFunction::RunAsync() {
   ExtensionToolbarModel* model = ExtensionToolbarModel::Get(GetProfile());
   if (!model) {
     error_ = kInternalError;
@@ -951,10 +915,10 @@ bool PageActionsFunction::SetPageActionEnabled(bool enable) {
   return true;
 }
 
-bool EnablePageActionsFunction::RunImpl() {
+bool EnablePageActionsFunction::RunSync() {
   return SetPageActionEnabled(true);
 }
 
-bool DisablePageActionsFunction::RunImpl() {
+bool DisablePageActionsFunction::RunSync() {
   return SetPageActionEnabled(false);
 }

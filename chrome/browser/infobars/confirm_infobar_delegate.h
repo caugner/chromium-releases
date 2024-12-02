@@ -7,13 +7,15 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/infobars/infobar_delegate.h"
+#include "components/infobars/core/infobar_delegate.h"
 
+namespace infobars {
 class InfoBar;
+}
 
 // An interface derived from InfoBarDelegate implemented by objects wishing to
 // control a ConfirmInfoBar.
-class ConfirmInfoBarDelegate : public InfoBarDelegate {
+class ConfirmInfoBarDelegate : public infobars::InfoBarDelegate {
  public:
   enum InfoBarButton {
     BUTTON_NONE   = 0,
@@ -29,15 +31,16 @@ class ConfirmInfoBarDelegate : public InfoBarDelegate {
   // Returns the message string to be displayed for the InfoBar.
   virtual base::string16 GetMessageText() const = 0;
 
-  // Return the buttons to be shown for this InfoBar.
+  // Returns the buttons to be shown for this InfoBar.
   virtual int GetButtons() const;
 
-  // Return the label for the specified button. The default implementation
+  // Returns the label for the specified button. The default implementation
   // returns "OK" for the OK button and "Cancel" for the Cancel button.
   virtual base::string16 GetButtonLabel(InfoBarButton button) const;
 
-  // Return whether or not the specified button needs elevation.
-  virtual bool NeedElevation(InfoBarButton button) const;
+  // Returns whether or not the OK button will trigger a UAC elevation prompt on
+  // Windows.
+  virtual bool OKButtonTriggersUACPrompt() const;
 
   // Called when the OK button is pressed. If this function returns true, the
   // infobar is then immediately closed. Subclasses MUST NOT return true if in
@@ -64,15 +67,16 @@ class ConfirmInfoBarDelegate : public InfoBarDelegate {
   ConfirmInfoBarDelegate();
 
   // Returns a confirm infobar that owns |delegate|.
-  static scoped_ptr<InfoBar> CreateInfoBar(
+  static scoped_ptr<infobars::InfoBar> CreateInfoBar(
       scoped_ptr<ConfirmInfoBarDelegate> delegate);
 
   virtual bool ShouldExpireInternal(
-      const content::LoadCommittedDetails& details) const OVERRIDE;
+      const NavigationDetails& details) const OVERRIDE;
 
  private:
   // InfoBarDelegate:
-  virtual bool EqualsDelegate(InfoBarDelegate* delegate) const OVERRIDE;
+  virtual bool EqualsDelegate(
+      infobars::InfoBarDelegate* delegate) const OVERRIDE;
   virtual ConfirmInfoBarDelegate* AsConfirmInfoBarDelegate() OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(ConfirmInfoBarDelegate);

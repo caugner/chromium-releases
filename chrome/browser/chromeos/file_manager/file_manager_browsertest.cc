@@ -13,7 +13,7 @@
 
 #include "apps/app_window.h"
 #include "apps/app_window_registry.h"
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/callback.h"
@@ -39,7 +39,6 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/drive/fake_drive_service.h"
-#include "chrome/browser/extensions/api/test/test_api.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
@@ -53,6 +52,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/api/test/test_api.h"
 #include "extensions/common/extension.h"
 #include "google_apis/drive/gdata_wapi_parser.h"
 #include "google_apis/drive/test_util.h"
@@ -448,9 +448,6 @@ class DriveTestVolume : public TestVolume {
       Profile* profile) {
     profile_ = profile;
     fake_drive_service_ = new drive::FakeDriveService;
-    fake_drive_service_->LoadResourceListForWapi("gdata/empty_feed.json");
-    fake_drive_service_->LoadAccountMetadataForWapi(
-        "gdata/account_metadata.json");
     fake_drive_service_->LoadAppListForDriveApi("drive/applist.json");
 
     if (!CreateRootDirectory(profile))
@@ -736,11 +733,36 @@ INSTANTIATE_TEST_CASE_P(
 // DISABLED           TestParameter(NOT_IN_GUEST_MODE, "zipOpenDrive")));
 
 INSTANTIATE_TEST_CASE_P(
+    OpenVideoFiles,
+    FileManagerBrowserTest,
+    ::testing::Values(TestParameter(IN_GUEST_MODE, "videoOpenDownloads"),
+                      TestParameter(NOT_IN_GUEST_MODE, "videoOpenDownloads"),
+                      TestParameter(NOT_IN_GUEST_MODE, "videoOpenDrive")));
+
+INSTANTIATE_TEST_CASE_P(
     OpenAudioFiles,
     FileManagerBrowserTest,
-    ::testing::Values(TestParameter(IN_GUEST_MODE, "audioOpenDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE, "audioOpenDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE, "audioOpenDrive")));
+    ::testing::Values(
+        TestParameter(IN_GUEST_MODE, "audioOpenDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "audioOpenDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "audioOpenDrive"),
+        TestParameter(NOT_IN_GUEST_MODE, "audioAutoAdvanceDrive"),
+        TestParameter(NOT_IN_GUEST_MODE, "audioRepeatSingleFileDrive"),
+        TestParameter(NOT_IN_GUEST_MODE, "audioNoRepeatSingleFileDrive"),
+        TestParameter(NOT_IN_GUEST_MODE, "audioRepeatMultipleFileDrive"),
+        TestParameter(NOT_IN_GUEST_MODE, "audioNoRepeatMultipleFileDrive")));
+
+INSTANTIATE_TEST_CASE_P(
+    CreateNewFolder,
+    FileManagerBrowserTest,
+    ::testing::Values(TestParameter(NOT_IN_GUEST_MODE,
+                                    "createNewFolderAfterSelectFile"),
+                      TestParameter(IN_GUEST_MODE,
+                                    "createNewFolderDownloads"),
+                      TestParameter(NOT_IN_GUEST_MODE,
+                                    "createNewFolderDownloads"),
+                      TestParameter(NOT_IN_GUEST_MODE,
+                                    "createNewFolderDrive")));
 
 INSTANTIATE_TEST_CASE_P(
     KeyboardOperations,
@@ -751,10 +773,17 @@ INSTANTIATE_TEST_CASE_P(
                       TestParameter(NOT_IN_GUEST_MODE, "keyboardDeleteDrive"),
                       TestParameter(IN_GUEST_MODE, "keyboardCopyDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "keyboardCopyDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE, "keyboardCopyDrive")));
+                      TestParameter(NOT_IN_GUEST_MODE, "keyboardCopyDrive"),
+                      TestParameter(IN_GUEST_MODE,
+                                    "renameFileDownloads"),
+                      TestParameter(NOT_IN_GUEST_MODE,
+                                    "renameFileDownloads"),
+                      TestParameter(NOT_IN_GUEST_MODE,
+                                    "renameFileDrive")));
 
+// Disabled due to frequent timeouts; http://crbug.com/370980.
 INSTANTIATE_TEST_CASE_P(
-    DriveSpecific,
+    DISABLED_DriveSpecific,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "openSidebarRecent"),
                       TestParameter(NOT_IN_GUEST_MODE, "openSidebarOffline"),
@@ -781,12 +810,6 @@ INSTANTIATE_TEST_CASE_P(
                                     "transferFromOfflineToDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE,
                                     "transferFromOfflineToDrive")));
-
-INSTANTIATE_TEST_CASE_P(
-     HideSearchBox,
-     FileManagerBrowserTest,
-     ::testing::Values(TestParameter(IN_GUEST_MODE, "hideSearchBox"),
-                       TestParameter(NOT_IN_GUEST_MODE, "hideSearchBox")));
 
 INSTANTIATE_TEST_CASE_P(
     RestorePrefs,
@@ -899,9 +922,6 @@ class MultiProfileFileManagerBrowserTest : public FileManagerBrowserTestBase {
     const TestAccountInfo& info = kTestAccounts[PRIMARY_ACCOUNT_INDEX];
 
     AddUser(info, true);
-    chromeos::UserManager* const user_manager = chromeos::UserManager::Get();
-    if (user_manager->GetActiveUser() != user_manager->FindUser(info.email))
-      chromeos::UserManager::Get()->SwitchActiveUser(info.email);
     FileManagerBrowserTestBase::SetUpOnMainThread();
   }
 

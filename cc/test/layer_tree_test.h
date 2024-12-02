@@ -36,8 +36,6 @@ class TestHooks : public AnimationDelegate {
 
   virtual void WillBeginImplFrameOnThread(LayerTreeHostImpl* host_impl,
                                           const BeginFrameArgs& args) {}
-  virtual void DidBeginImplFrameOnThread(LayerTreeHostImpl* host_impl,
-                                         const BeginFrameArgs& args) {}
   virtual void BeginMainFrameAbortedOnThread(LayerTreeHostImpl* host_impl,
                                              bool did_handle) {}
   virtual void BeginCommitOnThread(LayerTreeHostImpl* host_impl) {}
@@ -66,7 +64,7 @@ class TestHooks : public AnimationDelegate {
   virtual void WillBeginMainFrame() {}
   virtual void DidBeginMainFrame() {}
   virtual void Layout() {}
-  virtual void DidInitializeOutputSurface(bool succeeded) {}
+  virtual void DidInitializeOutputSurface() {}
   virtual void DidFailToInitializeOutputSurface() {}
   virtual void DidAddAnimation() {}
   virtual void WillCommit() {}
@@ -89,7 +87,6 @@ class TestHooks : public AnimationDelegate {
       Animation::TargetProperty target_property) OVERRIDE {}
 
   virtual scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback) = 0;
-  virtual scoped_refptr<ContextProvider> OffscreenContextProvider() = 0;
 };
 
 class BeginTask;
@@ -122,7 +119,6 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   void PostSetNeedsCommitToMainThread();
   void PostSetNeedsUpdateLayersToMainThread();
   void PostReadbackToMainThread();
-  void PostAcquireLayerTextures();
   void PostSetNeedsRedrawToMainThread();
   void PostSetNeedsRedrawRectToMainThread(const gfx::Rect& damage_rect);
   void PostSetVisibleToMainThread(bool visible);
@@ -145,7 +141,6 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   void DispatchSetNeedsCommit();
   void DispatchSetNeedsUpdateLayers();
   void DispatchReadback();
-  void DispatchAcquireLayerTextures();
   void DispatchSetNeedsRedraw();
   void DispatchSetNeedsRedrawRect(const gfx::Rect& damage_rect);
   void DispatchSetVisible(bool visible);
@@ -189,8 +184,6 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   virtual scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback) OVERRIDE;
   // Override this for unit tests, which should not produce pixel output.
   virtual scoped_ptr<FakeOutputSurface> CreateFakeOutputSurface(bool fallback);
-
-  virtual scoped_refptr<ContextProvider> OffscreenContextProvider() OVERRIDE;
 
   TestWebGraphicsContext3D* TestContext();
 

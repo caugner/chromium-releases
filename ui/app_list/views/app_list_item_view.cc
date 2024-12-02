@@ -7,14 +7,17 @@
 #include <algorithm>
 
 #include "base/strings/utf_string_conversions.h"
+#include "grit/ui_strings.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/app_list/app_list_constants.h"
+#include "ui/app_list/app_list_folder_item.h"
 #include "ui/app_list/app_list_item.h"
 #include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/views/apps_grid_view.h"
 #include "ui/app_list/views/cached_label.h"
 #include "ui/app_list/views/progress_bar_view.h"
 #include "ui/base/dragdrop/drag_utils.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
@@ -24,9 +27,9 @@
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/transform_util.h"
+#include "ui/views/background.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
-#include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/drag_controller.h"
 
@@ -37,6 +40,15 @@ namespace {
 const int kTopPadding = 20;
 const int kIconTitleSpacing = 7;
 const int kProgressBarHorizontalPadding = 12;
+
+// The font is different on each platform. The font size is adjusted on some
+// platforms to keep a consistent look.
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// Reducing the font size by 2 makes it the same as the Windows font size.
+const int kFontSizeDelta = -2;
+#else
+const int kFontSizeDelta = 0;
+#endif
 
 // Radius of the folder dropping preview circle.
 const int kFolderPreviewRadius = 40;
@@ -70,10 +82,12 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
   title_->SetBackgroundColor(0);
   title_->SetAutoColorReadabilityEnabled(false);
   title_->SetEnabledColor(kGridTitleColor);
-  title_->SetFontList(rb.GetFontList(kItemTextFontStyle));
+  title_->SetFontList(
+      rb.GetFontList(kItemTextFontStyle).DeriveWithSizeDelta(kFontSizeDelta));
   title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   title_->SetVisible(!item_->is_installing());
   title_->Invalidate();
+  SetTitleSubpixelAA();
 
   const gfx::ShadowValue kIconShadows[] = {
     gfx::ShadowValue(gfx::Point(0, 2), 2, SkColorSetARGB(0x24, 0, 0, 0)),
@@ -144,7 +158,6 @@ void AppListItemView::SetUIState(UIState state) {
 
   ui_state_ = state;
 
-#if defined(USE_AURA)
   switch (ui_state_) {
     case UI_STATE_NORMAL:
       title_->SetVisible(!item_->is_installing());
@@ -173,10 +186,9 @@ void AppListItemView::SetUIState(UIState state) {
     case UI_STATE_DROPPING_IN_FOLDER:
       break;
   }
+#endif  // !OS_WIN
 
   SchedulePaint();
-#endif  // !OS_WIN
-#endif  // USE_AURA
 }
 
 void AppListItemView::SetTouchDragging(bool touch_dragging) {
@@ -190,6 +202,32 @@ void AppListItemView::SetTouchDragging(bool touch_dragging) {
 void AppListItemView::OnMouseDragTimer() {
   DCHECK(apps_grid_view_->IsDraggedView(this));
   SetUIState(UI_STATE_DRAGGING);
+}
+
+void AppListItemView::SetTitleSubpixelAA() {
+  // TODO(tapted): Enable AA for folders as well, taking care to play nice with
+  // the folder bubble animation.
+  bool enable_aa = !item_->IsInFolder() && ui_state_ == UI_STATE_NORMAL &&
+                   !item_->highlighted() &&
+                   !apps_grid_view_->IsSelectedView(this) &&
+                   !apps_grid_view_->IsAnimatingView(this);
+
+  bool currently_enabled = title_->background() != NULL;
+  if (currently_enabled == enable_aa)
+    return;
+
+  if (enable_aa) {
+    title_->SetBackgroundColor(app_list::kContentsBackgroundColor);
+    title_->set_background(views::Background::CreateSolidBackground(
+        app_list::kContentsBackgroundColor));
+  } else {
+    // In other cases, keep the background transparent to ensure correct
+    // interactions with animations. This will temporarily disable subpixel AA.
+    title_->SetBackgroundColor(0);
+    title_->set_background(NULL);
+  }
+  title_->Invalidate();
+  title_->SchedulePaint();
 }
 
 void AppListItemView::Prerender() {
@@ -231,7 +269,11 @@ void AppListItemView::ItemNameChanged() {
   title_->Invalidate();
   UpdateTooltip();
   // Use full name for accessibility.
-  SetAccessibleName(base::UTF8ToUTF16(item_->name()));
+  SetAccessibleName(item_->GetItemType() == AppListFolderItem::kItemType
+                        ? l10n_util::GetStringFUTF16(
+                              IDS_APP_LIST_FOLDER_BUTTON_ACCESSIBILE_NAME,
+                              base::UTF8ToUTF16(item_->name()))
+                        : base::UTF8ToUTF16(item_->name()));
   Layout();
 }
 
@@ -285,6 +327,11 @@ void AppListItemView::Layout() {
   progress_bar_->SetBoundsRect(progress_bar_bounds);
 }
 
+void AppListItemView::SchedulePaintInRect(const gfx::Rect& r) {
+  SetTitleSubpixelAA();
+  views::CustomButton::SchedulePaintInRect(r);
+}
+
 void AppListItemView::OnPaint(gfx::Canvas* canvas) {
   if (apps_grid_view_->IsDraggedView(this))
     return;
@@ -323,12 +370,15 @@ void AppListItemView::ShowContextMenuForView(views::View* source,
     return;
 
   context_menu_runner_.reset(new views::MenuRunner(menu_model));
-  if (context_menu_runner_->RunMenuAt(
-          GetWidget(), NULL, gfx::Rect(point, gfx::Size()),
-          views::MenuItemView::TOPLEFT, source_type,
-          views::MenuRunner::HAS_MNEMONICS) ==
-      views::MenuRunner::MENU_DELETED)
+  if (context_menu_runner_->RunMenuAt(GetWidget(),
+                                      NULL,
+                                      gfx::Rect(point, gfx::Size()),
+                                      views::MENU_ANCHOR_TOPLEFT,
+                                      source_type,
+                                      views::MenuRunner::HAS_MNEMONICS) ==
+      views::MenuRunner::MENU_DELETED) {
     return;
+  }
 }
 
 void AppListItemView::StateChanged() {

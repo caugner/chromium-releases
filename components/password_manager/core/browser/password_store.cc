@@ -20,6 +20,8 @@
 
 using autofill::PasswordForm;
 
+namespace password_manager {
+
 namespace {
 
 // Calls |consumer| back with the request result, if |consumer| is still alive.
@@ -161,6 +163,14 @@ void PasswordStore::RemoveObserver(Observer* observer) {
   observers_->RemoveObserver(observer);
 }
 
+bool PasswordStore::ScheduleTask(const base::Closure& task) {
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner(
+      GetBackgroundTaskRunner());
+  if (task_runner.get())
+    return task_runner->PostTask(FROM_HERE, task);
+  return false;
+}
+
 void PasswordStore::Shutdown() {
 #if defined(PASSWORD_MANAGER_ENABLE_SYNC)
   ScheduleTask(base::Bind(&PasswordStore::DestroySyncableService, this));
@@ -178,14 +188,6 @@ base::WeakPtr<syncer::SyncableService>
 #endif
 
 PasswordStore::~PasswordStore() { DCHECK(shutdown_called_); }
-
-bool PasswordStore::ScheduleTask(const base::Closure& task) {
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner(
-      GetBackgroundTaskRunner());
-  if (task_runner.get())
-    return task_runner->PostTask(FROM_HERE, task);
-  return false;
-}
 
 scoped_refptr<base::SingleThreadTaskRunner>
 PasswordStore::GetBackgroundTaskRunner() {
@@ -253,3 +255,5 @@ void PasswordStore::DestroySyncableService() {
   syncable_service_.reset();
 }
 #endif
+
+}  // namespace password_manager

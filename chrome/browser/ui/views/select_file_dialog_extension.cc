@@ -45,7 +45,7 @@ namespace {
 
 const int kFileManagerWidth = 972;  // pixels
 const int kFileManagerHeight = 640;  // pixels
-const int kFileManagerMinimumWidth = 320;  // pixels
+const int kFileManagerMinimumWidth = 640;  // pixels
 const int kFileManagerMinimumHeight = 240;  // pixels
 
 // Holds references to file manager dialogs that have callbacks pending
@@ -417,12 +417,7 @@ void SelectFileDialogExtension::SelectFileImpl(
       kFileManagerHeight,
       kFileManagerMinimumWidth,
       kFileManagerMinimumHeight,
-#if defined(USE_AURA)
       file_manager::util::GetSelectFileDialogTitle(type),
-#else
-      // HTML-based header used.
-      base::string16(),
-#endif
       this /* ExtensionDialog::Observer */);
   if (!dialog) {
     LOG(ERROR) << "Unable to create extension dialog";

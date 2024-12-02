@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/logging.h"
 #include "content/shell/renderer/test_runner/TestCommon.h"
 #include "third_party/WebKit/public/platform/WebCString.h"
 #include "third_party/WebKit/public/platform/WebString.h"
@@ -14,11 +15,11 @@
 using namespace blink;
 using namespace std;
 
-namespace WebTestRunner {
+namespace content {
 
 bool MockGrammarCheck::checkGrammarOfString(const WebString& text, vector<WebTextCheckingResult>* results)
 {
-    BLINK_ASSERT(results);
+    DCHECK(results);
     base::string16 stringText = text;
     if (find_if(stringText.begin(), stringText.end(), isASCIIAlpha) == stringText.end())
         return true;
@@ -55,4 +56,4 @@ bool MockGrammarCheck::checkGrammarOfString(const WebString& text, vector<WebTex
     return false;
 }
 
-}
+}  // namespace content

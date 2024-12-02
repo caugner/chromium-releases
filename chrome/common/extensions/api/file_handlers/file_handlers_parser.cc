@@ -19,9 +19,6 @@ namespace errors = manifest_errors;
 
 const int kMaxTypeAndExtensionHandlers = 200;
 
-FileHandlerInfo::FileHandlerInfo() {}
-FileHandlerInfo::~FileHandlerInfo() {}
-
 FileHandlers::FileHandlers() {}
 FileHandlers::~FileHandlers() {}
 
@@ -118,8 +115,6 @@ bool FileHandlersParser::Parse(Extension* extension, base::string16* error) {
     *error = base::ASCIIToUTF16(errors::kInvalidFileHandlers);
     return false;
   }
-
-  DCHECK(extension->is_platform_app());
 
   for (base::DictionaryValue::Iterator iter(*all_handlers); !iter.IsAtEnd();
        iter.Advance()) {

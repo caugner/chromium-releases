@@ -201,7 +201,7 @@ class SpdyWebSocketStreamTest
     host_port_pair_.set_port(80);
     spdy_session_key_ = SpdySessionKey(host_port_pair_,
                                        ProxyServer::Direct(),
-                                       kPrivacyModeDisabled);
+                                       PRIVACY_MODE_DISABLED);
 
     spdy_settings_to_send_[spdy_settings_id_to_set_] =
         SettingsFlagsAndValue(
@@ -295,8 +295,7 @@ INSTANTIATE_TEST_CASE_P(
     NextProto,
     SpdyWebSocketStreamTest,
     testing::Values(kProtoDeprecatedSPDY2,
-                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4a2,
-                    kProtoHTTP2Draft04));
+                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4));
 
 // TODO(toyoshim): Replace old framing data to new one, then use HEADERS and
 // data frames.

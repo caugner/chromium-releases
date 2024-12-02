@@ -17,6 +17,7 @@
 #include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/print_messages.h"
 #include "content/public/browser/browser_thread.h"
@@ -25,7 +26,6 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "printing/metafile_impl.h"
 #include "printing/printed_document.h"
@@ -208,6 +208,14 @@ void PrintViewManagerBase::OnPrintingFailed(int cookie) {
       content::NotificationService::NoDetails());
 }
 
+void PrintViewManagerBase::OnShowInvalidPrinterSettingsError() {
+  chrome::ShowMessageBox(NULL,
+                         base::string16(),
+                         l10n_util::GetStringUTF16(
+                             IDS_PRINT_INVALID_PRINTER_SETTINGS),
+                         chrome::MESSAGE_BOX_TYPE_WARNING);
+}
+
 void PrintViewManagerBase::DidStartLoading(
     content::RenderViewHost* render_view_host) {
   UpdateScriptedPrintingBlocked();
@@ -222,6 +230,8 @@ bool PrintViewManagerBase::OnMessageReceived(const IPC::Message& message) {
                         OnDidGetDocumentCookie)
     IPC_MESSAGE_HANDLER(PrintHostMsg_DidPrintPage, OnDidPrintPage)
     IPC_MESSAGE_HANDLER(PrintHostMsg_PrintingFailed, OnPrintingFailed)
+    IPC_MESSAGE_HANDLER(PrintHostMsg_ShowInvalidPrinterSettingsError,
+                        OnShowInvalidPrinterSettingsError);
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;

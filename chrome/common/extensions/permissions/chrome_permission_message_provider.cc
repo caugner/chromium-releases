@@ -5,27 +5,85 @@
 #include "chrome/common/extensions/permissions/chrome_permission_message_provider.h"
 
 #include "base/stl_util.h"
+#include "base/strings/stringprintf.h"
 #include "extensions/common/extensions_client.h"
 #include "extensions/common/permissions/permission_message.h"
 #include "extensions/common/permissions/permission_message_util.h"
 #include "extensions/common/permissions/permission_set.h"
+#include "extensions/common/url_pattern.h"
 #include "extensions/common/url_pattern_set.h"
 #include "grit/generated_resources.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/gurl.h"
 
 namespace extensions {
 
 namespace {
 
-PermissionMessages::iterator FindMessageByID(PermissionMessages& messages,
-                                             int id) {
-  for (PermissionMessages::iterator it = messages.begin();
+typedef std::set<PermissionMessage> PermissionMsgSet;
+
+bool ShouldWarnAllHosts(const PermissionSet* permissions) {
+  if (permissions->HasEffectiveAccessToAllHosts())
+    return true;
+
+  const URLPatternSet& effective_hosts = permissions->effective_hosts();
+  for (URLPatternSet::const_iterator iter = effective_hosts.begin();
+       iter != effective_hosts.end();
+       ++iter) {
+    // If this doesn't even match subdomains, it can't possibly imply all hosts.
+    if (!iter->match_subdomains())
+      continue;
+
+    // If iter->host() is a recognized TLD, this will be 0. We don't include
+    // private TLDs, so that, e.g., *.appspot.com does not imply all hosts.
+    size_t registry_length =
+        net::registry_controlled_domains::GetRegistryLength(
+            iter->host(),
+            net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
+            net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
+    // If there was more than just a TLD in the host (e.g., *.foobar.com), it
+    // doesn't imply all hosts.
+    if (registry_length > 0)
+      continue;
+
+    // At this point the host could either be just a TLD ("com") or some unknown
+    // TLD-like string ("notatld"). To disambiguate between them construct a
+    // fake URL, and check the registry. This returns 0 if the TLD is
+    // unrecognized, or the length of the recognized TLD.
+    registry_length = net::registry_controlled_domains::GetRegistryLength(
+        base::StringPrintf("foo.%s", iter->host().c_str()),
+        net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
+        net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
+    // If we recognized this TLD, then this is a pattern like *.com, and it
+    // should imply all hosts.
+    if (registry_length > 0)
+      return true;
+  }
+
+  return false;
+}
+
+template<typename T>
+typename T::iterator FindMessageByID(T& messages, int id) {
+  for (typename T::iterator it = messages.begin();
        it != messages.end(); ++it) {
     if (it->id() == id)
       return it;
   }
-
   return messages.end();
+}
+
+template<typename T>
+void SuppressMessage(T& messages,
+                     int suppressing_message,
+                     int suppressed_message) {
+  typename T::iterator suppressed = FindMessageByID(messages,
+                                                    suppressed_message);
+  if (suppressed != messages.end() &&
+      FindMessageByID(messages, suppressing_message) != messages.end()) {
+    messages.erase(suppressed);
+  }
 }
 
 }  // namespace
@@ -36,7 +94,6 @@ ChromePermissionMessageProvider::ChromePermissionMessageProvider() {
 ChromePermissionMessageProvider::~ChromePermissionMessageProvider() {
 }
 
-// static
 PermissionMessages ChromePermissionMessageProvider::GetPermissionMessages(
     const PermissionSet* permissions,
     Manifest::Type extension_type) const {
@@ -49,30 +106,35 @@ PermissionMessages ChromePermissionMessageProvider::GetPermissionMessages(
     return messages;
   }
 
-  std::set<PermissionMessage> host_msgs =
+  PermissionMsgSet host_msgs =
       GetHostPermissionMessages(permissions, extension_type);
-  std::set<PermissionMessage> api_msgs = GetAPIPermissionMessages(permissions);
-  std::set<PermissionMessage> manifest_permission_msgs =
+  PermissionMsgSet api_msgs = GetAPIPermissionMessages(permissions);
+  PermissionMsgSet manifest_permission_msgs =
       GetManifestPermissionMessages(permissions);
   messages.insert(messages.end(), host_msgs.begin(), host_msgs.end());
   messages.insert(messages.end(), api_msgs.begin(), api_msgs.end());
   messages.insert(messages.end(), manifest_permission_msgs.begin(),
                   manifest_permission_msgs.end());
 
-  // Special hack: bookmarks permission message supersedes override bookmarks UI
-  // permission message if both permissions are specified.
-  PermissionMessages::iterator override_bookmarks_ui =
-      FindMessageByID(messages, PermissionMessage::kOverrideBookmarksUI);
-  if (override_bookmarks_ui != messages.end() &&
-      FindMessageByID(messages, PermissionMessage::kBookmarks) !=
-          messages.end()) {
-    messages.erase(override_bookmarks_ui);
-  }
-
+  // Some warnings are more generic and/or powerful and superseed other
+  // warnings. In that case, suppress the superseeded warning.
+  SuppressMessage(messages,
+                  PermissionMessage::kBookmarks,
+                  PermissionMessage::kOverrideBookmarksUI);
+  // Both tabs and history already allow reading favicons.
+  SuppressMessage(messages,
+                  PermissionMessage::kTabs,
+                  PermissionMessage::kFavicon);
+  SuppressMessage(messages,
+                  PermissionMessage::kBrowsingHistory,
+                  PermissionMessage::kFavicon);
+  // Warning for history permission already covers warning for tabs permission.
+  SuppressMessage(messages,
+                  PermissionMessage::kBrowsingHistory,
+                  PermissionMessage::kTabs);
   return messages;
 }
 
-// static
 std::vector<base::string16> ChromePermissionMessageProvider::GetWarningMessages(
     const PermissionSet* permissions,
     Manifest::Type extension_type) const {
@@ -142,7 +204,6 @@ std::vector<base::string16> ChromePermissionMessageProvider::GetWarningMessages(
   return message_strings;
 }
 
-// static
 std::vector<base::string16>
 ChromePermissionMessageProvider::GetWarningMessagesDetails(
     const PermissionSet* permissions,
@@ -158,7 +219,6 @@ ChromePermissionMessageProvider::GetWarningMessagesDetails(
   return message_strings;
 }
 
-// static
 bool ChromePermissionMessageProvider::IsPrivilegeIncrease(
     const PermissionSet* old_permissions,
     const PermissionSet* new_permissions,
@@ -186,7 +246,7 @@ bool ChromePermissionMessageProvider::IsPrivilegeIncrease(
 std::set<PermissionMessage>
 ChromePermissionMessageProvider::GetAPIPermissionMessages(
     const PermissionSet* permissions) const {
-  std::set<PermissionMessage> messages;
+  PermissionMsgSet messages;
   for (APIPermissionSet::const_iterator permission_it =
            permissions->apis().begin();
        permission_it != permissions->apis().end(); ++permission_it) {
@@ -197,39 +257,28 @@ ChromePermissionMessageProvider::GetAPIPermissionMessages(
   }
 
   // A special hack: If kFileSystemWriteDirectory would be displayed, hide
-  // kFileSystemDirectory and and kFileSystemWrite as the write directory
-  // message implies the other two.
+  // kFileSystemDirectory as the write directory message implies it.
   // TODO(sammc): Remove this. See http://crbug.com/284849.
-  std::set<PermissionMessage>::iterator write_directory_message =
-      messages.find(PermissionMessage(
-          PermissionMessage::kFileSystemWriteDirectory, base::string16()));
-  if (write_directory_message != messages.end()) {
-    messages.erase(
-        PermissionMessage(PermissionMessage::kFileSystemWrite,
-                          base::string16()));
-    messages.erase(
-        PermissionMessage(PermissionMessage::kFileSystemDirectory,
-                          base::string16()));
-  }
-
+  SuppressMessage(messages,
+                  PermissionMessage::kFileSystemWriteDirectory,
+                  PermissionMessage::kFileSystemDirectory);
   // A special hack: The warning message for declarativeWebRequest
   // permissions speaks about blocking parts of pages, which is a
   // subset of what the "<all_urls>" access allows. Therefore we
   // display only the "<all_urls>" warning message if both permissions
   // are required.
-  if (permissions->HasEffectiveAccessToAllHosts()) {
+  if (ShouldWarnAllHosts(permissions)) {
     messages.erase(
         PermissionMessage(
             PermissionMessage::kDeclarativeWebRequest, base::string16()));
   }
-
   return messages;
 }
 
 std::set<PermissionMessage>
 ChromePermissionMessageProvider::GetManifestPermissionMessages(
     const PermissionSet* permissions) const {
-  std::set<PermissionMessage> messages;
+  PermissionMsgSet messages;
   for (ManifestPermissionSet::const_iterator permission_it =
            permissions->manifest_permissions().begin();
       permission_it != permissions->manifest_permissions().end();
@@ -246,7 +295,7 @@ std::set<PermissionMessage>
 ChromePermissionMessageProvider::GetHostPermissionMessages(
     const PermissionSet* permissions,
     Manifest::Type extension_type) const {
-  std::set<PermissionMessage> messages;
+  PermissionMsgSet messages;
   // Since platform apps always use isolated storage, they can't (silently)
   // access user data on other domains, so there's no need to prompt.
   // Note: this must remain consistent with IsHostPrivilegeIncrease.
@@ -254,7 +303,7 @@ ChromePermissionMessageProvider::GetHostPermissionMessages(
   if (extension_type == Manifest::TYPE_PLATFORM_APP)
     return messages;
 
-  if (permissions->HasEffectiveAccessToAllHosts()) {
+  if (ShouldWarnAllHosts(permissions)) {
     messages.insert(PermissionMessage(
         PermissionMessage::kHostsAll,
         l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_ALL_HOSTS)));
@@ -277,23 +326,18 @@ bool ChromePermissionMessageProvider::IsAPIPrivilegeIncrease(
   if (new_permissions == NULL)
     return false;
 
-  typedef std::set<PermissionMessage> PermissionMsgSet;
   PermissionMsgSet old_warnings = GetAPIPermissionMessages(old_permissions);
   PermissionMsgSet new_warnings = GetAPIPermissionMessages(new_permissions);
   PermissionMsgSet delta_warnings =
       base::STLSetDifference<PermissionMsgSet>(new_warnings, old_warnings);
 
-  // A special hack: kFileSystemWriteDirectory implies kFileSystemDirectory and
-  // kFileSystemWrite.
+  // A special hack: kFileSystemWriteDirectory implies kFileSystemDirectory.
   // TODO(sammc): Remove this. See http://crbug.com/284849.
   if (old_warnings.find(PermissionMessage(
           PermissionMessage::kFileSystemWriteDirectory, base::string16())) !=
       old_warnings.end()) {
     delta_warnings.erase(
         PermissionMessage(PermissionMessage::kFileSystemDirectory,
-                          base::string16()));
-    delta_warnings.erase(
-        PermissionMessage(PermissionMessage::kFileSystemWrite,
                           base::string16()));
   }
 
@@ -307,7 +351,6 @@ bool ChromePermissionMessageProvider::IsManifestPermissionPrivilegeIncrease(
   if (new_permissions == NULL)
     return false;
 
-  typedef std::set<PermissionMessage> PermissionMsgSet;
   PermissionMsgSet old_warnings =
       GetManifestPermissionMessages(old_permissions);
   PermissionMsgSet new_warnings =

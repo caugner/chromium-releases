@@ -49,8 +49,6 @@ TestInProcessContextProvider::TestInProcessContextProvider()
     : context_(CreateTestInProcessContext()) {}
 
 TestInProcessContextProvider::~TestInProcessContextProvider() {
-  if (gr_context_)
-    gr_context_->contextDestroyed();
 }
 
 bool TestInProcessContextProvider::BindToCurrentThread() { return true; }
@@ -116,6 +114,11 @@ TestInProcessContextProvider::ContextCapabilities() {
 bool TestInProcessContextProvider::IsContextLost() { return false; }
 
 void TestInProcessContextProvider::VerifyContexts() {}
+
+void TestInProcessContextProvider::DeleteCachedResources() {
+  if (gr_context_)
+    gr_context_->freeGpuResources();
+}
 
 bool TestInProcessContextProvider::DestroyedOnMainThread() { return false; }
 

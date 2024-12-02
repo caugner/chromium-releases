@@ -104,6 +104,7 @@
         'views/apps_grid_view.cc',
         'views/apps_grid_view.h',
         'views/apps_grid_view_delegate.h',
+        'views/apps_grid_view_folder_delegate.h',
         'views/cached_label.cc',
         'views/cached_label.h',
         'views/contents_switcher_view.cc',
@@ -142,6 +143,7 @@
         ['use_aura==1', {
           'dependencies': [
             '../aura/aura.gyp:aura',
+            '../wm/wm.gyp:wm',
           ],
         }],
         ['toolkit_views==1', {
@@ -150,7 +152,6 @@
             '../events/events.gyp:events',
             '../views/controls/webview/webview.gyp:webview',
             '../views/views.gyp:views',
-            '../wm/wm.gyp:wm_core',
           ],
         }, {  # toolkit_views==0
           'sources/': [
@@ -221,6 +222,7 @@
         'test/run_all_unittests.cc',
         'views/app_list_main_view_unittest.cc',
         'views/apps_grid_view_unittest.cc',
+        'views/folder_header_view_unittest.cc',
         'views/search_box_view_unittest.cc',
         'views/search_result_list_view_unittest.cc',
         'views/test/apps_grid_view_test_api.cc',
@@ -256,8 +258,7 @@
           ],
         }],
         # See http://crbug.com/162998#c4 for why this is needed.
-        # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-        ['OS=="linux" and ((use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1))', {
+        ['OS=="linux" and use_allocator!="none"', {
           'dependencies': [
             '../../base/allocator/allocator.gyp:allocator',
             # The following two dependencies provide the missing

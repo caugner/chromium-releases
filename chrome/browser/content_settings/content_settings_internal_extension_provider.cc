@@ -11,7 +11,6 @@
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/extensions/api/plugins/plugins_handler.h"
-#include "chrome/common/extensions/features/simple_feature.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -19,6 +18,7 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
+#include "extensions/common/features/simple_feature.h"
 
 using extensions::UnloadedExtensionInfo;
 
@@ -37,7 +37,8 @@ InternalExtensionProvider::InternalExtensionProvider(
   Profile* profile = extension_service->profile();
   registrar_->Add(this, chrome::NOTIFICATION_EXTENSION_HOST_CREATED,
                   content::Source<Profile>(profile));
-  registrar_->Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+  registrar_->Add(this,
+                  chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
                   content::Source<Profile>(profile));
   registrar_->Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                   content::Source<Profile>(profile));
@@ -107,7 +108,7 @@ void InternalExtensionProvider::Observe(int type,
           "8B344D9E8A4C505EF82A0DBBC25B8BD1F984E777",
           "E06AFCB1EB0EFD237824CC4AC8FDD3D43E8BC868"
         };
-        if (extensions::SimpleFeature::IsIdInWhitelist(
+        if (extensions::SimpleFeature::IsIdInList(
                 host->extension()->id(),
                 std::set<std::string>(
                     kAppWhitelist, kAppWhitelist + arraysize(kAppWhitelist)))) {
@@ -120,7 +121,7 @@ void InternalExtensionProvider::Observe(int type,
 
       break;
     }
-    case chrome::NOTIFICATION_EXTENSION_LOADED: {
+    case chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED: {
       const extensions::Extension* extension =
           content::Details<extensions::Extension>(details).ptr();
       if (extensions::PluginInfo::HasPlugins(extension))

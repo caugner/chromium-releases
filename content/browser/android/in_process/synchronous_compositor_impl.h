@@ -10,13 +10,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "cc/input/layer_scroll_offset_delegate.h"
 #include "content/browser/android/in_process/synchronous_compositor_output_surface.h"
-#include "content/port/common/input_event_ack_state.h"
+#include "content/common/input/input_event_ack_state.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/browser/web_contents_user_data.h"
 
 namespace cc {
 class InputHandler;
-struct DidOverscrollParams;
 }
 
 namespace blink {
@@ -25,6 +24,7 @@ class WebInputEvent;
 
 namespace content {
 class InputHandlerManager;
+struct DidOverscrollParams;
 
 // The purpose of this class is to act as the intermediary between the various
 // components that make up the 'synchronous compositor mode' implementation and
@@ -85,7 +85,7 @@ class SynchronousCompositorImpl
   virtual void SetScrollableSize(const gfx::SizeF& scrollable_size) OVERRIDE;
 
   void SetInputHandler(cc::InputHandler* input_handler);
-  void DidOverscroll(const cc::DidOverscrollParams& params);
+  void DidOverscroll(const DidOverscrollParams& params);
   void DidStopFlinging();
 
  private:

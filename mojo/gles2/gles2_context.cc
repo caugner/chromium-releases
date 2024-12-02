@@ -7,8 +7,8 @@
 #include "gpu/command_buffer/client/gles2_cmd_helper.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
+#include "mojo/public/c/gles2/gles2.h"
 #include "mojo/public/cpp/system/core.h"
-#include "mojo/public/gles2/gles2.h"
 
 namespace mojo {
 namespace gles2 {
@@ -21,7 +21,7 @@ const size_t kDefaultMaxTransferBufferSize = 16 * 1024 * 1024;
 }
 
 GLES2Context::GLES2Context(MojoAsyncWaiter* async_waiter,
-                           ScopedCommandBufferHandle command_buffer_handle,
+                           ScopedMessagePipeHandle command_buffer_handle,
                            MojoGLES2ContextLost lost_callback,
                            MojoGLES2DrawAnimationFrame animation_callback,
                            void* closure)

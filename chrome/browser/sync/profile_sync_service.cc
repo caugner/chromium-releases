@@ -31,18 +31,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/services/gcm/gcm_profile_service.h"
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
-#include "chrome/browser/signin/about_signin_internals.h"
 #include "chrome/browser/signin/about_signin_internals_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/backend_migrator.h"
-#include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/chrome_report_unrecoverable_error.h"
 #include "chrome/browser/sync/glue/device_info.h"
 #include "chrome/browser/sync/glue/favicon_cache.h"
-#include "chrome/browser/sync/glue/session_data_type_controller.h"
-#include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/sync_backend_host_impl.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
@@ -50,8 +45,8 @@
 #include "chrome/browser/sync/glue/typed_url_data_type_controller.h"
 #include "chrome/browser/sync/managed_user_signin_manager_wrapper.h"
 #include "chrome/browser/sync/profile_sync_components_factory_impl.h"
-#include "chrome/browser/sync/sessions2/notification_service_sessions_router.h"
-#include "chrome/browser/sync/sessions2/sessions_sync_manager.h"
+#include "chrome/browser/sync/sessions/notification_service_sessions_router.h"
+#include "chrome/browser/sync/sessions/sessions_sync_manager.h"
 #include "chrome/browser/sync/sync_error_controller.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -62,7 +57,10 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/signin/core/browser/about_signin_internals.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/signin_manager.h"
+#include "components/sync_driver/change_processor.h"
 #include "components/sync_driver/data_type_controller.h"
 #include "components/sync_driver/pref_names.h"
 #include "components/sync_driver/system_encryptor.h"
@@ -79,10 +77,11 @@
 #include "sync/internal_api/public/configure_reason.h"
 #include "sync/internal_api/public/http_bridge_network_resources.h"
 #include "sync/internal_api/public/network_resources.h"
+#include "sync/internal_api/public/sessions/type_debug_info_observer.h"
+#include "sync/internal_api/public/sync_core_proxy.h"
 #include "sync/internal_api/public/sync_encryption_handler.h"
 #include "sync/internal_api/public/util/experiments.h"
 #include "sync/internal_api/public/util/sync_string_conversions.h"
-#include "sync/js/js_arg_list.h"
 #include "sync/js/js_event_details.h"
 #include "sync/util/cryptographer.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -212,15 +211,12 @@ ProfileSyncService::ProfileSyncService(
     sync_service_url_ = GURL(kSyncServerUrl);
   }
 
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableSyncSessionsV2)) {
-    syncer::SyncableService::StartSyncFlare flare(
-        sync_start_util::GetFlareForSyncableService(profile->GetPath()));
-    scoped_ptr<browser_sync::LocalSessionEventRouter> router(
-        new NotificationServiceSessionsRouter(profile, flare));
-    sessions_sync_manager_.reset(
-        new SessionsSyncManager(profile, this, router.Pass()));
-  }
+  syncer::SyncableService::StartSyncFlare flare(
+      sync_start_util::GetFlareForSyncableService(profile->GetPath()));
+  scoped_ptr<browser_sync::LocalSessionEventRouter> router(
+      new NotificationServiceSessionsRouter(profile, flare));
+  sessions_sync_manager_.reset(
+      new SessionsSyncManager(profile, this, router.Pass()));
 }
 
 ProfileSyncService::~ProfileSyncService() {
@@ -344,55 +340,50 @@ void ProfileSyncService::UnregisterAuthNotifications() {
 
 void ProfileSyncService::RegisterDataTypeController(
     DataTypeController* data_type_controller) {
-  DCHECK_EQ(data_type_controllers_.count(data_type_controller->type()), 0U);
-  data_type_controllers_[data_type_controller->type()] =
+  DCHECK_EQ(
+      directory_data_type_controllers_.count(data_type_controller->type()),
+      0U);
+  DCHECK(!GetRegisteredNonBlockingDataTypes().Has(
+      data_type_controller->type()));
+  directory_data_type_controllers_[data_type_controller->type()] =
       data_type_controller;
 }
 
-browser_sync::SessionModelAssociator*
-    ProfileSyncService::GetSessionModelAssociatorDeprecated() {
-  if (!IsSessionsDataTypeControllerRunning())
-    return NULL;
+void ProfileSyncService::RegisterNonBlockingType(syncer::ModelType type) {
+  DCHECK_EQ(directory_data_type_controllers_.count(type), 0U)
+      << "Duplicate registration of type " << ModelTypeToString(type);
 
-  // If we're using sessions V2, there's no model associator.
-  if (sessions_sync_manager_.get())
-    return NULL;
+  // TODO(rlarocque): Set the enable flag properly when crbug.com/368834 is
+  // fixed and we have some way of telling whether or not this type should be
+  // enabled.
+  non_blocking_data_type_manager_.RegisterType(type, false);
+}
 
-  return static_cast<browser_sync::SessionDataTypeController*>(
-      data_type_controllers_.find(
-      syncer::SESSIONS)->second.get())->GetModelAssociator();
+void ProfileSyncService::InitializeNonBlockingType(
+    syncer::ModelType type,
+    scoped_refptr<base::SequencedTaskRunner> task_runner,
+    base::WeakPtr<syncer::NonBlockingTypeProcessor> processor) {
+  non_blocking_data_type_manager_.InitializeTypeProcessor(
+      type,
+      task_runner,
+      processor);
 }
 
 bool ProfileSyncService::IsSessionsDataTypeControllerRunning() const {
-  return data_type_controllers_.find(syncer::SESSIONS) !=
-      data_type_controllers_.end() &&
-      data_type_controllers_.find(syncer::SESSIONS)->second->state() ==
-      DataTypeController::RUNNING;
+  return directory_data_type_controllers_.find(syncer::SESSIONS) !=
+      directory_data_type_controllers_.end() &&
+      (directory_data_type_controllers_.find(syncer::SESSIONS)->
+       second->state() == DataTypeController::RUNNING);
 }
 
 browser_sync::OpenTabsUIDelegate* ProfileSyncService::GetOpenTabsUIDelegate() {
   if (!IsSessionsDataTypeControllerRunning())
     return NULL;
-
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableSyncSessionsV2)) {
-    return sessions_sync_manager_.get();
-  } else {
-    return GetSessionModelAssociatorDeprecated();
-  }
+  return sessions_sync_manager_.get();
 }
 
 browser_sync::FaviconCache* ProfileSyncService::GetFaviconCache() {
-  // TODO(tim): Clean this up (or remove) once there's only one implementation.
-  // Bug 98892.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableSyncSessionsV2)) {
-    return sessions_sync_manager_->GetFaviconCache();
-  } else if (GetSessionModelAssociatorDeprecated()) {
-    return GetSessionModelAssociatorDeprecated()->GetFaviconCache();
-  } else {
-    return NULL;
-  }
+  return sessions_sync_manager_->GetFaviconCache();
 }
 
 scoped_ptr<browser_sync::DeviceInfo>
@@ -469,7 +460,8 @@ void ProfileSyncService::RemoveObserverForDeviceInfoChange(
 void ProfileSyncService::GetDataTypeControllerStates(
   browser_sync::DataTypeController::StateMap* state_map) const {
     for (browser_sync::DataTypeController::TypeMap::const_iterator iter =
-         data_type_controllers_.begin(); iter != data_type_controllers_.end();
+         directory_data_type_controllers_.begin();
+         iter != directory_data_type_controllers_.end();
          ++iter)
       (*state_map)[iter->first] = iter->second.get()->state();
 }
@@ -561,6 +553,30 @@ void ProfileSyncService::OnProtocolEvent(
   FOR_EACH_OBSERVER(browser_sync::ProtocolEventObserver,
                     protocol_event_observers_,
                     OnProtocolEvent(event));
+}
+
+void ProfileSyncService::OnDirectoryTypeCommitCounterUpdated(
+    syncer::ModelType type,
+    const syncer::CommitCounters& counters) {
+  FOR_EACH_OBSERVER(syncer::TypeDebugInfoObserver,
+                    type_debug_info_observers_,
+                    OnCommitCountersUpdated(type, counters));
+}
+
+void ProfileSyncService::OnDirectoryTypeUpdateCounterUpdated(
+    syncer::ModelType type,
+    const syncer::UpdateCounters& counters) {
+  FOR_EACH_OBSERVER(syncer::TypeDebugInfoObserver,
+                    type_debug_info_observers_,
+                    OnUpdateCountersUpdated(type, counters));
+}
+
+void ProfileSyncService::OnDirectoryTypeStatusCounterUpdated(
+    syncer::ModelType type,
+    const syncer::StatusCounters& counters) {
+  FOR_EACH_OBSERVER(syncer::TypeDebugInfoObserver,
+                    type_debug_info_observers_,
+                    OnStatusCountersUpdated(type, counters));
 }
 
 void ProfileSyncService::OnDataTypeRequestsSyncStartup(
@@ -717,6 +733,8 @@ void ProfileSyncService::ShutdownImpl(
   if (!backend_)
     return;
 
+  non_blocking_data_type_manager_.DisconnectSyncBackend();
+
   // First, we spin down the backend to stop change processing as soon as
   // possible.
   base::Time shutdown_start_time = base::Time::Now();
@@ -727,14 +745,14 @@ void ProfileSyncService::ShutdownImpl(
   // change from a native model.  In that case, it will get applied to the sync
   // database (which doesn't get destroyed until we destroy the backend below)
   // as an unsynced change.  That will be persisted, and committed on restart.
-  if (data_type_manager_) {
-    if (data_type_manager_->state() != DataTypeManager::STOPPED) {
+  if (directory_data_type_manager_) {
+    if (directory_data_type_manager_->state() != DataTypeManager::STOPPED) {
       // When aborting as part of shutdown, we should expect an aborted sync
       // configure result, else we'll dcheck when we try to read the sync error.
       expect_sync_configuration_aborted_ = true;
-      data_type_manager_->Stop();
+      directory_data_type_manager_->Stop();
     }
-    data_type_manager_.reset();
+    directory_data_type_manager_.reset();
   }
 
   // Shutdown the migrator before the backend to ensure it doesn't pull a null
@@ -819,7 +837,7 @@ void ProfileSyncService::ClearUnrecoverableError() {
 }
 
 void ProfileSyncService::RegisterNewDataType(syncer::ModelType data_type) {
-  if (data_type_controllers_.count(data_type) > 0)
+  if (directory_data_type_controllers_.count(data_type) > 0)
     return;
   NOTREACHED();
 }
@@ -936,7 +954,14 @@ void ProfileSyncService::OnBackendInitialized(
   debug_info_listener_ = debug_info_listener;
 
   if (protocol_event_observers_.might_have_observers()) {
-    backend_->SetForwardProtocolEvents(true);
+    backend_->RequestBufferedProtocolEventsAndEnableForwarding();
+  }
+
+  non_blocking_data_type_manager_.ConnectSyncBackend(
+      backend_->GetSyncCoreProxy());
+
+  if (type_debug_info_observers_.might_have_observers()) {
+    backend_->EnableDirectoryTypeDebugInfoForwarding();
   }
 
   // If we have a cached passphrase use it to decrypt/encrypt data now that the
@@ -975,16 +1000,9 @@ void ProfileSyncService::OnSyncCycleCompleted() {
   if (IsSessionsDataTypeControllerRunning()) {
     // Trigger garbage collection of old sessions now that we've downloaded
     // any new session data.
-    if (sessions_sync_manager_) {
-      // Sessions V2.
-      base::MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-          &browser_sync::SessionsSyncManager::DoGarbageCollection,
-              base::AsWeakPtr(sessions_sync_manager_.get())));
-    } else {
-      base::MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-          &browser_sync::SessionModelAssociator::DeleteStaleSessions,
-              GetSessionModelAssociatorDeprecated()->AsWeakPtr()));
-    }
+    base::MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
+        &browser_sync::SessionsSyncManager::DoGarbageCollection,
+            base::AsWeakPtr(sessions_sync_manager_.get())));
   }
   DVLOG(2) << "Notifying observers sync cycle completed";
   NotifySyncCycleCompleted();
@@ -1213,13 +1231,15 @@ void ProfileSyncService::OnPassphraseRequired(
            << syncer::PassphraseRequiredReasonToString(reason);
   passphrase_required_reason_ = reason;
 
-  const syncer::ModelTypeSet types = GetPreferredDataTypes();
-  if (data_type_manager_) {
+  const syncer::ModelTypeSet types = GetPreferredDirectoryDataTypes();
+  if (directory_data_type_manager_) {
     // Reconfigure without the encrypted types (excluded implicitly via the
     // failed datatypes handler).
-    data_type_manager_->Configure(types,
-                                  syncer::CONFIGURE_REASON_CRYPTO);
+    directory_data_type_manager_->Configure(types,
+                                            syncer::CONFIGURE_REASON_CRYPTO);
   }
+
+  // TODO(rlarocque): Support non-blocking types.  http://crbug.com/351005.
 
   // Notify observers that the passphrase status may have changed.
   NotifyObservers();
@@ -1241,12 +1261,14 @@ void ProfileSyncService::OnPassphraseAccepted() {
 
   // Make sure the data types that depend on the passphrase are started at
   // this time.
-  const syncer::ModelTypeSet types = GetPreferredDataTypes();
-  if (data_type_manager_) {
+  const syncer::ModelTypeSet types = GetPreferredDirectoryDataTypes();
+  if (directory_data_type_manager_) {
     // Re-enable any encrypted types if necessary.
-    data_type_manager_->Configure(types,
-                                  syncer::CONFIGURE_REASON_CRYPTO);
+    directory_data_type_manager_->Configure(types,
+                                            syncer::CONFIGURE_REASON_CRYPTO);
   }
+
+  // TODO(rlarocque): Support non-blocking types.  http://crbug.com/351005.
 
   NotifyObservers();
 }
@@ -1285,7 +1307,7 @@ void ProfileSyncService::OnEncryptionComplete() {
 void ProfileSyncService::OnMigrationNeededForTypes(
     syncer::ModelTypeSet types) {
   DCHECK(backend_initialized_);
-  DCHECK(data_type_manager_.get());
+  DCHECK(directory_data_type_manager_.get());
 
   // Migrator must be valid, because we don't sync until it is created and this
   // callback originates from a sync cycle.
@@ -1445,9 +1467,10 @@ ProfileSyncService::SyncStatusSummary
     return NOT_ENABLED;
   } else if (backend_.get() && !HasSyncSetupCompleted()) {
     return SETUP_INCOMPLETE;
-  } else if (backend_.get() && HasSyncSetupCompleted() &&
-             data_type_manager_.get() &&
-             data_type_manager_->state() != DataTypeManager::CONFIGURED) {
+  } else if (
+      backend_.get() && HasSyncSetupCompleted() &&
+      directory_data_type_manager_.get() &&
+      directory_data_type_manager_->state() != DataTypeManager::CONFIGURED) {
     return DATATYPES_NOT_INITIALIZED;
   } else if (ShouldPushChanges()) {
     return INITIALIZED;
@@ -1658,6 +1681,10 @@ void ProfileSyncService::ChangePreferredDataTypes(
 
   // Now reconfigure the DTM.
   ReconfigureDatatypeManager();
+
+  // TODO(rlarocque): Reconfigure the NonBlockingDataTypeManager, too.  Blocked
+  // on crbug.com/368834.  Until that bug is fixed, it's difficult to tell
+  // which types should be enabled and when.
 }
 
 syncer::ModelTypeSet ProfileSyncService::GetActiveDataTypes() const {
@@ -1674,16 +1701,41 @@ syncer::ModelTypeSet ProfileSyncService::GetPreferredDataTypes() const {
   return preferred_types;
 }
 
+syncer::ModelTypeSet
+ProfileSyncService::GetPreferredDirectoryDataTypes() const {
+  const syncer::ModelTypeSet registered_directory_types =
+      GetRegisteredDirectoryDataTypes();
+  const syncer::ModelTypeSet preferred_types =
+      sync_prefs_.GetPreferredDataTypes(registered_directory_types);
+  return preferred_types;
+}
+
+syncer::ModelTypeSet
+ProfileSyncService::GetPreferredNonBlockingDataTypes() const {
+  return sync_prefs_.GetPreferredDataTypes(GetRegisteredNonBlockingDataTypes());
+}
+
 syncer::ModelTypeSet ProfileSyncService::GetRegisteredDataTypes() const {
+  return Union(GetRegisteredDirectoryDataTypes(),
+               GetRegisteredNonBlockingDataTypes());
+}
+
+syncer::ModelTypeSet
+ProfileSyncService::GetRegisteredDirectoryDataTypes() const {
   syncer::ModelTypeSet registered_types;
-  // The data_type_controllers_ are determined by command-line flags; that's
-  // effectively what controls the values returned here.
+  // The directory_data_type_controllers_ are determined by command-line flags;
+  // that's effectively what controls the values returned here.
   for (DataTypeController::TypeMap::const_iterator it =
-       data_type_controllers_.begin();
-       it != data_type_controllers_.end(); ++it) {
+       directory_data_type_controllers_.begin();
+       it != directory_data_type_controllers_.end(); ++it) {
     registered_types.Put(it->first);
   }
   return registered_types;
+}
+
+syncer::ModelTypeSet
+ProfileSyncService::GetRegisteredNonBlockingDataTypes() const {
+  return non_blocking_data_type_manager_.GetRegisteredTypes();
 }
 
 bool ProfileSyncService::IsUsingSecondaryPassphrase() const {
@@ -1707,12 +1759,13 @@ bool ProfileSyncService::IsCryptographerReady(
 
 void ProfileSyncService::ConfigurePriorityDataTypes() {
   const syncer::ModelTypeSet priority_types =
-      Intersection(GetPreferredDataTypes(), syncer::PriorityUserTypes());
+      Intersection(GetPreferredDirectoryDataTypes(),
+                   syncer::PriorityUserTypes());
   if (!priority_types.Empty()) {
     const syncer::ConfigureReason reason = HasSyncSetupCompleted() ?
         syncer::CONFIGURE_REASON_RECONFIGURATION :
         syncer::CONFIGURE_REASON_NEW_CLIENT;
-    data_type_manager_->Configure(priority_types, reason);
+    directory_data_type_manager_->Configure(priority_types, reason);
   }
 }
 
@@ -1726,11 +1779,11 @@ void ProfileSyncService::ConfigureDataTypeManager() {
     return;
 
   bool restart = false;
-  if (!data_type_manager_) {
+  if (!directory_data_type_manager_) {
     restart = true;
-    data_type_manager_.reset(
+    directory_data_type_manager_.reset(
         factory_->CreateDataTypeManager(debug_info_listener_,
-                                        &data_type_controllers_,
+                                        &directory_data_type_controllers_,
                                         this,
                                         backend_.get(),
                                         this,
@@ -1740,12 +1793,12 @@ void ProfileSyncService::ConfigureDataTypeManager() {
     migrator_.reset(
         new browser_sync::BackendMigrator(
             profile_->GetDebugName(), GetUserShare(),
-            this, data_type_manager_.get(),
+            this, directory_data_type_manager_.get(),
             base::Bind(&ProfileSyncService::StartSyncingWithServer,
                        base::Unretained(this))));
   }
 
-  const syncer::ModelTypeSet types = GetPreferredDataTypes();
+  const syncer::ModelTypeSet types = GetPreferredDirectoryDataTypes();
   syncer::ConfigureReason reason = syncer::CONFIGURE_REASON_UNKNOWN;
   if (!HasSyncSetupCompleted()) {
     reason = syncer::CONFIGURE_REASON_NEW_CLIENT;
@@ -1761,7 +1814,7 @@ void ProfileSyncService::ConfigureDataTypeManager() {
     reason = syncer::CONFIGURE_REASON_RECONFIGURATION;
   }
 
-  data_type_manager_->Configure(types, reason);
+  directory_data_type_manager_->Configure(types, reason);
 }
 
 syncer::UserShare* ProfileSyncService::GetUserShare() const {
@@ -1862,6 +1915,9 @@ base::Value* ProfileSyncService::GetTypeStatusMap() const {
     } else if (throttled_types.Has(type)) {
       type_status->SetString("status", "warning");
       type_status->SetString("value", "Throttled");
+    } else if (GetRegisteredNonBlockingDataTypes().Has(type)) {
+      type_status->SetString("status", "ok");
+      type_status->SetString("value", "Non-Blocking");
     } else if (active_types.Has(type)) {
       type_status->SetString("status", "ok");
       type_status->SetString("value", "Active: " +
@@ -1880,17 +1936,6 @@ base::Value* ProfileSyncService::GetTypeStatusMap() const {
     result->Append(type_status.release());
   }
   return result.release();
-}
-
-void ProfileSyncService::ActivateDataType(
-    syncer::ModelType type, syncer::ModelSafeGroup group,
-    ChangeProcessor* change_processor) {
-  if (!backend_) {
-    NOTREACHED();
-    return;
-  }
-  DCHECK(backend_initialized_);
-  backend_->ActivateDataType(type, group, change_processor);
 }
 
 void ProfileSyncService::DeactivateDataType(syncer::ModelType type) {
@@ -2067,17 +2112,129 @@ void ProfileSyncService::AddProtocolEventObserver(
     browser_sync::ProtocolEventObserver* observer) {
   protocol_event_observers_.AddObserver(observer);
   if (backend_) {
-    backend_->SetForwardProtocolEvents(
-        protocol_event_observers_.might_have_observers());
+    backend_->RequestBufferedProtocolEventsAndEnableForwarding();
   }
 }
 
 void ProfileSyncService::RemoveProtocolEventObserver(
     browser_sync::ProtocolEventObserver* observer) {
   protocol_event_observers_.RemoveObserver(observer);
-  if (backend_) {
-    backend_->SetForwardProtocolEvents(
-        protocol_event_observers_.might_have_observers());
+  if (backend_ && !protocol_event_observers_.might_have_observers()) {
+    backend_->DisableProtocolEventForwarding();
+  }
+}
+
+void ProfileSyncService::AddTypeDebugInfoObserver(
+    syncer::TypeDebugInfoObserver* type_debug_info_observer) {
+  type_debug_info_observers_.AddObserver(type_debug_info_observer);
+  if (type_debug_info_observers_.might_have_observers() && backend_) {
+    backend_->EnableDirectoryTypeDebugInfoForwarding();
+  }
+}
+
+void ProfileSyncService::RemoveTypeDebugInfoObserver(
+    syncer::TypeDebugInfoObserver* type_debug_info_observer) {
+  type_debug_info_observers_.RemoveObserver(type_debug_info_observer);
+  if (!type_debug_info_observers_.might_have_observers() && backend_) {
+    backend_->DisableDirectoryTypeDebugInfoForwarding();
+  }
+}
+
+namespace {
+
+class GetAllNodesRequestHelper
+    : public base::RefCountedThreadSafe<GetAllNodesRequestHelper> {
+ public:
+  GetAllNodesRequestHelper(
+      syncer::ModelTypeSet requested_types,
+      const base::Callback<void(scoped_ptr<base::ListValue>)>& callback);
+
+  void OnReceivedNodesForTypes(
+      const std::vector<syncer::ModelType>& types,
+      ScopedVector<base::ListValue> scoped_node_lists);
+
+ private:
+  friend class base::RefCountedThreadSafe<GetAllNodesRequestHelper>;
+  virtual ~GetAllNodesRequestHelper();
+
+  scoped_ptr<base::ListValue> result_accumulator_;
+
+  syncer::ModelTypeSet awaiting_types_;
+  base::Callback<void(scoped_ptr<base::ListValue>)> callback_;
+};
+
+GetAllNodesRequestHelper::GetAllNodesRequestHelper(
+    syncer::ModelTypeSet requested_types,
+    const base::Callback<void(scoped_ptr<base::ListValue>)>& callback)
+    : result_accumulator_(new base::ListValue()),
+      awaiting_types_(requested_types),
+      callback_(callback) {}
+
+GetAllNodesRequestHelper::~GetAllNodesRequestHelper() {
+  if (!awaiting_types_.Empty()) {
+    DLOG(WARNING)
+        << "GetAllNodesRequest deleted before request was fulfilled.  "
+        << "Missing types are: " << ModelTypeSetToString(awaiting_types_);
+  }
+}
+
+// Called when the set of nodes for a type or set of types has been returned.
+//
+// The nodes for several types can be returned at the same time by specifying
+// their types in the |types| array, and putting their results at the
+// correspnding indices in the |scoped_node_lists|.
+void GetAllNodesRequestHelper::OnReceivedNodesForTypes(
+    const std::vector<syncer::ModelType>& types,
+    ScopedVector<base::ListValue> scoped_node_lists) {
+  DCHECK_EQ(types.size(), scoped_node_lists.size());
+
+  // Take unsafe ownership of the node list.
+  std::vector<base::ListValue*> node_lists;
+  scoped_node_lists.release(&node_lists);
+
+  for (size_t i = 0; i < node_lists.size() && i < types.size(); ++i) {
+    const ModelType type = types[i];
+    base::ListValue* node_list = node_lists[i];
+
+    // Add these results to our list.
+    scoped_ptr<base::DictionaryValue> type_dict(new base::DictionaryValue());
+    type_dict->SetString("type", ModelTypeToString(type));
+    type_dict->Set("nodes", node_list);
+    result_accumulator_->Append(type_dict.release());
+
+    // Remember that this part of the request is satisfied.
+    awaiting_types_.Remove(type);
+  }
+
+  if (awaiting_types_.Empty()) {
+    callback_.Run(result_accumulator_.Pass());
+    callback_.Reset();
+  }
+}
+
+}  // namespace
+
+void ProfileSyncService::GetAllNodes(
+    const base::Callback<void(scoped_ptr<base::ListValue>)>& callback) {
+  ModelTypeSet directory_types = GetRegisteredDirectoryDataTypes();
+  directory_types.PutAll(syncer::ControlTypes());
+  scoped_refptr<GetAllNodesRequestHelper> helper =
+      new GetAllNodesRequestHelper(directory_types, callback);
+
+  if (!backend_initialized_) {
+    // If there's no backend available to fulfill the request, handle it here.
+    ScopedVector<base::ListValue> empty_results;
+    std::vector<ModelType> type_vector;
+    for (ModelTypeSet::Iterator it = directory_types.First();
+         it.Good(); it.Inc()) {
+      type_vector.push_back(it.Get());
+      empty_results.push_back(new base::ListValue());
+    }
+    helper->OnReceivedNodesForTypes(type_vector, empty_results.Pass());
+  } else {
+    backend_->GetAllNodesForTypes(
+        directory_types,
+        base::Bind(&GetAllNodesRequestHelper::OnReceivedNodesForTypes, helper));
   }
 }
 
@@ -2112,10 +2269,10 @@ bool ProfileSyncService::ShouldPushChanges() {
   if (HasUnrecoverableError())
     return false;
 
-  if (!data_type_manager_)
+  if (!directory_data_type_manager_)
     return false;
 
-  return data_type_manager_->state() == DataTypeManager::CONFIGURED;
+  return directory_data_type_manager_->state() == DataTypeManager::CONFIGURED;
 }
 
 void ProfileSyncService::StopAndSuppress() {

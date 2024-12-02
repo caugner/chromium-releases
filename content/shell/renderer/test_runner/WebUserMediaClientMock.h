@@ -8,12 +8,11 @@
 #include "base/basictypes.h"
 #include "content/shell/renderer/test_runner/TestCommon.h"
 #include "content/shell/renderer/test_runner/WebTask.h"
-#include "third_party/WebKit/public/platform/WebCommon.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/web/WebUserMediaClient.h"
 
-namespace WebTestRunner {
+namespace content {
 
 class WebTestDelegate;
 
@@ -37,6 +36,6 @@ private:
     DISALLOW_COPY_AND_ASSIGN(WebUserMediaClientMock);
 };
 
-}
+}  // namespace content
 
 #endif  // CONTENT_SHELL_RENDERER_TEST_RUNNER_WEBUSERMEDIACLIENTMOCK_H_

@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <math.h>
+#include <cmath>
 
-#include "media/cast/test/utility/audio_utility.h"
-
+#include "base/basictypes.h"
+#include "base/logging.h"
 #include "base/time/time.h"
 #include "media/base/audio_bus.h"
-#include "media/cast/cast_config.h"
+#include "media/cast/test/utility/audio_utility.h"
 
 namespace media {
 namespace cast {
@@ -41,32 +41,21 @@ scoped_ptr<AudioBus> TestAudioBusFactory::NextAudioBus(
   return bus.Pass();
 }
 
-scoped_ptr<PcmAudioFrame> ToPcmAudioFrame(const AudioBus& audio_bus,
-                                          int sample_rate) {
-  scoped_ptr<PcmAudioFrame> audio_frame(new PcmAudioFrame());
-  audio_frame->channels = audio_bus.channels();
-  audio_frame->frequency = sample_rate;
-  audio_frame->samples.resize(audio_bus.channels() * audio_bus.frames());
-  audio_bus.ToInterleaved(audio_bus.frames(),
-                          sizeof(audio_frame->samples.front()),
-                          &audio_frame->samples.front());
-  return audio_frame.Pass();
-}
-
-int CountZeroCrossings(const std::vector<int16>& samples) {
+int CountZeroCrossings(const float* samples, int length) {
   // The sample values must pass beyond |kAmplitudeThreshold| on the opposite
   // side of zero before a crossing will be counted.
-  const int kAmplitudeThreshold = 1000;  // Approx. 3% of max amplitude.
+  const float kAmplitudeThreshold = 0.03f;  // 3% of max amplitude.
 
   int count = 0;
-  std::vector<int16>::const_iterator i = samples.begin();
-  int16 last = 0;
-  for (; i != samples.end() && abs(last) < kAmplitudeThreshold; ++i)
-    last = *i;
-  for (; i != samples.end(); ++i) {
-    if (abs(*i) >= kAmplitudeThreshold && (last < 0) != (*i < 0)) {
+  int i = 0;
+  float last = 0.0f;
+  for (; i < length && fabsf(last) < kAmplitudeThreshold; ++i)
+    last = samples[i];
+  for (; i < length; ++i) {
+    if (fabsf(samples[i]) >= kAmplitudeThreshold &&
+        (last < 0) != (samples[i] < 0)) {
       ++count;
-      last = *i;
+      last = samples[i];
     }
   }
   return count;
@@ -102,31 +91,34 @@ const int kSamplingFrequency = 48000;
 const size_t kNumBits = 16;
 const size_t kSamplesToAnalyze = kSamplingFrequency / kBaseFrequency;
 const double kSenseFrequency = kBaseFrequency * (kNumBits + 1);
-const double kMinSense = 50000.0;
+const double kMinSense = 1.5;
 
 bool EncodeTimestamp(uint16 timestamp,
                      size_t sample_offset,
-                     std::vector<int16>* samples) {
-  if (samples->size() < kSamplesToAnalyze) {
+                     size_t length,
+                     float* samples) {
+  if (length < kSamplesToAnalyze) {
     return false;
   }
   // gray-code the number
   timestamp = (timestamp >> 1) ^ timestamp;
   std::vector<double> frequencies;
-  for (int i = 0; i < kNumBits; i++) {
+  for (size_t i = 0; i < kNumBits; i++) {
     if ((timestamp >> i) & 1) {
       frequencies.push_back(kBaseFrequency * (i+1));
     }
   }
   // Carrier sense frequency
   frequencies.push_back(kSenseFrequency);
-  for (size_t i = 0; i < samples->size(); i++) {
-    double ret = 0.0;
+  for (size_t i = 0; i < length; i++) {
+    double mix_of_components = 0.0;
     for (size_t f = 0; f < frequencies.size(); f++) {
-      ret += sin((i + sample_offset) * Pi * 2.0 * frequencies[f] /
-                 kSamplingFrequency);
+      mix_of_components += sin((i + sample_offset) * Pi * 2.0 * frequencies[f] /
+                                   kSamplingFrequency);
     }
-    (*samples)[i] = ret * 32766 / (kNumBits + 1);
+    mix_of_components /= kNumBits + 1;
+    DCHECK_LE(fabs(mix_of_components), 1.0);
+    samples[i] = mix_of_components;
   }
   return true;
 }
@@ -138,7 +130,7 @@ namespace {
 // With an FFT we would verify that none of the higher frequencies
 // contain a lot of energy, which would be useful in detecting
 // bogus data.
-double DecodeOneFrequency(const int16* samples,
+double DecodeOneFrequency(const float* samples,
                           size_t length,
                           double frequency) {
   double sin_sum = 0.0;
@@ -155,9 +147,9 @@ double DecodeOneFrequency(const int16* samples,
 // each of the bits. Each frequency must have a strength that is similar to
 // the sense frequency or to zero, or the decoding fails. If it fails, we
 // move head by 60 samples and try again until we run out of samples.
-bool DecodeTimestamp(const std::vector<int16>& samples, uint16* timestamp) {
+bool DecodeTimestamp(const float* samples, size_t length, uint16* timestamp) {
   for (size_t start = 0;
-       start + kSamplesToAnalyze <= samples.size();
+       start + kSamplesToAnalyze <= length;
        start += kSamplesToAnalyze / 4) {
     double sense = DecodeOneFrequency(&samples[start],
                                       kSamplesToAnalyze,
@@ -165,7 +157,7 @@ bool DecodeTimestamp(const std::vector<int16>& samples, uint16* timestamp) {
     if (sense < kMinSense) continue;
     bool success = true;
     uint16 gray_coded = 0;
-    for (int bit = 0; success && bit < kNumBits; bit++) {
+    for (size_t bit = 0; success && bit < kNumBits; bit++) {
       double signal_strength = DecodeOneFrequency(
           &samples[start],
           kSamplesToAnalyze,

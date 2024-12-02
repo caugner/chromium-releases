@@ -8,6 +8,8 @@
     'external_ozone_platforms': [],
     'external_ozone_platform_files': [],
     'external_ozone_platform_deps': [],
+    'internal_ozone_platforms': [],
+    'internal_ozone_platform_deps': [],
   },
   'targets': [
     {
@@ -20,6 +22,7 @@
         '<(DEPTH)/ui/gfx/gfx.gyp:gfx_geometry',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<@(external_ozone_platform_deps)',
+        '<@(internal_ozone_platform_deps)',
       ],
       'defines': [
         'OZONE_IMPLEMENTATION',
@@ -28,20 +31,20 @@
         'platform_list_file': '<(SHARED_INTERMEDIATE_DIR)/ui/ozone/ozone_platform_list.cc',
         'ozone_platforms': [
           '<@(external_ozone_platforms)',
+          '<@(internal_ozone_platforms)',
         ],
       },
       'sources': [
         '<(platform_list_file)',
+        # common/chromeos files are excluded automatically when building with
+        # chromeos=0, by exclusion rules in filename_rules.gypi due to the
+        # 'chromeos' folder name.
+        'common/chromeos/native_display_delegate_ozone.cc',
+        'common/chromeos/native_display_delegate_ozone.h',
         'ozone_platform.cc',
         'ozone_platform.h',
         'ozone_switches.cc',
         'ozone_switches.h',
-        'platform/dri/ozone_platform_dri.cc',
-        'platform/dri/ozone_platform_dri.h',
-        'platform/dri/cursor_factory_evdev_dri.cc',
-        'platform/dri/cursor_factory_evdev_dri.h',
-        'platform/test/ozone_platform_test.cc',
-        'platform/test/ozone_platform_test.h',
         '<@(external_ozone_platform_files)',
       ],
       'includes': [
@@ -69,29 +72,34 @@
         },
       ],
       'conditions': [
-        ['<(ozone_platform_dri)==1', {
-          'variables': {
-            'ozone_platforms': [
-              'dri'
-            ]
-          }
-        }, {  # ozone_platform_dri==0
+        ['use_udev == 0', {
           'sources/': [
-            ['exclude', '^platform/dri/'],
-          ]
+            ['exclude', '_udev\\.(h|cc)$'],
+          ],
         }],
-        ['<(ozone_platform_test)==1', {
-          'variables': {
-            'ozone_platforms': [
-              'test'
-            ],
-          }
-        }, {  # ozone_platform_test==0
-          'sources/': [
-            ['exclude', '^platform/test/'],
-          ]
+        ['chromeos==1', {
+          'dependencies': [
+            '<(DEPTH)/ui/display/display.gyp:display_types',
+          ],
         }],
       ]
     },
+  ],
+  'conditions': [
+    ['<(ozone_platform_caca) == 1', {
+      'includes': [
+        'platform/caca/caca.gypi',
+      ],
+    }],
+    ['<(ozone_platform_dri) == 1', {
+      'includes': [
+        'platform/dri/dri.gypi',
+      ],
+    }],
+    ['<(ozone_platform_test) == 1', {
+      'includes': [
+        'platform/test/test.gypi',
+      ],
+    }],
   ],
 }

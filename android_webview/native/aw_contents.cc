@@ -10,10 +10,12 @@
 #include "android_webview/browser/aw_browser_main_parts.h"
 #include "android_webview/browser/aw_resource_context.h"
 #include "android_webview/browser/browser_view_renderer.h"
+#include "android_webview/browser/deferred_gpu_command_service.h"
 #include "android_webview/browser/gpu_memory_buffer_factory_impl.h"
 #include "android_webview/browser/hardware_renderer.h"
 #include "android_webview/browser/net_disk_cache_remover.h"
 #include "android_webview/browser/renderer_host/aw_resource_dispatcher_host_delegate.h"
+#include "android_webview/browser/scoped_app_gl_state_restore.h"
 #include "android_webview/common/aw_hit_test_data.h"
 #include "android_webview/common/devtools_instrumentation.h"
 #include "android_webview/native/aw_autofill_manager_delegate.h"
@@ -24,6 +26,8 @@
 #include "android_webview/native/aw_picture.h"
 #include "android_webview/native/aw_web_contents_delegate.h"
 #include "android_webview/native/java_browser_view_renderer_helper.h"
+#include "android_webview/native/permission/aw_permission_request.h"
+#include "android_webview/native/permission/permission_request_handler.h"
 #include "android_webview/native/state_serializer.h"
 #include "android_webview/public/browser/draw_gl.h"
 #include "base/android/jni_android.h"
@@ -41,6 +45,7 @@
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/browser_thread.h"
@@ -54,11 +59,11 @@
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/ssl_status.h"
 #include "jni/AwContents_jni.h"
+#include "net/base/auth.h"
 #include "net/cert/x509_certificate.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "ui/base/l10n/l10n_util_android.h"
 #include "ui/gfx/android/java_bitmap.h"
-#include "ui/gfx/font_render_params_linux.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/size.h"
 
@@ -75,6 +80,7 @@ using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaRef;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
+using data_reduction_proxy::DataReductionProxySettings;
 using navigation_interception::InterceptNavigationDelegate;
 using content::BrowserThread;
 using content::ContentViewCore;
@@ -118,46 +124,6 @@ class AwContentsUserData : public base::SupportsUserData::Data {
 
 base::subtle::Atomic32 g_instance_count = 0;
 
-// TODO(boliu): Deduplicate with chrome/ code.
-content::RendererPreferencesHintingEnum GetRendererPreferencesHintingEnum(
-    gfx::FontRenderParams::Hinting hinting) {
-  switch (hinting) {
-    case gfx::FontRenderParams::HINTING_NONE:
-      return content::RENDERER_PREFERENCES_HINTING_NONE;
-    case gfx::FontRenderParams::HINTING_SLIGHT:
-      return content::RENDERER_PREFERENCES_HINTING_SLIGHT;
-    case gfx::FontRenderParams::HINTING_MEDIUM:
-      return content::RENDERER_PREFERENCES_HINTING_MEDIUM;
-    case gfx::FontRenderParams::HINTING_FULL:
-      return content::RENDERER_PREFERENCES_HINTING_FULL;
-    default:
-      NOTREACHED() << "Unhandled hinting style " << hinting;
-      return content::RENDERER_PREFERENCES_HINTING_SYSTEM_DEFAULT;
-  }
-}
-
-// TODO(boliu): Deduplicate with chrome/ code.
-content::RendererPreferencesSubpixelRenderingEnum
-GetRendererPreferencesSubpixelRenderingEnum(
-    gfx::FontRenderParams::SubpixelRendering subpixel_rendering) {
-  switch (subpixel_rendering) {
-    case gfx::FontRenderParams::SUBPIXEL_RENDERING_NONE:
-      return content::RENDERER_PREFERENCES_SUBPIXEL_RENDERING_NONE;
-    case gfx::FontRenderParams::SUBPIXEL_RENDERING_RGB:
-      return content::RENDERER_PREFERENCES_SUBPIXEL_RENDERING_RGB;
-    case gfx::FontRenderParams::SUBPIXEL_RENDERING_BGR:
-      return content::RENDERER_PREFERENCES_SUBPIXEL_RENDERING_BGR;
-    case gfx::FontRenderParams::SUBPIXEL_RENDERING_VRGB:
-      return content::RENDERER_PREFERENCES_SUBPIXEL_RENDERING_VRGB;
-    case gfx::FontRenderParams::SUBPIXEL_RENDERING_VBGR:
-      return content::RENDERER_PREFERENCES_SUBPIXEL_RENDERING_VBGR;
-    default:
-      NOTREACHED() << "Unhandled subpixel rendering style "
-                   << subpixel_rendering;
-      return content::RENDERER_PREFERENCES_SUBPIXEL_RENDERING_SYSTEM_DEFAULT;
-  }
-}
-
 void OnIoThreadClientReady(content::RenderFrameHost* rfh) {
   int render_process_id = rfh->GetProcess()->GetID();
   int render_frame_id = rfh->GetRoutingID();
@@ -185,9 +151,7 @@ AwContents* AwContents::FromID(int render_process_id, int render_view_id) {
 }
 
 AwContents::AwContents(scoped_ptr<WebContents> web_contents)
-    : weak_factory_on_ui_thread_(this),
-      ui_thread_weak_ptr_(weak_factory_on_ui_thread_.GetWeakPtr()),
-      web_contents_(web_contents.Pass()),
+    : web_contents_(web_contents.Pass()),
       shared_renderer_state_(
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
           this),
@@ -195,7 +159,8 @@ AwContents::AwContents(scoped_ptr<WebContents> web_contents)
           this,
           &shared_renderer_state_,
           web_contents_.get(),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI)) {
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI)),
+      renderer_manager_key_(GLViewRendererManager::GetInstance()->NullKey()) {
   base::subtle::NoBarrier_AtomicIncrement(&g_instance_count, 1);
   icon_helper_.reset(new IconHelper(web_contents_.get()));
   icon_helper_->SetListener(this);
@@ -204,12 +169,14 @@ AwContents::AwContents(scoped_ptr<WebContents> web_contents)
   render_view_host_ext_.reset(
       new AwRenderViewHostExt(this, web_contents_.get()));
 
+  permission_request_handler_.reset(
+      new PermissionRequestHandler(this, web_contents_.get()));
+
   AwAutofillManagerDelegate* autofill_manager_delegate =
       AwAutofillManagerDelegate::FromWebContents(web_contents_.get());
+  InitDataReductionProxyIfNecessary();
   if (autofill_manager_delegate)
     InitAutofillIfNecessary(autofill_manager_delegate->GetSaveFormData());
-
-  SetAndroidWebViewRendererPrefs();
 }
 
 void AwContents::SetJavaPeers(JNIEnv* env,
@@ -256,6 +223,12 @@ void AwContents::SetSaveFormData(bool enabled) {
   }
 }
 
+void AwContents::InitDataReductionProxyIfNecessary() {
+  AwBrowserContext* browser_context =
+      AwBrowserContext::FromWebContents(web_contents_.get());
+  browser_context->CreateUserPrefServiceIfNecessary();
+}
+
 void AwContents::InitAutofillIfNecessary(bool enabled) {
   // Do not initialize if the feature is not enabled.
   if (!enabled)
@@ -273,27 +246,6 @@ void AwContents::InitAutofillIfNecessary(bool enabled) {
       AwAutofillManagerDelegate::FromWebContents(web_contents),
       l10n_util::GetDefaultLocale(),
       AutofillManager::DISABLE_AUTOFILL_DOWNLOAD_MANAGER);
-}
-
-void AwContents::SetAndroidWebViewRendererPrefs() {
-  content::RendererPreferences* prefs =
-      web_contents_->GetMutableRendererPrefs();
-  prefs->tap_multiple_targets_strategy =
-      content::TAP_MULTIPLE_TARGETS_STRATEGY_NONE;
-
-  // TODO(boliu): Deduplicate with chrome/ code.
-  const gfx::FontRenderParams& params = gfx::GetDefaultWebKitFontRenderParams();
-  prefs->should_antialias_text = params.antialiasing;
-  prefs->use_subpixel_positioning = params.subpixel_positioning;
-  prefs->hinting = GetRendererPreferencesHintingEnum(params.hinting);
-  prefs->use_autohinter = params.autohinter;
-  prefs->use_bitmaps = params.use_bitmaps;
-  prefs->subpixel_rendering =
-      GetRendererPreferencesSubpixelRenderingEnum(params.subpixel_rendering);
-
-  content::RenderViewHost* host = web_contents_->GetRenderViewHost();
-  if (host)
-    host->SyncRendererPrefs();
 }
 
 void AwContents::SetAwAutofillManagerDelegate(jobject delegate) {
@@ -374,24 +326,42 @@ jlong AwContents::GetAwDrawGLViewContext(JNIEnv* env, jobject obj) {
 }
 
 void AwContents::DrawGL(AwDrawGLInfo* draw_info) {
+  {
+    GLViewRendererManager* manager = GLViewRendererManager::GetInstance();
+    base::AutoLock lock(render_thread_lock_);
+    if (renderer_manager_key_ != manager->NullKey()) {
+      manager->DidDrawGL(renderer_manager_key_);
+    }
+  }
+
+  ScopedAppGLStateRestore state_restore(
+      draw_info->mode == AwDrawGLInfo::kModeDraw
+          ? ScopedAppGLStateRestore::MODE_DRAW
+          : ScopedAppGLStateRestore::MODE_RESOURCE_MANAGEMENT);
+  ScopedAllowGL allow_gl;
+
+  if (!shared_renderer_state_.IsHardwareAllowed()) {
+    hardware_renderer_.reset();
+    shared_renderer_state_.SetHardwareInitialized(false);
+    return;
+  }
+
+  if (draw_info->mode != AwDrawGLInfo::kModeDraw)
+    return;
+
   if (!hardware_renderer_) {
-    // TODO(boliu): Use executeHardwareAction to synchronously initialize
-    // hardware on first functor request. Then functor can point directly
-    // to HardwareRenderer.
+    DCHECK(!shared_renderer_state_.IsHardwareInitialized());
     hardware_renderer_.reset(new HardwareRenderer(&shared_renderer_state_));
+    shared_renderer_state_.SetHardwareInitialized(true);
   }
 
   DrawGLResult result;
-  if (hardware_renderer_->DrawGL(draw_info, &result)) {
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&AwContents::DidDrawGL, ui_thread_weak_ptr_, result));
+  if (hardware_renderer_->DrawGL(state_restore.stencil_enabled(),
+                                 state_restore.framebuffer_binding_ext(),
+                                 draw_info,
+                                 &result)) {
+    browser_view_renderer_.DidDrawGL(result);
   }
-}
-
-void AwContents::DidDrawGL(const DrawGLResult& result) {
-  browser_view_renderer_.DidDrawGL(result);
 }
 
 namespace {
@@ -481,7 +451,7 @@ void AwContents::AddVisitedLinks(JNIEnv* env,
 }
 
 bool RegisterAwContents(JNIEnv* env) {
-  return RegisterNativesImpl(env) >= 0;
+  return RegisterNativesImpl(env);
 }
 
 namespace {
@@ -577,6 +547,39 @@ void AwContents::HideGeolocationPrompt(const GURL& origin) {
   }
 }
 
+void AwContents::OnPermissionRequest(AwPermissionRequest* request) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> j_request = request->CreateJavaPeer();
+  ScopedJavaLocalRef<jobject> j_ref = java_ref_.get(env);
+  if (j_request.is_null() || j_ref.is_null()) {
+    permission_request_handler_->CancelRequest(
+        request->GetOrigin(), request->GetResources());
+    return;
+  }
+
+  Java_AwContents_onPermissionRequest(env, j_ref.obj(), j_request.obj());
+}
+
+void AwContents::OnPermissionRequestCanceled(AwPermissionRequest* request) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> j_request = request->GetJavaObject();
+  ScopedJavaLocalRef<jobject> j_ref = java_ref_.get(env);
+  if (j_request.is_null() || j_ref.is_null())
+    return;
+
+  Java_AwContents_onPermissionRequestCanceled(
+      env, j_ref.obj(), j_request.obj());
+}
+
+void AwContents::PreauthorizePermission(
+    JNIEnv* env,
+    jobject obj,
+    jstring origin,
+    jlong resources) {
+  permission_request_handler_->PreauthorizePermission(
+      GURL(base::android::ConvertJavaStringToUTF8(env, origin)), resources);
+}
+
 void AwContents::FindAllAsync(JNIEnv* env, jobject obj, jstring search_string) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   GetFindHelper()->FindAllAsync(ConvertJavaStringToUTF16(env, search_string));
@@ -663,13 +666,15 @@ void AwContents::OnReceivedTouchIconUrl(const std::string& url,
       env, obj.obj(), ConvertUTF8ToJavaString(env, url).obj(), precomposed);
 }
 
-bool AwContents::RequestDrawGL(jobject canvas) {
+bool AwContents::RequestDrawGL(jobject canvas, bool wait_for_completion) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!canvas || !wait_for_completion);
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return false;
-  return Java_AwContents_requestDrawGL(env, obj.obj(), canvas);
+  return Java_AwContents_requestDrawGL(
+      env, obj.obj(), canvas, wait_for_completion);
 }
 
 void AwContents::PostInvalidate() {
@@ -784,16 +789,53 @@ void AwContents::SetIsPaused(JNIEnv* env, jobject obj, bool paused) {
 
 void AwContents::OnAttachedToWindow(JNIEnv* env, jobject obj, int w, int h) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  shared_renderer_state_.SetHardwareAllowed(true);
   browser_view_renderer_.OnAttachedToWindow(w, h);
+}
+
+void AwContents::InitializeHardwareDrawIfNeeded() {
+  GLViewRendererManager* manager = GLViewRendererManager::GetInstance();
+
+  base::AutoLock lock(render_thread_lock_);
+  if (renderer_manager_key_ == manager->NullKey()) {
+    renderer_manager_key_ = manager->PushBack(&shared_renderer_state_);
+    DeferredGpuCommandService::SetInstance();
+  }
 }
 
 void AwContents::OnDetachedFromWindow(JNIEnv* env, jobject obj) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  browser_view_renderer_.OnDetachedFromWindow();
-}
+  shared_renderer_state_.SetHardwareAllowed(false);
 
-void AwContents::ReleaseHardwareDrawOnRenderThread(JNIEnv* env, jobject obj) {
-  hardware_renderer_.reset();
+  bool hardware_initialized = shared_renderer_state_.IsHardwareInitialized();
+  if (hardware_initialized) {
+    bool draw_functor_succeeded = RequestDrawGL(NULL, true);
+    if (!draw_functor_succeeded && hardware_initialized) {
+      LOG(ERROR) << "Unable to free GL resources. Has the Window leaked?";
+      // Calling release on wrong thread intentionally.
+      AwDrawGLInfo info;
+      info.mode = AwDrawGLInfo::kModeProcess;
+      DrawGL(&info);
+    }
+  }
+
+  DCHECK(!hardware_renderer_);
+  browser_view_renderer_.OnDetachedFromWindow();
+
+  GLViewRendererManager* manager = GLViewRendererManager::GetInstance();
+
+  {
+    base::AutoLock lock(render_thread_lock_);
+    if (renderer_manager_key_ != manager->NullKey()) {
+      manager->Remove(renderer_manager_key_);
+      renderer_manager_key_ = manager->NullKey();
+    }
+  }
+
+  if (hardware_initialized) {
+    // Flush any invoke functors that's caused by OnDetachedFromWindow.
+    RequestDrawGL(NULL, true);
+  }
 }
 
 base::android::ScopedJavaLocalRef<jbyteArray>
@@ -843,6 +885,8 @@ bool AwContents::OnDraw(JNIEnv* env,
                         jint clip_right,
                         jint clip_bottom) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (is_hardware_accelerated)
+    InitializeHardwareDrawIfNeeded();
   return browser_view_renderer_.OnDraw(
       canvas,
       is_hardware_accelerated,
@@ -1045,22 +1089,16 @@ void AwContents::SetJsOnlineProperty(JNIEnv* env,
   render_view_host_ext_->SetJsOnlineProperty(network_up);
 }
 
-void AwContents::TrimMemoryOnRenderThread(JNIEnv* env,
-                                          jobject obj,
-                                          jint level,
-                                          jboolean visible) {
-  if (hardware_renderer_) {
-    if (hardware_renderer_->TrimMemory(level, visible)) {
-      content::BrowserThread::PostTask(
-          content::BrowserThread::UI,
-          FROM_HERE,
-          base::Bind(&AwContents::ForceFakeComposite, ui_thread_weak_ptr_));
-    }
-  }
-}
+void AwContents::TrimMemory(JNIEnv* env,
+                            jobject obj,
+                            jint level,
+                            jboolean visible) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-void AwContents::ForceFakeComposite() {
-  browser_view_renderer_.ForceFakeCompositeSW();
+  if (!shared_renderer_state_.IsHardwareInitialized())
+    return;
+
+  browser_view_renderer_.TrimMemory(level, visible);
 }
 
 void SetShouldDownloadFavicons(JNIEnv* env, jclass jclazz) {

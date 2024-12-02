@@ -9,14 +9,14 @@
 #include "chrome/browser/bitmap_fetcher_delegate.h"
 #include "chrome/browser/image_decoder.h"
 #include "net/url_request/url_fetcher_delegate.h"
+#include "net/url_request/url_request.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "url/gurl.h"
 
 namespace net {
 class URLFetcher;
+class URLRequestContextGetter;
 }  // namespace net
-
-class Profile;
 
 namespace chrome {
 
@@ -31,8 +31,15 @@ class BitmapFetcher : public net::URLFetcherDelegate,
   const GURL& url() const { return url_; }
 
   // Start fetching the URL with the fetcher. The delegate is notified
-  // asynchronously when done.
-  void Start(Profile* profile);
+  // asynchronously when done.  Start may be called more than once in some
+  // cases.  If so, subsequent starts will be ignored since the operation is
+  // already in progress.  Arguments are used to configure the internal fetcher.
+  // Values for |load_flags| are defined in net/base/load_flags.h.  In general,
+  // |net::LOAD_NORMAL| is appropriate.
+  void Start(net::URLRequestContextGetter* request_context,
+             const std::string& referrer,
+             net::URLRequest::ReferrerPolicy referrer_policy,
+             int load_flags);
 
   // Methods inherited from URLFetcherDelegate
 

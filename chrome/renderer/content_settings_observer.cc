@@ -9,12 +9,12 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/renderer/extensions/dispatcher.h"
 #include "content/public/renderer/document_state.h"
 #include "content/public/renderer/navigation_state.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/constants.h"
+#include "extensions/renderer/dispatcher.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -246,10 +246,10 @@ void ContentSettingsObserver::DidCommitProvisionalLoad(bool is_new_navigation) {
          !url.SchemeIs(content::kDataScheme));
 }
 
-bool ContentSettingsObserver::allowDatabase(WebFrame* frame,
-                                            const WebString& name,
+bool ContentSettingsObserver::allowDatabase(const WebString& name,
                                             const WebString& display_name,
                                             unsigned long estimated_size) {
+  WebFrame* frame = render_frame()->GetWebFrame();
   if (frame->document().securityOrigin().isUnique() ||
       frame->top()->document().securityOrigin().isUnique())
     return false;
@@ -262,7 +262,8 @@ bool ContentSettingsObserver::allowDatabase(WebFrame* frame,
   return result;
 }
 
-bool ContentSettingsObserver::allowFileSystem(WebFrame* frame) {
+bool ContentSettingsObserver::allowFileSystem() {
+  WebFrame* frame = render_frame()->GetWebFrame();
   if (frame->document().securityOrigin().isUnique() ||
       frame->top()->document().securityOrigin().isUnique())
     return false;
@@ -274,13 +275,14 @@ bool ContentSettingsObserver::allowFileSystem(WebFrame* frame) {
   return result;
 }
 
-bool ContentSettingsObserver::allowImage(WebFrame* frame,
-                                         bool enabled_per_settings,
+bool ContentSettingsObserver::allowImage(bool enabled_per_settings,
                                          const WebURL& image_url) {
   bool allow = enabled_per_settings;
   if (enabled_per_settings) {
     if (is_interstitial_page_)
       return true;
+
+    WebFrame* frame = render_frame()->GetWebFrame();
     if (IsWhitelistedForContentSettings(frame))
       return true;
 
@@ -296,9 +298,9 @@ bool ContentSettingsObserver::allowImage(WebFrame* frame,
   return allow;
 }
 
-bool ContentSettingsObserver::allowIndexedDB(WebFrame* frame,
-                                             const WebString& name,
+bool ContentSettingsObserver::allowIndexedDB(const WebString& name,
                                              const WebSecurityOrigin& origin) {
+  WebFrame* frame = render_frame()->GetWebFrame();
   if (frame->document().securityOrigin().isUnique() ||
       frame->top()->document().securityOrigin().isUnique())
     return false;
@@ -311,18 +313,17 @@ bool ContentSettingsObserver::allowIndexedDB(WebFrame* frame,
   return result;
 }
 
-bool ContentSettingsObserver::allowPlugins(WebFrame* frame,
-                                           bool enabled_per_settings) {
+bool ContentSettingsObserver::allowPlugins(bool enabled_per_settings) {
   return enabled_per_settings;
 }
 
-bool ContentSettingsObserver::allowScript(WebFrame* frame,
-                                          bool enabled_per_settings) {
+bool ContentSettingsObserver::allowScript(bool enabled_per_settings) {
   if (!enabled_per_settings)
     return false;
   if (is_interstitial_page_)
     return true;
 
+  WebFrame* frame = render_frame()->GetWebFrame();
   std::map<WebFrame*, bool>::const_iterator it =
       cached_script_permissions_.find(frame);
   if (it != cached_script_permissions_.end())
@@ -346,7 +347,6 @@ bool ContentSettingsObserver::allowScript(WebFrame* frame,
 }
 
 bool ContentSettingsObserver::allowScriptFromSource(
-    WebFrame* frame,
     bool enabled_per_settings,
     const blink::WebURL& script_url) {
   if (!enabled_per_settings)
@@ -355,6 +355,7 @@ bool ContentSettingsObserver::allowScriptFromSource(
     return true;
 
   bool allow = true;
+  WebFrame* frame = render_frame()->GetWebFrame();
   if (content_setting_rules_) {
     ContentSetting setting = GetContentSettingFromRules(
         content_setting_rules_->script_rules,
@@ -365,7 +366,8 @@ bool ContentSettingsObserver::allowScriptFromSource(
   return allow || IsWhitelistedForContentSettings(frame);
 }
 
-bool ContentSettingsObserver::allowStorage(WebFrame* frame, bool local) {
+bool ContentSettingsObserver::allowStorage(bool local) {
+  WebFrame* frame = render_frame()->GetWebFrame();
   if (frame->document().securityOrigin().isUnique() ||
       frame->top()->document().securityOrigin().isUnique())
     return false;
@@ -386,28 +388,28 @@ bool ContentSettingsObserver::allowStorage(WebFrame* frame, bool local) {
   return result;
 }
 
-bool ContentSettingsObserver::allowReadFromClipboard(WebFrame* frame,
-                                                     bool default_value) {
+bool ContentSettingsObserver::allowReadFromClipboard(bool default_value) {
   bool allowed = false;
+  WebFrame* frame = render_frame()->GetWebFrame();
   // TODO(dcheng): Should we consider a toURL() method on WebSecurityOrigin?
   Send(new ChromeViewHostMsg_CanTriggerClipboardRead(
-      GURL(frame->document().securityOrigin().toString().utf8()), &allowed));
+      GURL(frame->document().securityOrigin().toString()), &allowed));
   return allowed;
 }
 
-bool ContentSettingsObserver::allowWriteToClipboard(WebFrame* frame,
-                                                    bool default_value) {
+bool ContentSettingsObserver::allowWriteToClipboard(bool default_value) {
   bool allowed = false;
+  WebFrame* frame = render_frame()->GetWebFrame();
   Send(new ChromeViewHostMsg_CanTriggerClipboardWrite(
-      GURL(frame->document().securityOrigin().toString().utf8()), &allowed));
+      GURL(frame->document().securityOrigin().toString()), &allowed));
   return allowed;
 }
 
-bool ContentSettingsObserver::allowWebComponents(WebFrame* frame,
-                                                 bool defaultValue) {
-  if (defaultValue)
+bool ContentSettingsObserver::allowWebComponents(bool default_value) {
+  if (default_value)
     return true;
 
+  WebFrame* frame = render_frame()->GetWebFrame();
   WebSecurityOrigin origin = frame->document().securityOrigin();
   if (EqualsASCII(origin.protocol(), content::kChromeUIScheme))
     return true;
@@ -420,8 +422,8 @@ bool ContentSettingsObserver::allowWebComponents(WebFrame* frame,
   return false;
 }
 
-bool ContentSettingsObserver::allowMutationEvents(WebFrame* frame,
-                                                  bool default_value) {
+bool ContentSettingsObserver::allowMutationEvents(bool default_value) {
+  WebFrame* frame = render_frame()->GetWebFrame();
   WebSecurityOrigin origin = frame->document().securityOrigin();
   const extensions::Extension* extension = GetExtension(origin);
   if (extension && extension->is_platform_app())
@@ -429,7 +431,8 @@ bool ContentSettingsObserver::allowMutationEvents(WebFrame* frame,
   return default_value;
 }
 
-bool ContentSettingsObserver::allowPushState(WebFrame* frame) {
+bool ContentSettingsObserver::allowPushState() {
+  WebFrame* frame = render_frame()->GetWebFrame();
   WebSecurityOrigin origin = frame->document().securityOrigin();
   const extensions::Extension* extension = GetExtension(origin);
   return !extension || !extension->is_platform_app();
@@ -441,13 +444,13 @@ static void SendInsecureContentSignal(int signal) {
 }
 
 bool ContentSettingsObserver::allowDisplayingInsecureContent(
-    blink::WebFrame* frame,
     bool allowed_per_settings,
     const blink::WebSecurityOrigin& origin,
     const blink::WebURL& resource_url) {
   SendInsecureContentSignal(INSECURE_CONTENT_DISPLAY);
 
   std::string origin_host(origin.host().utf8());
+  WebFrame* frame = render_frame()->GetWebFrame();
   GURL frame_gurl(frame->document().url());
   if (IsHostInDomain(origin_host, kGoogleDotCom)) {
     SendInsecureContentSignal(INSECURE_CONTENT_DISPLAY_HOST_GOOGLE);
@@ -497,11 +500,11 @@ bool ContentSettingsObserver::allowDisplayingInsecureContent(
 }
 
 bool ContentSettingsObserver::allowRunningInsecureContent(
-    blink::WebFrame* frame,
     bool allowed_per_settings,
     const blink::WebSecurityOrigin& origin,
     const blink::WebURL& resource_url) {
   std::string origin_host(origin.host().utf8());
+  WebFrame* frame = render_frame()->GetWebFrame();
   GURL frame_gurl(frame->document().url());
   DCHECK_EQ(frame_gurl.host(), origin_host);
 
@@ -562,11 +565,11 @@ bool ContentSettingsObserver::allowRunningInsecureContent(
   return true;
 }
 
-void ContentSettingsObserver::didNotAllowPlugins(WebFrame* frame) {
+void ContentSettingsObserver::didNotAllowPlugins() {
   DidBlockContentType(CONTENT_SETTINGS_TYPE_PLUGINS);
 }
 
-void ContentSettingsObserver::didNotAllowScript(WebFrame* frame) {
+void ContentSettingsObserver::didNotAllowScript() {
   DidBlockContentType(CONTENT_SETTINGS_TYPE_JAVASCRIPT);
 }
 

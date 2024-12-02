@@ -131,14 +131,13 @@ base::string16 ToolbarModelImpl::GetCorpusNameForMobile() const {
   // otherwise look for the corpus name in the query parameters.
   const std::string& query_str(google_util::HasGoogleSearchQueryParam(
       url.ref()) ? url.ref() : url.query());
-  url_parse::Component query(0, query_str.length()), key, value;
+  url::Component query(0, query_str.length()), key, value;
   const char kChipKey[] = "sboxchip";
-  while (url_parse::ExtractQueryKeyValue(query_str.c_str(), &query, &key,
-                                         &value)) {
+  while (url::ExtractQueryKeyValue(query_str.c_str(), &query, &key, &value)) {
     if (key.is_nonempty() && query_str.substr(key.begin, key.len) == kChipKey) {
       return net::UnescapeAndDecodeUTF8URLComponent(
           query_str.substr(value.begin, value.len),
-          net::UnescapeRule::NORMAL, NULL);
+          net::UnescapeRule::NORMAL);
     }
   }
   return base::string16();
@@ -183,10 +182,18 @@ bool ToolbarModelImpl::WouldOmitURLDueToOriginChip() const {
     }
   }
 
-  bool should_display_origin_chip =
-      chrome::ShouldDisplayOriginChip() || chrome::ShouldDisplayOriginChipV2();
-  return should_display_origin_chip && delegate_->InTabbedBrowser() &&
-      ShouldDisplayURL() && url_replacement_enabled();
+  if (!delegate_->InTabbedBrowser() || !ShouldDisplayURL() ||
+      !url_replacement_enabled())
+    return false;
+
+  if (chrome::ShouldDisplayOriginChip())
+    return true;
+
+  const chrome::OriginChipV2Condition chip_condition =
+      chrome::GetOriginChipV2Condition();
+  return (chip_condition != chrome::ORIGIN_CHIP_V2_DISABLED) &&
+      ((chip_condition != chrome::ORIGIN_CHIP_V2_ON_SRP) ||
+       WouldPerformSearchTermReplacement(false));
 }
 
 bool ToolbarModelImpl::WouldPerformSearchTermReplacement(

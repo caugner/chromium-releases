@@ -104,9 +104,9 @@ class MockAudioSource : public webrtc::AudioSourceInterface {
   webrtc::MediaConstraintsInterface::Constraints mandatory_constraints_;
 };
 
-class MockLocalVideoTrack : public webrtc::VideoTrackInterface {
+class MockWebRtcVideoTrack : public webrtc::VideoTrackInterface {
  public:
-  MockLocalVideoTrack(std::string id,
+  MockWebRtcVideoTrack(const std::string& id,
                       webrtc::VideoSourceInterface* source);
   virtual void AddRenderer(webrtc::VideoRendererInterface* renderer) OVERRIDE;
   virtual void RemoveRenderer(
@@ -122,7 +122,7 @@ class MockLocalVideoTrack : public webrtc::VideoTrackInterface {
   virtual webrtc::VideoSourceInterface* GetSource() const OVERRIDE;
 
  protected:
-  virtual ~MockLocalVideoTrack();
+  virtual ~MockWebRtcVideoTrack();
 
  private:
   bool enabled_;
@@ -130,6 +130,7 @@ class MockLocalVideoTrack : public webrtc::VideoTrackInterface {
   TrackState state_;
   scoped_refptr<webrtc::VideoSourceInterface> source_;
   webrtc::ObserverInterface* observer_;
+  webrtc::VideoRendererInterface* renderer_;
 };
 
 class MockMediaStream : public webrtc::MediaStreamInterface {
@@ -206,7 +207,11 @@ class MockMediaStreamDependencyFactory : public MediaStreamDependencyFactory {
 
   virtual scoped_refptr<WebRtcAudioCapturer> CreateAudioCapturer(
       int render_view_id, const StreamDeviceInfo& device_info,
-      const blink::WebMediaConstraints& constraints) OVERRIDE;
+      const blink::WebMediaConstraints& constraints,
+      MediaStreamAudioSource* audio_source) OVERRIDE;
+  void FailToCreateNextAudioCapturer() {
+    fail_to_create_next_audio_capturer_ = true;
+  }
 
   virtual void StartLocalAudioTrack(
       WebRtcLocalAudioTrack* audio_track) OVERRIDE;
@@ -215,6 +220,7 @@ class MockMediaStreamDependencyFactory : public MediaStreamDependencyFactory {
   MockVideoSource* last_video_source() { return last_video_source_.get(); }
 
  private:
+  bool fail_to_create_next_audio_capturer_;
   scoped_refptr <MockAudioSource> last_audio_source_;
   scoped_refptr <MockVideoSource> last_video_source_;
 

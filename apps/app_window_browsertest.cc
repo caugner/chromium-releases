@@ -16,14 +16,14 @@ typedef extensions::PlatformAppBrowserTest AppWindowBrowserTest;
 // This test is disabled on Linux because of the unpredictable nature of native
 // windows. We cannot assume that the window manager will insert any title bar
 // at all, so the test may fail on certain window managers.
-#if defined(TOOLKIT_GTK) || (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 #define MAYBE_FrameInsetsForDefaultFrame DISABLED_FrameInsetsForDefaultFrame
 #else
 #define MAYBE_FrameInsetsForDefaultFrame FrameInsetsForDefaultFrame
 #endif
 
 // Verifies that the NativeAppWindows implement GetFrameInsets() correctly.
-// See crbug.com/346115
+// See http://crbug.com/346115
 IN_PROC_BROWSER_TEST_F(AppWindowBrowserTest, MAYBE_FrameInsetsForDefaultFrame) {
   AppWindow* app_window = CreateTestAppWindow("{}");
   NativeAppWindow* native_window = app_window->GetBaseWindow();
@@ -31,7 +31,7 @@ IN_PROC_BROWSER_TEST_F(AppWindowBrowserTest, MAYBE_FrameInsetsForDefaultFrame) {
 
   // It is a reasonable assumption that the top padding must be greater than
   // the bottom padding due to the title bar.
-  EXPECT_TRUE(insets.top() > insets.bottom());
+  EXPECT_GT(insets.top(), insets.bottom());
 
   CloseAppWindow(app_window);
 }
@@ -39,14 +39,14 @@ IN_PROC_BROWSER_TEST_F(AppWindowBrowserTest, MAYBE_FrameInsetsForDefaultFrame) {
 // This test is also disabled on Linux because frame: color is ignored on stable
 // and beta channels (so it can fail the same as the previous test).
 // TODO(benwells): Re-enable on Linux after frame: color is on stable.
-#if defined(TOOLKIT_GTK) || (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 #define MAYBE_FrameInsetsForColoredFrame DISABLED_FrameInsetsForColoredFrame
 #else
 #define MAYBE_FrameInsetsForColoredFrame FrameInsetsForColoredFrame
 #endif
 
 // Verifies that the NativeAppWindows implement GetFrameInsets() correctly.
-// See crbug.com/346115
+// See http://crbug.com/346115
 IN_PROC_BROWSER_TEST_F(AppWindowBrowserTest, MAYBE_FrameInsetsForColoredFrame) {
   AppWindow* app_window =
       CreateTestAppWindow("{ \"frame\": { \"color\": \"#ffffff\" } }");
@@ -55,7 +55,7 @@ IN_PROC_BROWSER_TEST_F(AppWindowBrowserTest, MAYBE_FrameInsetsForColoredFrame) {
 
   // It is a reasonable assumption that the top padding must be greater than
   // the bottom padding due to the title bar.
-  EXPECT_TRUE(insets.top() > insets.bottom());
+  EXPECT_GT(insets.top(), insets.bottom());
 
   CloseAppWindow(app_window);
 }

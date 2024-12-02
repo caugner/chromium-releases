@@ -6,7 +6,7 @@
  * TestFixture for Invalidations WebUI testing.
  * @extends {testing.Test}
  * @constructor
- **/
+ */
 function InvalidationsWebUITest() {}
 
 InvalidationsWebUITest.prototype = {
@@ -14,7 +14,7 @@ InvalidationsWebUITest.prototype = {
 
   /**
    * Browse to the Invalidations page.
-   **/
+   */
   browsePreload: 'chrome://invalidations',
   runAccessibilityChecks: false,
   accessibilityIssuesAreErrors: false
@@ -26,7 +26,7 @@ TEST_F('InvalidationsWebUITest', 'testRegisteringNewInvalidation', function() {
   var invalidation = [{
     isUnknownVersion: 'true',
     objectId: {name: 'EXTENSIONS', source: 1004}
-    }];
+  }];
   invalidationsLog.value = '';
   chrome.invalidations.logInvalidations(invalidation);
   var isContained =
@@ -46,32 +46,34 @@ TEST_F('InvalidationsWebUITest', 'testChangingInvalidationsState', function() {
   var newNewState = 'TRANSIENT_INVALIDATION_ERROR';
 
   chrome.invalidations.updateInvalidatorState(newState);
-  expectEquals(invalidationsState.textContent,
-    'INVALIDATIONS_ENABLED',
-    'could not change the invalidations text');
+  var isContainedState = invalidationsState.textContent.indexOf(
+      'INVALIDATIONS_ENABLED') != -1;
+  expectTrue(isContainedState, 'could not change the invalidations text');
+
   invalidationsLog.value = '';
   chrome.invalidations.updateInvalidatorState(newNewState);
-  expectEquals(invalidationsState.textContent,
-    'TRANSIENT_INVALIDATION_ERROR');
-  var isContained =
+  var isContainedState2 = invalidationsState.textContent.indexOf(
+      'TRANSIENT_INVALIDATION_ERROR') != -1;
+  expectTrue(isContainedState2, 'could not change the invalidations text');
+  var isContainedLog =
     invalidationsLog.value.indexOf(
       'Invalidations service state changed to ' +
       '"TRANSIENT_INVALIDATION_ERROR"') != -1;
-  expectTrue(isContained, 'Actual log is:' + invalidationsLog.value);
+  expectTrue(isContainedLog, 'Actual log is:' + invalidationsLog.value);
 });
 
 // Test that objects ids appear on the table.
 TEST_F('InvalidationsWebUITest', 'testRegisteringNewIds', function() {
   var newDataType = [
-    { name: 'EXTENSIONS', source: 1004},
-    { name: 'FAVICON_IMAGE', source: 1004}
-    ];
-  var pattern1 = ['Fake', '1004', 'EXTENSIONS', '0', '', '', ''];
-  var pattern2 = ['Fake', '1004', 'FAVICON_IMAGE', '0', '', '', ''];
+    { name: 'EXTENSIONS', source: 1004, totalCount: 0},
+    { name: 'FAVICON_IMAGE', source: 1004, totalCount: 0}
+  ];
+  var pattern1 = ['Fake', '1004', 'EXTENSIONS', '0', '0', '', '', ''];
+  var pattern2 = ['Fake', '1004', 'FAVICON_IMAGE', '0', '0', '', '', ''];
   // Register two objects ID with 'Fake' registrar
   chrome.invalidations.updateIds('Fake', newDataType);
   // Disable the Extensions ObjectId by only sending FAVICON_IMAGE
-  newDataType = [{ name: 'FAVICON_IMAGE', source: 1004}];
+  newDataType = [{name: 'FAVICON_IMAGE', source: 1004}];
   chrome.invalidations.updateIds('Fake', newDataType);
 
   // Test that the two patterns are contained in the table.

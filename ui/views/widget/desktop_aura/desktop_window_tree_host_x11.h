@@ -13,6 +13,8 @@
 #include "base/observer_list.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/cursor/cursor_loader_x11.h"
+#include "ui/events/event_source.h"
+#include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/x/x11_atom_cache.h"
 #include "ui/views/views_export.h"
@@ -31,11 +33,11 @@ class X11DesktopWindowMoveClient;
 class X11ScopedCapture;
 class X11WindowEventFilter;
 
-class VIEWS_EXPORT DesktopWindowTreeHostX11 :
-    public DesktopWindowTreeHost,
-    public aura::WindowTreeHost,
-    public ui::EventSource,
-    public base::MessagePumpDispatcher {
+class VIEWS_EXPORT DesktopWindowTreeHostX11
+    : public DesktopWindowTreeHost,
+      public aura::WindowTreeHost,
+      public ui::EventSource,
+      public ui::PlatformEventDispatcher {
  public:
   DesktopWindowTreeHostX11(
       internal::NativeWidgetDelegate* native_widget_delegate,
@@ -129,20 +131,15 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11 :
   virtual bool IsAnimatingClosed() const OVERRIDE;
 
   // Overridden from aura::WindowTreeHost:
+  virtual ui::EventSource* GetEventSource() OVERRIDE;
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
-  virtual void ToggleFullScreen() OVERRIDE;
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
-  virtual gfx::Insets GetInsets() const OVERRIDE;
-  virtual void SetInsets(const gfx::Insets& insets) OVERRIDE;
   virtual gfx::Point GetLocationOnNativeScreen() const OVERRIDE;
   virtual void SetCapture() OVERRIDE;
   virtual void ReleaseCapture() OVERRIDE;
-  virtual bool QueryMouseLocation(gfx::Point* location_return) OVERRIDE;
-  virtual bool ConfineCursorToRootWindow() OVERRIDE;
-  virtual void UnConfineCursor() OVERRIDE;
   virtual void PostNativeEvent(const base::NativeEvent& native_event) OVERRIDE;
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
   virtual void SetCursorNative(gfx::NativeCursor cursor) OVERRIDE;
@@ -161,10 +158,8 @@ private:
   // along with all aura client objects that direct behavior.
   aura::WindowEventDispatcher* InitDispatcher(const Widget::InitParams& params);
 
-  // Returns true if there's an X window manager present... in most cases.  Some
-  // window managers (notably, ion3) don't implement enough of ICCCM for us to
-  // detect that they're there.
-  bool IsWindowManagerPresent();
+  // Updates |xwindow_|'s _NET_WM_USER_TIME if |xwindow_| is active.
+  void UpdateWMUserTime(const ui::PlatformEvent& event);
 
   // Sends a message to the x11 window manager, enabling or disabling the
   // states |state1| and |state2|.
@@ -197,14 +192,21 @@ private:
   void SerializeImageRepresentation(const gfx::ImageSkiaRep& rep,
                                     std::vector<unsigned long>* data);
 
+  // Returns an 8888 ARGB visual. Can return NULL if there is no matching
+  // visual on this display.
+  Visual* GetARGBVisual();
+
   // See comment for variable open_windows_.
   static std::list<XID>& open_windows();
 
   // Map the window (shows it) taking into account the given |show_state|.
   void MapWindow(ui::WindowShowState show_state);
 
-  // Overridden from Dispatcher:
-  virtual uint32_t Dispatch(const base::NativeEvent& event) OVERRIDE;
+  void SetWindowTransparency();
+
+  // ui::PlatformEventDispatcher:
+  virtual bool CanDispatchEvent(const ui::PlatformEvent& event) OVERRIDE;
+  virtual uint32_t DispatchEvent(const ui::PlatformEvent& event) OVERRIDE;
 
   base::WeakPtrFactory<DesktopWindowTreeHostX11> close_widget_factory_;
 
@@ -247,6 +249,9 @@ private:
 
   // True if the window has title-bar / borders provided by the window manager.
   bool use_native_frame_;
+
+  // Whether we used an ARGB visual for our window.
+  bool use_argb_visual_;
 
   scoped_ptr<DesktopDispatcherClient> dispatcher_client_;
 

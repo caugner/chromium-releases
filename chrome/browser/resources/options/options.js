@@ -30,7 +30,6 @@ var ManageProfileOverlay = options.ManageProfileOverlay;
 var ManagedUserCreateConfirmOverlay = options.ManagedUserCreateConfirmOverlay;
 var ManagedUserImportOverlay = options.ManagedUserImportOverlay;
 var ManagedUserLearnMoreOverlay = options.ManagedUserLearnMoreOverlay;
-var MediaGalleriesManager = options.MediaGalleriesManager;
 var OptionsFocusManager = options.OptionsFocusManager;
 var OptionsPage = options.OptionsPage;
 var PasswordManager = options.PasswordManager;
@@ -153,16 +152,11 @@ function load() {
   if (!cr.isChromeOS) {
     OptionsPage.registerOverlay(ManagedUserCreateConfirmOverlay.getInstance(),
                                 BrowserOptions.getInstance());
-    if (!loadTimeData.getBoolean('disableCreateExistingManagedUsers')) {
-      OptionsPage.registerOverlay(ManagedUserImportOverlay.getInstance(),
-                                  CreateProfileOverlay.getInstance());
-    }
+    OptionsPage.registerOverlay(ManagedUserImportOverlay.getInstance(),
+                                CreateProfileOverlay.getInstance());
     OptionsPage.registerOverlay(ManagedUserLearnMoreOverlay.getInstance(),
                                 CreateProfileOverlay.getInstance());
   }
-  OptionsPage.registerOverlay(MediaGalleriesManager.getInstance(),
-                              ContentSettings.getInstance(),
-                              [$('manage-galleries-button')]);
   OptionsPage.registerOverlay(PasswordManager.getInstance(),
                               BrowserOptions.getInstance(),
                               [$('manage-passwords')]);

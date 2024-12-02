@@ -16,6 +16,7 @@
 #include "chrome/browser/chromeos/extensions/file_manager/file_browser_private_api.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_util.h"
 #include "chrome/browser/chromeos/file_manager/app_installer.h"
+#include "chrome/browser/chromeos/file_manager/zip_file_creator.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/drive/event_logger.h"
@@ -24,13 +25,13 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
 #include "chrome/common/extensions/api/file_browser_private.h"
 #include "chrome/common/pref_names.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_zoom.h"
@@ -87,11 +88,13 @@ GetLoggedInProfileInfoList(content::WebContents* contents) {
     if (contents) {
       const gfx::Image& image =
           ash::GetAvatarImageForContext(contents->GetBrowserContext());
-      const SkBitmap* const bitmap = image.ToSkBitmap();
-      if (bitmap) {
-        profile_info->image_uri.reset(
-            new std::string(webui::GetBitmapDataUrl(*bitmap)));
-      }
+      const gfx::ImageSkia& skia = image.AsImageSkia();
+      profile_info->profile_image.reset(
+          new api::file_browser_private::ImageSet);
+      profile_info->profile_image->scale1x_url =
+          webui::GetBitmapDataUrl(skia.GetRepresentation(1.0f).sk_bitmap());
+      profile_info->profile_image->scale2x_url =
+          webui::GetBitmapDataUrl(skia.GetRepresentation(2.0f).sk_bitmap());
     }
     result_profiles.push_back(profile_info);
   }
@@ -100,7 +103,7 @@ GetLoggedInProfileInfoList(content::WebContents* contents) {
 }
 } // namespace
 
-bool FileBrowserPrivateLogoutUserForReauthenticationFunction::RunImpl() {
+bool FileBrowserPrivateLogoutUserForReauthenticationFunction::RunSync() {
   chromeos::User* user =
       chromeos::UserManager::Get()->GetUserByProfile(GetProfile());
   if (user) {
@@ -113,7 +116,7 @@ bool FileBrowserPrivateLogoutUserForReauthenticationFunction::RunImpl() {
   return true;
 }
 
-bool FileBrowserPrivateGetPreferencesFunction::RunImpl() {
+bool FileBrowserPrivateGetPreferencesFunction::RunSync() {
   api::file_browser_private::Preferences result;
   const PrefService* const service = GetProfile()->GetPrefs();
 
@@ -138,7 +141,7 @@ bool FileBrowserPrivateGetPreferencesFunction::RunImpl() {
   return true;
 }
 
-bool FileBrowserPrivateSetPreferencesFunction::RunImpl() {
+bool FileBrowserPrivateSetPreferencesFunction::RunSync() {
   using extensions::api::file_browser_private::SetPreferences::Params;
   const scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
@@ -165,7 +168,7 @@ FileBrowserPrivateZipSelectionFunction::
 FileBrowserPrivateZipSelectionFunction::
     ~FileBrowserPrivateZipSelectionFunction() {}
 
-bool FileBrowserPrivateZipSelectionFunction::RunImpl() {
+bool FileBrowserPrivateZipSelectionFunction::RunAsync() {
   using extensions::api::file_browser_private::ZipSelection::Params;
   const scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
@@ -213,25 +216,20 @@ bool FileBrowserPrivateZipSelectionFunction::RunImpl() {
     src_relative_paths.push_back(relative_path);
   }
 
-  zip_file_creator_ = new file_manager::ZipFileCreator(this,
-                                                       src_dir,
-                                                       src_relative_paths,
-                                                       dest_file);
-
-  // Keep the refcount until the zipping is complete on utility process.
-  AddRef();
-
-  zip_file_creator_->Start();
+  (new file_manager::ZipFileCreator(
+       base::Bind(&FileBrowserPrivateZipSelectionFunction::OnZipDone, this),
+       src_dir,
+       src_relative_paths,
+       dest_file))->Start();
   return true;
 }
 
 void FileBrowserPrivateZipSelectionFunction::OnZipDone(bool success) {
   SetResult(new base::FundamentalValue(success));
   SendResponse(true);
-  Release();
 }
 
-bool FileBrowserPrivateZoomFunction::RunImpl() {
+bool FileBrowserPrivateZoomFunction::RunSync() {
   using extensions::api::file_browser_private::Zoom::Params;
   const scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
@@ -255,7 +253,7 @@ bool FileBrowserPrivateZoomFunction::RunImpl() {
   return true;
 }
 
-bool FileBrowserPrivateInstallWebstoreItemFunction::RunImpl() {
+bool FileBrowserPrivateInstallWebstoreItemFunction::RunAsync() {
   using extensions::api::file_browser_private::InstallWebstoreItem::Params;
   const scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
@@ -310,7 +308,7 @@ FileBrowserPrivateRequestWebStoreAccessTokenFunction::
     ~FileBrowserPrivateRequestWebStoreAccessTokenFunction() {
 }
 
-bool FileBrowserPrivateRequestWebStoreAccessTokenFunction::RunImpl() {
+bool FileBrowserPrivateRequestWebStoreAccessTokenFunction::RunAsync() {
   std::vector<std::string> scopes;
   scopes.push_back(kCWSScope);
 
@@ -368,7 +366,7 @@ void FileBrowserPrivateRequestWebStoreAccessTokenFunction::OnAccessTokenFetched(
   }
 }
 
-bool FileBrowserPrivateGetProfilesFunction::RunImpl() {
+bool FileBrowserPrivateGetProfilesFunction::RunSync() {
   const std::vector<linked_ptr<api::file_browser_private::ProfileInfo> >&
       profiles = GetLoggedInProfileInfoList(GetAssociatedWebContents());
 
@@ -390,7 +388,7 @@ bool FileBrowserPrivateGetProfilesFunction::RunImpl() {
   return true;
 }
 
-bool FileBrowserPrivateVisitDesktopFunction::RunImpl() {
+bool FileBrowserPrivateVisitDesktopFunction::RunSync() {
   using api::file_browser_private::VisitDesktop::Params;
   const scoped_ptr<Params> params(Params::Create(*args_));
   const std::vector<linked_ptr<api::file_browser_private::ProfileInfo> >&

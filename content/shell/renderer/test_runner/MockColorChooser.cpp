@@ -10,7 +10,7 @@
 using namespace blink;
 using namespace std;
 
-namespace WebTestRunner {
+namespace content {
 
 namespace {
 class HostMethodTask : public WebMethodTask<MockColorChooser> {
@@ -55,4 +55,4 @@ void MockColorChooser::invokeDidEndChooser()
     m_client->didEndChooser();
 }
 
-}
+}  // namespace content

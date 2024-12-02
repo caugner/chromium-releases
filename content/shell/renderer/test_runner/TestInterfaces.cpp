@@ -6,7 +6,10 @@
 
 #include <string>
 
+#include "base/logging.h"
+#include "base/command_line.h"
 #include "base/strings/stringprintf.h"
+#include "content/shell/common/shell_switches.h"
 #include "content/shell/renderer/test_runner/WebTestProxy.h"
 #include "content/shell/renderer/test_runner/accessibility_controller.h"
 #include "content/shell/renderer/test_runner/event_sender.h"
@@ -23,17 +26,19 @@
 using namespace blink;
 using namespace std;
 
-namespace WebTestRunner {
+namespace content {
 
 TestInterfaces::TestInterfaces()
-    : m_accessibilityController(new content::AccessibilityController())
-    , m_eventSender(new content::EventSender(this))
-    , m_gamepadController(new content::GamepadController())
-    , m_textInputController(new content::TextInputController())
-    , m_testRunner(new content::TestRunner(this))
+    : m_accessibilityController(new AccessibilityController())
+    , m_eventSender(new EventSender(this))
+    , m_gamepadController(new GamepadController())
+    , m_textInputController(new TextInputController())
+    , m_testRunner(new TestRunner(this))
     , m_delegate(0)
 {
     blink::setLayoutTestMode(true);
+    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableFontAntialiasing))
+        blink::setFontAntialiasingEnabledForTest(true);
 
     // NOTE: please don't put feature specific enable flags here,
     // instead add them to RuntimeEnabledFeatures.in
@@ -128,7 +133,7 @@ void TestInterfaces::configureForTestWithURL(const WebURL& testURL, bool generat
                 "{\"lastActivePanel\":\"\\\"%s\\\"\"}",
                 test_path.substr(0, slash_index).c_str());
         }
-        m_testRunner->showDevTools(settings);
+        m_testRunner->showDevTools(settings, string());
     }
     if (spec.find("/viewsource/") != string::npos) {
         m_testRunner->setShouldEnableViewSource(true);
@@ -146,23 +151,23 @@ void TestInterfaces::windowClosed(WebTestProxyBase* proxy)
 {
     vector<WebTestProxyBase*>::iterator pos = find(m_windowList.begin(), m_windowList.end(), proxy);
     if (pos == m_windowList.end()) {
-        BLINK_ASSERT_NOT_REACHED();
+        NOTREACHED();
         return;
     }
     m_windowList.erase(pos);
 }
 
-content::AccessibilityController* TestInterfaces::accessibilityController()
+AccessibilityController* TestInterfaces::accessibilityController()
 {
     return m_accessibilityController.get();
 }
 
-content::EventSender* TestInterfaces::eventSender()
+EventSender* TestInterfaces::eventSender()
 {
     return m_eventSender.get();
 }
 
-content::TestRunner* TestInterfaces::testRunner()
+TestRunner* TestInterfaces::testRunner()
 {
     return m_testRunner.get();
 }
@@ -196,4 +201,4 @@ WebThemeEngine* TestInterfaces::themeEngine()
     return m_themeEngine.get();
 }
 
-}
+}  // namespace content

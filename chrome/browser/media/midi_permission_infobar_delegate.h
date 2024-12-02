@@ -21,11 +21,11 @@ class MidiPermissionInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
   // Creates a MIDI permission infobar and delegate and adds the infobar to
   // |infobar_service|.  Returns the infobar if it was successfully added.
-  static InfoBar* Create(InfoBarService* infobar_service,
-                         PermissionQueueController* controller,
-                         const PermissionRequestID& id,
-                         const GURL& requesting_frame,
-                         const std::string& display_languages);
+  static infobars::InfoBar* Create(InfoBarService* infobar_service,
+                                   PermissionQueueController* controller,
+                                   const PermissionRequestID& id,
+                                   const GURL& requesting_frame,
+                                   const std::string& display_languages);
 
  private:
   MidiPermissionInfoBarDelegate(PermissionQueueController* controller,
@@ -40,7 +40,7 @@ class MidiPermissionInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual int GetIconID() const OVERRIDE;
   virtual Type GetInfoBarType() const OVERRIDE;
   virtual bool ShouldExpireInternal(
-      const content::LoadCommittedDetails& details) const OVERRIDE;
+      const NavigationDetails& details) const OVERRIDE;
   virtual base::string16 GetMessageText() const OVERRIDE;
   virtual base::string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;

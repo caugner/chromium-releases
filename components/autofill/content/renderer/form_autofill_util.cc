@@ -25,9 +25,9 @@
 #include "third_party/WebKit/public/web/WebExceptionCode.h"
 #include "third_party/WebKit/public/web/WebFormControlElement.h"
 #include "third_party/WebKit/public/web/WebFormElement.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebLabelElement.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebNode.h"
 #include "third_party/WebKit/public/web/WebNodeList.h"
 #include "third_party/WebKit/public/web/WebOptionElement.h"
@@ -448,6 +448,13 @@ void GetOptionStringsFromElement(const WebSelectElement& select_element,
   option_values->clear();
   option_contents->clear();
   WebVector<WebElement> list_items = select_element.listItems();
+
+  // Constrain the maximum list length to prevent a malicious site from DOS'ing
+  // the browser, without entirely breaking autocomplete for some extreme
+  // legitimate sites: http://crbug.com/49332 and http://crbug.com/363094
+  if (list_items.size() > kMaxListSize)
+    return;
+
   option_values->reserve(list_items.size());
   option_contents->reserve(list_items.size());
   for (size_t i = 0; i < list_items.size(); ++i) {
@@ -533,19 +540,16 @@ void FillFormField(const FormFieldData& data,
   field->setAutofilled(true);
 
   WebInputElement* input_element = toWebInputElement(field);
-  if (IsTextInput(input_element) || IsMonthInput(input_element)) {
-    // If the maxlength attribute contains a negative value, maxLength()
-    // returns the default maxlength value.
-    input_element->setValue(
-        data.value.substr(0, input_element->maxLength()), true);
-  } else if (IsTextAreaElement(*field) || IsSelectElement(*field)) {
-    if (field->value() != data.value) {
-      field->setValue(data.value);
-      field->dispatchFormControlChangeEvent();
-    }
-  } else {
-    DCHECK(IsCheckableElement(input_element));
+  if (IsCheckableElement(input_element)) {
     input_element->setChecked(data.is_checked, true);
+  } else {
+    base::string16 value = data.value;
+    if (IsTextInput(input_element) || IsMonthInput(input_element)) {
+      // If the maxlength attribute contains a negative value, maxLength()
+      // returns the default maxlength value.
+      value = value.substr(0, input_element->maxLength());
+    }
+    field->setValue(value, true);
   }
 
   if (is_initiating_node &&

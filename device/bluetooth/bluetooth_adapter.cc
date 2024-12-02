@@ -11,12 +11,25 @@
 
 namespace device {
 
+#if !defined(OS_CHROMEOS) && !defined(OS_WIN) && !defined(OS_MACOSX)
+//static
+base::WeakPtr<BluetoothAdapter> BluetoothAdapter::CreateAdapter(
+    const InitCallback& init_callback) {
+  return base::WeakPtr<BluetoothAdapter>();
+}
+#endif  // !defined(OS_CHROMEOS) && !defined(OS_WIN) && !defined(OS_MACOSX)
+
+
 BluetoothAdapter::BluetoothAdapter()
     : weak_ptr_factory_(this) {
 }
 
 BluetoothAdapter::~BluetoothAdapter() {
   STLDeleteValues(&devices_);
+}
+
+base::WeakPtr<BluetoothAdapter> BluetoothAdapter::GetWeakPtrForTesting() {
+  return weak_ptr_factory_.GetWeakPtr();
 }
 
 void BluetoothAdapter::StartDiscoverySession(

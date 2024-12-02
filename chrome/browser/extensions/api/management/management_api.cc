@@ -25,14 +25,15 @@
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/api/management.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
-#include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -45,6 +46,8 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_icon_set.h"
+#include "extensions/common/manifest_handlers/icons_handler.h"
 #include "extensions/common/manifest_handlers/offline_enabled_info.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_data.h"
@@ -235,7 +238,7 @@ ExtensionService* AsyncManagementFunction::service() {
   return GetProfile()->GetExtensionService();
 }
 
-bool ManagementGetAllFunction::RunImpl() {
+bool ManagementGetAllFunction::RunSync() {
   ExtensionInfoList extensions;
   ExtensionRegistry* registry = ExtensionRegistry::Get(GetProfile());
   ExtensionSystem* system = ExtensionSystem::Get(GetProfile());
@@ -248,7 +251,7 @@ bool ManagementGetAllFunction::RunImpl() {
   return true;
 }
 
-bool ManagementGetFunction::RunImpl() {
+bool ManagementGetFunction::RunSync() {
   scoped_ptr<management::Get::Params> params(
       management::Get::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -267,7 +270,7 @@ bool ManagementGetFunction::RunImpl() {
   return true;
 }
 
-bool ManagementGetPermissionWarningsByIdFunction::RunImpl() {
+bool ManagementGetPermissionWarningsByIdFunction::RunSync() {
   scoped_ptr<management::GetPermissionWarningsById::Params> params(
       management::GetPermissionWarningsById::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -373,7 +376,7 @@ class SafeManifestJSONParser : public UtilityProcessHostClient {
 
 }  // namespace
 
-bool ManagementGetPermissionWarningsByManifestFunction::RunImpl() {
+bool ManagementGetPermissionWarningsByManifestFunction::RunAsync() {
   scoped_ptr<management::GetPermissionWarningsByManifest::Params> params(
       management::GetPermissionWarningsByManifest::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -406,7 +409,7 @@ void ManagementGetPermissionWarningsByManifestFunction::OnParseSuccess(
       management::GetPermissionWarningsByManifest::Results::Create(warnings);
   SendResponse(true);
 
-  // Matched with AddRef() in RunImpl().
+  // Matched with AddRef() in RunAsync().
   Release();
 }
 
@@ -415,11 +418,11 @@ void ManagementGetPermissionWarningsByManifestFunction::OnParseFailure(
   error_ = error;
   SendResponse(false);
 
-  // Matched with AddRef() in RunImpl().
+  // Matched with AddRef() in RunAsync().
   Release();
 }
 
-bool ManagementLaunchAppFunction::RunImpl() {
+bool ManagementLaunchAppFunction::RunSync() {
   scoped_ptr<management::LaunchApp::Params> params(
       management::LaunchApp::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -457,7 +460,7 @@ ManagementSetEnabledFunction::ManagementSetEnabledFunction() {
 ManagementSetEnabledFunction::~ManagementSetEnabledFunction() {
 }
 
-bool ManagementSetEnabledFunction::RunImpl() {
+bool ManagementSetEnabledFunction::RunAsync() {
   scoped_ptr<management::SetEnabled::Params> params(
       management::SetEnabled::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -577,13 +580,24 @@ void ManagementUninstallFunctionBase::SetAutoConfirmForTest(
 
 void ManagementUninstallFunctionBase::Finish(bool should_uninstall) {
   if (should_uninstall) {
-    bool success = service()->UninstallExtension(
-        extension_id_,
-        false, /* external uninstall */
-        NULL);
+    // The extension can be uninstalled in another window while the UI was
+    // showing. Do nothing in that case.
+    ExtensionRegistry* registry = ExtensionRegistry::Get(GetProfile());
+    const Extension* extension = registry->GetExtensionById(
+        extension_id_, ExtensionRegistry::EVERYTHING);
+    if (!extension) {
+      error_ = ErrorUtils::FormatErrorMessage(keys::kNoExtensionError,
+                                              extension_id_);
+      SendResponse(false);
+    } else {
+      bool success =
+          service()->UninstallExtension(extension_id_,
+                                        false, /* external uninstall */
+                                        NULL);
 
-    // TODO set error_ if !success
-    SendResponse(success);
+      // TODO set error_ if !success
+      SendResponse(success);
+    }
   } else {
     error_ = ErrorUtils::FormatErrorMessage(
         keys::kUninstallCanceledError, extension_id_);
@@ -608,7 +622,7 @@ ManagementUninstallFunction::ManagementUninstallFunction() {
 ManagementUninstallFunction::~ManagementUninstallFunction() {
 }
 
-bool ManagementUninstallFunction::RunImpl() {
+bool ManagementUninstallFunction::RunAsync() {
   scoped_ptr<management::Uninstall::Params> params(
       management::Uninstall::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(extension_);
@@ -635,7 +649,7 @@ ManagementUninstallSelfFunction::ManagementUninstallSelfFunction() {
 ManagementUninstallSelfFunction::~ManagementUninstallSelfFunction() {
 }
 
-bool ManagementUninstallSelfFunction::RunImpl() {
+bool ManagementUninstallSelfFunction::RunAsync() {
   scoped_ptr<management::UninstallSelf::Params> params(
       management::UninstallSelf::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -646,14 +660,83 @@ bool ManagementUninstallSelfFunction::RunImpl() {
   return Uninstall(extension_->id(), show_confirm_dialog);
 }
 
+ManagementCreateAppShortcutFunction::ManagementCreateAppShortcutFunction() {
+}
+
+ManagementCreateAppShortcutFunction::~ManagementCreateAppShortcutFunction() {
+}
+
+// static
+void ManagementCreateAppShortcutFunction::SetAutoConfirmForTest(
+    bool should_proceed) {
+  auto_confirm_for_test = should_proceed ? PROCEED : ABORT;
+}
+
+void ManagementCreateAppShortcutFunction::OnCloseShortcutPrompt(bool created) {
+  if (!created)
+    error_ = keys::kCreateShortcutCanceledError;
+  SendResponse(created);
+  Release();
+}
+
+bool ManagementCreateAppShortcutFunction::RunAsync() {
+  if (!user_gesture()) {
+    error_ = keys::kGestureNeededForCreateAppShortcutError;
+    return false;
+  }
+
+  scoped_ptr<management::CreateAppShortcut::Params> params(
+      management::CreateAppShortcut::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+  const Extension* extension = service()->GetExtensionById(params->id, true);
+  if (!extension) {
+    error_ = ErrorUtils::FormatErrorMessage(keys::kNoExtensionError,
+                                            params->id);
+    return false;
+  }
+
+  if (!extension->is_app()) {
+    error_ = ErrorUtils::FormatErrorMessage(keys::kNotAnAppError, params->id);
+    return false;
+  }
+
+#if defined(OS_MACOSX)
+  if (!extension->is_platform_app()) {
+    error_ = keys::kCreateOnlyPackagedAppShortcutMac;
+    return false;
+  }
+#endif
+
+  Browser* browser = chrome::FindBrowserWithProfile(
+      GetProfile(), chrome::HOST_DESKTOP_TYPE_NATIVE);
+  if (!browser) {
+    // Shouldn't happen if we have user gesture.
+    error_ = keys::kNoBrowserToCreateShortcut;
+    return false;
+  }
+
+  // Matched with a Release() in OnCloseShortcutPrompt().
+  AddRef();
+
+  if (auto_confirm_for_test == DO_NOT_SKIP) {
+    chrome::ShowCreateChromeAppShortcutsDialog(
+        browser->window()->GetNativeWindow(), browser->profile(), extension,
+        base::Bind(&ManagementCreateAppShortcutFunction::OnCloseShortcutPrompt,
+           this));
+  } else {
+    OnCloseShortcutPrompt(auto_confirm_for_test == PROCEED);
+  }
+
+  // Response is sent async in OnCloseShortcutPrompt().
+  return true;
+}
+
 ManagementEventRouter::ManagementEventRouter(Profile* profile)
     : profile_(profile) {
-  int types[] = {
-    chrome::NOTIFICATION_EXTENSION_INSTALLED,
-    chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
-    chrome::NOTIFICATION_EXTENSION_LOADED,
-    chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED
-  };
+  int types[] = {chrome::NOTIFICATION_EXTENSION_INSTALLED,
+                 chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
+                 chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
+                 chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED};
 
   CHECK(registrar_.IsEmpty());
   for (size_t i = 0; i < arraysize(types); i++) {
@@ -685,7 +768,7 @@ void ManagementEventRouter::Observe(
       event_name = management::OnUninstalled::kEventName;
       extension = content::Details<const Extension>(details).ptr();
       break;
-    case chrome::NOTIFICATION_EXTENSION_LOADED:
+    case chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED:
       event_name = management::OnEnabled::kEventName;
       extension = content::Details<const Extension>(details).ptr();
       break;
@@ -714,13 +797,12 @@ void ManagementEventRouter::Observe(
   }
 
   scoped_ptr<Event> event(new Event(event_name, args.Pass()));
-  ExtensionSystem::Get(profile)->event_router()->BroadcastEvent(event.Pass());
+  EventRouter::Get(profile)->BroadcastEvent(event.Pass());
 }
 
 ManagementAPI::ManagementAPI(content::BrowserContext* context)
     : browser_context_(context) {
-  EventRouter* event_router =
-      ExtensionSystem::Get(browser_context_)->event_router();
+  EventRouter* event_router = EventRouter::Get(browser_context_);
   event_router->RegisterObserver(this, management::OnInstalled::kEventName);
   event_router->RegisterObserver(this, management::OnUninstalled::kEventName);
   event_router->RegisterObserver(this, management::OnEnabled::kEventName);
@@ -731,8 +813,7 @@ ManagementAPI::~ManagementAPI() {
 }
 
 void ManagementAPI::Shutdown() {
-  ExtensionSystem::Get(browser_context_)->event_router()->UnregisterObserver(
-      this);
+  EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
 static base::LazyInstance<BrowserContextKeyedAPIFactory<ManagementAPI> >
@@ -747,8 +828,7 @@ ManagementAPI::GetFactoryInstance() {
 void ManagementAPI::OnListenerAdded(const EventListenerInfo& details) {
   management_event_router_.reset(
       new ManagementEventRouter(Profile::FromBrowserContext(browser_context_)));
-  ExtensionSystem::Get(browser_context_)->event_router()->UnregisterObserver(
-      this);
+  EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
 }  // namespace extensions

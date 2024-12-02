@@ -57,7 +57,6 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
@@ -238,8 +237,9 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
                        atIndex:(NSInteger)modelIndex;
 - (void)layoutTabsWithAnimation:(BOOL)animate
              regenerateSubviews:(BOOL)doUpdate;
-- (void)animationDidStopForController:(TabController*)controller
-                             finished:(BOOL)finished;
+- (void)animationDidStop:(CAAnimation*)animation
+           forController:(TabController*)controller
+                finished:(BOOL)finished;
 - (NSInteger)indexFromModelIndex:(NSInteger)index;
 - (void)clickNewTabButton:(id)sender;
 - (NSInteger)numberOfOpenTabs;
@@ -388,7 +388,9 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 }
 
 - (void)animationDidStop:(CAAnimation*)animation finished:(BOOL)finished {
-  [strip_ animationDidStopForController:controller_ finished:finished];
+  [strip_ animationDidStop:animation
+             forController:controller_
+                  finished:finished];
 }
 
 @end
@@ -1308,7 +1310,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
 // Called before |contents| is deactivated.
 - (void)tabDeactivatedWithContents:(content::WebContents*)contents {
-  contents->GetView()->StoreFocus();
+  contents->StoreFocus();
 }
 
 // Called when a notification is received from the model to select a particular
@@ -1354,7 +1356,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
   if (newContents) {
     newContents->WasShown();
-    newContents->GetView()->RestoreFocus();
+    newContents->RestoreFocus();
   }
 }
 
@@ -1443,8 +1445,10 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
 // Called by the CAAnimation delegate when the tab completes the closing
 // animation.
-- (void)animationDidStopForController:(TabController*)controller
-                             finished:(BOOL)finished {
+- (void)animationDidStop:(CAAnimation*)animation
+           forController:(TabController*)controller
+                finished:(BOOL)finished{
+  [[animation delegate] invalidate];
   [closingControllers_ removeObject:controller];
   [self removeTab:controller];
 }
@@ -2230,5 +2234,5 @@ NSView* GetSheetParentViewForWebContents(WebContents* web_contents) {
   //
   // Changing it? Do not forget to modify
   // -[TabStripController swapInTabAtIndex:] too.
-  return [web_contents->GetView()->GetNativeView() superview];
+  return [web_contents->GetNativeView() superview];
 }

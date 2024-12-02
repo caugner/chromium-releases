@@ -83,10 +83,9 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
         block_notify_ready_to_activate_for_testing_(false),
         notify_ready_to_activate_was_blocked_(false) {}
 
-  virtual void BeginImplFrame(const BeginFrameArgs& args) OVERRIDE {
+  virtual void WillBeginImplFrame(const BeginFrameArgs& args) OVERRIDE {
+    LayerTreeHostImpl::WillBeginImplFrame(args);
     test_hooks_->WillBeginImplFrameOnThread(this, args);
-    LayerTreeHostImpl::BeginImplFrame(args);
-    test_hooks_->DidBeginImplFrameOnThread(this, args);
   }
 
   virtual void BeginMainFrameAborted(bool did_handle) OVERRIDE {
@@ -129,8 +128,8 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     return result;
   }
 
-  virtual void OnSwapBuffersComplete() OVERRIDE {
-    LayerTreeHostImpl::OnSwapBuffersComplete();
+  virtual void DidSwapBuffersComplete() OVERRIDE {
+    LayerTreeHostImpl::DidSwapBuffersComplete();
     test_hooks_->SwapBuffersCompleteOnThread(this);
   }
 
@@ -241,8 +240,8 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient,
     return test_hooks_->CreateOutputSurface(fallback);
   }
 
-  virtual void DidInitializeOutputSurface(bool succeeded) OVERRIDE {
-    test_hooks_->DidInitializeOutputSurface(succeeded);
+  virtual void DidInitializeOutputSurface() OVERRIDE {
+    test_hooks_->DidInitializeOutputSurface();
   }
 
   virtual void DidFailToInitializeOutputSurface() OVERRIDE {
@@ -271,10 +270,6 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient,
 
   virtual void DidPostSwapBuffers() OVERRIDE {}
   virtual void DidAbortSwapBuffers() OVERRIDE {}
-
-  virtual scoped_refptr<ContextProvider> OffscreenContextProvider() OVERRIDE {
-    return test_hooks_->OffscreenContextProvider();
-  }
 
  private:
   explicit LayerTreeHostClientForTesting(TestHooks* test_hooks)
@@ -374,8 +369,10 @@ void LayerTreeTest::EndTest() {
 }
 
 void LayerTreeTest::EndTestAfterDelay(int delay_milliseconds) {
-  main_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&LayerTreeTest::EndTest, main_thread_weak_ptr_));
+  main_task_runner_->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&LayerTreeTest::EndTest, main_thread_weak_ptr_),
+      base::TimeDelta::FromMilliseconds(delay_milliseconds));
 }
 
 void LayerTreeTest::PostAddAnimationToMainThread(
@@ -425,13 +422,6 @@ void LayerTreeTest::PostReadbackToMainThread() {
   main_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&LayerTreeTest::DispatchReadback, main_thread_weak_ptr_));
-}
-
-void LayerTreeTest::PostAcquireLayerTextures() {
-  main_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&LayerTreeTest::DispatchAcquireLayerTextures,
-                 main_thread_weak_ptr_));
 }
 
 void LayerTreeTest::PostSetNeedsRedrawToMainThread() {
@@ -568,13 +558,6 @@ void LayerTreeTest::DispatchReadback() {
   }
 }
 
-void LayerTreeTest::DispatchAcquireLayerTextures() {
-  DCHECK(!proxy() || proxy()->IsMainThread());
-
-  if (layer_tree_host_)
-    layer_tree_host_->AcquireLayerTextures();
-}
-
 void LayerTreeTest::DispatchSetNeedsRedraw() {
   DCHECK(!proxy() || proxy()->IsMainThread());
 
@@ -640,7 +623,7 @@ void LayerTreeTest::RunTest(bool threaded,
 
   delegating_renderer_ = delegating_renderer;
 
-  // Spend less time waiting for BeginImplFrame because the output is
+  // Spend less time waiting for BeginFrame because the output is
   // mocked out.
   settings_.refresh_rate = 200.0;
   if (impl_side_painting) {
@@ -683,6 +666,10 @@ void LayerTreeTest::RunTestWithImplSidePainting() {
 scoped_ptr<OutputSurface> LayerTreeTest::CreateOutputSurface(bool fallback) {
   scoped_ptr<FakeOutputSurface> output_surface =
       CreateFakeOutputSurface(fallback);
+  if (output_surface) {
+    DCHECK_EQ(delegating_renderer_,
+              output_surface->capabilities().delegated_rendering);
+  }
   output_surface_ = output_surface.get();
   return output_surface.PassAs<OutputSurface>();
 }
@@ -693,13 +680,6 @@ scoped_ptr<FakeOutputSurface> LayerTreeTest::CreateFakeOutputSurface(
     return FakeOutputSurface::CreateDelegating3d();
   else
     return FakeOutputSurface::Create3d();
-}
-
-scoped_refptr<ContextProvider> LayerTreeTest::OffscreenContextProvider() {
-  if (!compositor_contexts_.get() ||
-      compositor_contexts_->DestroyedOnMainThread())
-    compositor_contexts_ = TestContextProvider::Create();
-  return compositor_contexts_;
 }
 
 TestWebGraphicsContext3D* LayerTreeTest::TestContext() {

@@ -6,21 +6,25 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service_unittest.h"
-#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
-#include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "chrome/test/base/testing_profile.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/common/extension_icon_set.h"
+#include "extensions/common/manifest_handlers/icons_handler.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/skia_util.h"
 
 namespace {
 
 #if !defined(OS_ANDROID)
 const char kAppUrl[] = "http://www.chromium.org";
 const char kAppTitle[] = "Test title";
+const char kAlternativeAppTitle[] = "Different test title";
 const char kAppDescription[] = "Test description";
 
 const int kIconSizeSmall = extension_misc::EXTENSION_ICON_SMALL;
+const int kIconSizeLarge = extension_misc::EXTENSION_ICON_LARGE;
 #endif
 
 class BookmarkAppHelperTest : public testing::Test {
@@ -63,6 +67,33 @@ void ValidateBitmapSizeAndColor(SkBitmap bitmap, int size, SkColor color) {
   EXPECT_EQ(size, bitmap.width());
   EXPECT_EQ(size, bitmap.height());
 }
+
+#if !defined(OS_ANDROID)
+WebApplicationInfo::IconInfo CreateIconInfoWithBitmap(int size, SkColor color) {
+  WebApplicationInfo::IconInfo icon_info;
+  icon_info.width = size;
+  icon_info.height = size;
+  icon_info.data = CreateSquareBitmapWithColor(size, color);
+  return icon_info;
+}
+
+void ValidateWebApplicationInfo(base::Closure callback,
+                                const WebApplicationInfo& expected,
+                                const WebApplicationInfo& actual) {
+  EXPECT_EQ(expected.title, actual.title);
+  EXPECT_EQ(expected.description, actual.description);
+  EXPECT_EQ(expected.app_url, actual.app_url);
+  EXPECT_EQ(expected.icons.size(), actual.icons.size());
+  for (size_t i = 0; i < expected.icons.size(); ++i) {
+    EXPECT_EQ(expected.icons[i].width, actual.icons[i].width);
+    EXPECT_EQ(expected.icons[i].height, actual.icons[i].height);
+    EXPECT_EQ(expected.icons[i].url, actual.icons[i].url);
+    EXPECT_TRUE(
+        gfx::BitmapsAreEqual(expected.icons[i].data, actual.icons[i].data));
+  }
+  callback.Run();
+}
+#endif
 
 }  // namespace
 
@@ -127,6 +158,76 @@ TEST_F(BookmarkAppHelperExtensionServiceTest, CreateBookmarkApp) {
       IconsInfo::GetIconResource(
           extension, kIconSizeSmall, ExtensionIconSet::MATCH_EXACTLY).empty());
 }
+
+TEST_F(BookmarkAppHelperExtensionServiceTest, CreateAndUpdateBookmarkApp) {
+  EXPECT_EQ(0u, registry_->enabled_extensions().size());
+  WebApplicationInfo web_app_info;
+  web_app_info.app_url = GURL(kAppUrl);
+  web_app_info.title = base::UTF8ToUTF16(kAppTitle);
+  web_app_info.description = base::UTF8ToUTF16(kAppDescription);
+  web_app_info.icons.push_back(
+      CreateIconInfoWithBitmap(kIconSizeSmall, SK_ColorRED));
+
+  extensions::CreateOrUpdateBookmarkApp(service_, web_app_info);
+  base::RunLoop().RunUntilIdle();
+
+  {
+    EXPECT_EQ(1u, registry_->enabled_extensions().size());
+    const Extension* extension = service_->extensions()->begin()->get();
+    EXPECT_TRUE(extension->from_bookmark());
+    EXPECT_EQ(kAppTitle, extension->name());
+    EXPECT_EQ(kAppDescription, extension->description());
+    EXPECT_EQ(GURL(kAppUrl), AppLaunchInfo::GetLaunchWebURL(extension));
+    EXPECT_FALSE(extensions::IconsInfo::GetIconResource(
+                     extension, kIconSizeSmall, ExtensionIconSet::MATCH_EXACTLY)
+                     .empty());
+  }
+
+  web_app_info.title = base::UTF8ToUTF16(kAlternativeAppTitle);
+  web_app_info.icons[0] = CreateIconInfoWithBitmap(kIconSizeLarge, SK_ColorRED);
+
+  extensions::CreateOrUpdateBookmarkApp(service_, web_app_info);
+  base::RunLoop().RunUntilIdle();
+
+  {
+    EXPECT_EQ(1u, registry_->enabled_extensions().size());
+    const Extension* extension = service_->extensions()->begin()->get();
+    EXPECT_TRUE(extension->from_bookmark());
+    EXPECT_EQ(kAlternativeAppTitle, extension->name());
+    EXPECT_EQ(kAppDescription, extension->description());
+    EXPECT_EQ(GURL(kAppUrl), AppLaunchInfo::GetLaunchWebURL(extension));
+    EXPECT_TRUE(extensions::IconsInfo::GetIconResource(
+                    extension, kIconSizeSmall, ExtensionIconSet::MATCH_EXACTLY)
+                    .empty());
+    EXPECT_FALSE(extensions::IconsInfo::GetIconResource(
+                     extension, kIconSizeLarge, ExtensionIconSet::MATCH_EXACTLY)
+                     .empty());
+  }
+}
+
+TEST_F(BookmarkAppHelperExtensionServiceTest, GetWebApplicationInfo) {
+  WebApplicationInfo web_app_info;
+  web_app_info.app_url = GURL(kAppUrl);
+  web_app_info.title = base::UTF8ToUTF16(kAppTitle);
+  web_app_info.description = base::UTF8ToUTF16(kAppDescription);
+
+  web_app_info.icons.push_back(
+      CreateIconInfoWithBitmap(kIconSizeSmall, SK_ColorRED));
+  web_app_info.icons.push_back(
+      CreateIconInfoWithBitmap(kIconSizeLarge, SK_ColorRED));
+
+  extensions::CreateOrUpdateBookmarkApp(service_, web_app_info);
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(1u, registry_->enabled_extensions().size());
+  base::RunLoop run_loop;
+  extensions::GetWebApplicationInfoFromApp(
+      profile_.get(),
+      service_->extensions()->begin()->get(),
+      base::Bind(
+          &ValidateWebApplicationInfo, run_loop.QuitClosure(), web_app_info));
+  run_loop.Run();
+}
 #endif
 
 TEST_F(BookmarkAppHelperTest, ConstrainBitmapsToSizes) {
@@ -190,6 +291,13 @@ TEST_F(BookmarkAppHelperTest, GenerateIcons) {
     BookmarkAppHelper::GenerateContainerIcon(&bitmaps, 32);
     EXPECT_EQ(0u, bitmaps.count(32));
   }
+}
+
+TEST_F(BookmarkAppHelperTest, IsValidBookmarkAppUrl) {
+  EXPECT_TRUE(IsValidBookmarkAppUrl(GURL("https://www.chromium.org")));
+  EXPECT_TRUE(IsValidBookmarkAppUrl(GURL("http://www.chromium.org/path")));
+  EXPECT_FALSE(IsValidBookmarkAppUrl(GURL("ftp://www.chromium.org")));
+  EXPECT_FALSE(IsValidBookmarkAppUrl(GURL("chrome://flags")));
 }
 
 }  // namespace extensions

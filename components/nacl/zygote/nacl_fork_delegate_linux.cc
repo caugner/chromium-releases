@@ -15,7 +15,10 @@
 #include "base/command_line.h"
 #include "base/cpu.h"
 #include "base/files/file_path.h"
+#include "base/files/scoped_file.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/path_service.h"
 #include "base/pickle.h"
 #include "base/posix/eintr_wrapper.h"
@@ -29,6 +32,7 @@
 #include "components/nacl/loader/nacl_helper_linux.h"
 #include "content/public/common/content_descriptors.h"
 #include "content/public/common/content_switches.h"
+#include "sandbox/linux/suid/client/setuid_sandbox_client.h"
 
 namespace {
 
@@ -90,7 +94,7 @@ bool SendIPCRequestAndReadReply(int ipc_channel,
   }
 
   // Then read the remote reply.
-  std::vector<int> received_fds;
+  ScopedVector<base::ScopedFD> received_fds;
   const ssize_t msg_len =
       UnixDomainSocket::RecvMsg(ipc_channel, reply_data_buffer,
                                 reply_data_buffer_size, &received_fds);
@@ -108,9 +112,13 @@ NaClForkDelegate::NaClForkDelegate()
     : status_(kNaClHelperUnused),
       fd_(-1) {}
 
-void NaClForkDelegate::Init(const int sandboxdesc) {
+void NaClForkDelegate::Init(const int sandboxdesc,
+                            const bool enable_layer1_sandbox) {
   VLOG(1) << "NaClForkDelegate::Init()";
   int fds[2];
+
+  scoped_ptr<sandbox::SetuidSandboxClient> setuid_sandbox_client(
+      sandbox::SetuidSandboxClient::Create());
 
   // For communications between the NaCl loader process and
   // the SUID sandbox.
@@ -166,6 +174,7 @@ void NaClForkDelegate::Init(const int sandboxdesc) {
       // Append any switches that need to be forwarded to the NaCl helper.
       static const char* kForwardSwitches[] = {
         switches::kDisableSeccompFilterSandbox,
+        switches::kNaClDangerousNoSandboxNonSfi,
         switches::kNoSandbox,
       };
       const CommandLine& current_cmd_line = *CommandLine::ForCurrentProcess();
@@ -188,9 +197,22 @@ void NaClForkDelegate::Init(const int sandboxdesc) {
                             bootstrap_prepend.begin(),
                             bootstrap_prepend.end());
     }
+
     base::LaunchOptions options;
+
+    base::ScopedFD dummy_fd;
+    if (enable_layer1_sandbox) {
+      // NaCl needs to keep tight control of the cmd_line, so prepend the
+      // setuid sandbox wrapper manually.
+      base::FilePath sandbox_path =
+          setuid_sandbox_client->GetSandboxBinaryPath();
+      argv_to_launch.insert(argv_to_launch.begin(), sandbox_path.value());
+      setuid_sandbox_client->SetupLaunchOptions(
+          &options, &fds_to_map, &dummy_fd);
+      setuid_sandbox_client->SetupLaunchEnvironment();
+    }
+
     options.fds_to_remap = &fds_to_map;
-    options.clone_flags = CLONE_FS | SIGCHLD;
 
     // The NaCl processes spawned may need to exceed the ambient soft limit
     // on RLIMIT_AS to allocate the untrusted address space and its guard
@@ -205,6 +227,11 @@ void NaClForkDelegate::Init(const int sandboxdesc) {
     if (!base::LaunchProcess(argv_to_launch, options, NULL))
       status_ = kNaClHelperLaunchFailed;
     // parent and error cases are handled below
+
+    if (enable_layer1_sandbox) {
+      // Sanity check that dummy_fd was kept alive for LaunchProcess.
+      DCHECK(dummy_fd.is_valid());
+    }
   }
   if (IGNORE_EINTR(close(fds[1])) != 0)
     LOG(ERROR) << "close(fds[1]) failed";
@@ -252,7 +279,8 @@ bool NaClForkDelegate::CanHelp(const std::string& process_type,
                                std::string* uma_name,
                                int* uma_sample,
                                int* uma_boundary_value) {
-  if (process_type != switches::kNaClLoaderProcess)
+  if (process_type != switches::kNaClLoaderProcess &&
+      process_type != switches::kNaClLoaderNonSfiProcess)
     return false;
   *uma_name = "NaCl.Client.Helper.StateOnFork";
   *uma_sample = status_;
@@ -260,7 +288,9 @@ bool NaClForkDelegate::CanHelp(const std::string& process_type,
   return true;
 }
 
-pid_t NaClForkDelegate::Fork(const std::vector<int>& fds) {
+pid_t NaClForkDelegate::Fork(const std::string& process_type,
+                             const std::vector<int>& fds,
+                             const std::string& channel_id) {
   VLOG(1) << "NaClForkDelegate::Fork";
 
   DCHECK(fds.size() == kNumPassedFDs);
@@ -273,6 +303,12 @@ pid_t NaClForkDelegate::Fork(const std::vector<int>& fds) {
   // First, send a remote fork request.
   Pickle write_pickle;
   write_pickle.WriteInt(nacl::kNaClForkRequest);
+  // TODO(hamaji): When we split the helper binary for non-SFI mode
+  // from nacl_helper, stop sending this information.
+  const bool uses_nonsfi_mode =
+    process_type == switches::kNaClLoaderNonSfiProcess;
+  write_pickle.WriteBool(uses_nonsfi_mode);
+  write_pickle.WriteString(channel_id);
 
   char reply_buf[kNaClMaxIPCMessageLength];
   ssize_t reply_size = 0;
@@ -294,16 +330,6 @@ pid_t NaClForkDelegate::Fork(const std::vector<int>& fds) {
   }
   VLOG(1) << "nacl_child is " << nacl_child;
   return nacl_child;
-}
-
-bool NaClForkDelegate::AckChild(const int fd,
-                                const std::string& channel_switch) {
-  int nwritten = HANDLE_EINTR(write(fd, channel_switch.c_str(),
-                                    channel_switch.length()));
-  if (nwritten != static_cast<int>(channel_switch.length())) {
-    return false;
-  }
-  return true;
 }
 
 bool NaClForkDelegate::GetTerminationStatus(pid_t pid, bool known_dead,

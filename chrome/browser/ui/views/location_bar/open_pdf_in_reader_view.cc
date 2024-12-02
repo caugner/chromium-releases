@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/views/location_bar/open_pdf_in_reader_view.h"
 
 #include "chrome/browser/ui/pdf/pdf_tab_helper.h"
-#include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/open_pdf_in_reader_bubble_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -14,15 +13,11 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/widget/widget.h"
 
-OpenPDFInReaderView::OpenPDFInReaderView(LocationBarView* location_bar_view)
-    : location_bar_view_(location_bar_view),
-      bubble_(NULL),
-      model_(NULL) {
+OpenPDFInReaderView::OpenPDFInReaderView() : bubble_(NULL), model_(NULL) {
   SetAccessibilityFocusable(true);
   SetImage(ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
       IDR_OMNIBOX_PDF_ICON));
   SetTooltipText(l10n_util::GetStringUTF16(IDS_PDF_BUBBLE_OPEN_IN_READER_LINK));
-  LocationBarView::InitTouchableLocationBarChildView(this);
 }
 
 OpenPDFInReaderView::~OpenPDFInReaderView() {

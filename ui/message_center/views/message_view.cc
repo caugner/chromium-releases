@@ -14,7 +14,6 @@
 #include "ui/gfx/canvas.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_style.h"
-#include "ui/message_center/message_center_util.h"
 #include "ui/message_center/views/padded_button.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/image_button.h"
@@ -82,6 +81,11 @@ MessageView::MessageView(MessageViewController* controller,
 }
 
 MessageView::~MessageView() {
+}
+
+void MessageView::UpdateWithNotification(const Notification& notification) {
+  small_image_view_->SetImage(notification.small_image().AsImageSkia());
+  display_source_ = notification.display_source();
 }
 
 // static

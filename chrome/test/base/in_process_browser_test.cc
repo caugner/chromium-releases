@@ -150,6 +150,13 @@ void InProcessBrowserTest::SetUp() {
   DCHECK(!g_browser_process);
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
+
+  // Auto-reload breaks many browser tests, which assume error pages won't be
+  // reloaded out from under them. Tests that expect or desire this behavior can
+  // append switches::kEnableOfflineAutoReload, which will override the disable
+  // here.
+  command_line->AppendSwitch(switches::kDisableOfflineAutoReload);
+
   // Allow subclasses to change the command line before running any tests.
   SetUpCommandLine(command_line);
   // Add command line arguments that are used by all InProcessBrowserTests.
@@ -178,8 +185,8 @@ void InProcessBrowserTest::SetUp() {
 #endif
 
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
-  captive_portal::CaptivePortalService::set_state_for_testing(
-      captive_portal::CaptivePortalService::DISABLED_FOR_TESTING);
+  CaptivePortalService::set_state_for_testing(
+      CaptivePortalService::DISABLED_FOR_TESTING);
 #endif
 
   chrome_browser_net::NetErrorTabHelper::set_state_for_testing(
@@ -325,7 +332,7 @@ Browser* InProcessBrowserTest::CreateBrowserForApp(
     Profile* profile) {
   Browser* browser = new Browser(
       Browser::CreateParams::CreateForApp(
-          Browser::TYPE_POPUP, app_name, gfx::Rect(), profile,
+          app_name, false /* trusted_source */, gfx::Rect(), profile,
           chrome::GetActiveDesktop()));
   AddBlankTabAndShow(browser);
   return browser;

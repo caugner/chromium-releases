@@ -12,7 +12,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -26,9 +25,9 @@
 #include "chrome/browser/ui/webui/options/content_settings_handler.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/url_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/url_util.h"
 
@@ -109,6 +108,11 @@ void ShowHelpImpl(Browser* browser,
   ShowSingletonTab(browser, url);
 }
 
+bool SettingsWindowEnabled() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      ::switches::kEnableSettingsWindow);
+}
+
 }  // namespace
 
 void ShowBookmarkManager(Browser* browser) {
@@ -125,6 +129,11 @@ void ShowBookmarkManagerForNode(Browser* browser, int64 node_id) {
 
 void ShowHistory(Browser* browser) {
   content::RecordAction(UserMetricsAction("ShowHistory"));
+  if (SettingsWindowEnabled()) {
+    SettingsWindowManager::GetInstance()->ShowChromePageForProfile(
+        browser->profile(), GURL(kChromeUIHistoryURL));
+    return;
+  }
   NavigateParams params(
       GetSingletonTabNavigateParams(browser, GURL(kChromeUIHistoryURL)));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
@@ -147,6 +156,11 @@ void ShowDownloads(Browser* browser) {
 void ShowExtensions(Browser* browser,
                     const std::string& extension_to_highlight) {
   content::RecordAction(UserMetricsAction("ShowExtensions"));
+  if (SettingsWindowEnabled()) {
+    SettingsWindowManager::GetInstance()->ShowChromePageForProfile(
+        browser->profile(), GURL(kChromeUIExtensionsURL));
+    return;
+  }
   NavigateParams params(
       GetSingletonTabNavigateParams(browser, GURL(kChromeUIExtensionsURL)));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
@@ -212,19 +226,18 @@ GURL GetSettingsUrl(const std::string& sub_page) {
   return GURL(url);
 }
 
-bool IsSettingsWindow(const Browser* browser) {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableSettingsWindow))
+bool IsTrustedPopupWindowWithScheme(const Browser* browser,
+                                    const std::string& scheme) {
+  if (!browser->is_type_popup() || !browser->is_trusted_source())
     return false;
-  if (browser->is_type_tabbed())
-    return false;
+  if (scheme.empty())  // Any trusted popup window
+    return true;
   const content::WebContents* web_contents =
       browser->tab_strip_model()->GetWebContentsAt(0);
   if (!web_contents)
     return false;
   GURL url(web_contents->GetURL());
-  return (url.SchemeIs(content::kChromeUIScheme) &&
-          url.spec().find(chrome::kChromeUISettingsURL) == 0);
+  return url.SchemeIs(scheme.c_str());
 }
 
 void ShowSettings(Browser* browser) {
@@ -232,10 +245,8 @@ void ShowSettings(Browser* browser) {
 }
 
 void ShowSettingsSubPage(Browser* browser, const std::string& sub_page) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          ::switches::kEnableSettingsWindow)) {
-    SettingsWindowManager::GetInstance()->ShowForProfile(browser->profile(),
-                                                         sub_page);
+  if (SettingsWindowEnabled()) {
+    ShowSettingsSubPageForProfile(browser->profile(), sub_page);
     return;
   }
   ShowSettingsSubPageInTabbedBrowser(browser, sub_page);
@@ -243,9 +254,10 @@ void ShowSettingsSubPage(Browser* browser, const std::string& sub_page) {
 
 void ShowSettingsSubPageForProfile(Profile* profile,
                                    const std::string& sub_page) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          ::switches::kEnableSettingsWindow)) {
-    SettingsWindowManager::GetInstance()->ShowForProfile(profile, sub_page);
+  if (SettingsWindowEnabled()) {
+    content::RecordAction(base::UserMetricsAction("ShowOptions"));
+    SettingsWindowManager::GetInstance()->ShowChromePageForProfile(
+        profile, GetSettingsUrl(sub_page));
     return;
   }
   Browser* browser =

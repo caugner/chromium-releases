@@ -17,9 +17,20 @@ class FakePictureLayerImpl : public PictureLayerImpl {
     return make_scoped_ptr(new FakePictureLayerImpl(tree_impl, id));
   }
 
+  // Create layer from a pile that covers the entire layer.
   static scoped_ptr<FakePictureLayerImpl> CreateWithPile(
       LayerTreeImpl* tree_impl, int id, scoped_refptr<PicturePileImpl> pile) {
     return make_scoped_ptr(new FakePictureLayerImpl(tree_impl, id, pile));
+  }
+
+  // Create layer from a pile that only covers part of the layer.
+  static scoped_ptr<FakePictureLayerImpl> CreateWithPartialPile(
+      LayerTreeImpl* tree_impl,
+      int id,
+      scoped_refptr<PicturePileImpl> pile,
+      const gfx::Size& layer_bounds) {
+    return make_scoped_ptr(
+        new FakePictureLayerImpl(tree_impl, id, pile, layer_bounds));
   }
 
   virtual scoped_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl)
@@ -35,6 +46,11 @@ class FakePictureLayerImpl : public PictureLayerImpl {
   using PictureLayerImpl::MarkVisibleResourcesAsRequired;
   using PictureLayerImpl::DoPostCommitInitializationIfNeeded;
   using PictureLayerImpl::MinimumContentsScale;
+  using PictureLayerImpl::SanityCheckTilingState;
+
+  void SetNeedsPostCommitInitialization() {
+    needs_post_commit_initialization_ = true;
+  }
 
   bool needs_post_commit_initialization() const {
     return needs_post_commit_initialization_;
@@ -56,18 +72,33 @@ class FakePictureLayerImpl : public PictureLayerImpl {
   const Region& invalidation() const { return invalidation_; }
   void set_invalidation(const Region& region) { invalidation_ = region; }
 
+  gfx::Rect visible_rect_for_tile_priority() {
+    return visible_rect_for_tile_priority_;
+  }
+  gfx::Size viewport_size_for_tile_priority() {
+    return viewport_size_for_tile_priority_;
+  }
+  gfx::Transform screen_space_transform_for_tile_priority() {
+    return screen_space_transform_for_tile_priority_;
+  }
+
   void set_fixed_tile_size(const gfx::Size& size) { fixed_tile_size_ = size; }
 
   void CreateDefaultTilingsAndTiles();
   void SetAllTilesVisible();
   void SetAllTilesReady();
   void SetAllTilesReadyInTiling(PictureLayerTiling* tiling);
+  void ResetAllTilesPriorities();
 
  protected:
   FakePictureLayerImpl(
       LayerTreeImpl* tree_impl,
       int id,
       scoped_refptr<PicturePileImpl> pile);
+  FakePictureLayerImpl(LayerTreeImpl* tree_impl,
+                       int id,
+                       scoped_refptr<PicturePileImpl> pile,
+                       const gfx::Size& layer_bounds);
   FakePictureLayerImpl(LayerTreeImpl* tree_impl, int id);
 
  private:

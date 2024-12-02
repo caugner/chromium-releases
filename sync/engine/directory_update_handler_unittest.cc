@@ -11,6 +11,7 @@
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/test/test_entry_factory.h"
 #include "sync/protocol/sync.pb.h"
+#include "sync/sessions/directory_type_debug_info_emitter.h"
 #include "sync/sessions/status_controller.h"
 #include "sync/syncable/directory.h"
 #include "sync/syncable/entry.h"
@@ -55,6 +56,7 @@ class DirectoryUpdateHandlerProcessUpdateTest : public ::testing::Test {
   syncable::Directory* dir() {
     return dir_maker_.directory();
   }
+
  protected:
   scoped_ptr<sync_pb::SyncEntity> CreateUpdate(
       const std::string& id,
@@ -123,7 +125,8 @@ static const char kCacheGuid[] = "IrcjZ2jyzHDV9Io4+zKcXQ==";
 
 // Test that the bookmark tag is set on newly downloaded items.
 TEST_F(DirectoryUpdateHandlerProcessUpdateTest, NewBookmarkTag) {
-  DirectoryUpdateHandler handler(dir(), BOOKMARKS, ui_worker());
+  DirectoryTypeDebugInfoEmitter emitter;
+  DirectoryUpdateHandler handler(dir(), BOOKMARKS, ui_worker(), &emitter);
   sync_pb::GetUpdatesResponse gu_response;
   sessions::StatusController status;
 
@@ -161,7 +164,8 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, NewBookmarkTag) {
 // Test the receipt of a type root node.
 TEST_F(DirectoryUpdateHandlerProcessUpdateTest,
        ReceiveServerCreatedBookmarkFolders) {
-  DirectoryUpdateHandler handler(dir(), BOOKMARKS, ui_worker());
+  DirectoryTypeDebugInfoEmitter emitter;
+  DirectoryUpdateHandler handler(dir(), BOOKMARKS, ui_worker(), &emitter);
   sync_pb::GetUpdatesResponse gu_response;
   sessions::StatusController status;
 
@@ -195,14 +199,15 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest,
 
 // Test the receipt of a non-bookmark item.
 TEST_F(DirectoryUpdateHandlerProcessUpdateTest, ReceiveNonBookmarkItem) {
-  DirectoryUpdateHandler handler(dir(), PREFERENCES, ui_worker());
+  DirectoryTypeDebugInfoEmitter emitter;
+  DirectoryUpdateHandler handler(dir(), AUTOFILL, ui_worker(), &emitter);
   sync_pb::GetUpdatesResponse gu_response;
   sessions::StatusController status;
 
   std::string root = syncable::GetNullId().GetServerId();
   syncable::Id server_id = syncable::Id::CreateFromServerId("xyz");
   scoped_ptr<sync_pb::SyncEntity> e =
-      CreateUpdate(SyncableIdToProto(server_id), root, PREFERENCES);
+      CreateUpdate(SyncableIdToProto(server_id), root, AUTOFILL);
   e->set_server_defined_unique_tag("9PGRuKdX5sHyGMB17CvYTXuC43I=");
 
   // Add it to the applicable updates list.
@@ -226,7 +231,8 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, ReceiveNonBookmarkItem) {
 
 // Tests the setting of progress markers.
 TEST_F(DirectoryUpdateHandlerProcessUpdateTest, ProcessNewProgressMarkers) {
-  DirectoryUpdateHandler handler(dir(), BOOKMARKS, ui_worker());
+  DirectoryTypeDebugInfoEmitter emitter;
+  DirectoryUpdateHandler handler(dir(), BOOKMARKS, ui_worker(), &emitter);
 
   sync_pb::DataTypeProgressMarker progress;
   progress.set_data_type_id(GetSpecificsFieldNumberFromModelType(BOOKMARKS));
@@ -242,7 +248,9 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, ProcessNewProgressMarkers) {
 }
 
 TEST_F(DirectoryUpdateHandlerProcessUpdateTest, GarbageCollectionByVersion) {
-  DirectoryUpdateHandler handler(dir(), SYNCED_NOTIFICATIONS, ui_worker());
+  DirectoryTypeDebugInfoEmitter emitter;
+  DirectoryUpdateHandler handler(dir(), SYNCED_NOTIFICATIONS,
+                                 ui_worker(), &emitter);
   sessions::StatusController status;
 
   sync_pb::DataTypeProgressMarker progress;
@@ -250,6 +258,12 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, GarbageCollectionByVersion) {
       GetSpecificsFieldNumberFromModelType(SYNCED_NOTIFICATIONS));
   progress.set_token("token");
   progress.mutable_gc_directive()->set_version_watermark(kDefaultVersion + 10);
+
+  sync_pb::DataTypeContext context;
+  context.set_data_type_id(
+      GetSpecificsFieldNumberFromModelType(SYNCED_NOTIFICATIONS));
+  context.set_context("context");
+  context.set_version(1);
 
   scoped_ptr<sync_pb::SyncEntity> type_root =
       CreateUpdate(SyncableIdToProto(syncable::Id::CreateFromServerId("root")),
@@ -277,7 +291,9 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, GarbageCollectionByVersion) {
   updates.push_back(e2.get());
 
   // Process and apply updates.
-  handler.ProcessGetUpdatesResponse(progress, updates, &status);
+  EXPECT_EQ(
+      SYNCER_OK,
+      handler.ProcessGetUpdatesResponse(progress, context, updates, &status));
   handler.ApplyUpdates(&status);
 
   // Verify none is deleted because they are unapplied during GC.
@@ -287,11 +303,93 @@ TEST_F(DirectoryUpdateHandlerProcessUpdateTest, GarbageCollectionByVersion) {
 
   // Process and apply again. Old entry is deleted but not root.
   progress.mutable_gc_directive()->set_version_watermark(kDefaultVersion + 20);
-  handler.ProcessGetUpdatesResponse(progress, SyncEntityList(), &status);
+  EXPECT_EQ(SYNCER_OK,
+            handler.ProcessGetUpdatesResponse(
+                progress, context, SyncEntityList(), &status));
   handler.ApplyUpdates(&status);
   EXPECT_TRUE(EntryExists(type_root->id_string()));
   EXPECT_FALSE(EntryExists(e1->id_string()));
   EXPECT_TRUE(EntryExists(e2->id_string()));
+}
+
+TEST_F(DirectoryUpdateHandlerProcessUpdateTest, ContextVersion) {
+  DirectoryTypeDebugInfoEmitter emitter;
+  DirectoryUpdateHandler handler(dir(), SYNCED_NOTIFICATIONS,
+                                 ui_worker(), &emitter);
+  sessions::StatusController status;
+  int field_number = GetSpecificsFieldNumberFromModelType(SYNCED_NOTIFICATIONS);
+
+  sync_pb::DataTypeProgressMarker progress;
+  progress.set_data_type_id(
+      GetSpecificsFieldNumberFromModelType(SYNCED_NOTIFICATIONS));
+  progress.set_token("token");
+
+  sync_pb::DataTypeContext old_context;
+  old_context.set_version(1);
+  old_context.set_context("data");
+  old_context.set_data_type_id(field_number);
+
+  scoped_ptr<sync_pb::SyncEntity> type_root =
+      CreateUpdate(SyncableIdToProto(syncable::Id::CreateFromServerId("root")),
+                   syncable::GetNullId().GetServerId(),
+                   SYNCED_NOTIFICATIONS);
+  type_root->set_server_defined_unique_tag(
+      ModelTypeToRootTag(SYNCED_NOTIFICATIONS));
+  type_root->set_folder(true);
+  scoped_ptr<sync_pb::SyncEntity> e1 =
+      CreateUpdate(SyncableIdToProto(syncable::Id::CreateFromServerId("e1")),
+                   type_root->id_string(),
+                   SYNCED_NOTIFICATIONS);
+
+  SyncEntityList updates;
+  updates.push_back(type_root.get());
+  updates.push_back(e1.get());
+
+  // The first response should be processed fine.
+  EXPECT_EQ(SYNCER_OK,
+            handler.ProcessGetUpdatesResponse(
+                progress, old_context, updates, &status));
+  handler.ApplyUpdates(&status);
+
+  EXPECT_TRUE(EntryExists(type_root->id_string()));
+  EXPECT_TRUE(EntryExists(e1->id_string()));
+
+  {
+    sync_pb::DataTypeContext dir_context;
+    syncable::ReadTransaction trans(FROM_HERE, dir());
+    trans.directory()->GetDataTypeContext(
+        &trans, SYNCED_NOTIFICATIONS, &dir_context);
+    EXPECT_EQ(old_context.SerializeAsString(), dir_context.SerializeAsString());
+  }
+
+  sync_pb::DataTypeContext new_context;
+  new_context.set_version(0);
+  new_context.set_context("old");
+  new_context.set_data_type_id(field_number);
+
+  scoped_ptr<sync_pb::SyncEntity> e2 =
+      CreateUpdate(SyncableIdToProto(syncable::Id::CreateFromServerId("e2")),
+                   type_root->id_string(),
+                   SYNCED_NOTIFICATIONS);
+  updates.clear();
+  updates.push_back(e2.get());
+
+  // The second response, with an old context version, should result in an
+  // error and the updates should be dropped.
+  EXPECT_EQ(DATATYPE_TRIGGERED_RETRY,
+            handler.ProcessGetUpdatesResponse(
+                progress, new_context, updates, &status));
+  handler.ApplyUpdates(&status);
+
+  EXPECT_FALSE(EntryExists(e2->id_string()));
+
+  {
+    sync_pb::DataTypeContext dir_context;
+    syncable::ReadTransaction trans(FROM_HERE, dir());
+    trans.directory()->GetDataTypeContext(
+        &trans, SYNCED_NOTIFICATIONS, &dir_context);
+    EXPECT_EQ(old_context.SerializeAsString(), dir_context.SerializeAsString());
+  }
 }
 
 // A test harness for tests that focus on applying updates.
@@ -323,12 +421,14 @@ class DirectoryUpdateHandlerApplyUpdateTest : public ::testing::Test {
 
     update_handler_map_.insert(std::make_pair(
         BOOKMARKS,
-        new DirectoryUpdateHandler(directory(), BOOKMARKS, ui_worker_)));
+        new DirectoryUpdateHandler(directory(), BOOKMARKS,
+                                   ui_worker_, &bookmarks_emitter_)));
     update_handler_map_.insert(std::make_pair(
         PASSWORDS,
         new DirectoryUpdateHandler(directory(),
-                                       PASSWORDS,
-                                       password_worker_)));
+                                   PASSWORDS,
+                                   password_worker_,
+                                   &passwords_emitter_)));
   }
 
   virtual void TearDown() OVERRIDE {
@@ -362,6 +462,9 @@ class DirectoryUpdateHandlerApplyUpdateTest : public ::testing::Test {
   scoped_refptr<FakeModelWorker> ui_worker_;
   scoped_refptr<FakeModelWorker> password_worker_;
   scoped_refptr<FakeModelWorker> passive_worker_;
+
+  DirectoryTypeDebugInfoEmitter bookmarks_emitter_;
+  DirectoryTypeDebugInfoEmitter passwords_emitter_;
 
   UpdateHandlerMap update_handler_map_;
   STLValueDeleter<UpdateHandlerMap> update_handler_map_deleter_;

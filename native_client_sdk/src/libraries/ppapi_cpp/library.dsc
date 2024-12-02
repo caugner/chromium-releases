@@ -3,8 +3,6 @@
   'SEARCH': [
       '../../../../ppapi/cpp',
       '../../../../ppapi/cpp/dev',
-      '../../../../ppapi/cpp/extensions',
-      '../../../../ppapi/cpp/extensions/dev',
       '../../../../ppapi/utility',
       '../../../../ppapi/utility/graphics',
       '../../../../ppapi/utility/threading',
@@ -57,6 +55,7 @@
         'var_array.cc',
         'var.cc',
         'var_dictionary.cc',
+        'video_decoder.cc',
         'video_frame.cc',
         'view.cc',
         'websocket.cc',
@@ -74,9 +73,6 @@
         'truetype_font_dev.cc',
         'view_dev.cc',
         'zoom_dev.cc',
-
-        # ppapi/cpp/extensions/dev
-        'socket_dev.cc',
 
         # ppapi/utility/graphics
         'paint_aggregator.cc',
@@ -143,6 +139,7 @@
         'var_array.h',
         'var_dictionary.h',
         'var.h',
+        'video_decoder.h',
         'video_frame.h',
         'view.h',
         'websocket.h',
@@ -173,22 +170,6 @@
         'zoom_dev.h',
       ],
       'DEST': 'include/ppapi/cpp/dev',
-    },
-    {
-      'FILES': [
-        'dict_field.h',
-        'ext_output_traits.h',
-        'from_var_converter.h',
-        'optional.h',
-        'to_var_converter.h',
-      ],
-      'DEST': 'include/ppapi/cpp/extensions',
-    },
-    {
-      'FILES': [
-        'socket_dev.h',
-      ],
-      'DEST': 'include/ppapi/cpp/extensions/dev',
     },
     {
       'FILES': [

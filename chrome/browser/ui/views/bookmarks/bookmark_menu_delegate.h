@@ -9,10 +9,10 @@
 #include <set>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
-#include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_stats.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_context_menu.h"
+#include "components/bookmarks/core/browser/base_bookmark_model_observer.h"
+#include "components/bookmarks/core/browser/bookmark_node_data.h"
 #include "ui/views/controls/menu/menu_delegate.h"
 
 class BookmarkNode;
@@ -182,9 +182,6 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
 
   // Used when a context menu is shown.
   scoped_ptr<BookmarkContextMenu> context_menu_;
-
-  // Is the menu being shown for a drop?
-  bool for_drop_;
 
   // If non-NULL this is the |parent| passed to Init and is NOT owned by us.
   views::MenuItemView* parent_menu_item_;

@@ -193,9 +193,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual content::MediaObserver* GetMediaObserver() OVERRIDE;
   virtual void RequestDesktopNotificationPermission(
       const GURL& source_origin,
-      int callback_context,
-      int render_process_id,
-      int render_view_id) OVERRIDE;
+      content::RenderFrameHost* render_frame_host,
+      base::Closure& callback) OVERRIDE;
   virtual blink::WebNotificationPresenter::Permission
       CheckDesktopNotificationPermission(
           const GURL& source_origin,
@@ -203,13 +202,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
           int render_process_id) OVERRIDE;
   virtual void ShowDesktopNotification(
       const content::ShowDesktopNotificationHostMsgParams& params,
-      int render_process_id,
-      int render_view_id,
-      bool worker) OVERRIDE;
-  virtual void CancelDesktopNotification(
-      int render_process_id,
-      int render_view_id,
-      int notification_id) OVERRIDE;
+      content::RenderFrameHost* render_frame_host,
+      content::DesktopNotificationDelegate* delegate,
+      base::Closure* cancel_callback) OVERRIDE;
   virtual bool CanCreateWindow(const GURL& opener_url,
                                const GURL& opener_top_level_frame_url,
                                const GURL& source_origin,
@@ -249,8 +244,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::BrowserPpapiHost* browser_host) OVERRIDE;
   virtual content::BrowserPpapiHost* GetExternalBrowserPpapiHost(
       int plugin_process_id) OVERRIDE;
-  virtual bool SupportsBrowserPlugin(content::BrowserContext* browser_context,
-                                     const GURL& site_url) OVERRIDE;
   virtual bool AllowPepperSocketAPI(
       content::BrowserContext* browser_context,
       const GURL& url,

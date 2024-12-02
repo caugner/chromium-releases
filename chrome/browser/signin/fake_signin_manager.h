@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/signin/signin_manager.h"
+#include "components/signin/core/browser/signin_manager.h"
 
 namespace content {
 class BrowserContext;
@@ -62,6 +62,16 @@ class FakeSigninManager : public SigninManager {
   virtual void SignOut() OVERRIDE;
 
   virtual void CompletePendingSignin() OVERRIDE;
+
+  virtual void AddMergeSessionObserver(
+      MergeSessionHelper::Observer* observer) OVERRIDE;
+  virtual void RemoveMergeSessionObserver(
+      MergeSessionHelper::Observer* observer) OVERRIDE;
+
+  void NotifyMergeSessionObservers(const GoogleServiceAuthError& error);
+
+ private:
+  ObserverList<MergeSessionHelper::Observer, true> merge_session_observer_list_;
 };
 
 #endif  // !defined (OS_CHROMEOS)

@@ -15,16 +15,16 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "chrome/browser/bookmarks/bookmark_codec.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/common/favicon/favicon_types.h"
+#include "components/bookmarks/core/browser/bookmark_codec.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/favicon_base/favicon_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
-#include "grit/generated_resources.h"
+#include "grit/components_strings.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/favicon_size.h"
@@ -205,7 +205,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
   // Writes out the text string (as UTF8). The text is escaped based on
   // type.
   bool Write(const std::string& text, TextType type) {
-    DCHECK(IsStringUTF8(text));
+    DCHECK(base::IsStringUTF8(text));
     std::string utf8_string;
 
     switch (type) {
@@ -460,7 +460,7 @@ bool BookmarkFaviconFetcher::FetchNextFavicon() {
           profile_, Profile::EXPLICIT_ACCESS);
       favicon_service->GetRawFaviconForURL(
           FaviconService::FaviconForURLParams(
-              GURL(url), chrome::FAVICON, gfx::kFaviconSize),
+              GURL(url), favicon_base::FAVICON, gfx::kFaviconSize),
           ui::SCALE_FACTOR_100P,
           base::Bind(&BookmarkFaviconFetcher::OnFaviconDataAvailable,
                      base::Unretained(this)),
@@ -474,7 +474,7 @@ bool BookmarkFaviconFetcher::FetchNextFavicon() {
 }
 
 void BookmarkFaviconFetcher::OnFaviconDataAvailable(
-    const chrome::FaviconBitmapResult& bitmap_result) {
+    const favicon_base::FaviconBitmapResult& bitmap_result) {
   GURL url;
   if (!bookmark_urls_.empty()) {
     url = GURL(bookmark_urls_.front());

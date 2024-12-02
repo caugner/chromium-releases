@@ -20,13 +20,13 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/features/simple_feature.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_provider.h"
+#include "extensions/common/features/simple_feature.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "extensions/common/switches.h"
 
 using extensions::api::tab_capture::MediaStreamConstraint;
 
@@ -62,7 +62,7 @@ const char* whitelisted_extensions[] = {
 
 }  // namespace
 
-bool TabCaptureCaptureFunction::RunImpl() {
+bool TabCaptureCaptureFunction::RunSync() {
   scoped_ptr<api::tab_capture::Capture::Params> params =
       TabCapture::Capture::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -93,7 +93,7 @@ bool TabCaptureCaptureFunction::RunImpl() {
           extension, tab_id, APIPermission::kTabCaptureForTab) &&
       CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kWhitelistedExtensionID) != extension_id &&
-      !SimpleFeature::IsIdInWhitelist(
+      !SimpleFeature::IsIdInList(
           extension_id,
           std::set<std::string>(
               whitelisted_extensions,
@@ -163,7 +163,7 @@ bool TabCaptureCaptureFunction::RunImpl() {
   return true;
 }
 
-bool TabCaptureGetCapturedTabsFunction::RunImpl() {
+bool TabCaptureGetCapturedTabsFunction::RunSync() {
   extensions::TabCaptureRegistry* registry =
       extensions::TabCaptureRegistry::Get(GetProfile());
 

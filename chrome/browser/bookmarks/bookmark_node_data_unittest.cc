@@ -7,14 +7,15 @@
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_node_data.h"
-#include "chrome/browser/bookmarks/bookmark_test_helpers.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/core/browser/bookmark_node_data.h"
+#include "components/bookmarks/core/test/bookmark_test_helpers.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
+#include "ui/events/platform/platform_event_source.h"
 #include "url/gurl.h"
 
 using base::ASCIIToUTF16;
@@ -24,6 +25,7 @@ class BookmarkNodeDataTest : public testing::Test {
   BookmarkNodeDataTest() : model_(NULL) {}
 
   virtual void SetUp() OVERRIDE {
+    event_source_ = ui::PlatformEventSource::CreateDefault();
     profile_.reset(new TestingProfile);
     profile_->SetID(L"id");
     profile_->CreateBookmarkModel(false);
@@ -33,6 +35,7 @@ class BookmarkNodeDataTest : public testing::Test {
 
   virtual void TearDown() OVERRIDE {
     profile_.reset();
+    event_source_.reset();
   }
 
   Profile* profile() { return profile_.get(); }
@@ -43,6 +46,7 @@ class BookmarkNodeDataTest : public testing::Test {
   content::TestBrowserThreadBundle thread_bundle_;
   scoped_ptr<TestingProfile> profile_;
   BookmarkModel* model_;
+  scoped_ptr<ui::PlatformEventSource> event_source_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkNodeDataTest);
 };
@@ -106,7 +110,7 @@ TEST_F(BookmarkNodeDataTest, URL) {
   EXPECT_EQ(node->date_folder_modified(),
             drag_data.elements[0].date_folder_modified);
   ui::OSExchangeData data;
-  drag_data.Write(profile(), &data);
+  drag_data.Write(profile()->GetPath(), &data);
 
   // Now read the data back in.
   ui::OSExchangeData data2(CloneProvider(data));
@@ -119,11 +123,11 @@ TEST_F(BookmarkNodeDataTest, URL) {
   EXPECT_EQ(title, read_data.elements[0].title);
   EXPECT_TRUE(read_data.elements[0].date_added.is_null());
   EXPECT_TRUE(read_data.elements[0].date_folder_modified.is_null());
-  EXPECT_TRUE(read_data.GetFirstNode(profile()) == node);
+  EXPECT_TRUE(read_data.GetFirstNode(model(), profile()->GetPath()) == node);
 
   // Make sure asking for the node with a different profile returns NULL.
   TestingProfile profile2;
-  EXPECT_TRUE(read_data.GetFirstNode(&profile2) == NULL);
+  EXPECT_TRUE(read_data.GetFirstNode(model(), profile2.GetPath()) == NULL);
 
   // Writing should also put the URL and title on the clipboard.
   GURL read_url;
@@ -151,7 +155,7 @@ TEST_F(BookmarkNodeDataTest, Folder) {
             drag_data.elements[0].date_folder_modified);
 
   ui::OSExchangeData data;
-  drag_data.Write(profile(), &data);
+  drag_data.Write(profile()->GetPath(), &data);
 
   // Now read the data back in.
   ui::OSExchangeData data2(CloneProvider(data));
@@ -165,12 +169,13 @@ TEST_F(BookmarkNodeDataTest, Folder) {
   EXPECT_TRUE(read_data.elements[0].date_folder_modified.is_null());
 
   // We should get back the same node when asking for the same profile.
-  const BookmarkNode* r_g12 = read_data.GetFirstNode(profile());
+  const BookmarkNode* r_g12 =
+      read_data.GetFirstNode(model(), profile()->GetPath());
   EXPECT_TRUE(g12 == r_g12);
 
   // A different profile should return NULL for the node.
   TestingProfile profile2;
-  EXPECT_TRUE(read_data.GetFirstNode(&profile2) == NULL);
+  EXPECT_TRUE(read_data.GetFirstNode(model(), profile2.GetPath()) == NULL);
 }
 
 // Tests reading/writing a folder with children.
@@ -186,7 +191,7 @@ TEST_F(BookmarkNodeDataTest, FolderWithChild) {
   BookmarkNodeData drag_data(folder);
 
   ui::OSExchangeData data;
-  drag_data.Write(profile(), &data);
+  drag_data.Write(profile()->GetPath(), &data);
 
   // Now read the data back in.
   ui::OSExchangeData data2(CloneProvider(data));
@@ -205,7 +210,8 @@ TEST_F(BookmarkNodeDataTest, FolderWithChild) {
   EXPECT_TRUE(read_child.is_url);
 
   // And make sure we get the node back.
-  const BookmarkNode* r_folder = read_data.GetFirstNode(profile());
+  const BookmarkNode* r_folder =
+      read_data.GetFirstNode(model(), profile()->GetPath());
   EXPECT_TRUE(folder == r_folder);
 }
 
@@ -225,7 +231,7 @@ TEST_F(BookmarkNodeDataTest, MultipleNodes) {
   nodes.push_back(url_node);
   BookmarkNodeData drag_data(nodes);
   ui::OSExchangeData data;
-  drag_data.Write(profile(), &data);
+  drag_data.Write(profile()->GetPath(), &data);
 
   // Read the data back in.
   ui::OSExchangeData data2(CloneProvider(data));
@@ -248,14 +254,15 @@ TEST_F(BookmarkNodeDataTest, MultipleNodes) {
   EXPECT_EQ(0u, read_url.children.size());
 
   // And make sure we get the node back.
-  std::vector<const BookmarkNode*> read_nodes = read_data.GetNodes(profile());
+  std::vector<const BookmarkNode*> read_nodes =
+      read_data.GetNodes(model(), profile()->GetPath());
   ASSERT_EQ(2u, read_nodes.size());
   EXPECT_TRUE(read_nodes[0] == folder);
   EXPECT_TRUE(read_nodes[1] == url_node);
 
   // Asking for the first node should return NULL with more than one element
   // present.
-  EXPECT_TRUE(read_data.GetFirstNode(profile()) == NULL);
+  EXPECT_TRUE(read_data.GetFirstNode(model(), profile()->GetPath()) == NULL);
 }
 
 // Tests reading/writing of meta info.
@@ -270,7 +277,7 @@ TEST_F(BookmarkNodeDataTest, MetaInfo) {
 
   BookmarkNodeData node_data(node);
   ui::OSExchangeData data;
-  node_data.Write(profile(), &data);
+  node_data.Write(profile()->GetPath(), &data);
 
   // Read the data back in.
   ui::OSExchangeData data2(CloneProvider(data));

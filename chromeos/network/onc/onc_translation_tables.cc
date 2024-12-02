@@ -18,8 +18,6 @@ namespace onc {
 //
 // Proxy settings are converted to Shill by function
 // ConvertOncProxySettingsToProxyConfig(...).
-//
-// Translation of IPConfig objects is not supported, yet.
 
 namespace {
 
@@ -173,6 +171,19 @@ const FieldTranslationEntry network_fields[] = {
     // onc_translator_shill_to_onc.cc. It is only converted when going from
     // Shill->ONC, and ignored otherwise.
     // { ::onc::network_config::kConnectionState, shill::kStateProperty },
+
+    { ::onc::network_config::kConnectable, shill::kConnectableProperty },
+    { ::onc::network_config::kErrorState, shill::kErrorProperty },
+    {NULL}};
+
+const FieldTranslationEntry ipconfig_fields[] = {
+    { ::onc::ipconfig::kIPAddress, shill::kAddressProperty},
+    { ::onc::ipconfig::kGateway, shill::kGatewayProperty},
+    { ::onc::ipconfig::kRoutingPrefix, shill::kPrefixlenProperty},
+    { ::onc::ipconfig::kNameServers, shill::kNameServersProperty},
+    // This field is converted during translation, see ShillToONCTranslator::
+    // TranslateIPConfig. It is only converted from Shill->ONC.
+    // { ::onc::ipconfig::kType, shill::kMethodProperty},
     {NULL}};
 
 struct OncValueTranslationEntry {
@@ -196,6 +207,7 @@ const OncValueTranslationEntry onc_value_translation_table[] = {
   { &kCellularWithStateSignature, cellular_fields },
   { &kNetworkWithStateSignature, network_fields },
   { &kNetworkConfigurationSignature, network_fields },
+  { &kIPConfigSignature, ipconfig_fields },
   { NULL }
 };
 

@@ -37,6 +37,14 @@
                   '|testing/android/' \
                   '|tools/android/'
     },
+    'android_media': {
+      'filepath': 'content/browser/media/android' \
+                  '|content/renderer/media/android' \
+                  '|media/audio/android' \
+                  '|media/base/android' \
+                  '|media/midi/*_android.*' \
+                  '|media/video/capture/android'
+    },
     'android_tab': {
       'filepath': 'chrome/android/java/src/org/chromium/chrome/browser/Tab'
     },
@@ -151,6 +159,9 @@
     'cast': {
       'filepath': 'media/cast/',
     },
+    'chromecast': {
+      'filepath': 'chromecast/',
+    },
     'cc': {
       'filepath': 'cc/|'\
                   'webkit/renderer/compositor_bindings/|'\
@@ -204,6 +215,11 @@
     'content': {
       'filepath': 'content/',
     },
+    'content_input': {
+      'filepath': 'content/browser/renderer_host/input/|'\
+                  'content/common/input/|'\
+                  'content/renderer/input/',
+    },
     'content_shell': {
       'filepath': 'content/shell/',
     },
@@ -214,12 +230,12 @@
     'deep_memory_profiler': {
       'filepath': 'tools/(deep_memory_profiler|find_runtime_symbols)',
     },
-    'device_orientation': {
-      'filepath': 'content/browser/device_orientation/|'\
-                  'content/common/device_orientation/|'\
-                  'content/public/android/java/src/org/chromium/content/browser/DeviceMotionAndOrientation.java|'\
-                  'content/public/android/javatests/src/org/chromium/content/browser/DeviceMotionAndOrientationTest.java|'\
-                  'content/renderer/device_orientation/',
+    'device_sensors': {
+      'filepath': 'content/browser/device_sensors/|'\
+                  'content/common/device_sensors/|'\
+                  'content/public/android/java/src/org/chromium/content/browser/DeviceSensors.java|'\
+                  'content/public/android/javatests/src/org/chromium/content/browser/DeviceSensorsTest.java|'\
+                  'content/renderer/device_sensors/',
     },
     'devtools': {
       'filepath': 'devtools',
@@ -262,6 +278,9 @@
     'drive_resource_metadata': {
       'filepath': 'chrome/browser/chromeos/drive/resource_metadata'
     },
+    'events': {
+      'filepath': 'ui/events/',
+    },
     'extension': {
       'filepath': 'extension',
     },
@@ -275,7 +294,7 @@
                   'filebrowse'
     },
     'filesapp': {
-      'filepath': 'chrome/browser/resources/file_manager',
+      'filepath': 'ui/file_manager'
     },
     'ftp': {
       'filepath': 'ftp',
@@ -298,6 +317,9 @@
                   'ui/gfx/size|'\
                   'ui/gfx/transform|'\
                   'ui/gfx/vector2d',
+    },
+    'gn': {
+      'filepath': 'tools/gn',
     },
     'gpu': {
       'filepath': 'gpu/',
@@ -444,6 +466,9 @@
       'filepath': 'chrome/browser/resources/options/|'\
           'chrome/browser/ui/webui/options/',
     },
+    'overview_mode': {
+      'filepath': 'ash/wm/overview/',
+    },
     'ozone': {
       'filepath': 'ui/ozone/|'\
         'ui/events/ozone/|'\
@@ -456,6 +481,14 @@
                   '|chrome/browser/ui/cocoa/panels'\
                   '|chrome/browser/ui/gtk/panels'\
                   '|chrome/browser/ui/views/panels'
+    },
+    'password_manager': {
+      'filepath': 'chrome/.*/password_'\
+                  '|chrome/browser/ui/passwords'\
+                  '|chrome/browser/ui/views/passwords'\
+                  '|chrome/test/data/password'\
+                  '|components/autofill.*password'
+                  '|components/password_'\
     },
     'pepper_api': {
       'filepath': 'ppapi/api'\
@@ -672,7 +705,8 @@
                       'yfriedman+watch@chromium.org',
                       'ilevy-cc@chromium.org',
                       'klundberg+watch@chromium.org'],
-    'android_tab': ['dtrainor@chromium.org'],
+    'android_media': ['avayvod+watch@chromium.org'],
+    'android_tab': ['avayvod+watch@chromium.org', 'dtrainor@chromium.org'],
     'android_webview': ['android-webview-reviews@chromium.org'],
     'app_list': ['tfarina@chromium.org', 'chrome-apps-syd-reviews@chromium.org'],
     'app_shortcuts': ['chrome-apps-syd-reviews@chromium.org'],
@@ -709,7 +743,8 @@
     'browser_resources': ['arv+watch@chromium.org'],
     'browsing_data': ['markusheintz@chromium.org'],
     'bubble': ['alicet@chromium.org', 'msw+watch@chromium.org'],
-    'cast': ['hclam+watch@chromium.org',
+    'cast': ['avayvod+watch@chromium.org',
+             'hclam+watch@chromium.org',
              'hguihot+watch@chromium.org',
              'hubbe+watch@chromium.org',
              'imcheng+watch@chromium.org',
@@ -717,6 +752,7 @@
              'mikhal+watch@chromium.org',
              'miu+watch@chromium.org',
              'pwestin+watch@google.com'],
+    'chromecast': ['ozone-reviews@chromium.org'],
     'cc': ['cc-bugs@chromium.org'],
     'chrome_elf': ['caitkp+watch@chromium.org',],
     'chrome_views': ['tfarina@chromium.org'],
@@ -735,10 +771,11 @@
     'clipboard': ['dcheng@chromium.org'],
     'content': ['jam@chromium.org',
                 'darin-cc@chromium.org'],
+    'content_input': ['jdduke+watch@chromium.org'],
     'content_shell': ['jochen+watch@chromium.org'],
     'cookie_monster': ['erikwright@chromium.org'],
     'deep_memory_profiler': ['dmikurube+memory@chromium.org'],
-    'device_orientation': ['timvolodine@chromium.org', 'mvanouwerkerk@chromium.org'],
+    'device_sensors': ['timvolodine@chromium.org', 'mvanouwerkerk@chromium.org', 'rijubrata.bhaumik@intel.com'],
     'devtools': ['pfeldman@chromium.org', 'yurys@chromium.org',
                  'vsevik@chromium.org', 'aandrey+blink@chromium.org',
                  'paulirish+reviews@chromium.org',
@@ -751,6 +788,7 @@
     'downloads_ui': ['asanka@chromium.org', 'benjhayden+dwatch@chromium.org'],
     'drive': ['tfarina@chromium.org'],
     'drive_resource_metadata': ['hashimoto+watch@chromium.org'],
+    'events': ['tdresser+watch@chromium.org'],
     'extension': ['chromium-apps-reviews@chromium.org',
                   'extensions-reviews@chromium.org'],
     'fileapi': ['kinuko+watch@chromium.org',
@@ -763,6 +801,7 @@
     'geolocation': ['mvanouwerkerk@chromium.org'],
     'gfx_geometry': ['cc-bugs@chromium.org'],
     'gfx_image': ['rsesek+watch@chromium.org'],
+    'gn': ['tfarina@chromium.org'],
     'gpu': ['piman+watch@chromium.org'],
     'history_ui': ['dubroy@chromium.org', 'pam+watch@chromium.org'],
     'i18n': ['jshin+watch@chromium.org'],
@@ -797,13 +836,15 @@
              'abarth@chromium.org',
              'ben+mojo@chromium.org',
              'darin@chromium.org',
-             'viettrungluu+watch@chromium.org'],
+             'qsr+mojo@chromium.org',
+             'viettrungluu+watch@chromium.org',
+             'yzshen+watch@chromium.org'],
     'mouse_lock': ['scheib+watch@chromium.org'],
     'music_manager_private': ['gab+watch@chromium.org',
                               'erikwright+watch@chromium.org',
                               'robertshield+watch@chromium.org'],
     'nacl': ['native-client-reviews@googlegroups.com'],
-    'native_client_sdk': ['sbc@chromium.org', 'binji@chromium.org'],
+    'native_client_sdk': ['sbc@chromium.org', 'binji+watch@chromium.org'],
     'navigation': ['creis+watch@chromium.org', 'nasko+codewatch@chromium.org'],
     'net': ['cbentzel+watch@chromium.org'],
     'net_error_list': ['mmenke@chromium.org'],
@@ -813,14 +854,15 @@
             'pedrosimonetti+watch@chromium.org'],
     'omnibox': ['suzhe@chromium.org'],
     'options': ['dbeam+watch-options@chromium.org'],
+    'overview_mode': ['tdanderson+overview@chromium.org'],
     'ozone': ['kalyan.kondapally@intel.com', 'ozone-reviews@chromium.org',
               'rjkroege@chromium.org'],
     'panels': ['dimich@chromium.org', 'jennb@chromium.org',
                'dcheng@chromium.org', 'jianli@chromium.org'],
-    'pepper_api': ['piman+watch@chromium.org',
-                   'ihf+watch@chromium.org', 'yzshen+watch@chromium.org',
+    'password_manager': ['mkwst+watchlist@chromium.org'],
+    'pepper_api': ['piman+watch@chromium.org', 'ihf+watch@chromium.org',
                    'yusukes+watch@chromium.org', 'raymes+watch@chromium.org',
-                   'noelallen@chromium.org', 'binji@chromium.org',
+                   'noelallen@chromium.org', 'binji+watch@chromium.org',
                    'nfullagar@chromium.org', 'teravest+watch@chromium.org',
                    'tzik@chromium.org'],
     'plugin': ['jam@chromium.org',
@@ -881,7 +923,8 @@
     'version_assembly': ['caitkp+watch@chromium.org',
                          'gab+watch@chromium.org'],
     'views': ['tfarina@chromium.org'],
-    'views_core': ['ben+views@chromium.org'],
+    'views_core': ['ben+views@chromium.org',
+                   'tdanderson+views@chromium.org'],
     'views_corewm': ['ben+corewm@chromium.org'],
     'virtual_keyboard': ['dfaden+virtualkb@google.com',
                          'groby+virtualkb@chromium.org'],

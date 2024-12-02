@@ -148,7 +148,7 @@ void HidServiceWin::PlatformAddDevice(const std::string& device_path) {
   base::win::ScopedHandle device_handle(
       CreateFileA(device_path.c_str(),
                   0,
-                  FILE_SHARE_READ | FILE_SHARE_WRITE,
+                  FILE_SHARE_READ,
                   NULL,
                   OPEN_EXISTING,
                   FILE_FLAG_OVERLAPPED,
@@ -175,11 +175,12 @@ void HidServiceWin::PlatformAddDevice(const std::string& device_path) {
       preparsed_data) {
     HIDP_CAPS capabilities;
     if (HidP_GetCaps(preparsed_data, &capabilities) == HIDP_STATUS_SUCCESS) {
-      device_info.usage = capabilities.Usage;
-      device_info.usage_page = capabilities.UsagePage;
       device_info.input_report_size = capabilities.InputReportByteLength;
       device_info.output_report_size = capabilities.OutputReportByteLength;
       device_info.feature_report_size = capabilities.FeatureReportByteLength;
+      device_info.usages.push_back(HidUsageAndPage(
+        capabilities.Usage,
+        static_cast<HidUsageAndPage::Page>(capabilities.UsagePage)));
     }
     // Detect if the device supports report ids.
     if (capabilities.NumberInputValueCaps > 0) {
@@ -189,34 +190,22 @@ void HidServiceWin::PlatformAddDevice(const std::string& device_path) {
       if (HidP_GetValueCaps(HidP_Input, &value_caps[0], &value_caps_length,
                             preparsed_data) == HIDP_STATUS_SUCCESS) {
         device_info.has_report_id = (value_caps[0].ReportID != 0);
-        // If report IDs are supported, adjust all the expected report sizes
-        // down by one byte. This is because Windows will always provide sizes
-        // which assume the presence of a report ID.
-        if (device_info.has_report_id) {
-          if (device_info.input_report_size > 0)
-            device_info.input_report_size -= 1;
-          if (device_info.output_report_size > 0)
-            device_info.output_report_size -= 1;
-          if (device_info.feature_report_size > 0)
-            device_info.feature_report_size -= 1;
-        }
       }
     }
+    if (!device_info.has_report_id && capabilities.NumberInputButtonCaps > 0)
+    {
+      scoped_ptr<HIDP_BUTTON_CAPS[]> button_caps(
+        new HIDP_BUTTON_CAPS[capabilities.NumberInputButtonCaps]);
+      USHORT button_caps_length = capabilities.NumberInputButtonCaps;
+      if (HidP_GetButtonCaps(HidP_Input,
+                             &button_caps[0],
+                             &button_caps_length,
+                             preparsed_data) == HIDP_STATUS_SUCCESS) {
+        device_info.has_report_id = (button_caps[0].ReportID != 0);
+      }
+    }
+
     HidD_FreePreparsedData(preparsed_data);
-  }
-
-  // Get the serial number
-  wchar_t str_property[512] = { 0 };
-  if (HidD_GetSerialNumberString(device_handle.Get(),
-                                 str_property,
-                                 sizeof(str_property))) {
-    device_info.serial_number = base::SysWideToUTF8(str_property);
-  }
-
-  if (HidD_GetProductString(device_handle.Get(),
-                            str_property,
-                            sizeof(str_property))) {
-    device_info.product_name = base::SysWideToUTF8(str_property);
   }
 
   AddDevice(device_info);

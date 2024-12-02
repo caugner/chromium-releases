@@ -43,6 +43,12 @@ cr.define('cr.ui', function() {
   function Oobe() {
   }
 
+  /**
+   * Delay in milliseconds between start of OOBE animation and start of
+   * header bar animation.
+   */
+  var HEADER_BAR_DELAY_MS = 300;
+
   cr.addSingletonGetter(Oobe);
 
   Oobe.prototype = {
@@ -81,13 +87,21 @@ cr.define('cr.ui', function() {
   Oobe.showOobeUI = function(showOobe) {
     if (showOobe) {
       document.body.classList.add('oobe-display');
+
+      // Callback to animate the header bar in.
+      var showHeaderBar = function() {
+        login.HeaderBar.animateIn(function() {
+          chrome.send('headerBarVisible');
+        });
+      };
+      // Start asynchronously so the OOBE network screen comes in first.
+      window.setTimeout(showHeaderBar, HEADER_BAR_DELAY_MS);
     } else {
       document.body.classList.remove('oobe-display');
       Oobe.getInstance().prepareForLoginDisplay_();
     }
 
-    // Don't show header bar for OOBE.
-    Oobe.getInstance().headerHidden = showOobe;
+    Oobe.getInstance().headerHidden = false;
   };
 
   /**
@@ -241,6 +255,14 @@ cr.define('cr.ui', function() {
   };
 
   /**
+   * Skip to login screen for telemetry.
+   */
+  Oobe.skipToLoginForTesting = function() {
+    Oobe.disableSigninUI();
+    chrome.send('skipToLoginForTesting');
+  };
+
+  /**
    * Login for telemetry.
    * @param {string} username Login username.
    * @param {string} password Login password.
@@ -255,8 +277,7 @@ cr.define('cr.ui', function() {
    * Guest login for telemetry.
    */
   Oobe.guestLoginForTesting = function() {
-    Oobe.disableSigninUI();
-    chrome.send('skipToLoginForTesting');
+    Oobe.skipToLoginForTesting();
     chrome.send('launchIncognito');
   };
 
@@ -274,15 +295,46 @@ cr.define('cr.ui', function() {
    * Gaia login screen for telemetry.
    */
   Oobe.addUserForTesting = function() {
-    chrome.send('skipToLoginForTesting');
+    Oobe.skipToLoginForTesting();
     chrome.send('addUser');
   };
 
   /**
-   * Chromebox requisition for telemetry.
+   * Hotrod requisition for telemetry.
    */
-  Oobe.chromeboxRequisitionForTesting = function() {
+  Oobe.remoraRequisitionForTesting = function() {
     chrome.send('setDeviceRequisition', ['remora']);
+  };
+
+  /**
+   * Finish enterprise enrollment for telemetry.
+   */
+  Oobe.enterpriseEnrollmentDone = function() {
+    chrome.send('oauthEnrollClose', ['done']);
+  };
+
+  /**
+   * Shows/hides login UI control bar with buttons like [Shut down].
+   */
+  Oobe.showControlBar = function(show) {
+    Oobe.getInstance().headerHidden = !show;
+  };
+
+  /**
+   * Sets the current state of the virtual keyboard (shown/hidden, size).
+   */
+  Oobe.setKeyboardState = function(shown, width, height) {
+    Oobe.getInstance().virtualKeyboardShown = shown;
+    Oobe.getInstance().setVirtualKeyboardSize(width, height);
+  };
+
+  /**
+   * Sets the current size of the client area (display size).
+   * @param {number} width client area width
+   * @param {number} height client area height
+   */
+  Oobe.setClientAreaSize = function(width, height) {
+    Oobe.getInstance().setClientAreaSize(width, height);
   };
 
   // Export

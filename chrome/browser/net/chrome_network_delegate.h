@@ -13,7 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
-#include "chrome/browser/net/spdyproxy/data_saving_metrics.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_metrics.h"
 #include "net/base/network_delegate.h"
 
 class ClientHints;
@@ -186,7 +186,7 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   void AccumulateContentLength(
       int64 received_payload_byte_count,
       int64 original_payload_byte_count,
-      spdyproxy::DataReductionRequestType data_reduction_type);
+      data_reduction_proxy::DataReductionProxyRequestType request_type);
 
   scoped_refptr<extensions::EventRouterForwarder> event_router_;
   void* profile_;
@@ -225,6 +225,8 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   int64 original_content_length_;
 
   scoped_ptr<ClientHints> client_hints_;
+
+  bool first_request_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeNetworkDelegate);
 };

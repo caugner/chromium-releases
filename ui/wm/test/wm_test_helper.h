@@ -14,7 +14,6 @@ namespace aura {
 class Window;
 class WindowTreeHost;
 namespace client {
-class DefaultActivationClient;
 class DefaultCaptureClient;
 class FocusClient;
 }
@@ -26,11 +25,9 @@ class Size;
 }
 
 namespace wm {
+
 class CompoundEventFilter;
 class InputMethodEventFilter;
-}
-
-namespace wm {
 
 // Creates a minimal environment for running the shell. We can't pull in all of
 // ash here, but we can create attach several of the same things we'd find in
@@ -50,12 +47,9 @@ class WMTestHelper : public aura::client::WindowTreeClient {
  private:
   scoped_ptr<aura::WindowTreeHost> host_;
 
-  // Owned by the root Window.
-  wm::CompoundEventFilter* root_window_event_filter_;
-
+  scoped_ptr<wm::CompoundEventFilter> root_window_event_filter_;
   scoped_ptr<aura::client::DefaultCaptureClient> capture_client_;
   scoped_ptr<wm::InputMethodEventFilter> input_method_filter_;
-  scoped_ptr<aura::client::DefaultActivationClient> activation_client_;
   scoped_ptr<aura::client::FocusClient> focus_client_;
 
   DISALLOW_COPY_AND_ASSIGN(WMTestHelper);

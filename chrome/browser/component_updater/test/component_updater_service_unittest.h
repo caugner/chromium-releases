@@ -17,7 +17,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
-#include "chrome/browser/component_updater/test/component_patcher_mock.h"
 #include "chrome/browser/component_updater/test/url_request_post_interceptor.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/test/net/url_request_prepackaged_interceptor.h"
@@ -48,6 +47,7 @@ class PartialMatch : public URLRequestPostInterceptor::RequestMatcher {
  public:
   explicit PartialMatch(const std::string& expected) : expected_(expected) {}
   virtual bool Match(const std::string& actual) const OVERRIDE;
+
  private:
   const std::string expected_;
 
@@ -91,7 +91,6 @@ class TestConfigurator : public ComponentUpdateService::Configurator {
   virtual size_t UrlSizeLimit() OVERRIDE;
   virtual net::URLRequestContextGetter* RequestContext() OVERRIDE;
   virtual bool InProcess() OVERRIDE;
-  virtual ComponentPatcher* CreateComponentPatcher() OVERRIDE;
   virtual bool DeltasEnabled() const OVERRIDE;
   virtual bool UseBackgroundDownloader() const OVERRIDE;
 
@@ -147,9 +146,10 @@ class ComponentUpdaterTest : public testing::Test {
   void RunThreadsUntilIdle();
 
   scoped_ptr<InterceptorFactory> interceptor_factory_;
-  URLRequestPostInterceptor* post_interceptor_;   // Owned by the factory.
+  URLRequestPostInterceptor* post_interceptor_;  // Owned by the factory.
 
   scoped_ptr<GetInterceptor> get_interceptor_;
+
  private:
   TestConfigurator* test_config_;
   base::FilePath test_data_dir_;
@@ -160,17 +160,18 @@ class ComponentUpdaterTest : public testing::Test {
 const char expected_crx_url[] =
     "http://localhost/download/jebgalgnebhfojomionfpkfelancnnkf.crx";
 
-class MockComponentObserver : public ComponentObserver {
+class MockServiceObserver : public ServiceObserver {
  public:
-  MockComponentObserver();
-  ~MockComponentObserver();
-  MOCK_METHOD2(OnEvent, void(Events event, int extra));
+  MockServiceObserver();
+  ~MockServiceObserver();
+  MOCK_METHOD2(OnEvent, void(Events event, const std::string&));
 };
 
 class OnDemandTester {
  public:
   static ComponentUpdateService::Status OnDemand(
-      ComponentUpdateService* cus, const std::string& component_id);
+      ComponentUpdateService* cus,
+      const std::string& component_id);
 };
 
 }  // namespace component_updater

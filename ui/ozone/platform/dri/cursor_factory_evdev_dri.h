@@ -12,7 +12,7 @@
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/native_widget_types.h"
 
-namespace gfx {
+namespace ui {
 class DriSurfaceFactory;
 }
 
@@ -21,10 +21,11 @@ namespace ui {
 class CursorFactoryEvdevDri : public BitmapCursorFactoryOzone,
                               public CursorDelegateEvdev {
  public:
-  CursorFactoryEvdevDri(gfx::DriSurfaceFactory* dri);
+  CursorFactoryEvdevDri(DriSurfaceFactory* dri);
   virtual ~CursorFactoryEvdevDri();
 
   // BitmapCursorFactoryOzone:
+  virtual gfx::AcceleratedWidget GetCursorWindow() OVERRIDE;
   virtual void SetBitmapCursor(gfx::AcceleratedWidget widget,
                                scoped_refptr<BitmapCursorOzone> cursor)
       OVERRIDE;
@@ -33,7 +34,6 @@ class CursorFactoryEvdevDri : public BitmapCursorFactoryOzone,
   virtual void MoveCursorTo(gfx::AcceleratedWidget widget,
                             const gfx::PointF& location) OVERRIDE;
   virtual void MoveCursor(const gfx::Vector2dF& delta) OVERRIDE;
-  virtual gfx::AcceleratedWidget window() OVERRIDE;
   virtual gfx::PointF location() OVERRIDE;
 
  private:
@@ -41,16 +41,13 @@ class CursorFactoryEvdevDri : public BitmapCursorFactoryOzone,
   gfx::Point bitmap_location();
 
   // The DRI implementation for setting the hardware cursor.
-  gfx::DriSurfaceFactory* dri_;
+  DriSurfaceFactory* dri_;
 
   // The current cursor bitmap.
   scoped_refptr<BitmapCursorOzone> cursor_;
 
   // The window under the cursor.
   gfx::AcceleratedWidget cursor_window_;
-
-  // The bounds of the window under the cursor.
-  gfx::RectF cursor_bounds_;
 
   // The location of the cursor within the window.
   gfx::PointF cursor_location_;

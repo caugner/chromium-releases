@@ -31,6 +31,20 @@ namespace keyboard {
 // keyboard window.
 class KEYBOARD_EXPORT KeyboardControllerProxy {
  public:
+  class TestApi {
+   public:
+    explicit TestApi(KeyboardControllerProxy* proxy) : proxy_(proxy) {}
+
+    const content::WebContents* keyboard_contents() {
+      return proxy_->keyboard_contents_.get();
+    }
+
+   private:
+    KeyboardControllerProxy* proxy_;
+
+    DISALLOW_COPY_AND_ASSIGN(TestApi);
+  };
+
   KeyboardControllerProxy();
   virtual ~KeyboardControllerProxy();
 
@@ -38,18 +52,9 @@ class KEYBOARD_EXPORT KeyboardControllerProxy {
   // with the proxy.
   virtual aura::Window* GetKeyboardWindow();
 
-  // Whether the keyboard window is resizing from its web contents.
-  bool resizing_from_contents() const { return resizing_from_contents_; }
-
   // Whether the keyboard window is created. The keyboard window is tied to a
   // WebContent so we can just check if the WebContent is created or not.
   virtual bool HasKeyboardWindow() const;
-
-  // Sets the flag of whether the keyboard window is resizing from
-  // its web contents.
-  void set_resizing_from_contents(bool resizing) {
-    resizing_from_contents_ = resizing;
-  }
 
   // Gets the InputMethod that will provide notifications about changes in the
   // text input context.
@@ -104,6 +109,8 @@ class KEYBOARD_EXPORT KeyboardControllerProxy {
   virtual void SetupWebContents(content::WebContents* contents);
 
  private:
+  friend class TestApi;
+
   // Loads the web contents for the given |url|.
   void LoadContents(const GURL& url);
 
@@ -113,9 +120,6 @@ class KEYBOARD_EXPORT KeyboardControllerProxy {
   const GURL default_url_;
 
   scoped_ptr<content::WebContents> keyboard_contents_;
-
-  // Whether the current keyboard window is resizing from its web content.
-  bool resizing_from_contents_;
 
   DISALLOW_COPY_AND_ASSIGN(KeyboardControllerProxy);
 };

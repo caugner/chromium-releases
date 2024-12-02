@@ -47,7 +47,7 @@ class PermissionMessage {
     kAudioCapture,
     kVideoCapture,
     kDownloads,
-    kFileSystemWrite,
+    kDeleted_FileSystemWrite,
     kMediaGalleriesAllGalleriesRead,
     kSerial,
     kSocketAnyHost,
@@ -84,6 +84,7 @@ class PermissionMessage {
     kAutomation,
     kAccessibilityFeaturesModify,
     kAccessibilityFeaturesRead,
+    kBluetoothPrivate,
     kEnumBoundary,
   };
   COMPILE_ASSERT(PermissionMessage::kNone > PermissionMessage::kUnknown,

@@ -39,7 +39,6 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
@@ -167,12 +166,16 @@ Browser* GetBrowserForDisposition(chrome::NavigateParams* params) {
       if (app_name.empty()) {
         Browser::CreateParams browser_params(
             Browser::TYPE_POPUP, profile, params->host_desktop_type);
+        browser_params.trusted_source = params->trusted_source;
         browser_params.initial_bounds = params->window_bounds;
         return new Browser(browser_params);
       }
 
       return new Browser(Browser::CreateParams::CreateForApp(
-          Browser::TYPE_POPUP, app_name, params->window_bounds, profile,
+          app_name,
+          params->trusted_source,
+          params->window_bounds,
+          profile,
           params->host_desktop_type));
     }
     case NEW_WINDOW: {
@@ -336,7 +339,7 @@ content::WebContents* CreateTargetContents(const chrome::NavigateParams& params,
       tab_util::GetSiteInstanceForNewTab(params.browser->profile(), url));
   if (params.source_contents) {
     create_params.initial_size =
-        params.source_contents->GetView()->GetContainerSize();
+        params.source_contents->GetContainerBounds().size();
     if (params.should_set_opener)
       create_params.opener = params.source_contents;
   }
@@ -398,6 +401,7 @@ NavigateParams::NavigateParams(Browser* a_browser,
       target_contents(NULL),
       source_contents(NULL),
       disposition(CURRENT_TAB),
+      trusted_source(false),
       transition(a_transition),
       is_renderer_initiated(false),
       tabstrip_index(-1),
@@ -420,6 +424,7 @@ NavigateParams::NavigateParams(Browser* a_browser,
       target_contents(a_target_contents),
       source_contents(NULL),
       disposition(CURRENT_TAB),
+      trusted_source(false),
       transition(content::PAGE_TRANSITION_LINK),
       is_renderer_initiated(false),
       tabstrip_index(-1),
@@ -444,6 +449,7 @@ NavigateParams::NavigateParams(Profile* a_profile,
       target_contents(NULL),
       source_contents(NULL),
       disposition(NEW_FOREGROUND_TAB),
+      trusted_source(false),
       transition(a_transition),
       is_renderer_initiated(false),
       tabstrip_index(-1),
@@ -468,6 +474,7 @@ void FillNavigateParamsFromOpenURLParams(chrome::NavigateParams* nav_params,
   nav_params->redirect_chain = params.redirect_chain;
   nav_params->extra_headers = params.extra_headers;
   nav_params->disposition = params.disposition;
+  nav_params->trusted_source = false;
   nav_params->is_renderer_initiated = params.is_renderer_initiated;
   nav_params->transferred_global_request_id =
       params.transferred_global_request_id;
@@ -653,7 +660,7 @@ void Navigate(NavigateParams* params) {
       (params->disposition == NEW_FOREGROUND_TAB ||
        params->disposition == NEW_WINDOW) &&
       (params->tabstrip_add_types & TabStripModel::ADD_INHERIT_OPENER))
-    params->source_contents->GetView()->Focus();
+    params->source_contents->Focus();
 
   if (params->source_contents == params->target_contents ||
       (swapped_in_prerender && params->disposition == CURRENT_TAB)) {

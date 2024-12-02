@@ -24,7 +24,6 @@ IPC_STRUCT_TRAITS_BEGIN(nacl::NaClStartParams)
   IPC_STRUCT_TRAITS_MEMBER(enable_ipc_proxy)
   IPC_STRUCT_TRAITS_MEMBER(uses_irt)
   IPC_STRUCT_TRAITS_MEMBER(enable_dyncode_syscalls)
-  IPC_STRUCT_TRAITS_MEMBER(uses_nonsfi_mode)
 IPC_STRUCT_TRAITS_END()
 
 //-----------------------------------------------------------------------------
@@ -91,7 +90,8 @@ IPC_SYNC_MESSAGE_CONTROL2_2(NaClProcessMsg_ResolveFileToken,
 
 // Notify the browser process that the server side of the PPAPI channel was
 // created successfully.
-IPC_MESSAGE_CONTROL3(NaClProcessHostMsg_PpapiChannelsCreated,
+IPC_MESSAGE_CONTROL4(NaClProcessHostMsg_PpapiChannelsCreated,
                      IPC::ChannelHandle, /* browser_channel_handle */
                      IPC::ChannelHandle, /* ppapi_renderer_channel_handle */
-                     IPC::ChannelHandle /* trusted_renderer_channel_handle */)
+                     IPC::ChannelHandle, /* trusted_renderer_channel_handle */
+                     IPC::ChannelHandle /* manifest_service_channel_handle */)

@@ -9,6 +9,7 @@
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
+#include "google_apis/gcm/monitoring/gcm_stats_recorder.h"
 #include "net/base/escape.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_status_code.h"
@@ -21,8 +22,6 @@ namespace gcm {
 
 namespace {
 
-const char kRegistrationURL[] =
-    "https://android.clients.google.com/c2dm/register3";
 const char kRegistrationRequestContentType[] =
     "application/x-www-form-urlencoded";
 
@@ -98,16 +97,20 @@ RegistrationRequest::RequestInfo::RequestInfo(
 RegistrationRequest::RequestInfo::~RequestInfo() {}
 
 RegistrationRequest::RegistrationRequest(
+    const GURL& registration_url,
     const RequestInfo& request_info,
     const net::BackoffEntry::Policy& backoff_policy,
     const RegistrationCallback& callback,
     int max_retry_count,
-    scoped_refptr<net::URLRequestContextGetter> request_context_getter)
+    scoped_refptr<net::URLRequestContextGetter> request_context_getter,
+    GCMStatsRecorder* recorder)
     : callback_(callback),
       request_info_(request_info),
+      registration_url_(registration_url),
       backoff_entry_(&backoff_policy),
       request_context_getter_(request_context_getter),
       retries_left_(max_retry_count),
+      recorder_(recorder),
       weak_ptr_factory_(this) {
   DCHECK_GE(max_retry_count, 0);
 }
@@ -123,7 +126,7 @@ void RegistrationRequest::Start() {
 
   DCHECK(!url_fetcher_.get());
   url_fetcher_.reset(net::URLFetcher::Create(
-      GURL(kRegistrationURL), net::URLFetcher::POST, this));
+      registration_url_, net::URLFetcher::POST, this));
   url_fetcher_->SetRequestContext(request_context_getter_);
 
   std::string android_id = base::Uint64ToString(request_info_.android_id);
@@ -148,10 +151,14 @@ void RegistrationRequest::Start() {
     senders.append(*iter);
   }
   BuildFormEncoding(kSenderKey, senders, &body);
+  UMA_HISTOGRAM_COUNTS("GCM.RegistrationSenderIdCount",
+                       request_info_.sender_ids.size());
 
   DVLOG(1) << "Performing registration for: " << request_info_.app_id;
   DVLOG(1) << "Registration request: " << body;
   url_fetcher_->SetUploadData(kRegistrationRequestContentType, body);
+  recorder_->RecordRegistrationSent(request_info_.app_id, senders);
+  request_start_time_ = base::TimeTicks::Now();
   url_fetcher_->Start();
 }
 
@@ -225,17 +232,35 @@ void RegistrationRequest::OnURLFetchComplete(const net::URLFetcher* source) {
   std::string token;
   Status status = ParseResponse(source, &token);
   RecordRegistrationStatusToUMA(status);
+  recorder_->RecordRegistrationResponse(
+      request_info_.app_id,
+      request_info_.sender_ids,
+      status);
 
   if (ShouldRetryWithStatus(status)) {
     if (retries_left_ > 0) {
+      recorder_->RecordRegistrationRetryRequested(
+          request_info_.app_id,
+          request_info_.sender_ids,
+          retries_left_);
       RetryWithBackoff(true);
       return;
     }
 
     status = REACHED_MAX_RETRIES;
+    recorder_->RecordRegistrationResponse(
+        request_info_.app_id,
+        request_info_.sender_ids,
+        status);
     RecordRegistrationStatusToUMA(status);
   }
 
+  if (status == SUCCESS) {
+    UMA_HISTOGRAM_COUNTS("GCM.RegistrationRetryCount",
+                         backoff_entry_.failure_count());
+    UMA_HISTOGRAM_TIMES("GCM.RegistrationCompleteTime",
+                        base::TimeTicks::Now() - request_start_time_);
+  }
   callback_.Run(status, token);
 }
 

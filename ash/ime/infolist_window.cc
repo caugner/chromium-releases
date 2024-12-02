@@ -172,7 +172,8 @@ InfolistWindow::InfolistWindow(views::View* candidate_window,
       title_font_list_(gfx::Font(kJapaneseFontName, kFontSizeDelta + 15)),
       description_font_list_(gfx::Font(kJapaneseFontName,
                                        kFontSizeDelta + 11)) {
-  set_move_with_anchor(true);
+  set_use_focusless(true);
+  set_accept_events(false);
   set_margins(gfx::Insets());
 
   set_background(

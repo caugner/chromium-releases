@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "url/gurl.h"
@@ -148,6 +148,11 @@ bool ModelsMatch(int profile_a, int profile_b) WARN_UNUSED_RESULT;
 // not compare them with the verifier bookmark model. Returns true if they
 // match.
 bool AllModelsMatch() WARN_UNUSED_RESULT;
+
+// Check if the bookmarks models of all sync profiles match each other, using
+// AllModelsMatch. Returns true if bookmark models match and don't timeout
+// while checking.
+bool AwaitAllModelsMatch() WARN_UNUSED_RESULT;
 
 // Checks if the bookmark model of profile |profile| contains any instances of
 // two bookmarks with the same URL under the same parent folder. Returns true

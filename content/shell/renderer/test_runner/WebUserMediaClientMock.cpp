@@ -4,6 +4,7 @@
 
 #include "content/shell/renderer/test_runner/WebUserMediaClientMock.h"
 
+#include "base/logging.h"
 #include "content/shell/renderer/test_runner/MockConstraints.h"
 #include "content/shell/renderer/test_runner/WebTestDelegate.h"
 #include "third_party/WebKit/public/platform/WebMediaConstraints.h"
@@ -19,7 +20,7 @@
 
 using namespace blink;
 
-namespace WebTestRunner {
+namespace content {
 
 class UserMediaRequestTask : public WebMethodTask<WebUserMediaClientMock> {
 public:
@@ -28,7 +29,7 @@ public:
         , m_request(request)
         , m_result(result)
     {
-        BLINK_ASSERT(!m_result.isNull());
+        DCHECK(!m_result.isNull());
     }
 
     virtual void runIfValid() OVERRIDE
@@ -110,7 +111,7 @@ WebUserMediaClientMock::WebUserMediaClientMock(WebTestDelegate* delegate)
 
 void WebUserMediaClientMock::requestUserMedia(const WebUserMediaRequest& streamRequest)
 {
-    BLINK_ASSERT(!streamRequest.isNull());
+    DCHECK(!streamRequest.isNull());
     WebUserMediaRequest request = streamRequest;
 
     if (request.ownerDocument().isNull() || !request.ownerDocument().frame()) {
@@ -175,4 +176,4 @@ void WebUserMediaClientMock::cancelMediaDevicesRequest(const WebMediaDevicesRequ
 {
 }
 
-}
+}  // namespace content

@@ -4,8 +4,8 @@
 
 #include "chrome/browser/favicon/favicon_util.h"
 
-#include "chrome/browser/history/select_favicon_frames.h"
-#include "chrome/common/favicon/favicon_types.h"
+#include "components/favicon_base/favicon_types.h"
+#include "components/favicon_base/select_favicon_frames.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -25,7 +25,7 @@ namespace {
 // |scale_factors| for which the image reps can be created without resizing
 // or decoding the bitmap data.
 std::vector<gfx::ImagePNGRep> SelectFaviconFramesFromPNGsWithoutResizing(
-    const std::vector<chrome::FaviconBitmapResult>& png_data,
+    const std::vector<favicon_base::FaviconBitmapResult>& png_data,
     const std::vector<ui::ScaleFactor>& scale_factors,
     int favicon_size) {
   std::vector<gfx::ImagePNGRep> png_reps;
@@ -173,9 +173,9 @@ void FaviconUtil::SetFaviconColorSpace(gfx::Image* image) {
 
 // static
 gfx::Image FaviconUtil::SelectFaviconFramesFromPNGs(
-      const std::vector<chrome::FaviconBitmapResult>& png_data,
-      const std::vector<ui::ScaleFactor>& scale_factors,
-      int favicon_size) {
+    const std::vector<favicon_base::FaviconBitmapResult>& png_data,
+    const std::vector<ui::ScaleFactor>& scale_factors,
+    int favicon_size) {
   // Create image reps for as many scale factors as possible without resizing
   // the bitmap data or decoding it. FaviconHandler stores already resized
   // favicons into history so no additional resizing should be needed in the
@@ -227,13 +227,11 @@ gfx::Image FaviconUtil::SelectFaviconFramesFromPNGs(
 
   gfx::ImageSkia resized_image_skia;
   for (size_t i = 0; i < scale_factors_to_generate.size(); ++i) {
-    ui::ScaleFactor scale_factor = scale_factors_to_generate[i];
-    int desired_size_in_pixel =
-        ceil(favicon_size * ui::GetImageScale(scale_factor));
+    float scale = ui::GetImageScale(scale_factors_to_generate[i]);
+    int desired_size_in_pixel = ceil(favicon_size * scale);
     SkBitmap bitmap = ResizeBitmapByDownsamplingIfPossible(
         bitmaps, desired_size_in_pixel);
-    resized_image_skia.AddRepresentation(
-        gfx::ImageSkiaRep(bitmap, scale_factor));
+    resized_image_skia.AddRepresentation(gfx::ImageSkiaRep(bitmap, scale));
   }
 
   if (png_reps.empty())

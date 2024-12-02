@@ -53,8 +53,12 @@ namespace {
 // The first token is always GroupN for some integer N, followed by a
 // space-delimited list of key:value pairs which correspond to these flags:
 const char kEmbeddedPageVersionFlagName[] = "espv";
-#if defined(OS_IOS) || defined(OS_ANDROID)
+#if defined(OS_IOS)
 const uint64 kEmbeddedPageVersionDefault = 1;
+#elif defined(OS_ANDROID)
+const uint64 kEmbeddedPageVersionDefault = 1;
+// Use this variant to enable EmbeddedSearch SearchBox API in the results page.
+const uint64 kEmbeddedSearchEnabledVersion = 2;
 #else
 const uint64 kEmbeddedPageVersionDefault = 2;
 #endif
@@ -108,7 +112,8 @@ enum NewTabURLState {
   NEW_TAB_URL_INSECURE = 4,
 
   // URL should not be used because Suggest is disabled.
-  NEW_TAB_URL_SUGGEST_OFF = 5,
+  // Not used anymore, see crbug.com/340424.
+  // NEW_TAB_URL_SUGGEST_OFF = 5,
 
   // URL should not be used because it is blocked for a supervised user.
   NEW_TAB_URL_BLOCKED = 6,
@@ -255,15 +260,13 @@ base::string16 GetSearchTermsImpl(const content::WebContents* contents,
   // faking search terms in the URL. Random pages can't get into the Instant
   // renderer and scripting doesn't work cross-process, so if the page is in
   // the Instant process, we know it isn't being exploited.
-  // Since iOS and Android doesn't use the instant framework, these checks are
-  // disabled for the two platforms.
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
-#if !defined(OS_IOS) && !defined(OS_ANDROID)
-  if (!IsRenderedInInstantProcess(contents, profile) &&
+  if (IsInstantExtendedAPIEnabled() &&
+      !IsRenderedInInstantProcess(contents, profile) &&
       ((entry == contents->GetController().GetLastCommittedEntry()) ||
        !ShouldAssignURLToInstantRenderer(entry->GetURL(), profile)))
     return base::string16();
-#endif  // !defined(OS_IOS) && !defined(OS_ANDROID)
+
   // Check to see if search terms have already been extracted.
   base::string16 search_terms = GetSearchTermsFromNavigationEntry(entry);
   if (!search_terms.empty())
@@ -299,8 +302,6 @@ NewTabURLState IsValidNewTabURL(Profile* profile, const GURL& new_tab_url) {
     return NEW_TAB_URL_NOT_SET;
   if (!new_tab_url.SchemeIsSecure())
     return NEW_TAB_URL_INSECURE;
-  if (!IsSuggestPrefEnabled(profile))
-    return NEW_TAB_URL_SUGGEST_OFF;
   if (!IsURLAllowedForSupervisedUser(new_tab_url, profile))
     return NEW_TAB_URL_BLOCKED;
   return NEW_TAB_URL_VALID;
@@ -344,16 +345,25 @@ struct NewTabURLDetails {
 const int kDisableStartMargin = -1;
 
 bool IsInstantExtendedAPIEnabled() {
-#if defined(OS_IOS) || defined(OS_ANDROID)
+#if defined(OS_IOS)
   return false;
+#elif defined(OS_ANDROID)
+  return EmbeddedSearchPageVersion() == kEmbeddedSearchEnabledVersion;
 #else
   return true;
-#endif  // defined(OS_IOS) || defined(OS_ANDROID)
+#endif  // defined(OS_IOS)
 }
 
 // Determine what embedded search page version to request from the user's
 // default search provider. If 0, the embedded search UI should not be enabled.
 uint64 EmbeddedSearchPageVersion() {
+#if defined(OS_ANDROID)
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableEmbeddedSearchAPI)) {
+    return kEmbeddedSearchEnabledVersion;
+  }
+#endif
+
   FieldTrialFlags flags;
   if (GetFieldTrialInfo(&flags)) {
     return GetUInt64ValueForFlagWithDefault(kEmbeddedPageVersionFlagName,
@@ -398,7 +408,9 @@ base::string16 ExtractSearchTermsFromURL(Profile* profile, const GURL& url) {
     // page.
     InstantSearchPrerenderer* prerenderer =
         InstantSearchPrerenderer::GetForProfile(profile);
-    DCHECK(prerenderer);
+    // TODO(kmadhusu): Remove this CHECK after the investigation of
+    // crbug.com/367204.
+    CHECK(prerenderer);
     return prerenderer->get_last_query();
   }
 
@@ -431,13 +443,12 @@ base::string16 GetSearchTerms(const content::WebContents* contents) {
   if (!entry)
     return base::string16();
 
-#if !defined(OS_IOS) && !defined(OS_ANDROID)
-  // iOS and Android doesn't use the Instant framework, disable this check for
-  // the two platforms.
-  InstantSupportState state = GetInstantSupportStateFromNavigationEntry(*entry);
-  if (state == INSTANT_SUPPORT_NO)
-    return base::string16();
-#endif  // !defined(OS_IOS) && !defined(OS_ANDROID)
+  if (IsInstantExtendedAPIEnabled()) {
+    InstantSupportState state =
+        GetInstantSupportStateFromNavigationEntry(*entry);
+    if (state == INSTANT_SUPPORT_NO)
+      return base::string16();
+  }
 
   return GetSearchTermsImpl(contents, entry);
 }
@@ -521,7 +532,7 @@ GURL GetInstantURL(Profile* profile, int start_margin,
   if (!instant_url.SchemeIsSecure() &&
       !google_util::StartsWithCommandLineGoogleBaseURL(instant_url)) {
     GURL::Replacements replacements;
-    const std::string secure_scheme(content::kHttpsScheme);
+    const std::string secure_scheme(url::kHttpsScheme);
     replacements.SetSchemeStr(secure_scheme);
     instant_url = instant_url.ReplaceComponents(replacements);
   }
@@ -641,10 +652,10 @@ OriginChipPosition GetOriginChipPosition() {
 }
 
 bool ShouldDisplayOriginChipV2() {
-  return GetOriginChipV2HideTrigger() != ORIGIN_CHIP_V2_DISABLED;
+  return GetOriginChipV2Condition() != ORIGIN_CHIP_V2_DISABLED;
 }
 
-OriginChipV2HideTrigger GetOriginChipV2HideTrigger() {
+OriginChipV2Condition GetOriginChipV2Condition() {
   const CommandLine* cl = CommandLine::ForCurrentProcess();
   if (cl->HasSwitch(switches::kDisableOriginChipV2))
     return ORIGIN_CHIP_V2_DISABLED;
@@ -652,6 +663,8 @@ OriginChipV2HideTrigger GetOriginChipV2HideTrigger() {
     return ORIGIN_CHIP_V2_HIDE_ON_MOUSE_RELEASE;
   if (cl->HasSwitch(switches::kEnableOriginChipV2HideOnUserInput))
     return ORIGIN_CHIP_V2_HIDE_ON_USER_INPUT;
+  if (cl->HasSwitch(switches::kEnableOriginChipV2OnSrp))
+    return ORIGIN_CHIP_V2_ON_SRP;
 
   FieldTrialFlags flags;
   if (!GetFieldTrialInfo(&flags))
@@ -659,7 +672,7 @@ OriginChipV2HideTrigger GetOriginChipV2HideTrigger() {
   uint64 value =
       GetUInt64ValueForFlagWithDefault(kOriginChipV2FlagName, 0, flags);
   return (value < ORIGIN_CHIP_V2_NUM_VALUES) ?
-      static_cast<OriginChipV2HideTrigger>(value) :
+      static_cast<OriginChipV2Condition>(value) :
       ORIGIN_CHIP_V2_DISABLED;
 }
 
@@ -679,10 +692,10 @@ GURL GetEffectiveURLForInstant(const GURL& url, Profile* profile) {
   GURL effective_url(url);
 
   // Replace the scheme with "chrome-search:".
-  url_canon::Replacements<char> replacements;
+  url::Replacements<char> replacements;
   std::string search_scheme(chrome::kChromeSearchScheme);
   replacements.SetScheme(search_scheme.data(),
-                         url_parse::Component(0, search_scheme.length()));
+                         url::Component(0, search_scheme.length()));
 
   // If this is the URL for a server-provided NTP, replace the host with
   // "remote-ntp".
@@ -691,7 +704,7 @@ GURL GetEffectiveURLForInstant(const GURL& url, Profile* profile) {
   if (details.state == NEW_TAB_URL_VALID &&
       search::MatchesOriginAndPath(url, details.url)) {
     replacements.SetHost(remote_ntp_host.c_str(),
-                         url_parse::Component(0, remote_ntp_host.length()));
+                         url::Component(0, remote_ntp_host.length()));
   }
 
   effective_url = effective_url.ReplaceComponents(replacements);

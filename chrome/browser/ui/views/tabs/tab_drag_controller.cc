@@ -33,8 +33,8 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "extensions/browser/extension_function_dispatcher.h"
+#include "ui/aura/env.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/event_utils.h"
@@ -43,6 +43,7 @@
 #include "ui/views/focus/view_storage.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
+#include "ui/wm/core/window_modality_controller.h"
 
 #if defined(USE_ASH)
 #include "ash/accelerators/accelerator_commands.h"
@@ -135,6 +136,33 @@ class WindowPositionManagedUpdater : public views::WidgetObserver {
   }
 };
 
+// EscapeTracker installs itself as a pre-target handler on aura::Env and runs a
+// callback when it receives the escape key.
+class EscapeTracker : public ui::EventHandler {
+ public:
+  explicit EscapeTracker(const base::Closure& callback)
+      : escape_callback_(callback) {
+    aura::Env::GetInstance()->AddPreTargetHandler(this);
+  }
+
+  virtual ~EscapeTracker() {
+    aura::Env::GetInstance()->RemovePreTargetHandler(this);
+  }
+
+ private:
+  // ui::EventHandler:
+  virtual void OnKeyEvent(ui::KeyEvent* key) OVERRIDE {
+    if (key->type() == ui::ET_KEY_PRESSED &&
+        key->key_code() == ui::VKEY_ESCAPE) {
+      escape_callback_.Run();
+    }
+  }
+
+  base::Closure escape_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(EscapeTracker);
+};
+
 }  // namespace
 
 TabDragController::TabDragData::TabDragData()
@@ -206,8 +234,6 @@ TabDragController::~TabDragController() {
   if (source_tabstrip_ && detach_into_browser_)
     GetModel(source_tabstrip_)->RemoveObserver(this);
 
-  base::MessageLoopForUI::current()->RemoveObserver(this);
-
   // Reset the delegate of the dragged WebContents. This ends up doing nothing
   // if the drag was completed.
   if (!detach_into_browser_)
@@ -267,7 +293,10 @@ void TabDragController::Init(
       std::find(tabs.begin(), tabs.end(), source_tab) - tabs.begin();
 
   // Listen for Esc key presses.
-  base::MessageLoopForUI::current()->AddObserver(this);
+  escape_tracker_.reset(
+      new EscapeTracker(base::Bind(&TabDragController::EndDrag,
+                                   weak_factory_.GetWeakPtr(),
+                                   END_DRAG_CANCEL)));
 
   if (source_tab->width() > 0) {
     offset_to_width_ratio_ = static_cast<float>(
@@ -490,25 +519,6 @@ void TabDragController::Observe(
   NOTREACHED();
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// TabDragController, MessageLoop::Observer implementation:
-
-base::EventStatus TabDragController::WillProcessEvent(
-    const base::NativeEvent& event) {
-  return base::EVENT_CONTINUE;
-}
-
-void TabDragController::DidProcessEvent(const base::NativeEvent& event) {
-  // If the user presses ESC during a drag, we need to abort and revert things
-  // to the way they were. This is the most reliable way to do this since no
-  // single view or window reliably receives events throughout all the various
-  // kinds of tab dragging.
-  if (ui::EventTypeFromNative(event) == ui::ET_KEY_PRESSED &&
-      ui::KeyboardCodeFromNative(event) == ui::VKEY_ESCAPE) {
-    EndDrag(END_DRAG_CANCEL);
-  }
-}
-
 void TabDragController::OnWidgetBoundsChanged(views::Widget* widget,
                                               const gfx::Rect& new_bounds) {
   TRACE_EVENT1("views", "TabDragController::OnWidgetBoundsChanged",
@@ -578,7 +588,7 @@ void TabDragController::RestoreFocus() {
     if (is_dragging_new_browser_) {
       content::WebContents* active_contents = source_dragged_contents();
       if (active_contents && !active_contents->FocusLocationBarByDefault())
-        active_contents->GetView()->Focus();
+        active_contents->Focus();
     }
     return;
   }
@@ -915,9 +925,14 @@ TabStrip* TabDragController::GetTargetTabStripForPoint(
   }
   gfx::NativeWindow local_window =
       GetLocalProcessWindow(point_in_screen, is_dragging_window_);
-  TabStrip* tab_strip = GetTabStripForWindow(local_window);
-  if (tab_strip && DoesTabStripContain(tab_strip, point_in_screen))
-    return tab_strip;
+  // Do not allow dragging into a window with a modal dialog, it causes a weird
+  // behavior.  See crbug.com/336691
+  if (!wm::GetModalTransient(local_window)) {
+    TabStrip* tab_strip = GetTabStripForWindow(local_window);
+    if (tab_strip && DoesTabStripContain(tab_strip, point_in_screen))
+      return tab_strip;
+  }
+
   return is_dragging_window_ ? attached_tabstrip_ : NULL;
 }
 

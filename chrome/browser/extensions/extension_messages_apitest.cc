@@ -21,7 +21,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/api/runtime.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -29,6 +28,7 @@
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/common/api/runtime.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/value_builder.h"
 #include "net/cert/asn1_util.h"
@@ -74,8 +74,8 @@ class MessageSender : public content::NotificationObserver {
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
-    EventRouter* event_router = ExtensionSystem::Get(
-        content::Source<Profile>(source).ptr())->event_router();
+    EventRouter* event_router =
+        EventRouter::Get(content::Source<Profile>(source).ptr());
 
     // Sends four messages to the extension. All but the third message sent
     // from the origin http://b.com/ are supposed to arrive.
@@ -866,7 +866,7 @@ class ExternallyConnectableMessagingWithTlsChannelIdTest :
       std::string* domain_bound_cert,
       net::ServerBoundCertService::RequestHandle* request_handle,
       scoped_refptr<net::URLRequestContextGetter> request_context_getter) {
-    DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+    DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
     net::ServerBoundCertService* server_bound_cert_service =
         request_context_getter->GetURLRequestContext()->
             server_bound_cert_service();

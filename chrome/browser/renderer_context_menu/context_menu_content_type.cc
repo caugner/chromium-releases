@@ -17,7 +17,6 @@
 
 
 using blink::WebContextMenuData;
-using content::RenderFrameHost;
 using content::WebContents;
 using extensions::Extension;
 
@@ -35,11 +34,11 @@ bool IsInternalResourcesURL(const GURL& url) {
 }  // namespace
 
 ContextMenuContentType::ContextMenuContentType(
-    RenderFrameHost* render_frame_host,
+    content::WebContents* web_contents,
     const content::ContextMenuParams& params,
     bool supports_custom_items)
     : params_(params),
-      source_web_contents_(WebContents::FromRenderFrameHost(render_frame_host)),
+      source_web_contents_(web_contents),
       profile_(Profile::FromBrowserContext(
                    source_web_contents_->GetBrowserContext())),
       supports_custom_items_(supports_custom_items) {
@@ -127,6 +126,9 @@ bool ContextMenuContentType::SupportsGroupInternal(int group) {
 
     case ITEM_GROUP_MEDIA_AUDIO:
       return params_.media_type == WebContextMenuData::MediaTypeAudio;
+
+    case ITEM_GROUP_MEDIA_CANVAS:
+      return params_.media_type == WebContextMenuData::MediaTypeCanvas;
 
     case ITEM_GROUP_MEDIA_PLUGIN:
       return params_.media_type == WebContextMenuData::MediaTypePlugin;

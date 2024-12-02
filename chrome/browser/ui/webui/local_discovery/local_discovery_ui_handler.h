@@ -14,7 +14,7 @@
 #include "chrome/browser/local_discovery/cloud_print_printer_list.h"
 #include "chrome/browser/local_discovery/privet_device_lister.h"
 #include "chrome/browser/local_discovery/privet_http.h"
-#include "chrome/browser/signin/signin_manager.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/web_ui_message_handler.h"
 
 #if defined(ENABLE_FULL_PRINTING) && !defined(OS_CHROMEOS)
@@ -87,7 +87,7 @@ class LocalDiscoveryUIHandler : public content::WebUIMessageHandler,
   typedef std::map<std::string, DeviceDescription> DeviceDescriptionMap;
 
   // Message handlers:
-  // For when the page is ready to recieve device notifications.
+  // For when the page is ready to receive device notifications.
   void HandleStart(const base::ListValue* args);
 
   // For when a visibility change occurs.
@@ -115,7 +115,7 @@ class LocalDiscoveryUIHandler : public content::WebUIMessageHandler,
 
   // For when the confirm operation on the cloudprint server has finished
   // executing.
-  void OnConfirmDone(CloudPrintBaseApiFlow::Status status);
+  void OnConfirmDone(GCDBaseApiFlow::Status status);
 
   // Signal to the web interface an error has ocurred while registering.
   void SendRegisterError();
@@ -129,9 +129,6 @@ class LocalDiscoveryUIHandler : public content::WebUIMessageHandler,
 
   // Get the sync account email.
   std::string GetSyncAccount();
-
-  // Get the base cloud print URL.
-  std::string GetCloudPrintBaseUrl();
 
   // Reset and cancel the current registration.
   void ResetCurrentRegistration();

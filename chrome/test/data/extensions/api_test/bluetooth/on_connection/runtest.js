@@ -9,7 +9,7 @@ var profileUuid;
 function testOnConnectionEvent() {
   chrome.test.assertEq('d1', deviceName);
   chrome.test.assertEq('11:12:13:14:15:16', deviceAddress);
-  chrome.test.assertEq('1234', profileUuid);
+  chrome.test.assertEq('00001234-0000-1000-8000-00805f9b34fb', profileUuid);
 
   chrome.test.succeed();
 }
@@ -18,8 +18,8 @@ chrome.bluetooth.onConnection.addListener(
   function(socket) {
     deviceName = socket.device.name;
     deviceAddress = socket.device.address;
-    profileUuid = socket.profile.uuid;
-    chrome.bluetooth.disconnect({'socket': socket});
+    profileUuid = socket.uuid;
+    chrome.bluetooth.disconnect({'socketId': socket.id});
   });
 
 chrome.test.sendMessage('ready',

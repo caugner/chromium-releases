@@ -60,7 +60,7 @@ class TestQuicConnection : public QuicConnection {
                      QuicConnectionHelper* helper,
                      QuicPacketWriter* writer)
       : QuicConnection(connection_id, address, helper, writer, false,
-                       versions) {
+                       versions, kInitialFlowControlWindowForTest) {
   }
 
   void SetSendAlgorithm(SendAlgorithmInterface* send_algorithm) {
@@ -187,7 +187,9 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<QuicVersion> {
                 OnPacketSent(_, _, _, _, _)).WillRepeatedly(Return(true));
     EXPECT_CALL(*send_algorithm_, RetransmissionDelay()).WillRepeatedly(
         Return(QuicTime::Delta::Zero()));
-    EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _, _)).
+    EXPECT_CALL(*send_algorithm_, GetCongestionWindow()).WillRepeatedly(
+        Return(kMaxPacketSize));
+    EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _)).
         WillRepeatedly(Return(QuicTime::Delta::Zero()));
     EXPECT_CALL(*send_algorithm_, BandwidthEstimate()).WillRepeatedly(
         Return(QuicBandwidth::Zero()));
@@ -208,14 +210,15 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<QuicVersion> {
                               writer_.Pass(), NULL,
                               &crypto_client_stream_factory_,
                               make_scoped_ptr((QuicServerInfo*)NULL),
-                              QuicSessionKey(kServerHostname, kServerPort,
-                                             false, kPrivacyModeDisabled),
+                              QuicServerId(kServerHostname, kServerPort,
+                                           false, PRIVACY_MODE_DISABLED),
                               DefaultQuicConfig(), &crypto_config_, NULL));
     session_->GetCryptoStream()->CryptoConnect();
     EXPECT_TRUE(session_->IsCryptoHandshakeConfirmed());
     stream_.reset(use_closing_stream_ ?
                   new AutoClosingStream(session_->GetWeakPtr()) :
                   new QuicHttpStream(session_->GetWeakPtr()));
+    clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(20));
   }
 
   void SetRequest(const std::string& method,
@@ -256,14 +259,15 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<QuicVersion> {
   scoped_ptr<QuicEncryptedPacket> ConstructRstStreamPacket(
       QuicPacketSequenceNumber sequence_number) {
     return maker_.MakeRstPacket(
-        sequence_number, true, stream_id_, QUIC_STREAM_NO_ERROR);
+        sequence_number, true, stream_id_,
+        AdjustErrorForVersion(QUIC_RST_FLOW_CONTROL_ACCOUNTING, GetParam()));
   }
 
   scoped_ptr<QuicEncryptedPacket> ConstructAckAndRstStreamPacket(
       QuicPacketSequenceNumber sequence_number) {
     return maker_.MakeAckAndRstPacket(
         sequence_number, !kIncludeVersion, stream_id_, QUIC_STREAM_CANCELLED,
-        1, 1, !kIncludeCongestionFeedback);
+        2, 1, !kIncludeCongestionFeedback);
   }
 
   scoped_ptr<QuicEncryptedPacket> ConstructAckPacket(
@@ -356,6 +360,8 @@ TEST_P(QuicHttpStreamTest, GetRequest) {
   ASSERT_TRUE(response_.headers.get());
   EXPECT_EQ(404, response_.headers->response_code());
   EXPECT_TRUE(response_.headers->HasHeaderValue("Content-Type", "text/plain"));
+  EXPECT_FALSE(response_.response_time.is_null());
+  EXPECT_FALSE(response_.request_time.is_null());
 
   // There is no body, so this should return immediately.
   EXPECT_EQ(0, stream_->ReadResponseBody(read_buffer_.get(),
@@ -587,9 +593,7 @@ TEST_P(QuicHttpStreamTest, CheckPriorityWithNoDelegate) {
   SetRequest("GET", "/", MEDIUM);
   use_closing_stream_ = true;
 
-  if (GetParam() > QUIC_VERSION_13) {
-    AddWrite(ConstructRstStreamPacket(1));
-  }
+  AddWrite(ConstructRstStreamPacket(1));
 
   Initialize();
 

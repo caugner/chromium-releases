@@ -9,6 +9,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
 #include "google_apis/gcm/engine/unregistration_request.h"
+#include "google_apis/gcm/monitoring/gcm_stats_recorder.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,6 +21,7 @@ const uint64 kAndroidId = 42UL;
 const char kLoginHeader[] = "AidLogin";
 const char kAppId[] = "TestAppId";
 const char kDeletedAppId[] = "deleted=TestAppId";
+const char kRegistrationURL[] = "http://foo.bar/register";
 const uint64 kSecurityToken = 77UL;
 
 // Backoff policy for testing registration request.
@@ -71,6 +73,7 @@ class UnregistrationRequestTest : public testing::Test {
   base::MessageLoop message_loop_;
   net::TestURLFetcherFactory url_fetcher_factory_;
   scoped_refptr<net::TestURLRequestContextGetter> url_request_context_getter_;
+  GCMStatsRecorder recorder_;
 };
 
 UnregistrationRequestTest::UnregistrationRequestTest()
@@ -89,13 +92,15 @@ void UnregistrationRequestTest::UnregistrationCallback(
 
 void UnregistrationRequestTest::CreateRequest() {
   request_.reset(new UnregistrationRequest(
+      GURL(kRegistrationURL),
       UnregistrationRequest::RequestInfo(kAndroidId,
                                          kSecurityToken,
                                          kAppId),
       kDefaultBackoffPolicy,
       base::Bind(&UnregistrationRequestTest::UnregistrationCallback,
                  base::Unretained(this)),
-      url_request_context_getter_.get()));
+      url_request_context_getter_.get(),
+      &recorder_));
 }
 
 void UnregistrationRequestTest::SetResponseStatusAndString(
@@ -122,6 +127,8 @@ TEST_F(UnregistrationRequestTest, RequestDataPassedToFetcher) {
   // Get data sent by request.
   net::TestURLFetcher* fetcher = url_fetcher_factory_.GetFetcherByID(0);
   ASSERT_TRUE(fetcher);
+
+  EXPECT_EQ(GURL(kRegistrationURL), fetcher->GetOriginalURL());
 
   // Verify that authorization header was put together properly.
   net::HttpRequestHeaders headers;

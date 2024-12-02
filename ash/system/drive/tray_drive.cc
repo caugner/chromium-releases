@@ -36,9 +36,6 @@
 #include "ui/views/widget/widget.h"
 
 namespace ash {
-
-namespace internal {
-
 namespace {
 
 const int kSidePadding = 8;
@@ -358,8 +355,10 @@ class DriveDetailedView : public TrayDetailsView,
       return;
 
     HoverHighlightView* container = new HoverHighlightView(this);
-    container->AddLabel(ui::ResourceBundle::GetSharedInstance().
-        GetLocalizedString(IDS_ASH_STATUS_TRAY_DRIVE_SETTINGS),
+    container->AddLabel(
+        ui::ResourceBundle::GetSharedInstance().GetLocalizedString(
+            IDS_ASH_STATUS_TRAY_DRIVE_SETTINGS),
+        gfx::ALIGN_LEFT,
         gfx::Font::NORMAL);
     AddChildView(container);
     settings_ = container;
@@ -515,5 +514,4 @@ void TrayDrive::HideIfNoOperations() {
     detailed_->Update(&empty_list);
 }
 
-}  // namespace internal
 }  // namespace ash

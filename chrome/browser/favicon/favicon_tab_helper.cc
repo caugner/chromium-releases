@@ -4,6 +4,7 @@
 
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/favicon/favicon_handler.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
@@ -14,6 +15,7 @@
 #include "chrome/browser/search/search.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/url_constants.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
@@ -38,11 +40,18 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(FaviconTabHelper);
 FaviconTabHelper::FaviconTabHelper(WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())) {
-  favicon_handler_.reset(new FaviconHandler(profile_, this,
-                                            FaviconHandler::FAVICON));
+#if defined(OS_ANDROID)
+  bool download_largest_icon = true;
+#else
+  bool download_largest_icon = false;
+#endif
+  favicon_handler_.reset(
+      new FaviconHandler(this, this, FaviconHandler::FAVICON,
+                         download_largest_icon));
   if (chrome::kEnableTouchIcon)
-    touch_icon_handler_.reset(new FaviconHandler(profile_, this,
-                                                 FaviconHandler::TOUCH));
+    touch_icon_handler_.reset(
+        new FaviconHandler(this, this, FaviconHandler::TOUCH,
+                           download_largest_icon));
 }
 
 FaviconTabHelper::~FaviconTabHelper() {
@@ -123,7 +132,7 @@ void FaviconTabHelper::SaveFavicon() {
     return;
   }
   service->SetFavicons(
-      entry->GetURL(), favicon.url, chrome::FAVICON, favicon.image);
+      entry->GetURL(), favicon.url, favicon_base::FAVICON, favicon.image);
 }
 
 NavigationEntry* FaviconTabHelper::GetActiveEntry() {
@@ -153,6 +162,11 @@ void FaviconTabHelper::NotifyFaviconUpdated(bool icon_url_changed) {
   web_contents()->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);
 }
 
+bool FaviconTabHelper::IsOffTheRecord() {
+  DCHECK(web_contents());
+  return web_contents()->GetBrowserContext()->IsOffTheRecord();
+}
+
 void FaviconTabHelper::DidStartNavigationToPendingEntry(
     const GURL& url,
     NavigationController::ReloadType reload_type) {
@@ -177,14 +191,23 @@ void FaviconTabHelper::DidNavigateMainFrame(
 }
 
 void FaviconTabHelper::DidUpdateFaviconURL(
-    int32 page_id,
     const std::vector<content::FaviconURL>& candidates) {
   DCHECK(!candidates.empty());
   favicon_urls_ = candidates;
 
-  favicon_handler_->OnUpdateFaviconURL(page_id, candidates);
+  favicon_handler_->OnUpdateFaviconURL(candidates);
   if (touch_icon_handler_.get())
-    touch_icon_handler_->OnUpdateFaviconURL(page_id, candidates);
+    touch_icon_handler_->OnUpdateFaviconURL(candidates);
+}
+
+FaviconService* FaviconTabHelper::GetFaviconService() {
+  return FaviconServiceFactory::GetForProfile(profile_,
+                                              Profile::EXPLICIT_ACCESS);
+}
+
+bool FaviconTabHelper::IsBookmarked(const GURL& url) {
+  BookmarkModel* bookmark_model = BookmarkModelFactory::GetForProfile(profile_);
+  return bookmark_model && bookmark_model->IsBookmarked(url);
 }
 
 void FaviconTabHelper::DidDownloadFavicon(

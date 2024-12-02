@@ -6,6 +6,22 @@ cr.define('chrome.sync.about_tab', function() {
   // Contains the latest snapshot of sync about info.
   chrome.sync.aboutInfo = {};
 
+  function highlightIfChanged(node, oldVal, newVal) {
+    function clearHighlight() {
+      this.removeAttribute('highlighted');
+    }
+
+    var oldStr = oldVal.toString();
+    var newStr = newVal.toString();
+    if (oldStr != '' && oldStr != newStr) {
+      // Note the addListener function does not end up creating duplicate
+      // listeners.  There can be only one listener per event at a time.
+      // Reference: https://developer.mozilla.org/en/DOM/element.addEventListener
+      node.addEventListener('webkitAnimationEnd', clearHighlight, false);
+      node.setAttribute('highlighted', '');
+    }
+  }
+
   function refreshAboutInfo(aboutInfo) {
     chrome.sync.aboutInfo = aboutInfo;
     var aboutInfoDiv = $('about-info');
@@ -16,8 +32,28 @@ cr.define('chrome.sync.about_tab', function() {
     refreshAboutInfo(e.details);
   }
 
+  /**
+   * Helper to determine if an element is scrolled to its bottom limit.
+   * @param {Element} elem element to check
+   * @return {boolean} true if the element is scrolled to the bottom
+   */
+  function isScrolledToBottom(elem) {
+    return elem.scrollHeight - elem.scrollTop == elem.clientHeight;
+  }
+
+  /**
+   * Helper to scroll an element to its bottom limit.
+   * @param {Element} elem element to be scrolled
+   */
+  function scrollToBottom(elem) {
+    elem.scrollTop = elem.scrollHeight - elem.clientHeight;
+  }
+
   /** Container for accumulated sync protocol events. */
   var protocolEvents = [];
+
+  /** We may receive re-delivered events.  Keep a record of ones we've seen. */
+  var knownEventTimestamps = {};
 
   /**
    * Callback for incoming protocol events.
@@ -25,10 +61,27 @@ cr.define('chrome.sync.about_tab', function() {
    */
   function onReceivedProtocolEvent(e) {
     var details = e.details;
+
+    // Return early if we've seen this event before.  Assumes that timestamps
+    // are sufficiently high resolution to uniquely identify an event.
+    if (knownEventTimestamps.hasOwnProperty(details.time)) {
+      return;
+    }
+
+    knownEventTimestamps[details.time] = true;
     protocolEvents.push(details);
 
+    var trafficContainer = $('traffic-event-container');
+
+    // Scroll to the bottom if we were already at the bottom.  Otherwise, leave
+    // the scrollbar alone.
+    var shouldScrollDown = isScrolledToBottom(trafficContainer);
+
     var context = new JsEvalContext({ events: protocolEvents });
-    jstProcess(context, $('traffic-event-container'));
+    jstProcess(context, trafficContainer);
+
+    if (shouldScrollDown)
+      scrollToBottom(trafficContainer);
   }
 
   /**
@@ -43,28 +96,10 @@ cr.define('chrome.sync.about_tab', function() {
   }
 
   /**
-   * Toggles the given traffic event entry div's "expanded" state.
-   * @param {HTMLElement} element the element to toggle.
+   * Initializes listeners for status dump and import UI.
    */
-  function expandListener(element) {
-    element.target.classList.toggle('traffic-event-entry-expanded');
-  }
-
-  /**
-   * Attaches a listener to the given traffic event entry div.
-   * @param {HTMLElement} element the element to attach the listener to.
-   */
-  function addExpandListener(element) {
-    element.addEventListener('click', expandListener, false);
-  }
-
-  function onLoad() {
+  function initStatusDumpButton() {
     $('status-data').hidden = true;
-
-    chrome.sync.events.addEventListener(
-        'onAboutInfoUpdated',
-        onAboutInfoUpdatedEvent);
-    chrome.sync.requestUpdatedAboutInfo();
 
     var dumpStatusButton = $('dump-status');
     dumpStatusButton.addEventListener('click', function(event) {
@@ -111,13 +146,43 @@ cr.define('chrome.sync.about_tab', function() {
       var aboutInfo = JSON.parse(data);
       refreshAboutInfo(aboutInfo);
     });
+  }
 
+  /**
+   * Toggles the given traffic event entry div's "expanded" state.
+   * @param {MouseEvent} e the click event that triggered the toggle.
+   */
+  function expandListener(e) {
+    e.target.classList.toggle('traffic-event-entry-expanded');
+  }
+
+  /**
+   * Attaches a listener to the given traffic event entry div.
+   * @param {HTMLElement} element the element to attach the listener to.
+   */
+  function addExpandListener(element) {
+    element.addEventListener('click', expandListener, false);
+  }
+
+  function onLoad() {
+    initStatusDumpButton();
     initProtocolEventLog();
+
+    chrome.sync.events.addEventListener(
+        'onAboutInfoUpdated',
+        onAboutInfoUpdatedEvent);
+
+    // Register to receive a stream of event notifications.
+    chrome.sync.registerForEvents();
+
+    // Request an about info update event to initialize the page.
+    chrome.sync.requestUpdatedAboutInfo();
   }
 
   return {
     onLoad: onLoad,
-    addExpandListener: addExpandListener
+    addExpandListener: addExpandListener,
+    highlightIfChanged: highlightIfChanged
   };
 });
 

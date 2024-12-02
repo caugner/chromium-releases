@@ -6,6 +6,8 @@
 
 #include <algorithm>
 
+#include "grit/ui_strings.h"
+#include "ui/accessibility/ax_view_state.h"
 #include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_folder_item.h"
 #include "ui/app_list/app_list_model.h"
@@ -56,7 +58,7 @@ AppListFolderView::AppListFolderView(AppsContainerView* container_view,
 
   items_grid_view_ =
       new AppsGridView(app_list_main_view_, pagination_model_.get());
-  items_grid_view_->set_is_root_level(false);
+  items_grid_view_->set_folder_delegate(this);
   items_grid_view_->SetLayout(
       kPreferredIconDimension,
       container_view->apps_grid_view()->cols(),
@@ -80,6 +82,10 @@ AppListFolderView::~AppListFolderView() {
 }
 
 void AppListFolderView::SetAppListFolderItem(AppListFolderItem* folder) {
+  accessible_name_ = ui::ResourceBundle::GetSharedInstance().GetLocalizedString(
+      IDS_APP_LIST_FOLDER_OPEN_FOLDER_ACCESSIBILE_NAME);
+  NotifyAccessibilityEvent(ui::AX_EVENT_ALERT, true);
+
   folder_item_ = folder;
   items_grid_view_->SetItemList(folder_item_->item_list());
   folder_header_view_->SetFolderItem(folder_item_);
@@ -226,7 +232,7 @@ void AppListFolderView::UpdateFolderNameVisibility(bool visible) {
   folder_header_view_->UpdateFolderNameVisibility(visible);
 }
 
-bool AppListFolderView::IsPointOutsideOfFolderBoundray(
+bool AppListFolderView::IsPointOutsideOfFolderBoundary(
     const gfx::Point& point) {
   if (!GetLocalBounds().Contains(point))
     return true;
@@ -262,14 +268,18 @@ void AppListFolderView::ReparentItem(
 
 void AppListFolderView::DispatchDragEventForReparent(
     AppsGridView::Pointer pointer,
-    const ui::LocatedEvent& event) {
-  container_view_->apps_grid_view()->UpdateDragFromReparentItem(pointer, event);
+    const gfx::Point& drag_point_in_folder_grid) {
+  AppsGridView* root_grid = container_view_->apps_grid_view();
+  gfx::Point drag_point_in_root_grid = drag_point_in_folder_grid;
+  ConvertPointToTarget(items_grid_view_, root_grid, &drag_point_in_root_grid);
+  root_grid->UpdateDragFromReparentItem(pointer, drag_point_in_folder_grid);
 }
 
 void AppListFolderView::DispatchEndDragEventForReparent(
-    bool events_forwarded_to_drag_drop_host) {
-  container_view_->apps_grid_view()->
-      EndDragFromReparentItemInRootLevel(events_forwarded_to_drag_drop_host);
+    bool events_forwarded_to_drag_drop_host,
+    bool cancel_drag) {
+  container_view_->apps_grid_view()->EndDragFromReparentItemInRootLevel(
+      events_forwarded_to_drag_drop_host, cancel_drag);
 }
 
 void AppListFolderView::HideViewImmediately() {
@@ -277,13 +287,34 @@ void AppListFolderView::HideViewImmediately() {
   hide_for_reparent_ = false;
 }
 
+void AppListFolderView::CloseFolderPage() {
+  accessible_name_ = ui::ResourceBundle::GetSharedInstance().GetLocalizedString(
+      IDS_APP_LIST_FOLDER_CLOSE_FOLDER_ACCESSIBILE_NAME);
+  NotifyAccessibilityEvent(ui::AX_EVENT_ALERT, true);
+
+  GiveBackFocusToSearchBox();
+  if (items_grid_view()->dragging())
+    items_grid_view()->EndDrag(true);
+  items_grid_view()->ClearAnySelectedView();
+  container_view_->ShowApps(folder_item_);
+}
+
 bool AppListFolderView::IsOEMFolder() const {
   return folder_item_->folder_type() == AppListFolderItem::FOLDER_TYPE_OEM;
 }
 
+void AppListFolderView::SetRootLevelDragViewVisible(bool visible) {
+  container_view_->apps_grid_view()->SetDragViewVisible(visible);
+}
+
+void AppListFolderView::GetAccessibleState(ui::AXViewState* state) {
+  state->role = ui::AX_ROLE_BUTTON;
+  state->name = accessible_name_;
+}
+
 void AppListFolderView::NavigateBack(AppListFolderItem* item,
                                      const ui::Event& event_flags) {
-  container_view_->ShowApps(item);
+  CloseFolderPage();
 }
 
 void AppListFolderView::GiveBackFocusToSearchBox() {

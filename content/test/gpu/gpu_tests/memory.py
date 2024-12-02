@@ -1,6 +1,8 @@
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import memory_expectations
+
 from telemetry import test
 from telemetry.page import page_test
 from telemetry.core.timeline import counter
@@ -52,9 +54,6 @@ test_harness_script = r"""
 """ % MEMORY_LIMIT_MB
 
 class _MemoryValidator(page_test.PageTest):
-  def __init__(self):
-    super(_MemoryValidator, self).__init__('ValidatePage')
-
   def ValidatePage(self, page, tab, results):
     timeline_data = tab.browser.StopTracing()
     timeline_model = model.TimelineModel(timeline_data)
@@ -81,7 +80,10 @@ class _MemoryValidator(page_test.PageTest):
 class Memory(test.Test):
   """Tests GPU memory limits"""
   test = _MemoryValidator
-  page_set = 'page_sets/memory_tests.json'
+  page_set = 'page_sets/memory_tests.py'
+
+  def CreateExpectations(self, page_set):
+    return memory_expectations.MemoryExpectations()
 
   def CreatePageSet(self, options):
     page_set = super(Memory, self).CreatePageSet(options)

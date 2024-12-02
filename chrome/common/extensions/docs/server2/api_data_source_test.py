@@ -11,6 +11,7 @@ import unittest
 from api_data_source import (_JSCModel,
                              _FormatValue,
                              _GetEventByNameFromEvents)
+from availability_finder import AvailabilityInfo
 from branch_utility import ChannelInfo
 from extensions_paths import CHROME_EXTENSIONS
 from fake_host_file_system_provider import FakeHostFileSystemProvider
@@ -18,7 +19,6 @@ from features_bundle import FeaturesBundle
 from file_system import FileNotFoundError
 from future import Future
 from object_store_creator import ObjectStoreCreator
-from reference_resolver import ReferenceResolver
 from server_instance import ServerInstance
 from test_data.canned_data import (CANNED_API_FILE_SYSTEM_DATA, CANNED_BRANCHES)
 from test_data.api_data_source.canned_trunk_fs import CANNED_TRUNK_FS_DATA
@@ -40,37 +40,13 @@ def _GetType(dict_, name):
 class _FakeAvailabilityFinder(object):
 
   def GetApiAvailability(self, version):
-    return ChannelInfo('stable', '396', 5)
+    return AvailabilityInfo(ChannelInfo('stable', '396', 5))
 
 
-class _FakeSamplesDataSource(object):
+class _FakeScheduledAvailabilityFinder(object):
 
-  def Create(self, request):
-    return {}
-
-
-# Sad irony :(
-class _FakeAPIDataSource(object):
-
-  def __init__(self, json_data):
-    self._json = json_data
-
-  def Create(self, *args, **kwargs):
-    return self
-
-  def get(self, key, disable_refs=False):
-    if key not in self._json:
-      raise FileNotFoundError(key)
-    return self._json[key]
-
-
-class _FakeAPIModels(object):
-
-  def __init__(self, names):
-    self._names = names
-
-  def GetNames(self):
-    return self._names
+  def GetApiAvailability(self, version):
+    return AvailabilityInfo(ChannelInfo('beta', '1453', 27), scheduled=28)
 
 
 class _FakeTemplateCache(object):
@@ -106,20 +82,11 @@ class APIDataSourceTest(unittest.TestCase):
     with open(os.path.join(self._base_path, filename), 'r') as f:
       return f.read()
 
-  def _CreateRefResolver(self, filename):
-    test_data = self._LoadJSON(filename)
-    return ReferenceResolver.Factory(_FakeAPIDataSource(test_data),
-                                     _FakeAPIModels(test_data),
-                                     ObjectStoreCreator.ForTest()).Create()
-
   def _LoadJSON(self, filename):
     return json.loads(self._ReadLocalFile(filename))
 
   def testCreateId(self):
-    dict_ = _JSCModel('tester',
-                      self._api_models,
-                      self._CreateRefResolver('test_file_data_source.json'),
-                      False,
+    dict_ = _JSCModel(self._api_models.GetModel('tester').Get(),
                       _FakeAvailabilityFinder(),
                       self._json_cache,
                       _FakeTemplateCache(),
@@ -134,10 +101,7 @@ class APIDataSourceTest(unittest.TestCase):
   # TODO(kalman): re-enable this when we have a rebase option.
   def DISABLED_testToDict(self):
     expected_json = self._LoadJSON('expected_tester.json')
-    dict_ = _JSCModel('tester',
-                      self._api_models,
-                      False,
-                      self._CreateRefResolver('test_file_data_source.json'),
+    dict_ = _JSCModel(self._api_models.GetModel('tester').Get(),
                       _FakeAvailabilityFinder(),
                       self._json_cache,
                       _FakeTemplateCache(),
@@ -150,42 +114,23 @@ class APIDataSourceTest(unittest.TestCase):
     self.assertEquals('67', _FormatValue(67))
     self.assertEquals('234,567', _FormatValue(234567))
 
-  def testFormatDescription(self):
-    dict_ = _JSCModel('ref_test',
-                      self._api_models,
-                      self._CreateRefResolver('ref_test_data_source.json'),
-                      False,
-                      _FakeAvailabilityFinder(),
-                      self._json_cache,
-                      _FakeTemplateCache(),
-                      self._features_bundle,
-                      None).ToDict()
-    self.assertEquals(_MakeLink('ref_test.html#type-type2', 'type2'),
-                      _GetType(dict_, 'type1')['description'])
-    self.assertEquals(
-        'A %s, or %s' % (_MakeLink('ref_test.html#type-type3', 'type3'),
-                         _MakeLink('ref_test.html#type-type2', 'type2')),
-        _GetType(dict_, 'type2')['description'])
-    self.assertEquals(
-        '%s != %s' % (_MakeLink('other.html#type-type2', 'other.type2'),
-                      _MakeLink('ref_test.html#type-type2', 'type2')),
-        _GetType(dict_, 'type3')['description'])
-
-
   def testGetApiAvailability(self):
     api_availabilities = {
-      'bluetooth': ChannelInfo('dev', CANNED_BRANCHES[28], 28),
-      'contextMenus': ChannelInfo('trunk', CANNED_BRANCHES['trunk'], 'trunk'),
-      'jsonStableAPI': ChannelInfo('stable', CANNED_BRANCHES[20], 20),
-      'idle': ChannelInfo('stable', CANNED_BRANCHES[5], 5),
-      'input.ime': ChannelInfo('stable', CANNED_BRANCHES[18], 18),
-      'tabs': ChannelInfo('stable', CANNED_BRANCHES[18], 18)
+      'bluetooth': AvailabilityInfo(
+          ChannelInfo('dev', CANNED_BRANCHES[28], 28)),
+      'contextMenus': AvailabilityInfo(
+          ChannelInfo('trunk', CANNED_BRANCHES['trunk'], 'trunk')),
+      'jsonStableAPI': AvailabilityInfo(
+          ChannelInfo('stable', CANNED_BRANCHES[20], 20)),
+      'idle': AvailabilityInfo(
+          ChannelInfo('stable', CANNED_BRANCHES[5], 5)),
+      'input.ime': AvailabilityInfo(
+          ChannelInfo('stable', CANNED_BRANCHES[18], 18)),
+      'tabs': AvailabilityInfo(
+          ChannelInfo('stable', CANNED_BRANCHES[18], 18))
     }
     for api_name, availability in api_availabilities.iteritems():
-      model = _JSCModel(api_name,
-                        self._avail_api_models,
-                        None,
-                        True,
+      model = _JSCModel(self._avail_api_models.GetModel(api_name).Get(),
                         self._avail_finder,
                         self._avail_json_cache,
                         _FakeTemplateCache(),
@@ -194,10 +139,7 @@ class APIDataSourceTest(unittest.TestCase):
       self.assertEquals(availability, model._GetApiAvailability())
 
   def testGetIntroList(self):
-    model = _JSCModel('tester',
-                      self._api_models,
-                      self._CreateRefResolver('test_file_data_source.json'),
-                      False,
+    model = _JSCModel(self._api_models.GetModel('tester').Get(),
                       _FakeAvailabilityFinder(),
                       self._json_cache,
                       _FakeTemplateCache(),
@@ -213,7 +155,8 @@ class APIDataSourceTest(unittest.TestCase):
         'content': [
           { 'partial': 'handlebar chrome/common/extensions/docs/' +
                        'templates/private/intro_tables/stable_message.html',
-            'version': 5
+            'version': 5,
+            'scheduled': None
           }
         ]
       },
@@ -242,6 +185,25 @@ class APIDataSourceTest(unittest.TestCase):
     ]
     self.assertEquals(model._GetIntroTableList(), expected_list)
 
+    # Tests the same data with a scheduled availability.
+    model = _JSCModel(self._api_models.GetModel('tester').Get(),
+                      _FakeScheduledAvailabilityFinder(),
+                      self._json_cache,
+                      _FakeTemplateCache(),
+                      self._features_bundle,
+                      None)
+    expected_list[1] = {
+      'title': 'Availability',
+      'content': [
+        { 'partial': 'handlebar chrome/common/extensions/docs/' +
+                     'templates/private/intro_tables/beta_message.html',
+          'version': 27,
+          'scheduled': 28
+        }
+      ]
+    }
+    self.assertEquals(model._GetIntroTableList(), expected_list)
+
   def testGetEventByNameFromEvents(self):
     events = {}
     # Missing 'types' completely.
@@ -267,10 +229,7 @@ class APIDataSourceTest(unittest.TestCase):
     return _GetEventByNameFromEvents(events)
 
   def testAddRules(self):
-    dict_ = _JSCModel('add_rules_tester',
-                      self._api_models,
-                      self._CreateRefResolver('test_file_data_source.json'),
-                      False,
+    dict_ = _JSCModel(self._api_models.GetModel('add_rules_tester').Get(),
                       _FakeAvailabilityFinder(),
                       self._json_cache,
                       _FakeTemplateCache(),

@@ -12,18 +12,16 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
-#include "mojo/examples/aura_demo/demo_screen.h"
-#include "mojo/examples/aura_demo/window_tree_host_mojo.h"
+#include "mojo/aura/screen_mojo.h"
+#include "mojo/aura/window_tree_host_mojo.h"
 #include "mojo/examples/launcher/launcher.mojom.h"
-#include "mojo/public/bindings/allocation_scope.h"
-#include "mojo/public/bindings/remote_ptr.h"
+#include "mojo/public/cpp/bindings/allocation_scope.h"
+#include "mojo/public/cpp/gles2/gles2.h"
+#include "mojo/public/cpp/shell/application.h"
 #include "mojo/public/cpp/system/core.h"
-#include "mojo/public/gles2/gles2_cpp.h"
-#include "mojo/public/shell/application.h"
-#include "mojo/public/shell/shell.mojom.h"
+#include "mojo/public/interfaces/shell/shell.mojom.h"
 #include "mojo/services/native_viewport/native_viewport.mojom.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/aura/client/default_activation_client.h"
 #include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/client/window_tree_client.h"
 #include "ui/aura/env.h"
@@ -45,6 +43,7 @@
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+#include "ui/wm/core/default_activation_client.h"
 #include "url/gurl.h"
 
 #if defined(WIN32)
@@ -67,6 +66,7 @@ class MinimalInputEventFilter : public ui::internal::InputMethodDelegate,
       : root_(root),
         input_method_(ui::CreateInputMethod(this,
                                             gfx::kNullAcceleratedWidget)) {
+    ui::InitializeInputMethod();
     input_method_->Init(true);
     root_->AddPreTargetHandler(this);
     root_->SetProperty(aura::client::kRootWindowInputMethodKey,
@@ -188,38 +188,32 @@ class LauncherController : public views::TextfieldController {
   DISALLOW_COPY_AND_ASSIGN(LauncherController);
 };
 
-class LauncherImpl : public Application,
-                     public Launcher,
+class LauncherImpl : public ServiceConnection<Launcher, LauncherImpl>,
                      public URLReceiver {
  public:
-  explicit LauncherImpl(MojoHandle shell_handle)
-      : Application(shell_handle),
-        launcher_controller_(this),
+  LauncherImpl()
+      : launcher_controller_(this),
+        launcher_client_(NULL),
         pending_show_(false) {
-    screen_.reset(DemoScreen::Create());
+  }
+
+  void Initialize() {
+    screen_.reset(ScreenMojo::Create());
     gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, screen_.get());
 
-    InterfacePipe<NativeViewport, AnyInterface> pipe;
-
-    AllocationScope scope;
-    shell()->Connect("mojo:mojo_native_viewport_service",
-                     pipe.handle_to_peer.Pass());
+    NativeViewportPtr viewport;
+    ConnectTo(shell(), "mojo:mojo_native_viewport_service", &viewport);
 
     window_tree_host_.reset(new WindowTreeHostMojo(
-        pipe.handle_to_self.Pass(), gfx::Rect(50, 50, 450, 60),
+        viewport.Pass(), gfx::Rect(50, 50, 450, 60),
         base::Bind(&LauncherImpl::HostContextCreated, base::Unretained(this))));
   }
 
  private:
-  // Overridden from Application:
-  virtual void AcceptConnection(const mojo::String& url,
-                                ScopedMessagePipeHandle handle) OVERRIDE {
-    launcher_client_.reset(
-        MakeScopedHandle(LauncherClientHandle(handle.release().value())).Pass(),
-        this);
-  }
-
   // Overridden from Launcher:
+  virtual void SetClient(LauncherClient* client) OVERRIDE {
+    launcher_client_ = client;
+  }
   virtual void Show() OVERRIDE {
     if (!window_tree_host_.get()) {
       pending_show_ = true;
@@ -244,8 +238,7 @@ class LauncherImpl : public Application,
     focus_client_.reset(new aura::test::TestFocusClient());
     aura::client::SetFocusClient(window_tree_host_->window(),
                                  focus_client_.get());
-    activation_client_.reset(
-        new aura::client::DefaultActivationClient(window_tree_host_->window()));
+    new wm::DefaultActivationClient(window_tree_host_->window());
     capture_client_.reset(
         new aura::client::DefaultCaptureClient(window_tree_host_->window()));
     ime_filter_.reset(new MinimalInputEventFilter(window_tree_host_->window()));
@@ -261,16 +254,15 @@ class LauncherImpl : public Application,
     }
   }
 
-  scoped_ptr<DemoScreen> screen_;
+  scoped_ptr<ScreenMojo> screen_;
   scoped_ptr<LauncherWindowTreeClient> window_tree_client_;
-  scoped_ptr<aura::client::DefaultActivationClient> activation_client_;
   scoped_ptr<aura::client::FocusClient> focus_client_;
   scoped_ptr<aura::client::DefaultCaptureClient> capture_client_;
   scoped_ptr<ui::EventHandler> ime_filter_;
 
   LauncherController launcher_controller_;
 
-  RemotePtr<LauncherClient> launcher_client_;
+  LauncherClient* launcher_client_;
   scoped_ptr<aura::WindowTreeHost> window_tree_host_;
 
   bool pending_show_;
@@ -297,9 +289,12 @@ extern "C" LAUNCHER_EXPORT MojoResult CDECL MojoMain(
   // TODO(beng): This crashes in a DCHECK on X11 because this thread's
   //             MessageLoop is not of TYPE_UI. I think we need a way to build
   //             Aura that doesn't define platform-specific stuff.
-  aura::Env::CreateInstance();
-  mojo::examples::LauncherImpl launcher(shell_handle);
-  loop.Run();
+  aura::Env::CreateInstance(true);
 
+  mojo::Application app(shell_handle);
+  app.AddServiceConnector(
+      new mojo::ServiceConnector<mojo::examples::LauncherImpl>());
+
+  loop.Run();
   return MOJO_RESULT_OK;
 }

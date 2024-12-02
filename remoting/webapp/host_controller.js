@@ -9,28 +9,14 @@ var remoting = remoting || {};
 
 /** @constructor */
 remoting.HostController = function() {
-  /** @return {remoting.HostPlugin} */
-  var createPluginForMe2Me = function() {
-    /** @type {HTMLElement} @private */
-    var container = document.getElementById('daemon-plugin-container');
-    return remoting.createNpapiPlugin(container);
-  };
+  this.hostDispatcher_ = this.createDispatcher_();
+};
 
-  /** @type {remoting.HostDispatcher} @private */
-  this.hostDispatcher_ = new remoting.HostDispatcher(createPluginForMe2Me);
-
-  /** @param {string} version */
-  var printVersion = function(version) {
-    if (version == '') {
-      console.log('Host not installed.');
-    } else {
-      console.log('Host version: ' + version);
-    }
-  };
-
-  this.hostDispatcher_.getDaemonVersion(printVersion, function() {
-    console.log('Host version not available.');
-  });
+/**
+ * @return {remoting.HostDispatcher}
+ */
+remoting.HostController.prototype.getDispatcher = function() {
+  return this.hostDispatcher_;
 };
 
 // Note that the values in the enums below are copied from
@@ -78,6 +64,37 @@ remoting.HostController.AsyncResult.fromString = function(result) {
 }
 
 /**
+ * @return {remoting.HostDispatcher}
+ * @private
+ */
+remoting.HostController.prototype.createDispatcher_ = function() {
+  /** @return {remoting.HostPlugin} */
+  var createPluginForMe2Me = function() {
+    /** @type {HTMLElement} @private */
+    var container = document.getElementById('daemon-plugin-container');
+    return remoting.createNpapiPlugin(container);
+  };
+
+  /** @type {remoting.HostDispatcher} @private */
+  var hostDispatcher = new remoting.HostDispatcher(createPluginForMe2Me);
+
+  /** @param {string} version */
+  var printVersion = function(version) {
+    if (version == '') {
+      console.log('Host not installed.');
+    } else {
+      console.log('Host version: ' + version);
+    }
+  };
+
+  hostDispatcher.getDaemonVersion(printVersion, function() {
+    console.log('Host version not available.');
+  });
+
+  return hostDispatcher;
+};
+
+/**
  * Set of features for which hasFeature() can be used to test.
  *
  * @enum {string}
@@ -106,6 +123,27 @@ remoting.HostController.prototype.hasFeature = function(feature, callback) {
  */
 remoting.HostController.prototype.getConsent = function(onDone, onError) {
   this.hostDispatcher_.getUsageStatsConsent(onDone, onError);
+};
+
+/**
+ * @param {function(remoting.HostController.AsyncResult):void} onDone
+ * @param {function(remoting.Error):void} onError
+ * @return {void}
+ */
+remoting.HostController.prototype.installHost = function(onDone, onError) {
+  /** @type {remoting.HostController} */
+  var that = this;
+
+  /** @param {remoting.HostController.AsyncResult} asyncResult */
+  var onHostInstalled = function(asyncResult) {
+    // Refresh the dispatcher after the host has been installed.
+    if (asyncResult == remoting.HostController.AsyncResult.OK) {
+      that.hostDispatcher_ = that.createDispatcher_();
+    }
+    onDone(asyncResult);
+  };
+
+  this.hostDispatcher_.installHost(onHostInstalled, onError);
 };
 
 /**

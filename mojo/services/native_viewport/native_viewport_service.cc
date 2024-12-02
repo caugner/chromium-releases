@@ -7,8 +7,8 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/time/time.h"
-#include "mojo/public/bindings/allocation_scope.h"
-#include "mojo/public/shell/shell.mojom.h"
+#include "mojo/public/cpp/bindings/allocation_scope.h"
+#include "mojo/public/interfaces/shell/shell.mojom.h"
 #include "mojo/services/gles2/command_buffer_impl.h"
 #include "mojo/services/native_viewport/geometry_conversions.h"
 #include "mojo/services/native_viewport/native_viewport.h"
@@ -28,20 +28,30 @@ bool IsRateLimitedEventType(ui::Event* event) {
 }
 
 class NativeViewportImpl
-    : public Service<mojo::NativeViewport, NativeViewportImpl, shell::Context>,
+    : public ServiceConnection<mojo::NativeViewport,
+                               NativeViewportImpl,
+                               shell::Context>,
       public NativeViewportDelegate {
  public:
   NativeViewportImpl()
-      : widget_(gfx::kNullAcceleratedWidget),
-        waiting_for_event_ack_(false),
-        pending_event_timestamp_(0) {}
-  virtual ~NativeViewportImpl() {}
+      : client_(NULL),
+        widget_(gfx::kNullAcceleratedWidget),
+        waiting_for_event_ack_(false) {}
+  virtual ~NativeViewportImpl() {
+    // Destroy the NativeViewport early on as it may call us back during
+    // destruction and we want to be in a known state.
+    native_viewport_.reset();
+  }
+
+  virtual void SetClient(NativeViewportClient* client) OVERRIDE {
+    client_ = client;
+  }
 
   virtual void Create(const Rect& bounds) OVERRIDE {
     native_viewport_ =
         services::NativeViewport::Create(context(), this);
     native_viewport_->Init(bounds);
-    client()->OnCreated();
+    client_->OnCreated();
     OnBoundsChanged(bounds);
   }
 
@@ -67,23 +77,18 @@ class NativeViewportImpl
 
   virtual void CreateGLES2Context(ScopedMessagePipeHandle client_handle)
       OVERRIDE {
-    if (command_buffer_ || command_buffer_handle_.is_valid()) {
+    if (command_buffer_.get() || command_buffer_handle_.is_valid()) {
       LOG(ERROR) << "Can't create multiple contexts on a NativeViewport";
       return;
     }
 
-    // TODO(darin):
-    // CreateGLES2Context should accept a ScopedCommandBufferClientHandle once
-    // it is possible to import interface definitions from another module.  For
-    // now, we just kludge it.
-    command_buffer_handle_.reset(
-        InterfaceHandle<CommandBufferClient>(client_handle.release().value()));
+    // TODO(darin): CreateGLES2Context should accept a |CommandBufferPtr*|.
+    command_buffer_handle_ = client_handle.Pass();
 
     CreateCommandBufferIfNeeded();
   }
 
-  virtual void AckEvent(const Event& event) OVERRIDE {
-    DCHECK_EQ(event.time_stamp(), pending_event_timestamp_);
+  void AckEvent() {
     waiting_for_event_ack_ = false;
   }
 
@@ -96,8 +101,9 @@ class NativeViewportImpl
     gfx::Size size = native_viewport_->GetSize();
     if (size.IsEmpty())
       return;
-    command_buffer_.reset(new CommandBufferImpl(
-        command_buffer_handle_.Pass(), widget_, native_viewport_->GetSize()));
+    command_buffer_.reset(
+        BindToPipe(new CommandBufferImpl(widget_, native_viewport_->GetSize()),
+                   command_buffer_handle_.Pass()));
   }
 
   virtual bool OnEvent(ui::Event* ui_event) OVERRIDE {
@@ -118,13 +124,12 @@ class NativeViewportImpl
     if (waiting_for_event_ack_ && IsRateLimitedEventType(ui_event))
       return false;
 
-    pending_event_timestamp_ = ui_event->time_stamp().ToInternalValue();
     AllocationScope scope;
 
     Event::Builder event;
     event.set_action(ui_event->type());
     event.set_flags(ui_event->flags());
-    event.set_time_stamp(pending_event_timestamp_);
+    event.set_time_stamp(ui_event->time_stamp().ToInternalValue());
 
     if (ui_event->IsMouseEvent() || ui_event->IsTouchEvent()) {
       ui::LocatedEvent* located_event =
@@ -148,7 +153,9 @@ class NativeViewportImpl
       event.set_key_data(key_data.Finish());
     }
 
-    client()->OnEvent(event.Finish());
+    client_->OnEvent(event.Finish(),
+                     base::Bind(&NativeViewportImpl::AckEvent,
+                                base::Unretained(this)));
     waiting_for_event_ack_ = true;
     return false;
   }
@@ -162,52 +169,35 @@ class NativeViewportImpl
   virtual void OnBoundsChanged(const gfx::Rect& bounds) OVERRIDE {
     CreateCommandBufferIfNeeded();
     AllocationScope scope;
-    client()->OnBoundsChanged(bounds);
+    client_->OnBoundsChanged(bounds);
   }
 
   virtual void OnDestroyed() OVERRIDE {
     command_buffer_.reset();
-    client()->OnDestroyed();
+    client_->OnDestroyed();
     base::MessageLoop::current()->Quit();
   }
 
  private:
+  NativeViewportClient* client_;
   gfx::AcceleratedWidget widget_;
   scoped_ptr<services::NativeViewport> native_viewport_;
-  ScopedCommandBufferClientHandle command_buffer_handle_;
+  ScopedMessagePipeHandle command_buffer_handle_;
   scoped_ptr<CommandBufferImpl> command_buffer_;
   bool waiting_for_event_ack_;
-  int64 pending_event_timestamp_;
 };
 
 }  // namespace services
 }  // namespace mojo
 
 
-#if defined(OS_ANDROID)
-
-// Android will call this.
 MOJO_NATIVE_VIEWPORT_EXPORT mojo::Application*
     CreateNativeViewportService(mojo::shell::Context* context,
-                                mojo::ScopedShellHandle shell_handle) {
+                                mojo::ScopedMessagePipeHandle shell_handle) {
   mojo::Application* app = new mojo::Application(shell_handle.Pass());
-  app->AddServiceFactory(
-    new mojo::ServiceFactory<mojo::services::NativeViewportImpl,
-                             mojo::shell::Context>(context));
+  app->AddServiceConnector(
+      new mojo::ServiceConnector<mojo::services::NativeViewportImpl,
+                                 mojo::shell::Context>(context));
   return app;
 }
 
-#else
-
-extern "C" MOJO_NATIVE_VIEWPORT_EXPORT MojoResult MojoMain(
-    const MojoHandle shell_handle) {
-  base::MessageLoopForUI loop;
-  mojo::Application app(shell_handle);
-  app.AddServiceFactory(
-    new mojo::ServiceFactory<mojo::services::NativeViewportImpl,
-                             mojo::shell::Context>);
-  loop.Run();
-  return MOJO_RESULT_OK;
-}
-
-#endif // !OS_ANDROID

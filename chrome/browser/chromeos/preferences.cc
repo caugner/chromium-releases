@@ -28,15 +28,15 @@
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/feedback/tracing_manager.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/ime/extension_ime_util.h"
+#include "chromeos/ime/ime_keyboard.h"
 #include "chromeos/ime/input_method_manager.h"
-#include "chromeos/ime/xkeyboard.h"
 #include "chromeos/system/statistics_provider.h"
+#include "components/feedback/tracing_manager.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "ui/events/event_constants.h"
@@ -442,7 +442,7 @@ void Preferences::ApplyPreferences(ApplyReason reason,
     const bool enabled = natural_scroll_.GetValue();
     DVLOG(1) << "Natural scroll set to " << enabled;
     if (user_is_active)
-      ui::SetNaturalScroll(enabled);
+      touchpad_settings.SetNaturalScroll(enabled);
     if (reason == REASON_PREF_CHANGED)
       UMA_HISTOGRAM_BOOLEAN("Touchpad.NaturalScroll.Changed", enabled);
     else if (reason == REASON_INITIALIZATION)
@@ -518,7 +518,8 @@ void Preferences::ApplyPreferences(ApplyReason reason,
       pref_name == prefs::kLanguageXkbAutoRepeatEnabled) {
     if (user_is_active) {
       const bool enabled = xkb_auto_repeat_enabled_.GetValue();
-      input_method::InputMethodManager::Get()->GetXKeyboard()
+      input_method::InputMethodManager::Get()
+          ->GetImeKeyboard()
           ->SetAutoRepeatEnabled(enabled);
     }
   }
@@ -627,7 +628,8 @@ void Preferences::UpdateAutoRepeatRate() {
   rate.repeat_interval_in_ms = xkb_auto_repeat_interval_pref_.GetValue();
   DCHECK(rate.initial_delay_in_ms > 0);
   DCHECK(rate.repeat_interval_in_ms > 0);
-  input_method::InputMethodManager::Get()->GetXKeyboard()
+  input_method::InputMethodManager::Get()
+      ->GetImeKeyboard()
       ->SetAutoRepeatRate(rate);
 }
 

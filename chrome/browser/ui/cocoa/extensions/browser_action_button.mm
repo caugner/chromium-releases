@@ -132,6 +132,8 @@ class ExtensionActionIconFactoryBridge
     ExtensionAction* browser_action =
         extensions::ExtensionActionManager::Get(browser->profile())->
         GetBrowserAction(*extension);
+    CHECK(browser_action)
+        << "Don't create a BrowserActionButton if there is no browser action.";
     [cell setExtensionAction:browser_action];
     [cell
         accessibilitySetOverrideValue:base::SysUTF8ToNSString(extension->name())
@@ -149,16 +151,14 @@ class ExtensionActionIconFactoryBridge
     [self setButtonType:NSMomentaryChangeButton];
     [self setShowsBorderOnlyWhileMouseInside:YES];
 
-    if (extension->ShowConfigureContextMenus()) {
-      contextMenuController_.reset([[ExtensionActionContextMenuController alloc]
-          initWithExtension:extension
-                    browser:browser
-            extensionAction:browser_action]);
-      base::scoped_nsobject<NSMenu> contextMenu(
-          [[NSMenu alloc] initWithTitle:@""]);
-      [contextMenu setDelegate:self];
-      [self setMenu:contextMenu];
-    }
+    contextMenuController_.reset([[ExtensionActionContextMenuController alloc]
+        initWithExtension:extension
+                  browser:browser
+          extensionAction:browser_action]);
+    base::scoped_nsobject<NSMenu> contextMenu(
+        [[NSMenu alloc] initWithTitle:@""]);
+    [contextMenu setDelegate:self];
+    [self setMenu:contextMenu];
 
     tabId_ = tabId;
     extension_ = extension;
@@ -337,6 +337,7 @@ class ExtensionActionIconFactoryBridge
 - (void)drawWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
   gfx::ScopedNSGraphicsContextSaveGState scopedGState;
   [super drawWithFrame:cellFrame inView:controlView];
+  CHECK(extensionAction_);
   bool enabled = extensionAction_->GetIsVisible(tabId_);
   const NSSize imageSize = self.image.size;
   const NSRect imageRect =

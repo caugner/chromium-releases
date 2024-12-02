@@ -11,6 +11,7 @@
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
+#include "ui/base/theme_provider.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/controls/button/label_button_border.h"
@@ -50,7 +51,7 @@ gfx::Size ToolbarButton::GetPreferredSize() {
   gfx::Size size(image()->GetPreferredSize());
   gfx::Size label_size = label()->GetPreferredSize();
   if (label_size.width() > 0)
-    size.Enlarge(label_size.width() + LocationBarView::GetItemPadding(), 0);
+    size.Enlarge(label_size.width() + LocationBarView::kItemPadding, 0);
   return size;
 }
 
@@ -128,6 +129,21 @@ void ToolbarButton::GetAccessibleState(ui::AXViewState* state) {
   state->AddStateFlag(ui::AX_STATE_HASPOPUP);
 }
 
+scoped_ptr<views::LabelButtonBorder>
+ToolbarButton::CreateDefaultBorder() const {
+  scoped_ptr<views::LabelButtonBorder> border =
+      LabelButton::CreateDefaultBorder();
+
+  ui::ThemeProvider* provider = GetThemeProvider();
+  if (provider && provider->UsingNativeTheme()) {
+    // We set smaller insets here to accommodate the slightly larger GTK+
+    // icons.
+    border->set_insets(gfx::Insets(2, 2, 2, 2));
+  }
+
+  return border.Pass();
+}
+
 void ToolbarButton::ShowContextMenuForView(View* source,
                                            const gfx::Point& point,
                                            ui::MenuSourceType source_type) {
@@ -199,9 +215,10 @@ void ToolbarButton::ShowDropDownMenu(ui::MenuSourceType source_type) {
     menu_delegate.set_triggerable_event_flags(triggerable_event_flags());
     menu_runner_.reset(new views::MenuRunner(menu_delegate.CreateMenu()));
     views::MenuRunner::RunResult result =
-        menu_runner_->RunMenuAt(GetWidget(), NULL,
+        menu_runner_->RunMenuAt(GetWidget(),
+                                NULL,
                                 gfx::Rect(menu_position, gfx::Size(0, 0)),
-                                views::MenuItemView::TOPLEFT,
+                                views::MENU_ANCHOR_TOPLEFT,
                                 source_type,
                                 views::MenuRunner::HAS_MNEMONICS);
     if (result == views::MenuRunner::MENU_DELETED)
@@ -211,9 +228,10 @@ void ToolbarButton::ShowDropDownMenu(ui::MenuSourceType source_type) {
     views::MenuItemView* menu = new views::MenuItemView(&menu_delegate);
     menu_runner_.reset(new views::MenuRunner(menu));
     views::MenuRunner::RunResult result =
-        menu_runner_->RunMenuAt(GetWidget(), NULL,
+        menu_runner_->RunMenuAt(GetWidget(),
+                                NULL,
                                 gfx::Rect(menu_position, gfx::Size(0, 0)),
-                                views::MenuItemView::TOPLEFT,
+                                views::MENU_ANCHOR_TOPLEFT,
                                 source_type,
                                 views::MenuRunner::HAS_MNEMONICS);
     if (result == views::MenuRunner::MENU_DELETED)

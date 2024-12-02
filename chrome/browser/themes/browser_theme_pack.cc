@@ -870,8 +870,7 @@ gfx::Image BrowserThemePack::GetImageNamed(int idr_id) {
       png_map[scale_factors_[i]] = memory;
   }
   if (!png_map.empty()) {
-    gfx::ImageSkia image_skia(new ThemeImagePngSource(png_map),
-                              ui::SCALE_FACTOR_100P);
+    gfx::ImageSkia image_skia(new ThemeImagePngSource(png_map), 1.0f);
     // |image_skia| takes ownership of ThemeImagePngSource.
     gfx::Image ret = gfx::Image(image_skia);
     images_on_ui_thread_[prs_id] = ret;
@@ -1452,7 +1451,6 @@ void BrowserThemePack::CreateTabBackgroundImages(ImageCache* images) const {
 
 void BrowserThemePack::RepackImages(const ImageCache& images,
                                     RawImages* reencoded_images) const {
-  typedef std::vector<ui::ScaleFactor> ScaleFactors;
   for (ImageCache::const_iterator it = images.begin();
        it != images.end(); ++it) {
     gfx::ImageSkia image_skia = *it->second.ToImageSkia();

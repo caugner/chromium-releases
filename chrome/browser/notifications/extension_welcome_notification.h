@@ -163,5 +163,3 @@ class ExtensionWelcomeNotification : public PrefServiceSyncableObserver {
 };
 
 #endif  // CHROME_BROWSER_NOTIFICATIONS_EXTENSION_WELCOME_NOTIFICATION_H_
-
-// C++ Readability Review Change Trigger

@@ -13,19 +13,19 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/themes/theme_properties.h"
-#include "chrome/browser/ui/views/avatar_label.h"
-#include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/opaque_browser_frame_view_layout.h"
 #include "chrome/browser/ui/views/frame/opaque_browser_frame_view_platform_specific.h"
-#include "chrome/browser/ui/views/new_avatar_button.h"
+#include "chrome/browser/ui/views/profiles/avatar_label.h"
+#include "chrome/browser/ui/views/profiles/avatar_menu_button.h"
+#include "chrome/browser/ui/views/profiles/new_avatar_button.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/theme_image_mapper.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/profile_management_switches.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
@@ -101,32 +101,30 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
       frame_background_(new views::FrameBackground()) {
   SetLayoutManager(layout_);
 
-  if (OpaqueBrowserFrameViewLayout::ShouldAddDefaultCaptionButtons()) {
-    minimize_button_ = InitWindowCaptionButton(IDR_MINIMIZE,
-                                               IDR_MINIMIZE_H,
-                                               IDR_MINIMIZE_P,
-                                               IDR_MINIMIZE_BUTTON_MASK,
-                                               IDS_ACCNAME_MINIMIZE,
-                                               VIEW_ID_MINIMIZE_BUTTON);
-    maximize_button_ = InitWindowCaptionButton(IDR_MAXIMIZE,
-                                               IDR_MAXIMIZE_H,
-                                               IDR_MAXIMIZE_P,
-                                               IDR_MAXIMIZE_BUTTON_MASK,
-                                               IDS_ACCNAME_MAXIMIZE,
-                                               VIEW_ID_MAXIMIZE_BUTTON);
-    restore_button_ = InitWindowCaptionButton(IDR_RESTORE,
-                                              IDR_RESTORE_H,
-                                              IDR_RESTORE_P,
-                                              IDR_RESTORE_BUTTON_MASK,
-                                              IDS_ACCNAME_RESTORE,
-                                              VIEW_ID_RESTORE_BUTTON);
-    close_button_ = InitWindowCaptionButton(IDR_CLOSE,
-                                            IDR_CLOSE_H,
-                                            IDR_CLOSE_P,
-                                            IDR_CLOSE_BUTTON_MASK,
-                                            IDS_ACCNAME_CLOSE,
-                                            VIEW_ID_CLOSE_BUTTON);
-  }
+  minimize_button_ = InitWindowCaptionButton(IDR_MINIMIZE,
+                                             IDR_MINIMIZE_H,
+                                             IDR_MINIMIZE_P,
+                                             IDR_MINIMIZE_BUTTON_MASK,
+                                             IDS_ACCNAME_MINIMIZE,
+                                             VIEW_ID_MINIMIZE_BUTTON);
+  maximize_button_ = InitWindowCaptionButton(IDR_MAXIMIZE,
+                                             IDR_MAXIMIZE_H,
+                                             IDR_MAXIMIZE_P,
+                                             IDR_MAXIMIZE_BUTTON_MASK,
+                                             IDS_ACCNAME_MAXIMIZE,
+                                             VIEW_ID_MAXIMIZE_BUTTON);
+  restore_button_ = InitWindowCaptionButton(IDR_RESTORE,
+                                            IDR_RESTORE_H,
+                                            IDR_RESTORE_P,
+                                            IDR_RESTORE_BUTTON_MASK,
+                                            IDS_ACCNAME_RESTORE,
+                                            VIEW_ID_RESTORE_BUTTON);
+  close_button_ = InitWindowCaptionButton(IDR_CLOSE,
+                                          IDR_CLOSE_H,
+                                          IDR_CLOSE_P,
+                                          IDR_CLOSE_BUTTON_MASK,
+                                          IDS_ACCNAME_CLOSE,
+                                          VIEW_ID_CLOSE_BUTTON);
 
   // Initializing the TabIconView is expensive, so only do it if we need to.
   if (browser_view->ShouldShowWindowIcon()) {
@@ -149,8 +147,7 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
   window_title_->set_id(VIEW_ID_WINDOW_TITLE);
   AddChildView(window_title_);
 
-  if (browser_view->IsRegularOrGuestSession() &&
-      switches::IsNewProfileManagement())
+  if (browser_view->IsRegularOrGuestSession() && switches::IsNewAvatarMenu())
     UpdateNewStyleAvatarInfo(this, NewAvatarButton::THEMED_BUTTON);
   else
     UpdateAvatarInfo();
@@ -275,8 +272,6 @@ void OpaqueBrowserFrameView::GetWindowMask(const gfx::Size& size,
 }
 
 void OpaqueBrowserFrameView::ResetWindowControls() {
-  if (!OpaqueBrowserFrameViewLayout::ShouldAddDefaultCaptionButtons())
-    return;
   restore_button_->SetState(views::CustomButton::STATE_NORMAL);
   minimize_button_->SetState(views::CustomButton::STATE_NORMAL);
   maximize_button_->SetState(views::CustomButton::STATE_NORMAL);
@@ -330,25 +325,9 @@ bool OpaqueBrowserFrameView::HitTestRect(const gfx::Rect& rect) const {
     return tabstrip->IsRectInWindowCaption(rect_in_tabstrip_coords);
   }
 
-  // The window switcher button is to the right of the tabstrip but is
-  // part of the client view.
-  views::View* window_switcher_button =
-      browser_view()->window_switcher_button();
-  if (window_switcher_button && window_switcher_button->visible()) {
-    gfx::RectF rect_in_window_switcher_coords_f(rect);
-    View::ConvertRectToTarget(this, window_switcher_button,
-        &rect_in_window_switcher_coords_f);
-    gfx::Rect rect_in_window_switcher_coords = gfx::ToEnclosingRect(
-        rect_in_window_switcher_coords_f);
-
-    if (window_switcher_button->HitTestRect(rect_in_window_switcher_coords))
-      return false;
-  }
-
   // We claim |rect| because it is above the bottom of the tabstrip, but
-  // neither in the tabstrip nor in the window switcher button. In particular,
-  // the avatar label/button is left of the tabstrip and the window controls
-  // are right of the tabstrip.
+  // not in the tabstrip itself. In particular, the avatar label/button is left
+  // of the tabstrip and the window controls are right of the tabstrip.
   return true;
 }
 
@@ -383,7 +362,7 @@ void OpaqueBrowserFrameView::OnMenuButtonClicked(views::View* source,
   ignore_result(menu_runner.RunMenuAt(browser_view()->GetWidget(),
                                       window_icon_,
                                       window_icon_->GetBoundsInScreen(),
-                                      views::MenuItemView::TOPLEFT,
+                                      views::MENU_ANCHOR_TOPLEFT,
                                       ui::MENU_SOURCE_MOUSE,
                                       views::MenuRunner::HAS_MNEMONICS));
 #endif
@@ -419,10 +398,11 @@ void OpaqueBrowserFrameView::Observe(
   switch (type) {
     case chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED:
       if (browser_view() ->IsRegularOrGuestSession() &&
-          switches::IsNewProfileManagement())
+          switches::IsNewAvatarMenu()) {
         UpdateNewStyleAvatarInfo(this, NewAvatarButton::THEMED_BUTTON);
-      else
+      } else {
         UpdateAvatarInfo();
+      }
       break;
     default:
       NOTREACHED() << "Got a notification we didn't register for!";
@@ -472,8 +452,6 @@ gfx::Size OpaqueBrowserFrameView::GetBrowserViewMinimumSize() const {
 }
 
 bool OpaqueBrowserFrameView::ShouldShowCaptionButtons() const {
-  if (!OpaqueBrowserFrameViewLayout::ShouldAddDefaultCaptionButtons())
-    return false;
   return ShouldShowWindowTitleBar();
 }
 
@@ -507,15 +485,6 @@ bool OpaqueBrowserFrameView::IsTabStripVisible() const {
 
 int OpaqueBrowserFrameView::GetTabStripHeight() const {
   return browser_view()->GetTabStripHeight();
-}
-
-int OpaqueBrowserFrameView::GetAdditionalReservedSpaceInTabStrip() const {
-  // We don't have the sysmenu buttons in Windows 8 metro mode. However there
-  // are buttons like the window switcher which are drawn in the non client
-  // are in the BrowserView. We need to ensure that the tab strip does not
-  // draw on the window switcher button.
-  views::View* button = browser_view()->window_switcher_button();
-  return button ? button->width() : 0;
 }
 
 gfx::Size OpaqueBrowserFrameView::GetTabstripPreferredSize() const {

@@ -6,14 +6,13 @@
 
 #include "ash/ash_switches.h"
 #include "ash/frame/caption_buttons/frame_caption_button_container_view.h"
-#include "ash/frame/caption_buttons/frame_maximize_button.h"
-#include "ash/frame/caption_buttons/frame_maximize_button_observer.h"
 #include "ash/frame/default_header_painter.h"
 #include "ash/frame/frame_border_hit_test_controller.h"
 #include "ash/frame/frame_util.h"
 #include "ash/frame/header_painter.h"
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
+#include "ash/shell_observer.h"
 #include "ash/wm/immersive_fullscreen_controller.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_state_delegate.h"
@@ -31,7 +30,6 @@
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
-#include "ui/views/widget/widget_deletion_observer.h"
 
 namespace {
 
@@ -50,9 +48,6 @@ class CustomFrameViewAshWindowStateDelegate
       ash::wm::WindowState* window_state,
       ash::CustomFrameViewAsh* custom_frame_view)
       : window_state_(NULL) {
-#if defined(OS_CHROMEOS)
-    // TODO(pkotwicz): Investigate if immersive fullscreen can be enabled for
-    // Windows Ash.
     immersive_fullscreen_controller_.reset(
         new ash::ImmersiveFullscreenController);
     custom_frame_view->InitImmersiveFullscreenControllerForView(
@@ -66,7 +61,6 @@ class CustomFrameViewAshWindowStateDelegate
     window_state_ = window_state;
     window_state_->AddObserver(this);
     window_state_->window()->AddObserver(this);
-#endif
   }
   virtual ~CustomFrameViewAshWindowStateDelegate() {
     if (window_state_) {
@@ -130,7 +124,7 @@ namespace ash {
 class CustomFrameViewAsh::HeaderView
     : public views::View,
       public ImmersiveFullscreenController::Delegate,
-      public FrameMaximizeButtonObserver {
+      public ShellObserver {
  public:
   // |frame| is the widget that the caption buttons act on.
   explicit HeaderView(views::Widget* frame);
@@ -153,9 +147,13 @@ class CustomFrameViewAsh::HeaderView
 
   void UpdateAvatarIcon();
 
-  // views::View overrides:
+  // views::View:
   virtual void Layout() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+
+  // ShellObserver:
+  virtual void OnMaximizeModeStarted() OVERRIDE;
+  virtual void OnMaximizeModeEnded() OVERRIDE;
 
   FrameCaptionButtonContainerView* caption_button_container() {
     return caption_button_container_;
@@ -166,15 +164,12 @@ class CustomFrameViewAsh::HeaderView
   }
 
  private:
-  // ImmersiveFullscreenController::Delegate overrides:
+  // ImmersiveFullscreenController::Delegate:
   virtual void OnImmersiveRevealStarted() OVERRIDE;
   virtual void OnImmersiveRevealEnded() OVERRIDE;
   virtual void OnImmersiveFullscreenExited() OVERRIDE;
   virtual void SetVisibleFraction(double visible_fraction) OVERRIDE;
   virtual std::vector<gfx::Rect> GetVisibleBoundsInScreen() const OVERRIDE;
-
-  // FrameMaximizeButtonObserver overrides:
-  virtual void OnMaximizeBubbleShown(views::Widget* bubble) OVERRIDE;
 
   // The widget that the caption buttons act on.
   views::Widget* frame_;
@@ -186,13 +181,6 @@ class CustomFrameViewAsh::HeaderView
 
   // View which contains the window caption buttons.
   FrameCaptionButtonContainerView* caption_button_container_;
-
-  // The maximize bubble widget. |maximize_bubble_| may be non-NULL but have
-  // been already destroyed.
-  views::Widget* maximize_bubble_;
-
-  // Keeps track of whether |maximize_bubble_| is still alive.
-  scoped_ptr<views::WidgetDeletionObserver> maximize_bubble_lifetime_observer_;
 
   // The fraction of the header's height which is visible while in fullscreen.
   // This value is meaningless when not in fullscreen.
@@ -206,7 +194,6 @@ CustomFrameViewAsh::HeaderView::HeaderView(views::Widget* frame)
       header_painter_(new ash::DefaultHeaderPainter),
       avatar_icon_(NULL),
       caption_button_container_(NULL),
-      maximize_bubble_(NULL),
       fullscreen_visible_fraction_(0) {
   // Unfortunately, there is no views::WidgetDelegate::CanMinimize(). Assume
   // that the window frame can be minimized if it can be maximized.
@@ -216,21 +203,18 @@ CustomFrameViewAsh::HeaderView::HeaderView(views::Widget* frame)
           FrameCaptionButtonContainerView::MINIMIZE_DISALLOWED;
   caption_button_container_ = new FrameCaptionButtonContainerView(frame_,
       minimize_allowed);
+  caption_button_container_->UpdateSizeButtonVisibility(Shell::GetInstance()->
+      IsMaximizeModeWindowManagerEnabled());
   AddChildView(caption_button_container_);
-  FrameMaximizeButton* frame_maximize_button =
-      caption_button_container_->GetOldStyleSizeButton();
-  if (frame_maximize_button)
-    frame_maximize_button->AddObserver(this);
 
   header_painter_->Init(frame_, this, NULL, caption_button_container_);
   UpdateAvatarIcon();
+
+  Shell::GetInstance()->AddShellObserver(this);
 }
 
 CustomFrameViewAsh::HeaderView::~HeaderView() {
-  FrameMaximizeButton* frame_maximize_button =
-      caption_button_container_->GetOldStyleSizeButton();
-  if (frame_maximize_button)
-    frame_maximize_button->RemoveObserver(this);
+  Shell::GetInstance()->RemoveShellObserver(this);
 }
 
 void CustomFrameViewAsh::HeaderView::SchedulePaintForTitle() {
@@ -284,6 +268,9 @@ void CustomFrameViewAsh::HeaderView::UpdateAvatarIcon() {
   Layout();
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// CustomFrameViewAsh::HeaderView, views::View overrides:
+
 void CustomFrameViewAsh::HeaderView::Layout() {
   header_painter_->LayoutHeader();
 }
@@ -297,6 +284,23 @@ void CustomFrameViewAsh::HeaderView::OnPaint(gfx::Canvas* canvas) {
       HeaderPainter::MODE_ACTIVE : HeaderPainter::MODE_INACTIVE;
   header_painter_->PaintHeader(canvas, header_mode);
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// CustomFrameViewAsh::HeaderView, ShellObserver overrides:
+
+void CustomFrameViewAsh::HeaderView::OnMaximizeModeStarted() {
+  caption_button_container_->UpdateSizeButtonVisibility(true);
+  parent()->Layout();
+}
+
+void CustomFrameViewAsh::HeaderView::OnMaximizeModeEnded() {
+  caption_button_container_->UpdateSizeButtonVisibility(false);
+  parent()->Layout();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// CustomFrameViewAsh::HeaderView,
+//   ImmersiveFullscreenController::Delegate overrides:
 
 void CustomFrameViewAsh::HeaderView::OnImmersiveRevealStarted() {
   fullscreen_visible_fraction_ = 0;
@@ -334,18 +338,7 @@ CustomFrameViewAsh::HeaderView::GetVisibleBoundsInScreen() const {
   std::vector<gfx::Rect> bounds_in_screen;
   bounds_in_screen.push_back(
       gfx::Rect(visible_origin_in_screen, visible_bounds.size()));
-  if (maximize_bubble_lifetime_observer_.get() &&
-      maximize_bubble_lifetime_observer_->IsWidgetAlive()) {
-    bounds_in_screen.push_back(maximize_bubble_->GetWindowBoundsInScreen());
-  }
   return bounds_in_screen;
-}
-
-void CustomFrameViewAsh::HeaderView::OnMaximizeBubbleShown(
-    views::Widget* bubble) {
-  maximize_bubble_ = bubble;
-  maximize_bubble_lifetime_observer_.reset(
-      new views::WidgetDeletionObserver(bubble));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -376,6 +369,9 @@ CustomFrameViewAsh::OverlayView::OverlayView(HeaderView* header_view)
 
 CustomFrameViewAsh::OverlayView::~OverlayView() {
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// CustomFrameViewAsh::OverlayView, views::View overrides:
 
 void CustomFrameViewAsh::OverlayView::Layout() {
   // Layout |header_view_| because layout affects the result of
@@ -537,6 +533,11 @@ const views::View* CustomFrameViewAsh::GetAvatarIconViewForTest() const {
 
 ////////////////////////////////////////////////////////////////////////////////
 // CustomFrameViewAsh, private:
+
+FrameCaptionButtonContainerView* CustomFrameViewAsh::
+    GetFrameCaptionButtonContainerViewForTest() {
+  return header_view_->caption_button_container();
+}
 
 int CustomFrameViewAsh::NonClientTopBorderHeight() const {
   return frame_->IsFullscreen() ? 0 : header_view_->GetPreferredHeight();

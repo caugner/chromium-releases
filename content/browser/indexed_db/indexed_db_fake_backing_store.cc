@@ -4,13 +4,36 @@
 
 #include "content/browser/indexed_db/indexed_db_fake_backing_store.h"
 
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 
 namespace content {
 
+IndexedDBFakeBackingStore::IndexedDBFakeBackingStore()
+    : IndexedDBBackingStore(NULL,
+                            GURL("http://localhost:81"),
+                            base::FilePath(),
+                            NULL,
+                            scoped_ptr<LevelDBDatabase>(),
+                            scoped_ptr<LevelDBComparator>(),
+                            NULL) {}
+
+IndexedDBFakeBackingStore::IndexedDBFakeBackingStore(
+    IndexedDBFactory* factory,
+    base::TaskRunner* task_runner)
+    : IndexedDBBackingStore(factory,
+                            GURL("http://localhost:81"),
+                            base::FilePath(),
+                            NULL,
+                            scoped_ptr<LevelDBDatabase>(),
+                            scoped_ptr<LevelDBComparator>(),
+                            task_runner) {}
+
 IndexedDBFakeBackingStore::~IndexedDBFakeBackingStore() {}
 
-std::vector<base::string16> IndexedDBFakeBackingStore::GetDatabaseNames() {
+std::vector<base::string16> IndexedDBFakeBackingStore::GetDatabaseNames(
+    leveldb::Status* s) {
+  *s = leveldb::Status::OK();
   return std::vector<base::string16>();
 }
 leveldb::Status IndexedDBFakeBackingStore::GetIDBDatabaseMetaData(
@@ -113,13 +136,17 @@ leveldb::Status IndexedDBFakeBackingStore::PutIndexDataForRecord(
   return leveldb::Status::IOError("test error");
 }
 
+void IndexedDBFakeBackingStore::ReportBlobUnused(int64 database_id,
+                                                 int64 blob_key) {}
+
 scoped_ptr<IndexedDBBackingStore::Cursor>
 IndexedDBFakeBackingStore::OpenObjectStoreKeyCursor(
     IndexedDBBackingStore::Transaction* transaction,
     int64 database_id,
     int64 object_store_id,
     const IndexedDBKeyRange& key_range,
-    indexed_db::CursorDirection) {
+    indexed_db::CursorDirection,
+    leveldb::Status* s) {
   return scoped_ptr<IndexedDBBackingStore::Cursor>();
 }
 scoped_ptr<IndexedDBBackingStore::Cursor>
@@ -128,7 +155,8 @@ IndexedDBFakeBackingStore::OpenObjectStoreCursor(
     int64 database_id,
     int64 object_store_id,
     const IndexedDBKeyRange& key_range,
-    indexed_db::CursorDirection) {
+    indexed_db::CursorDirection,
+    leveldb::Status* s) {
   return scoped_ptr<IndexedDBBackingStore::Cursor>();
 }
 scoped_ptr<IndexedDBBackingStore::Cursor>
@@ -138,7 +166,8 @@ IndexedDBFakeBackingStore::OpenIndexKeyCursor(
     int64 object_store_id,
     int64 index_id,
     const IndexedDBKeyRange& key_range,
-    indexed_db::CursorDirection) {
+    indexed_db::CursorDirection,
+    leveldb::Status* s) {
   return scoped_ptr<IndexedDBBackingStore::Cursor>();
 }
 scoped_ptr<IndexedDBBackingStore::Cursor>
@@ -148,7 +177,8 @@ IndexedDBFakeBackingStore::OpenIndexCursor(
     int64 object_store_id,
     int64 index_id,
     const IndexedDBKeyRange& key_range,
-    indexed_db::CursorDirection) {
+    indexed_db::CursorDirection,
+    leveldb::Status* s) {
   return scoped_ptr<IndexedDBBackingStore::Cursor>();
 }
 

@@ -18,7 +18,6 @@
 #include "chrome/browser/extensions/activity_log/counting_policy.h"
 #include "chrome/browser/extensions/activity_log/fullstream_ui_policy.h"
 #include "chrome/browser/extensions/api/activity_log_private/activity_log_private_api.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/install_tracker.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
@@ -32,10 +31,12 @@
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_system_provider.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/one_shot_event.h"
 #include "third_party/re2/re2/re2.h"
 #include "url/gurl.h"
 
@@ -45,9 +46,10 @@
 
 namespace constants = activity_log_constants;
 
+namespace extensions {
+
 namespace {
 
-using extensions::Action;
 using constants::kArgUrlPlaceholder;
 using content::BrowserThread;
 
@@ -199,7 +201,7 @@ bool GetUrlForTabId(int tab_id,
                     bool* is_incognito) {
   content::WebContents* contents = NULL;
   Browser* browser = NULL;
-  bool found = extensions::ExtensionTabUtil::GetTabById(
+  bool found = ExtensionTabUtil::GetTabById(
       tab_id,
       profile,
       true,  // Search incognito tabs, too.
@@ -333,8 +335,6 @@ void ExtractUrls(scoped_refptr<Action> action, Profile* profile) {
 }
 
 }  // namespace
-
-namespace extensions {
 
 // SET THINGS UP. --------------------------------------------------------------
 
@@ -476,7 +476,7 @@ bool ActivityLog::IsWatchdogAppActive() {
   return (watchdog_apps_active_ > 0);
 }
 
-void ActivityLog::SetWatchdogAppActive(bool active) {
+void ActivityLog::SetWatchdogAppActiveForTesting(bool active) {
   watchdog_apps_active_ = active ? 1 : 0;
 }
 
@@ -499,7 +499,7 @@ void ActivityLog::OnExtensionUnloaded(const Extension* extension) {
   if (watchdog_apps_active_ == 0 &&
       !CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableExtensionActivityLogging)) {
-   db_enabled_ = false;
+    db_enabled_ = false;
   }
 }
 
@@ -575,16 +575,11 @@ void ActivityLog::OnScriptsExecuted(
     const GURL& on_url) {
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  const ExtensionService* extension_service =
-      ExtensionSystem::Get(profile)->extension_service();
-  const ExtensionSet* extensions = extension_service->extensions();
-  const prerender::PrerenderManager* prerender_manager =
-      prerender::PrerenderManagerFactory::GetForProfile(
-          Profile::FromBrowserContext(web_contents->GetBrowserContext()));
-
+  ExtensionRegistry* registry = ExtensionRegistry::Get(profile);
   for (ExecutingScriptsMap::const_iterator it = extension_ids.begin();
        it != extension_ids.end(); ++it) {
-    const Extension* extension = extensions->GetByID(it->first);
+    const Extension* extension =
+        registry->GetExtensionById(it->first, ExtensionRegistry::ENABLED);
     if (!extension || ActivityLogAPI::IsExtensionWhitelisted(extension->id()))
       continue;
 
@@ -601,6 +596,9 @@ void ActivityLog::OnScriptsExecuted(
       action->set_page_title(base::UTF16ToUTF8(web_contents->GetTitle()));
       action->set_page_incognito(
           web_contents->GetBrowserContext()->IsOffTheRecord());
+
+      const prerender::PrerenderManager* prerender_manager =
+          prerender::PrerenderManagerFactory::GetForProfile(profile);
       if (prerender_manager &&
           prerender_manager->IsWebContentsPrerendering(web_contents, NULL))
         action->mutable_other()->SetBoolean(constants::kActionPrerender, true);
@@ -617,7 +615,7 @@ void ActivityLog::OnScriptsExecuted(
 void ActivityLog::OnApiEventDispatched(const std::string& extension_id,
                                        const std::string& event_name,
                                        scoped_ptr<base::ListValue> event_args) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   scoped_refptr<Action> action = new Action(extension_id,
                                             base::Time::Now(),
                                             Action::ACTION_API_EVENT,
@@ -629,7 +627,7 @@ void ActivityLog::OnApiEventDispatched(const std::string& extension_id,
 void ActivityLog::OnApiFunctionCalled(const std::string& extension_id,
                                       const std::string& api_name,
                                       scoped_ptr<base::ListValue> args) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   scoped_refptr<Action> action = new Action(extension_id,
                                             base::Time::Now(),
                                             Action::ACTION_API_CALL,

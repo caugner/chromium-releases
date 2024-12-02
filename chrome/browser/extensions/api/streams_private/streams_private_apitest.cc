@@ -11,7 +11,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/api/streams_private.h"
-#include "chrome/common/extensions/mime_types_handler.h"
+#include "chrome/common/extensions/manifest_handlers/mime_types_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -174,8 +174,8 @@ class StreamsPrivateApiTest : public ExtensionApiTest {
         new Event(streams_private::OnExecuteMimeTypeHandler::kEventName,
                   streams_private::OnExecuteMimeTypeHandler::Create(info)));
 
-    ExtensionSystem::Get(browser()->profile())->event_router()->
-        DispatchEventToExtension(test_extension_id_, event.Pass());
+    extensions::EventRouter::Get(browser()->profile())
+        ->DispatchEventToExtension(test_extension_id_, event.Pass());
   }
 
   // Loads the test extension and set's up its file_browser_handler to handle

@@ -5,10 +5,11 @@
 #ifndef CONTENT_SHELL_RENDERER_TEST_RUNNER_WEBPERMISSIONS_H_
 #define CONTENT_SHELL_RENDERER_TEST_RUNNER_WEBPERMISSIONS_H_
 
-#include "base/basictypes.h"
+#include "base/macros.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebPermissionClient.h"
 
-namespace WebTestRunner {
+namespace content {
 
 class WebTestDelegate;
 
@@ -18,12 +19,12 @@ public:
     virtual ~WebPermissions();
 
     // Override WebPermissionClient methods.
-    virtual bool allowImage(blink::WebFrame*, bool enabledPerSettings, const blink::WebURL& imageURL);
-    virtual bool allowScriptFromSource(blink::WebFrame*, bool enabledPerSettings, const blink::WebURL& scriptURL);
-    virtual bool allowStorage(blink::WebFrame*, bool local);
-    virtual bool allowPlugins(blink::WebFrame*, bool enabledPerSettings);
-    virtual bool allowDisplayingInsecureContent(blink::WebFrame*, bool enabledPerSettings, const blink::WebSecurityOrigin&, const blink::WebURL&);
-    virtual bool allowRunningInsecureContent(blink::WebFrame*, bool enabledPerSettings, const blink::WebSecurityOrigin&, const blink::WebURL&);
+    virtual bool allowImage(bool enabledPerSettings, const blink::WebURL& imageURL);
+    virtual bool allowScriptFromSource(bool enabledPerSettings, const blink::WebURL& scriptURL);
+    virtual bool allowStorage(bool local);
+    virtual bool allowPlugins(bool enabledPerSettings);
+    virtual bool allowDisplayingInsecureContent(bool enabledPerSettings, const blink::WebSecurityOrigin&, const blink::WebURL&);
+    virtual bool allowRunningInsecureContent(bool enabledPerSettings, const blink::WebSecurityOrigin&, const blink::WebURL&);
 
     // Hooks to set the different policies.
     void setImagesAllowed(bool);
@@ -53,6 +54,6 @@ private:
     DISALLOW_COPY_AND_ASSIGN(WebPermissions);
 };
 
-}
+}  // namespace content
 
-#endif
+#endif  // CONTENT_SHELL_RENDERER_TEST_RUNNER_WEBPERMISSIONS_H_

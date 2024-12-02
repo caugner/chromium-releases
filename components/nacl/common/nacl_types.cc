@@ -13,8 +13,7 @@ NaClStartParams::NaClStartParams()
       enable_debug_stub(false),
       enable_ipc_proxy(false),
       uses_irt(false),
-      enable_dyncode_syscalls(false),
-      uses_nonsfi_mode(false) {
+      enable_dyncode_syscalls(false) {
 }
 
 NaClStartParams::~NaClStartParams() {
@@ -72,11 +71,13 @@ NaClLaunchResult::NaClLaunchResult(
     FileDescriptor imc_channel_handle,
     const IPC::ChannelHandle& ppapi_ipc_channel_handle,
     const IPC::ChannelHandle& trusted_ipc_channel_handle,
+    const IPC::ChannelHandle& manifest_service_ipc_channel_handle,
     base::ProcessId plugin_pid,
     int plugin_child_id)
     : imc_channel_handle(imc_channel_handle),
       ppapi_ipc_channel_handle(ppapi_ipc_channel_handle),
       trusted_ipc_channel_handle(trusted_ipc_channel_handle),
+      manifest_service_ipc_channel_handle(manifest_service_ipc_channel_handle),
       plugin_pid(plugin_pid),
       plugin_child_id(plugin_child_id) {
 }

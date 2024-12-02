@@ -9,7 +9,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/scoped_native_library.h"
-#include "mojo/public/bindings/allocation_scope.h"
+#include "mojo/public/cpp/bindings/allocation_scope.h"
 
 namespace mojo {
 namespace shell {
@@ -31,7 +31,7 @@ OutOfProcessDynamicServiceRunner::~OutOfProcessDynamicServiceRunner() {
 
 void OutOfProcessDynamicServiceRunner::Start(
     const base::FilePath& app_path,
-    ScopedShellHandle service_handle,
+    ScopedMessagePipeHandle service_handle,
     const base::Closure& app_completed_callback) {
   app_path_ = app_path;
 

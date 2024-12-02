@@ -8,7 +8,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
-#include "chrome/browser/automation/automation_util.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/prerender/prerender_link_manager.h"
@@ -123,6 +122,30 @@ class GuestContentBrowserClient : public chrome::ChromeContentBrowserClient {
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
 };
 
+class WebContentsHiddenObserver : public content::WebContentsObserver {
+ public:
+  WebContentsHiddenObserver(content::WebContents* web_contents,
+                            const base::Closure& hidden_callback)
+      : WebContentsObserver(web_contents),
+        hidden_callback_(hidden_callback),
+        hidden_observed_(true) {
+  }
+
+  // WebContentsObserver.
+  virtual void WasHidden() OVERRIDE {
+    hidden_observed_ = true;
+    hidden_callback_.Run();
+  }
+
+  bool hidden_observed() { return hidden_observed_; }
+
+ private:
+  base::Closure hidden_callback_;
+  bool hidden_observed_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebContentsHiddenObserver);
+};
+
 class InterstitialObserver : public content::WebContentsObserver {
  public:
   InterstitialObserver(content::WebContents* web_contents,
@@ -147,6 +170,18 @@ class InterstitialObserver : public content::WebContentsObserver {
 
   DISALLOW_COPY_AND_ASSIGN(InterstitialObserver);
 };
+
+void ExecuteScriptWaitForTitle(content::WebContents* web_contents,
+                               const char* script,
+                               const char* title) {
+  base::string16 expected_title(base::ASCIIToUTF16(title));
+  base::string16 error_title(base::ASCIIToUTF16("error"));
+
+  content::TitleWatcher title_watcher(web_contents, expected_title);
+  title_watcher.AlsoWaitForTitle(error_title);
+  EXPECT_TRUE(content::ExecuteScript(web_contents, script));
+  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
+}
 
 }  // namespace
 
@@ -287,15 +322,8 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
   }
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    const testing::TestInfo* const test_info =
-        testing::UnitTest::GetInstance()->current_test_info();
-
     command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
     command_line->AppendSwitchASCII(switches::kJavaScriptFlags, "--expose-gc");
-
-    // Force SW rendering to check autosize bug.
-    if (!strncmp(test_info->name(), "AutoSizeSW", strlen("AutosizeSW")))
-      command_line->AppendSwitch(switches::kDisableForceCompositingMode);
 
     extensions::PlatformAppBrowserTest::SetUpCommandLine(command_line);
   }
@@ -465,18 +493,6 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
     }
   }
 
-  void ExecuteScriptWaitForTitle(content::WebContents* web_contents,
-                                 const char* script,
-                                 const char* title) {
-    base::string16 expected_title(base::ASCIIToUTF16(title));
-    base::string16 error_title(base::ASCIIToUTF16("error"));
-
-    content::TitleWatcher title_watcher(web_contents, expected_title);
-    title_watcher.AlsoWaitForTitle(error_title);
-    EXPECT_TRUE(content::ExecuteScript(web_contents, script));
-    EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
-  }
-
   // Handles |request| by serving a redirect response.
   static scoped_ptr<net::test_server::HttpResponse> RedirectResponseHandler(
       const std::string& path,
@@ -636,20 +652,90 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
       loop_runner->Run();
   }
 
+  void LoadAppWithGuest(const std::string& app_path) {
+    GuestContentBrowserClient new_client;
+    content::ContentBrowserClient* old_client =
+        SetBrowserClientForTesting(&new_client);
+
+    ExtensionTestMessageListener launched_listener("WebViewTest.LAUNCHED",
+                                                   false);
+    launched_listener.set_failure_message("WebViewTest.FAILURE");
+    LoadAndLaunchPlatformApp(app_path.c_str());
+    ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
+
+    guest_web_contents_ = new_client.WaitForGuestCreated();
+    SetBrowserClientForTesting(old_client);
+  }
+
+  void SendMessageToEmbedder(const std::string& message) {
+    EXPECT_TRUE(
+        content::ExecuteScript(
+            GetEmbedderWebContents(),
+            base::StringPrintf("onAppCommand('%s');", message.c_str())));
+  }
+
+  content::WebContents* GetGuestWebContents() {
+    return guest_web_contents_;
+  }
+
+  content::WebContents* GetEmbedderWebContents() {
+    if (!embedder_web_contents_) {
+      embedder_web_contents_ = GetFirstAppWindowWebContents();
+    }
+    return embedder_web_contents_;
+  }
+
+  WebViewTest() : guest_web_contents_(NULL),
+                  embedder_web_contents_(NULL) {
+  }
+
  private:
   bool UsesFakeSpeech() {
     const testing::TestInfo* const test_info =
         testing::UnitTest::GetInstance()->current_test_info();
 
     // SpeechRecognition test specific SetUp.
-    return !strcmp(test_info->name(), "SpeechRecognition") ||
-           !strcmp(test_info->name(),
+    return !strcmp(test_info->name(),
                    "SpeechRecognitionAPI_HasPermissionAllow");
   }
 
   scoped_ptr<content::FakeSpeechRecognitionManager>
       fake_speech_recognition_manager_;
+
+  // Note that these are only set if you launch app using LoadAppWithGuest().
+  content::WebContents* guest_web_contents_;
+  content::WebContents* embedder_web_contents_;
 };
+
+// This test verifies that hiding the guest triggers WebContents::WasHidden().
+IN_PROC_BROWSER_TEST_F(WebViewTest, GuestVisibilityChanged) {
+  LoadAppWithGuest("web_view/visibility_changed");
+
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  WebContentsHiddenObserver observer(GetGuestWebContents(),
+                                     loop_runner->QuitClosure());
+
+  // Handled in platform_apps/web_view/visibility_changed/main.js
+  SendMessageToEmbedder("hide-guest");
+  if (!observer.hidden_observed())
+    loop_runner->Run();
+}
+
+// This test verifies that hiding the embedder also hides the guest.
+IN_PROC_BROWSER_TEST_F(WebViewTest, EmbedderVisibilityChanged) {
+  LoadAppWithGuest("web_view/visibility_changed");
+
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  WebContentsHiddenObserver observer(GetGuestWebContents(),
+                                     loop_runner->QuitClosure());
+
+  // Handled in platform_apps/web_view/visibility_changed/main.js
+  SendMessageToEmbedder("hide-embedder");
+  if (!observer.hidden_observed())
+    loop_runner->Run();
+}
 
 // This test ensures JavaScript errors ("Cannot redefine property") do not
 // happen when a <webview> is removed from DOM and added back.
@@ -670,20 +756,6 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, AutoSize) {
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/autosize"))
       << message_;
 }
-
-#if !defined(OS_CHROMEOS)
-// This test ensures <webview> doesn't crash in SW rendering when autosize is
-// turned on.
-#if defined(OS_MACOSX) || defined(USE_AURA)
-#define MAYBE_AutoSizeSW DISABLED_AutoSizeSW
-#else
-#define MAYBE_AutoSizeSW AutoSizeSW
-#endif
-IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_AutoSizeSW) {
-  ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/autosize"))
-      << message_;
-}
-#endif
 
 // http://crbug.com/326332
 IN_PROC_BROWSER_TEST_F(WebViewTest, DISABLED_Shim_TestAutosizeAfterNavigation) {
@@ -747,6 +819,13 @@ IN_PROC_BROWSER_TEST_F(WebViewTest,
              NO_TEST_SERVER);
 }
 
+IN_PROC_BROWSER_TEST_F(WebViewTest,
+                       Shim_TestInlineScriptFromAccessibleResources) {
+  TestHelper("testInlineScriptFromAccessibleResources",
+             "web_view/shim",
+             NO_TEST_SERVER);
+}
+
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestInvalidChromeExtensionURL) {
   TestHelper("testInvalidChromeExtensionURL", "web_view/shim", NO_TEST_SERVER);
 }
@@ -755,7 +834,9 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestEventName) {
   TestHelper("testEventName", "web_view/shim", NO_TEST_SERVER);
 }
 
-IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestOnEventProperty) {
+// WebViewTest.Shim_TestOnEventProperty is flaky, so disable it.
+// http://crbug.com/359832.
+IN_PROC_BROWSER_TEST_F(WebViewTest, DISABLED_Shim_TestOnEventProperty) {
   TestHelper("testOnEventProperties", "web_view/shim", NO_TEST_SERVER);
 }
 
@@ -800,6 +881,14 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestExecuteScriptFail) {
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestExecuteScript) {
   TestHelper("testExecuteScript", "web_view/shim", NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(
+    WebViewTest,
+    Shim_TestExecuteScriptIsAbortedWhenWebViewSourceIsChanged) {
+  TestHelper("testExecuteScriptIsAbortedWhenWebViewSourceIsChanged",
+             "web_view/shim",
+             NO_TEST_SERVER);
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestTerminateAfterExit) {
@@ -1173,29 +1262,29 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_CookieIsolation) {
   std::string cookie_value;
 
   // Test the regular browser context to ensure we have only one cookie.
-  automation_util::GetCookies(GURL("http://localhost"),
-                              browser()->tab_strip_model()->GetWebContentsAt(0),
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            browser()->tab_strip_model()->GetWebContentsAt(0),
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("testCookie=1", cookie_value);
 
   // The default behavior is to combine webview tags with no explicit partition
   // declaration into the same in-memory partition. Test the webview tags to
   // ensure we have properly set the cookies and we have both cookies in both
   // tags.
-  automation_util::GetCookies(GURL("http://localhost"),
-                              cookie_contents1,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            cookie_contents1,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("guest1=true; guest2=true", cookie_value);
 
-  automation_util::GetCookies(GURL("http://localhost"),
-                              cookie_contents2,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            cookie_contents2,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("guest1=true; guest2=true", cookie_value);
 
   // The third tag should not have any cookies as it is in a separate partition.
-  automation_util::GetCookies(GURL("http://localhost"),
-                              named_partition_contents1,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            named_partition_contents1,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("", cookie_value);
 }
 
@@ -1252,35 +1341,35 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, PRE_StoragePersistence) {
   std::string cookie_value;
 
   // Check that all in-memory partitions have a cookie set.
-  automation_util::GetCookies(GURL("http://localhost"),
-                              cookie_contents1,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            cookie_contents1,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("inmemory=true", cookie_value);
-  automation_util::GetCookies(GURL("http://localhost"),
-                              cookie_contents2,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            cookie_contents2,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("inmemory=true", cookie_value);
-  automation_util::GetCookies(GURL("http://localhost"),
-                              named_partition_contents1,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            named_partition_contents1,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("inmemory=true", cookie_value);
-  automation_util::GetCookies(GURL("http://localhost"),
-                              named_partition_contents2,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            named_partition_contents2,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("inmemory=true", cookie_value);
 
   // Check that all persistent partitions kept their state.
-  automation_util::GetCookies(GURL("http://localhost"),
-                              persistent_partition_contents1,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            persistent_partition_contents1,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("persist1=true", cookie_value);
-  automation_util::GetCookies(GURL("http://localhost"),
-                              persistent_partition_contents2,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            persistent_partition_contents2,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("persist1=true", cookie_value);
-  automation_util::GetCookies(GURL("http://localhost"),
-                              persistent_partition_contents3,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            persistent_partition_contents3,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("persist2=true", cookie_value);
 }
 
@@ -1313,35 +1402,35 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, DISABLED_StoragePersistence) {
   std::string cookie_value;
 
   // Check that all in-memory partitions lost their state.
-  automation_util::GetCookies(GURL("http://localhost"),
-                              cookie_contents1,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            cookie_contents1,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("", cookie_value);
-  automation_util::GetCookies(GURL("http://localhost"),
-                              cookie_contents2,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            cookie_contents2,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("", cookie_value);
-  automation_util::GetCookies(GURL("http://localhost"),
-                              named_partition_contents1,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            named_partition_contents1,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("", cookie_value);
-  automation_util::GetCookies(GURL("http://localhost"),
-                              named_partition_contents2,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            named_partition_contents2,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("", cookie_value);
 
   // Check that all persistent partitions kept their state.
-  automation_util::GetCookies(GURL("http://localhost"),
-                              persistent_partition_contents1,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            persistent_partition_contents1,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("persist1=true", cookie_value);
-  automation_util::GetCookies(GURL("http://localhost"),
-                              persistent_partition_contents2,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            persistent_partition_contents2,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("persist1=true", cookie_value);
-  automation_util::GetCookies(GURL("http://localhost"),
-                              persistent_partition_contents3,
-                              &cookie_size, &cookie_value);
+  ui_test_utils::GetCookies(GURL("http://localhost"),
+                            persistent_partition_contents3,
+                            &cookie_size, &cookie_value);
   EXPECT_EQ("persist2=true", cookie_value);
 }
 
@@ -1593,20 +1682,10 @@ void WebViewTest::MediaAccessAPIAllowTestHelper(const std::string& test_name) {
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, ContextMenusAPI_Basic) {
-  GuestContentBrowserClient new_client;
-  content::ContentBrowserClient* old_client =
-      SetBrowserClientForTesting(&new_client);
+  LoadAppWithGuest("web_view/context_menus/basic");
 
-  ExtensionTestMessageListener launched_listener("Launched", false);
-  launched_listener.set_failure_message("TEST_FAILED");
-  LoadAndLaunchPlatformApp("web_view/context_menus/basic");
-  ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
-
-  content::WebContents* guest_web_contents = new_client.WaitForGuestCreated();
-  ASSERT_TRUE(guest_web_contents);
-  SetBrowserClientForTesting(old_client);
-
-  content::WebContents* embedder = GetFirstAppWindowWebContents();
+  content::WebContents* guest_web_contents = GetGuestWebContents();
+  content::WebContents* embedder = GetEmbedderWebContents();
   ASSERT_TRUE(embedder);
 
   // 1. Basic property test.
@@ -1677,24 +1756,6 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, ScreenCoordinates) {
   ASSERT_TRUE(RunPlatformAppTestWithArg(
       "platform_apps/web_view/common", "screen_coordinates"))
           << message_;
-}
-
-IN_PROC_BROWSER_TEST_F(WebViewTest, SpeechRecognition) {
-  ASSERT_TRUE(StartEmbeddedTestServer());
-  content::WebContents* guest_web_contents = LoadGuest(
-      "/extensions/platform_apps/web_view/speech/guest.html",
-      "web_view/speech");
-  ASSERT_TRUE(guest_web_contents);
-
-  // Click on the guest (center of the WebContents), the guest is rendered in a
-  // way that this will trigger clicking on speech recognition input mic.
-  SimulateMouseClick(guest_web_contents, 0, blink::WebMouseEvent::ButtonLeft);
-
-  base::string16 expected_title(base::ASCIIToUTF16("PASSED"));
-  base::string16 error_title(base::ASCIIToUTF16("FAILED"));
-  content::TitleWatcher title_watcher(guest_web_contents, expected_title);
-  title_watcher.AlsoWaitForTitle(error_title);
-  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
 
 #if defined(OS_CHROMEOS)
@@ -1996,20 +2057,13 @@ IN_PROC_BROWSER_TEST_F(WebViewPluginTest, TestLoadPluginEvent) {
 }
 #endif  // defined(ENABLE_PLUGINS)
 
-class WebViewCaptureTest : public WebViewTest,
-  public testing::WithParamInterface<std::string> {
+class WebViewCaptureTest : public WebViewTest {
  public:
   WebViewCaptureTest() {}
   virtual ~WebViewCaptureTest() {}
   virtual void SetUp() OVERRIDE {
     EnablePixelOutput();
     WebViewTest::SetUp();
-  }
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    command_line->AppendSwitch(GetParam());
-    // http://crbug.com/327035
-    command_line->AppendSwitch(switches::kDisableDelegatedRenderer);
-    WebViewTest::SetUpCommandLine(command_line);
   }
 };
 
@@ -2027,20 +2081,7 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestFindAPI_findupdate) {
 
 // <webview> screenshot capture fails with ubercomp.
 // See http://crbug.com/327035.
-IN_PROC_BROWSER_TEST_P(WebViewCaptureTest,
+IN_PROC_BROWSER_TEST_F(WebViewCaptureTest,
                        DISABLED_Shim_ScreenshotCapture) {
   TestHelper("testScreenshotCapture", "web_view/shim", NO_TEST_SERVER);
 }
-
-// Threaded compositing is always enabled on Aura and Mac.
-#if !defined(USE_AURA) && !defined(OS_MACOSX)
-INSTANTIATE_TEST_CASE_P(WithoutThreadedCompositor,
-    WebViewCaptureTest,
-    ::testing::Values(std::string(switches::kDisableThreadedCompositing)));
-#endif
-
-#if defined(USE_AURA) || defined(OS_MACOSX)
-INSTANTIATE_TEST_CASE_P(WithThreadedCompositor,
-    WebViewCaptureTest,
-    ::testing::Values(std::string(switches::kEnableThreadedCompositing)));
-#endif

@@ -4,6 +4,12 @@
 
 #include "components/password_manager/core/browser/password_manager_client.h"
 
+namespace password_manager {
+
+bool PasswordManagerClient::IsAutomaticPasswordSavingEnabled() const {
+  return false;
+}
+
 base::FieldTrial::Probability
 PasswordManagerClient::GetProbabilityForExperiment(
     const std::string& experiment_name) {
@@ -12,7 +18,14 @@ PasswordManagerClient::GetProbabilityForExperiment(
 
 bool PasswordManagerClient::IsPasswordSyncEnabled() { return false; }
 
-void PasswordManagerClient::SetLogger(PasswordManagerLogger* /*logger*/) {}
+void PasswordManagerClient::SetLogger(PasswordManagerLogger* logger) {
+}
 
-void PasswordManagerClient::LogSavePasswordProgress(
-    const std::string& /*text*/) {}
+void PasswordManagerClient::LogSavePasswordProgress(const std::string& text) {
+}
+
+bool PasswordManagerClient::IsLoggingActive() const {
+  return false;
+}
+
+}  // namespace password_manager

@@ -12,10 +12,7 @@
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/history_quick_provider.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_test_helpers.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -36,6 +33,9 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/core/browser/bookmark_utils.h"
+#include "components/bookmarks/core/test/bookmark_test_helpers.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "net/dns/mock_host_resolver.h"
@@ -44,11 +44,6 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/point.h"
-
-#if defined(TOOLKIT_GTK)
-#include <gdk/gdk.h>
-#include <gtk/gtk.h>
-#endif
 
 using base::ASCIIToUTF16;
 using base::UTF16ToUTF8;
@@ -114,19 +109,6 @@ const struct TestHistoryEntry {
   // name as the .com.
   {"http://bar/", "Bar", 1, 0, false },
 };
-
-#if defined(TOOLKIT_GTK)
-// Returns the text stored in the PRIMARY clipboard.
-std::string GetPrimarySelectionText() {
-  GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_PRIMARY);
-  DCHECK(clipboard);
-
-  gchar* selection_text = gtk_clipboard_wait_for_text(clipboard);
-  std::string result(selection_text ? selection_text : "");
-  g_free(selection_text);
-  return result;
-}
-#endif
 
 // Stores the given text to clipboard.
 void SetClipboardText(const base::string16& text) {
@@ -259,13 +241,6 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ui_test_utils::WaitForTemplateURLServiceToLoad(model);
 
     ASSERT_TRUE(model->loaded());
-    // Remove built-in template urls, like google.com, bing.com etc., as they
-    // may appear as autocomplete suggests and interfere with our tests.
-    model->SetDefaultSearchProvider(NULL);
-    TemplateURLService::TemplateURLVector builtins = model->GetTemplateURLs();
-    for (TemplateURLService::TemplateURLVector::const_iterator
-         i = builtins.begin(); i != builtins.end(); ++i)
-      model->Remove(*i);
 
     TemplateURLData data;
     data.short_name = ASCIIToUTF16(kSearchShortName);
@@ -273,10 +248,20 @@ class OmniboxViewTest : public InProcessBrowserTest,
     data.SetURL(kSearchURL);
     TemplateURL* template_url = new TemplateURL(profile, data);
     model->Add(template_url);
-    model->SetDefaultSearchProvider(template_url);
+    model->SetUserSelectedDefaultSearchProvider(template_url);
 
     data.SetKeyword(ASCIIToUTF16(kSearchKeyword2));
     model->Add(new TemplateURL(profile, data));
+
+    // Remove built-in template urls, like google.com, bing.com etc., as they
+    // may appear as autocomplete suggests and interfere with our tests.
+    TemplateURLService::TemplateURLVector urls = model->GetTemplateURLs();
+    for (TemplateURLService::TemplateURLVector::const_iterator i = urls.begin();
+         i != urls.end();
+         ++i) {
+      if ((*i)->prepopulate_id() != 0)
+        model->Remove(*i);
+    }
   }
 
   void AddHistoryEntry(const TestHistoryEntry& entry, const Time& time) {
@@ -1079,7 +1064,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_DeleteItem) {
   // items.
   TemplateURLService* model =
       TemplateURLServiceFactory::GetForProfile(browser()->profile());
-  model->SetDefaultSearchProvider(NULL);
+  model->SetUserSelectedDefaultSearchProvider(NULL);
 
   ui_test_utils::NavigateToURL(browser(), GURL(content::kAboutBlankURL));
   chrome::FocusLocationBar(browser());
@@ -1384,7 +1369,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
   EXPECT_EQ(old_text, omnibox_view->GetText());
 }
 
-#if defined(TOOLKIT_GTK) || defined(TOOLKIT_VIEWS)
+#if defined(TOOLKIT_VIEWS)
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, UndoRedo) {
   ui_test_utils::NavigateToURL(browser(), GURL(content::kAboutBlankURL));
   chrome::FocusLocationBar(browser());
@@ -1460,7 +1445,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
   ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_BACK, 0));
   EXPECT_EQ(base::UTF8ToUTF16("\357\276\200"), omnibox_view->GetText());
 }
-#endif  // defined(TOOLKIT_GTK) || defined(TOOLKIT_VIEWS)
+#endif  // defined(TOOLKIT_VIEWS)
 
 // Flaky test. crbug.com/356850
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
@@ -1478,7 +1463,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
   omnibox_view->GetSelectionBounds(&start, &end);
   EXPECT_TRUE(start != end);
   base::string16 old_autocomplete_text =
-      omnibox_view->model()->autocomplete_controller()->input().text();
+      omnibox_view->model()->autocomplete_controller()->input_.text();
 
   // Unfocus the omnibox. This should clear the text field selection and
   // close the popup, but should not run autocomplete.
@@ -1486,40 +1471,11 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
   ui_test_utils::ClickOnView(browser(), VIEW_ID_TAB_CONTAINER);
   ASSERT_FALSE(popup_model->IsOpen());
   omnibox_view->GetSelectionBounds(&start, &end);
-#if !defined(TOOLKIT_GTK)
   EXPECT_TRUE(start == end);
-#endif
 
   EXPECT_EQ(old_autocomplete_text,
-      omnibox_view->model()->autocomplete_controller()->input().text());
+      omnibox_view->model()->autocomplete_controller()->input_.text());
 }
-
-#if defined(TOOLKIT_GTK)
-// See http://crbug.com/63860
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, PrimarySelection) {
-  OmniboxView* omnibox_view = NULL;
-  ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
-  omnibox_view->SetUserText(ASCIIToUTF16("Hello world"));
-  EXPECT_FALSE(omnibox_view->IsSelectAll());
-
-  // Move the cursor to the end.
-  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_END, 0));
-
-  // Select all text by pressing Shift+Home
-  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_HOME, ui::EF_SHIFT_DOWN));
-  EXPECT_TRUE(omnibox_view->IsSelectAll());
-
-  // The selected content should be saved to the PRIMARY clipboard.
-  EXPECT_EQ("Hello world", GetPrimarySelectionText());
-
-  // Move the cursor to the end.
-  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_END, 0));
-  EXPECT_FALSE(omnibox_view->IsSelectAll());
-
-  // The content in the PRIMARY clipboard should not be cleared.
-  EXPECT_EQ("Hello world", GetPrimarySelectionText());
-}
-#endif  // defined(TOOLKIT_GTK)
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, Paste) {
   OmniboxView* omnibox_view = NULL;
@@ -1714,7 +1670,6 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, EditSearchEngines) {
   EXPECT_FALSE(omnibox_view->model()->popup_model()->IsOpen());
 }
 
-#if !defined(TOOLKIT_GTK)
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, BeginningShownAfterBlur) {
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
@@ -1736,7 +1691,6 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, BeginningShownAfterBlur) {
   ASSERT_EQ(0U, start);
   ASSERT_EQ(0U, end);
 }
-#endif  // !defined(TOOLKIT_GTK)
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CtrlArrowAfterArrowSuggestions) {
   OmniboxView* omnibox_view = NULL;

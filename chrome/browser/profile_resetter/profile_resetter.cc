@@ -152,7 +152,8 @@ void ProfileResetter::ResetDefaultSearchEngine() {
   if (template_url_service_->loaded()) {
     PrefService* prefs = profile_->GetPrefs();
     DCHECK(prefs);
-    TemplateURLPrepopulateData::ClearPrepopulatedEnginesInPrefs(profile_);
+    TemplateURLPrepopulateData::ClearPrepopulatedEnginesInPrefs(
+        profile_->GetPrefs());
     scoped_ptr<base::ListValue> search_engines(
         master_settings_->GetSearchProviderOverrides());
     if (search_engines) {
@@ -169,7 +170,7 @@ void ProfileResetter::ResetDefaultSearchEngine() {
     const TemplateURL* default_search_provider =
         template_url_service_->GetDefaultSearchProvider();
     if (default_search_provider &&
-        default_search_provider->url_ref().HasGoogleBaseURLs())
+        default_search_provider->HasGoogleBaseURLs())
       GoogleURLTracker::RequestServerCheck(profile_, true);
 
     MarkAsDone(DEFAULT_SEARCH_ENGINE);

@@ -11,6 +11,7 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #include "sync/api/sync_change_processor.h"
+#include "sync/api/sync_data.h"
 #include "sync/api/sync_error_factory.h"
 
 namespace extensions {
@@ -50,7 +51,7 @@ syncer::SyncChange AppSyncBundle::CreateSyncChangeToDelete(
   return sync_data.GetSyncChange(syncer::SyncChange::ACTION_DELETE);
 }
 
-void AppSyncBundle::ProcessDeletion(std::string extension_id,
+void AppSyncBundle::ProcessDeletion(const std::string& extension_id,
                                     const syncer::SyncChange& sync_change) {
   RemoveApp(extension_id);
   sync_processor_->ProcessSyncChanges(FROM_HERE,
@@ -59,12 +60,13 @@ void AppSyncBundle::ProcessDeletion(std::string extension_id,
 
 syncer::SyncChange AppSyncBundle::CreateSyncChange(
     const syncer::SyncData& sync_data) {
-  if (HasExtensionId(sync_data.GetTag())) {
+  const syncer::SyncDataLocal sync_data_local(sync_data);
+  if (HasExtensionId(sync_data_local.GetTag())) {
     return syncer::SyncChange(FROM_HERE,
                               syncer::SyncChange::ACTION_UPDATE,
                               sync_data);
   } else {
-    AddApp(sync_data.GetTag());
+    AddApp(sync_data_local.GetTag());
     return syncer::SyncChange(FROM_HERE,
                               syncer::SyncChange::ACTION_ADD,
                               sync_data);

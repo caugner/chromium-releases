@@ -15,10 +15,10 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/requirements_checker.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/extensions/extension_file_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/file_util.h"
 #include "gpu/config/gpu_info.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -35,9 +35,8 @@ class RequirementsCheckerBrowserTest : public ExtensionBrowserTest {
     PathService::Get(chrome::DIR_TEST_DATA, &extension_path);
     extension_path = extension_path.AppendASCII("requirements_checker")
                                    .AppendASCII(extension_dir_name);
-    scoped_refptr<const Extension> extension =
-        extension_file_util::LoadExtension(extension_path, Manifest::UNPACKED,
-                                           0, &load_error);
+    scoped_refptr<const Extension> extension = file_util::LoadExtension(
+        extension_path, Manifest::UNPACKED, 0, &load_error);
     CHECK(load_error.length() == 0u);
     return extension;
   }
@@ -119,27 +118,6 @@ IN_PROC_BROWSER_TEST_F(RequirementsCheckerBrowserTest,
   content::BrowserThread::GetBlockingPool()->FlushForTesting();
 }
 
-IN_PROC_BROWSER_TEST_F(RequirementsCheckerBrowserTest, DisallowCSS3D) {
-  scoped_refptr<const Extension> extension(
-      LoadExtensionFromDirName("require_3d"));
-  ASSERT_TRUE(extension.get());
-
-  // Blacklist css3d
-  std::vector<std::string> blacklisted_features;
-  blacklisted_features.push_back("accelerated_compositing");
-  BlackListGPUFeatures(blacklisted_features);
-  content::BrowserThread::GetBlockingPool()->FlushForTesting();
-
-  std::vector<std::string> expected_errors;
-  expected_errors.push_back(l10n_util::GetStringUTF8(
-      IDS_EXTENSION_CSS3D_NOT_SUPPORTED));
-
-  checker_.Check(extension, base::Bind(
-      &RequirementsCheckerBrowserTest::ValidateRequirementErrors,
-      base::Unretained(this), expected_errors));
-  content::BrowserThread::GetBlockingPool()->FlushForTesting();
-}
-
 IN_PROC_BROWSER_TEST_F(RequirementsCheckerBrowserTest, DisallowWebGL) {
   scoped_refptr<const Extension> extension(
       LoadExtensionFromDirName("require_3d"));
@@ -161,30 +139,6 @@ IN_PROC_BROWSER_TEST_F(RequirementsCheckerBrowserTest, DisallowWebGL) {
   content::BrowserThread::GetBlockingPool()->FlushForTesting();
 }
 
-IN_PROC_BROWSER_TEST_F(RequirementsCheckerBrowserTest, DisallowGPUFeatures) {
-  scoped_refptr<const Extension> extension(
-      LoadExtensionFromDirName("require_3d"));
-  ASSERT_TRUE(extension.get());
-
-  // Backlist both webgl and css3d
-  std::vector<std::string> blacklisted_features;
-  blacklisted_features.push_back("webgl");
-  blacklisted_features.push_back("accelerated_compositing");
-  BlackListGPUFeatures(blacklisted_features);
-  content::BrowserThread::GetBlockingPool()->FlushForTesting();
-
-  std::vector<std::string> expected_errors;
-  expected_errors.push_back(l10n_util::GetStringUTF8(
-      IDS_EXTENSION_WEBGL_NOT_SUPPORTED));
-  expected_errors.push_back(l10n_util::GetStringUTF8(
-      IDS_EXTENSION_CSS3D_NOT_SUPPORTED));
-
-  checker_.Check(extension, base::Bind(
-      &RequirementsCheckerBrowserTest::ValidateRequirementErrors,
-      base::Unretained(this), expected_errors));
-  content::BrowserThread::GetBlockingPool()->FlushForTesting();
-}
-
 IN_PROC_BROWSER_TEST_F(RequirementsCheckerBrowserTest, Check3DExtension) {
   scoped_refptr<const Extension> extension(
       LoadExtensionFromDirName("require_3d"));
@@ -195,8 +149,6 @@ IN_PROC_BROWSER_TEST_F(RequirementsCheckerBrowserTest, Check3DExtension) {
   if (!content::GpuDataManager::GetInstance()->GpuAccessAllowed(NULL)) {
     expected_errors.push_back(l10n_util::GetStringUTF8(
         IDS_EXTENSION_WEBGL_NOT_SUPPORTED));
-    expected_errors.push_back(l10n_util::GetStringUTF8(
-        IDS_EXTENSION_CSS3D_NOT_SUPPORTED));
   }
 
   checker_.Check(extension, base::Bind(

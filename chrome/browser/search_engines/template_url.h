@@ -133,6 +133,10 @@ class TemplateURLRef {
     // disabled by google.com preferences. See comments on
     // chrome::ForceInstantResultsParam().
     bool force_instant_results;
+
+    // True if the search was made using the app list search box. Otherwise, the
+    // search was made using the omnibox.
+    bool from_app_list;
   };
 
   TemplateURLRef(TemplateURL* owner, Type type);
@@ -223,8 +227,8 @@ class TemplateURLRef {
       const GURL& url,
       base::string16* search_terms,
       const SearchTermsData& search_terms_data,
-      url_parse::Parsed::ComponentType* search_term_component,
-      url_parse::Component* search_terms_position) const;
+      url::Parsed::ComponentType* search_term_component,
+      url::Component* search_terms_position) const;
 
   // Whether the URL uses POST (as opposed to GET).
   bool UsesPOSTMethodUsingTermsData(
@@ -393,7 +397,7 @@ class TemplateURLRef {
   mutable std::string host_;
   mutable std::string path_;
   mutable std::string search_term_key_;
-  mutable url_parse::Parsed::ComponentType search_term_key_location_;
+  mutable url::Parsed::ComponentType search_term_key_location_;
 
   mutable PostParams post_params_;
 
@@ -563,6 +567,11 @@ class TemplateURL {
   // Generates a favicon URL from the specified url.
   static GURL GenerateFaviconURL(const GURL& url);
 
+  // Returns true if |t_url| and |data| are equal in all meaningful respects.
+  // Static to allow either or both params to be NULL.
+  static bool MatchesData(const TemplateURL* t_url,
+                          const TemplateURLData* data);
+
   Profile* profile() { return profile_; }
   const TemplateURLData& data() const { return data_; }
 
@@ -641,14 +650,18 @@ class TemplateURL {
   bool SupportsReplacementUsingTermsData(
       const SearchTermsData& search_terms_data) const;
 
+  // Returns true if any URLRefs use Googe base URLs.
+  bool HasGoogleBaseURLs() const;
+
   // Returns true if this TemplateURL uses Google base URLs and has a keyword
   // of "google.TLD".  We use this to decide whether we can automatically
   // update the keyword to reflect the current Google base URL TLD.
   bool IsGoogleSearchURLWithReplaceableKeyword() const;
 
   // Returns true if the keywords match or if
-  // IsGoogleSearchURLWithReplaceableKeyword() is true for both TemplateURLs.
-  bool HasSameKeywordAs(const TemplateURL& other) const;
+  // IsGoogleSearchURLWithReplaceableKeyword() is true for both |this| and
+  // |other|.
+  bool HasSameKeywordAs(const TemplateURLData& other) const;
 
   Type GetType() const;
 
@@ -746,12 +759,11 @@ class TemplateURL {
   // and extract |search_terms| from it as well as the |search_terms_component|
   // (either REF or QUERY) and |search_terms_component| at which the
   // |search_terms| are found in |url|. See also ExtractSearchTermsFromURL().
-  bool FindSearchTermsInURL(
-      const GURL& url,
-      const SearchTermsData& search_terms_data,
-      base::string16* search_terms,
-      url_parse::Parsed::ComponentType* search_terms_component,
-      url_parse::Component* search_terms_position);
+  bool FindSearchTermsInURL(const GURL& url,
+                            const SearchTermsData& search_terms_data,
+                            base::string16* search_terms,
+                            url::Parsed::ComponentType* search_terms_component,
+                            url::Component* search_terms_position);
 
   Profile* profile_;
   TemplateURLData data_;

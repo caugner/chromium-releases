@@ -18,7 +18,6 @@
 #include "content/public/browser/notification_service.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_host.h"
-#include "extensions/browser/extension_system.h"
 
 namespace image_writer_api = extensions::api::image_writer_private;
 
@@ -61,9 +60,14 @@ void OperationManager::StartWriteFromUrl(
     const std::string& hash,
     const std::string& device_path,
     const Operation::StartWriteCallback& callback) {
+#if defined(OS_CHROMEOS)
+  // Chrome OS can only support a single operation at a time.
+  if (operations_.size() > 0) {
+#else
   OperationMap::iterator existing_operation = operations_.find(extension_id);
 
   if (existing_operation != operations_.end()) {
+#endif
     return callback.Run(false, error::kOperationAlreadyInProgress);
   }
 
@@ -86,9 +90,14 @@ void OperationManager::StartWriteFromFile(
     const base::FilePath& path,
     const std::string& device_path,
     const Operation::StartWriteCallback& callback) {
+#if defined(OS_CHROMEOS)
+  // Chrome OS can only support a single operation at a time.
+  if (operations_.size() > 0) {
+#else
   OperationMap::iterator existing_operation = operations_.find(extension_id);
 
   if (existing_operation != operations_.end()) {
+#endif
     return callback.Run(false, error::kOperationAlreadyInProgress);
   }
 
@@ -139,7 +148,7 @@ void OperationManager::DestroyPartitions(
 void OperationManager::OnProgress(const ExtensionId& extension_id,
                                   image_writer_api::Stage stage,
                                   int progress) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   image_writer_api::ProgressInfo info;
   info.stage = stage;
@@ -150,19 +159,19 @@ void OperationManager::OnProgress(const ExtensionId& extension_id,
   scoped_ptr<Event> event(new Event(
       image_writer_api::OnWriteProgress::kEventName, args.Pass()));
 
-  ExtensionSystem::Get(profile_)->event_router()->
-      DispatchEventToExtension(extension_id, event.Pass());
+  EventRouter::Get(profile_)
+      ->DispatchEventToExtension(extension_id, event.Pass());
 }
 
 void OperationManager::OnComplete(const ExtensionId& extension_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   scoped_ptr<base::ListValue> args(image_writer_api::OnWriteComplete::Create());
   scoped_ptr<Event> event(new Event(
       image_writer_api::OnWriteComplete::kEventName, args.Pass()));
 
-  ExtensionSystem::Get(profile_)->event_router()->
-      DispatchEventToExtension(extension_id, event.Pass());
+  EventRouter::Get(profile_)
+      ->DispatchEventToExtension(extension_id, event.Pass());
 
   DeleteOperation(extension_id);
 }
@@ -171,7 +180,7 @@ void OperationManager::OnError(const ExtensionId& extension_id,
                                image_writer_api::Stage stage,
                                int progress,
                                const std::string& error_message) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   image_writer_api::ProgressInfo info;
 
   DLOG(ERROR) << "ImageWriter error: " << error_message;
@@ -184,8 +193,8 @@ void OperationManager::OnError(const ExtensionId& extension_id,
   scoped_ptr<Event> event(new Event(
       image_writer_api::OnWriteError::kEventName, args.Pass()));
 
-  ExtensionSystem::Get(profile_)->event_router()->
-      DispatchEventToExtension(extension_id, event.Pass());
+  EventRouter::Get(profile_)
+      ->DispatchEventToExtension(extension_id, event.Pass());
 
   DeleteOperation(extension_id);
 }

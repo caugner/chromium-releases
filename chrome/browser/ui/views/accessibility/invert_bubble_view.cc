@@ -15,6 +15,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/gfx/sys_color_change_listener.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
@@ -124,7 +125,6 @@ void InvertBubbleView::Init() {
   // user to close it explicitly, which should be okay because it affects
   // a small minority of users, and only once.
   set_close_on_deactivate(false);
-  set_move_with_anchor(true);
 }
 
 void InvertBubbleView::LinkClicked(views::Link* source, int event_flags) {

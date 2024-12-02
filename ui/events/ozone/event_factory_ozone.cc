@@ -6,21 +6,11 @@
 
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
-#include "base/message_loop/message_pump_ozone.h"
 #include "base/strings/stringprintf.h"
 #include "ui/events/event.h"
 #include "ui/events/event_switches.h"
 
 namespace ui {
-
-namespace {
-
-void DispatchEventTask(scoped_ptr<ui::Event> key) {
-  TRACE_EVENT1("ozone", "DispatchEventTask", "type", key->type());
-  base::MessagePumpOzone::Current()->Dispatch(key.get());
-}
-
-}  // namespace
 
 // static
 EventFactoryOzone* EventFactoryOzone::impl_ = NULL;
@@ -44,12 +34,6 @@ void EventFactoryOzone::SetFileTaskRunner(
 void EventFactoryOzone::WarpCursorTo(gfx::AcceleratedWidget widget,
                                      const gfx::PointF& location) {
   NOTIMPLEMENTED();
-}
-
-// static
-void EventFactoryOzone::DispatchEvent(scoped_ptr<ui::Event> event) {
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE, base::Bind(&DispatchEventTask, base::Passed(&event)));
 }
 
 }  // namespace ui

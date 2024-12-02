@@ -20,11 +20,12 @@
 #include "chrome/browser/task_manager/background_information.h"
 #include "chrome/browser/task_manager/browser_process_resource_provider.h"
 #include "chrome/browser/task_manager/child_process_resource_provider.h"
-#include "chrome/browser/task_manager/extension_process_resource_provider.h"
+#include "chrome/browser/task_manager/extension_information.h"
 #include "chrome/browser/task_manager/guest_information.h"
 #include "chrome/browser/task_manager/panel_information.h"
+#include "chrome/browser/task_manager/printing_information.h"
 #include "chrome/browser/task_manager/resource_provider.h"
-#include "chrome/browser/task_manager/tab_contents_resource_provider.h"
+#include "chrome/browser/task_manager/tab_contents_information.h"
 #include "chrome/browser/task_manager/web_contents_resource_provider.h"
 #include "chrome/browser/task_manager/worker_resource_provider.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -45,10 +46,6 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/bytes_formatting.h"
 #include "ui/gfx/image/image_skia.h"
-
-#if !defined(OS_CHROMEOS)
-#include "chrome/browser/task_manager/notification_resource_provider.h"
-#endif
 
 #if defined(OS_MACOSX)
 #include "content/public/browser/browser_child_process_host.h"
@@ -252,27 +249,28 @@ TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
       task_manager,
       scoped_ptr<WebContentsInformation>(
           new task_manager::BackgroundInformation())));
-  AddResourceProvider(
-      new task_manager::TabContentsResourceProvider(task_manager));
+  AddResourceProvider(new task_manager::WebContentsResourceProvider(
+      task_manager,
+      scoped_ptr<WebContentsInformation>(
+          new task_manager::TabContentsInformation())));
+  AddResourceProvider(new task_manager::WebContentsResourceProvider(
+      task_manager,
+      scoped_ptr<WebContentsInformation>(
+          new task_manager::PrintingInformation())));
   AddResourceProvider(new task_manager::WebContentsResourceProvider(
       task_manager,
       scoped_ptr<WebContentsInformation>(
           new task_manager::PanelInformation())));
   AddResourceProvider(
       new task_manager::ChildProcessResourceProvider(task_manager));
-  AddResourceProvider(
-      new task_manager::ExtensionProcessResourceProvider(task_manager));
+  AddResourceProvider(new task_manager::WebContentsResourceProvider(
+      task_manager,
+      scoped_ptr<WebContentsInformation>(
+          new task_manager::ExtensionInformation())));
   AddResourceProvider(new task_manager::WebContentsResourceProvider(
       task_manager,
       scoped_ptr<WebContentsInformation>(
           new task_manager::GuestInformation())));
-
-#if !defined(OS_CHROMEOS) && defined(ENABLE_NOTIFICATIONS)
-  ResourceProvider* provider =
-      task_manager::NotificationResourceProvider::Create(task_manager);
-  if (provider)
-    AddResourceProvider(provider);
-#endif
 
   AddResourceProvider(new task_manager::WorkerResourceProvider(task_manager));
 }

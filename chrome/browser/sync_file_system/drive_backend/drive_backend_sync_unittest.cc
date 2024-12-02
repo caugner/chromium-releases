@@ -10,6 +10,7 @@
 #include "base/run_loop.h"
 #include "chrome/browser/drive/drive_uploader.h"
 #include "chrome/browser/drive/fake_drive_service.h"
+#include "chrome/browser/drive/test_util.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_constants.h"
 #include "chrome/browser/sync_file_system/drive_backend/fake_drive_service_helper.h"
 #include "chrome/browser/sync_file_system/drive_backend/metadata_database.h"
@@ -62,31 +63,29 @@ class DriveBackendSyncTest : public testing::Test,
         &profile_, in_memory_env_.get());
     local_sync_service_->AddChangeObserver(this);
 
-    scoped_ptr<drive::FakeDriveService> drive_service(
-        new drive::FakeDriveService());
+    scoped_ptr<drive::FakeDriveService>
+        drive_service(new drive::FakeDriveService);
     drive_service->Initialize("test@example.com");
-    ASSERT_TRUE(drive_service->LoadAccountMetadataForWapi(
-        "sync_file_system/account_metadata.json"));
-    ASSERT_TRUE(drive_service->LoadResourceListForWapi(
-        "gdata/root_feed.json"));
+    ASSERT_TRUE(drive::test_util::SetUpTestEntries(drive_service.get()));
 
     scoped_ptr<drive::DriveUploaderInterface> uploader(
         new drive::DriveUploader(drive_service.get(),
                                  file_task_runner_.get()));
 
+    fake_drive_service_helper_.reset(new FakeDriveServiceHelper(
+        drive_service.get(), uploader.get(),
+        kSyncRootFolderTitle));
+
     remote_sync_service_.reset(new SyncEngine(
-        base_dir_.path(),
-        file_task_runner_.get(),
         drive_service.PassAs<drive::DriveServiceInterface>(),
         uploader.Pass(),
-        NULL, NULL, NULL, in_memory_env_.get()));
+        file_task_runner_.get(),
+        NULL, NULL, NULL));
     remote_sync_service_->AddServiceObserver(this);
-    remote_sync_service_->Initialize();
+    remote_sync_service_->Initialize(base_dir_.path(),
+                                     base::MessageLoopProxy::current(),
+                                     in_memory_env_.get());
     remote_sync_service_->SetSyncEnabled(true);
-
-    fake_drive_service_helper_.reset(new FakeDriveServiceHelper(
-        fake_drive_service(), drive_uploader(),
-        kSyncRootFolderTitle));
 
     local_sync_service_->SetLocalChangeProcessor(remote_sync_service_.get());
     remote_sync_service_->SetRemoteChangeProcessor(local_sync_service_.get());
@@ -463,10 +462,6 @@ class DriveBackendSyncTest : public testing::Test,
   drive::FakeDriveService* fake_drive_service() {
     return static_cast<drive::FakeDriveService*>(
         remote_sync_service_->GetDriveService());
-  }
-
-  drive::DriveUploaderInterface* drive_uploader() {
-    return remote_sync_service_->GetDriveUploader();
   }
 
   FakeDriveServiceHelper* fake_drive_service_helper() {

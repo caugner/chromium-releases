@@ -17,7 +17,6 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "content/public/browser/web_contents_view.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/window.h"
 #include "ui/views/focus/focus_manager.h"
@@ -28,7 +27,8 @@ using web_modal::WebContentsModalDialogManager;
 
 ChromeWebContentsViewDelegateViews::ChromeWebContentsViewDelegateViews(
     content::WebContents* web_contents)
-    : web_contents_(web_contents) {
+    : ContextMenuDelegate(web_contents),
+      web_contents_(web_contents) {
   last_focused_view_storage_id_ =
       views::ViewStorage::GetInstance()->CreateStorageID();
 }
@@ -118,19 +118,35 @@ void ChromeWebContentsViewDelegateViews::RestoreFocus() {
   }
 }
 
-void ChromeWebContentsViewDelegateViews::ShowContextMenu(
-    content::RenderFrameHost* render_frame_host,
+scoped_ptr<RenderViewContextMenu> ChromeWebContentsViewDelegateViews::BuildMenu(
+    content::WebContents* web_contents,
     const content::ContextMenuParams& params) {
+  scoped_ptr<RenderViewContextMenu> menu;
+  content::RenderFrameHost* focused_frame = web_contents->GetFocusedFrame();
+  // If the frame tree does not have a focused frame at this point, do not
+  // bother creating RenderViewContextMenuViews.
+  // This happens if the frame has navigated to a different page before
+  // ContextMenu message was received by the current RenderFrameHost.
+  if (focused_frame) {
+    menu.reset(RenderViewContextMenuViews::Create(focused_frame, params));
+    menu->Init();
+  }
+  return menu.Pass();
+}
+
+void ChromeWebContentsViewDelegateViews::ShowMenu(
+    scoped_ptr<RenderViewContextMenu> menu) {
+  context_menu_.reset(static_cast<RenderViewContextMenuViews*>(menu.release()));
+  if (!context_menu_.get())
+    return;
+
   // Menus need a Widget to work. If we're not the active tab we won't
   // necessarily be in a widget.
   views::Widget* top_level_widget = GetTopLevelWidget();
   if (!top_level_widget)
     return;
 
-  context_menu_.reset(
-      RenderViewContextMenuViews::Create(render_frame_host, params));
-  context_menu_->Init();
-
+  const content::ContextMenuParams& params = context_menu_->params();
   // Don't show empty menus.
   if (context_menu_->menu_model().GetItemCount() == 0)
     return;
@@ -153,6 +169,14 @@ void ChromeWebContentsViewDelegateViews::ShowContextMenu(
   context_menu_->RunMenuAt(top_level_widget, screen_point, params.source_type);
 }
 
+void ChromeWebContentsViewDelegateViews::ShowContextMenu(
+    content::RenderFrameHost* render_frame_host,
+    const content::ContextMenuParams& params) {
+  ShowMenu(
+      BuildMenu(content::WebContents::FromRenderFrameHost(render_frame_host),
+                params));
+}
+
 void ChromeWebContentsViewDelegateViews::SizeChanged(const gfx::Size& size) {
   SadTabHelper* sad_tab_helper = SadTabHelper::FromWebContents(web_contents_);
   if (!sad_tab_helper)
@@ -165,7 +189,7 @@ void ChromeWebContentsViewDelegateViews::SizeChanged(const gfx::Size& size) {
 aura::Window* ChromeWebContentsViewDelegateViews::GetActiveNativeView() {
   return web_contents_->GetFullscreenRenderWidgetHostView() ?
       web_contents_->GetFullscreenRenderWidgetHostView()->GetNativeView() :
-      web_contents_->GetView()->GetNativeView();
+      web_contents_->GetNativeView();
 }
 
 views::Widget* ChromeWebContentsViewDelegateViews::GetTopLevelWidget() {
@@ -183,7 +207,7 @@ void ChromeWebContentsViewDelegateViews::SetInitialFocus() {
     if (web_contents_->GetDelegate())
       web_contents_->GetDelegate()->SetFocusToLocationBar(false);
   } else {
-    web_contents_->GetView()->Focus();
+    web_contents_->Focus();
   }
 }
 

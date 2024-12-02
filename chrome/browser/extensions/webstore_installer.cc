@@ -28,6 +28,7 @@
 #include "chrome/browser/extensions/install_tracker.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/extensions/install_verifier.h"
+#include "chrome/browser/extensions/shared_module_service.h"
 #include "chrome/browser/omaha_query_params/omaha_query_params.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -85,6 +86,10 @@ const char kInlineInstallSource[] = "inline";
 const char kDefaultInstallSource[] = "ondemand";
 const char kAppLauncherInstallSource[] = "applauncher";
 
+// TODO(rockot): Share this duplicated constant with the extension updater.
+// See http://crbug.com/371398.
+const char kAuthUserQueryKey[] = "authuser";
+
 const size_t kTimeRemainingMinutesThreshold = 1u;
 
 // Folder for downloading crx files from the webstore. This is used so that the
@@ -137,6 +142,37 @@ bool UseSeparateWebstoreDownloadDirectory() {
   std::string field_trial_group =
       base::FieldTrialList::FindFullName(kFieldTrial);
   return field_trial_group == kSeparateDirectoryUnderUDD;
+}
+
+void MaybeAppendAuthUserParameter(const std::string& authuser, GURL* url) {
+  if (authuser.empty())
+    return;
+  std::string old_query = url->query();
+  url::Component query(0, old_query.length());
+  url::Component key, value;
+  // Ensure that the URL doesn't already specify an authuser parameter.
+  while (url::ExtractQueryKeyValue(
+             old_query.c_str(), &query, &key, &value)) {
+    std::string key_string = old_query.substr(key.begin, key.len);
+    if (key_string == kAuthUserQueryKey) {
+      return;
+    }
+  }
+  if (!old_query.empty()) {
+    old_query += "&";
+  }
+  std::string authuser_param = base::StringPrintf(
+      "%s=%s",
+      kAuthUserQueryKey,
+      authuser.c_str());
+
+  // TODO(rockot): Share this duplicated code with the extension updater.
+  // See http://crbug.com/371398.
+  std::string new_query_string = old_query + authuser_param;
+  url::Component new_query(0, new_query_string.length());
+  url::Replacements<char> replacements;
+  replacements.SetQuery(new_query_string.c_str(), new_query);
+  *url = url->ReplaceComponents(replacements);
 }
 
 }  // namespace
@@ -258,7 +294,7 @@ WebstoreInstaller::WebstoreInstaller(Profile* profile,
       approval_(approval.release()),
       total_modules_(0),
       download_started_(false) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(web_contents);
 
   registrar_.Add(this, chrome::NOTIFICATION_CRX_INSTALLER_DONE,
@@ -270,7 +306,7 @@ WebstoreInstaller::WebstoreInstaller(Profile* profile,
 }
 
 void WebstoreInstaller::Start() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   AddRef();  // Balanced in ReportSuccess and ReportFailure.
 
   if (!Extension::IdIsValid(id_)) {
@@ -281,11 +317,13 @@ void WebstoreInstaller::Start() {
   ExtensionService* extension_service =
     ExtensionSystem::Get(profile_)->extension_service();
   if (approval_.get() && approval_->dummy_extension) {
-    ExtensionService::ImportStatus status =
-      extension_service->CheckImports(approval_->dummy_extension,
-                                      &pending_modules_, &pending_modules_);
+    SharedModuleService::ImportStatus status =
+        extension_service->shared_module_service()->CheckImports(
+            approval_->dummy_extension,
+            &pending_modules_,
+            &pending_modules_);
     // For this case, it is because some imports are not shared modules.
-    if (status == ExtensionService::IMPORT_STATUS_UNRECOVERABLE) {
+    if (status == SharedModuleService::IMPORT_STATUS_UNRECOVERABLE) {
       ReportFailure(kDependencyNotSharedModuleError,
           FAILURE_REASON_DEPENDENCY_NOT_SHARED_MODULE);
       return;
@@ -336,10 +374,12 @@ void WebstoreInstaller::Observe(int type,
       const Extension* extension =
           content::Details<const Extension>(details).ptr();
       CrxInstaller* installer = content::Source<CrxInstaller>(source).ptr();
-      if (extension == NULL && download_item_ != NULL &&
-          installer->download_url() == download_item_->GetURL() &&
-          installer->profile()->IsSameProfile(profile_)) {
-        ReportFailure(kInstallCanceledError, FAILURE_REASON_CANCELLED);
+      if (crx_installer_.get() == installer) {
+        crx_installer_ = NULL;
+        // ReportFailure releases a reference to this object so it must be the
+        // last operation in this method.
+        if (extension == NULL)
+          ReportFailure(kInstallCanceledError, FAILURE_REASON_CANCELLED);
       }
       break;
     }
@@ -381,7 +421,7 @@ void WebstoreInstaller::Observe(int type,
     case chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR: {
       CrxInstaller* crx_installer = content::Source<CrxInstaller>(source).ptr();
       CHECK(crx_installer);
-      if (!profile_->IsSameProfile(crx_installer->profile()))
+      if (crx_installer != crx_installer_.get())
         return;
 
       // TODO(rdevlin.cronin): Continue removing std::string errors and
@@ -389,8 +429,10 @@ void WebstoreInstaller::Observe(int type,
       const base::string16* error =
           content::Details<const base::string16>(details).ptr();
       const std::string utf8_error = base::UTF16ToUTF8(*error);
-      if (download_url_ == crx_installer->original_download_url())
-        ReportFailure(utf8_error, FAILURE_REASON_OTHER);
+      crx_installer_ = NULL;
+      // ReportFailure releases a reference to this object so it must be the
+      // last operation in this method.
+      ReportFailure(utf8_error, FAILURE_REASON_OTHER);
       break;
     }
 
@@ -456,7 +498,9 @@ void WebstoreInstaller::OnDownloadStarted(
 }
 
 void WebstoreInstaller::OnDownloadUpdated(DownloadItem* download) {
-  CHECK_EQ(download_item_, download);
+  // DownloadItemImpl calls the observer for a completed item, ignore it.
+  if (download_item_ != download)
+    return;
 
   switch (download->GetState()) {
     case DownloadItem::CANCELLED:
@@ -470,13 +514,19 @@ void WebstoreInstaller::OnDownloadUpdated(DownloadItem* download) {
       // Wait for other notifications if the download is really an extension.
       if (!download_crx_util::IsExtensionDownload(*download)) {
         ReportFailure(kInvalidDownloadError, FAILURE_REASON_OTHER);
-      } else if (pending_modules_.empty()) {
-        // The download is the last module - the extension main module.
-        if (delegate_)
-          delegate_->OnExtensionDownloadProgress(id_, download);
-        extensions::InstallTracker* tracker =
-            extensions::InstallTrackerFactory::GetForProfile(profile_);
-        tracker->OnDownloadProgress(id_, 100);
+      } else {
+        if (crx_installer_.get())
+          return;  // DownloadItemImpl calls the observer twice, ignore it.
+        StartCrxInstaller(*download);
+
+        if (pending_modules_.empty()) {
+          // The download is the last module - the extension main module.
+          if (delegate_)
+            delegate_->OnExtensionDownloadProgress(id_, download);
+          extensions::InstallTracker* tracker =
+              extensions::InstallTrackerFactory::GetForProfile(profile_);
+          tracker->OnDownloadProgress(id_, 100);
+        }
       }
       // Stop the progress timer if it's running.
       download_progress_timer_.Stop();
@@ -515,6 +565,7 @@ void WebstoreInstaller::DownloadCrx(
     const std::string& extension_id,
     InstallSource source) {
   download_url_ = GetWebstoreInstallURL(extension_id, source);
+  MaybeAppendAuthUserParameter(approval_->authuser, &download_url_);
 
   base::FilePath download_path;
   if (UseSeparateWebstoreDownloadDirectory()) {
@@ -552,7 +603,7 @@ void WebstoreInstaller::DownloadCrx(
 // early-returns into a single branch makes it hard to see exactly which pointer
 // it is.
 void WebstoreInstaller::StartDownload(const base::FilePath& file) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (file.empty()) {
     ReportFailure(kDownloadDirectoryError, FAILURE_REASON_OTHER);
@@ -647,6 +698,26 @@ void WebstoreInstaller::UpdateDownloadProgress() {
   } else {
     download_progress_timer_.Stop();
   }
+}
+
+void WebstoreInstaller::StartCrxInstaller(const DownloadItem& download) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!crx_installer_.get());
+
+  ExtensionService* service = ExtensionSystem::Get(profile_)->
+      extension_service();
+  CHECK(service);
+
+  const Approval* approval = GetAssociatedApproval(download);
+  DCHECK(approval);
+
+  crx_installer_ = download_crx_util::CreateCrxInstaller(profile_, download);
+
+  crx_installer_->set_expected_id(approval->extension_id);
+  crx_installer_->set_is_gallery_install(true);
+  crx_installer_->set_allow_silent_install(true);
+
+  crx_installer_->InstallCrx(download.GetFullPath());
 }
 
 void WebstoreInstaller::ReportFailure(const std::string& error,

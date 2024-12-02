@@ -18,7 +18,7 @@ import org.chromium.base.MemoryPressureListener;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.content.browser.BrowserStartupController;
-import org.chromium.content.browser.ContentView;
+import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.DeviceUtils;
 import org.chromium.content.common.ContentSwitches;
 import org.chromium.content_shell.Shell;
@@ -56,7 +56,7 @@ public class ContentShellActivity extends Activity {
 
         DeviceUtils.addDeviceSpecificUserAgentSwitch(this);
         try {
-            LibraryLoader.ensureInitialized(null);
+            LibraryLoader.ensureInitialized();
         } catch (ProcessInitException e) {
             Log.e(TAG, "ContentView initialization failed.", e);
             // Since the library failed to initialize nothing in the application
@@ -125,9 +125,9 @@ public class ContentShellActivity extends Activity {
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
-        Shell activeShell = getActiveShell();
-        if (activeShell != null) {
-            outState.putString(ACTIVE_SHELL_URL_KEY, activeShell.getContentView().getUrl());
+        ContentViewCore contentViewCore = getActiveContentViewCore();
+        if (contentViewCore != null) {
+            outState.putString(ACTIVE_SHELL_URL_KEY, contentViewCore.getUrl());
         }
 
         mWindowAndroid.saveInstanceState(outState);
@@ -143,12 +143,12 @@ public class ContentShellActivity extends Activity {
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
-        if (keyCode != KeyEvent.KEYCODE_BACK) return super.onKeyUp(keyCode, event);
-
-        Shell activeView = getActiveShell();
-        if (activeView != null && activeView.getContentView().canGoBack()) {
-            activeView.getContentView().goBack();
-            return true;
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            ContentViewCore contentViewCore = getActiveContentViewCore();
+            if (contentViewCore != null && contentViewCore.canGoBack()) {
+                contentViewCore.goBack();
+                return true;
+            }
         }
 
         return super.onKeyUp(keyCode, event);
@@ -175,16 +175,16 @@ public class ContentShellActivity extends Activity {
     protected void onStop() {
         super.onStop();
 
-        ContentView view = getActiveContentView();
-        if (view != null) view.onHide();
+        ContentViewCore contentViewCore = getActiveContentViewCore();
+        if (contentViewCore != null) contentViewCore.onHide();
     }
 
     @Override
     protected void onStart() {
         super.onStart();
 
-        ContentView view = getActiveContentView();
-        if (view != null) view.onShow();
+        ContentViewCore contentViewCore = getActiveContentViewCore();
+        if (contentViewCore != null) contentViewCore.onShow();
     }
 
     @Override
@@ -217,11 +217,11 @@ public class ContentShellActivity extends Activity {
     }
 
     /**
-     * @return The {@link ContentView} owned by the currently visible {@link Shell} or null if one
-     *         is not showing.
+     * @return The {@link ContentViewCore} owned by the currently visible {@link Shell} or null if
+     *         one is not showing.
      */
-    public ContentView getActiveContentView() {
+    public ContentViewCore getActiveContentViewCore() {
         Shell shell = getActiveShell();
-        return shell != null ? shell.getContentView() : null;
+        return shell != null ? shell.getContentViewCore() : null;
     }
 }

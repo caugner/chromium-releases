@@ -38,7 +38,6 @@
 #include "chrome/browser/signin/chrome_signin_client.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_names_io_thread.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -50,6 +49,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/sync/one_click_signin_histogram.h"
+#include "chrome/browser/ui/sync/one_click_signin_sync_observer.h"
 #include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
 #include "chrome/browser/ui/sync/signin_histogram.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
@@ -58,14 +58,15 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/net/url_util.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/profile_management_switches.h"
 #include "chrome/common/url_constants.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_error_controller.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_manager_cookie_helper.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_entry.h"
@@ -73,7 +74,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "content/public/common/page_transition_types.h"
 #include "google_apis/gaia/gaia_auth_util.h"
@@ -426,7 +426,7 @@ class CurrentHistoryCleaner : public content::WebContentsObserver {
   virtual ~CurrentHistoryCleaner();
 
   // content::WebContentsObserver:
-  virtual void WebContentsDestroyed(content::WebContents* contents) OVERRIDE;
+  virtual void WebContentsDestroyed() OVERRIDE;
   virtual void DidCommitProvisionalLoadForFrame(
       int64 frame_id,
       const base::string16& frame_unique_name,
@@ -479,15 +479,8 @@ void CurrentHistoryCleaner::DidCommitProvisionalLoadForFrame(
   }
 }
 
-void CurrentHistoryCleaner::WebContentsDestroyed(
-    content::WebContents* contents) {
+void CurrentHistoryCleaner::WebContentsDestroyed() {
   delete this;  // Failure.
-}
-
-void CloseTab(content::WebContents* tab) {
-  content::WebContentsDelegate* tab_delegate = tab->GetDelegate();
-  if (tab_delegate)
-    tab_delegate->CloseContents(tab);
 }
 
 }  // namespace
@@ -669,6 +662,7 @@ OneClickSigninHelper::SyncStarterWrapper::StartOneClickSigninSyncStarter(
                                 refresh_token, start_mode_,
                                 args_.web_contents,
                                 args_.confirmation_required,
+                                GURL(),
                                 args_.callback);
 }
 
@@ -680,8 +674,9 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(OneClickSigninHelper);
 // static
 const int OneClickSigninHelper::kMaxNavigationsSince = 10;
 
-OneClickSigninHelper::OneClickSigninHelper(content::WebContents* web_contents,
-                                           PasswordManager* password_manager)
+OneClickSigninHelper::OneClickSigninHelper(
+    content::WebContents* web_contents,
+    password_manager::PasswordManager* password_manager)
     : content::WebContentsObserver(web_contents),
       showing_signin_(false),
       auto_accept_(AUTO_ACCEPT_NONE),
@@ -700,11 +695,7 @@ OneClickSigninHelper::OneClickSigninHelper(content::WebContents* web_contents,
   }
 }
 
-OneClickSigninHelper::~OneClickSigninHelper() {
-  // WebContentsDestroyed() should always be called before the object is
-  // deleted.
-  DCHECK(!web_contents());
-}
+OneClickSigninHelper::~OneClickSigninHelper() {}
 
 // static
 void OneClickSigninHelper::LogHistogramValue(
@@ -757,6 +748,7 @@ void OneClickSigninHelper::LogHistogramValue(
     case signin::SOURCE_DEVICES_PAGE:
       UMA_HISTOGRAM_ENUMERATION("Signin.DevicesPageActions", action,
                                 one_click_signin::HISTOGRAM_MAX);
+      break;
     default:
       // This switch statement needs to be updated when the enum Source changes.
       COMPILE_ASSERT(signin::SOURCE_UNKNOWN == 12,
@@ -771,7 +763,7 @@ void OneClickSigninHelper::LogHistogramValue(
 // static
 void OneClickSigninHelper::CreateForWebContentsWithPasswordManager(
     content::WebContents* contents,
-    PasswordManager* password_manager) {
+    password_manager::PasswordManager* password_manager) {
   if (!FromWebContents(contents)) {
     contents->SetUserData(UserDataKey(),
                           new OneClickSigninHelper(contents, password_manager));
@@ -783,7 +775,7 @@ bool OneClickSigninHelper::CanOffer(content::WebContents* web_contents,
                                     CanOfferFor can_offer_for,
                                     const std::string& email,
                                     std::string* error_message) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     VLOG(1) << "OneClickSigninHelper::CanOffer";
 
   if (error_message)
@@ -1058,7 +1050,7 @@ void OneClickSigninHelper::ShowInfoBarUIThread(
     const GURL& continue_url,
     int child_id,
     int route_id) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   content::WebContents* web_contents = tab_util::GetWebContentsByID(child_id,
                                                                     route_id);
@@ -1200,6 +1192,12 @@ bool OneClickSigninHelper::HandleCrossAccountError(
 // static
 void OneClickSigninHelper::RedirectToNtpOrAppsPage(
     content::WebContents* contents, signin::Source source) {
+  // Do nothing if a navigation is pending, since this call can be triggered
+  // from DidStartLoading. This avoids deleting the pending entry while we are
+  // still navigating to it. See crbug/346632.
+  if (contents->GetController().GetPendingEntry())
+    return;
+
   VLOG(1) << "RedirectToNtpOrAppsPage";
   // Redirect to NTP/Apps page and display a confirmation bubble
   GURL url(source == signin::SOURCE_APPS_PAGE_LINK ?
@@ -1475,7 +1473,7 @@ void OneClickSigninHelper::DidStopLoading(
     case AUTO_ACCEPT_ACCEPTED:
       LogOneClickHistogramValue(one_click_signin::HISTOGRAM_ACCEPTED);
       LogOneClickHistogramValue(one_click_signin::HISTOGRAM_WITH_DEFAULTS);
-      SigninManager::DisableOneClickSignIn(profile);
+      SigninManager::DisableOneClickSignIn(profile->GetPrefs());
       // Start syncing with the default settings - prompt the user to sign in
       // first.
       if (!do_not_start_sync_for_testing_) {
@@ -1491,7 +1489,7 @@ void OneClickSigninHelper::DidStopLoading(
     case AUTO_ACCEPT_CONFIGURE:
       LogOneClickHistogramValue(one_click_signin::HISTOGRAM_ACCEPTED);
       LogOneClickHistogramValue(one_click_signin::HISTOGRAM_WITH_ADVANCED);
-      SigninManager::DisableOneClickSignIn(profile);
+      SigninManager::DisableOneClickSignIn(profile->GetPrefs());
       // Display the extra confirmation (even in the SAML case) in case this
       // was an untrusted renderer.
       if (!do_not_start_sync_for_testing_) {
@@ -1564,10 +1562,8 @@ void OneClickSigninHelper::DidStopLoading(
       if (original_source == signin::SOURCE_SETTINGS ||
           (original_source == signin::SOURCE_WEBSTORE_INSTALL &&
            source_ == signin::SOURCE_SETTINGS)) {
-        ProfileSyncService* sync_service =
-            ProfileSyncServiceFactory::GetForProfile(profile);
-        if (sync_service)
-          sync_service->AddObserver(this);
+        // The observer deletes itself once it's done.
+        new OneClickSigninSyncObserver(contents, original_continue_url_);
       }
       break;
     }
@@ -1581,60 +1577,6 @@ void OneClickSigninHelper::DidStopLoading(
   }
 
   CleanTransientState();
-}
-
-// It is guaranteed that this method is called before the object is deleted.
-void OneClickSigninHelper::WebContentsDestroyed(
-    content::WebContents* contents) {
-  Profile* profile =
-      Profile::FromBrowserContext(contents->GetBrowserContext());
-  ProfileSyncService* sync_service =
-      ProfileSyncServiceFactory::GetForProfile(profile);
-  if (sync_service)
-    sync_service->RemoveObserver(this);
-}
-
-void OneClickSigninHelper::OnStateChanged() {
-  // We only add observer for ProfileSyncService when original_continue_url_ is
-  // not empty.
-  DCHECK(!original_continue_url_.is_empty());
-
-  content::WebContents* contents = web_contents();
-  Profile* profile =
-      Profile::FromBrowserContext(contents->GetBrowserContext());
-  ProfileSyncService* sync_service =
-      ProfileSyncServiceFactory::GetForProfile(profile);
-
-  // At this point, the sign in process is complete, and control has been handed
-  // back to the sync engine. Close the gaia sign in tab if
-  // |original_continue_url_| contains the |auto_close| parameter. Otherwise,
-  // wait for sync setup to complete and then navigate to
-  // |original_continue_url_|.
-  if (signin::IsAutoCloseEnabledInURL(original_continue_url_)) {
-    // Close the gaia sign in tab via a task to make sure we aren't in the
-    // middle of any webui handler code.
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&CloseTab, base::Unretained(contents)));
-  } else {
-    // Sync setup not completed yet.
-    if (sync_service->FirstSetupInProgress())
-      return;
-
-    if (sync_service->sync_initialized() &&
-        signin::GetSourceForPromoURL(original_continue_url_)
-            != signin::SOURCE_SETTINGS) {
-      contents->GetController().LoadURL(original_continue_url_,
-                                        content::Referrer(),
-                                        content::PAGE_TRANSITION_AUTO_TOPLEVEL,
-                                        std::string());
-    }
-  }
-
-  // Clears |original_continue_url_| here instead of in CleanTransientState,
-  // because it is used in OnStateChanged which occurs later.
-  original_continue_url_ = GURL();
-  sync_service->RemoveObserver(this);
 }
 
 OneClickSigninSyncStarter::Callback

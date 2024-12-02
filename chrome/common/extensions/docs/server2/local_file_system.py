@@ -69,6 +69,8 @@ class LocalFileSystem(FileSystem):
   filesystem.
   '''
   def __init__(self, base_path):
+    # Enforce POSIX path, so path validity checks pass for Windows.
+    base_path = base_path.replace(os.sep, '/')
     AssertIsDirectory(base_path)
     self._base_path = _ConvertToFilepath(base_path)
 
@@ -76,7 +78,7 @@ class LocalFileSystem(FileSystem):
   def Create(*path):
     return LocalFileSystem(ChromiumPath(*path))
 
-  def Read(self, paths):
+  def Read(self, paths, skip_not_found=False):
     def resolve():
       result = {}
       for path in paths:

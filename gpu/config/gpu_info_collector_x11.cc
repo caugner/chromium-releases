@@ -20,6 +20,7 @@
 #include "library_loaders/libpci.h"
 #include "third_party/libXNVCtrl/NVCtrl.h"
 #include "third_party/libXNVCtrl/NVCtrlLib.h"
+#include "ui/gfx/x/x11_types.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
@@ -70,7 +71,7 @@ std::string CollectDriverVersionATI() {
 // Use NVCtrl extention to query NV driver version.
 // Return empty string on failing.
 std::string CollectDriverVersionNVidia() {
-  Display* display = base::MessagePumpForUI::GetDefaultXDisplay();
+  Display* display = gfx::GetXDisplay();
   if (!display) {
     LOG(ERROR) << "XOpenDisplay failed.";
     return std::string();
@@ -124,8 +125,18 @@ bool CollectPCIVideoCardInfo(GPUInfo* gpu_info) {
        device != NULL; device = device->next) {
     // Fill the IDs and class fields.
     (libpci_loader.pci_fill_info)(device, 33);
-    // TODO(zmo): there might be other classes that qualify as display devices.
-    if (device->device_class != 0x0300)  // Device class is DISPLAY_VGA.
+    bool is_gpu = false;
+    switch (device->device_class) {
+      case PCI_CLASS_DISPLAY_VGA:
+      case PCI_CLASS_DISPLAY_XGA:
+      case PCI_CLASS_DISPLAY_3D:
+        is_gpu = true;
+        break;
+      case PCI_CLASS_DISPLAY_OTHER:
+      default:
+        break;
+    }
+    if (!is_gpu)
       continue;
 
     GPUInfo::GPUDevice gpu;
@@ -243,11 +254,11 @@ CollectInfoResult CollectBasicGraphicsInfo(GPUInfo* gpu_info) {
 CollectInfoResult CollectDriverInfoGL(GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
-  std::string gl_version_string = gpu_info->gl_version_string;
-  if (StartsWithASCII(gl_version_string, "OpenGL ES", true))
-    gl_version_string = gl_version_string.substr(10);
+  std::string gl_version = gpu_info->gl_version;
+  if (StartsWithASCII(gl_version, "OpenGL ES", true))
+    gl_version = gl_version.substr(10);
   std::vector<std::string> pieces;
-  base::SplitStringAlongWhitespace(gl_version_string, &pieces);
+  base::SplitStringAlongWhitespace(gl_version, &pieces);
   // In linux, the gl version string might be in the format of
   //   GLVersion DriverVendor DriverVersion
   if (pieces.size() < 3)

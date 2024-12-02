@@ -103,7 +103,8 @@ base::string16 SCTListModel::GetItemAt(int index) {
 SignedCertificateTimestampsViews::SignedCertificateTimestampsViews(
     content::WebContents* web_contents,
     const net::SignedCertificateTimestampAndStatusList& sct_list)
-    : web_contents_(web_contents), sct_info_view_(NULL), sct_list_(sct_list) {
+    : sct_info_view_(NULL),
+      sct_list_(sct_list) {
   WebContentsModalDialogManager* web_contents_modal_dialog_manager =
       WebContentsModalDialogManager::FromWebContents(web_contents);
   WebContentsModalDialogManagerDelegate* modal_delegate =
@@ -111,7 +112,8 @@ SignedCertificateTimestampsViews::SignedCertificateTimestampsViews(
   DCHECK(modal_delegate);
   views::Widget* window = views::Widget::CreateWindowAsFramelessChild(
       this, modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
-  web_contents_modal_dialog_manager->ShowDialog(window->GetNativeView());
+  web_contents_modal_dialog_manager->ShowModalDialog(
+      window->GetNativeView());
 }
 
 SignedCertificateTimestampsViews::~SignedCertificateTimestampsViews() {}

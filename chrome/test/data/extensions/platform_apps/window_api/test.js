@@ -261,7 +261,7 @@ function testCreate() {
 function testDeprecatedBounds() {
   chrome.test.runTests([
     function contentSize() {
-      var options = { bounds: { width: 250, height: 200 } };
+      var options = { bounds: { left: 0, top: 0, width: 250, height: 200 } };
       chrome.app.window.create('test.html', options, callbackPass(
       function(win) {
         var bounds = win.getBounds();
@@ -274,7 +274,7 @@ function testDeprecatedBounds() {
     },
 
     function windowPosition() {
-      var options = { bounds: { left: 250, top: 200 } };
+      var options = { bounds: { left: 0, top: 0, left: 250, top: 200 } };
       chrome.app.window.create('test.html', options, callbackPass(
       function(win) {
         var bounds = win.getBounds();
@@ -288,7 +288,7 @@ function testDeprecatedBounds() {
 
     function minSize() {
       var options = {
-        bounds: { width: 250, height: 250 },
+        bounds: { left: 0, top: 0, width: 250, height: 250 },
         minWidth: 400, minHeight: 450
       };
       chrome.app.window.create('test.html', options, callbackPass(
@@ -302,7 +302,7 @@ function testDeprecatedBounds() {
 
     function maxSize() {
       var options = {
-        bounds: { width: 250, height: 250 },
+        bounds: { left: 0, top: 0, width: 250, height: 250 },
         maxWidth: 200, maxHeight: 150
       };
       chrome.app.window.create('test.html', options, callbackPass(
@@ -316,7 +316,7 @@ function testDeprecatedBounds() {
 
     function minAndMaxSize() {
       var options = {
-        bounds: { width: 250, height: 250 },
+        bounds: { left: 0, top: 0, width: 250, height: 250 },
         minWidth: 400, minHeight: 450,
         maxWidth: 200, maxHeight: 150
       };
@@ -330,8 +330,9 @@ function testDeprecatedBounds() {
     },
 
     function simpleSetBounds() {
-      chrome.app.window.create('test.html',
-          { bounds: { width: 250, height: 200 } }, callbackPass(function(win) {
+      chrome.app.window.create('test.html', {
+        bounds: { left: 0, top: 0, width: 250, height: 200 }
+      }, callbackPass(function(win) {
         var newBounds = {width: 400, height: 450};
         win.setBounds(newBounds);
         chrome.test.waitForRoundTrip('msg', callbackPass(function() {
@@ -345,13 +346,13 @@ function testDeprecatedBounds() {
 
     function heightOnlySetBounds() {
       chrome.app.window.create('test.html', {
-        bounds: { width: 512, height: 256 }
+        bounds: { left: 0, top: 0, width: 300, height: 256 }
       }, callbackPass(function(win) {
-        win.setBounds({ height: 512 });
+        win.setBounds({ height: 300 });
         chrome.test.waitForRoundTrip('msg', callbackPass(function() {
           var bounds = win.getBounds();
-          chrome.test.assertEq(512, bounds.width);
-          chrome.test.assertEq(512, bounds.height);
+          chrome.test.assertEq(300, bounds.width);
+          chrome.test.assertEq(300, bounds.height);
           win.close();
         }));
       }));
@@ -526,66 +527,6 @@ function testInitialBounds() {
       testConflictingBoundsProperty("maxWidth");
       testConflictingBoundsProperty("maxHeight");
     }
-  ]);
-}
-
-function testNewBoundsApiInStable() {
-  chrome.test.runTests([
-    function testInitInnerBounds() {
-      var innerBounds = {
-        width: 600,
-        height: 400
-      };
-      chrome.app.window.create('test.html', {
-        innerBounds: innerBounds
-      }, callbackFail('innerBounds and outerBounds are only available in'+
-                      ' dev channel.')
-      );
-    },
-
-    function testInitOuterBounds() {
-      var outerBounds = {
-        width: 600,
-        height: 400
-      };
-      chrome.app.window.create('test.html', {
-        outerBounds: outerBounds
-      }, callbackFail('innerBounds and outerBounds are only available in'+
-                      ' dev channel.')
-      );
-    },
-
-    function testSetBounds() {
-      var init = {
-        bounds: { width: 198, height: 159 }
-      };
-      chrome.app.window.create('test.html', init, callbackPass(function(win) {
-        chrome.test.assertTrue(win != null);
-        win.innerBounds.setSize(250, 100);
-        chrome.test.waitForRoundTrip('msg', callbackPass(function(msg) {
-          var bounds = win.getBounds();
-          chrome.test.assertEq(init.bounds.width, bounds.width);
-          chrome.test.assertEq(init.bounds.height, bounds.height);
-          win.close();
-        }));
-      }));
-    },
-
-    function testSetConstraints() {
-      var init = {
-        bounds: { width: 198, height: 159 }
-      };
-      chrome.app.window.create('test.html', init, callbackPass(function(win) {
-        chrome.test.assertTrue(win != null);
-        win.innerBounds.setMaximumSize(80, 80);
-        chrome.test.waitForRoundTrip('msg', callbackPass(function(msg) {
-          var bounds = win.getBounds();
-          chrome.test.assertEq(init.bounds.width, bounds.width);
-          chrome.test.assertEq(init.bounds.height, bounds.height);
-          win.close();
-        }));
-      }));
-    },
   ]);
 }
 
@@ -1105,7 +1046,7 @@ function testMaximize() {
   chrome.test.runTests([
     function basic() {
       chrome.app.window.create('test.html',
-                               { bounds: {width: 200, height: 200} },
+                               { innerBounds: {width: 200, height: 200} },
         callbackPass(function(win) {
           // TODO(mlamouri): we should be able to use onMaximized here but to
           // make that happen we need to make sure the event is not fired when
@@ -1127,7 +1068,7 @@ function testMaximize() {
 
     function nonResizableWindow() {
       chrome.app.window.create('test.html',
-                               { bounds: {width: 200, height: 200},
+                               { innerBounds: {width: 200, height: 200},
                                  resizable: false },
         callbackPass(function(win) {
           // TODO(mlamouri): we should be able to use onMaximized here but to
@@ -1154,7 +1095,7 @@ function testRestore() {
   chrome.test.runTests([
     function basic() {
       chrome.app.window.create('test.html',
-                               { bounds: {width: 200, height: 200} },
+                               { innerBounds: {width: 200, height: 200} },
         callbackPass(function(win) {
           var oldWidth = win.contentWindow.innerWidth;
           var oldHeight = win.contentWindow.innerHeight;
@@ -1191,9 +1132,11 @@ function testRestoreAfterClose() {
   chrome.test.runTests([
     function restoredBoundsLowerThanNewMinSize() {
       chrome.app.window.create('test.html', {
-        bounds: { width: 100, height: 150 },
-        minWidth: 200, minHeight: 250,
-        maxWidth: 200, maxHeight: 250,
+        innerBounds: {
+          width: 100, height: 150,
+          minWidth: 200, minHeight: 250,
+          maxWidth: 200, maxHeight: 250
+        },
         id: 'test-id'
       }, callbackPass(function(win) {
         var w = win.contentWindow;
@@ -1202,9 +1145,11 @@ function testRestoreAfterClose() {
 
         win.onClosed.addListener(callbackPass(function() {
           chrome.app.window.create('test.html', {
-            bounds: { width: 500, height: 550 },
-            minWidth: 400, minHeight: 450,
-            maxWidth: 600, maxHeight: 650,
+            innerBounds: {
+              width: 500, height: 550,
+              minWidth: 400, minHeight: 450,
+              maxWidth: 600, maxHeight: 650
+            },
             id: 'test-id'
           }, callbackPass(function(win) {
             var w = win.contentWindow;
@@ -1224,15 +1169,13 @@ function testRestoreAfterGeometryCacheChange() {
   chrome.test.runTests([
     function restorePositionAndSize() {
       chrome.app.window.create('test.html', {
-        bounds: { left: 200, top: 200, width: 200, height: 200 }, id: 'test-ra',
+        outerBounds: { left: 200, top: 200 },
+        innerBounds: { width: 200, height: 200 },
+        id: 'test-ra',
       }, callbackPass(function(win) { waitForLoad(win, function(win) {
         var w = win.contentWindow;
-        // The fuzzy factor here is related to the fact that depending on the
-        // platform, the bounds initialization will set the inner bounds or the
-        // outer bounds.
-        // TODO(mlamouri): remove the fuzz factor.
-        assertFuzzyEq(200, w.screenX, 5);
-        assertFuzzyEq(200, w.screenY, 30);
+        chrome.test.assertEq(200, w.screenX);
+        chrome.test.assertEq(200, w.screenY);
         chrome.test.assertEq(200, w.innerHeight);
         chrome.test.assertEq(200, w.innerWidth);
 
@@ -1240,7 +1183,7 @@ function testRestoreAfterGeometryCacheChange() {
         w.moveTo(100, 100);
 
         chrome.app.window.create('test.html', {
-          bounds: { left: 200, top: 200, width: 200, height: 200 },
+          outerBounds: { left: 200, top: 200, width: 200, height: 200 },
           id: 'test-rb', frame: 'none'
         }, callbackPass(function(win2) { waitForLoad(win2, function(win2) {
           var w2 = win2.contentWindow;
@@ -1329,7 +1272,8 @@ function testFrameColors() {
       },
       callbackPass(function(win) {
         chrome.test.assertEq(true, win.hasFrameColor);
-        chrome.test.assertEq(-16777216, win.frameColor);
+        chrome.test.assertEq(0x000000, win.activeFrameColor);
+        chrome.test.assertEq(0x000000, win.inactiveFrameColor);
         win.close();
       }));
     },
@@ -1342,7 +1286,24 @@ function testFrameColors() {
       },
       callbackPass(function(win) {
         chrome.test.assertEq(true, win.hasFrameColor);
-        chrome.test.assertEq(-1, win.frameColor);
+        chrome.test.assertEq(0xFFFFFF, win.activeFrameColor);
+        chrome.test.assertEq(0xFFFFFF, win.inactiveFrameColor);
+        win.close();
+      }));
+    },
+
+    function testWithActiveInactive() {
+      chrome.app.window.create('test.html', {
+        frame: {
+          type: 'chrome',
+          color: '#000000',
+          inactiveColor: '#FFFFFF'
+        }
+      },
+      callbackPass(function(win) {
+        chrome.test.assertEq(true, win.hasFrameColor);
+        chrome.test.assertEq(0x000000, win.activeFrameColor);
+        chrome.test.assertEq(0xFFFFFF, win.inactiveFrameColor);
         win.close();
       }));
     },
@@ -1355,7 +1316,8 @@ function testFrameColors() {
       },
       callbackPass(function(win) {
         chrome.test.assertEq(true, win.hasFrameColor);
-        chrome.test.assertEq(-1, win.frameColor);
+        chrome.test.assertEq(0xFFFFFF, win.activeFrameColor);
+        chrome.test.assertEq(0xFFFFFF, win.inactiveFrameColor);
         win.close();
       }));
     },
@@ -1370,38 +1332,22 @@ function testFrameColors() {
       callbackFail('Windows with no frame cannot have a color.'));
     },
 
-    function testWithInvalidColor() {
+    function testWithInactiveColorAndNoColor() {
+      chrome.app.window.create('test.html', {
+        frame: {
+          inactiveColor: '#FFF'
+        }
+      },
+      callbackFail('frame.inactiveColor must be used with frame.color.'));
+    },
+
+     function testWithInvalidColor() {
       chrome.app.window.create('test.html', {
         frame: {
           color: 'DontWorryBeHappy'
         }
       },
       callbackFail('The color specification could not be parsed.'));
-    }
-  ]);
-}
-
-function testFrameColorsInStable() {
-  chrome.test.runTests([
-    function testWithNoColor() {
-      chrome.app.window.create('test.html', callbackPass(function(win) {
-        if (navigator.platform.substr(0, 3).toLowerCase() == "win") {
-          chrome.test.assertEq(true, win.hasFrameColor);
-          chrome.test.assertEq(-1, win.frameColor);
-        } else {
-          chrome.test.assertEq(false, win.hasFrameColor);
-        }
-        win.close();
-      }));
-    },
-
-    function testWithOptionsGivesError() {
-      chrome.app.window.create('test.html', {
-        frame: {
-          color: '#FFF'
-        }
-      },
-      callbackFail('frameOptions is only available in dev channel.'));
     }
   ]);
 }

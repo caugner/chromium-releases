@@ -17,6 +17,7 @@
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkRect.h"
+#include "ui/aura/window.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/linear_animation.h"
@@ -33,10 +34,6 @@
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 #include "url/gurl.h"
-
-#if defined(USE_AURA)
-#include "ui/aura/window.h"
-#endif
 
 #if defined(USE_ASH)
 #include "ash/wm/window_state.h"
@@ -128,8 +125,7 @@ class StatusBubbleViews::StatusView : public views::View {
     STYLE_STANDARD_RIGHT
   };
 
-  StatusView(StatusBubble* status_bubble,
-             views::Widget* popup,
+  StatusView(views::Widget* popup,
              ui::ThemeProvider* theme_provider);
   virtual ~StatusView();
 
@@ -183,9 +179,6 @@ class StatusBubbleViews::StatusView : public views::View {
 
   scoped_ptr<StatusViewAnimation> animation_;
 
-  // Manager, owns us.
-  StatusBubble* status_bubble_;
-
   // Handle to the widget that contains us.
   views::Widget* popup_;
 
@@ -198,14 +191,12 @@ class StatusBubbleViews::StatusView : public views::View {
   DISALLOW_COPY_AND_ASSIGN(StatusView);
 };
 
-StatusBubbleViews::StatusView::StatusView(StatusBubble* status_bubble,
-                                          views::Widget* popup,
+StatusBubbleViews::StatusView::StatusView(views::Widget* popup,
                                           ui::ThemeProvider* theme_provider)
     : state_(BUBBLE_HIDDEN),
       style_(STYLE_STANDARD),
       timer_factory_(this),
       animation_(new StatusViewAnimation(this, 0, 0)),
-      status_bubble_(status_bubble),
       popup_(popup),
       theme_service_(theme_provider) {
 }
@@ -589,7 +580,6 @@ const int StatusBubbleViews::kShadowThickness = 1;
 StatusBubbleViews::StatusBubbleViews(views::View* base_view)
     : contains_mouse_(false),
       offset_(0),
-      opacity_(0),
       base_view_(base_view),
       view_(NULL),
       download_shelf_is_visible_(false),
@@ -609,7 +599,7 @@ void StatusBubbleViews::Init() {
     popup_.reset(new views::Widget);
     views::Widget* frame = base_view_->GetWidget();
     if (!view_)
-      view_ = new StatusView(this, popup_.get(), frame->GetThemeProvider());
+      view_ = new StatusView(popup_.get(), frame->GetThemeProvider());
     if (!expand_view_.get())
       expand_view_.reset(new StatusViewExpander(this, view_));
     views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
@@ -619,9 +609,7 @@ void StatusBubbleViews::Init() {
     params.parent = frame->GetNativeView();
     params.context = frame->GetNativeView();
     popup_->Init(params);
-#if defined(USE_AURA)
     popup_->GetNativeView()->SetName("StatusBubbleViews");
-#endif
     // We do our own animation and don't want any from the system.
     popup_->SetVisibilityChangedAnimationsEnabled(false);
     popup_->SetOpacity(0x00);

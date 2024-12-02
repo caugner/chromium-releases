@@ -133,9 +133,9 @@
           'apk_package_native_libs_dir': '<(intermediate_dir)/libs',
         }],
         ['is_test_apk == 0 and emma_coverage != 0', {
-          'emma_instrument': 1,
+          'emma_instrument%': 1,
         },{
-          'emma_instrument': 0,
+          'emma_instrument%': 0,
         }],
       ],
     },
@@ -143,7 +143,7 @@
     'native_lib_version_name%': '',
     'use_chromium_linker%' : 0,
     'enable_chromium_linker_tests%': 0,
-    'emma_instrument': '<(emma_instrument)',
+    'emma_instrument%': '<(emma_instrument)',
     'apk_package_native_libs_dir': '<(apk_package_native_libs_dir)',
     'unsigned_standalone_apk_path': '<(unsigned_standalone_apk_path)',
     'extra_native_libs': [],
@@ -153,7 +153,7 @@
   # cannot be lifted in a dependent to all_dependent_settings.
   'all_dependent_settings': {
     'variables': {
-      'apk_output_jar_path': '<(PRODUCT_DIR)/lib.java/<(jar_name)',
+      'apk_output_jar_path': '<(jar_path)',
     },
   },
   'conditions': [
@@ -188,7 +188,7 @@
           '<(SHARED_LIB_DIR)/<(native_lib_target).>(android_product_extension)'
         ],
         'package_input_paths': [
-          '<(apk_package_native_libs_dir)/<(android_app_abi)/<(android_gdbserver_executable)',
+          '<(apk_package_native_libs_dir)/<(android_app_abi)/gdbserver',
         ],
       },
       'copies': [
@@ -199,7 +199,6 @@
           'destination': '<(apk_package_native_libs_dir)/<(android_app_abi)',
           'files': [
             '<(android_gdbserver)',
-            '<@(extra_native_libs)',
           ],
         },
       ],
@@ -614,7 +613,6 @@
       'message': 'Obfuscating <(_target_name)',
       'inputs': [
         '<(DEPTH)/build/android/ant/apk-obfuscate.xml',
-        '<(DEPTH)/build/android/ant/create-test-jar.js',
         '<(DEPTH)/build/android/gyp/util/build_utils.py',
         '<(DEPTH)/build/android/gyp/ant.py',
         '<(android_manifest_path)',
@@ -629,19 +627,15 @@
       'action': [
         'python', '<(DEPTH)/build/android/gyp/ant.py',
         '-quiet',
-        '-DADDITIONAL_SRC_DIRS=>(additional_src_dirs)',
         '-DANDROID_MANIFEST=<(android_manifest_path)',
         '-DANDROID_SDK_JAR=<(android_sdk_jar)',
         '-DANDROID_SDK_ROOT=<(android_sdk_root)',
         '-DANDROID_SDK_VERSION=<(android_sdk_version)',
         '-DANDROID_SDK_TOOLS=<(android_sdk_tools)',
         '-DAPK_NAME=<(apk_name)',
-        '-DCREATE_TEST_JAR_PATH=<(DEPTH)/build/android/ant/create-test-jar.js',
         '-DCONFIGURATION_NAME=<(CONFIGURATION_NAME)',
-        '-DGENERATED_SRC_DIRS=>(generated_src_dirs)',
         '-DINPUT_JARS_PATHS=>(input_jars_paths)',
         '-DIS_TEST_APK=<(is_test_apk)',
-        '-DJAR_PATH=<(PRODUCT_DIR)/lib.java/<(jar_name)',
         '-DOBFUSCATED_JAR_PATH=<(obfuscated_jar_path)',
         '-DOUT_DIR=<(intermediate_dir)',
         '-DPROGUARD_ENABLED=<(proguard_enabled)',
@@ -660,8 +654,6 @@
         'conditions': [
           ['emma_instrument != 0', {
             'dex_no_locals': 1,
-          }],
-          ['emma_instrument != 0 and is_test_apk == 0', {
             'dex_input_paths': [ '<(emma_device_jar)' ],
           }],
         ],

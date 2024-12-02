@@ -5,7 +5,7 @@
 #include "chrome/browser/search/instant_unittest_base.h"
 #include <string>
 
-#include "base/basictypes.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/profiles/profile.h"
@@ -49,9 +49,10 @@ void InstantUnitTestBase::SetUpWithoutQueryExtraction() {
 }
 #endif
 
-void InstantUnitTestBase::SetDefaultSearchProvider(
+void InstantUnitTestBase::SetUserSelectedDefaultSearchProvider(
     const std::string& base_url) {
   TemplateURLData data;
+  data.SetKeyword(base::UTF8ToUTF16(base_url));
   data.SetURL(base_url + "url?bar={searchTerms}");
   data.instant_url = base_url +
       "instant?{google:omniboxStartMarginParameter}{google:forceInstantResults}"
@@ -63,7 +64,7 @@ void InstantUnitTestBase::SetDefaultSearchProvider(
   TemplateURL* template_url = new TemplateURL(profile(), data);
   // Takes ownership of |template_url|.
   template_url_service_->Add(template_url);
-  template_url_service_->SetDefaultSearchProvider(template_url);
+  template_url_service_->SetUserSelectedDefaultSearchProvider(template_url);
 }
 
 void InstantUnitTestBase::NotifyGoogleBaseURLUpdate(
@@ -87,11 +88,16 @@ bool InstantUnitTestBase::IsInstantServiceObserver(
   return instant_service_->observers_.HasObserver(observer);
 }
 
+TestingProfile* InstantUnitTestBase::CreateProfile() {
+  TestingProfile* profile = BrowserWithTestWindowTest::CreateProfile();
+  TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+      profile, &TemplateURLServiceFactory::BuildInstanceFor);
+  return profile;
+}
+
 void InstantUnitTestBase::SetUpHelper() {
   BrowserWithTestWindowTest::SetUp();
 
-  TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-      profile(), &TemplateURLServiceFactory::BuildInstanceFor);
   template_url_service_ = TemplateURLServiceFactory::GetForProfile(profile());
   ui_test_utils::WaitForTemplateURLServiceToLoad(template_url_service_);
 
@@ -99,6 +105,6 @@ void InstantUnitTestBase::SetUpHelper() {
   TestingPrefServiceSyncable* pref_service = profile()->GetTestingPrefService();
   pref_service->SetUserPref(prefs::kLastPromptedGoogleURL,
                             new base::StringValue("https://www.google.com/"));
-  SetDefaultSearchProvider("{google:baseURL}");
+  SetUserSelectedDefaultSearchProvider("{google:baseURL}");
   instant_service_ = InstantServiceFactory::GetForProfile(profile());
 }

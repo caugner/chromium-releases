@@ -4,10 +4,6 @@
 
 #include "chrome/browser/chrome_browser_main.h"
 
-#if defined(TOOLKIT_GTK)
-#include <gtk/gtk.h>
-#endif
-
 #include <set>
 #include <string>
 #include <vector>
@@ -46,6 +42,7 @@
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
+#include "chrome/browser/component_updater/cld_component_installer.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
 #include "chrome/browser/component_updater/flash_component_installer.h"
 #include "chrome/browser/component_updater/pnacl/pnacl_component_installer.h"
@@ -53,7 +50,6 @@
 #include "chrome/browser/component_updater/swiftshader_component_installer.h"
 #include "chrome/browser/component_updater/widevine_cdm_component_installer.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/extensions/extension_protocols.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/startup_helper.h"
 #include "chrome/browser/feedback/feedback_profile_observer.h"
@@ -110,13 +106,13 @@
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/net/net_resource_provider.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/profile_management_switches.h"
 #include "chrome/common/profiling.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "components/language_usage_metrics/language_usage_metrics.h"
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/nacl/browser/nacl_process_host.h"
 #include "components/rappor/rappor_service.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -128,7 +124,7 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
-#include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_protocols.h"
 #include "grit/app_locale_settings.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -143,6 +139,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
+
+#if defined(OS_ANDROID)
+#include "chrome/browser/metrics/thread_watcher_android.h"
+#endif
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 #include "chrome/browser/first_run/upgrade_util_linux.h"
@@ -406,6 +406,10 @@ void RegisterComponentsForUpdate(const CommandLine& command_line) {
     g_browser_process->crl_set_fetcher()->StartInitialLoad(cus);
 #endif
 
+#if defined(CLD2_DYNAMIC_MODE) && defined(CLD2_IS_COMPONENT)
+  RegisterCldComponent(cus);
+#endif
+
   cus->Start();
 }
 
@@ -436,27 +440,6 @@ bool ProcessSingletonNotificationCallback(
 
   g_browser_process->platform_part()->PlatformSpecificCommandLineProcessing(
       command_line);
-
-  // TODO(erikwright): Consider removing this - AFAIK it is no longer used.
-  // Handle the --uninstall-extension startup action. This needs to done here in
-  // the process that is running with the target profile, otherwise the
-  // uninstall will fail to unload and remove all components.
-  if (command_line.HasSwitch(switches::kUninstallExtension)) {
-    // The uninstall extension switch can't be combined with the profile
-    // directory switch.
-    DCHECK(!command_line.HasSwitch(switches::kProfileDirectory));
-
-    Profile* profile = ProfileManager::GetLastUsedProfile();
-    if (!profile) {
-      // We should never be called before the profile has been created.
-      NOTREACHED();
-      return true;
-    }
-
-    extensions::StartupHelper extension_startup_helper;
-    extension_startup_helper.UninstallExtension(command_line, profile);
-    return true;
-  }
 
   base::FilePath user_data_dir =
       g_browser_process->profile_manager()->user_data_dir();
@@ -520,7 +503,7 @@ namespace chrome_browser {
 const char kMissingLocaleDataTitle[] = "Missing File Error";
 #endif
 
-#if defined(OS_WIN) || defined(TOOLKIT_GTK)
+#if defined(OS_WIN)
 // TODO(port) This should be used on Linux Aura as well. http://crbug.com/338969
 const char kMissingLocaleDataMessage[] =
     "Unable to find locale data files. Please reinstall.";
@@ -578,14 +561,8 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
   // Initialize FieldTrialList to support FieldTrials that use one-time
   // randomization.
   MetricsService* metrics = browser_process_->metrics_service();
-  MetricsService::ReportingState reporting_state =
-      IsMetricsReportingEnabled() ? MetricsService::REPORTING_ENABLED :
-                                    MetricsService::REPORTING_DISABLED;
-  if (reporting_state == MetricsService::REPORTING_ENABLED)
-    metrics->ForceClientIdCreation();  // Needed below.
   field_trial_list_.reset(
-      new base::FieldTrialList(
-          metrics->CreateEntropyProvider(reporting_state).release()));
+      new base::FieldTrialList(metrics->CreateEntropyProvider().release()));
 
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kEnableBenchmarking))
@@ -633,7 +610,7 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
   field_trial_synchronizer_ = new FieldTrialSynchronizer();
 
   // Now that field trials have been created, initializes metrics recording.
-  metrics->InitializeMetricsRecordingState(reporting_state);
+  metrics->InitializeMetricsRecordingState();
 }
 
 // ChromeBrowserMainParts: |SetupMetricsAndFieldTrials()| related --------------
@@ -653,33 +630,14 @@ void ChromeBrowserMainParts::StartMetricsRecording() {
   }
 
   metrics->CheckForClonedInstall();
-
-  if (IsMetricsReportingEnabled())
-    metrics->Start();
-}
-
-bool ChromeBrowserMainParts::IsMetricsReportingEnabled() {
-  // If the user permits metrics reporting with the checkbox in the
-  // prefs, we turn on recording.  We disable metrics completely for
-  // non-official builds.  This can be forced with a flag.
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableMetricsReportingForTesting))
-    return true;
-
-  bool enabled = false;
-  // The debug build doesn't send UMA logs when FieldTrials are forced.
-  if (command_line->HasSwitch(switches::kForceFieldTrials))
-    return false;
-
-#if defined(GOOGLE_CHROME_BUILD)
-#if defined(OS_CHROMEOS)
-  chromeos::CrosSettings::Get()->GetBoolean(chromeos::kStatsReportingPref,
-                                            &enabled);
-#else
-  enabled = local_state_->GetBoolean(prefs::kMetricsReportingEnabled);
-#endif  // #if defined(OS_CHROMEOS)
-#endif  // defined(GOOGLE_CHROME_BUILD)
-  return enabled;
+  const bool metrics_enabled = metrics->StartIfMetricsReportingEnabled();
+  if (metrics_enabled) {
+    // TODO(asvitkine): Since this function is not run on Android, RAPPOR is
+    // currently disabled there. http://crbug.com/370041
+    browser_process_->rappor_service()->Start(
+        browser_process_->local_state(),
+        browser_process_->system_request_context());
+  }
 }
 
 void ChromeBrowserMainParts::RecordBrowserStartupTime() {
@@ -916,10 +874,6 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
   }
 #endif  // defined(OS_MACOSX)
 
-#if defined(TOOLKIT_GTK)
-  g_set_application_name(l10n_util::GetStringUTF8(IDS_PRODUCT_NAME).c_str());
-#endif
-
   // Android does first run in Java instead of native.
   // Chrome OS has its own out-of-box-experience code.
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
@@ -1053,13 +1007,13 @@ void ChromeBrowserMainParts::PreProfileInit() {
   ProfileInfoCache& profile_cache = profile_manager->GetProfileInfoCache();
   size_t profiles_count = profile_cache.GetNumberOfProfiles();
   std::vector<base::FilePath> profiles_to_delete;
-  for (size_t i = 0;i < profiles_count; ++i) {
+  for (size_t i = 0; i < profiles_count; ++i) {
     if (profile_cache.ProfileIsEphemeralAtIndex(i))
       profiles_to_delete.push_back(profile_cache.GetPathOfProfileAtIndex(i));
   }
 
   if (profiles_to_delete.size()) {
-    for (size_t i = 0;i < profiles_to_delete.size(); ++i) {
+    for (size_t i = 0; i < profiles_to_delete.size(); ++i) {
       profile_manager->ScheduleProfileForDeletion(
           profiles_to_delete[i], ProfileManager::CreateCallback());
     }
@@ -1114,12 +1068,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   StartMetricsRecording();
 #endif
 
-  if (IsMetricsReportingEnabled()) {
-    browser_process_->rappor_service()->Start(
-        browser_process_->local_state(),
-        browser_process_->system_request_context());
-  }
-
   // Create watchdog thread after creating all other threads because it will
   // watch the other threads and they must be running.
   browser_process_->watchdog_thread();
@@ -1157,9 +1105,8 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   }
 
 #if defined(USE_AURA)
-  // Env creates the compositor. Aura widgets need the compositor to be created
-  // before they can be initialized by the browser.
-  aura::Env::CreateInstance();
+  // Make sure aura::Env has been initialized.
+  CHECK(aura::Env::GetInstance());
 #endif
 
   // Android doesn't support extensions and doesn't implement ProcessSingleton.
@@ -1308,8 +1255,8 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // NaClBrowserDelegateImpl is accessed inside PostProfileInit().
   // So make sure to create it before that.
 #if !defined(DISABLE_NACL)
-  NaClBrowserDelegateImpl* delegate = new NaClBrowserDelegateImpl(
-    extensions::ExtensionSystem::Get(profile_)->info_map());
+  NaClBrowserDelegateImpl* delegate =
+      new NaClBrowserDelegateImpl(browser_process_->profile_manager());
   nacl::NaClBrowser::SetDelegate(delegate);
 #endif
 
@@ -1410,6 +1357,23 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 
   if (parsed_command_line().HasSwitch(switches::kEnableSdchOverHttps)) {
     net::SdchManager::EnableSecureSchemeSupport(true);
+  } else {
+    // Check SDCH field trial.
+    const char kSdchFieldTrialName[] = "SDCH";
+    const char kEnabledAllGroupName[] = "EnabledAll";
+    const char kEnabledHttpOnlyGroupName[] = "EnabledHttpOnly";
+    const char kDisabledAllGroupName[] = "DisabledAll";
+
+    base::StringPiece sdch_trial_group =
+        base::FieldTrialList::FindFullName(kSdchFieldTrialName);
+    if (sdch_trial_group.starts_with(kEnabledAllGroupName)) {
+      net::SdchManager::EnableSecureSchemeSupport(true);
+      net::SdchManager::EnableSdchSupport(true);
+    } else if (sdch_trial_group.starts_with(kEnabledHttpOnlyGroupName)) {
+      net::SdchManager::EnableSdchSupport(true);
+    } else if (sdch_trial_group.starts_with(kDisabledAllGroupName)) {
+      net::SdchManager::EnableSdchSupport(false);
+    }
   }
 
   if (parsed_command_line().HasSwitch(switches::kEnableWatchdog))
@@ -1431,17 +1395,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
       profile_->GetPrefs()->GetString(prefs::kAcceptLanguages));
   language_usage_metrics::LanguageUsageMetrics::RecordApplicationLanguage(
       browser_process_->GetApplicationLocale());
-
-  // The extension service may be available at this point. If the command line
-  // specifies --uninstall-extension, attempt the uninstall extension startup
-  // action.
-  if (parsed_command_line().HasSwitch(switches::kUninstallExtension)) {
-    extensions::StartupHelper extension_startup_helper;
-    if (extension_startup_helper.UninstallExtension(
-            parsed_command_line(), profile_))
-      return content::RESULT_CODE_NORMAL_EXIT;
-    return chrome::RESULT_CODE_UNINSTALL_EXTENSION_ERROR;
-  }
 
   // Start watching for hangs during startup. We disarm this hang detector when
   // ThreadWatcher takes over or when browser is shutdown or when
@@ -1470,6 +1423,10 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // Start watching all browser threads for responsiveness.
   MetricsService::SetExecutionPhase(MetricsService::THREAD_WATCHER_START);
   ThreadWatcherList::StartWatchingAll(parsed_command_line());
+
+#if defined(OS_ANDROID)
+  ThreadWatcherAndroid::RegisterApplicationStatusListener();
+#endif
 
 #if !defined(DISABLE_NACL)
   content::BrowserThread::PostTask(

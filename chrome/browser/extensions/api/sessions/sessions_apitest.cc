@@ -11,7 +11,6 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/open_tabs_ui_delegate.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -21,6 +20,8 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/testing_browser_process.h"
+#include "sync/api/attachments/attachment_id.h"
+#include "sync/api/attachments/attachment_service_proxy_for_test.h"
 #include "sync/api/fake_sync_change_processor.h"
 #include "sync/api/sync_error_factory_mock.h"
 
@@ -92,7 +93,6 @@ class ExtensionSessionsTest : public InProcessBrowserTest {
   };
 
   Browser* browser_;
-  browser_sync::SessionModelAssociator* associator_;
   scoped_refptr<extensions::Extension> extension_;
 };
 
@@ -116,15 +116,6 @@ void ExtensionSessionsTest::CreateTestProfileSyncService() {
       profile, &ProfileSyncServiceMock::BuildMockProfileSyncService));
   browser_ = new Browser(Browser::CreateParams(
       profile, chrome::HOST_DESKTOP_TYPE_NATIVE));
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableSyncSessionsV2)) {
-    associator_ = new browser_sync::SessionModelAssociator(
-        static_cast<ProfileSyncService*>(service), true);
-    associator_->SetCurrentMachineTagForTesting(kSessionTags[0]);
-    ON_CALL(*service, GetSessionModelAssociatorDeprecated())
-        .WillByDefault(testing::Return(associator_));
-  }
 
   syncer::ModelTypeSet preferred_types;
   preferred_types.Put(syncer::SESSIONS);
@@ -178,39 +169,33 @@ void ExtensionSessionsTest::CreateSessionModels() {
       BuildTabSpecifics(kSessionTags[index], 0, tab_list1[i], &tabs1[i]);
     }
 
-    if (!CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kDisableSyncSessionsV2)) {
+    sync_pb::EntitySpecifics entity;
+    entity.mutable_session()->CopyFrom(meta);
+    initial_data.push_back(syncer::SyncData::CreateRemoteData(
+        1,
+        entity,
+        base::Time(),
+        syncer::AttachmentIdList(),
+        syncer::AttachmentServiceProxyForTest::Create()));
+    for (size_t i = 0; i < tabs1.size(); i++) {
       sync_pb::EntitySpecifics entity;
-      entity.mutable_session()->CopyFrom(meta);
-      initial_data.push_back(
-          syncer::SyncData::CreateRemoteData(1, entity, base::Time()));
-      for (size_t i = 0; i < tabs1.size(); i++) {
-        sync_pb::EntitySpecifics entity;
-        entity.mutable_session()->CopyFrom(tabs1[i]);
-        initial_data.push_back(syncer::SyncData::CreateRemoteData(
-            i + 2, entity, base::Time()));
-      }
-    } else {
-      // Update associator with the session's meta node containing one window.
-      associator_->AssociateForeignSpecifics(meta, base::Time());
-      // Add tabs for the window.
-      std::vector<sync_pb::SessionSpecifics>::iterator iter;
-      for (iter = tabs1.begin(); iter != tabs1.end(); ++iter) {
-        associator_->AssociateForeignSpecifics(*iter, base::Time());
-      }
+      entity.mutable_session()->CopyFrom(tabs1[i]);
+      initial_data.push_back(syncer::SyncData::CreateRemoteData(
+          i + 2,
+          entity,
+          base::Time(),
+          syncer::AttachmentIdList(),
+          syncer::AttachmentServiceProxyForTest::Create()));
     }
   }
 
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableSyncSessionsV2)) {
-    ProfileSyncServiceFactory::GetForProfile(browser_->profile())->
-        GetSessionsSyncableService()->
-            MergeDataAndStartSyncing(syncer::SESSIONS, initial_data,
-        scoped_ptr<syncer::SyncChangeProcessor>(
-            new syncer::FakeSyncChangeProcessor()),
-        scoped_ptr<syncer::SyncErrorFactory>(
-            new syncer::SyncErrorFactoryMock()));
-  }
+  ProfileSyncServiceFactory::GetForProfile(browser_->profile())->
+      GetSessionsSyncableService()->
+          MergeDataAndStartSyncing(syncer::SESSIONS, initial_data,
+      scoped_ptr<syncer::SyncChangeProcessor>(
+          new syncer::FakeSyncChangeProcessor()),
+      scoped_ptr<syncer::SyncErrorFactory>(
+          new syncer::SyncErrorFactoryMock()));
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionSessionsTest, GetDevices) {

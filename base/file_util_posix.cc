@@ -61,8 +61,7 @@ namespace base {
 
 namespace {
 
-#if defined(OS_BSD) || defined(OS_MACOSX)
-typedef struct stat stat_wrapper_t;
+#if defined(OS_BSD) || defined(OS_MACOSX) || defined(OS_NACL)
 static int CallStat(const char *path, stat_wrapper_t *sb) {
   ThreadRestrictions::AssertIOAllowed();
   return stat(path, sb);
@@ -71,8 +70,7 @@ static int CallLstat(const char *path, stat_wrapper_t *sb) {
   ThreadRestrictions::AssertIOAllowed();
   return lstat(path, sb);
 }
-#else  // defined(OS_BSD) || defined(OS_MACOSX)
-typedef struct stat64 stat_wrapper_t;
+#else  //  defined(OS_BSD) || defined(OS_MACOSX) || defined(OS_NACL)
 static int CallStat(const char *path, stat_wrapper_t *sb) {
   ThreadRestrictions::AssertIOAllowed();
   return stat64(path, sb);
@@ -81,7 +79,7 @@ static int CallLstat(const char *path, stat_wrapper_t *sb) {
   ThreadRestrictions::AssertIOAllowed();
   return lstat64(path, sb);
 }
-#endif // !(defined(OS_BSD) || defined(OS_MACOSX))
+#endif  // !(defined(OS_BSD) || defined(OS_MACOSX) || defined(OS_NACL))
 
 // Helper for NormalizeFilePath(), defined below.
 bool RealPath(const FilePath& path, FilePath* real_path) {
@@ -175,7 +173,7 @@ bool DetermineDevShmExecutable() {
     CHECK_GE(sysconf_result, 0);
     size_t pagesize = static_cast<size_t>(sysconf_result);
     CHECK_GE(sizeof(pagesize), sizeof(sysconf_result));
-    void *mapping = mmap(NULL, pagesize, PROT_READ, MAP_SHARED, fd.get(), 0);
+    void* mapping = mmap(NULL, pagesize, PROT_READ, MAP_SHARED, fd.get(), 0);
     if (mapping != MAP_FAILED) {
       if (mprotect(mapping, pagesize, PROT_READ | PROT_EXEC) == 0)
         result = true;
@@ -639,21 +637,8 @@ bool GetFileInfo(const FilePath& file_path, File::Info* results) {
 #if defined(OS_ANDROID)
   }
 #endif  // defined(OS_ANDROID)
-  results->is_directory = S_ISDIR(file_info.st_mode);
-  results->size = file_info.st_size;
-#if defined(OS_MACOSX) || (defined(OS_FREEBSD) && __FreeBSD_version < 900000)
-  results->last_modified = Time::FromTimeSpec(file_info.st_mtimespec);
-  results->last_accessed = Time::FromTimeSpec(file_info.st_atimespec);
-  results->creation_time = Time::FromTimeSpec(file_info.st_ctimespec);
-#elif defined(OS_ANDROID)
-  results->last_modified = Time::FromTimeT(file_info.st_mtime);
-  results->last_accessed = Time::FromTimeT(file_info.st_atime);
-  results->creation_time = Time::FromTimeT(file_info.st_ctime);
-#else
-  results->last_modified = Time::FromTimeSpec(file_info.st_mtim);
-  results->last_accessed = Time::FromTimeSpec(file_info.st_atim);
-  results->creation_time = Time::FromTimeSpec(file_info.st_ctim);
-#endif
+
+  results->FromStat(file_info);
   return true;
 }
 
@@ -666,15 +651,15 @@ FILE* OpenFile(const FilePath& filename, const char* mode) {
   return result;
 }
 
-int ReadFile(const FilePath& filename, char* data, int size) {
+int ReadFile(const FilePath& filename, char* data, int max_size) {
   ThreadRestrictions::AssertIOAllowed();
   int fd = HANDLE_EINTR(open(filename.value().c_str(), O_RDONLY));
   if (fd < 0)
     return -1;
 
-  ssize_t bytes_read = HANDLE_EINTR(read(fd, data, size));
-  if (int ret = IGNORE_EINTR(close(fd)) < 0)
-    return ret;
+  ssize_t bytes_read = HANDLE_EINTR(read(fd, data, max_size));
+  if (IGNORE_EINTR(close(fd)) < 0)
+    return -1;
   return bytes_read;
 }
 
@@ -685,8 +670,8 @@ int WriteFile(const FilePath& filename, const char* data, int size) {
     return -1;
 
   int bytes_written = WriteFileDescriptor(fd, data, size);
-  if (int ret = IGNORE_EINTR(close(fd)) < 0)
-    return ret;
+  if (IGNORE_EINTR(close(fd)) < 0)
+    return -1;
   return bytes_written;
 }
 
@@ -712,8 +697,8 @@ int AppendToFile(const FilePath& filename, const char* data, int size) {
     return -1;
 
   int bytes_written = WriteFileDescriptor(fd, data, size);
-  if (int ret = IGNORE_EINTR(close(fd)) < 0)
-    return ret;
+  if (IGNORE_EINTR(close(fd)) < 0)
+    return -1;
   return bytes_written;
 }
 

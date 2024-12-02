@@ -33,6 +33,7 @@ TEST(AutocompleteInputTest, InputType) {
     { ASCIIToUTF16("foo.-com"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("foo/"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo/bar"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("foo/bar%00"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("foo/bar/"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo/bar baz\\"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo.com/bar"), AutocompleteInput::URL },
@@ -87,6 +88,7 @@ TEST(AutocompleteInputTest, InputType) {
     { ASCIIToUTF16("http://foo.c"), AutocompleteInput::URL },
     { ASCIIToUTF16("http://foo.com"), AutocompleteInput::URL },
     { ASCIIToUTF16("http://foo_bar.com"), AutocompleteInput::URL },
+    { ASCIIToUTF16("http://foo/bar%00"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("http://foo/bar baz"), AutocompleteInput::URL },
     { ASCIIToUTF16("http://-foo.com"), AutocompleteInput::URL },
     { ASCIIToUTF16("http://foo-.com"), AutocompleteInput::URL },
@@ -121,6 +123,8 @@ TEST(AutocompleteInputTest, InputType) {
     { ASCIIToUTF16("chrome-search://"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("chrome-devtools:"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("about://f;"), AutocompleteInput::QUERY },
+    { ASCIIToUTF16("://w"), AutocompleteInput::QUERY },
+    { ASCIIToUTF16(":w"), AutocompleteInput::QUERY },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input_cases); ++i) {
@@ -128,7 +132,7 @@ TEST(AutocompleteInputTest, InputType) {
     AutocompleteInput input(input_cases[i].input, base::string16::npos,
                             base::string16(), GURL(),
                             AutocompleteInput::INVALID_SPEC, true, false, true,
-                            AutocompleteInput::ALL_MATCHES);
+                            true);
     EXPECT_EQ(input_cases[i].type, input.type());
   }
 }
@@ -157,7 +161,7 @@ TEST(AutocompleteInputTest, InputTypeWithDesiredTLD) {
     AutocompleteInput input(input_cases[i].input, base::string16::npos,
                             ASCIIToUTF16("com"), GURL(),
                             AutocompleteInput::INVALID_SPEC, true, false, true,
-                            AutocompleteInput::ALL_MATCHES);
+                            true);
     EXPECT_EQ(input_cases[i].type, input.type());
     if (input_cases[i].type == AutocompleteInput::URL)
       EXPECT_EQ(input_cases[i].spec, input.canonicalized_url().spec());
@@ -170,11 +174,11 @@ TEST(AutocompleteInputTest, InputCrash) {
   AutocompleteInput input(base::WideToUTF16(L"\uff65@s"), base::string16::npos,
                           base::string16(), GURL(),
                           AutocompleteInput::INVALID_SPEC, true, false,
-                          true, AutocompleteInput::ALL_MATCHES);
+                          true, true);
 }
 
 TEST(AutocompleteInputTest, ParseForEmphasizeComponent) {
-  using url_parse::Component;
+  using url::Component;
   Component kInvalidComponent(0, -1);
   struct test_data {
     const base::string16 input;
@@ -214,7 +218,7 @@ TEST(AutocompleteInputTest, ParseForEmphasizeComponent) {
     AutocompleteInput input(input_cases[i].input, base::string16::npos,
                             base::string16(), GURL(),
                             AutocompleteInput::INVALID_SPEC, true,
-                            false, true, AutocompleteInput::ALL_MATCHES);
+                            false, true, true);
     EXPECT_EQ(input_cases[i].scheme.begin, scheme.begin);
     EXPECT_EQ(input_cases[i].scheme.len, scheme.len);
     EXPECT_EQ(input_cases[i].host.begin, host.begin);
@@ -253,7 +257,7 @@ TEST(AutocompleteInputTest, InputTypeWithCursorPosition) {
                             input_cases[i].cursor_position,
                             base::string16(), GURL(),
                             AutocompleteInput::INVALID_SPEC,
-                            true, false, true, AutocompleteInput::ALL_MATCHES);
+                            true, false, true, true);
     EXPECT_EQ(input_cases[i].normalized_input, input.text());
     EXPECT_EQ(input_cases[i].normalized_cursor_position,
               input.cursor_position());

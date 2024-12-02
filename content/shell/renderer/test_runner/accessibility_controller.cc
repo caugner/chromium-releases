@@ -61,6 +61,8 @@ void AccessibilityControllerBindings::Install(
   gin::Handle<AccessibilityControllerBindings> bindings =
       gin::CreateHandle(isolate,
                         new AccessibilityControllerBindings(controller));
+  if (bindings.IsEmpty())
+    return;
   v8::Handle<v8::Object> global = context->Global();
   global->Set(gin::StringToV8(isolate, "accessibilityController"),
               bindings.ToV8());
@@ -200,8 +202,7 @@ void AccessibilityController::NotificationReceived(
       argv);
 }
 
-void AccessibilityController::SetDelegate(
-    WebTestRunner::WebTestDelegate* delegate) {
+void AccessibilityController::SetDelegate(WebTestDelegate* delegate) {
   delegate_ = delegate;
 }
 

@@ -19,7 +19,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_path_override.h"
-#include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_constants.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -167,11 +166,11 @@ TEST(ShellIntegrationTest, GetExistingShortcutLocations) {
   // No existing shortcuts.
   {
     MockEnvironment env;
-    ShellIntegration::ShortcutLocations result =
+    web_app::ShortcutLocations result =
         ShellIntegrationLinux::GetExistingShortcutLocations(
             &env, kProfilePath, kExtensionId);
     EXPECT_FALSE(result.on_desktop);
-    EXPECT_EQ(ShellIntegration::APP_MENU_LOCATION_NONE,
+    EXPECT_EQ(web_app::APP_MENU_LOCATION_NONE,
               result.applications_menu_location);
 
     EXPECT_FALSE(result.in_quick_launch_bar);
@@ -189,11 +188,11 @@ TEST(ShellIntegrationTest, GetExistingShortcutLocations) {
     ASSERT_FALSE(base::WriteFile(
         desktop_path.AppendASCII(kTemplateFilename),
         "", 0));
-    ShellIntegration::ShortcutLocations result =
+    web_app::ShortcutLocations result =
         ShellIntegrationLinux::GetExistingShortcutLocations(
             &env, kProfilePath, kExtensionId, desktop_path);
     EXPECT_TRUE(result.on_desktop);
-    EXPECT_EQ(ShellIntegration::APP_MENU_LOCATION_NONE,
+    EXPECT_EQ(web_app::APP_MENU_LOCATION_NONE,
               result.applications_menu_location);
 
     EXPECT_FALSE(result.in_quick_launch_bar);
@@ -212,11 +211,11 @@ TEST(ShellIntegrationTest, GetExistingShortcutLocations) {
     ASSERT_FALSE(base::WriteFile(
         apps_path.AppendASCII(kTemplateFilename),
         "", 0));
-    ShellIntegration::ShortcutLocations result =
+    web_app::ShortcutLocations result =
         ShellIntegrationLinux::GetExistingShortcutLocations(
             &env, kProfilePath, kExtensionId);
     EXPECT_FALSE(result.on_desktop);
-    EXPECT_EQ(ShellIntegration::APP_MENU_LOCATION_SUBDIR_CHROMEAPPS,
+    EXPECT_EQ(web_app::APP_MENU_LOCATION_SUBDIR_CHROMEAPPS,
               result.applications_menu_location);
 
     EXPECT_FALSE(result.in_quick_launch_bar);
@@ -235,12 +234,12 @@ TEST(ShellIntegrationTest, GetExistingShortcutLocations) {
     ASSERT_TRUE(base::WriteFile(
         apps_path.AppendASCII(kTemplateFilename),
         kNoDisplayDesktopFile, strlen(kNoDisplayDesktopFile)));
-    ShellIntegration::ShortcutLocations result =
+    web_app::ShortcutLocations result =
         ShellIntegrationLinux::GetExistingShortcutLocations(
             &env, kProfilePath, kExtensionId);
     // Doesn't count as being in applications menu.
     EXPECT_FALSE(result.on_desktop);
-    EXPECT_EQ(ShellIntegration::APP_MENU_LOCATION_NONE,
+    EXPECT_EQ(web_app::APP_MENU_LOCATION_NONE,
               result.applications_menu_location);
     EXPECT_FALSE(result.in_quick_launch_bar);
     EXPECT_TRUE(result.hidden);
@@ -266,11 +265,11 @@ TEST(ShellIntegrationTest, GetExistingShortcutLocations) {
     ASSERT_FALSE(base::WriteFile(
         apps_path.AppendASCII(kTemplateFilename),
         "", 0));
-    ShellIntegration::ShortcutLocations result =
+    web_app::ShortcutLocations result =
         ShellIntegrationLinux::GetExistingShortcutLocations(
             &env, kProfilePath, kExtensionId, desktop_path);
     EXPECT_TRUE(result.on_desktop);
-    EXPECT_EQ(ShellIntegration::APP_MENU_LOCATION_SUBDIR_CHROMEAPPS,
+    EXPECT_EQ(web_app::APP_MENU_LOCATION_SUBDIR_CHROMEAPPS,
               result.applications_menu_location);
     EXPECT_FALSE(result.in_quick_launch_bar);
     EXPECT_FALSE(result.hidden);
@@ -447,6 +446,7 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
     const char* url;
     const char* title;
     const char* icon_name;
+    const char* categories;
     bool nodisplay;
     const char* expected_output;
   } test_cases[] = {
@@ -454,6 +454,7 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
     { "http://gmail.com",
       "GMail",
       "chrome-http__gmail.com",
+      "",
       false,
 
       "#!/usr/bin/env xdg-open\n"
@@ -470,6 +471,7 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
     // Make sure that empty icons are replaced by the chrome icon.
     { "http://gmail.com",
       "GMail",
+      "",
       "",
       false,
 
@@ -488,10 +490,11 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
       "StartupWMClass=gmail.com\n"
     },
 
-    // Test adding NoDisplay=true.
+    // Test adding categories and NoDisplay=true.
     { "http://gmail.com",
       "GMail",
       "chrome-http__gmail.com",
+      "Graphics;Education;",
       true,
 
       "#!/usr/bin/env xdg-open\n"
@@ -502,6 +505,7 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
       "Name=GMail\n"
       "Exec=/opt/google/chrome/google-chrome --app=http://gmail.com/\n"
       "Icon=chrome-http__gmail.com\n"
+      "Categories=Graphics;Education;\n"
       "NoDisplay=true\n"
       "StartupWMClass=gmail.com\n"
     },
@@ -510,6 +514,7 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
     { "http://evil.com/evil --join-the-b0tnet",
       "Ownz0red\nExec=rm -rf /",
       "chrome-http__evil.com_evil",
+      "",
       false,
 
       "#!/usr/bin/env xdg-open\n"
@@ -526,6 +531,7 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
     { "http://evil.com/evil; rm -rf /; \"; rm -rf $HOME >ownz0red",
       "Innocent Title",
       "chrome-http__evil.com_evil",
+      "",
       false,
 
       "#!/usr/bin/env xdg-open\n"
@@ -547,6 +553,7 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
     { "http://evil.com/evil | cat `echo ownz0red` >/dev/null",
       "Innocent Title",
       "chrome-http__evil.com_evil",
+      "",
       false,
 
       "#!/usr/bin/env xdg-open\n"
@@ -576,6 +583,7 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
             base::ASCIIToUTF16(test_cases[i].title),
             test_cases[i].icon_name,
             base::FilePath(),
+            test_cases[i].categories,
             test_cases[i].nodisplay));
   }
 }
@@ -593,6 +601,7 @@ TEST(ShellIntegrationTest, GetDesktopFileContentsAppList) {
       "Name=Chrome App Launcher\n"
       "Exec=/opt/google/chrome/google-chrome --show-app-list\n"
       "Icon=chrome_app_list\n"
+      "Categories=Network;WebBrowser;\n"
       "StartupWMClass=chrome-app-list\n",
       ShellIntegrationLinux::GetDesktopFileContentsForCommand(
           command_line,
@@ -600,6 +609,7 @@ TEST(ShellIntegrationTest, GetDesktopFileContentsAppList) {
           GURL(),
           base::ASCIIToUTF16("Chrome App Launcher"),
           "chrome_app_list",
+          "Network;WebBrowser;",
           false));
 }
 
