@@ -666,7 +666,7 @@ void DnsProbeBrowserTest::OnDnsProbeStatusSent(
     DnsProbeStatus dns_probe_status) {
   dns_probe_status_queue_.push_back(dns_probe_status);
   if (awaiting_dns_probe_status_)
-    MessageLoop::current()->Quit();
+    MessageLoop::current()->QuitWhenIdle();
 }
 
 // Make sure probes don't break non-DNS error pages when corrections load.
@@ -898,12 +898,8 @@ IN_PROC_BROWSER_TEST_F(DnsProbeBrowserTest, CorrectionsLoadStoppedSlowProbe) {
 IN_PROC_BROWSER_TEST_F(DnsProbeBrowserTest, NoProbeInSubframe) {
   SetCorrectionServiceBroken(false);
 
-  const FilePath::CharType kIframeDnsErrorHtmlName[] =
-      FILE_PATH_LITERAL("iframe_dns_error.html");
-
-  NavigateToURL(
-      browser(),
-      URLRequestMockHTTPJob::GetMockUrl(FilePath(kIframeDnsErrorHtmlName)));
+  NavigateToURL(browser(),
+                URLRequestMockHTTPJob::GetMockUrl("iframe_dns_error.html"));
 
   // By the time NavigateToURL returns, the browser will have seen the failed
   // provisional load.  If a probe was started (or considered but not run),

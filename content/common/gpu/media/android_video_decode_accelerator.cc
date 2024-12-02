@@ -77,7 +77,6 @@ AndroidVideoDecodeAccelerator::AndroidVideoDecodeAccelerator(
       make_context_current_(make_context_current),
       codec_(media::kCodecH264),
       state_(NO_ERROR),
-      surface_texture_id_(0),
       picturebuffers_requested_(false),
       gl_decoder_(decoder),
       strategy_(strategy.Pass()),
@@ -95,8 +94,6 @@ bool AndroidVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile,
 
   client_ = client;
   codec_ = VideoCodecProfileToVideoCodec(profile);
-
-  strategy_->SetStateProvider(this);
 
   bool profile_supported = codec_ == media::kCodecVP8;
 #if defined(ENABLE_MEDIA_PIPELINE_ON_ANDROID)
@@ -128,20 +125,10 @@ bool AndroidVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile,
     LOG(ERROR) << "Failed to get gles2 decoder instance.";
     return false;
   }
-  glGenTextures(1, &surface_texture_id_);
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_EXTERNAL_OES, surface_texture_id_);
 
-  glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_EXTERNAL_OES,
-                  GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_EXTERNAL_OES,
-                  GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  gl_decoder_->RestoreTextureUnitBindings(0);
-  gl_decoder_->RestoreActiveTexture();
+  strategy_->Initialize(this);
 
-  surface_texture_ = gfx::SurfaceTexture::Create(surface_texture_id_);
+  surface_texture_ = strategy_->CreateSurfaceTexture();
 
   if (!ConfigureMediaCodec()) {
     LOG(ERROR) << "Failed to create MediaCodec instance.";
@@ -149,6 +136,12 @@ bool AndroidVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile,
   }
 
   return true;
+}
+
+void AndroidVideoDecodeAccelerator::SetCdm(int /* cdm_id */) {
+  // TODO(xhwang): Implement CDM setting here.
+  NOTIMPLEMENTED();
+  NotifyCdmAttached(false);
 }
 
 void AndroidVideoDecodeAccelerator::DoIOTask() {
@@ -159,7 +152,8 @@ void AndroidVideoDecodeAccelerator::DoIOTask() {
   }
 
   QueueInput();
-  DequeueOutput();
+  while (DequeueOutput())
+    ;
 }
 
 void AndroidVideoDecodeAccelerator::QueueInput() {
@@ -171,8 +165,8 @@ void AndroidVideoDecodeAccelerator::QueueInput() {
     return;
 
   int input_buf_index = 0;
-  media::MediaCodecStatus status = media_codec_->DequeueInputBuffer(
-      NoWaitTimeOut(), &input_buf_index);
+  media::MediaCodecStatus status =
+      media_codec_->DequeueInputBuffer(NoWaitTimeOut(), &input_buf_index);
   if (status != media::MEDIA_CODEC_OK) {
     DCHECK(status == media::MEDIA_CODEC_DEQUEUE_INPUT_AGAIN_LATER ||
            status == media::MEDIA_CODEC_ERROR);
@@ -202,6 +196,7 @@ void AndroidVideoDecodeAccelerator::QueueInput() {
       bitstream_buffer.presentation_timestamp();
   DCHECK(presentation_timestamp != media::kNoTimestamp())
       << "Bitstream buffers must have valid presentation timestamps";
+
   // There may already be a bitstream buffer with this timestamp, e.g., VP9 alt
   // ref frames, but it's OK to overwrite it because we only expect a single
   // output frame to have that timestamp. AVDA clients only use the bitstream
@@ -210,9 +205,26 @@ void AndroidVideoDecodeAccelerator::QueueInput() {
   // result in them finding the right timestamp.
   bitstream_buffers_in_decoder_[presentation_timestamp] = bitstream_buffer.id();
 
-  status = media_codec_->QueueInputBuffer(
-      input_buf_index, static_cast<const uint8*>(shm->memory()),
-      bitstream_buffer.size(), presentation_timestamp);
+  const uint8_t* memory = static_cast<const uint8_t*>(shm->memory());
+  const std::string& key_id = bitstream_buffer.key_id();
+  const std::string& iv = bitstream_buffer.iv();
+  const std::vector<media::SubsampleEntry>& subsamples =
+      bitstream_buffer.subsamples();
+
+  if (key_id.empty() || iv.empty()) {
+    status = media_codec_->QueueInputBuffer(input_buf_index, memory,
+                                            bitstream_buffer.size(),
+                                            presentation_timestamp);
+  } else {
+    status = media_codec_->QueueSecureInputBuffer(
+        input_buf_index, memory, bitstream_buffer.size(), key_id, iv,
+        subsamples, presentation_timestamp);
+  }
+
+  DVLOG(2) << __FUNCTION__
+           << ": QueueInputBuffer: pts:" << presentation_timestamp
+           << " status:" << status;
+
   RETURN_ON_FAILURE(this, status == media::MEDIA_CODEC_OK,
                     "Failed to QueueInputBuffer: " << status, PLATFORM_FAILURE);
 
@@ -231,20 +243,21 @@ void AndroidVideoDecodeAccelerator::QueueInput() {
   bitstreams_notified_in_advance_.push_back(bitstream_buffer.id());
 }
 
-void AndroidVideoDecodeAccelerator::DequeueOutput() {
+bool AndroidVideoDecodeAccelerator::DequeueOutput() {
   DCHECK(thread_checker_.CalledOnValidThread());
   TRACE_EVENT0("media", "AVDA::DequeueOutput");
   if (picturebuffers_requested_ && output_picture_buffers_.empty())
-    return;
+    return false;
 
   if (!output_picture_buffers_.empty() && free_picture_ids_.empty()) {
     // Don't have any picture buffer to send. Need to wait more.
-    return;
+    return false;
   }
 
   bool eos = false;
   base::TimeDelta presentation_timestamp;
   int32 buf_index = 0;
+  bool should_try_again = false;
   do {
     size_t offset = 0;
     size_t size = 0;
@@ -256,10 +269,15 @@ void AndroidVideoDecodeAccelerator::DequeueOutput() {
     TRACE_EVENT_END2("media", "AVDA::DequeueOutputBuffer", "status", status,
                      "presentation_timestamp (ms)",
                      presentation_timestamp.InMilliseconds());
+
+    DVLOG(3) << "AVDA::DequeueOutputBuffer: pts:" << presentation_timestamp
+             << " buf_index:" << buf_index << " offset:" << offset
+             << " size:" << size << " eos:" << eos;
+
     switch (status) {
       case media::MEDIA_CODEC_DEQUEUE_OUTPUT_AGAIN_LATER:
       case media::MEDIA_CODEC_ERROR:
-        return;
+        return false;
 
       case media::MEDIA_CODEC_OUTPUT_FORMAT_CHANGED: {
         int32 width, height;
@@ -280,9 +298,9 @@ void AndroidVideoDecodeAccelerator::DequeueOutput() {
           // b/7093648
           RETURN_ON_FAILURE(this, size_ == gfx::Size(width, height),
                             "Dynamic resolution change is not supported.",
-                            PLATFORM_FAILURE);
+                            PLATFORM_FAILURE, false);
         }
-        return;
+        return false;
       }
 
       case media::MEDIA_CODEC_OUTPUT_BUFFERS_CHANGED:
@@ -298,25 +316,33 @@ void AndroidVideoDecodeAccelerator::DequeueOutput() {
     }
   } while (buf_index < 0);
 
-  if (eos) {
+  // Normally we assume that the decoder makes at most one output frame for each
+  // distinct input timestamp. A VP9 alt ref frame is a case where an input
+  // buffer, with a possibly unique timestamp, will not result in a
+  // corresponding output frame.
+
+  // However MediaCodecBridge uses timestamp correction and provides
+  // non-decreasing timestamp sequence, which might result in timestamp
+  // duplicates. Discard the frame if we cannot get corresponding buffer id.
+
+  // Get the bitstream buffer id from the timestamp.
+  auto it = eos ? bitstream_buffers_in_decoder_.end()
+                : bitstream_buffers_in_decoder_.find(presentation_timestamp);
+
+  if (it == bitstream_buffers_in_decoder_.end()) {
     media_codec_->ReleaseOutputBuffer(buf_index, false);
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&AndroidVideoDecodeAccelerator::NotifyFlushDone,
                    weak_this_factory_.GetWeakPtr()));
   } else {
-    // Get the bitstream buffer id from the timestamp.
-    auto it = bitstream_buffers_in_decoder_.find(presentation_timestamp);
-    // Require the decoder to output at most one frame for each distinct input
-    // buffer timestamp. A VP9 alt ref frame is a case where an input buffer,
-    // with a possibly unique timestamp, will not result in a corresponding
-    // output frame.
-    CHECK(it != bitstream_buffers_in_decoder_.end())
-        << "Unexpected output frame timestamp";
     const int32 bitstream_buffer_id = it->second;
     bitstream_buffers_in_decoder_.erase(bitstream_buffers_in_decoder_.begin(),
                                         ++it);
     SendCurrentSurfaceToClient(buf_index, bitstream_buffer_id);
+
+    // If we decoded a frame this time, then try for another.
+    should_try_again = true;
 
     // Removes ids former or equal than the id from decoder. Note that
     // |bitstreams_notified_in_advance_| does not mean bitstream ids in decoder
@@ -332,6 +358,8 @@ void AndroidVideoDecodeAccelerator::DequeueOutput() {
       }
     }
   }
+
+  return should_try_again;
 }
 
 void AndroidVideoDecodeAccelerator::SendCurrentSurfaceToClient(
@@ -358,7 +386,7 @@ void AndroidVideoDecodeAccelerator::SendCurrentSurfaceToClient(
 
   // Connect the PictureBuffer to the decoded frame, via whatever
   // mechanism the strategy likes.
-  strategy_->AssignCurrentSurfaceToPictureBuffer(codec_buffer_index, i->second);
+  strategy_->UseCodecBufferForPictureBuffer(codec_buffer_index, i->second);
 
   // TODO(henryhsu): Pass (0, 0) as visible size will cause several test
   // cases failed. We should make sure |size_| is coded size or visible size.
@@ -410,6 +438,8 @@ void AndroidVideoDecodeAccelerator::AssignPictureBuffers(
     // about previously-dismissed IDs now.  See ReusePictureBuffer() comment
     // about "zombies" for why we maintain this set in the first place.
     dismissed_picture_ids_.erase(id);
+
+    strategy_->AssignOnePictureBuffer(buffers[i]);
   }
   TRACE_COUNTER1("media", "AVDA::FreePictureIds", free_picture_ids_.size());
 
@@ -432,6 +462,14 @@ void AndroidVideoDecodeAccelerator::ReusePictureBuffer(
     return;
 
   free_picture_ids_.push(picture_buffer_id);
+
+  OutputBufferMap::const_iterator i =
+      output_picture_buffers_.find(picture_buffer_id);
+  RETURN_ON_FAILURE(this, i != output_picture_buffers_.end(),
+                    "Can't find a PictureBuffer for " << picture_buffer_id,
+                    PLATFORM_FAILURE);
+  strategy_->ReuseOnePictureBuffer(i->second);
+
   TRACE_COUNTER1("media", "AVDA::FreePictureIds", free_picture_ids_.size());
 
   DoIOTask();
@@ -454,6 +492,7 @@ bool AndroidVideoDecodeAccelerator::ConfigureMediaCodec() {
   // when it's known from the bitstream.
   media_codec_.reset(media::VideoCodecBridge::CreateDecoder(
       codec_, false, gfx::Size(320, 240), surface.j_surface().obj(), NULL));
+  strategy_->CodecChanged(media_codec_.get(), output_picture_buffers_);
   if (!media_codec_)
     return false;
 
@@ -485,6 +524,7 @@ void AndroidVideoDecodeAccelerator::Reset() {
   for (OutputBufferMap::iterator it = output_picture_buffers_.begin();
        it != output_picture_buffers_.end();
        ++it) {
+    strategy_->DismissOnePictureBuffer(it->second);
     client_->DismissPictureBuffer(it->first);
     dismissed_picture_ids_.insert(it->first);
   }
@@ -513,15 +553,12 @@ void AndroidVideoDecodeAccelerator::Reset() {
 void AndroidVideoDecodeAccelerator::Destroy() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  strategy_->Cleanup();
-
+  strategy_->Cleanup(output_picture_buffers_);
   weak_this_factory_.InvalidateWeakPtrs();
   if (media_codec_) {
     io_timer_.Stop();
     media_codec_->Stop();
   }
-  if (surface_texture_id_)
-    glDeleteTextures(1, &surface_texture_id_);
   delete this;
 }
 
@@ -538,20 +575,9 @@ const base::ThreadChecker& AndroidVideoDecodeAccelerator::ThreadChecker()
   return thread_checker_;
 }
 
-gfx::SurfaceTexture* AndroidVideoDecodeAccelerator::GetSurfaceTexture() const {
-  return surface_texture_.get();
-}
-
-uint32 AndroidVideoDecodeAccelerator::GetSurfaceTextureId() const {
-  return surface_texture_id_;
-}
-
-gpu::gles2::GLES2Decoder* AndroidVideoDecodeAccelerator::GetGlDecoder() const {
-  return gl_decoder_.get();
-}
-
-media::VideoCodecBridge* AndroidVideoDecodeAccelerator::GetMediaCodec() {
-  return media_codec_.get();
+base::WeakPtr<gpu::gles2::GLES2Decoder>
+AndroidVideoDecodeAccelerator::GetGlDecoder() const {
+  return gl_decoder_;
 }
 
 void AndroidVideoDecodeAccelerator::PostError(
@@ -561,6 +587,10 @@ void AndroidVideoDecodeAccelerator::PostError(
       from_here, base::Bind(&AndroidVideoDecodeAccelerator::NotifyError,
                             weak_this_factory_.GetWeakPtr(), error));
   state_ = ERROR;
+}
+
+void AndroidVideoDecodeAccelerator::NotifyCdmAttached(bool success) {
+  client_->NotifyCdmAttached(success);
 }
 
 void AndroidVideoDecodeAccelerator::NotifyPictureReady(

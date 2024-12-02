@@ -43,7 +43,7 @@
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
-#include "chrome/browser/metrics/metrics_services_manager.h"
+#include "chrome/browser/metrics/chrome_metrics_services_manager_client.h"
 #include "chrome/browser/metrics/thread_watcher.h"
 #include "chrome/browser/net/chrome_net_log_helper.h"
 #include "chrome/browser/net/crl_set_fetcher.h"
@@ -62,7 +62,6 @@
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/user_manager.h"
 #include "chrome/browser/update_client/chrome_update_query_params_delegate.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
@@ -76,7 +75,9 @@
 #include "chrome/installer/util/google_update_settings.h"
 #include "components/component_updater/component_updater_service.h"
 #include "components/gcm_driver/gcm_driver.h"
+#include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_service.h"
+#include "components/metrics_services_manager/metrics_services_manager.h"
 #include "components/net_log/chrome_net_log.h"
 #include "components/network_time/network_time_tracker.h"
 #include "components/policy/core/common/policy_service.h"
@@ -94,6 +95,7 @@
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/common/content_switches.h"
 #include "extensions/common/constants.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -110,6 +112,7 @@
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/chrome_device_client.h"
+#include "chrome/browser/ui/user_manager.h"
 #include "components/gcm_driver/gcm_client_factory.h"
 #include "components/gcm_driver/gcm_desktop_utils.h"
 #endif
@@ -245,20 +248,18 @@ BrowserProcessImpl::~BrowserProcessImpl() {
   g_browser_process = NULL;
 }
 
+#if !defined(OS_ANDROID)
 void BrowserProcessImpl::StartTearDown() {
-    TRACE_EVENT0("shutdown", "BrowserProcessImpl::StartTearDown");
+  TRACE_EVENT0("shutdown", "BrowserProcessImpl::StartTearDown");
   // We need to destroy the MetricsServicesManager, IntranetRedirectDetector,
   // PromoResourceService, and SafeBrowsing ClientSideDetectionService (owned by
   // the SafeBrowsingService) before the io_thread_ gets destroyed, since their
   // destructors can call the URLFetcher destructor, which does a
   // PostDelayedTask operation on the IO thread. (The IO thread will handle that
   // URLFetcher operation before going away.)
-  metrics_services_manager_.reset();
   intranet_redirect_detector_.reset();
-#if defined(SAFE_BROWSING_SERVICE)
   if (safe_browsing_service_.get())
     safe_browsing_service()->ShutDown();
-#endif
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   plugins_resource_service_.reset();
 #endif
@@ -287,6 +288,10 @@ void BrowserProcessImpl::StartTearDown() {
     profile_manager_.reset();
   }
 
+  // MetricsServiceManager holds reference to RapporService, wich is needed by
+  // WebContents (which can be held by ProfileManager). To prevent use after
+  // free, it must be destroyed after profile_manager_.
+  metrics_services_manager_.reset();
   // PromoResourceService must be destroyed after the keyed services and before
   // the IO thread.
   promo_resource_service_.reset();
@@ -352,6 +357,7 @@ void BrowserProcessImpl::PostDestroyThreads() {
   // IO thread having stopped.
   io_thread_.reset();
 }
+#endif  // !defined(OS_ANDROID)
 
 unsigned int BrowserProcessImpl::AddRefModule() {
   DCHECK(CalledOnValidThread());
@@ -399,7 +405,7 @@ unsigned int BrowserProcessImpl::ReleaseModule() {
         FROM_HERE,
         base::Bind(ChromeBrowserMainPartsMac::DidEndMainMessageLoop));
 #endif
-    base::MessageLoop::current()->Quit();
+    base::MessageLoop::current()->QuitWhenIdle();
   }
   return module_ref_count_;
 }
@@ -528,10 +534,14 @@ void BrowserProcessImpl::EndSession() {
 #endif
 }
 
-MetricsServicesManager* BrowserProcessImpl::GetMetricsServicesManager() {
+metrics_services_manager::MetricsServicesManager*
+BrowserProcessImpl::GetMetricsServicesManager() {
   DCHECK(CalledOnValidThread());
-  if (!metrics_services_manager_)
-    metrics_services_manager_.reset(new MetricsServicesManager(local_state()));
+  if (!metrics_services_manager_) {
+    metrics_services_manager_.reset(
+        new metrics_services_manager::MetricsServicesManager(make_scoped_ptr(
+            new ChromeMetricsServicesManagerClient(local_state()))));
+  }
   return metrics_services_manager_.get();
 }
 
@@ -867,8 +877,8 @@ StatusTray* BrowserProcessImpl::status_tray() {
   return status_tray_.get();
 }
 
-
-SafeBrowsingService* BrowserProcessImpl::safe_browsing_service() {
+safe_browsing::SafeBrowsingService*
+BrowserProcessImpl::safe_browsing_service() {
   DCHECK(CalledOnValidThread());
   if (!created_safe_browsing_service_)
     CreateSafeBrowsingService();
@@ -1155,10 +1165,9 @@ void BrowserProcessImpl::CreateSafeBrowsingService() {
   // Set this flag to true so that we don't retry indefinitely to
   // create the service class if there was an error.
   created_safe_browsing_service_ = true;
-#if defined(SAFE_BROWSING_SERVICE)
-  safe_browsing_service_ = SafeBrowsingService::CreateSafeBrowsingService();
+  safe_browsing_service_ =
+      safe_browsing::SafeBrowsingService::CreateSafeBrowsingService();
   safe_browsing_service_->Initialize();
-#endif
 }
 
 void BrowserProcessImpl::CreateGCMDriver() {

@@ -19,11 +19,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/browser/safe_browsing/local_database_manager.h"
-#include "chrome/browser/safe_browsing/malware_details.h"
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "chrome/browser/safe_browsing/test_database_manager.h"
+#include "chrome/browser/safe_browsing/threat_details.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -51,6 +51,8 @@ using content::BrowserThread;
 using content::InterstitialPage;
 using content::NavigationController;
 using content::WebContents;
+
+namespace safe_browsing {
 
 namespace {
 
@@ -92,7 +94,7 @@ class FakeSafeBrowsingDatabaseManager : public TestSafeBrowsingDatabaseManager {
         std::vector<GURL>(1, gurl),
         std::vector<SBFullHash>(),
         client,
-        safe_browsing_util::MALWARE,
+        MALWARE,
         expected_threats);
     sb_check.url_results[0] = badurls[gurl.spec()];
     sb_check.OnSafeBrowsingResult();
@@ -116,6 +118,10 @@ class FakeSafeBrowsingDatabaseManager : public TestSafeBrowsingDatabaseManager {
     return true;
   }
 
+  safe_browsing::ThreatSource GetThreatSource() const override {
+    return safe_browsing::ThreatSource::LOCAL_PVER3;
+  }
+
  private:
   ~FakeSafeBrowsingDatabaseManager() override {}
 
@@ -130,31 +136,29 @@ class FakeSafeBrowsingUIManager :  public SafeBrowsingUIManager {
       SafeBrowsingUIManager(service) { }
 
   // Overrides SafeBrowsingUIManager
-  void SendSerializedMalwareDetails(const std::string& serialized) override {
+  void SendSerializedThreatDetails(const std::string& serialized) override {
     // Notify the UI thread that we got a report.
     BrowserThread::PostTask(
-        BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&FakeSafeBrowsingUIManager::OnMalwareDetailsDone,
-                   this,
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&FakeSafeBrowsingUIManager::OnThreatDetailsDone, this,
                    serialized));
   }
 
-  void OnMalwareDetailsDone(const std::string& serialized) {
+  void OnThreatDetailsDone(const std::string& serialized) {
     EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
     report_ = serialized;
 
-    EXPECT_FALSE(malware_details_done_callback_.is_null());
-    if (!malware_details_done_callback_.is_null()) {
-      malware_details_done_callback_.Run();
-      malware_details_done_callback_ = base::Closure();
+    EXPECT_FALSE(threat_details_done_callback_.is_null());
+    if (!threat_details_done_callback_.is_null()) {
+      threat_details_done_callback_.Run();
+      threat_details_done_callback_ = base::Closure();
     }
   }
 
-  void set_malware_details_done_callback(const base::Closure& callback) {
+  void set_threat_details_done_callback(const base::Closure& callback) {
     EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    EXPECT_TRUE(malware_details_done_callback_.is_null());
-    malware_details_done_callback_ = callback;
+    EXPECT_TRUE(threat_details_done_callback_.is_null());
+    threat_details_done_callback_ = callback;
   }
 
   std::string GetReport() {
@@ -167,7 +171,7 @@ class FakeSafeBrowsingUIManager :  public SafeBrowsingUIManager {
 
  private:
   std::string report_;
-  base::Closure malware_details_done_callback_;
+  base::Closure threat_details_done_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeSafeBrowsingUIManager);
 };
@@ -234,27 +238,27 @@ class TestSafeBrowsingServiceFactory : public SafeBrowsingServiceFactory {
   FakeSafeBrowsingService* most_recent_service_;
 };
 
-// A MalwareDetails class lets us intercept calls from the renderer.
-class FakeMalwareDetails : public MalwareDetails {
+// A ThreatDetails class lets us intercept calls from the renderer.
+class FakeThreatDetails : public ThreatDetails {
  public:
-  FakeMalwareDetails(
+  FakeThreatDetails(
       SafeBrowsingUIManager* delegate,
       WebContents* web_contents,
       const SafeBrowsingUIManager::UnsafeResource& unsafe_resource)
-      : MalwareDetails(delegate, web_contents, unsafe_resource),
+      : ThreatDetails(delegate, web_contents, unsafe_resource),
         got_dom_(false),
-        waiting_(false) { }
+        waiting_(false) {}
 
   void AddDOMDetails(
-      const std::vector<SafeBrowsingHostMsg_MalwareDOMDetails_Node>& params)
+      const std::vector<SafeBrowsingHostMsg_ThreatDOMDetails_Node>& params)
       override {
     EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    MalwareDetails::AddDOMDetails(params);
+    ThreatDetails::AddDOMDetails(params);
 
     // Notify the UI thread that we got the dom details.
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::Bind(&FakeMalwareDetails::OnDOMDetailsDone,
-                                       this));
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&FakeThreatDetails::OnDOMDetailsDone, this));
   }
 
   void WaitForDOM() {
@@ -262,19 +266,19 @@ class FakeMalwareDetails : public MalwareDetails {
       return;
     }
     // This condition might not trigger normally, but if you add a
-    // sleep(1) in malware_dom_details it triggers :).
+    // sleep(1) in threat_dom_details it triggers :).
     waiting_ = true;
     content::RunMessageLoop();
     EXPECT_TRUE(got_dom_);
   }
 
  private:
-  ~FakeMalwareDetails() override {}
+  ~FakeThreatDetails() override {}
 
   void OnDOMDetailsDone() {
     got_dom_ = true;
     if (waiting_) {
-      base::MessageLoopForUI::current()->Quit();
+      base::MessageLoopForUI::current()->QuitWhenIdle();
     }
   }
 
@@ -284,26 +288,23 @@ class FakeMalwareDetails : public MalwareDetails {
   bool waiting_;
 };
 
-class TestMalwareDetailsFactory : public MalwareDetailsFactory {
+class TestThreatDetailsFactory : public ThreatDetailsFactory {
  public:
-  TestMalwareDetailsFactory() : details_() { }
-  ~TestMalwareDetailsFactory() override {}
+  TestThreatDetailsFactory() : details_() {}
+  ~TestThreatDetailsFactory() override {}
 
-  MalwareDetails* CreateMalwareDetails(
+  ThreatDetails* CreateThreatDetails(
       SafeBrowsingUIManager* delegate,
       WebContents* web_contents,
       const SafeBrowsingUIManager::UnsafeResource& unsafe_resource) override {
-    details_ = new FakeMalwareDetails(delegate, web_contents,
-                                      unsafe_resource);
+    details_ = new FakeThreatDetails(delegate, web_contents, unsafe_resource);
     return details_;
   }
 
-  FakeMalwareDetails* get_details() {
-    return details_;
-  }
+  FakeThreatDetails* get_details() { return details_; }
 
  private:
-  FakeMalwareDetails* details_;
+  FakeThreatDetails* details_;
 };
 
 // A SafeBrowingBlockingPage class that lets us wait until it's hidden.
@@ -323,7 +324,7 @@ class TestSafeBrowsingBlockingPage : public SafeBrowsingBlockingPage {
       return;
 
     // Notify that we are gone
-    base::MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->QuitWhenIdle();
     wait_for_delete_ = false;
   }
 
@@ -355,7 +356,7 @@ class TestSafeBrowsingBlockingPageFactory
       const SafeBrowsingBlockingPage::UnsafeResourceList& unsafe_resources)
       override {
     return new TestSafeBrowsingBlockingPage(delegate, web_contents,
-                                              unsafe_resources);
+                                            unsafe_resources);
   }
 };
 
@@ -377,7 +378,7 @@ class SafeBrowsingBlockingPageBrowserTest
   void SetUp() override {
     SafeBrowsingService::RegisterFactory(&factory_);
     SafeBrowsingBlockingPage::RegisterFactory(&blocking_page_factory_);
-    MalwareDetails::RegisterFactory(&details_factory_);
+    ThreatDetails::RegisterFactory(&details_factory_);
     InProcessBrowserTest::SetUp();
   }
 
@@ -385,7 +386,7 @@ class SafeBrowsingBlockingPageBrowserTest
     InProcessBrowserTest::TearDown();
     SafeBrowsingBlockingPage::RegisterFactory(NULL);
     SafeBrowsingService::RegisterFactory(NULL);
-    MalwareDetails::RegisterFactory(NULL);
+    ThreatDetails::RegisterFactory(NULL);
   }
 
   void SetUpOnMainThread() override {
@@ -494,7 +495,7 @@ class SafeBrowsingBlockingPageBrowserTest
   void SetReportSentCallback(const base::Closure& callback) {
     factory_.most_recent_service()
         ->fake_ui_manager()
-        ->set_malware_details_done_callback(callback);
+        ->set_threat_details_done_callback(callback);
   }
 
   std::string GetReportSent() {
@@ -581,8 +582,8 @@ class SafeBrowsingBlockingPageBrowserTest
 
   bool ClickAndWaitForDetach(const std::string& node_id) {
     // We wait for interstitial_detached rather than nav_entry_committed, as
-    // going back from a main-frame malware interstitial page will not cause a
-    // nav entry committed event.
+    // going back from a main-frame safe browsing interstitial page will not
+    // cause a nav entry committed event.
     if (!Click(node_id))
       return false;
     content::WaitForInterstitialDetach(
@@ -609,7 +610,7 @@ class SafeBrowsingBlockingPageBrowserTest
   }
 
  protected:
-  TestMalwareDetailsFactory details_factory_;
+  TestThreatDetailsFactory details_factory_;
 
  private:
   TestSafeBrowsingServiceFactory factory_;
@@ -715,26 +716,27 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, IframeProceed) {
 }
 
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
-                       IframeOptInAndReportMalwareDetails) {
+                       IframeOptInAndReportThreatDetails) {
   // The extended reporting opt-in is presented in the interstitial for malware,
-  // phishing, and UwS threats. It however only results in uploading further
-  // details about the immediate threat when facing malware threats.
-  const bool expect_malware_details = GetParam() == SB_THREAT_TYPE_URL_MALWARE;
+  // phishing, and UwS threats. This test uses malware as an example to verify
+  // this reporting functionality.
+  const bool expect_threat_details =
+      SafeBrowsingBlockingPage::ShouldReportThreatDetails(GetParam());
 
-  scoped_refptr<content::MessageLoopRunner> malware_report_sent_runner(
+  scoped_refptr<content::MessageLoopRunner> threat_report_sent_runner(
       new content::MessageLoopRunner);
-  if (expect_malware_details)
-    SetReportSentCallback(malware_report_sent_runner->QuitClosure());
+  if (expect_threat_details)
+    SetReportSentCallback(threat_report_sent_runner->QuitClosure());
 
   GURL url = SetupThreatIframeWarningAndNavigate();
 
-  FakeMalwareDetails* fake_malware_details = details_factory_.get_details();
-  EXPECT_EQ(expect_malware_details, fake_malware_details != nullptr);
+  FakeThreatDetails* fake_threat_details = details_factory_.get_details();
+  EXPECT_EQ(expect_threat_details, fake_threat_details != nullptr);
 
   // If the DOM details from renderer did not already return when they are
   // expected, wait for them.
-  if (expect_malware_details)
-    fake_malware_details->WaitForDOM();
+  if (expect_threat_details)
+    fake_threat_details->WaitForDOM();
 
   EXPECT_EQ(VISIBLE, GetVisibility("extended-reporting-opt-in"));
   EXPECT_TRUE(Click("opt-in-checkbox"));
@@ -746,10 +748,10 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
   EXPECT_EQ(url,
             browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
 
-  if (expect_malware_details) {
-    malware_report_sent_runner->Run();
+  if (expect_threat_details) {
+    threat_report_sent_runner->Run();
     std::string serialized = GetReportSent();
-    safe_browsing::ClientMalwareReportRequest report;
+    ClientSafeBrowsingReportRequest report;
     ASSERT_TRUE(report.ParseFromString(serialized));
     // Verify the report is complete.
     EXPECT_TRUE(report.complete());
@@ -758,7 +760,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
 
 // Verifies that the "proceed anyway" link isn't available when it is disabled
 // by the corresponding policy. Also verifies that sending the "proceed"
-// command anyway doesn't advance to the malware site.
+// command anyway doesn't advance to the unsafe site.
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ProceedDisabled) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (https://crbug.com/262796).
@@ -1011,7 +1013,7 @@ class SafeBrowsingBlockingPageIDNTest
     resource.threat_type = GetParam();
     resource.render_process_host_id = contents->GetRenderProcessHost()->GetID();
     resource.render_view_id = contents->GetRenderViewHost()->GetRoutingID();
-    resource.threat_source = SafeBrowsingUIManager::FROM_DEVICE;
+    resource.threat_source = safe_browsing::ThreatSource::LOCAL_PVER3;
 
     return SafeBrowsingBlockingPage::CreateBlockingPage(
         sb_service->ui_manager().get(), contents, resource);
@@ -1028,3 +1030,5 @@ INSTANTIATE_TEST_CASE_P(SafeBrowsingBlockingPageIDNTestWithThreatType,
                         testing::Values(SB_THREAT_TYPE_URL_MALWARE,
                                         SB_THREAT_TYPE_URL_PHISHING,
                                         SB_THREAT_TYPE_URL_UNWANTED));
+
+}  // namespace safe_browsing

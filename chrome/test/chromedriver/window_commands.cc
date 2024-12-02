@@ -212,8 +212,14 @@ Status ExecuteWindowCommand(
   if (status.IsError())
     return status;
 
-  if (web_view->GetJavaScriptDialogManager()->IsDialogOpen())
-    return Status(kUnexpectedAlertOpen);
+  if (web_view->GetJavaScriptDialogManager()->IsDialogOpen()) {
+    std::string alert_text;
+    status =
+        web_view->GetJavaScriptDialogManager()->GetDialogMessage(&alert_text);
+    if (status.IsError())
+      return status;
+    return Status(kUnexpectedAlertOpen, "{Alert text : " + alert_text + "}");
+  }
 
   Status nav_status(kOk);
   for (int attempt = 0; attempt < 3; attempt++) {
@@ -446,9 +452,16 @@ Status ExecuteGetCurrentUrl(
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
   std::string url;
-  Status status = GetUrl(web_view, session->GetCurrentFrameId(), &url);
+  Status status = GetUrl(web_view, std::string(), &url);
   if (status.IsError())
     return status;
+  if (!session->GetCurrentFrameId().empty()) {
+    // TODO(samuong): remove this after we release ChromeDriver 2.21.
+    LOG(WARNING) << "As of ChromeDriver 2.21, GetCurrentUrl now returns the "
+                    "URL of the top-level browsing, not the current frame. See "
+                    "https://code.google.com/p/chromedriver/issues/"
+                    "detail?id=1249 for details and workarounds.";
+  }
   value->reset(new base::StringValue(url));
   return Status(kOk);
 }

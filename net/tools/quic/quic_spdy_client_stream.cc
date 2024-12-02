@@ -21,29 +21,29 @@ namespace tools {
 
 QuicSpdyClientStream::QuicSpdyClientStream(QuicStreamId id,
                                            QuicClientSession* session)
-    : QuicDataStream(id, session),
+    : QuicSpdyStream(id, session),
       content_length_(-1),
       response_code_(0),
       header_bytes_read_(0),
-      header_bytes_written_(0) {
-}
+      header_bytes_written_(0),
+      allow_bidirectional_data_(false) {}
 
 QuicSpdyClientStream::~QuicSpdyClientStream() {
 }
 
 void QuicSpdyClientStream::OnStreamFrame(const QuicStreamFrame& frame) {
-  if (!write_side_closed()) {
+  if (!allow_bidirectional_data_ && !write_side_closed()) {
     DVLOG(1) << "Got a response before the request was complete.  "
              << "Aborting request.";
     CloseWriteSide();
   }
-  QuicDataStream::OnStreamFrame(frame);
+  QuicSpdyStream::OnStreamFrame(frame);
 }
 
 void QuicSpdyClientStream::OnStreamHeadersComplete(bool fin,
                                                    size_t frame_len) {
   header_bytes_read_ = frame_len;
-  QuicDataStream::OnStreamHeadersComplete(fin, frame_len);
+  QuicSpdyStream::OnStreamHeadersComplete(fin, frame_len);
   if (!ParseResponseHeaders(decompressed_headers().data(),
                             decompressed_headers().length())) {
     Reset(QUIC_BAD_APPLICATION_PAYLOAD);
@@ -81,17 +81,11 @@ bool QuicSpdyClientStream::ParseResponseHeaders(const char* data,
                                                 uint32 data_len) {
   DCHECK(headers_decompressed());
   SpdyFramer framer(HTTP2);
-  size_t len = framer.ParseHeaderBlockInBuffer(data,
-                                               data_len,
-                                               &response_headers_);
-  DCHECK_LE(len, data_len);
-  if (len == 0 || response_headers_.empty()) {
+  if (!framer.ParseHeaderBlockInBuffer(data, data_len, &response_headers_) ||
+      response_headers_.empty()) {
     return false;  // Headers were invalid.
   }
 
-  if (data_len > len) {
-    data_.append(data + len, data_len - len);
-  }
   if (ContainsKey(response_headers_, "content-length") &&
       !StringToInt(StringPiece(response_headers_["content-length"]),
                    &content_length_)) {
@@ -128,10 +122,10 @@ void QuicSpdyClientStream::SendBody(const string& data, bool fin) {
   SendBody(data, fin, nullptr);
 }
 
-void QuicSpdyClientStream::SendBody(
-    const string& data, bool fin,
-    QuicAckNotifier::DelegateInterface* delegate) {
-  WriteOrBufferData(data, fin, delegate);
+void QuicSpdyClientStream::SendBody(const string& data,
+                                    bool fin,
+                                    QuicAckListenerInterface* listener) {
+  WriteOrBufferData(data, fin, listener);
 }
 
 }  // namespace tools

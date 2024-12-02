@@ -19,10 +19,14 @@ class TestGpuMemoryBufferManager : public gpu::GpuMemoryBufferManager {
       const gfx::Size& size,
       gfx::BufferFormat format,
       gfx::BufferUsage usage) override;
+  scoped_ptr<gfx::GpuMemoryBuffer> CreateGpuMemoryBufferFromHandle(
+      const gfx::GpuMemoryBufferHandle& handle,
+      const gfx::Size& size,
+      gfx::BufferFormat format) override;
   gfx::GpuMemoryBuffer* GpuMemoryBufferFromClientBuffer(
       ClientBuffer buffer) override;
-  void SetDestructionSyncPoint(gfx::GpuMemoryBuffer* buffer,
-                               uint32 sync_point) override;
+  void SetDestructionSyncToken(gfx::GpuMemoryBuffer* buffer,
+                               const gpu::SyncToken& sync_token) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestGpuMemoryBufferManager);

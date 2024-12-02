@@ -13,6 +13,7 @@ from telemetry.internal.browser import browser_options
 from telemetry.internal.platform import device_finder
 from telemetry.internal.util import binary_manager
 from telemetry.internal.util import command_line
+from telemetry.internal.util import ps_util
 from telemetry.testing import browser_test_case
 from telemetry.testing import options_for_unittests
 
@@ -49,6 +50,8 @@ class RunTestsCommand(command_line.OptparseCommand):
                       help='Treat test filter as exact matches (default is '
                            'substring matches).')
     parser.add_option('--client-config', dest='client_config', default=None)
+    parser.add_option('--disable-logging-config', action='store_true',
+                      default=False, help='Configure logging (default on)')
 
     typ.ArgumentParser.add_option_group(parser,
                                         "Options for running the tests",
@@ -204,6 +207,7 @@ def _MatchesSelectedTest(name, selected_tests, selected_tests_are_exact):
 
 
 def _SetUpProcess(child, context): # pylint: disable=W0613
+  ps_util.EnableListingStrayProcessesUponExitHook()
   if binary_manager.NeedsInit():
     # Typ doesn't keep the DependencyManager initialization in the child
     # processes.
@@ -216,6 +220,12 @@ def _SetUpProcess(child, context): # pylint: disable=W0613
       format='(%(levelname)s) %(asctime)s %(module)s.%(funcName)s:%(lineno)d  '
              '%(message)s')
   args = context
+  if not args.disable_logging_config:
+    logging.getLogger().handlers = []
+    logging.basicConfig(
+        level=logging.INFO,
+        format='(%(levelname)s) %(asctime)s %(module)s.%(funcName)s:%(lineno)d'
+              '  %(message)s')
   if args.device and args.device == 'android':
     android_devices = device_finder.GetDevicesMatchingOptions(args)
     args.device = android_devices[child.worker_num-1].guid

@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.crash;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.preference.PreferenceManager;
+import android.support.annotation.IntDef;
 
 import org.chromium.base.Log;
 import org.chromium.base.StreamUtil;
@@ -37,12 +38,12 @@ import java.util.zip.GZIPOutputStream;
  * It is implemented as a Callable<Boolean> and returns true on successful uploads,
  * and false otherwise.
  */
-public class MinidumpUploadCallable implements Callable<Boolean> {
-    private static final String TAG = "cr.MDUploadCallable";
+public class MinidumpUploadCallable implements Callable<Integer> {
     @VisibleForTesting protected static final int LOG_SIZE_LIMIT_BYTES = 2 * 1024 * 1024; // 2MB
     @VisibleForTesting protected static final int LOG_UPLOAD_LIMIT_PER_DAY = 5;
     @VisibleForTesting
     protected static final int LOG_WEEKLY_SIZE_LIMIT_BYTES = 5 * 1024 * 1024; // 5MB
+    private static final String TAG = "MDUploadCallable";
 
     @VisibleForTesting
     protected static final String PREF_DAY_UPLOAD_COUNT = "crash_day_dump_upload_count";
@@ -58,6 +59,16 @@ public class MinidumpUploadCallable implements Callable<Boolean> {
 
     @VisibleForTesting
     protected static final String CONTENT_TYPE_TMPL = "multipart/form-data; boundary=%s";
+
+    @IntDef({
+        UPLOAD_SUCCESS,
+        UPLOAD_FAILURE,
+        UPLOAD_DISABLED,
+    })
+    public @interface MinidumpUploadStatus {}
+    public static final int UPLOAD_SUCCESS = 0;
+    public static final int UPLOAD_FAILURE = 1;
+    public static final int UPLOAD_DISABLED = 2;
 
     private final File mFileToUpload;
     private final File mLogfile;
@@ -82,38 +93,40 @@ public class MinidumpUploadCallable implements Callable<Boolean> {
     }
 
     @Override
-    public Boolean call() {
-        if (!mPermManager.isUploadPermitted()) {
-            Log.i(TAG, "Minidump upload is not permitted");
-            return false;
+    public Integer call() {
+        if (!mPermManager.isUploadUserPermitted()) {
+            Log.i(TAG, "Minidump upload is not permitted by user. Marking file as uploaded for "
+                    + "cleanup to prevent future uploads.");
+            cleanupMinidumpFile();
+            return UPLOAD_DISABLED;
         }
 
         boolean isLimited = mPermManager.isUploadLimited();
-        if (isLimited) {
+        if (isLimited || !mPermManager.isUploadPermitted()) {
             Log.i(TAG, "Minidump cannot currently be uploaded due to constraints.");
-            return false;
+            return UPLOAD_FAILURE;
         }
 
         HttpURLConnection connection =
                 mHttpURLConnectionFactory.createHttpURLConnection(CRASH_URL_STRING);
         if (connection == null) {
-            return false;
+            return UPLOAD_FAILURE;
         }
 
         FileInputStream minidumpInputStream = null;
         try {
             if (!configureConnectionForHttpPost(connection)) {
-                return false;
+                return UPLOAD_FAILURE;
             }
             minidumpInputStream = new FileInputStream(mFileToUpload);
             streamCopy(minidumpInputStream, new GZIPOutputStream(connection.getOutputStream()));
             boolean success = handleExecutionResponse(connection);
 
-            return success;
+            return success ? UPLOAD_SUCCESS : UPLOAD_FAILURE;
         } catch (IOException e) {
             // For now just log the stack trace.
             Log.w(TAG, "Error while uploading " + mFileToUpload.getName(), e);
-            return false;
+            return UPLOAD_FAILURE;
         } finally {
             connection.disconnect();
 

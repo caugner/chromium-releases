@@ -12,8 +12,8 @@
 #include "mojo/application/public/cpp/application_impl.h"
 #include "mojo/gles2/gles2_context.h"
 #include "mojo/gpu/mojo_gles2_impl_autogen.h"
-#include "third_party/mojo/src/mojo/public/cpp/environment/environment.h"
-#include "third_party/mojo/src/mojo/public/cpp/system/message_pipe.h"
+#include "mojo/public/cpp/environment/environment.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 
 namespace html_viewer {
 
@@ -25,8 +25,9 @@ WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
     const GURL& active_url,
     const blink::WebGraphicsContext3D::Attributes& attributes,
     blink::WebGraphicsContext3D* share_context,
-    blink::WebGLInfo* gl_info) {
-  const mojo::GpuInfo* gpu_info = global_state->GetGpuInfo();
+    blink::WebGraphicsContext3D::WebGraphicsInfo* gl_info) {
+  DCHECK(gl_info);
+  const mus::mojom::GpuInfo* gpu_info = global_state->GetGpuInfo();
   gl_info->vendorId = gpu_info->vendor_id;
   gl_info->deviceId = gpu_info->device_id;
   gl_info->vendorInfo = gpu_info->vendor_info.To<blink::WebString>();
@@ -35,16 +36,16 @@ WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
 
   mojo::URLRequestPtr request(mojo::URLRequest::New());
   request->url = mojo::String::From("mojo:mus");
-  mojo::GpuPtr gpu_service;
+  mus::mojom::GpuPtr gpu_service;
   app->ConnectToService(request.Pass(), &gpu_service);
-  mojo::CommandBufferPtr cb;
+  mus::mojom::CommandBufferPtr cb;
   gpu_service->CreateOffscreenGLES2Context(GetProxy(&cb));
   return new WebGraphicsContext3DCommandBufferImpl(
       cb.PassInterface(), active_url, attributes, share_context);
 }
 
 WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl(
-    mojo::InterfacePtrInfo<mojo::CommandBuffer> command_buffer_info,
+    mojo::InterfacePtrInfo<mus::mojom::CommandBuffer> command_buffer_info,
     const GURL& active_url,
     const blink::WebGraphicsContext3D::Attributes& attributes,
     blink::WebGraphicsContext3D* share_context) {

@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -19,7 +20,7 @@
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
-#include "chrome/browser/net/ssl_config_service_manager.h"
+#include "components/ssl_config/ssl_config_service_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/browser_thread_delegate.h"
 #include "net/base/network_change_notifier.h"
@@ -35,8 +36,20 @@ namespace base {
 class CommandLine;
 }
 
+#if defined(OS_ANDROID)
+namespace chrome {
+namespace android {
+class ExternalDataUseObserver;
+}
+}
+#endif  // defined(OS_ANDROID)
+
 namespace chrome_browser_net {
 class DnsProbeService;
+}
+
+namespace data_usage {
+class DataUseAggregator;
 }
 
 namespace extensions {
@@ -53,6 +66,7 @@ class FtpTransactionFactory;
 class HostMappingRules;
 class HostResolver;
 class HttpAuthHandlerFactory;
+class HttpNetworkSession;
 class HttpServerProperties;
 class HttpTransactionFactory;
 class HttpUserAgentSettings;
@@ -122,6 +136,14 @@ class IOThread : public content::BrowserThreadDelegate {
     Globals();
     ~Globals();
 
+    // Global aggregator of data use. It must outlive the
+    // |system_network_delegate|.
+    scoped_ptr<data_usage::DataUseAggregator> data_use_aggregator;
+#if defined(OS_ANDROID)
+    // An external observer of data use.
+    scoped_ptr<chrome::android::ExternalDataUseObserver>
+        external_data_use_observer;
+#endif  // defined(OS_ANDROID)
     // The "system" NetworkDelegate, used for Profile-agnostic network events.
     scoped_ptr<net::NetworkDelegate> system_network_delegate;
     scoped_ptr<net::HostResolver> host_resolver;
@@ -138,6 +160,8 @@ class IOThread : public content::BrowserThreadDelegate {
     scoped_ptr<net::HttpAuthHandlerFactory> http_auth_handler_factory;
     scoped_ptr<net::HttpServerProperties> http_server_properties;
     scoped_ptr<net::ProxyService> proxy_script_fetcher_proxy_service;
+    scoped_ptr<net::HttpNetworkSession>
+        proxy_script_fetcher_http_network_session;
     scoped_ptr<net::HttpTransactionFactory>
         proxy_script_fetcher_http_transaction_factory;
     scoped_ptr<net::FtpTransactionFactory>
@@ -154,6 +178,7 @@ class IOThread : public content::BrowserThreadDelegate {
     // ProxyService, since we always directly connect to fetch the PAC script.
     scoped_ptr<net::URLRequestContext> proxy_script_fetcher_context;
     scoped_ptr<net::ProxyService> system_proxy_service;
+    scoped_ptr<net::HttpNetworkSession> system_http_network_session;
     scoped_ptr<net::HttpTransactionFactory> system_http_transaction_factory;
     scoped_ptr<net::URLRequestJobFactory> system_url_request_job_factory;
     scoped_ptr<net::URLRequestContext> system_request_context;
@@ -183,8 +208,9 @@ class IOThread : public content::BrowserThreadDelegate {
     Optional<bool> use_alternative_services;
     Optional<double> alternative_service_probability_threshold;
 
+    Optional<bool> enable_npn;
+
     Optional<bool> enable_quic;
-    Optional<bool> enable_insecure_quic;
     Optional<bool> enable_quic_for_proxies;
     Optional<bool> enable_quic_port_selection;
     Optional<bool> quic_always_require_handshake_confirmation;
@@ -203,6 +229,8 @@ class IOThread : public content::BrowserThreadDelegate {
     Optional<std::string> quic_user_agent_id;
     Optional<net::QuicVersionVector> quic_supported_versions;
     Optional<net::HostPortPair> origin_to_force_quic_on;
+    Optional<bool> quic_close_sessions_on_ip_change;
+    std::unordered_set<std::string> quic_host_whitelist;
     bool enable_user_alternate_protocol_ports;
     // NetErrorTabHelper uses |dns_probe_service| to send DNS probes when a
     // main frame load fails with a DNS error in order to provide more useful
@@ -283,6 +311,10 @@ class IOThread : public content::BrowserThreadDelegate {
                                    const VariationParameters& quic_trial_params,
                                    Globals* globals);
 
+  // Configures NPN in |globals| based on the field trial group.
+  static void ConfigureNPNGlobals(base::StringPiece npn_trial_group,
+                                  Globals* globals);
+
   // Global state must be initialized on the IO thread, then this
   // method must be invoked on the UI thread.
   void InitSystemRequestContext();
@@ -337,12 +369,6 @@ class IOThread : public content::BrowserThreadDelegate {
       const base::CommandLine& command_line,
       base::StringPiece quic_trial_group,
       bool quic_allowed_by_policy);
-
-  // Returns true if QUIC should be enabled for http:// URLs, as a result
-  // of a field trial or command line flag.
-  static bool ShouldEnableInsecureQuic(
-      const base::CommandLine& command_line,
-      const VariationParameters& quic_trial_params);
 
   // Returns true if the selection of the ephemeral port in bind() should be
   // performed by Chromium, and false if the OS should select the port.  The OS
@@ -406,6 +432,16 @@ class IOThread : public content::BrowserThreadDelegate {
 
   // Returns true if QUIC should delay TCP connection when QUIC works.
   static bool ShouldQuicDelayTcpRace(
+      const VariationParameters& quic_trial_params);
+
+  // Returns true if QUIC should close sessions when any of the client's
+  // IP addresses change.
+  static bool ShouldQuicCloseSessionsOnIpChange(
+      const VariationParameters& quic_trial_params);
+
+  // Returns the set of hosts to whitelist for QUIC.
+  static std::unordered_set<std::string> GetQuicHostWhitelist(
+      const base::CommandLine& command_line,
       const VariationParameters& quic_trial_params);
 
   // Returns the maximum length for QUIC packets, based on any flags in
@@ -489,7 +525,7 @@ class IOThread : public content::BrowserThreadDelegate {
 
   // This is an instance of the default SSLConfigServiceManager for the current
   // platform and it gets SSL preferences from local_state object.
-  scoped_ptr<SSLConfigServiceManager> ssl_config_service_manager_;
+  scoped_ptr<ssl_config::SSLConfigServiceManager> ssl_config_service_manager_;
 
   // These member variables are initialized by a task posted to the IO thread,
   // which gets posted by calling certain member functions of IOThread.

@@ -36,13 +36,12 @@ class CommandBufferImpl::CommandBufferDriverClientImpl
 };
 
 CommandBufferImpl::CommandBufferImpl(
-    mojo::InterfaceRequest<mojo::CommandBuffer> request,
+    mojo::InterfaceRequest<mus::mojom::CommandBuffer> request,
     scoped_refptr<GpuState> gpu_state,
     scoped_ptr<CommandBufferDriver> driver)
     : gpu_state_(gpu_state),
       driver_task_runner_(base::MessageLoop::current()->task_runner()),
       driver_(driver.Pass()),
-      binding_(this),
       observer_(nullptr),
       weak_ptr_factory_(this) {
   driver_->set_client(make_scoped_ptr(new CommandBufferDriverClientImpl(this)));
@@ -54,18 +53,19 @@ CommandBufferImpl::CommandBufferImpl(
 }
 
 void CommandBufferImpl::Initialize(
-    mojo::CommandBufferSyncClientPtr sync_client,
-    mojo::CommandBufferSyncPointClientPtr sync_point_client,
-    mojo::CommandBufferLostContextObserverPtr loss_observer,
+    mus::mojom::CommandBufferSyncClientPtr sync_client,
+    mus::mojom::CommandBufferSyncPointClientPtr sync_point_client,
+    mus::mojom::CommandBufferLostContextObserverPtr loss_observer,
     mojo::ScopedSharedBufferHandle shared_state,
     mojo::Array<int32_t> attribs) {
   sync_point_client_ = sync_point_client.Pass();
   driver_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&CommandBufferDriver::Initialize,
-                 base::Unretained(driver_.get()), base::Passed(&sync_client),
-                 base::Passed(&loss_observer), base::Passed(&shared_state),
-                 base::Passed(&attribs)));
+                 base::Unretained(driver_.get()),
+                 base::Passed(sync_client.PassInterface()),
+                 base::Passed(loss_observer.PassInterface()),
+                 base::Passed(&shared_state), base::Passed(&attribs)));
 }
 
 void CommandBufferImpl::SetGetBuffer(int32_t buffer) {
@@ -151,9 +151,10 @@ CommandBufferImpl::~CommandBufferImpl() {
 }
 
 void CommandBufferImpl::BindToRequest(
-    mojo::InterfaceRequest<mojo::CommandBuffer> request) {
-  binding_.Bind(request.Pass());
-  binding_.set_connection_error_handler([this]() { OnConnectionError(); });
+    mojo::InterfaceRequest<mus::mojom::CommandBuffer> request) {
+  binding_.reset(
+      new mojo::Binding<mus::mojom::CommandBuffer>(this, request.Pass()));
+  binding_->set_connection_error_handler([this]() { OnConnectionError(); });
 }
 
 void CommandBufferImpl::OnConnectionError() {
@@ -162,6 +163,10 @@ void CommandBufferImpl::OnConnectionError() {
   // should also be destroyed on the control because InterfacePtrs are thread-
   // hostile.
   sync_point_client_.reset();
+
+  // Before deleting, we need to delete |binding_| because it is bound to the
+  // current thread (|control_task_runner|).
+  binding_.reset();
 
   // Objects we own (such as CommandBufferDriver) need to be destroyed on the
   // thread we were created on.

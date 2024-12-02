@@ -102,7 +102,8 @@ void TestingBrowserProcess::ResourceDispatcherHostCreated() {
 void TestingBrowserProcess::EndSession() {
 }
 
-MetricsServicesManager* TestingBrowserProcess::GetMetricsServicesManager() {
+metrics_services_manager::MetricsServicesManager*
+TestingBrowserProcess::GetMetricsServicesManager() {
   return nullptr;
 }
 
@@ -209,7 +210,8 @@ StatusTray* TestingBrowserProcess::status_tray() {
   return nullptr;
 }
 
-SafeBrowsingService* TestingBrowserProcess::safe_browsing_service() {
+safe_browsing::SafeBrowsingService*
+TestingBrowserProcess::safe_browsing_service() {
 #if defined(OS_IOS)
   NOTIMPLEMENTED();
   return nullptr;
@@ -444,7 +446,7 @@ void TestingBrowserProcess::ShutdownBrowserPolicyConnector() {
 }
 
 void TestingBrowserProcess::SetSafeBrowsingService(
-    SafeBrowsingService* sb_service) {
+    safe_browsing::SafeBrowsingService* sb_service) {
 #if defined(OS_IOS)
   NOTIMPLEMENTED();
 #else

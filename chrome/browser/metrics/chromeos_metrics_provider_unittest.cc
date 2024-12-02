@@ -120,20 +120,20 @@ class ChromeOSMetricsProviderTest : public testing::Test {
 };
 
 TEST_F(ChromeOSMetricsProviderTest, MultiProfileUserCount) {
-  std::string user1("user1@example.com");
-  std::string user2("user2@example.com");
-  std::string user3("user3@example.com");
+  const AccountId account_id1(AccountId::FromUserEmail("user1@example.com"));
+  const AccountId account_id2(AccountId::FromUserEmail("user2@example.com"));
+  const AccountId account_id3(AccountId::FromUserEmail("user3@example.com"));
 
   // |scoped_enabler| takes over the lifetime of |user_manager|.
   chromeos::FakeChromeUserManager* user_manager =
       new chromeos::FakeChromeUserManager();
   chromeos::ScopedUserManagerEnabler scoped_enabler(user_manager);
-  user_manager->AddKioskAppUser(user1);
-  user_manager->AddKioskAppUser(user2);
-  user_manager->AddKioskAppUser(user3);
+  user_manager->AddKioskAppUser(account_id1);
+  user_manager->AddKioskAppUser(account_id2);
+  user_manager->AddKioskAppUser(account_id3);
 
-  user_manager->LoginUser(user1);
-  user_manager->LoginUser(user3);
+  user_manager->LoginUser(account_id1);
+  user_manager->LoginUser(account_id3);
 
   ChromeOSMetricsProvider provider;
   provider.OnDidCreateMetricsLog();
@@ -143,19 +143,19 @@ TEST_F(ChromeOSMetricsProviderTest, MultiProfileUserCount) {
 }
 
 TEST_F(ChromeOSMetricsProviderTest, MultiProfileCountInvalidated) {
-  std::string user1("user1@example.com");
-  std::string user2("user2@example.com");
-  std::string user3("user3@example.com");
+  const AccountId account_id1(AccountId::FromUserEmail("user1@example.com"));
+  const AccountId account_id2(AccountId::FromUserEmail("user2@example.com"));
+  const AccountId account_id3(AccountId::FromUserEmail("user3@example.com"));
 
   // |scoped_enabler| takes over the lifetime of |user_manager|.
   chromeos::FakeChromeUserManager* user_manager =
       new chromeos::FakeChromeUserManager();
   chromeos::ScopedUserManagerEnabler scoped_enabler(user_manager);
-  user_manager->AddKioskAppUser(user1);
-  user_manager->AddKioskAppUser(user2);
-  user_manager->AddKioskAppUser(user3);
+  user_manager->AddKioskAppUser(account_id1);
+  user_manager->AddKioskAppUser(account_id2);
+  user_manager->AddKioskAppUser(account_id3);
 
-  user_manager->LoginUser(user1);
+  user_manager->LoginUser(account_id1);
 
   ChromeOSMetricsProvider provider;
   provider.OnDidCreateMetricsLog();
@@ -164,7 +164,7 @@ TEST_F(ChromeOSMetricsProviderTest, MultiProfileCountInvalidated) {
   provider.ProvideSystemProfileMetrics(&system_profile);
   EXPECT_EQ(1u, system_profile.multi_profile_user_count());
 
-  user_manager->LoginUser(user2);
+  user_manager->LoginUser(account_id2);
   provider.ProvideSystemProfileMetrics(&system_profile);
   EXPECT_EQ(0u, system_profile.multi_profile_user_count());
 }
@@ -230,11 +230,29 @@ TEST_F(ChromeOSMetricsProviderTest, BluetoothPairedDevices) {
 
   typedef metrics::SystemProfileProto::Hardware::Bluetooth::PairedDevice
       PairedDevice;
+  // As BluetoothAdapter keeps the device list without ordering,
+  // it's not appropriate to use fixed positional indices to index into the
+  // system_profile.hardware().bluetooth().paired_device list.
+  // Instead, directly find the two devices we're interested in.
+  PairedDevice device1;
+  PairedDevice device2;
+  for (int i = 0;
+       i < system_profile.hardware().bluetooth().paired_device_size(); ++i) {
+    const PairedDevice& device =
+        system_profile.hardware().bluetooth().paired_device(i);
+    if (device.bluetooth_class() ==
+            FakeBluetoothDeviceClient::kPairedDeviceClass &&
+        device.vendor_prefix() == 0x001122U) {
+      // Found the Paired Device object.
+      device1 = device;
+    } else if (device.bluetooth_class() ==
+               FakeBluetoothDeviceClient::kConfirmPasskeyClass) {
+      // Found the Confirm Passkey object.
+      device2 = device;
+    }
+  }
 
-  // First device should match the Paired Device object, complete with
-  // parsed Device ID information.
-  PairedDevice device1 = system_profile.hardware().bluetooth().paired_device(0);
-
+  // The Paired Device object, complete with parsed Device ID information.
   EXPECT_EQ(FakeBluetoothDeviceClient::kPairedDeviceClass,
             device1.bluetooth_class());
   EXPECT_EQ(PairedDevice::DEVICE_COMPUTER, device1.type());
@@ -244,10 +262,7 @@ TEST_F(ChromeOSMetricsProviderTest, BluetoothPairedDevices) {
   EXPECT_EQ(0x030DU, device1.product_id());
   EXPECT_EQ(0x0306U, device1.device_id());
 
-  // Third device should match the Confirm Passkey object, this has
-  // no Device ID information.
-  PairedDevice device2 = system_profile.hardware().bluetooth().paired_device(1);
-
+  // The Confirm Passkey object, this has no Device ID information.
   EXPECT_EQ(FakeBluetoothDeviceClient::kConfirmPasskeyClass,
             device2.bluetooth_class());
   EXPECT_EQ(PairedDevice::DEVICE_PHONE, device2.type());

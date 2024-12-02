@@ -96,7 +96,7 @@ class TestHooks : public AnimationDelegate {
   virtual void BeginMainFrame(const BeginFrameArgs& args) {}
   virtual void WillBeginMainFrame() {}
   virtual void DidBeginMainFrame() {}
-  virtual void Layout() {}
+  virtual void UpdateLayerTreeHost() {}
   virtual void DidInitializeOutputSurface() {}
   virtual void DidFailToInitializeOutputSurface() {}
   virtual void DidAddAnimation() {}
@@ -108,6 +108,7 @@ class TestHooks : public AnimationDelegate {
                                        bool visible) {}
   virtual void ScheduleComposite() {}
   virtual void DidSetNeedsUpdateLayers() {}
+  virtual void DidActivateSyncTree() {}
 
   // Hooks for SchedulerClient.
   virtual void ScheduledActionWillSendBeginMainFrame() {}
@@ -120,6 +121,42 @@ class TestHooks : public AnimationDelegate {
   virtual void ScheduledActionInvalidateOutputSurface() {}
   virtual void SendBeginFramesToChildren(const BeginFrameArgs& args) {}
   virtual void SendBeginMainFrameNotExpectedSoon() {}
+
+  // Hooks for ProxyImpl
+  virtual void SetThrottleFrameProductionOnImpl(bool throttle) {}
+  virtual void UpdateTopControlsStateOnImpl(TopControlsState constraints,
+                                            TopControlsState current,
+                                            bool animate) {}
+  virtual void InitializeOutputSurfaceOnImpl(OutputSurface* output_surface) {}
+  virtual void MainThreadHasStoppedFlingingOnImpl() {}
+  virtual void SetInputThrottledUntilCommitOnImpl(bool is_throttled) {}
+  virtual void SetDeferCommitsOnImpl(bool defer_commits) {}
+  virtual void BeginMainFrameAbortedOnImpl(CommitEarlyOutReason reason) {}
+  virtual void SetNeedsRedrawOnImpl(const gfx::Rect& damage_rect) {}
+  virtual void SetNeedsCommitOnImpl() {}
+  virtual void FinishAllRenderingOnImpl() {}
+  virtual void SetVisibleOnImpl(bool visible) {}
+  virtual void ReleaseOutputSurfaceOnImpl() {}
+  virtual void FinishGLOnImpl() {}
+  virtual void StartCommitOnImpl() {}
+  virtual void InitializeImplOnImpl() {}
+  virtual void WillCloseLayerTreeHostOnImpl() {}
+
+  // Hooks for ProxyMain
+  virtual void ReceivedDidCompleteSwapBuffers() {}
+  virtual void ReceivedSetRendererCapabilitiesMainCopy(
+      const RendererCapabilities& capabilities) {}
+  virtual void ReceivedBeginMainFrameNotExpectedSoon() {}
+  virtual void ReceivedDidCommitAndDrawFrame() {}
+  virtual void ReceivedSetAnimationEvents() {}
+  virtual void ReceivedDidLoseOutputSurface() {}
+  virtual void ReceivedRequestNewOutputSurface() {}
+  virtual void ReceivedDidInitializeOutputSurface(
+      bool success,
+      const RendererCapabilities& capabilities) {}
+  virtual void ReceivedDidCompletePageScaleAnimation() {}
+  virtual void ReceivedPostFrameTimingEventsOnMain() {}
+  virtual void ReceivedBeginMainFrame() {}
 
   // Implementation of AnimationDelegate:
   void NotifyAnimationStarted(base::TimeTicks monotonic_time,
@@ -216,15 +253,21 @@ class LayerTreeTest : public testing::Test, public TestHooks {
 
   bool HasImplThread() { return !!impl_thread_; }
   base::SingleThreadTaskRunner* ImplThreadTaskRunner() {
-    DCHECK(proxy());
-    return proxy()->ImplThreadTaskRunner() ? proxy()->ImplThreadTaskRunner()
-                                           : main_task_runner_.get();
+    DCHECK(task_runner_provider());
+    base::SingleThreadTaskRunner* impl_thread_task_runner =
+        task_runner_provider()->ImplThreadTaskRunner();
+    return impl_thread_task_runner ? impl_thread_task_runner
+                                   : main_task_runner_.get();
   }
   base::SingleThreadTaskRunner* MainThreadTaskRunner() {
     return main_task_runner_.get();
   }
   Proxy* proxy() const {
     return layer_tree_host_ ? layer_tree_host_->proxy() : NULL;
+  }
+  TaskRunnerProvider* task_runner_provider() const {
+    return layer_tree_host_ ? layer_tree_host_->task_runner_provider()
+                            : nullptr;
   }
   TaskGraphRunner* task_graph_runner() const {
     return task_graph_runner_.get();

@@ -120,14 +120,6 @@ AutofillWebDataBackendImpl::GetFormValuesForElementName(
                                                  values));
 }
 
-scoped_ptr<WDTypedResult> AutofillWebDataBackendImpl::HasFormElements(
-    WebDatabase* db) {
-  DCHECK(db_thread_->BelongsToCurrentThread());
-  bool value = AutofillTable::FromWebDatabase(db)->HasFormElements();
-  return scoped_ptr<WDTypedResult>(
-      new WDResult<bool>(AUTOFILL_VALUE_RESULT, value));
-}
-
 WebDatabase::State AutofillWebDataBackendImpl::RemoveFormElementsAddedBetween(
     const base::Time& delete_begin,
     const base::Time& delete_end,
@@ -261,6 +253,18 @@ scoped_ptr<WDTypedResult> AutofillWebDataBackendImpl::GetServerProfiles(
           profiles,
           base::Bind(&AutofillWebDataBackendImpl::DestroyAutofillProfileResult,
               base::Unretained(this))));
+}
+
+scoped_ptr<WDTypedResult>
+    AutofillWebDataBackendImpl::GetCountOfValuesContainedBetween(
+        const base::Time& begin,
+        const base::Time& end,
+        WebDatabase* db) {
+  DCHECK(db_thread_->BelongsToCurrentThread());
+  int value = AutofillTable::FromWebDatabase(db)
+      ->GetCountOfValuesContainedBetween(begin, end);
+  return scoped_ptr<WDTypedResult>(
+      new WDResult<int>(AUTOFILL_VALUE_RESULT, value));
 }
 
 WebDatabase::State AutofillWebDataBackendImpl::UpdateAutofillEntries(
@@ -451,21 +455,20 @@ WebDatabase::State AutofillWebDataBackendImpl::RemoveOriginURLsModifiedBetween(
     WebDatabase* db) {
   DCHECK(db_thread_->BelongsToCurrentThread());
   ScopedVector<AutofillProfile> profiles;
-  if (AutofillTable::FromWebDatabase(db)->RemoveOriginURLsModifiedBetween(
+  if (!AutofillTable::FromWebDatabase(db)->RemoveOriginURLsModifiedBetween(
           delete_begin, delete_end, &profiles)) {
-    for (std::vector<AutofillProfile*>::const_iterator it = profiles.begin();
-         it != profiles.end(); ++it) {
-      AutofillProfileChange change(AutofillProfileChange::UPDATE,
-                                   (*it)->guid(), *it);
-      FOR_EACH_OBSERVER(AutofillWebDataServiceObserverOnDBThread,
-                        db_observer_list_,
-                        AutofillProfileChanged(change));
-    }
-    // Note: It is the caller's responsibility to post notifications for any
-    // changes, e.g. by calling the Refresh() method of PersonalDataManager.
-    return WebDatabase::COMMIT_NEEDED;
+    return WebDatabase::COMMIT_NOT_NEEDED;
   }
-  return WebDatabase::COMMIT_NOT_NEEDED;
+
+  for (const AutofillProfile* it : profiles) {
+    AutofillProfileChange change(AutofillProfileChange::UPDATE, it->guid(), it);
+    FOR_EACH_OBSERVER(AutofillWebDataServiceObserverOnDBThread,
+                      db_observer_list_,
+                      AutofillProfileChanged(change));
+  }
+  // Note: It is the caller's responsibility to post notifications for any
+  // changes, e.g. by calling the Refresh() method of PersonalDataManager.
+  return WebDatabase::COMMIT_NEEDED;
 }
 
 WebDatabase::State AutofillWebDataBackendImpl::RemoveExpiredFormElementsImpl(

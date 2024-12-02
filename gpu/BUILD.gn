@@ -127,6 +127,8 @@ test("gl_tests") {
     "command_buffer/tests/gl_copy_texture_CHROMIUM_unittest.cc",
     "command_buffer/tests/gl_cube_map_texture_unittest.cc",
     "command_buffer/tests/gl_depth_texture_unittest.cc",
+    "command_buffer/tests/gl_ext_srgb_unittest.cc",
+    "command_buffer/tests/gl_fence_sync_unittest.cc",
     "command_buffer/tests/gl_gpu_memory_buffer_unittest.cc",
     "command_buffer/tests/gl_lose_context_chromium_unittest.cc",
     "command_buffer/tests/gl_manager.cc",
@@ -173,8 +175,8 @@ test("gl_tests") {
   libs = []
 
   if (is_android) {
-    deps += [ "//testing/android/native_test:native_test_native_code" ]
     libs += [ "android" ]
+    apk_deps = [ "//ui/android:ui_java" ]
   }
 }
 
@@ -262,6 +264,7 @@ test("gpu_unittests") {
     "command_buffer/service/shader_manager_unittest.cc",
     "command_buffer/service/shader_translator_cache_unittest.cc",
     "command_buffer/service/shader_translator_unittest.cc",
+    "command_buffer/service/sync_point_manager_unittest.cc",
     "command_buffer/service/test_helper.cc",
     "command_buffer/service/test_helper.h",
     "command_buffer/service/texture_manager_unittest.cc",
@@ -339,11 +342,13 @@ group("angle_unittests_run") {
   ]
 }
 
-# TODO(GYP): Delete this after we've converted everything to GN.
-# The _run targets exist only for compatibility w/ GYP.
-group("angle_end2end_tests_run") {
-  testonly = true
-  deps = [
-    "//third_party/angle/src/tests:angle_end2end_tests",
-  ]
+if (is_win || is_linux || is_mac) {
+  # TODO(GYP): Delete this after we've converted everything to GN.
+  # The _run targets exist only for compatibility w/ GYP.
+  group("angle_end2end_tests_run") {
+    testonly = true
+    deps = [
+      "//third_party/angle/src/tests:angle_end2end_tests",
+    ]
+  }
 }

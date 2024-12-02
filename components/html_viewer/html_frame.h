@@ -9,18 +9,19 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/time/time.h"
 #include "cc/layers/surface_layer.h"
 #include "components/html_viewer/html_frame_tree_manager.h"
 #include "components/html_viewer/replicated_frame_state.h"
-#include "components/mus/public/cpp/view_observer.h"
+#include "components/mus/public/cpp/window_observer.h"
 #include "components/web_view/public/interfaces/frame.mojom.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/services/tracing/public/interfaces/tracing.mojom.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebFrameClient.h"
 #include "third_party/WebKit/public/web/WebRemoteFrameClient.h"
 #include "third_party/WebKit/public/web/WebSandboxFlags.h"
 #include "third_party/WebKit/public/web/WebTextInputInfo.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/binding.h"
 
 namespace cc_blink {
 class WebLayerImpl;
@@ -37,8 +38,8 @@ class Rect;
 }
 
 namespace mus {
-class ScopedViewPtr;
-class View;
+class ScopedWindowPtr;
+class Window;
 }
 
 namespace html_viewer {
@@ -54,7 +55,7 @@ class WebLayerTreeViewImpl;
 // Frame is used to represent a single frame in the frame tree of a page. The
 // frame is either local or remote. Each Frame is associated with a single
 // HTMLFrameTreeManager and can not be moved to another HTMLFrameTreeManager.
-// Local frames have a mus::View, remote frames do not.
+// Local frames have a mus::Window, remote frames do not.
 //
 // HTMLFrame serves as the FrameClient. It implements it by forwarding the
 // calls to HTMLFrameTreeManager so that HTMLFrameTreeManager can update the
@@ -69,20 +70,20 @@ class WebLayerTreeViewImpl;
 class HTMLFrame : public blink::WebFrameClient,
                   public blink::WebRemoteFrameClient,
                   public web_view::mojom::FrameClient,
-                  public mus::ViewObserver {
+                  public mus::WindowObserver {
  public:
   struct CreateParams {
     CreateParams(
         HTMLFrameTreeManager* manager,
         HTMLFrame* parent,
         uint32_t id,
-        mus::View* view,
+        mus::Window* window,
         const mojo::Map<mojo::String, mojo::Array<uint8_t>>& properties,
         HTMLFrameDelegate* delegate)
         : manager(manager),
           parent(parent),
           id(id),
-          view(view),
+          window(window),
           properties(properties),
           delegate(delegate),
           is_local_create_child(false) {}
@@ -91,7 +92,7 @@ class HTMLFrame : public blink::WebFrameClient,
     HTMLFrameTreeManager* manager;
     HTMLFrame* parent;
     uint32_t id;
-    mus::View* view;
+    mus::Window* window;
     const mojo::Map<mojo::String, mojo::Array<uint8_t>>& properties;
     HTMLFrameDelegate* delegate;
 
@@ -130,10 +131,10 @@ class HTMLFrame : public blink::WebFrameClient,
   blink::WebView* web_view();
   blink::WebWidget* GetWebWidget();
 
-  // The mus::View this frame renders to. This is non-null for the local frame
+  // The mus::Window this frame renders to. This is non-null for the local frame
   // the frame tree was created with as well as non-null for any frames created
   // locally.
-  mus::View* view() { return view_; }
+  mus::Window* window() { return window_; }
 
   HTMLFrameTreeManager* frame_tree_manager() { return frame_tree_manager_; }
 
@@ -147,7 +148,8 @@ class HTMLFrame : public blink::WebFrameClient,
   // Returns true if this or one of the frames descendants is local.
   bool HasLocalDescendant() const;
 
-  void LoadRequest(const blink::WebURLRequest& request);
+  void LoadRequest(const blink::WebURLRequest& request,
+                   base::TimeTicks navigation_start_time);
 
  protected:
   virtual ~HTMLFrame();
@@ -158,12 +160,14 @@ class HTMLFrame : public blink::WebFrameClient,
       const blink::WebURL& url,
       blink::WebMediaPlayerClient* client,
       blink::WebMediaPlayerEncryptedMediaClient* encrypted_client,
-      blink::WebContentDecryptionModule* initial_cdm);
+      blink::WebContentDecryptionModule* initial_cdm,
+      const blink::WebString& sink_id);
   virtual blink::WebFrame* createChildFrame(
       blink::WebLocalFrame* parent,
       blink::WebTreeScopeType scope,
       const blink::WebString& frame_ame,
-      blink::WebSandboxFlags sandbox_flags);
+      blink::WebSandboxFlags sandbox_flags,
+      const blink::WebFrameOwnerProperties& frame_owner_properties);
   virtual void frameDetached(blink::WebFrame* frame,
                              blink::WebFrameClient::DetachType type);
   virtual blink::WebCookieJar* cookieJar(blink::WebLocalFrame* frame);
@@ -194,6 +198,13 @@ class HTMLFrame : public blink::WebFrameClient,
   virtual void didReceiveTitle(blink::WebLocalFrame* frame,
                                const blink::WebString& title,
                                blink::WebTextDirection direction);
+  virtual void reportFindInFrameMatchCount(int identifier,
+                                           int count,
+                                           bool finalUpdate);
+  virtual void reportFindInPageSelection(int identifier,
+                                         int activeMatchOrdinal,
+                                         const blink::WebRect& selection);
+  virtual bool shouldSearchSingleFrame();
 
  private:
   friend class HTMLFrameTreeManager;
@@ -219,7 +230,7 @@ class HTMLFrame : public blink::WebFrameClient,
   // Gets the server Frame to use for this frame.
   web_view::mojom::Frame* GetServerFrame();
 
-  void SetView(mus::View* view);
+  void SetWindow(mus::Window* window);
 
   // Creates the appropriate WebWidget implementation for the Frame.
   void CreateRootWebWidget();
@@ -234,7 +245,7 @@ class HTMLFrame : public blink::WebFrameClient,
   // Swaps this frame from a remote frame to a local frame.
   void SwapToLocal(
       HTMLFrameDelegate* delegate,
-      mus::View* view,
+      mus::Window* window,
       const mojo::Map<mojo::String, mojo::Array<uint8_t>>& properties);
 
   // Invoked when changing the delegate. This informs the new delegate to take
@@ -244,27 +255,33 @@ class HTMLFrame : public blink::WebFrameClient,
 
   GlobalState* global_state() { return frame_tree_manager_->global_state(); }
 
+  // Returns the focused element if the focused element is in this
+  // frame. Returns an empty one otherwise.
+  blink::WebElement GetFocusedElement();
+
   // Returns the Frame associated with the specified WebFrame.
   HTMLFrame* FindFrameWithWebFrame(blink::WebFrame* web_frame);
 
   // The various frameDetached() implementations call into this.
   void FrameDetachedImpl(blink::WebFrame* web_frame);
 
-  // mus::ViewObserver methods:
-  void OnViewBoundsChanged(mus::View* view,
-                           const mojo::Rect& old_bounds,
-                           const mojo::Rect& new_bounds) override;
-  void OnViewDestroyed(mus::View* view) override;
-  void OnViewInputEvent(mus::View* view, const mojo::EventPtr& event) override;
-  void OnViewFocusChanged(mus::View* gained_focus,
-                          mus::View* lost_focus) override;
+  // mus::WindowObserver methods:
+  void OnWindowBoundsChanged(mus::Window* window,
+                             const gfx::Rect& old_bounds,
+                             const gfx::Rect& new_bounds) override;
+  void OnWindowDestroyed(mus::Window* window) override;
+  void OnWindowInputEvent(mus::Window* window,
+                          const mus::mojom::EventPtr& event) override;
+  void OnWindowFocusChanged(mus::Window* gained_focus,
+                            mus::Window* lost_focus) override;
 
   // web_view::mojom::FrameClient:
   void OnConnect(web_view::mojom::FramePtr server,
                  uint32_t change_id,
-                 uint32_t view_id,
-                 web_view::mojom::ViewConnectType view_connect_type,
+                 uint32_t window_id,
+                 web_view::mojom::WindowConnectType window_connect_type,
                  mojo::Array<web_view::mojom::FrameDataPtr> frame_data,
+                 int64_t navigation_start_time_ticks,
                  const OnConnectCallback& callback) override;
   void OnFrameAdded(uint32_t change_id,
                     web_view::mojom::FrameDataPtr frame_data) override;
@@ -280,6 +297,17 @@ class HTMLFrame : public blink::WebFrameClient,
                       const OnWillNavigateCallback& callback) override;
   void OnFrameLoadingStateChanged(uint32_t frame_id, bool loading) override;
   void OnDispatchFrameLoadEvent(uint32_t frame_id) override;
+  void Find(int32 request_id,
+            const mojo::String& search_text,
+            web_view::mojom::FindOptionsPtr options,
+            bool wrap_within_frame,
+            const FindCallback& callback) override;
+  void StopFinding(bool clear_selection) override;
+  void HighlightFindResults(int32_t request_id,
+                            const mojo::String& search_test,
+                            web_view::mojom::FindOptionsPtr options,
+                            bool reset) override;
+  void StopHighlightingFindResults() override;
 
   // blink::WebRemoteFrameClient:
   virtual void frameDetached(blink::WebRemoteFrameClient::DetachType type);
@@ -296,11 +324,11 @@ class HTMLFrame : public blink::WebFrameClient,
 
   HTMLFrameTreeManager* frame_tree_manager_;
   HTMLFrame* parent_;
-  // |view_| is non-null for local frames or remote frames that were once
+  // |window_| is non-null for local frames or remote frames that were once
   // local.
-  mus::View* view_;
-  // The id for this frame. If there is a view, this is the same id as the
-  // view has.
+  mus::Window* window_;
+  // The id for this frame. If there is a window, this is the same id as the
+  // window has.
   const uint32_t id_;
   std::vector<HTMLFrame*> children_;
   blink::WebFrame* web_frame_;
@@ -318,16 +346,16 @@ class HTMLFrame : public blink::WebFrameClient,
   ReplicatedFrameState state_;
 
   // If this frame is the result of creating a local frame
-  // (createChildFrame()), then |owned_view_| is the View initially created
-  // for the frame. While the frame is local |owned_view_| is the same as
-  // |view_|. If this frame becomes remote |view_| is set to null and
-  // |owned_view_| remains as the View initially created for the frame.
+  // (createChildFrame()), then |owned_window_| is the Window initially created
+  // for the frame. While the frame is local |owned_window_| is the same as
+  // |window_|. If this frame becomes remote |window_| is set to null and
+  // |owned_window_| remains as the Window initially created for the frame.
   //
-  // This is done to ensure the View isn't prematurely deleted (it must exist
-  // as long as the frame is valid). If the View was deleted as soon as the
-  // frame was swapped to remote then the process rendering to the view would
+  // This is done to ensure the Window isn't prematurely deleted (it must exist
+  // as long as the frame is valid). If the Window was deleted as soon as the
+  // frame was swapped to remote then the process rendering to the window would
   // be severed.
-  scoped_ptr<mus::ScopedViewPtr> owned_view_;
+  scoped_ptr<mus::ScopedWindowPtr> owned_window_;
 
   // This object is only valid in the context of performance tests.
   tracing::StartupPerformanceDataCollectorPtr
@@ -338,6 +366,8 @@ class HTMLFrame : public blink::WebFrameClient,
   // A navigation request has been sent to the frame server side, and we haven't
   // received response to it.
   bool pending_navigation_;
+
+  base::TimeTicks navigation_start_time_;
 
   base::WeakPtrFactory<HTMLFrame> weak_factory_;
 

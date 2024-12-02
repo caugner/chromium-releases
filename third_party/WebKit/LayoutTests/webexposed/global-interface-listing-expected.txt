@@ -17,7 +17,7 @@ On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE
 
 
 [INTERFACES]
-interface AnalyserNode
+interface AnalyserNode : AudioNode
     getter fftSize
     getter frequencyBinCount
     getter maxDecibels
@@ -56,11 +56,11 @@ interface AnimationEffectTiming
     setter iterationStart
     setter iterations
     setter playbackRate
-interface AnimationEvent
+interface AnimationEvent : Event
     getter animationName
     getter elapsedTime
     method constructor
-interface AnimationPlayerEvent
+interface AnimationPlayerEvent : Event
     getter currentTime
     getter timelineTime
     method constructor
@@ -76,7 +76,7 @@ interface AppBannerPromptResult
     getter outcome
     getter platform
     method constructor
-interface ApplicationCache
+interface ApplicationCache : EventTarget
     attribute CHECKING
     attribute DOWNLOADING
     attribute IDLE
@@ -104,13 +104,13 @@ interface ApplicationCache
     setter onobsolete
     setter onprogress
     setter onupdateready
-interface ApplicationCacheErrorEvent
+interface ApplicationCacheErrorEvent : Event
     getter message
     getter reason
     getter status
     getter url
     method constructor
-interface Attr
+interface Attr : Node
     getter localName
     getter name
     getter namespaceURI
@@ -135,7 +135,7 @@ interface AudioBuffer
     method copyFromChannel
     method copyToChannel
     method getChannelData
-interface AudioBufferSourceNode
+interface AudioBufferSourceNode : AudioSourceNode
     getter buffer
     getter detune
     getter loop
@@ -151,7 +151,7 @@ interface AudioBufferSourceNode
     setter loopEnd
     setter loopStart
     setter onended
-interface AudioContext
+interface AudioContext : EventTarget
     getter currentTime
     getter destination
     getter listener
@@ -183,7 +183,7 @@ interface AudioContext
     method resume
     method suspend
     setter onstatechange
-interface AudioDestinationNode
+interface AudioDestinationNode : AudioNode
     getter maxChannelCount
     method constructor
 interface AudioListener
@@ -195,7 +195,7 @@ interface AudioListener
     method setVelocity
     setter dopplerFactor
     setter speedOfSound
-interface AudioNode
+interface AudioNode : EventTarget
     getter channelCount
     getter channelCountMode
     getter channelInterpretation
@@ -219,7 +219,7 @@ interface AudioParam
     method setValueAtTime
     method setValueCurveAtTime
     setter value
-interface AudioProcessingEvent
+interface AudioProcessingEvent : Event
     getter inputBuffer
     getter outputBuffer
     getter playbackTime
@@ -232,7 +232,7 @@ interface AudioTrack
     getter language
     method constructor
     setter enabled
-interface AudioTrackList
+interface AudioTrackList : EventTarget
     getter length
     getter onaddtrack
     getter onchange
@@ -242,13 +242,13 @@ interface AudioTrackList
     setter onaddtrack
     setter onchange
     setter onremovetrack
-interface AutocompleteErrorEvent
+interface AutocompleteErrorEvent : Event
     getter reason
     method constructor
 interface BarProp
     getter visible
     method constructor
-interface BatteryManager
+interface BatteryManager : EventTarget
     getter charging
     getter chargingTime
     getter dischargingTime
@@ -262,16 +262,16 @@ interface BatteryManager
     setter onchargingtimechange
     setter ondischargingtimechange
     setter onlevelchange
-interface BeforeInstallPromptEvent
+interface BeforeInstallPromptEvent : Event
     getter platforms
     getter userChoice
     method constructor
     method prompt
-interface BeforeUnloadEvent
+interface BeforeUnloadEvent : Event
     getter returnValue
     method constructor
     setter returnValue
-interface BiquadFilterNode
+interface BiquadFilterNode : AudioNode
     getter Q
     getter detune
     getter frequency
@@ -286,11 +286,28 @@ interface Blob
     method close
     method constructor
     method slice
-interface BlobEvent
+interface BlobEvent : Event
     getter data
     method constructor
+interface BluetoothAdvertisingData
+    getter rssi
+    getter txPower
+    method constructor
+interface BluetoothCharacteristicProperties
+    getter authenticatedSignedWrites
+    getter broadcast
+    getter indicate
+    getter notify
+    getter read
+    getter reliableWrite
+    getter writableAuxiliaries
+    getter write
+    getter writeWithoutResponse
+    method constructor
 interface BluetoothDevice
+    getter adData
     getter deviceClass
+    getter id
     getter instanceID
     getter name
     getter paired
@@ -301,11 +318,17 @@ interface BluetoothDevice
     getter vendorIDSource
     method connectGATT
     method constructor
-interface BluetoothGATTCharacteristic
+interface BluetoothGATTCharacteristic : EventTarget
+    getter oncharacteristicvaluechanged
+    getter properties
     getter uuid
+    getter value
     method constructor
     method readValue
+    method startNotifications
+    method stopNotifications
     method writeValue
+    setter oncharacteristicvaluechanged
 interface BluetoothGATTRemoteServer
     getter connected
     method constructor
@@ -316,30 +339,39 @@ interface BluetoothGATTService
     method constructor
     method getCharacteristic
 interface BluetoothUUID
+    static method canonicalUUID
+    static method getCharacteristic
+    static method getDescriptor
+    static method getService
     method constructor
-interface CDATASection
+interface ByteLengthQueuingStrategy
+    method constructor
+    method size
+interface CDATASection : Text
     method constructor
 interface CSS
+    static method escape
+    static method supports
     method constructor
-interface CSSFontFaceRule
+interface CSSFontFaceRule : CSSRule
     getter style
     method constructor
-interface CSSGroupingRule
+interface CSSGroupingRule : CSSRule
     getter cssRules
     method constructor
     method deleteRule
     method insertRule
-interface CSSImportRule
+interface CSSImportRule : CSSRule
     getter href
     getter media
     getter styleSheet
     method constructor
-interface CSSKeyframeRule
+interface CSSKeyframeRule : CSSRule
     getter keyText
     getter style
     method constructor
     setter keyText
-interface CSSKeyframesRule
+interface CSSKeyframesRule : CSSRule
     getter cssRules
     getter name
     method appendRule
@@ -347,14 +379,14 @@ interface CSSKeyframesRule
     method deleteRule
     method findRule
     setter name
-interface CSSMediaRule
+interface CSSMediaRule : CSSGroupingRule
     getter media
     method constructor
-interface CSSNamespaceRule
+interface CSSNamespaceRule : CSSRule
     getter namespaceURI
     getter prefix
     method constructor
-interface CSSPageRule
+interface CSSPageRule : CSSRule
     getter selectorText
     getter style
     method constructor
@@ -396,12 +428,13 @@ interface CSSStyleDeclaration
     method setProperty
     setter cssFloat
     setter cssText
-interface CSSStyleRule
+interface CSSStyleRule : CSSRule
     getter selectorText
     getter style
     method constructor
     setter selectorText
-interface CSSStyleSheet
+    setter style
+interface CSSStyleSheet : StyleSheet
     getter cssRules
     getter ownerRule
     getter rules
@@ -410,13 +443,13 @@ interface CSSStyleSheet
     method deleteRule
     method insertRule
     method removeRule
-interface CSSSupportsRule
+interface CSSSupportsRule : CSSRule
     getter conditionText
     getter cssRules
     method constructor
     method deleteRule
     method insertRule
-interface CSSViewportRule
+interface CSSViewportRule : CSSRule
     getter style
     method constructor
 interface Cache
@@ -451,6 +484,7 @@ interface CanvasRenderingContext2D
     getter globalAlpha
     getter globalCompositeOperation
     getter imageSmoothingEnabled
+    getter imageSmoothingQuality
     getter lineCap
     getter lineDashOffset
     getter lineJoin
@@ -518,6 +552,7 @@ interface CanvasRenderingContext2D
     setter globalAlpha
     setter globalCompositeOperation
     setter imageSmoothingEnabled
+    setter imageSmoothingQuality
     setter lineCap
     setter lineDashOffset
     setter lineJoin
@@ -531,11 +566,11 @@ interface CanvasRenderingContext2D
     setter textAlign
     setter textBaseline
     setter webkitImageSmoothingEnabled
-interface ChannelMergerNode
+interface ChannelMergerNode : AudioNode
     method constructor
-interface ChannelSplitterNode
+interface ChannelSplitterNode : AudioNode
     method constructor
-interface CharacterData
+interface CharacterData : Node
     getter data
     getter length
     getter nextElementSibling
@@ -548,7 +583,7 @@ interface CharacterData
     method replaceData
     method substringData
     setter data
-interface CircularGeofencingRegion
+interface CircularGeofencingRegion : GeofencingRegion
     attribute MAX_RADIUS
     attribute MIN_RADIUS
     getter latitude
@@ -567,17 +602,17 @@ interface ClientRectList
     getter length
     method constructor
     method item
-interface ClipboardEvent
+interface ClipboardEvent : Event
     getter clipboardData
     method constructor
-interface CloseEvent
+interface CloseEvent : Event
     getter code
     getter reason
     getter wasClean
     method constructor
-interface Comment
+interface Comment : CharacterData
     method constructor
-interface CompositionEvent
+interface CompositionEvent : UIEvent
     getter data
     method constructor
     method initCompositionEvent
@@ -593,7 +628,7 @@ interface CompositorProxy
     setter scrollLeft
     setter scrollTop
     setter transform
-interface CompositorWorker
+interface CompositorWorker : EventTarget
     getter onerror
     getter onmessage
     method constructor
@@ -601,7 +636,7 @@ interface CompositorWorker
     method terminate
     setter onerror
     setter onmessage
-interface ConvolverNode
+interface ConvolverNode : AudioNode
     getter buffer
     getter normalize
     method constructor
@@ -628,7 +663,7 @@ interface CryptoKey
     getter type
     getter usages
     method constructor
-interface CustomEvent
+interface CustomEvent : Event
     getter detail
     method constructor
     method initCustomEvent
@@ -673,7 +708,7 @@ interface DOMImplementation
     method createDocumentType
     method createHTMLDocument
     method hasFeature
-interface DOMMatrix
+interface DOMMatrix : DOMMatrixReadOnly
     getter a
     getter b
     getter c
@@ -761,7 +796,7 @@ interface DOMMatrixReadOnly
 interface DOMParser
     method constructor
     method parseFromString
-interface DOMPoint
+interface DOMPoint : DOMPointReadOnly
     getter w
     getter x
     getter y
@@ -777,7 +812,7 @@ interface DOMPointReadOnly
     getter y
     getter z
     method constructor
-interface DOMRect
+interface DOMRect : DOMRectReadOnly
     getter height
     getter width
     getter x
@@ -797,7 +832,7 @@ interface DOMRectReadOnly
     getter x
     getter y
     method constructor
-interface DOMSettableTokenList
+interface DOMSettableTokenList : DOMTokenList
     getter value
     method constructor
     setter value
@@ -868,27 +903,27 @@ interface DataView
     method setUint16
     method setUint32
     method setUint8
-interface DelayNode
+interface DelayNode : AudioNode
     getter delayTime
     method constructor
-interface DeviceLightEvent
+interface DeviceLightEvent : Event
     getter value
     method constructor
-interface DeviceMotionEvent
+interface DeviceMotionEvent : Event
     getter acceleration
     getter accelerationIncludingGravity
     getter interval
     getter rotationRate
     method constructor
     method initDeviceMotionEvent
-interface DeviceOrientationEvent
+interface DeviceOrientationEvent : Event
     getter absolute
     getter alpha
     getter beta
     getter gamma
     method constructor
     method initDeviceOrientationEvent
-interface Document
+interface Document : Node
     getter URL
     getter activeElement
     getter anchors
@@ -1018,6 +1053,7 @@ interface Document
     getter scrollingElement
     getter selectedStylesheetSet
     getter styleSheets
+    getter suborigin
     getter timeline
     getter title
     getter visibilityState
@@ -1057,7 +1093,6 @@ interface Document
     method execCommand
     method exitFullscreen
     method exitPointerLock
-    method getCSSCanvasContext
     method getElementById
     method getElementsByClassName
     method getElementsByName
@@ -1171,7 +1206,7 @@ interface Document
     setter title
     setter xmlStandalone
     setter xmlVersion
-interface DocumentFragment
+interface DocumentFragment : Node
     getter childElementCount
     getter children
     getter firstElementChild
@@ -1180,16 +1215,16 @@ interface DocumentFragment
     method getElementById
     method querySelector
     method querySelectorAll
-interface DocumentType
+interface DocumentType : Node
     getter name
     getter publicId
     getter systemId
     method constructor
     method remove
-interface DragEvent
+interface DragEvent : MouseEvent
     getter dataTransfer
     method constructor
-interface DynamicsCompressorNode
+interface DynamicsCompressorNode : AudioNode
     getter attack
     getter knee
     getter ratio
@@ -1197,7 +1232,7 @@ interface DynamicsCompressorNode
     getter release
     getter threshold
     method constructor
-interface Element
+interface Element : Node
     getter attributes
     getter childElementCount
     getter children
@@ -1224,10 +1259,6 @@ interface Element
     getter onpaste
     getter onsearch
     getter onselectstart
-    getter ontouchcancel
-    getter ontouchend
-    getter ontouchmove
-    getter ontouchstart
     getter onwebkitfullscreenchange
     getter onwebkitfullscreenerror
     getter onwheel
@@ -1241,6 +1272,7 @@ interface Element
     getter shadowRoot
     getter tagName
     method animate
+    method attachShadow
     method closest
     method constructor
     method createShadowRoot
@@ -1293,17 +1325,13 @@ interface Element
     setter onpaste
     setter onsearch
     setter onselectstart
-    setter ontouchcancel
-    setter ontouchend
-    setter ontouchmove
-    setter ontouchstart
     setter onwebkitfullscreenchange
     setter onwebkitfullscreenerror
     setter onwheel
     setter outerHTML
     setter scrollLeft
     setter scrollTop
-interface ErrorEvent
+interface ErrorEvent : Event
     getter colno
     getter error
     getter filename
@@ -1350,7 +1378,7 @@ interface Event
     method stopPropagation
     setter cancelBubble
     setter returnValue
-interface EventSource
+interface EventSource : EventTarget
     attribute CLOSED
     attribute CONNECTING
     attribute OPEN
@@ -1370,17 +1398,17 @@ interface EventTarget
     method constructor
     method dispatchEvent
     method removeEventListener
-interface FederatedCredential
+interface FederatedCredential : Credential
     getter protocol
     getter provider
     method constructor
-interface File
+interface File : Blob
     getter lastModified
     getter lastModifiedDate
     getter name
     getter webkitRelativePath
     method constructor
-interface FileError
+interface FileError : DOMError
     attribute ABORT_ERR
     attribute ENCODING_ERR
     attribute INVALID_MODIFICATION_ERR
@@ -1399,7 +1427,7 @@ interface FileList
     getter length
     method constructor
     method item
-interface FileReader
+interface FileReader : EventTarget
     attribute DONE
     attribute EMPTY
     attribute LOADING
@@ -1424,7 +1452,7 @@ interface FileReader
     setter onloadend
     setter onloadstart
     setter onprogress
-interface FocusEvent
+interface FocusEvent : UIEvent
     getter relatedTarget
     method constructor
 interface FontFace
@@ -1458,7 +1486,7 @@ interface FormData
     method keys
     method set
     method values
-interface GainNode
+interface GainNode : AudioNode
     getter gain
     method constructor
 interface Gamepad
@@ -1474,15 +1502,19 @@ interface GamepadButton
     getter pressed
     getter value
     method constructor
-interface GamepadEvent
+interface GamepadEvent : Event
     getter gamepad
     method constructor
+interface HMDVRDevice : VRDevice
+    method constructor
+    method getEyeParameters
+    method setFieldOfView
 interface HTMLAllCollection
     getter length
     method constructor
     method item
     method namedItem
-interface HTMLAnchorElement
+interface HTMLAnchorElement : HTMLElement
     getter charset
     getter coords
     getter download
@@ -1532,7 +1564,7 @@ interface HTMLAnchorElement
     setter text
     setter type
     setter username
-interface HTMLAreaElement
+interface HTMLAreaElement : HTMLElement
     getter alt
     getter coords
     getter hash
@@ -1568,19 +1600,19 @@ interface HTMLAreaElement
     setter shape
     setter target
     setter username
-interface HTMLAudioElement
+interface HTMLAudioElement : HTMLMediaElement
     method constructor
-interface HTMLBRElement
+interface HTMLBRElement : HTMLElement
     getter clear
     method constructor
     setter clear
-interface HTMLBaseElement
+interface HTMLBaseElement : HTMLElement
     getter href
     getter target
     method constructor
     setter href
     setter target
-interface HTMLBodyElement
+interface HTMLBodyElement : HTMLElement
     getter aLink
     getter background
     getter bgColor
@@ -1632,7 +1664,7 @@ interface HTMLBodyElement
     setter onunload
     setter text
     setter vLink
-interface HTMLButtonElement
+interface HTMLButtonElement : HTMLElement
     getter autofocus
     getter disabled
     getter form
@@ -1662,7 +1694,7 @@ interface HTMLButtonElement
     setter name
     setter type
     setter value
-interface HTMLCanvasElement
+interface HTMLCanvasElement : HTMLElement
     getter height
     getter width
     method constructor
@@ -1676,23 +1708,23 @@ interface HTMLCollection
     method constructor
     method item
     method namedItem
-interface HTMLContentElement
+interface HTMLContentElement : HTMLElement
     getter select
     method constructor
     method getDistributedNodes
     setter select
-interface HTMLDListElement
+interface HTMLDListElement : HTMLElement
     getter compact
     method constructor
     setter compact
-interface HTMLDataListElement
+interface HTMLDataListElement : HTMLElement
     getter options
     method constructor
-interface HTMLDetailsElement
+interface HTMLDetailsElement : HTMLElement
     getter open
     method constructor
     setter open
-interface HTMLDialogElement
+interface HTMLDialogElement : HTMLElement
     getter open
     getter returnValue
     method close
@@ -1701,15 +1733,15 @@ interface HTMLDialogElement
     method showModal
     setter open
     setter returnValue
-interface HTMLDirectoryElement
+interface HTMLDirectoryElement : HTMLElement
     getter compact
     method constructor
     setter compact
-interface HTMLDivElement
+interface HTMLDivElement : HTMLElement
     getter align
     method constructor
     setter align
-interface HTMLDocument
+interface HTMLDocument : Document
     getter alinkColor
     getter all
     getter bgColor
@@ -1726,7 +1758,7 @@ interface HTMLDocument
     setter fgColor
     setter linkColor
     setter vlinkColor
-interface HTMLElement
+interface HTMLElement : Element
     getter accessKey
     getter contentEditable
     getter contextMenu
@@ -1801,6 +1833,10 @@ interface HTMLElement
     getter onsuspend
     getter ontimeupdate
     getter ontoggle
+    getter ontouchcancel
+    getter ontouchend
+    getter ontouchmove
+    getter ontouchstart
     getter onvolumechange
     getter onwaiting
     getter outerText
@@ -1881,15 +1917,20 @@ interface HTMLElement
     setter onsuspend
     setter ontimeupdate
     setter ontoggle
+    setter ontouchcancel
+    setter ontouchend
+    setter ontouchmove
+    setter ontouchstart
     setter onvolumechange
     setter onwaiting
     setter outerText
     setter spellcheck
+    setter style
     setter tabIndex
     setter title
     setter translate
     setter webkitdropzone
-interface HTMLEmbedElement
+interface HTMLEmbedElement : HTMLElement
     getter align
     getter height
     getter name
@@ -1904,7 +1945,7 @@ interface HTMLEmbedElement
     setter src
     setter type
     setter width
-interface HTMLFieldSetElement
+interface HTMLFieldSetElement : HTMLElement
     getter disabled
     getter elements
     getter form
@@ -1919,7 +1960,7 @@ interface HTMLFieldSetElement
     method setCustomValidity
     setter disabled
     setter name
-interface HTMLFontElement
+interface HTMLFontElement : HTMLElement
     getter color
     getter face
     getter size
@@ -1927,10 +1968,10 @@ interface HTMLFontElement
     setter color
     setter face
     setter size
-interface HTMLFormControlsCollection
+interface HTMLFormControlsCollection : HTMLCollection
     method constructor
     method namedItem
-interface HTMLFormElement
+interface HTMLFormElement : HTMLElement
     getter acceptCharset
     getter action
     getter autocomplete
@@ -1957,7 +1998,7 @@ interface HTMLFormElement
     setter name
     setter noValidate
     setter target
-interface HTMLFrameElement
+interface HTMLFrameElement : HTMLElement
     getter contentDocument
     getter contentWindow
     getter frameBorder
@@ -1969,7 +2010,6 @@ interface HTMLFrameElement
     getter scrolling
     getter src
     method constructor
-    method getSVGDocument
     setter frameBorder
     setter longDesc
     setter marginHeight
@@ -1978,7 +2018,7 @@ interface HTMLFrameElement
     setter noResize
     setter scrolling
     setter src
-interface HTMLFrameSetElement
+interface HTMLFrameSetElement : HTMLElement
     getter cols
     getter onbeforeunload
     getter onblur
@@ -2022,7 +2062,7 @@ interface HTMLFrameSetElement
     setter onunhandledrejection
     setter onunload
     setter rows
-interface HTMLHRElement
+interface HTMLHRElement : HTMLElement
     getter align
     getter color
     getter noShade
@@ -2034,17 +2074,17 @@ interface HTMLHRElement
     setter noShade
     setter size
     setter width
-interface HTMLHeadElement
+interface HTMLHeadElement : HTMLElement
     method constructor
-interface HTMLHeadingElement
+interface HTMLHeadingElement : HTMLElement
     getter align
     method constructor
     setter align
-interface HTMLHtmlElement
+interface HTMLHtmlElement : HTMLElement
     getter version
     method constructor
     setter version
-interface HTMLIFrameElement
+interface HTMLIFrameElement : HTMLElement
     getter align
     getter allowFullscreen
     getter contentDocument
@@ -2077,7 +2117,7 @@ interface HTMLIFrameElement
     setter src
     setter srcdoc
     setter width
-interface HTMLImageElement
+interface HTMLImageElement : HTMLElement
     getter align
     getter alt
     getter border
@@ -2119,7 +2159,7 @@ interface HTMLImageElement
     setter useMap
     setter vspace
     setter width
-interface HTMLInputElement
+interface HTMLInputElement : HTMLElement
     getter accept
     getter align
     getter alt
@@ -2224,7 +2264,7 @@ interface HTMLInputElement
     setter valueAsNumber
     setter webkitdirectory
     setter width
-interface HTMLKeygenElement
+interface HTMLKeygenElement : HTMLElement
     getter autofocus
     getter challenge
     getter disabled
@@ -2245,24 +2285,25 @@ interface HTMLKeygenElement
     setter disabled
     setter keytype
     setter name
-interface HTMLLIElement
+interface HTMLLIElement : HTMLElement
     getter type
     getter value
     method constructor
     setter type
     setter value
-interface HTMLLabelElement
+interface HTMLLabelElement : HTMLElement
     getter control
     getter form
     getter htmlFor
     method constructor
     setter htmlFor
-interface HTMLLegendElement
+interface HTMLLegendElement : HTMLElement
     getter align
     getter form
     method constructor
     setter align
-interface HTMLLinkElement
+interface HTMLLinkElement : HTMLElement
+    getter as
     getter charset
     getter crossOrigin
     getter disabled
@@ -2278,6 +2319,7 @@ interface HTMLLinkElement
     getter target
     getter type
     method constructor
+    setter as
     setter charset
     setter crossOrigin
     setter disabled
@@ -2290,12 +2332,12 @@ interface HTMLLinkElement
     setter sizes
     setter target
     setter type
-interface HTMLMapElement
+interface HTMLMapElement : HTMLElement
     getter areas
     getter name
     method constructor
     setter name
-interface HTMLMarqueeElement
+interface HTMLMarqueeElement : HTMLElement
     getter behavior
     getter bgColor
     getter direction
@@ -2321,7 +2363,7 @@ interface HTMLMarqueeElement
     setter trueSpeed
     setter vspace
     setter width
-interface HTMLMediaElement
+interface HTMLMediaElement : HTMLElement
     attribute HAVE_CURRENT_DATA
     attribute HAVE_ENOUGH_DATA
     attribute HAVE_FUTURE_DATA
@@ -2334,7 +2376,6 @@ interface HTMLMediaElement
     getter audioTracks
     getter autoplay
     getter buffered
-    getter controller
     getter controls
     getter crossOrigin
     getter currentSrc
@@ -2345,7 +2386,6 @@ interface HTMLMediaElement
     getter ended
     getter error
     getter loop
-    getter mediaGroup
     getter mediaKeys
     getter muted
     getter networkState
@@ -2380,14 +2420,12 @@ interface HTMLMediaElement
     method webkitCancelKeyRequest
     method webkitGenerateKeyRequest
     setter autoplay
-    setter controller
     setter controls
     setter crossOrigin
     setter currentTime
     setter defaultMuted
     setter defaultPlaybackRate
     setter loop
-    setter mediaGroup
     setter muted
     setter onencrypted
     setter onwebkitkeyadded
@@ -2398,7 +2436,7 @@ interface HTMLMediaElement
     setter preload
     setter src
     setter volume
-interface HTMLMenuElement
+interface HTMLMenuElement : HTMLElement
     getter compact
     getter label
     getter type
@@ -2406,7 +2444,7 @@ interface HTMLMenuElement
     setter compact
     setter label
     setter type
-interface HTMLMenuItemElement
+interface HTMLMenuItemElement : HTMLElement
     getter checked
     getter default
     getter disabled
@@ -2422,7 +2460,7 @@ interface HTMLMenuItemElement
     setter label
     setter radiogroup
     setter type
-interface HTMLMetaElement
+interface HTMLMetaElement : HTMLElement
     getter content
     getter httpEquiv
     getter name
@@ -2432,7 +2470,7 @@ interface HTMLMetaElement
     setter httpEquiv
     setter name
     setter scheme
-interface HTMLMeterElement
+interface HTMLMeterElement : HTMLElement
     getter high
     getter labels
     getter low
@@ -2447,13 +2485,13 @@ interface HTMLMeterElement
     setter min
     setter optimum
     setter value
-interface HTMLModElement
+interface HTMLModElement : HTMLElement
     getter cite
     getter dateTime
     method constructor
     setter cite
     setter dateTime
-interface HTMLOListElement
+interface HTMLOListElement : HTMLElement
     getter compact
     getter reversed
     getter start
@@ -2463,7 +2501,7 @@ interface HTMLOListElement
     setter reversed
     setter start
     setter type
-interface HTMLObjectElement
+interface HTMLObjectElement : HTMLElement
     getter align
     getter archive
     getter border
@@ -2506,13 +2544,13 @@ interface HTMLObjectElement
     setter useMap
     setter vspace
     setter width
-interface HTMLOptGroupElement
+interface HTMLOptGroupElement : HTMLElement
     getter disabled
     getter label
     method constructor
     setter disabled
     setter label
-interface HTMLOptionElement
+interface HTMLOptionElement : HTMLElement
     getter defaultSelected
     getter disabled
     getter form
@@ -2528,7 +2566,7 @@ interface HTMLOptionElement
     setter selected
     setter text
     setter value
-interface HTMLOptionsCollection
+interface HTMLOptionsCollection : HTMLCollection
     getter length
     getter selectedIndex
     method add
@@ -2537,7 +2575,7 @@ interface HTMLOptionsCollection
     method remove
     setter length
     setter selectedIndex
-interface HTMLOutputElement
+interface HTMLOutputElement : HTMLElement
     getter defaultValue
     getter form
     getter htmlFor
@@ -2556,11 +2594,11 @@ interface HTMLOutputElement
     setter htmlFor
     setter name
     setter value
-interface HTMLParagraphElement
+interface HTMLParagraphElement : HTMLElement
     getter align
     method constructor
     setter align
-interface HTMLParamElement
+interface HTMLParamElement : HTMLElement
     getter name
     getter type
     getter value
@@ -2570,13 +2608,13 @@ interface HTMLParamElement
     setter type
     setter value
     setter valueType
-interface HTMLPictureElement
+interface HTMLPictureElement : HTMLElement
     method constructor
-interface HTMLPreElement
+interface HTMLPreElement : HTMLElement
     getter width
     method constructor
     setter width
-interface HTMLProgressElement
+interface HTMLProgressElement : HTMLElement
     getter labels
     getter max
     getter position
@@ -2584,11 +2622,11 @@ interface HTMLProgressElement
     method constructor
     setter max
     setter value
-interface HTMLQuoteElement
+interface HTMLQuoteElement : HTMLElement
     getter cite
     method constructor
     setter cite
-interface HTMLScriptElement
+interface HTMLScriptElement : HTMLElement
     getter async
     getter charset
     getter crossOrigin
@@ -2612,7 +2650,7 @@ interface HTMLScriptElement
     setter src
     setter text
     setter type
-interface HTMLSelectElement
+interface HTMLSelectElement : HTMLElement
     getter autofocus
     getter disabled
     getter form
@@ -2647,10 +2685,14 @@ interface HTMLSelectElement
     setter selectedIndex
     setter size
     setter value
-interface HTMLShadowElement
+interface HTMLShadowElement : HTMLElement
     method constructor
     method getDistributedNodes
-interface HTMLSourceElement
+interface HTMLSlotElement : HTMLElement
+    getter name
+    method constructor
+    setter name
+interface HTMLSourceElement : HTMLElement
     getter media
     getter sizes
     getter src
@@ -2662,9 +2704,9 @@ interface HTMLSourceElement
     setter src
     setter srcset
     setter type
-interface HTMLSpanElement
+interface HTMLSpanElement : HTMLElement
     method constructor
-interface HTMLStyleElement
+interface HTMLStyleElement : HTMLElement
     getter disabled
     getter media
     getter sheet
@@ -2673,11 +2715,11 @@ interface HTMLStyleElement
     setter disabled
     setter media
     setter type
-interface HTMLTableCaptionElement
+interface HTMLTableCaptionElement : HTMLElement
     getter align
     method constructor
     setter align
-interface HTMLTableCellElement
+interface HTMLTableCellElement : HTMLElement
     getter abbr
     getter align
     getter axis
@@ -2708,7 +2750,7 @@ interface HTMLTableCellElement
     setter scope
     setter vAlign
     setter width
-interface HTMLTableColElement
+interface HTMLTableColElement : HTMLElement
     getter align
     getter ch
     getter chOff
@@ -2722,7 +2764,7 @@ interface HTMLTableColElement
     setter span
     setter vAlign
     setter width
-interface HTMLTableElement
+interface HTMLTableElement : HTMLElement
     getter align
     getter bgColor
     getter border
@@ -2759,7 +2801,7 @@ interface HTMLTableElement
     setter tFoot
     setter tHead
     setter width
-interface HTMLTableRowElement
+interface HTMLTableRowElement : HTMLElement
     getter align
     getter bgColor
     getter cells
@@ -2776,7 +2818,7 @@ interface HTMLTableRowElement
     setter ch
     setter chOff
     setter vAlign
-interface HTMLTableSectionElement
+interface HTMLTableSectionElement : HTMLElement
     getter align
     getter ch
     getter chOff
@@ -2789,10 +2831,10 @@ interface HTMLTableSectionElement
     setter ch
     setter chOff
     setter vAlign
-interface HTMLTemplateElement
+interface HTMLTemplateElement : HTMLElement
     getter content
     method constructor
-interface HTMLTextAreaElement
+interface HTMLTextAreaElement : HTMLElement
     getter autocapitalize
     getter autofocus
     getter cols
@@ -2845,11 +2887,11 @@ interface HTMLTextAreaElement
     setter selectionStart
     setter value
     setter wrap
-interface HTMLTitleElement
+interface HTMLTitleElement : HTMLElement
     getter text
     method constructor
     setter text
-interface HTMLTrackElement
+interface HTMLTrackElement : HTMLElement
     attribute ERROR
     attribute LOADED
     attribute LOADING
@@ -2867,15 +2909,15 @@ interface HTMLTrackElement
     setter label
     setter src
     setter srclang
-interface HTMLUListElement
+interface HTMLUListElement : HTMLElement
     getter compact
     getter type
     method constructor
     setter compact
     setter type
-interface HTMLUnknownElement
+interface HTMLUnknownElement : HTMLElement
     method constructor
-interface HTMLVideoElement
+interface HTMLVideoElement : HTMLMediaElement
     getter height
     getter poster
     getter videoHeight
@@ -2894,7 +2936,7 @@ interface HTMLVideoElement
     setter height
     setter poster
     setter width
-interface HashChangeEvent
+interface HashChangeEvent : Event
     getter newURL
     getter oldURL
     method constructor
@@ -2932,10 +2974,10 @@ interface IDBCursor
     method continuePrimaryKey
     method delete
     method update
-interface IDBCursorWithValue
+interface IDBCursorWithValue : IDBCursor
     getter value
     method constructor
-interface IDBDatabase
+interface IDBDatabase : EventTarget
     getter name
     getter objectStoreNames
     getter onabort
@@ -2973,6 +3015,10 @@ interface IDBIndex
     method openCursor
     method openKeyCursor
 interface IDBKeyRange
+    static method bound
+    static method lowerBound
+    static method only
+    static method upperBound
     getter lower
     getter lowerOpen
     getter upper
@@ -2998,13 +3044,13 @@ interface IDBObjectStore
     method openCursor
     method openKeyCursor
     method put
-interface IDBOpenDBRequest
+interface IDBOpenDBRequest : IDBRequest
     getter onblocked
     getter onupgradeneeded
     method constructor
     setter onblocked
     setter onupgradeneeded
-interface IDBRequest
+interface IDBRequest : EventTarget
     getter error
     getter onerror
     getter onsuccess
@@ -3015,7 +3061,7 @@ interface IDBRequest
     method constructor
     setter onerror
     setter onsuccess
-interface IDBTransaction
+interface IDBTransaction : EventTarget
     getter db
     getter error
     getter mode
@@ -3029,7 +3075,7 @@ interface IDBTransaction
     setter onabort
     setter oncomplete
     setter onerror
-interface IDBVersionChangeEvent
+interface IDBVersionChangeEvent : Event
     getter dataLoss
     getter dataLossMessage
     getter newVersion
@@ -3052,7 +3098,7 @@ interface ImageData
 interface InputDeviceCapabilities
     getter firesTouchEvents
     method constructor
-interface KeyboardEvent
+interface KeyboardEvent : UIEvent
     attribute DOM_KEY_LOCATION_LEFT
     attribute DOM_KEY_LOCATION_NUMPAD
     attribute DOM_KEY_LOCATION_RIGHT
@@ -3073,21 +3119,21 @@ interface KeyboardEvent
     method constructor
     method getModifierState
     method initKeyboardEvent
-interface KeyframeEffect
+interface KeyframeEffect : AnimationEffectReadOnly
     method constructor
 interface Location
     method constructor
-interface MIDIAccess
+interface MIDIAccess : EventTarget
     getter inputs
     getter onstatechange
     getter outputs
     getter sysexEnabled
     method constructor
     setter onstatechange
-interface MIDIConnectionEvent
+interface MIDIConnectionEvent : Event
     getter port
     method constructor
-interface MIDIInput
+interface MIDIInput : MIDIPort
     getter onmidimessage
     method constructor
     setter onmidimessage
@@ -3100,11 +3146,11 @@ interface MIDIInputMap
     method has
     method keys
     method values
-interface MIDIMessageEvent
+interface MIDIMessageEvent : Event
     getter data
     getter receivedTime
     method constructor
-interface MIDIOutput
+interface MIDIOutput : MIDIPort
     method constructor
     method send
 interface MIDIOutputMap
@@ -3116,7 +3162,7 @@ interface MIDIOutputMap
     method has
     method keys
     method values
-interface MIDIPort
+interface MIDIPort : EventTarget
     getter connection
     getter id
     getter manufacturer
@@ -3129,35 +3175,14 @@ interface MIDIPort
     method constructor
     method open
     setter onstatechange
-interface MediaController
-    getter buffered
-    getter currentTime
-    getter defaultPlaybackRate
-    getter duration
-    getter muted
-    getter paused
-    getter playbackRate
-    getter playbackState
-    getter played
-    getter seekable
-    getter volume
-    method constructor
-    method pause
-    method play
-    method unpause
-    setter currentTime
-    setter defaultPlaybackRate
-    setter muted
-    setter playbackRate
-    setter volume
 interface MediaDevices
     method constructor
     method enumerateDevices
     method getUserMedia
-interface MediaElementAudioSourceNode
+interface MediaElementAudioSourceNode : AudioSourceNode
     getter mediaElement
     method constructor
-interface MediaEncryptedEvent
+interface MediaEncryptedEvent : Event
     getter initData
     getter initDataType
     method constructor
@@ -3178,7 +3203,7 @@ interface MediaKeyError
     getter code
     getter systemCode
     method constructor
-interface MediaKeyEvent
+interface MediaKeyEvent : Event
     getter defaultURL
     getter errorCode
     getter initData
@@ -3187,11 +3212,11 @@ interface MediaKeyEvent
     getter sessionId
     getter systemCode
     method constructor
-interface MediaKeyMessageEvent
+interface MediaKeyMessageEvent : Event
     getter message
     getter messageType
     method constructor
-interface MediaKeySession
+interface MediaKeySession : EventTarget
     getter closed
     getter expiration
     getter keyStatuses
@@ -3228,7 +3253,7 @@ interface MediaList
     method deleteMedium
     method item
     setter mediaText
-interface MediaQueryList
+interface MediaQueryList : EventTarget
     getter matches
     getter media
     getter onchange
@@ -3236,11 +3261,12 @@ interface MediaQueryList
     method constructor
     method removeListener
     setter onchange
-interface MediaQueryListEvent
+interface MediaQueryListEvent : Event
     getter matches
     getter media
     method constructor
-interface MediaRecorder
+interface MediaRecorder : EventTarget
+    static method canRecordMimeType
     getter ignoreMutedMedia
     getter mimeType
     getter ondataavailable
@@ -3264,7 +3290,8 @@ interface MediaRecorder
     setter onresume
     setter onstart
     setter onstop
-interface MediaSource
+interface MediaSource : EventTarget
+    static method isTypeSupported
     getter activeSourceBuffers
     getter duration
     getter readyState
@@ -3274,16 +3301,17 @@ interface MediaSource
     method endOfStream
     method removeSourceBuffer
     setter duration
-interface MediaStreamAudioDestinationNode
+interface MediaStreamAudioDestinationNode : AudioNode
     getter stream
     method constructor
-interface MediaStreamAudioSourceNode
+interface MediaStreamAudioSourceNode : AudioSourceNode
     getter mediaStream
     method constructor
-interface MediaStreamEvent
+interface MediaStreamEvent : Event
     getter stream
     method constructor
-interface MediaStreamTrack
+interface MediaStreamTrack : EventTarget
+    static method getSources
     getter enabled
     getter id
     getter kind
@@ -3293,6 +3321,7 @@ interface MediaStreamTrack
     getter onmute
     getter onunmute
     getter readyState
+    getter remote
     method clone
     method constructor
     method stop
@@ -3304,15 +3333,16 @@ interface MessageChannel
     getter port1
     getter port2
     method constructor
-interface MessageEvent
+interface MessageEvent : Event
     getter data
     getter lastEventId
     getter origin
     getter ports
     getter source
+    getter suborigin
     method constructor
     method initMessageEvent
-interface MessagePort
+interface MessagePort : EventTarget
     getter onmessage
     method close
     method constructor
@@ -3330,7 +3360,7 @@ interface MimeTypeArray
     method constructor
     method item
     method namedItem
-interface MouseEvent
+interface MouseEvent : UIEvent
     getter altKey
     getter button
     getter buttons
@@ -3361,7 +3391,7 @@ interface MouseEvent
     method constructor
     method getModifierState
     method initMouseEvent
-interface MutationEvent
+interface MutationEvent : Event
     attribute ADDITION
     attribute MODIFICATION
     attribute REMOVAL
@@ -3439,6 +3469,7 @@ interface Navigator
     method getBattery
     method getGamepads
     method getStorageUpdates
+    method getVRDevices
     method isProtocolHandlerRegistered
     method javaEnabled
     method registerProtocolHandler
@@ -3448,7 +3479,7 @@ interface Navigator
     method unregisterProtocolHandler
     method vibrate
     method webkitGetUserMedia
-interface NetworkInformation
+interface NetworkInformation : EventTarget
     getter downlinkMax
     getter onchange
     getter ontypechange
@@ -3456,7 +3487,7 @@ interface NetworkInformation
     method constructor
     setter onchange
     setter ontypechange
-interface Node
+interface Node : EventTarget
     attribute ATTRIBUTE_NODE
     attribute CDATA_SECTION_NODE
     attribute COMMENT_NODE
@@ -3537,8 +3568,15 @@ interface NodeIterator
 interface NodeList
     getter length
     method constructor
+    method entries
+    method forEach
     method item
-interface Notification
+    method keys
+    method values
+interface Notification : EventTarget
+    static getter maxActions
+    static getter permission
+    static method requestPermission
     getter actions
     getter body
     getter data
@@ -3560,17 +3598,17 @@ interface Notification
     setter onclose
     setter onerror
     setter onshow
-interface OfflineAudioCompletionEvent
+interface OfflineAudioCompletionEvent : Event
     getter renderedBuffer
     method constructor
-interface OfflineAudioContext
+interface OfflineAudioContext : AudioContext
     getter oncomplete
     method constructor
     method startRendering
     setter oncomplete
 interface Option
     method constructor
-interface OscillatorNode
+interface OscillatorNode : AudioSourceNode
     getter detune
     getter frequency
     getter onended
@@ -3581,10 +3619,10 @@ interface OscillatorNode
     method stop
     setter onended
     setter type
-interface PageTransitionEvent
+interface PageTransitionEvent : Event
     getter persisted
     method constructor
-interface PasswordCredential
+interface PasswordCredential : Credential
     method constructor
     method toFormData
 interface Path2D
@@ -3599,7 +3637,7 @@ interface Path2D
     method moveTo
     method quadraticCurveTo
     method rect
-interface Performance
+interface Performance : EventTarget
     getter memory
     getter navigation
     getter onframetimingbufferfull
@@ -3624,7 +3662,7 @@ interface Performance
     setter onframetimingbufferfull
     setter onresourcetimingbufferfull
     setter onwebkitresourcetimingbufferfull
-interface PerformanceCompositeTiming
+interface PerformanceCompositeTiming : PerformanceEntry
     getter sourceFrame
     method constructor
 interface PerformanceEntry
@@ -3634,9 +3672,9 @@ interface PerformanceEntry
     getter startTime
     method constructor
     method toJSON
-interface PerformanceMark
+interface PerformanceMark : PerformanceEntry
     method constructor
-interface PerformanceMeasure
+interface PerformanceMeasure : PerformanceEntry
     method constructor
 interface PerformanceNavigation
     attribute TYPE_BACK_FORWARD
@@ -3655,10 +3693,10 @@ interface PerformanceObserverEntryList
     method getEntries
     method getEntriesByName
     method getEntriesByType
-interface PerformanceRenderTiming
+interface PerformanceRenderTiming : PerformanceEntry
     getter sourceFrame
     method constructor
-interface PerformanceResourceTiming
+interface PerformanceResourceTiming : PerformanceEntry
     getter connectEnd
     getter connectStart
     getter domainLookupEnd
@@ -3697,23 +3735,9 @@ interface PerformanceTiming
     getter unloadEventStart
     method constructor
     method toJSON
-interface PeriodicSyncManager
-    getter minPossiblePeriod
-    method constructor
-    method getRegistration
-    method getRegistrations
-    method permissionState
-    method register
-interface PeriodicSyncRegistration
-    getter minPeriod
-    getter networkState
-    getter powerState
-    getter tag
-    method constructor
-    method unregister
 interface PeriodicWave
     method constructor
-interface PermissionStatus
+interface PermissionStatus : EventTarget
     getter onchange
     getter state
     method constructor
@@ -3722,6 +3746,7 @@ interface Permissions
     method constructor
     method query
     method request
+    method requestAll
     method revoke
 interface Plugin
     getter description
@@ -3737,50 +3762,62 @@ interface PluginArray
     method item
     method namedItem
     method refresh
-interface PopStateEvent
+interface PopStateEvent : Event
     getter state
     method constructor
+interface PositionSensorVRDevice : VRDevice
+    method constructor
+    method getImmediateState
+    method getState
+    method resetSensor
 interface Presentation
     getter defaultRequest
+    getter receiver
     method constructor
     setter defaultRequest
-interface PresentationAvailability
+interface PresentationAvailability : EventTarget
     getter onchange
     getter value
     method constructor
     setter onchange
-interface PresentationConnection
+interface PresentationConnection : EventTarget
     getter binaryType
     getter id
     getter onmessage
     getter onstatechange
     getter state
-    method close
     method constructor
     method send
+    method terminate
     setter binaryType
     setter onmessage
     setter onstatechange
-interface PresentationConnectionAvailableEvent
+interface PresentationConnectionAvailableEvent : Event
     getter connection
     method constructor
-interface PresentationRequest
+interface PresentationReceiver : EventTarget
+    getter onconnectionavailable
+    method constructor
+    method getConnection
+    method getConnections
+    setter onconnectionavailable
+interface PresentationRequest : EventTarget
     getter onconnectionavailable
     method constructor
     method getAvailability
     method reconnect
     method start
     setter onconnectionavailable
-interface ProcessingInstruction
+interface ProcessingInstruction : CharacterData
     getter sheet
     getter target
     method constructor
-interface ProgressEvent
+interface ProgressEvent : Event
     getter lengthComputable
     getter loaded
     getter total
     method constructor
-interface PromiseRejectionEvent
+interface PromiseRejectionEvent : Event
     getter promise
     getter reason
     method constructor
@@ -3795,6 +3832,8 @@ interface PushSubscription
     method getKey
     method toJSON
     method unsubscribe
+interface RTCCertificate
+    method constructor
 interface RTCIceCandidate
     getter candidate
     getter sdpMLineIndex
@@ -3811,7 +3850,7 @@ interface RTCSessionDescription
     method toJSON
     setter sdp
     setter type
-interface RadioNodeList
+interface RadioNodeList : NodeList
     getter value
     method constructor
     setter value
@@ -3860,7 +3899,7 @@ interface ReadableStream
     method cancel
     method constructor
     method getReader
-interface RelatedEvent
+interface RelatedEvent : Event
     getter relatedTarget
     method constructor
 interface Request
@@ -3880,6 +3919,8 @@ interface Request
     method json
     method text
 interface Response
+    static method error
+    static method redirect
     getter body
     getter bodyUsed
     getter headers
@@ -3894,7 +3935,7 @@ interface Response
     method constructor
     method json
     method text
-interface SVGAElement
+interface SVGAElement : SVGGraphicsElement
     getter href
     getter target
     method constructor
@@ -3914,11 +3955,11 @@ interface SVGAngle
     setter value
     setter valueAsString
     setter valueInSpecifiedUnits
-interface SVGAnimateElement
+interface SVGAnimateElement : SVGAnimationElement
     method constructor
-interface SVGAnimateMotionElement
+interface SVGAnimateMotionElement : SVGAnimationElement
     method constructor
-interface SVGAnimateTransformElement
+interface SVGAnimateTransformElement : SVGAnimationElement
     method constructor
 interface SVGAnimatedAngle
     getter animVal
@@ -3973,7 +4014,7 @@ interface SVGAnimatedTransformList
     getter animVal
     getter baseVal
     method constructor
-interface SVGAnimationElement
+interface SVGAnimationElement : SVGElement
     getter onbegin
     getter onend
     getter onrepeat
@@ -3992,15 +4033,15 @@ interface SVGAnimationElement
     setter onbegin
     setter onend
     setter onrepeat
-interface SVGCircleElement
+interface SVGCircleElement : SVGGeometryElement
     getter cx
     getter cy
     getter r
     method constructor
-interface SVGClipPathElement
+interface SVGClipPathElement : SVGGraphicsElement
     getter clipPathUnits
     method constructor
-interface SVGComponentTransferFunctionElement
+interface SVGComponentTransferFunctionElement : SVGElement
     attribute SVG_FECOMPONENTTRANSFER_TYPE_DISCRETE
     attribute SVG_FECOMPONENTTRANSFER_TYPE_GAMMA
     attribute SVG_FECOMPONENTTRANSFER_TYPE_IDENTITY
@@ -4015,7 +4056,7 @@ interface SVGComponentTransferFunctionElement
     getter tableValues
     getter type
     method constructor
-interface SVGCursorElement
+interface SVGCursorElement : SVGElement
     getter href
     getter requiredExtensions
     getter requiredFeatures
@@ -4023,13 +4064,13 @@ interface SVGCursorElement
     getter x
     getter y
     method constructor
-interface SVGDefsElement
+interface SVGDefsElement : SVGGraphicsElement
     method constructor
-interface SVGDescElement
+interface SVGDescElement : SVGElement
     method constructor
-interface SVGDiscardElement
+interface SVGDiscardElement : SVGElement
     method constructor
-interface SVGElement
+interface SVGElement : Element
     getter className
     getter offsetHeight
     getter offsetLeft
@@ -4095,6 +4136,10 @@ interface SVGElement
     getter onsuspend
     getter ontimeupdate
     getter ontoggle
+    getter ontouchcancel
+    getter ontouchend
+    getter ontouchmove
+    getter ontouchstart
     getter onvolumechange
     getter onwaiting
     getter ownerSVGElement
@@ -4163,16 +4208,21 @@ interface SVGElement
     setter onsuspend
     setter ontimeupdate
     setter ontoggle
+    setter ontouchcancel
+    setter ontouchend
+    setter ontouchmove
+    setter ontouchstart
     setter onvolumechange
     setter onwaiting
+    setter style
     setter tabIndex
-interface SVGEllipseElement
+interface SVGEllipseElement : SVGGeometryElement
     getter cx
     getter cy
     getter rx
     getter ry
     method constructor
-interface SVGFEBlendElement
+interface SVGFEBlendElement : SVGElement
     attribute SVG_FEBLEND_MODE_DARKEN
     attribute SVG_FEBLEND_MODE_LIGHTEN
     attribute SVG_FEBLEND_MODE_MULTIPLY
@@ -4188,7 +4238,7 @@ interface SVGFEBlendElement
     getter x
     getter y
     method constructor
-interface SVGFEColorMatrixElement
+interface SVGFEColorMatrixElement : SVGElement
     attribute SVG_FECOLORMATRIX_TYPE_HUEROTATE
     attribute SVG_FECOLORMATRIX_TYPE_LUMINANCETOALPHA
     attribute SVG_FECOLORMATRIX_TYPE_MATRIX
@@ -4203,7 +4253,7 @@ interface SVGFEColorMatrixElement
     getter x
     getter y
     method constructor
-interface SVGFEComponentTransferElement
+interface SVGFEComponentTransferElement : SVGElement
     getter height
     getter in1
     getter result
@@ -4211,7 +4261,7 @@ interface SVGFEComponentTransferElement
     getter x
     getter y
     method constructor
-interface SVGFECompositeElement
+interface SVGFECompositeElement : SVGElement
     attribute SVG_FECOMPOSITE_OPERATOR_ARITHMETIC
     attribute SVG_FECOMPOSITE_OPERATOR_ATOP
     attribute SVG_FECOMPOSITE_OPERATOR_IN
@@ -4232,7 +4282,7 @@ interface SVGFECompositeElement
     getter x
     getter y
     method constructor
-interface SVGFEConvolveMatrixElement
+interface SVGFEConvolveMatrixElement : SVGElement
     attribute SVG_EDGEMODE_DUPLICATE
     attribute SVG_EDGEMODE_NONE
     attribute SVG_EDGEMODE_UNKNOWN
@@ -4255,7 +4305,7 @@ interface SVGFEConvolveMatrixElement
     getter x
     getter y
     method constructor
-interface SVGFEDiffuseLightingElement
+interface SVGFEDiffuseLightingElement : SVGElement
     getter diffuseConstant
     getter height
     getter in1
@@ -4267,7 +4317,7 @@ interface SVGFEDiffuseLightingElement
     getter x
     getter y
     method constructor
-interface SVGFEDisplacementMapElement
+interface SVGFEDisplacementMapElement : SVGElement
     attribute SVG_CHANNEL_A
     attribute SVG_CHANNEL_B
     attribute SVG_CHANNEL_G
@@ -4284,11 +4334,11 @@ interface SVGFEDisplacementMapElement
     getter y
     getter yChannelSelector
     method constructor
-interface SVGFEDistantLightElement
+interface SVGFEDistantLightElement : SVGElement
     getter azimuth
     getter elevation
     method constructor
-interface SVGFEDropShadowElement
+interface SVGFEDropShadowElement : SVGElement
     getter dx
     getter dy
     getter height
@@ -4301,22 +4351,22 @@ interface SVGFEDropShadowElement
     getter y
     method constructor
     method setStdDeviation
-interface SVGFEFloodElement
+interface SVGFEFloodElement : SVGElement
     getter height
     getter result
     getter width
     getter x
     getter y
     method constructor
-interface SVGFEFuncAElement
+interface SVGFEFuncAElement : SVGComponentTransferFunctionElement
     method constructor
-interface SVGFEFuncBElement
+interface SVGFEFuncBElement : SVGComponentTransferFunctionElement
     method constructor
-interface SVGFEFuncGElement
+interface SVGFEFuncGElement : SVGComponentTransferFunctionElement
     method constructor
-interface SVGFEFuncRElement
+interface SVGFEFuncRElement : SVGComponentTransferFunctionElement
     method constructor
-interface SVGFEGaussianBlurElement
+interface SVGFEGaussianBlurElement : SVGElement
     getter height
     getter in1
     getter result
@@ -4327,7 +4377,7 @@ interface SVGFEGaussianBlurElement
     getter y
     method constructor
     method setStdDeviation
-interface SVGFEImageElement
+interface SVGFEImageElement : SVGElement
     getter height
     getter href
     getter preserveAspectRatio
@@ -4336,17 +4386,17 @@ interface SVGFEImageElement
     getter x
     getter y
     method constructor
-interface SVGFEMergeElement
+interface SVGFEMergeElement : SVGElement
     getter height
     getter result
     getter width
     getter x
     getter y
     method constructor
-interface SVGFEMergeNodeElement
+interface SVGFEMergeNodeElement : SVGElement
     getter in1
     method constructor
-interface SVGFEMorphologyElement
+interface SVGFEMorphologyElement : SVGElement
     attribute SVG_MORPHOLOGY_OPERATOR_DILATE
     attribute SVG_MORPHOLOGY_OPERATOR_ERODE
     attribute SVG_MORPHOLOGY_OPERATOR_UNKNOWN
@@ -4360,7 +4410,7 @@ interface SVGFEMorphologyElement
     getter x
     getter y
     method constructor
-interface SVGFEOffsetElement
+interface SVGFEOffsetElement : SVGElement
     getter dx
     getter dy
     getter height
@@ -4370,12 +4420,12 @@ interface SVGFEOffsetElement
     getter x
     getter y
     method constructor
-interface SVGFEPointLightElement
+interface SVGFEPointLightElement : SVGElement
     getter x
     getter y
     getter z
     method constructor
-interface SVGFESpecularLightingElement
+interface SVGFESpecularLightingElement : SVGElement
     getter height
     getter in1
     getter kernelUnitLengthX
@@ -4388,7 +4438,7 @@ interface SVGFESpecularLightingElement
     getter x
     getter y
     method constructor
-interface SVGFESpotLightElement
+interface SVGFESpotLightElement : SVGElement
     getter limitingConeAngle
     getter pointsAtX
     getter pointsAtY
@@ -4398,7 +4448,7 @@ interface SVGFESpotLightElement
     getter y
     getter z
     method constructor
-interface SVGFETileElement
+interface SVGFETileElement : SVGElement
     getter height
     getter in1
     getter result
@@ -4406,7 +4456,7 @@ interface SVGFETileElement
     getter x
     getter y
     method constructor
-interface SVGFETurbulenceElement
+interface SVGFETurbulenceElement : SVGElement
     attribute SVG_STITCHTYPE_NOSTITCH
     attribute SVG_STITCHTYPE_STITCH
     attribute SVG_STITCHTYPE_UNKNOWN
@@ -4425,7 +4475,7 @@ interface SVGFETurbulenceElement
     getter x
     getter y
     method constructor
-interface SVGFilterElement
+interface SVGFilterElement : SVGElement
     getter filterUnits
     getter height
     getter href
@@ -4434,19 +4484,19 @@ interface SVGFilterElement
     getter x
     getter y
     method constructor
-interface SVGForeignObjectElement
+interface SVGForeignObjectElement : SVGGraphicsElement
     getter height
     getter width
     getter x
     getter y
     method constructor
-interface SVGGElement
+interface SVGGElement : SVGGraphicsElement
     method constructor
-interface SVGGeometryElement
+interface SVGGeometryElement : SVGGraphicsElement
     method constructor
     method isPointInFill
     method isPointInStroke
-interface SVGGradientElement
+interface SVGGradientElement : SVGElement
     attribute SVG_SPREADMETHOD_PAD
     attribute SVG_SPREADMETHOD_REFLECT
     attribute SVG_SPREADMETHOD_REPEAT
@@ -4456,7 +4506,7 @@ interface SVGGradientElement
     getter href
     getter spreadMethod
     method constructor
-interface SVGGraphicsElement
+interface SVGGraphicsElement : SVGElement
     getter farthestViewportElement
     getter nearestViewportElement
     getter requiredExtensions
@@ -4467,8 +4517,7 @@ interface SVGGraphicsElement
     method getBBox
     method getCTM
     method getScreenCTM
-    method getTransformToElement
-interface SVGImageElement
+interface SVGImageElement : SVGGraphicsElement
     getter height
     getter href
     getter preserveAspectRatio
@@ -4509,22 +4558,22 @@ interface SVGLengthList
     method insertItemBefore
     method removeItem
     method replaceItem
-interface SVGLineElement
+interface SVGLineElement : SVGGeometryElement
     getter x1
     getter x2
     getter y1
     getter y2
     method constructor
-interface SVGLinearGradientElement
+interface SVGLinearGradientElement : SVGGradientElement
     getter x1
     getter x2
     getter y1
     getter y2
     method constructor
-interface SVGMPathElement
+interface SVGMPathElement : SVGElement
     getter href
     method constructor
-interface SVGMarkerElement
+interface SVGMarkerElement : SVGElement
     attribute SVG_MARKERUNITS_STROKEWIDTH
     attribute SVG_MARKERUNITS_UNKNOWN
     attribute SVG_MARKERUNITS_USERSPACEONUSE
@@ -4543,7 +4592,7 @@ interface SVGMarkerElement
     method constructor
     method setOrientToAngle
     method setOrientToAuto
-interface SVGMaskElement
+interface SVGMaskElement : SVGElement
     getter height
     getter maskContentUnits
     getter maskUnits
@@ -4579,7 +4628,7 @@ interface SVGMatrix
     setter d
     setter e
     setter f
-interface SVGMetadataElement
+interface SVGMetadataElement : SVGElement
     method constructor
 interface SVGNumber
     getter value
@@ -4596,225 +4645,13 @@ interface SVGNumberList
     method insertItemBefore
     method removeItem
     method replaceItem
-interface SVGPathElement
-    getter animatedNormalizedPathSegList
-    getter animatedPathSegList
-    getter normalizedPathSegList
+interface SVGPathElement : SVGGeometryElement
     getter pathLength
-    getter pathSegList
     method constructor
-    method createSVGPathSegArcAbs
-    method createSVGPathSegArcRel
-    method createSVGPathSegClosePath
-    method createSVGPathSegCurvetoCubicAbs
-    method createSVGPathSegCurvetoCubicRel
-    method createSVGPathSegCurvetoCubicSmoothAbs
-    method createSVGPathSegCurvetoCubicSmoothRel
-    method createSVGPathSegCurvetoQuadraticAbs
-    method createSVGPathSegCurvetoQuadraticRel
-    method createSVGPathSegCurvetoQuadraticSmoothAbs
-    method createSVGPathSegCurvetoQuadraticSmoothRel
-    method createSVGPathSegLinetoAbs
-    method createSVGPathSegLinetoHorizontalAbs
-    method createSVGPathSegLinetoHorizontalRel
-    method createSVGPathSegLinetoRel
-    method createSVGPathSegLinetoVerticalAbs
-    method createSVGPathSegLinetoVerticalRel
-    method createSVGPathSegMovetoAbs
-    method createSVGPathSegMovetoRel
     method getPathSegAtLength
     method getPointAtLength
     method getTotalLength
-interface SVGPathSeg
-    attribute PATHSEG_ARC_ABS
-    attribute PATHSEG_ARC_REL
-    attribute PATHSEG_CLOSEPATH
-    attribute PATHSEG_CURVETO_CUBIC_ABS
-    attribute PATHSEG_CURVETO_CUBIC_REL
-    attribute PATHSEG_CURVETO_CUBIC_SMOOTH_ABS
-    attribute PATHSEG_CURVETO_CUBIC_SMOOTH_REL
-    attribute PATHSEG_CURVETO_QUADRATIC_ABS
-    attribute PATHSEG_CURVETO_QUADRATIC_REL
-    attribute PATHSEG_CURVETO_QUADRATIC_SMOOTH_ABS
-    attribute PATHSEG_CURVETO_QUADRATIC_SMOOTH_REL
-    attribute PATHSEG_LINETO_ABS
-    attribute PATHSEG_LINETO_HORIZONTAL_ABS
-    attribute PATHSEG_LINETO_HORIZONTAL_REL
-    attribute PATHSEG_LINETO_REL
-    attribute PATHSEG_LINETO_VERTICAL_ABS
-    attribute PATHSEG_LINETO_VERTICAL_REL
-    attribute PATHSEG_MOVETO_ABS
-    attribute PATHSEG_MOVETO_REL
-    attribute PATHSEG_UNKNOWN
-    getter pathSegType
-    getter pathSegTypeAsLetter
-    method constructor
-interface SVGPathSegArcAbs
-    getter angle
-    getter largeArcFlag
-    getter r1
-    getter r2
-    getter sweepFlag
-    getter x
-    getter y
-    method constructor
-    setter angle
-    setter largeArcFlag
-    setter r1
-    setter r2
-    setter sweepFlag
-    setter x
-    setter y
-interface SVGPathSegArcRel
-    getter angle
-    getter largeArcFlag
-    getter r1
-    getter r2
-    getter sweepFlag
-    getter x
-    getter y
-    method constructor
-    setter angle
-    setter largeArcFlag
-    setter r1
-    setter r2
-    setter sweepFlag
-    setter x
-    setter y
-interface SVGPathSegClosePath
-    method constructor
-interface SVGPathSegCurvetoCubicAbs
-    getter x
-    getter x1
-    getter x2
-    getter y
-    getter y1
-    getter y2
-    method constructor
-    setter x
-    setter x1
-    setter x2
-    setter y
-    setter y1
-    setter y2
-interface SVGPathSegCurvetoCubicRel
-    getter x
-    getter x1
-    getter x2
-    getter y
-    getter y1
-    getter y2
-    method constructor
-    setter x
-    setter x1
-    setter x2
-    setter y
-    setter y1
-    setter y2
-interface SVGPathSegCurvetoCubicSmoothAbs
-    getter x
-    getter x2
-    getter y
-    getter y2
-    method constructor
-    setter x
-    setter x2
-    setter y
-    setter y2
-interface SVGPathSegCurvetoCubicSmoothRel
-    getter x
-    getter x2
-    getter y
-    getter y2
-    method constructor
-    setter x
-    setter x2
-    setter y
-    setter y2
-interface SVGPathSegCurvetoQuadraticAbs
-    getter x
-    getter x1
-    getter y
-    getter y1
-    method constructor
-    setter x
-    setter x1
-    setter y
-    setter y1
-interface SVGPathSegCurvetoQuadraticRel
-    getter x
-    getter x1
-    getter y
-    getter y1
-    method constructor
-    setter x
-    setter x1
-    setter y
-    setter y1
-interface SVGPathSegCurvetoQuadraticSmoothAbs
-    getter x
-    getter y
-    method constructor
-    setter x
-    setter y
-interface SVGPathSegCurvetoQuadraticSmoothRel
-    getter x
-    getter y
-    method constructor
-    setter x
-    setter y
-interface SVGPathSegLinetoAbs
-    getter x
-    getter y
-    method constructor
-    setter x
-    setter y
-interface SVGPathSegLinetoHorizontalAbs
-    getter x
-    method constructor
-    setter x
-interface SVGPathSegLinetoHorizontalRel
-    getter x
-    method constructor
-    setter x
-interface SVGPathSegLinetoRel
-    getter x
-    getter y
-    method constructor
-    setter x
-    setter y
-interface SVGPathSegLinetoVerticalAbs
-    getter y
-    method constructor
-    setter y
-interface SVGPathSegLinetoVerticalRel
-    getter y
-    method constructor
-    setter y
-interface SVGPathSegList
-    getter length
-    getter numberOfItems
-    method appendItem
-    method clear
-    method constructor
-    method getItem
-    method initialize
-    method insertItemBefore
-    method removeItem
-    method replaceItem
-interface SVGPathSegMovetoAbs
-    getter x
-    getter y
-    method constructor
-    setter x
-    setter y
-interface SVGPathSegMovetoRel
-    getter x
-    getter y
-    method constructor
-    setter x
-    setter y
-interface SVGPatternElement
+interface SVGPatternElement : SVGElement
     getter height
     getter href
     getter patternContentUnits
@@ -4847,11 +4684,11 @@ interface SVGPointList
     method insertItemBefore
     method removeItem
     method replaceItem
-interface SVGPolygonElement
+interface SVGPolygonElement : SVGGeometryElement
     getter animatedPoints
     getter points
     method constructor
-interface SVGPolylineElement
+interface SVGPolylineElement : SVGGeometryElement
     getter animatedPoints
     getter points
     method constructor
@@ -4875,7 +4712,7 @@ interface SVGPreserveAspectRatio
     method constructor
     setter align
     setter meetOrSlice
-interface SVGRadialGradientElement
+interface SVGRadialGradientElement : SVGGradientElement
     getter cx
     getter cy
     getter fr
@@ -4893,7 +4730,7 @@ interface SVGRect
     setter width
     setter x
     setter y
-interface SVGRectElement
+interface SVGRectElement : SVGGeometryElement
     getter height
     getter rx
     getter ry
@@ -4901,7 +4738,7 @@ interface SVGRectElement
     getter x
     getter y
     method constructor
-interface SVGSVGElement
+interface SVGSVGElement : SVGGraphicsElement
     attribute SVG_ZOOMANDPAN_DISABLE
     attribute SVG_ZOOMANDPAN_MAGNIFY
     attribute SVG_ZOOMANDPAN_UNKNOWN
@@ -4943,14 +4780,14 @@ interface SVGSVGElement
     method unsuspendRedrawAll
     setter currentScale
     setter zoomAndPan
-interface SVGScriptElement
+interface SVGScriptElement : SVGElement
     getter href
     getter type
     method constructor
     setter type
-interface SVGSetElement
+interface SVGSetElement : SVGAnimationElement
     method constructor
-interface SVGStopElement
+interface SVGStopElement : SVGElement
     getter offset
     method constructor
 interface SVGStringList
@@ -4964,7 +4801,7 @@ interface SVGStringList
     method insertItemBefore
     method removeItem
     method replaceItem
-interface SVGStyleElement
+interface SVGStyleElement : SVGElement
     getter disabled
     getter media
     getter sheet
@@ -4975,15 +4812,15 @@ interface SVGStyleElement
     setter media
     setter title
     setter type
-interface SVGSwitchElement
+interface SVGSwitchElement : SVGGraphicsElement
     method constructor
-interface SVGSymbolElement
+interface SVGSymbolElement : SVGElement
     getter preserveAspectRatio
     getter viewBox
     method constructor
-interface SVGTSpanElement
+interface SVGTSpanElement : SVGTextPositioningElement
     method constructor
-interface SVGTextContentElement
+interface SVGTextContentElement : SVGGraphicsElement
     attribute LENGTHADJUST_SPACING
     attribute LENGTHADJUST_SPACINGANDGLYPHS
     attribute LENGTHADJUST_UNKNOWN
@@ -4999,9 +4836,9 @@ interface SVGTextContentElement
     method getStartPositionOfChar
     method getSubStringLength
     method selectSubString
-interface SVGTextElement
+interface SVGTextElement : SVGTextPositioningElement
     method constructor
-interface SVGTextPathElement
+interface SVGTextPathElement : SVGTextContentElement
     attribute TEXTPATH_METHODTYPE_ALIGN
     attribute TEXTPATH_METHODTYPE_STRETCH
     attribute TEXTPATH_METHODTYPE_UNKNOWN
@@ -5013,14 +4850,14 @@ interface SVGTextPathElement
     getter spacing
     getter startOffset
     method constructor
-interface SVGTextPositioningElement
+interface SVGTextPositioningElement : SVGTextContentElement
     getter dx
     getter dy
     getter rotate
     getter x
     getter y
     method constructor
-interface SVGTitleElement
+interface SVGTitleElement : SVGElement
     method constructor
 interface SVGTransform
     attribute SVG_TRANSFORM_MATRIX
@@ -5054,15 +4891,18 @@ interface SVGTransformList
     method removeItem
     method replaceItem
 interface SVGUnitTypes
+    static attribute SVG_UNIT_TYPE_OBJECTBOUNDINGBOX
+    static attribute SVG_UNIT_TYPE_UNKNOWN
+    static attribute SVG_UNIT_TYPE_USERSPACEONUSE
     method constructor
-interface SVGUseElement
+interface SVGUseElement : SVGGraphicsElement
     getter height
     getter href
     getter width
     getter x
     getter y
     method constructor
-interface SVGViewElement
+interface SVGViewElement : SVGElement
     attribute SVG_ZOOMANDPAN_DISABLE
     attribute SVG_ZOOMANDPAN_MAGNIFY
     attribute SVG_ZOOMANDPAN_UNKNOWN
@@ -5073,6 +4913,9 @@ interface SVGViewElement
     method constructor
     setter zoomAndPan
 interface SVGViewSpec
+    static attribute SVG_ZOOMANDPAN_DISABLE
+    static attribute SVG_ZOOMANDPAN_MAGNIFY
+    static attribute SVG_ZOOMANDPAN_UNKNOWN
     getter preserveAspectRatio
     getter preserveAspectRatioString
     getter transform
@@ -5084,7 +4927,7 @@ interface SVGViewSpec
     getter zoomAndPan
     method constructor
     setter zoomAndPan
-interface SVGZoomEvent
+interface SVGZoomEvent : UIEvent
     getter newScale
     getter newTranslate
     getter previousScale
@@ -5104,7 +4947,7 @@ interface Screen
     getter width
     method constructor
     setter keepAwake
-interface ScreenOrientation
+interface ScreenOrientation : EventTarget
     getter angle
     getter onchange
     getter type
@@ -5112,12 +4955,12 @@ interface ScreenOrientation
     method lock
     method unlock
     setter onchange
-interface ScriptProcessorNode
+interface ScriptProcessorNode : AudioNode
     getter bufferSize
     getter onaudioprocess
     method constructor
     setter onaudioprocess
-interface SecurityPolicyViolationEvent
+interface SecurityPolicyViolationEvent : Event
     getter blockedURI
     getter columnNumber
     getter documentURI
@@ -5164,7 +5007,7 @@ interface ServicePort
     method close
     method constructor
     method postMessage
-interface ServicePortCollection
+interface ServicePortCollection : EventTarget
     getter onclose
     getter onmessage
     method connect
@@ -5173,7 +5016,7 @@ interface ServicePortCollection
     method matchAll
     setter onclose
     setter onmessage
-interface ServiceWorker
+interface ServiceWorker : EventTarget
     getter onerror
     getter onstatechange
     getter scriptURL
@@ -5182,7 +5025,7 @@ interface ServiceWorker
     method postMessage
     setter onerror
     setter onstatechange
-interface ServiceWorkerContainer
+interface ServiceWorkerContainer : EventTarget
     getter oncontrollerchange
     getter onmessage
     getter ready
@@ -5192,17 +5035,16 @@ interface ServiceWorkerContainer
     method register
     setter oncontrollerchange
     setter onmessage
-interface ServiceWorkerMessageEvent
+interface ServiceWorkerMessageEvent : Event
     getter data
     getter lastEventId
     getter origin
     getter ports
     getter source
     method constructor
-interface ServiceWorkerRegistration
+interface ServiceWorkerRegistration : EventTarget
     getter geofencing
     getter onupdatefound
-    getter periodicSync
     getter pushManager
     getter scope
     getter sync
@@ -5212,7 +5054,7 @@ interface ServiceWorkerRegistration
     method unregister
     method update
     setter onupdatefound
-interface ShadowRoot
+interface ShadowRoot : DocumentFragment
     getter activeElement
     getter delegatesFocus
     getter host
@@ -5225,19 +5067,19 @@ interface ShadowRoot
     method elementsFromPoint
     method getSelection
     setter innerHTML
-interface SharedWorker
+interface SharedWorker : EventTarget
     getter onerror
     getter port
     getter workerStart
     method constructor
     setter onerror
-interface SpeechSynthesisEvent
+interface SpeechSynthesisEvent : Event
     getter charIndex
     getter elapsedTime
     getter name
     getter utterance
     method constructor
-interface SpeechSynthesisUtterance
+interface SpeechSynthesisUtterance : EventTarget
     getter lang
     getter onboundary
     getter onend
@@ -5273,7 +5115,7 @@ interface Storage
     method key
     method removeItem
     method setItem
-interface StorageEvent
+interface StorageEvent : Event
     getter key
     getter newValue
     getter oldValue
@@ -5318,16 +5160,9 @@ interface SubtleCrypto
     method wrapKey
 interface SyncManager
     method constructor
-    method getRegistration
-    method getRegistrations
-    method permissionState
+    method getTags
     method register
-interface SyncRegistration
-    getter done
-    getter tag
-    method constructor
-    method unregister
-interface Text
+interface Text : CharacterData
     getter wholeText
     method constructor
     method getDestinationInsertionPoints
@@ -5342,7 +5177,7 @@ interface TextEncoder
     getter encoding
     method constructor
     method encode
-interface TextEvent
+interface TextEvent : UIEvent
     getter data
     method constructor
     method initTextEvent
@@ -5360,7 +5195,7 @@ interface TextMetrics
     getter ideographicBaseline
     getter width
     method constructor
-interface TextTrack
+interface TextTrack : EventTarget
     getter activeCues
     getter cues
     getter id
@@ -5377,7 +5212,7 @@ interface TextTrack
     method removeRegion
     setter mode
     setter oncuechange
-interface TextTrackCue
+interface TextTrackCue : EventTarget
     getter endTime
     getter id
     getter onenter
@@ -5396,15 +5231,13 @@ interface TextTrackCueList
     getter length
     method constructor
     method getCueById
-    method item
-interface TextTrackList
+interface TextTrackList : EventTarget
     getter length
     getter onaddtrack
     getter onchange
     getter onremovetrack
     method constructor
     method getTrackById
-    method item
     setter onaddtrack
     setter onchange
     setter onremovetrack
@@ -5428,7 +5261,7 @@ interface Touch
     getter screenY
     getter target
     method constructor
-interface TouchEvent
+interface TouchEvent : UIEvent
     getter altKey
     getter changedTouches
     getter ctrlKey
@@ -5452,10 +5285,10 @@ interface TrackDefault
 interface TrackDefaultList
     getter length
     method constructor
-interface TrackEvent
+interface TrackEvent : Event
     getter track
     method constructor
-interface TransitionEvent
+interface TransitionEvent : Event
     getter elapsedTime
     getter propertyName
     getter pseudoElement
@@ -5474,7 +5307,7 @@ interface TreeWalker
     method previousNode
     method previousSibling
     setter currentNode
-interface UIEvent
+interface UIEvent : Event
     getter detail
     getter sourceCapabilities
     getter view
@@ -5482,6 +5315,8 @@ interface UIEvent
     method constructor
     method initUIEvent
 interface URL
+    static method createObjectURL
+    static method revokeObjectURL
     getter hash
     getter host
     getter hostname
@@ -5518,7 +5353,7 @@ interface USBConfiguration
     getter configurationValue
     getter interfaces
     method constructor
-interface USBConnectionEvent
+interface USBConnectionEvent : Event
     getter device
     method constructor
 interface USBDevice
@@ -5570,7 +5405,39 @@ interface USBOutTransferResult
     getter bytesWritten
     getter status
     method constructor
-interface VTTCue
+interface VRDevice
+    getter deviceId
+    getter deviceName
+    getter hardwareUnitId
+    method constructor
+interface VREyeParameters
+    getter currentFieldOfView
+    getter eyeTranslation
+    getter maximumFieldOfView
+    getter minimumFieldOfView
+    getter recommendedFieldOfView
+    getter renderRect
+    method constructor
+interface VRFieldOfView
+    getter downDegrees
+    getter leftDegrees
+    getter rightDegrees
+    getter upDegrees
+    method constructor
+    setter downDegrees
+    setter leftDegrees
+    setter rightDegrees
+    setter upDegrees
+interface VRPositionState
+    getter angularAcceleration
+    getter angularVelocity
+    getter linearAcceleration
+    getter linearVelocity
+    getter orientation
+    getter position
+    getter timeStamp
+    method constructor
+interface VTTCue : TextTrackCue
     getter align
     getter line
     getter position
@@ -5640,7 +5507,7 @@ interface VideoTrack
     getter selected
     method constructor
     setter selected
-interface VideoTrackList
+interface VideoTrackList : EventTarget
     getter length
     getter onaddtrack
     getter onchange
@@ -5651,7 +5518,7 @@ interface VideoTrackList
     setter onaddtrack
     setter onchange
     setter onremovetrack
-interface WaveShaperNode
+interface WaveShaperNode : AudioNode
     getter curve
     getter oversample
     method constructor
@@ -5664,7 +5531,7 @@ interface WebGLActiveInfo
     method constructor
 interface WebGLBuffer
     method constructor
-interface WebGLContextEvent
+interface WebGLContextEvent : Event
     getter statusMessage
     method constructor
 interface WebGLFramebuffer
@@ -6122,7 +5989,7 @@ interface WebGLTexture
     method constructor
 interface WebGLUniformLocation
     method constructor
-interface WebKitAnimationEvent
+interface WebKitAnimationEvent : Event
     getter animationName
     getter elapsedTime
     method constructor
@@ -6187,12 +6054,12 @@ interface WebKitMutationObserver
     method disconnect
     method observe
     method takeRecords
-interface WebKitTransitionEvent
+interface WebKitTransitionEvent : Event
     getter elapsedTime
     getter propertyName
     getter pseudoElement
     method constructor
-interface WebSocket
+interface WebSocket : EventTarget
     attribute CLOSED
     attribute CLOSING
     attribute CONNECTING
@@ -6215,7 +6082,7 @@ interface WebSocket
     setter onerror
     setter onmessage
     setter onopen
-interface WheelEvent
+interface WheelEvent : MouseEvent
     attribute DOM_DELTA_LINE
     attribute DOM_DELTA_PAGE
     attribute DOM_DELTA_PIXEL
@@ -6227,12 +6094,12 @@ interface WheelEvent
     getter wheelDeltaX
     getter wheelDeltaY
     method constructor
-interface Window
+interface Window : EventTarget
     attribute PERSISTENT
     attribute TEMPORARY
     method constructor
     method toString
-interface Worker
+interface Worker : EventTarget
     getter onerror
     getter onmessage
     method constructor
@@ -6240,9 +6107,9 @@ interface Worker
     method terminate
     setter onerror
     setter onmessage
-interface XMLDocument
+interface XMLDocument : Document
     method constructor
-interface XMLHttpRequest
+interface XMLHttpRequest : XMLHttpRequestEventTarget
     attribute DONE
     attribute HEADERS_RECEIVED
     attribute LOADING
@@ -6272,7 +6139,7 @@ interface XMLHttpRequest
     setter responseType
     setter timeout
     setter withCredentials
-interface XMLHttpRequestEventTarget
+interface XMLHttpRequestEventTarget : EventTarget
     getter onabort
     getter onerror
     getter onload
@@ -6288,11 +6155,11 @@ interface XMLHttpRequestEventTarget
     setter onloadstart
     setter onprogress
     setter ontimeout
-interface XMLHttpRequestProgressEvent
+interface XMLHttpRequestProgressEvent : ProgressEvent
     getter position
     getter totalSize
     method constructor
-interface XMLHttpRequestUpload
+interface XMLHttpRequestUpload : XMLHttpRequestEventTarget
     method constructor
 interface XMLSerializer
     method constructor
@@ -6336,7 +6203,7 @@ interface XSLTProcessor
     method setParameter
     method transformToDocument
     method transformToFragment
-interface webkitAudioContext
+interface webkitAudioContext : EventTarget
     getter currentTime
     getter destination
     getter listener
@@ -6379,7 +6246,7 @@ interface webkitIDBCursor
     method continuePrimaryKey
     method delete
     method update
-interface webkitIDBDatabase
+interface webkitIDBDatabase : EventTarget
     getter name
     getter objectStoreNames
     getter onabort
@@ -6417,6 +6284,10 @@ interface webkitIDBIndex
     method openCursor
     method openKeyCursor
 interface webkitIDBKeyRange
+    static method bound
+    static method lowerBound
+    static method only
+    static method upperBound
     getter lower
     getter lowerOpen
     getter upper
@@ -6442,7 +6313,7 @@ interface webkitIDBObjectStore
     method openCursor
     method openKeyCursor
     method put
-interface webkitIDBRequest
+interface webkitIDBRequest : EventTarget
     getter error
     getter onerror
     getter onsuccess
@@ -6453,7 +6324,7 @@ interface webkitIDBRequest
     method constructor
     setter onerror
     setter onsuccess
-interface webkitIDBTransaction
+interface webkitIDBTransaction : EventTarget
     getter db
     getter error
     getter mode
@@ -6467,7 +6338,7 @@ interface webkitIDBTransaction
     setter onabort
     setter oncomplete
     setter onerror
-interface webkitMediaStream
+interface webkitMediaStream : EventTarget
     getter active
     getter id
     getter onactive
@@ -6488,12 +6359,13 @@ interface webkitMediaStream
     setter onended
     setter oninactive
     setter onremovetrack
-interface webkitOfflineAudioContext
+interface webkitOfflineAudioContext : AudioContext
     getter oncomplete
     method constructor
     method startRendering
     setter oncomplete
-interface webkitRTCPeerConnection
+interface webkitRTCPeerConnection : EventTarget
+    static method generateCertificate
     getter iceConnectionState
     getter iceGatheringState
     getter localDescription
@@ -6541,7 +6413,7 @@ interface webkitSpeechGrammarList
     method addFromUri
     method constructor
     method item
-interface webkitSpeechRecognition
+interface webkitSpeechRecognition : EventTarget
     getter audioTrack
     getter continuous
     getter grammars
@@ -6582,17 +6454,19 @@ interface webkitSpeechRecognition
     setter onspeechstart
     setter onstart
     setter serviceURI
-interface webkitSpeechRecognitionError
+interface webkitSpeechRecognitionError : Event
     getter error
     getter message
     method constructor
-interface webkitSpeechRecognitionEvent
+interface webkitSpeechRecognitionEvent : Event
     getter emma
     getter interpretation
     getter resultIndex
     getter results
     method constructor
 interface webkitURL
+    static method createObjectURL
+    static method revokeObjectURL
     getter hash
     getter host
     getter hostname
@@ -6669,6 +6543,7 @@ interface webkitURL
     attribute ondevicelight
     attribute ondevicemotion
     attribute ondeviceorientation
+    attribute ondeviceorientationabsolute
     attribute ondrag
     attribute ondragend
     attribute ondragenter

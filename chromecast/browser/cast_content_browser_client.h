@@ -61,10 +61,9 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
       PrefService* pref_service,
       net::URLRequestContextGetter* request_context_getter);
 
-  // Provide an AudioManagerFactory instance for WebAudio playback.
+#if !defined(OS_ANDROID)
   virtual scoped_ptr<::media::AudioManagerFactory> CreateAudioManagerFactory();
 
-#if !defined(OS_ANDROID)
   // Creates a CmaMediaPipelineClient which is responsible to create (CMA
   // backend)
   // for media playback and watch media pipeline status, called once per media
@@ -72,10 +71,6 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
   // instance.
   virtual scoped_refptr<media::CmaMediaPipelineClient>
   CreateCmaMediaPipelineClient();
-
-  // Creates and returns a factory used for creating BrowserCdm instances for
-  // playing protected content. This is called once per browser lifetime.
-  virtual scoped_ptr<::media::BrowserCdmFactory> CreateBrowserCdmFactory();
 #endif
 
   // Performs cleanup for process exit (but before AtExitManager cleanup).
@@ -151,6 +146,7 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
       content::FileDescriptorInfo* mappings,
       std::map<int, base::MemoryMappedFile::Region>* regions) override;
 #else
+  scoped_ptr<::media::CdmFactory> CreateCdmFactory() override;
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,

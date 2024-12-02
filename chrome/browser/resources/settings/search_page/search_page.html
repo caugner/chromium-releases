@@ -1,19 +1,19 @@
 <link rel="import" href="chrome://resources/polymer/v1_0/polymer/polymer.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/neon-animation/neon-animatable.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
-<link rel="import" href="chrome://md-settings/checkbox/checkbox.html">
+<link rel="import" href="chrome://md-settings/controls/settings_checkbox.html">
 <link rel="import" href="chrome://md-settings/search_engines_page/search_engines_page.html">
 <link rel="import" href="chrome://md-settings/settings_page/settings_animated_pages.html">
 <link rel="import" href="chrome://md-settings/settings_page/settings_subheader.html">
 
-<dom-module id="cr-settings-search-page">
+<dom-module id="settings-search-page">
   <link rel="import" type="css"
       href="chrome://md-settings/settings_page/settings_page.css">
   <link rel="import" type="css" href="search_page.css">
   <template>
     <settings-animated-pages id="pages" current-route="{{currentRoute}}"
         section="search">
-      <neon-animatable id="">
+      <neon-animatable id="main">
         <p i18n-content="searchExplanation"></p>
 
         <div class="search-engines">
@@ -32,7 +32,7 @@
       <neon-animatable id="search-engines">
         <settings-subheader i18n-values="page-title:searchEnginesLabel">
         </settings-subheader>
-        <cr-settings-search-engines-page></cr-settings-search-engines-page>
+        <settings-search-engines-page></settings-search-engines-page>
         <paper-button class="search-engines-advanced"
             i18n-content="advancedPageTitle"
             on-tap="onSearchEnginesAdvancedTap_" raised>

@@ -4,7 +4,9 @@
 
 #include "chrome/browser/ui/views/exclusive_access_bubble_views.h"
 
+#include "base/i18n/case_conversion.h"
 #include "base/message_loop/message_loop.h"
+#include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -28,7 +30,6 @@
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/layout/box_layout.h"
-#include "ui/views/layout/grid_layout.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 #include "url/gurl.h"
@@ -44,13 +45,14 @@ namespace {
 // Space between the site info label and the buttons / link.
 const int kMiddlePaddingPx = 30;
 
+// Opacity of the background (out of 255). Only used with
+// IsSimplifiedFullscreenUIEnabled.
+const unsigned char kBackgroundOpacity = 180;
+
 class ButtonView : public views::View {
  public:
   ButtonView(views::ButtonListener* listener, int between_button_spacing);
   ~ButtonView() override;
-
-  // Returns an empty size when the view is not visible.
-  gfx::Size GetPreferredSize() const override;
 
   views::LabelButton* accept_button() const { return accept_button_; }
   views::LabelButton* deny_button() const { return deny_button_; }
@@ -81,8 +83,73 @@ ButtonView::ButtonView(views::ButtonListener* listener,
 ButtonView::~ButtonView() {
 }
 
-gfx::Size ButtonView::GetPreferredSize() const {
-  return visible() ? views::View::GetPreferredSize() : gfx::Size();
+// Class containing the exit instruction text. Contains fancy styling on the
+// keyboard key (not just a simple label).
+class InstructionView : public views::View {
+ public:
+  // Creates an InstructionView with specific text. |text| may contain a single
+  // segment delimited by a pair of pipes ('|'); this segment will be displayed
+  // as a keyboard key. e.g., "Press |Esc| to exit" will have "Esc" rendered as
+  // a key.
+  InstructionView(const base::string16& text,
+                  const gfx::FontList& font_list,
+                  SkColor foreground_color,
+                  SkColor background_color);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(InstructionView);
+};
+
+InstructionView::InstructionView(const base::string16& text,
+                                 const gfx::FontList& font_list,
+                                 SkColor foreground_color,
+                                 SkColor background_color) {
+  // Parse |text|, looking for pipe-delimited segment.
+  std::vector<base::string16> segments =
+      base::SplitString(text, base::ASCIIToUTF16("|"), base::TRIM_WHITESPACE,
+                        base::SPLIT_WANT_ALL);
+  // Expect 1 or 3 pieces (either no pipe-delimited segments, or one).
+  DCHECK(segments.size() == 1 || segments.size() == 3);
+
+  // Spacing around the escape key name.
+  const int kKeyNameMarginHorizPx = 7;
+  const int kKeyNameBorderPx = 2;
+  const int kKeyNameCornerRadius = 2;
+  const int kKeyNamePaddingPx = 7;
+
+  // The |between_child_spacing| is the horizontal margin of the key name.
+  views::BoxLayout* layout = new views::BoxLayout(views::BoxLayout::kHorizontal,
+                                                  0, 0, kKeyNameMarginHorizPx);
+  SetLayoutManager(layout);
+
+  views::Label* before_key = new views::Label(segments[0], font_list);
+  before_key->SetEnabledColor(foreground_color);
+  before_key->SetBackgroundColor(background_color);
+  AddChildView(before_key);
+
+  if (segments.size() < 3)
+    return;
+
+  base::string16 key = base::i18n::ToUpper(segments[1]);
+  views::Label* key_name_label = new views::Label(key, font_list);
+  key_name_label->SetEnabledColor(foreground_color);
+  key_name_label->SetBackgroundColor(background_color);
+
+  views::View* key_name = new views::View;
+  views::BoxLayout* key_name_layout = new views::BoxLayout(
+      views::BoxLayout::kHorizontal, kKeyNamePaddingPx, kKeyNamePaddingPx, 0);
+  key_name->SetLayoutManager(key_name_layout);
+  key_name->AddChildView(key_name_label);
+  // The key name has a border around it.
+  scoped_ptr<views::Border> border(views::Border::CreateRoundedRectBorder(
+      kKeyNameBorderPx, kKeyNameCornerRadius, foreground_color));
+  key_name->SetBorder(border.Pass());
+  AddChildView(key_name);
+
+  views::Label* after_key = new views::Label(segments[2], font_list);
+  after_key->SetEnabledColor(foreground_color);
+  after_key->SetBackgroundColor(background_color);
+  AddChildView(after_key);
 }
 
 }  // namespace
@@ -109,13 +176,17 @@ class ExclusiveAccessBubbleViews::ExclusiveAccessView
  private:
   ExclusiveAccessBubbleViews* bubble_;
 
-  // Clickable hint text for exiting fullscreen mode.
+  // Clickable hint text for exiting fullscreen mode. (Non-simplified mode
+  // only.)
   views::Link* link_;
-  // Instruction for exiting mouse lock.
-  views::Label* mouse_lock_exit_instruction_;
-  // Informational label: 'www.foo.com has gone fullscreen'.
+  // Informational label: 'www.foo.com has gone fullscreen'. (Non-simplified
+  // mode only.)
   views::Label* message_label_;
+  // Clickable buttons to exit fullscreen. (Non-simplified mode only.)
   ButtonView* button_view_;
+  // Instruction for exiting fullscreen / mouse lock. Only present if there is
+  // no link or button (always present in simplified mode).
+  InstructionView* exit_instruction_;
   const base::string16 browser_fullscreen_exit_accelerator_;
 
   DISALLOW_COPY_AND_ASSIGN(ExclusiveAccessView);
@@ -128,9 +199,9 @@ ExclusiveAccessBubbleViews::ExclusiveAccessView::ExclusiveAccessView(
     ExclusiveAccessBubbleType bubble_type)
     : bubble_(bubble),
       link_(nullptr),
-      mouse_lock_exit_instruction_(nullptr),
       message_label_(nullptr),
       button_view_(nullptr),
+      exit_instruction_(nullptr),
       browser_fullscreen_exit_accelerator_(accelerator) {
   views::BubbleBorder::Shadow shadow_type = views::BubbleBorder::BIG_SHADOW;
 #if defined(OS_LINUX)
@@ -139,10 +210,21 @@ ExclusiveAccessBubbleViews::ExclusiveAccessView::ExclusiveAccessView(
   // See http://crbug.com/462983.
   shadow_type = views::BubbleBorder::SMALL_SHADOW;
 #endif
+  if (ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled())
+    shadow_type = views::BubbleBorder::NO_ASSETS;
+
   ui::NativeTheme* theme = ui::NativeTheme::instance();
+  SkColor background_color =
+      ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled()
+          ? SkColorSetA(SK_ColorBLACK, kBackgroundOpacity)
+          : theme->GetSystemColor(ui::NativeTheme::kColorId_BubbleBackground);
+  SkColor foreground_color =
+      ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled()
+          ? SK_ColorWHITE
+          : theme->GetSystemColor(ui::NativeTheme::kColorId_LabelEnabledColor);
+
   scoped_ptr<views::BubbleBorder> bubble_border(new views::BubbleBorder(
-      views::BubbleBorder::NONE, shadow_type,
-      theme->GetSystemColor(ui::NativeTheme::kColorId_BubbleBackground)));
+      views::BubbleBorder::NONE, shadow_type, background_color));
   set_background(new views::BubbleBackground(bubble_border.get()));
   SetBorder(bubble_border.Pass());
   SetFocusable(false);
@@ -150,14 +232,18 @@ ExclusiveAccessBubbleViews::ExclusiveAccessView::ExclusiveAccessView(
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   const gfx::FontList& medium_font_list =
       rb.GetFontList(ui::ResourceBundle::MediumFont);
-  message_label_ = new views::Label(base::string16(), medium_font_list);
 
-  mouse_lock_exit_instruction_ =
-      new views::Label(bubble_->GetInstructionText(), medium_font_list);
-  mouse_lock_exit_instruction_->set_collapse_when_hidden(true);
+  if (!ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled()) {
+    message_label_ = new views::Label(base::string16(), medium_font_list);
+    message_label_->SetEnabledColor(foreground_color);
+    message_label_->SetBackgroundColor(background_color);
+  }
+
+  exit_instruction_ =
+      new InstructionView(bubble_->GetInstructionText(), medium_font_list,
+                          foreground_color, background_color);
 
   link_ = new views::Link();
-  link_->set_collapse_when_hidden(true);
   link_->SetFocusable(false);
 #if defined(OS_CHROMEOS)
   // On CrOS, the link text doesn't change, since it doesn't show the shortcut.
@@ -165,37 +251,23 @@ ExclusiveAccessBubbleViews::ExclusiveAccessView::ExclusiveAccessView(
 #endif
   link_->set_listener(this);
   link_->SetFontList(medium_font_list);
-  link_->SetPressedColor(message_label_->enabled_color());
-  link_->SetEnabledColor(message_label_->enabled_color());
+  link_->SetPressedColor(foreground_color);
+  link_->SetEnabledColor(foreground_color);
+  link_->SetBackgroundColor(background_color);
   link_->SetVisible(false);
-
-  link_->SetBackgroundColor(background()->get_color());
-  message_label_->SetBackgroundColor(background()->get_color());
-  mouse_lock_exit_instruction_->SetBackgroundColor(background()->get_color());
 
   button_view_ = new ButtonView(this, kPaddingPx);
 
-  views::GridLayout* layout = new views::GridLayout(this);
-  views::ColumnSet* columns = layout->AddColumnSet(0);
-  columns->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER, 0,
-                     views::GridLayout::USE_PREF, 0, 0);
-  columns->AddPaddingColumn(1, kMiddlePaddingPx);
-  columns->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER, 0,
-                     views::GridLayout::USE_PREF, 0, 0);
-  columns->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER, 0,
-                     views::GridLayout::USE_PREF, 0, 0);
-  columns->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER, 0,
-                     views::GridLayout::USE_PREF, 0, 0);
+  if (!ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled()) {
+    DCHECK(message_label_);
+    AddChildView(message_label_);
+  }
+  AddChildView(button_view_);
+  AddChildView(exit_instruction_);
+  AddChildView(link_);
 
-  layout->StartRow(0, 0);
-  layout->AddView(message_label_);
-  layout->AddView(button_view_);
-  layout->AddView(mouse_lock_exit_instruction_);
-  layout->AddView(link_);
-
-  gfx::Insets padding(kPaddingPx, kPaddingPx, kPaddingPx, kPaddingPx);
-  padding += GetInsets();
-  layout->SetInsets(padding);
+  views::BoxLayout* layout = new views::BoxLayout(
+      views::BoxLayout::kHorizontal, kPaddingPx, kPaddingPx, kMiddlePaddingPx);
   SetLayoutManager(layout);
 
   UpdateContent(url, bubble_type);
@@ -224,10 +296,14 @@ void ExclusiveAccessBubbleViews::ExclusiveAccessView::UpdateContent(
     ExclusiveAccessBubbleType bubble_type) {
   DCHECK_NE(EXCLUSIVE_ACCESS_BUBBLE_TYPE_NONE, bubble_type);
 
-  message_label_->SetText(bubble_->GetCurrentMessageText());
+  if (!ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled()) {
+    DCHECK(message_label_);
+    message_label_->SetText(bubble_->GetCurrentMessageText());
+  }
+
   if (exclusive_access_bubble::ShowButtonsForType(bubble_type)) {
     link_->SetVisible(false);
-    mouse_lock_exit_instruction_->SetVisible(false);
+    exit_instruction_->SetVisible(false);
     button_view_->SetVisible(true);
     button_view_->deny_button()->SetText(bubble_->GetCurrentDenyButtonText());
     button_view_->deny_button()->SetMinSize(gfx::Size());
@@ -235,7 +311,8 @@ void ExclusiveAccessBubbleViews::ExclusiveAccessView::UpdateContent(
         bubble_->GetCurrentAllowButtonText());
     button_view_->accept_button()->SetMinSize(gfx::Size());
   } else {
-    bool link_visible = true;
+    bool link_visible =
+        !ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled();
     base::string16 accelerator;
     if (bubble_type ==
             EXCLUSIVE_ACCESS_BUBBLE_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION ||
@@ -257,7 +334,7 @@ void ExclusiveAccessBubbleViews::ExclusiveAccessView::UpdateContent(
     }
 #endif
     link_->SetVisible(link_visible);
-    mouse_lock_exit_instruction_->SetVisible(!link_visible);
+    exit_instruction_->SetVisible(!link_visible);
     button_view_->SetVisible(false);
   }
 }
@@ -300,6 +377,10 @@ ExclusiveAccessBubbleViews::ExclusiveAccessBubbleViews(
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.parent =
       bubble_view_context_->GetBubbleAssociatedWidget()->GetNativeView();
+  // The simplified UI just shows a notice; clicks should go through to the
+  // underlying window.
+  params.accept_events =
+      !ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled();
   popup_->Init(params);
   popup_->SetContentsView(view_);
   gfx::Size size = GetPopupRect(true).size();
@@ -391,7 +472,8 @@ void ExclusiveAccessBubbleViews::UpdateMouseWatcher() {
 
 void ExclusiveAccessBubbleViews::UpdateForImmersiveState() {
   AnimatedAttribute expected_animated_attribute =
-      bubble_view_context_->IsImmersiveModeEnabled()
+      ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled() ||
+              bubble_view_context_->IsImmersiveModeEnabled()
           ? ANIMATED_ATTRIBUTE_OPACITY
           : ANIMATED_ATTRIBUTE_BOUNDS;
   if (animated_attribute_ != expected_animated_attribute) {

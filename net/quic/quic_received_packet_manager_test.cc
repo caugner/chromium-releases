@@ -198,7 +198,7 @@ class QuicReceivedPacketManagerTest : public ::testing::Test {
                            QuicPacketEntropyHash entropy_hash,
                            QuicTime receipt_time) {
     QuicPacketHeader header;
-    header.packet_packet_number = packet_number;
+    header.packet_number = packet_number;
     header.entropy_hash = entropy_hash;
     received_manager_.RecordPacketReceived(0u, header, receipt_time);
   }
@@ -290,9 +290,9 @@ TEST_F(QuicReceivedPacketManagerTest, SetCumulativeEntropyUpTo) {
 
 TEST_F(QuicReceivedPacketManagerTest, DontWaitForPacketsBefore) {
   QuicPacketHeader header;
-  header.packet_packet_number = 2u;
+  header.packet_number = 2u;
   received_manager_.RecordPacketReceived(0u, header, QuicTime::Zero());
-  header.packet_packet_number = 7u;
+  header.packet_number = 7u;
   received_manager_.RecordPacketReceived(0u, header, QuicTime::Zero());
   EXPECT_TRUE(received_manager_.IsAwaitingPacket(3u));
   EXPECT_TRUE(received_manager_.IsAwaitingPacket(6u));
@@ -304,7 +304,7 @@ TEST_F(QuicReceivedPacketManagerTest, DontWaitForPacketsBefore) {
 
 TEST_F(QuicReceivedPacketManagerTest, UpdateReceivedPacketInfo) {
   QuicPacketHeader header;
-  header.packet_packet_number = 2u;
+  header.packet_number = 2u;
   QuicTime two_ms = QuicTime::Zero().Add(QuicTime::Delta::FromMilliseconds(2));
   received_manager_.RecordPacketReceived(0u, header, two_ms);
 
@@ -313,7 +313,7 @@ TEST_F(QuicReceivedPacketManagerTest, UpdateReceivedPacketInfo) {
   // When UpdateReceivedPacketInfo with a time earlier than the time of the
   // largest observed packet, make sure that the delta is 0, not negative.
   EXPECT_EQ(QuicTime::Delta::Zero(), ack.delta_time_largest_observed);
-  EXPECT_FALSE(ack.received_packet_times.empty());
+  EXPECT_EQ(1ul, ack.received_packet_times.size());
 
   QuicTime four_ms = QuicTime::Zero().Add(QuicTime::Delta::FromMilliseconds(4));
   received_manager_.UpdateReceivedPacketInfo(&ack, four_ms);
@@ -321,6 +321,18 @@ TEST_F(QuicReceivedPacketManagerTest, UpdateReceivedPacketInfo) {
   // the delta should still be accurate.
   EXPECT_EQ(QuicTime::Delta::FromMilliseconds(2),
             ack.delta_time_largest_observed);
+  EXPECT_EQ(0ul, ack.received_packet_times.size());
+
+  header.packet_number = 999u;
+  received_manager_.RecordPacketReceived(0u, header, two_ms);
+  header.packet_number = 4u;
+  received_manager_.RecordPacketReceived(0u, header, two_ms);
+  header.packet_number = 1000u;
+  received_manager_.RecordPacketReceived(0u, header, two_ms);
+  received_manager_.UpdateReceivedPacketInfo(&ack, two_ms);
+  // UpdateReceivedPacketInfo should discard any times which can't be
+  // expressed on the wire.
+  EXPECT_EQ(2ul, ack.received_packet_times.size());
 }
 
 TEST_F(QuicReceivedPacketManagerTest, UpdateReceivedConnectionStats) {
@@ -343,8 +355,7 @@ TEST_F(QuicReceivedPacketManagerTest, RevivedPacket) {
   received_manager_.UpdateReceivedPacketInfo(&ack, QuicTime::Zero());
   EXPECT_EQ(1u, ack.missing_packets.NumPacketsSlow());
   EXPECT_EQ(2u, ack.missing_packets.Min());
-  EXPECT_EQ(1u, ack.revived_packets.size());
-  EXPECT_EQ(2u, *ack.revived_packets.begin());
+  EXPECT_EQ(2u, ack.latest_revived_packet);
 }
 
 TEST_F(QuicReceivedPacketManagerTest, PacketRevivedThenReceived) {
@@ -356,7 +367,7 @@ TEST_F(QuicReceivedPacketManagerTest, PacketRevivedThenReceived) {
   QuicAckFrame ack;
   received_manager_.UpdateReceivedPacketInfo(&ack, QuicTime::Zero());
   EXPECT_TRUE(ack.missing_packets.Empty());
-  EXPECT_TRUE(ack.revived_packets.empty());
+  EXPECT_EQ(0u, ack.latest_revived_packet);
 }
 
 

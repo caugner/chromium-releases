@@ -89,6 +89,7 @@
 #include "components/translate/core/browser/translate_ui_delegate.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #import "ui/base/cocoa/cocoa_base_utils.h"
@@ -183,6 +184,17 @@ using content::Referrer;
 using content::RenderWidgetHostView;
 using content::WebContents;
 
+namespace {
+
+void SetUpBrowserWindowCommandHandler(NSWindow* window) {
+  // Make the window handle browser window commands.
+  [base::mac::ObjCCastStrict<ChromeEventProcessingWindow>(window)
+      setCommandHandler:[[[BrowserWindowCommandHandler alloc] init]
+                            autorelease]];
+}
+
+}  // namespace
+
 @interface NSWindow (NSPrivateApis)
 // Note: These functions are private, use -[NSObject respondsToSelector:]
 // before calling them.
@@ -226,10 +238,7 @@ using content::WebContents;
     browser_.reset(browser);
     ownsBrowser_ = ownIt;
     NSWindow* window = [self window];
-    // Make the window handle browser window commands.
-    [base::mac::ObjCCastStrict<ChromeEventProcessingWindow>(window)
-        setCommandHandler:[[[BrowserWindowCommandHandler alloc] init]
-                              autorelease]];
+    SetUpBrowserWindowCommandHandler(window);
 
     // Make the content view for the window have a layer. This will make all
     // sub-views have layers. This is necessary to ensure correct layer
@@ -326,7 +335,8 @@ using content::WebContents;
     toolbarController_.reset([[ToolbarController alloc]
         initWithCommands:browser->command_controller()->command_updater()
                  profile:browser->profile()
-                 browser:browser]);
+                 browser:browser
+          resizeDelegate:self]);
     [toolbarController_ setHasToolbar:[self hasToolbar]
                        hasLocationBar:[self hasLocationBar]];
 
@@ -421,6 +431,8 @@ using content::WebContents;
             extensions::ExtensionKeybindingRegistry::ALL_EXTENSIONS,
             windowShim_.get()));
 
+    blockLayoutSubviews_ = NO;
+
     // We are done initializing now.
     initializing_ = NO;
   }
@@ -455,6 +467,7 @@ using content::WebContents;
   [downloadShelfController_ browserWillBeDestroyed];
   [bookmarkBarController_ browserWillBeDestroyed];
   [avatarButtonController_ browserWillBeDestroyed];
+  [bookmarkBubbleController_ browserWillBeDestroyed];
 
   [super dealloc];
 }
@@ -606,8 +619,10 @@ using content::WebContents;
 - (void)windowDidBecomeMain:(NSNotification*)notification {
   if (chrome::GetLastActiveBrowser() != browser_) {
     BrowserList::SetLastActive(browser_.get());
-    [self saveWindowPositionIfNeeded];
   }
+  // Always saveWindowPositionIfNeeded when becoming main, not just
+  // when |browser_| is not the last active browser. See crbug.com/536280 .
+  [self saveWindowPositionIfNeeded];
 
   NSView* rootView = [[[self window] contentView] superview];
   [rootView cr_recursivelyInvokeBlock:^(id view) {
@@ -690,6 +705,10 @@ using content::WebContents;
 
 // Called when we have been unminimized.
 - (void)windowDidDeminiaturize:(NSNotification *)notification {
+  // Make sure the window's show_state (which is now ui::SHOW_STATE_NORMAL)
+  // gets saved.
+  [self saveWindowPositionIfNeeded];
+
   // Let the selected RenderWidgetHostView know, so that it can tell plugins.
   if (WebContents* contents = [self webContents]) {
     if (RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView())
@@ -1060,7 +1079,8 @@ using content::WebContents;
     // Send new resize rect to foreground tab.
     if (WebContents* contents = [self webContents]) {
       if (content::RenderViewHost* rvh = contents->GetRenderViewHost()) {
-        rvh->ResizeRectChanged(windowShim_->GetRootWindowResizerRect());
+        rvh->GetWidget()->ResizeRectChanged(
+            windowShim_->GetRootWindowResizerRect());
       }
     }
   }
@@ -1436,8 +1456,10 @@ using content::WebContents;
 }
 
 - (NSWindow*)createFullscreenWindow {
-  return [[[FullscreenWindow alloc] initForScreen:[[self window] screen]]
-           autorelease];
+  NSWindow* window = [[[FullscreenWindow alloc]
+      initForScreen:[[self window] screen]] autorelease];
+  SetUpBrowserWindowCommandHandler(window);
+  return window;
 }
 
 - (NSInteger)numberOfTabs {
@@ -1965,7 +1987,13 @@ willAnimateFromState:(BookmarkBar::State)oldState
 
 - (void)enterWebContentFullscreenForURL:(const GURL&)url
                              bubbleType:(ExclusiveAccessBubbleType)bubbleType {
-  [self enterImmersiveFullscreen];
+  // HTML5 Fullscreen should only use AppKit fullscreen in 10.10+.
+  if (chrome::mac::SupportsSystemFullscreen() &&
+      base::mac::IsOSYosemiteOrLater())
+    [self enterAppKitFullscreen];
+  else
+    [self enterImmersiveFullscreen];
+
   if (!url.is_empty())
     [self updateFullscreenExitBubbleURL:url bubbleType:bubbleType];
 }

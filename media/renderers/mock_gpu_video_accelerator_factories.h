@@ -23,7 +23,8 @@ namespace media {
 
 class MockGpuVideoAcceleratorFactories : public GpuVideoAcceleratorFactories {
  public:
-  MockGpuVideoAcceleratorFactories();
+  explicit MockGpuVideoAcceleratorFactories(gpu::gles2::GLES2Interface* gles2);
+  ~MockGpuVideoAcceleratorFactories() override;
 
   bool IsGpuVideoAcceleratorEnabled() override;
   // CreateVideo{Decode,Encode}Accelerator returns scoped_ptr, which the mocking
@@ -38,7 +39,7 @@ class MockGpuVideoAcceleratorFactories : public GpuVideoAcceleratorFactories {
                     std::vector<gpu::Mailbox>* texture_mailboxes,
                     uint32 texture_target));
   MOCK_METHOD1(DeleteTexture, void(uint32 texture_id));
-  MOCK_METHOD1(WaitSyncPoint, void(uint32 sync_point));
+  MOCK_METHOD1(WaitSyncToken, void(const gpu::SyncToken& sync_token));
   MOCK_METHOD0(GetTaskRunner, scoped_refptr<base::SingleThreadTaskRunner>());
   MOCK_METHOD0(GetVideoDecodeAcceleratorSupportedProfiles,
                VideoDecodeAccelerator::SupportedProfiles());
@@ -56,6 +57,9 @@ class MockGpuVideoAcceleratorFactories : public GpuVideoAcceleratorFactories {
     return video_frame_output_format_;
   };
 
+  scoped_ptr<GpuVideoAcceleratorFactories::ScopedGLContextLock>
+  GetGLContextLock() override;
+
   void SetVideoFrameOutputFormat(
       const VideoPixelFormat video_frame_output_format) {
     video_frame_output_format_ = video_frame_output_format;
@@ -65,22 +69,23 @@ class MockGpuVideoAcceleratorFactories : public GpuVideoAcceleratorFactories {
     fail_to_allocate_gpu_memory_buffer_ = fail;
   }
 
-  MOCK_METHOD0(GetGLES2Interface, gpu::gles2::GLES2Interface*());
-
   scoped_ptr<base::SharedMemory> CreateSharedMemory(size_t size) override;
 
   scoped_ptr<VideoDecodeAccelerator> CreateVideoDecodeAccelerator() override;
 
   scoped_ptr<VideoEncodeAccelerator> CreateVideoEncodeAccelerator() override;
 
- private:
-  ~MockGpuVideoAcceleratorFactories() override;
+  gpu::gles2::GLES2Interface* GetGLES2Interface() { return gles2_; }
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(MockGpuVideoAcceleratorFactories);
 
+  base::Lock lock_;
   VideoPixelFormat video_frame_output_format_ = PIXEL_FORMAT_I420;
 
   bool fail_to_allocate_gpu_memory_buffer_ = false;
+
+  gpu::gles2::GLES2Interface* gles2_;
 };
 
 }  // namespace media

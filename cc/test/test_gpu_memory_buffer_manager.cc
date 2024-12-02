@@ -16,42 +16,43 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
  public:
   GpuMemoryBufferImpl(const gfx::Size& size,
                       gfx::BufferFormat format,
-                      scoped_ptr<base::SharedMemory> shared_memory)
+                      scoped_ptr<base::SharedMemory> shared_memory,
+                      size_t offset,
+                      size_t stride)
       : size_(size),
         format_(format),
         shared_memory_(shared_memory.Pass()),
+        offset_(offset),
+        stride_(stride),
         mapped_(false) {}
 
   // Overridden from gfx::GpuMemoryBuffer:
-  bool Map(void** data) override {
+  bool Map() override {
     DCHECK(!mapped_);
-    if (!shared_memory_->Map(gfx::BufferSizeForBufferFormat(size_, format_)))
+    DCHECK_EQ(stride_, gfx::RowSizeForBufferFormat(size_.width(), format_, 0));
+    if (!shared_memory_->Map(offset_ +
+                             gfx::BufferSizeForBufferFormat(size_, format_)))
       return false;
     mapped_ = true;
-    size_t offset = 0;
-    int num_planes =
-        static_cast<int>(gfx::NumberOfPlanesForBufferFormat(format_));
-    for (int i = 0; i < num_planes; ++i) {
-      data[i] = reinterpret_cast<uint8*>(shared_memory_->memory()) + offset;
-      offset +=
-          gfx::RowSizeForBufferFormat(size_.width(), format_, i) *
-          (size_.height() / gfx::SubsamplingFactorForBufferFormat(format_, i));
-    }
     return true;
+  }
+  void* memory(size_t plane) override {
+    DCHECK(mapped_);
+    DCHECK_LT(plane, gfx::NumberOfPlanesForBufferFormat(format_));
+    return reinterpret_cast<uint8_t*>(shared_memory_->memory()) + offset_ +
+           gfx::BufferOffsetForBufferFormat(size_, format_, plane);
   }
   void Unmap() override {
     DCHECK(mapped_);
     shared_memory_->Unmap();
     mapped_ = false;
   }
-  bool IsMapped() const override { return mapped_; }
+  gfx::Size GetSize() const override { return size_; }
   gfx::BufferFormat GetFormat() const override { return format_; }
-  void GetStride(int* stride) const override {
-    int num_planes =
-        static_cast<int>(gfx::NumberOfPlanesForBufferFormat(format_));
-    for (int i = 0; i < num_planes; ++i)
-      stride[i] = base::checked_cast<int>(
-          gfx::RowSizeForBufferFormat(size_.width(), format_, i));
+  int stride(size_t plane) const override {
+    DCHECK_LT(plane, gfx::NumberOfPlanesForBufferFormat(format_));
+    return base::checked_cast<int>(gfx::RowSizeForBufferFormat(
+        size_.width(), format_, static_cast<int>(plane)));
   }
   gfx::GpuMemoryBufferId GetId() const override {
     NOTREACHED();
@@ -61,6 +62,8 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
     gfx::GpuMemoryBufferHandle handle;
     handle.type = gfx::SHARED_MEMORY_BUFFER;
     handle.handle = shared_memory_->handle();
+    handle.offset = base::checked_cast<uint32_t>(offset_);
+    handle.stride = base::checked_cast<int32_t>(stride_);
     return handle;
   }
   ClientBuffer AsClientBuffer() override {
@@ -71,6 +74,8 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
   const gfx::Size size_;
   gfx::BufferFormat format_;
   scoped_ptr<base::SharedMemory> shared_memory_;
+  size_t offset_;
+  size_t stride_;
   bool mapped_;
 };
 
@@ -90,8 +95,24 @@ TestGpuMemoryBufferManager::AllocateGpuMemoryBuffer(const gfx::Size& size,
   const size_t buffer_size = gfx::BufferSizeForBufferFormat(size, format);
   if (!shared_memory->CreateAnonymous(buffer_size))
     return nullptr;
-  return make_scoped_ptr<gfx::GpuMemoryBuffer>(
-      new GpuMemoryBufferImpl(size, format, shared_memory.Pass()));
+  return make_scoped_ptr<gfx::GpuMemoryBuffer>(new GpuMemoryBufferImpl(
+      size, format, shared_memory.Pass(), 0,
+      base::checked_cast<int>(
+          gfx::RowSizeForBufferFormat(size.width(), format, 0))));
+}
+
+scoped_ptr<gfx::GpuMemoryBuffer>
+TestGpuMemoryBufferManager::CreateGpuMemoryBufferFromHandle(
+    const gfx::GpuMemoryBufferHandle& handle,
+    const gfx::Size& size,
+    gfx::BufferFormat format) {
+  if (handle.type != gfx::SHARED_MEMORY_BUFFER)
+    return nullptr;
+
+  return make_scoped_ptr<gfx::GpuMemoryBuffer>(new GpuMemoryBufferImpl(
+      size, format,
+      make_scoped_ptr(new base::SharedMemory(handle.handle, false)),
+      handle.offset, handle.stride));
 }
 
 gfx::GpuMemoryBuffer*
@@ -100,9 +121,8 @@ TestGpuMemoryBufferManager::GpuMemoryBufferFromClientBuffer(
   return reinterpret_cast<gfx::GpuMemoryBuffer*>(buffer);
 }
 
-void TestGpuMemoryBufferManager::SetDestructionSyncPoint(
+void TestGpuMemoryBufferManager::SetDestructionSyncToken(
     gfx::GpuMemoryBuffer* buffer,
-    uint32 sync_point) {
-}
+    const gpu::SyncToken& sync_token) {}
 
 }  // namespace cc

@@ -78,13 +78,16 @@ class BrowserProcessImpl : public BrowserProcess,
   // ChromeBrowserMain based on notifications from the content
   // framework, rather than in the destructor, so that we can
   // interleave cleanup with threads being stopped.
+#if !defined(OS_ANDROID)
   void StartTearDown();
   void PostDestroyThreads();
+#endif
 
   // BrowserProcess implementation.
   void ResourceDispatcherHostCreated() override;
   void EndSession() override;
-  MetricsServicesManager* GetMetricsServicesManager() override;
+  metrics_services_manager::MetricsServicesManager* GetMetricsServicesManager()
+      override;
   metrics::MetricsService* metrics_service() override;
   rappor::RapporService* rappor_service() override;
   IOThread* io_thread() override;
@@ -123,7 +126,7 @@ class BrowserProcessImpl : public BrowserProcess,
   void set_background_mode_manager_for_test(
       scoped_ptr<BackgroundModeManager> manager) override;
   StatusTray* status_tray() override;
-  SafeBrowsingService* safe_browsing_service() override;
+  safe_browsing::SafeBrowsingService* safe_browsing_service() override;
   safe_browsing::ClientSideDetectionService* safe_browsing_detection_service()
       override;
 
@@ -174,7 +177,8 @@ class BrowserProcessImpl : public BrowserProcess,
 
   void CacheDefaultWebClientState();
 
-  scoped_ptr<MetricsServicesManager> metrics_services_manager_;
+  scoped_ptr<metrics_services_manager::MetricsServicesManager>
+      metrics_services_manager_;
 
   scoped_ptr<IOThread> io_thread_;
 
@@ -238,7 +242,7 @@ class BrowserProcessImpl : public BrowserProcess,
 #endif
 
   bool created_safe_browsing_service_;
-  scoped_refptr<SafeBrowsingService> safe_browsing_service_;
+  scoped_refptr<safe_browsing::SafeBrowsingService> safe_browsing_service_;
 
   unsigned int module_ref_count_;
   bool did_start_;

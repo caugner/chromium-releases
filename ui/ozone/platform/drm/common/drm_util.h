@@ -58,6 +58,9 @@ DisplaySnapshot_Params CreateDisplaySnapshotParams(
     size_t device_index,
     const gfx::Point& origin);
 
+int GetFourCCFormatFromBufferFormat(gfx::BufferFormat format);
+gfx::BufferFormat GetBufferFormatFromFourCCFormat(int format);
+
 }  // namespace ui
 
 #endif  // UI_OZONE_PLATFORM_DRM_COMMON_DRM_UTIL_H_

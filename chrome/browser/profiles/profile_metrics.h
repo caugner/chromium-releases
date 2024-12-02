@@ -19,24 +19,12 @@ namespace base {
 class FilePath;
 }
 
+namespace profile_metrics {
+struct Counts;
+}
+
 class ProfileMetrics {
  public:
-  struct ProfileCounts {
-    size_t total;
-    size_t signedin;
-    size_t supervised;
-    size_t unused;
-    size_t gaia_icon;
-    size_t auth_errors;
-
-    ProfileCounts()
-        : total(0),
-          signedin(0),
-          supervised(0),
-          unused(0),
-          gaia_icon(0),
-          auth_errors(0) {}
-  };
 
   // Enum for counting the ways users were added.
   enum ProfileAdd {
@@ -62,15 +50,16 @@ class ProfileMetrics {
 
   // Enum for counting the ways user profiles and menus were opened.
   enum ProfileOpen {
-    NTP_AVATAR_BUBBLE = 0,    // User opens avatar menu from NTP
-    ICON_AVATAR_BUBBLE,       // User opens the avatar menu from button
-    SWITCH_PROFILE_ICON,      // User switches profiles from icon menu
-    SWITCH_PROFILE_MENU,      // User switches profiles from menu bar
-    SWITCH_PROFILE_DOCK,      // User switches profiles from dock (Mac-only)
-    OPEN_USER_MANAGER,        // User opens the User Manager
-    SWITCH_PROFILE_MANAGER,   // User switches profiles from the User Manager
-    SWITCH_PROFILE_UNLOCK,    // User switches to lockd profile via User Manager
-    SWITCH_PROFILE_GUEST,     // User switches to guest profile
+    NTP_AVATAR_BUBBLE = 0,   // User opens avatar menu from NTP
+    ICON_AVATAR_BUBBLE,      // User opens the avatar menu from button
+    SWITCH_PROFILE_ICON,     // User switches profiles from icon menu
+    SWITCH_PROFILE_MENU,     // User switches profiles from menu bar
+    SWITCH_PROFILE_DOCK,     // User switches profiles from dock (Mac-only)
+    OPEN_USER_MANAGER,       // User opens the User Manager
+    SWITCH_PROFILE_MANAGER,  // User switches profiles from the User Manager
+    SWITCH_PROFILE_UNLOCK,   // User switches to locked profile via User Manager
+    SWITCH_PROFILE_GUEST,    // User switches to guest profile
+    SWITCH_PROFILE_CONTEXT_MENU,  // User switches profiles from context menu
     NUM_PROFILE_OPEN_METRICS
   };
 
@@ -212,7 +201,7 @@ class ProfileMetrics {
   // Count and return summary information about the profiles currently in the
   // |manager|. This information is returned in the output variable |counts|.
   static bool CountProfileInformation(ProfileManager* manager,
-                                      ProfileCounts* counts);
+                                      profile_metrics::Counts* counts);
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
   static void LogNumberOfProfileSwitches();

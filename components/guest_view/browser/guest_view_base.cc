@@ -46,7 +46,8 @@ SetSizeParams::~SetSizeParams() {
 
 // This observer ensures that the GuestViewBase destroys itself when its
 // embedder goes away. It also tracks when the embedder's fullscreen is
-// toggled so the guest can change itself accordingly.
+// toggled or when its page scale factor changes so the guest can change
+// itself accordingly.
 class GuestViewBase::OwnerContentsObserver : public WebContentsObserver {
  public:
   OwnerContentsObserver(GuestViewBase* guest,
@@ -98,6 +99,13 @@ class GuestViewBase::OwnerContentsObserver : public WebContentsObserver {
       is_fullscreen_ = false;
       guest_->EmbedderFullscreenToggled(is_fullscreen_);
     }
+  }
+
+  void OnPageScaleFactorChanged(float page_scale_factor) override {
+    if (destroyed_)
+      return;
+
+    guest_->web_contents()->SetPageScale(page_scale_factor);
   }
 
  private:
@@ -158,6 +166,8 @@ GuestViewBase::GuestViewBase(WebContents* owner_web_contents)
       IsOwnedByExtension(this) ?
           owner_web_contents->GetLastCommittedURL().host() : std::string();
 }
+
+GuestViewBase::~GuestViewBase() {}
 
 void GuestViewBase::Init(const base::DictionaryValue& create_params,
                          const WebContentsCreatedCallback& callback) {
@@ -407,9 +417,10 @@ void GuestViewBase::DidDetach() {
   element_instance_id_ = kInstanceIDNone;
 }
 
-bool GuestViewBase::Find(int request_id,
-                         const base::string16& search_text,
-                         const blink::WebFindOptions& options) {
+bool GuestViewBase::HandleFindForEmbedder(
+    int request_id,
+    const base::string16& search_text,
+    const blink::WebFindOptions& options) {
   if (ShouldHandleFindRequestsForEmbedder()) {
     web_contents()->Find(request_id, search_text, options);
     return true;
@@ -417,7 +428,8 @@ bool GuestViewBase::Find(int request_id,
   return false;
 }
 
-bool GuestViewBase::StopFinding(content::StopFindAction action) {
+bool GuestViewBase::HandleStopFindingForEmbedder(
+    content::StopFindAction action) {
   if (ShouldHandleFindRequestsForEmbedder()) {
     web_contents()->StopFinding(action);
     return true;
@@ -589,14 +601,6 @@ void GuestViewBase::ActivateContents(WebContents* web_contents) {
       embedder_web_contents());
 }
 
-void GuestViewBase::DeactivateContents(WebContents* web_contents) {
-  if (!attached() || !embedder_web_contents()->GetDelegate())
-    return;
-
-  embedder_web_contents()->GetDelegate()->DeactivateContents(
-      embedder_web_contents());
-}
-
 void GuestViewBase::ContentsMouseEvent(WebContents* source,
                                        const gfx::Point& location,
                                        bool motion) {
@@ -709,9 +713,6 @@ void GuestViewBase::FindReply(WebContents* source,
   }
 }
 
-GuestViewBase::~GuestViewBase() {
-}
-
 void GuestViewBase::OnZoomChanged(
     const ui_zoom::ZoomController::ZoomChangedEventData& data) {
   if (data.web_contents == embedder_web_contents()) {
@@ -725,8 +726,6 @@ void GuestViewBase::OnZoomChanged(
     // When the embedder's zoom level doesn't match the guest's, then update the
     // guest's zoom level to match.
     guest_zoom_controller->SetZoomLevel(data.new_zoom_level);
-
-    EmbedderZoomChanged(data.old_zoom_level, data.new_zoom_level);
     return;
   }
 

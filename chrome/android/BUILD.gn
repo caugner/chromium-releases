@@ -4,7 +4,8 @@
 
 import("//build/config/android/config.gni")
 import("//build/config/android/rules.gni")
-import("//build/module_args/v8.gni")
+import("//build_overrides/v8.gni")
+import("//chrome/android/chrome_public_apk_tmpl.gni")
 import("//chrome/version.gni")
 import("//testing/test.gni")
 import("//third_party/icu/config.gni")
@@ -142,7 +143,6 @@ android_library("chrome_java") {
     "//third_party/android_protobuf:protobuf_nano_javalib",
     "//third_party/android_swipe_refresh:android_swipe_refresh_java",
     "//third_party/android_tools:android_gcm_java",
-    "//third_party/android_tools:android_support_design_java",
     "//third_party/android_tools:android_support_v13_java",
     "//third_party/android_tools:android_support_v7_appcompat_java",
     "//third_party/android_tools:android_support_v7_mediarouter_java",
@@ -162,6 +162,7 @@ android_library("chrome_java") {
 
   srcjar_deps = [
     ":chrome_android_java_enums_srcjar",
+    ":chrome_android_java_google_api_keys_srcjar",
     ":chrome_version_srcjar",
     ":custom_tabs_service_aidl",
     ":resource_id_javagen",
@@ -170,6 +171,7 @@ android_library("chrome_java") {
     "//chrome:content_settings_type_javagen",
     "//components/enhanced_bookmarks:enhanced_bookmarks_java_enums_srcjar",
     "//components/offline_pages:offline_pages_enums_java",
+    "//components/omnibox/browser:autocomplete_match_type_javagen",
   ]
 
   DEPRECATED_java_in_dir = "java/src"
@@ -182,6 +184,19 @@ android_library("chrome_java") {
 # GYP: //chrome/chrome_browser.gypi:connection_security_levels_java
 # GYP: //chrome/chrome_browser.gypi:tab_load_status_java
 # GYP: //chrome/chrome_browser.gypi:infobar_action_type_java
+
+action("chrome_android_java_google_api_keys_srcjar") {
+  script = "//build/android/gyp/java_google_api_keys.py"
+  _output_path = "$target_gen_dir/$target_name.srcjar"
+  outputs = [
+    _output_path,
+  ]
+  args = [
+    "--srcjar",
+    rebase_path(_output_path, root_build_dir),
+  ]
+}
+
 java_cpp_enum("chrome_android_java_enums_srcjar") {
   sources = [
     "//chrome/browser/android/activity_type_ids.h",
@@ -192,16 +207,6 @@ java_cpp_enum("chrome_android_java_enums_srcjar") {
     "//chrome/browser/profiles/profile_metrics.h",
     "//chrome/browser/ssl/security_state_model.h",
     "//chrome/browser/ui/android/infobars/infobar_android.h",
-  ]
-  outputs = [
-    "org/chromium/chrome/browser/ActivityTypeIds.java",
-    "org/chromium/chrome/browser/feedback/ConnectivityCheckResult.java",
-    "org/chromium/chrome/browser/ntp/MostVisitedTileType.java",
-    "org/chromium/chrome/browser/ShortcutSource.java",
-    "org/chromium/chrome/browser/TabLoadStatus.java",
-    "org/chromium/chrome/browser/profiles/ProfileAccountManagementMetrics.java",
-    "org/chromium/chrome/browser/ssl/ConnectionSecurityLevel.java",
-    "org/chromium/chrome/browser/infobar/ActionType.java",
   ]
 }
 
@@ -227,40 +232,35 @@ java_cpp_template("resource_id_javagen") {
 # GYP: //chrome/chrome_tests.gypi:chrome_junit_tests
 junit_binary("chrome_junit_tests") {
   java_files = [
+    "junit/src/org/chromium/chrome/browser/SSLClientCertificateRequestTest.java",
+    "junit/src/org/chromium/chrome/browser/crash/LogcatExtractionCallableTest.java",
     "junit/src/org/chromium/chrome/browser/externalauth/ExternalAuthUtilsTest.java",
-    "junit/src/org/chromium/chrome/browser/omaha/ResponseParserTest.java",
+    "junit/src/org/chromium/chrome/browser/firstrun/FirstRunFlowSequencerTest.java",
+    "junit/src/org/chromium/chrome/browser/gcore/GoogleApiClientConnectionHelperTest.java",
+    "junit/src/org/chromium/chrome/browser/invalidations/InvalidationControllerTest.java",
     "junit/src/org/chromium/chrome/browser/media/remote/AbstractMediaRouteControllerTest.java",
     "junit/src/org/chromium/chrome/browser/media/remote/MediaUrlResolverTest.java",
     "junit/src/org/chromium/chrome/browser/media/remote/RemoteVideoInfoTest.java",
     "junit/src/org/chromium/chrome/browser/media/remote/TransportControlTest.java",
+    "junit/src/org/chromium/chrome/browser/media/router/ChromeMediaRouterTest.java",
+    "junit/src/org/chromium/chrome/browser/omaha/ResponseParserTest.java",
+    "junit/src/org/chromium/chrome/browser/omaha/VersionNumberTest.java",
+    "junit/src/org/chromium/chrome/browser/util/NonThreadSafeTest.java",
+    "junit/src/org/chromium/chrome/browser/webapps/WebappDataStorageTest.java",
+    "junit/src/org/chromium/chrome/browser/webapps/WebappRegistryTest.java",
   ]
   deps = [
     ":chrome_java",
     "//base:base_java",
     "//base:base_java_test_support",
     "//base:base_junit_test_support",
+    "//components/invalidation/impl:java",
     "//sync:sync_java_test_support",
     "//sync/android:sync_java",
+    "//third_party/cacheinvalidation:cacheinvalidation_javalib",
     "//third_party/junit:hamcrest",
     "//third_party/android_tools:android_support_v7_mediarouter_java",
-  ]
-}
-
-# GYP: //chrome/chrome_tests.gypi:chrome_uiautomator_tests_java
-android_library("chrome_uiautomator_tests_java") {
-  testonly = true
-  DEPRECATED_java_in_dir = "uiautomator_tests/src"
-  deps = [
-    "//base:base_java_test_support",
-    "//third_party/android_tools:uiautomator_java",
-  ]
-}
-
-# GYP: //chrome/chrome_tests.gypi:chrome_uiautomator_tests
-uiautomator_test("chrome_uiautomator_tests") {
-  testonly = true
-  deps = [
-    ":chrome_uiautomator_tests_java",
+    google_play_services_library,
   ]
 }
 
@@ -333,6 +333,7 @@ android_library("chrome_shared_test_java") {
     "//third_party/jsr-305:jsr_305_javalib",
     "//ui/android:ui_java",
     "//ui/android:ui_javatests",
+    google_play_services_library,
   ]
 }
 
@@ -346,30 +347,17 @@ android_resources("chrome_public_apk_resources") {
   ]
 }
 
-chrome_public_apk_assets_dir = "$root_build_dir/chrome_public_apk_assets"
-
-copy_ex("chrome_public_apk_assets") {
-  clear_dir = true
-  dest = chrome_public_apk_assets_dir
+android_assets("chrome_public_apk_assets") {
   sources = chrome_android_paks_gypi.chrome_android_pak_input_resources
-  if (icu_use_data_file) {
-    sources += [ "$root_build_dir/icudtl.dat" ]
-  }
+  sources += [ "$root_build_dir/resources.pak" ]
+  disable_compression = true
+
   deps = [
     "//chrome:packed_extra_resources",
     "//chrome:packed_resources",
-    "//third_party/icu:icudata",
+    "//third_party/icu:icu_assets",
+    "//v8:v8_external_startup_data_assets",
   ]
-
-  if (v8_use_external_startup_data) {
-    sources += [
-      "$root_build_dir/natives_blob.bin",
-      "$root_build_dir/snapshot_blob.bin",
-    ]
-    deps += [ "//v8" ]
-  }
-
-  sources += [ "$root_build_dir/resources.pak" ]
 }
 
 # GYP: //chrome/android/chrome_apk.gyp:chrome_apk_manifest
@@ -417,18 +405,22 @@ shared_library("chrome_public") {
   #],
 }
 
-android_apk("chrome_public_apk") {
+chrome_public_apk_tmpl("chrome_public_apk") {
   version_name = "Developer Build"
   version_code = "1"
   android_manifest = get_target_outputs(":chrome_public_apk_manifest")
   android_manifest = android_manifest[1]
   apk_name = "ChromePublic"
-  native_libs = [ "$root_build_dir/lib.stripped/libchrome_public.so" ]
+  native_libs = [ "libchrome_public.so" ]
   native_lib_version_rule = "//build/util:chrome_version_json"
-  _native_lib_file =
-      rebase_path("$root_gen_dir/CHROME_VERSION.json", root_out_dir)
-  native_lib_version_arg = "@FileArg($_native_lib_file:full-quoted)"
-  asset_location = chrome_public_apk_assets_dir
+
+  # Only attempt loading the library from the APK for 64 bit devices
+  # until the number of 32 bit devices which don't support this
+  # approach falls to a minimal level -  http://crbug.com/390618.
+  if (chromium_linker_supported &&
+      (target_cpu == "arm64" || target_cpu == "x64")) {
+    load_library_from_apk = chrome_public_apk_load_library_from_apk
+  }
 
   deps = [
     ":chrome_java",
@@ -454,7 +446,6 @@ jinja_template("chrome_public_test_apk_manifest") {
 
 # GYP: //chrome/android/chrome_apk.gyp:chrome_public_test_apk
 instrumentation_test_apk("chrome_public_test_apk") {
-  # TODO(GYP,cjhopman): Does this need version code/name?
   apk_name = "ChromePublicTest"
   apk_under_test = ":chrome_public_apk"
   android_manifest = chrome_public_test_apk_manifest
@@ -463,4 +454,5 @@ instrumentation_test_apk("chrome_public_test_apk") {
     "//chrome/android:chrome_shared_test_java",
   ]
   isolate_file = "../chrome_public_test_apk.isolate"
+  proguard_enabled = !is_debug
 }

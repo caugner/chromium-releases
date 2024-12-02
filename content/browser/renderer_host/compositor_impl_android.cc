@@ -179,9 +179,6 @@ class SingleThreadTaskGraphRunner
 base::LazyInstance<SingleThreadTaskGraphRunner> g_task_graph_runner =
     LAZY_INSTANCE_INITIALIZER;
 
-base::LazyInstance<cc::LayerSettings> g_layer_settings =
-    LAZY_INSTANCE_INITIALIZER;
-
 } // anonymous namespace
 
 // static
@@ -199,12 +196,12 @@ void Compositor::Initialize() {
 
 // static
 const cc::LayerSettings& Compositor::LayerSettings() {
-  return g_layer_settings.Get();
+  return ui::WindowAndroidCompositor::LayerSettings();
 }
 
 // static
 void Compositor::SetLayerSettings(const cc::LayerSettings& settings) {
-  g_layer_settings.Get() = settings;
+  ui::WindowAndroidCompositor::SetLayerSettings(settings);
 }
 
 // static
@@ -232,6 +229,7 @@ scoped_ptr<cc::SurfaceIdAllocator> CompositorImpl::CreateSurfaceIdAllocator() {
 CompositorImpl::CompositorImpl(CompositorClient* client,
                                gfx::NativeWindow root_window)
     : root_layer_(cc::Layer::Create(Compositor::LayerSettings())),
+      resource_manager_(root_window),
       surface_id_allocator_(GetSurfaceManager() ? CreateSurfaceIdAllocator()
                                                 : nullptr),
       has_transparent_background_(false),
@@ -447,6 +445,8 @@ void CompositorImpl::CreateLayerTreeHost() {
       command_line->HasSwitch(cc::switches::kEnableGpuBenchmarking));
   settings.initial_debug_state.show_fps_counter =
       command_line->HasSwitch(cc::switches::kUIShowFPSCounter);
+  settings.use_property_trees =
+      command_line->HasSwitch(cc::switches::kEnableCompositorPropertyTrees);
   // TODO(enne): Update this this compositor to use the scheduler.
   settings.single_thread_proxy_scheduler = false;
 
@@ -462,9 +462,8 @@ void CompositorImpl::CreateLayerTreeHost() {
   params.main_task_runner = base::ThreadTaskRunnerHandle::Get();
   params.settings = &settings;
   host_ = cc::LayerTreeHost::CreateSingleThreaded(this, &params);
-  host_->SetVisible(false);
+  DCHECK(!host_->visible());
   host_->SetRootLayer(root_layer_);
-  host_->SetLayerTreeHostClientReady();
   host_->SetViewportSize(size_);
   host_->set_has_transparent_background(has_transparent_background_);
   host_->SetDeviceScaleFactor(device_scale_factor_);
@@ -576,10 +575,10 @@ CreateGpuProcessViewContext(
                                                 NULL));
 }
 
-void CompositorImpl::Layout() {
+void CompositorImpl::UpdateLayerTreeHost() {
   base::AutoReset<bool> auto_reset_ignore_schedule(&ignore_schedule_composite_,
                                                    true);
-  client_->Layout();
+  client_->UpdateLayerTreeHost();
 }
 
 void CompositorImpl::OnGpuChannelEstablished() {
@@ -713,7 +712,7 @@ void CompositorImpl::ScheduleComposite() {
   if (ignore_schedule_composite_ || !host_->visible())
     return;
 
-  DCHECK_IMPLIES(needs_composite_, WillComposite());
+  DCHECK(!needs_composite_ || WillComposite());
   needs_composite_ = true;
   // We currently expect layer tree invalidations at most once per frame
   // during normal operation and therefore try to composite immediately

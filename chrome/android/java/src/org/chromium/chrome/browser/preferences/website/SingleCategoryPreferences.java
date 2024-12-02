@@ -21,6 +21,8 @@ import android.widget.ListView;
 import android.widget.TextView;
 
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.media.cdm.MediaDrmCredentialManager;
+import org.chromium.chrome.browser.media.cdm.MediaDrmCredentialManager.MediaDrmCredentialManagerCallback;
 import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreference;
 import org.chromium.chrome.browser.preferences.ChromeBasePreference;
 import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
@@ -31,8 +33,6 @@ import org.chromium.chrome.browser.preferences.ManagedPreferencesUtils;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.ProtectedContentResetCredentialConfirmDialogFragment;
 import org.chromium.chrome.browser.widget.TintedDrawable;
-import org.chromium.content.browser.MediaDrmCredentialManager;
-import org.chromium.content.browser.MediaDrmCredentialManager.MediaDrmCredentialManagerCallback;
 import org.chromium.ui.widget.Toast;
 
 import java.util.ArrayList;
@@ -250,7 +250,7 @@ public class SingleCategoryPreferences extends PreferenceFragment
         // Set the title and arrow icons for the header.
         allowedGroup.setGroupTitle(resourceId, numAllowed);
         TintedDrawable icon = TintedDrawable.constructTintedDrawable(getResources(),
-                mAllowListExpanded ? R.drawable.ic_expand : R.drawable.ic_collapse);
+                mAllowListExpanded ? R.drawable.ic_expanded : R.drawable.ic_collapsed);
         allowedGroup.setExpanded(mAllowListExpanded);
         allowedGroup.setIcon(icon);
     }
@@ -267,7 +267,7 @@ public class SingleCategoryPreferences extends PreferenceFragment
         // Set the title and arrow icons for the header.
         blockedGroup.setGroupTitle(R.string.website_settings_blocked_group_heading, numBlocked);
         TintedDrawable icon = TintedDrawable.constructTintedDrawable(getResources(),
-                mBlockListExpanded ? R.drawable.ic_expand : R.drawable.ic_collapse);
+                mBlockListExpanded ? R.drawable.ic_expanded : R.drawable.ic_collapsed);
         blockedGroup.setExpanded(mBlockListExpanded);
         blockedGroup.setIcon(icon);
     }

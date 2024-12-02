@@ -4,7 +4,6 @@
 
 package org.chromium.net;
 
-import android.content.Context;
 import android.os.Build;
 import android.os.ConditionVariable;
 import android.os.Handler;
@@ -18,7 +17,15 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeClassQualifiedName;
 import org.chromium.base.annotations.UsedByReflection;
+import org.chromium.net.urlconnection.CronetHttpURLConnection;
+import org.chromium.net.urlconnection.CronetURLStreamHandlerFactory;
 
+import java.net.Proxy;
+import java.net.URL;
+import java.net.URLConnection;
+import java.net.URLStreamHandlerFactory;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -26,11 +33,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.concurrent.GuardedBy;
 
 /**
- * UrlRequestContext using Chromium HTTP stack implementation.
+ * CronetEngine using Chromium HTTP stack implementation.
  */
 @JNINamespace("cronet")
-@UsedByReflection("UrlRequestContext.java")
-class CronetUrlRequestContext extends UrlRequestContext {
+@UsedByReflection("CronetEngine.java")
+class CronetUrlRequestContext extends CronetEngine {
     private static final int LOG_NONE = 3;  // LOG(FATAL), no VLOG.
     private static final int LOG_DEBUG = -1;  // LOG(FATAL...INFO), VLOG(1)
     private static final int LOG_VERBOSE = -2;  // LOG(FATAL...INFO), VLOG(2)
@@ -62,12 +69,11 @@ class CronetUrlRequestContext extends UrlRequestContext {
     private final ObserverList<NetworkQualityThroughputListener> mThroughputListenerList =
             new ObserverList<NetworkQualityThroughputListener>();
 
-    @UsedByReflection("UrlRequestContext.java")
-    public CronetUrlRequestContext(Context context,
-                                   UrlRequestContextConfig config) {
-        CronetLibraryLoader.ensureInitialized(context, config);
+    @UsedByReflection("CronetEngine.java")
+    public CronetUrlRequestContext(CronetEngine.Builder builder) {
+        CronetLibraryLoader.ensureInitialized(builder.getContext(), builder);
         nativeSetMinLogLevel(getLoggingLevel());
-        mUrlRequestContextAdapter = nativeCreateRequestContextAdapter(config.toString());
+        mUrlRequestContextAdapter = nativeCreateRequestContextAdapter(builder.toJSONString());
         if (mUrlRequestContextAdapter == 0) {
             throw new NullPointerException("Context Adapter creation failed.");
         }
@@ -93,23 +99,28 @@ class CronetUrlRequestContext extends UrlRequestContext {
     }
 
     @Override
-    public UrlRequest createRequest(String url, UrlRequestListener listener,
-                                    Executor executor) {
+    public UrlRequest createRequest(String url, UrlRequest.Callback callback, Executor executor) {
         synchronized (mLock) {
             checkHaveAdapter();
             return new CronetUrlRequest(this, mUrlRequestContextAdapter, url,
-                    UrlRequest.REQUEST_PRIORITY_MEDIUM, listener, executor);
+                    UrlRequest.Builder.REQUEST_PRIORITY_MEDIUM, callback, executor);
         }
     }
 
     @Override
-    public UrlRequest createRequest(String url, UrlRequestListener listener,
-                                    Executor executor, int priority) {
+    public UrlRequest createRequest(
+            String url, UrlRequest.Callback callback, Executor executor, int priority) {
         synchronized (mLock) {
             checkHaveAdapter();
-            return new CronetUrlRequest(this, mUrlRequestContextAdapter, url,
-                    priority, listener, executor);
+            return new CronetUrlRequest(
+                    this, mUrlRequestContextAdapter, url, priority, callback, executor);
         }
+    }
+
+    @Override
+    BidirectionalStream createBidirectionalStream(String url, BidirectionalStream.Callback callback,
+            Executor executor, String httpMethod, List<Map.Entry<String, String>> requestHeaders) {
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -166,6 +177,13 @@ class CronetUrlRequestContext extends UrlRequestContext {
             checkHaveAdapter();
             nativeStopNetLog(mUrlRequestContextAdapter);
         }
+    }
+
+    // This method is intentionally non-static to ensure Cronet native library
+    // is loaded by class constructor.
+    @Override
+    public byte[] getGlobalMetricsDeltas() {
+        return nativeGetHistogramDeltas();
     }
 
     @Override
@@ -256,6 +274,28 @@ class CronetUrlRequestContext extends UrlRequestContext {
         }
     }
 
+    @Override
+    public URLConnection openConnection(URL url) {
+        return openConnection(url, Proxy.NO_PROXY);
+    }
+
+    @Override
+    public URLConnection openConnection(URL url, Proxy proxy) {
+        if (proxy.type() != Proxy.Type.DIRECT) {
+            throw new UnsupportedOperationException();
+        }
+        String protocol = url.getProtocol();
+        if ("http".equals(protocol) || "https".equals(protocol)) {
+            return new CronetHttpURLConnection(url, this);
+        }
+        throw new UnsupportedOperationException("Unexpected protocol:" + protocol);
+    }
+
+    @Override
+    public URLStreamHandlerFactory createURLStreamHandlerFactory() {
+        return new CronetURLStreamHandlerFactory(this);
+    }
+
     /**
      * Mark request as started to prevent shutdown when there are active
      * requests.
@@ -282,7 +322,7 @@ class CronetUrlRequestContext extends UrlRequestContext {
 
     private void checkHaveAdapter() throws IllegalStateException {
         if (!haveRequestContextAdapter()) {
-            throw new IllegalStateException("Context is shut down.");
+            throw new IllegalStateException("Engine is shut down.");
         }
     }
 
@@ -359,10 +399,12 @@ class CronetUrlRequestContext extends UrlRequestContext {
         }
     }
 
-    // Native methods are implemented in cronet_url_request_context.cc.
+    // Native methods are implemented in cronet_url_request_context_adapter.cc.
     private static native long nativeCreateRequestContextAdapter(String config);
 
     private static native int nativeSetMinLogLevel(int loggingLevel);
+
+    private static native byte[] nativeGetHistogramDeltas();
 
     @NativeClassQualifiedName("CronetURLRequestContextAdapter")
     private native void nativeDestroy(long nativePtr);

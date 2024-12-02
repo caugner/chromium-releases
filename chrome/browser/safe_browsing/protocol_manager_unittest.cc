@@ -37,13 +37,8 @@ const char kAppVer[] = "1.0";
 const char kAdditionalQuery[] = "additional_query";
 const char kUrlSuffix[] = "&ext=0";
 
-#if defined(OS_ANDROID)
-const char kDefaultPhishList[] = "goog-mobilephish-shavar";
-const char kDefaultMalwareList[] = "goog-mobilemalware-shavar";
-#else
 const char kDefaultPhishList[] = "goog-phish-shavar";
 const char kDefaultMalwareList[] = "goog-malware-shavar";
-#endif
 
 // Add-prefix chunk with single prefix.
 const char kRawChunkPayload1[] = {
@@ -69,6 +64,8 @@ const std::string kChunkPayload2(kRawChunkPayload2, sizeof(kRawChunkPayload2));
 
 }  // namespace
 
+namespace safe_browsing {
+
 class SafeBrowsingProtocolManagerTest : public testing::Test {
  protected:
   std::string key_param_;
@@ -91,9 +88,6 @@ class SafeBrowsingProtocolManagerTest : public testing::Test {
     config.backup_http_error_url_prefix = kBackupHttpUrlPrefix;
     config.backup_network_error_url_prefix = kBackupNetworkUrlPrefix;
     config.version = kAppVer;
-#if defined(OS_ANDROID)
-    config.disable_connection_check = true;
-#endif
     return scoped_ptr<SafeBrowsingProtocolManager>(
         SafeBrowsingProtocolManager::Create(delegate, NULL, config));
   }
@@ -186,26 +180,23 @@ TEST_F(SafeBrowsingProtocolManagerTest, TestChunkStrings) {
   phish.subs = "16,32,64-96";
   EXPECT_EQ(base::StringPrintf("%s;a:1,4,6,8-20,99:s:16,32,64-96\n",
                                kDefaultPhishList),
-            safe_browsing::FormatList(phish));
+            FormatList(phish));
 
   // Add chunks only.
   phish.subs = "";
-  EXPECT_EQ(base::StringPrintf("%s;a:1,4,6,8-20,99\n",
-                               kDefaultPhishList),
-            safe_browsing::FormatList(phish));
+  EXPECT_EQ(base::StringPrintf("%s;a:1,4,6,8-20,99\n", kDefaultPhishList),
+            FormatList(phish));
 
   // Sub chunks only.
   phish.adds = "";
   phish.subs = "16,32,64-96";
-  EXPECT_EQ(base::StringPrintf("%s;s:16,32,64-96\n",
-                               kDefaultPhishList),
-            safe_browsing::FormatList(phish));
+  EXPECT_EQ(base::StringPrintf("%s;s:16,32,64-96\n", kDefaultPhishList),
+            FormatList(phish));
 
   // No chunks of either type.
   phish.adds = "";
   phish.subs = "";
-  EXPECT_EQ(base::StringPrintf("%s;\n", kDefaultPhishList),
-            safe_browsing::FormatList(phish));
+  EXPECT_EQ(base::StringPrintf("%s;\n", kDefaultPhishList), FormatList(phish));
 }
 
 TEST_F(SafeBrowsingProtocolManagerTest, TestGetHashBackOffTimes) {
@@ -416,7 +407,7 @@ TEST_F(SafeBrowsingProtocolManagerTest, ExistingDatabase) {
   net::TestURLFetcherFactory url_fetcher_factory;
 
   std::vector<SBListChunkRanges> ranges;
-  SBListChunkRanges range_phish(safe_browsing_util::kPhishingList);
+  SBListChunkRanges range_phish(kPhishingList);
   range_phish.adds = "adds_phish";
   range_phish.subs = "subs_phish";
   ranges.push_back(range_phish);
@@ -1139,3 +1130,5 @@ TEST_F(SafeBrowsingProtocolManagerTest, MultipleRedirectResponsesWithChunks) {
 
   EXPECT_TRUE(pm->IsUpdateScheduled());
 }
+
+}  // namespace safe_browsing

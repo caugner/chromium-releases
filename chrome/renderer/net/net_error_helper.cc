@@ -34,8 +34,8 @@
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
-#include "third_party/WebKit/public/web/WebView.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/jstemplate_builder.h"
 #include "url/gurl.h"
@@ -50,6 +50,7 @@ using error_page::DnsProbeStatus;
 using error_page::DnsProbeStatusToString;
 using error_page::ErrorPageParams;
 using error_page::NetErrorHelperCore;
+using error_page::OfflinePageStatus;
 
 namespace {
 
@@ -57,15 +58,16 @@ namespace {
 // suggestions.  If it takes too long, just use the local error page.
 const int kNavigationCorrectionFetchTimeoutSec = 3;
 
-NetErrorHelperCore::PageType GetLoadingPageType(const blink::WebFrame* frame) {
-  GURL url = frame->provisionalDataSource()->request().url();
+NetErrorHelperCore::PageType GetLoadingPageType(RenderFrame* render_frame) {
+  blink::WebFrame* web_frame = render_frame->GetWebFrame();
+  GURL url = web_frame->provisionalDataSource()->request().url();
   if (!url.is_valid() || url.spec() != kUnreachableWebDataURL)
     return NetErrorHelperCore::NON_ERROR_PAGE;
   return NetErrorHelperCore::ERROR_PAGE;
 }
 
-NetErrorHelperCore::FrameType GetFrameType(const blink::WebFrame* frame) {
-  if (!frame->parent())
+NetErrorHelperCore::FrameType GetFrameType(RenderFrame* render_frame) {
+  if (render_frame->IsMainFrame())
     return NetErrorHelperCore::MAIN_FRAME;
   return NetErrorHelperCore::SUB_FRAME;
 }
@@ -82,6 +84,8 @@ NetErrorHelper::NetErrorHelper(RenderFrame* render_frame)
       command_line->HasSwitch(switches::kEnableOfflineAutoReload);
   bool auto_reload_visible_only =
       command_line->HasSwitch(switches::kEnableOfflineAutoReloadVisibleOnly);
+  // TODO(mmenke): Consider only creating a NetErrorHelperCore for main frames.
+  // subframes don't need any of the NetErrorHelperCore's extra logic.
   core_.reset(new NetErrorHelperCore(this,
                                      auto_reload_enabled,
                                      auto_reload_visible_only,
@@ -102,24 +106,28 @@ void NetErrorHelper::TrackClick(int tracking_id) {
 }
 
 void NetErrorHelper::DidStartProvisionalLoad() {
-  blink::WebFrame* frame = render_frame()->GetWebFrame();
-  core_->OnStartLoad(GetFrameType(frame), GetLoadingPageType(frame));
+  core_->OnStartLoad(GetFrameType(render_frame()),
+                     GetLoadingPageType(render_frame()));
 }
 
 void NetErrorHelper::DidCommitProvisionalLoad(bool is_new_navigation,
                                               bool is_same_page_navigation) {
+  // If this is a "same page" navigation, it's not a real navigation.  There
+  // wasn't a start event for it, either, so just ignore it.
+  if (is_same_page_navigation)
+    return;
+
   // Invalidate weak pointers from old error page controllers. If loading a new
   // error page, the controller has not yet been attached, so this won't affect
   // it.
   weak_controller_delegate_factory_.InvalidateWeakPtrs();
 
-  blink::WebFrame* frame = render_frame()->GetWebFrame();
-  core_->OnCommitLoad(GetFrameType(frame), frame->document().url());
+  core_->OnCommitLoad(GetFrameType(render_frame()),
+                      render_frame()->GetWebFrame()->document().url());
 }
 
 void NetErrorHelper::DidFinishLoad() {
-  blink::WebFrame* frame = render_frame()->GetWebFrame();
-  core_->OnFinishLoad(GetFrameType(frame));
+  core_->OnFinishLoad(GetFrameType(render_frame()));
 }
 
 void NetErrorHelper::OnStop() {
@@ -143,6 +151,9 @@ bool NetErrorHelper::OnMessageReceived(const IPC::Message& message) {
                         OnSetCanShowNetworkDiagnosticsDialog);
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetNavigationCorrectionInfo,
                         OnSetNavigationCorrectionInfo);
+#if defined(OS_ANDROID)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetOfflinePageInfo, OnSetOfflinePageInfo)
+#endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -153,27 +164,29 @@ void NetErrorHelper::NetworkStateChanged(bool enabled) {
   core_->NetworkStateChanged(enabled);
 }
 
-void NetErrorHelper::GetErrorHTML(
-    blink::WebFrame* frame,
-    const blink::WebURLError& error,
-    bool is_failed_post,
-    std::string* error_html) {
-  core_->GetErrorHTML(GetFrameType(frame), error, is_failed_post, error_html);
+void NetErrorHelper::GetErrorHTML(const blink::WebURLError& error,
+                                  bool is_failed_post,
+                                  bool is_ignoring_cache,
+                                  std::string* error_html) {
+  core_->GetErrorHTML(GetFrameType(render_frame()), error, is_failed_post,
+                      is_ignoring_cache, error_html);
 }
 
-bool NetErrorHelper::ShouldSuppressErrorPage(blink::WebFrame* frame,
-                                             const GURL& url) {
-  return core_->ShouldSuppressErrorPage(GetFrameType(frame), url);
+bool NetErrorHelper::ShouldSuppressErrorPage(const GURL& url) {
+  return core_->ShouldSuppressErrorPage(GetFrameType(render_frame()), url);
 }
 
 void NetErrorHelper::GenerateLocalizedErrorPage(
     const blink::WebURLError& error,
     bool is_failed_post,
     bool can_show_network_diagnostics_dialog,
+    OfflinePageStatus offline_page_status,
     scoped_ptr<ErrorPageParams> params,
     bool* reload_button_shown,
     bool* show_saved_copy_button_shown,
     bool* show_cached_copy_button_shown,
+    bool* show_offline_pages_button_shown,
+    bool* show_offline_copy_button_shown,
     std::string* error_html) const {
   error_html->clear();
 
@@ -184,31 +197,36 @@ void NetErrorHelper::GenerateLocalizedErrorPage(
     NOTREACHED() << "unable to load template.";
   } else {
     base::DictionaryValue error_strings;
-    LocalizedError::GetStrings(error.reason, error.domain.utf8(),
-                               error.unreachableURL, is_failed_post,
-                               error.staleCopyInCache,
-                               can_show_network_diagnostics_dialog,
-                               RenderThread::Get()->GetLocale(),
-                               render_frame()->GetRenderView()->
-                                   GetAcceptLanguages(),
-                               params.Pass(), &error_strings);
+    LocalizedError::GetStrings(
+        error.reason,
+        error.domain.utf8(),
+        error.unreachableURL,
+        is_failed_post,
+        error.staleCopyInCache,
+        can_show_network_diagnostics_dialog,
+        offline_page_status,
+        RenderThread::Get()->GetLocale(),
+        render_frame()->GetRenderView()->GetAcceptLanguages(),
+        params.Pass(),
+        &error_strings);
     *reload_button_shown = error_strings.Get("reloadButton", nullptr);
     *show_saved_copy_button_shown =
         error_strings.Get("showSavedCopyButton", nullptr);
     *show_cached_copy_button_shown =
         error_strings.Get("cacheButton", nullptr);
+    *show_offline_pages_button_shown =
+        error_strings.Get("showOfflinePagesButton", nullptr);
+    *show_offline_copy_button_shown =
+        error_strings.Get("showOfflineCopyButton", nullptr);
     // "t" is the id of the template's root node.
     *error_html = webui::GetTemplatesHtml(template_html, &error_strings, "t");
   }
 }
 
-void NetErrorHelper::LoadErrorPageInMainFrame(const std::string& html,
-                                              const GURL& failed_url) {
-  blink::WebView* web_view = render_frame()->GetRenderView()->GetWebView();
-  if (!web_view)
-    return;
-  blink::WebFrame* frame = web_view->mainFrame();
-  frame->loadHTMLString(html, GURL(kUnreachableWebDataURL), failed_url, true);
+void NetErrorHelper::LoadErrorPage(const std::string& html,
+                                   const GURL& failed_url) {
+  render_frame()->GetWebFrame()->loadHTMLString(
+      html, GURL(kUnreachableWebDataURL), failed_url, true);
 }
 
 void NetErrorHelper::EnablePageHelperFunctions() {
@@ -218,19 +236,21 @@ void NetErrorHelper::EnablePageHelperFunctions() {
 
 void NetErrorHelper::UpdateErrorPage(const blink::WebURLError& error,
                                      bool is_failed_post,
-                                     bool can_show_network_diagnostics_dialog) {
+                                     bool can_show_network_diagnostics_dialog,
+                                     OfflinePageStatus offline_page_status) {
   base::DictionaryValue error_strings;
-  LocalizedError::GetStrings(error.reason,
-                             error.domain.utf8(),
-                             error.unreachableURL,
-                             is_failed_post,
-                             error.staleCopyInCache,
-                             can_show_network_diagnostics_dialog,
-                             RenderThread::Get()->GetLocale(),
-                             render_frame()->GetRenderView()->
-                                 GetAcceptLanguages(),
-                             scoped_ptr<ErrorPageParams>(),
-                             &error_strings);
+  LocalizedError::GetStrings(
+      error.reason,
+      error.domain.utf8(),
+      error.unreachableURL,
+      is_failed_post,
+      error.staleCopyInCache,
+      can_show_network_diagnostics_dialog,
+      offline_page_status,
+      RenderThread::Get()->GetLocale(),
+      render_frame()->GetRenderView()->GetAcceptLanguages(),
+      scoped_ptr<ErrorPageParams>(),
+      &error_strings);
 
   std::string json;
   JSONWriter::Write(error_strings, &json);
@@ -251,11 +271,6 @@ void NetErrorHelper::FetchNavigationCorrections(
     const std::string& navigation_correction_request_body) {
   DCHECK(!correction_fetcher_.get());
 
-  blink::WebView* web_view = render_frame()->GetRenderView()->GetWebView();
-  if (!web_view)
-    return;
-  blink::WebFrame* frame = web_view->mainFrame();
-
   correction_fetcher_.reset(
       content::ResourceFetcher::Create(navigation_correction_url));
   correction_fetcher_->SetMethod("POST");
@@ -263,7 +278,7 @@ void NetErrorHelper::FetchNavigationCorrections(
   correction_fetcher_->SetHeader("Content-Type", "application/json");
 
   correction_fetcher_->Start(
-      frame,
+      render_frame()->GetWebFrame(),
       blink::WebURLRequest::RequestContextInternal,
       blink::WebURLRequest::FrameTypeNone,
       content::ResourceFetcher::PLATFORM_LOADER,
@@ -281,11 +296,6 @@ void NetErrorHelper::CancelFetchNavigationCorrections() {
 void NetErrorHelper::SendTrackingRequest(
     const GURL& tracking_url,
     const std::string& tracking_request_body) {
-  blink::WebView* web_view = render_frame()->GetRenderView()->GetWebView();
-  if (!web_view)
-    return;
-  blink::WebFrame* frame = web_view->mainFrame();
-
   // If there's already a pending tracking request, this will cancel it.
   tracking_fetcher_.reset(content::ResourceFetcher::Create(tracking_url));
   tracking_fetcher_->SetMethod("POST");
@@ -293,7 +303,7 @@ void NetErrorHelper::SendTrackingRequest(
   tracking_fetcher_->SetHeader("Content-Type", "application/json");
 
   tracking_fetcher_->Start(
-      frame,
+      render_frame()->GetWebFrame(),
       blink::WebURLRequest::RequestContextInternal,
       blink::WebURLRequest::FrameTypeTopLevel,
       content::ResourceFetcher::PLATFORM_LOADER,
@@ -301,8 +311,8 @@ void NetErrorHelper::SendTrackingRequest(
                  base::Unretained(this)));
 }
 
-void NetErrorHelper::ReloadPage() {
-  render_frame()->GetWebFrame()->reload(false);
+void NetErrorHelper::ReloadPage(bool ignore_cache) {
+  render_frame()->GetWebFrame()->reload(ignore_cache);
 }
 
 void NetErrorHelper::LoadPageFromCache(const GURL& page_url) {
@@ -320,6 +330,20 @@ void NetErrorHelper::LoadPageFromCache(const GURL& page_url) {
 void NetErrorHelper::DiagnoseError(const GURL& page_url) {
   render_frame()->Send(new ChromeViewHostMsg_RunNetworkDiagnostics(
       render_frame()->GetRoutingID(), page_url));
+}
+
+void NetErrorHelper::ShowOfflinePages() {
+#if defined(OS_ANDROID)
+  render_frame()->Send(new ChromeViewHostMsg_ShowOfflinePages(
+      render_frame()->GetRoutingID()));
+#endif  // defined(OS_ANDROID)
+}
+
+void NetErrorHelper::LoadOfflineCopy(const GURL& page_url) {
+#if defined(OS_ANDROID)
+  render_frame()->Send(new ChromeViewHostMsg_LoadOfflineCopy(
+      render_frame()->GetRoutingID(), page_url));
+#endif  // defined(OS_ANDROID)
 }
 
 void NetErrorHelper::OnNetErrorInfo(int status_num) {
@@ -365,3 +389,10 @@ void NetErrorHelper::OnTrackingRequestComplete(
     const std::string& data) {
   tracking_fetcher_.reset();
 }
+
+#if defined(OS_ANDROID)
+void NetErrorHelper::OnSetOfflinePageInfo(
+    OfflinePageStatus offline_page_status) {
+  core_->OnSetOfflinePageInfo(offline_page_status);
+}
+#endif  // defined(OS_ANDROID)

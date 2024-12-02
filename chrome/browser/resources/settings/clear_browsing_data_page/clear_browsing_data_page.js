@@ -4,22 +4,22 @@
 
 /**
  * @fileoverview
- * 'cr-settings-clear-browsing-data-page' provides options to delete browsing
+ * 'settings-clear-browsing-data-page' provides options to delete browsing
  * data that has been cached by chromium.
  *
  * Example:
  *
  *    <iron-animated-pages>
- *      <cr-settings-clear-browsing-data-page prefs="{{prefs}}">
- *      </cr-settings-clear-browsing-data-page>
+ *      <settings-clear-browsing-data-page prefs="{{prefs}}">
+ *      </settings-clear-browsing-data-page>
  *      ... other pages ...
  *    </iron-animated-pages>
  *
  * @group Chrome Settings Elements
- * @element cr-settings-privacy-page
+ * @element settings-privacy-page
  */
 Polymer({
-  is: 'cr-settings-clear-browsing-data-page',
+  is: 'settings-clear-browsing-data-page',
 
   properties: {
     /**
@@ -42,18 +42,23 @@ Polymer({
      * List of options for the dropdown menu.
      * The order of entries in this array matches the
      * prefs.browser.clear_data.time_period.value enum.
+     * @private {!Array<!Array<number, string>>}
      */
     clearFromOptions_: {
       readOnly: true,
       type: Array,
       value: [
-        loadTimeData.getString('clearDataHour'),
-        loadTimeData.getString('clearDataDay'),
-        loadTimeData.getString('clearDataWeek'),
-        loadTimeData.getString('clearData4Weeks'),
-        loadTimeData.getString('clearDataEverything'),
+        [0, loadTimeData.getString('clearDataHour')],
+        [1, loadTimeData.getString('clearDataDay')],
+        [2, loadTimeData.getString('clearDataWeek')],
+        [3, loadTimeData.getString('clearData4Weeks')],
+        [4, loadTimeData.getString('clearDataEverything')],
       ],
     },
+  },
+
+  ready: function() {
+    this.$.clearFrom.menuOptions = this.clearFromOptions_;
   },
 
   attached: function() {

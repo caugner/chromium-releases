@@ -4,6 +4,7 @@
 
 #import "ios/web/web_state/ui/crw_ui_web_view_web_controller.h"
 
+#import "base/ios/ios_util.h"
 #import "base/ios/ns_error_util.h"
 #import "base/ios/weak_nsobject.h"
 #include "base/json/json_reader.h"
@@ -550,13 +551,25 @@ const size_t kMaxMessageQueueSize = 262144;
   if (!_uiWebView) {
     return web::WEB_VIEW_DOCUMENT_TYPE_GENERIC;
   }
-  NSString* documentType =
-      [_uiWebView stringByEvaluatingJavaScriptFromString:
-          @"'' + document"];
-  if ([documentType isEqualToString:@"[object HTMLDocument]"])
-    return web::WEB_VIEW_DOCUMENT_TYPE_HTML;
-  else if ([documentType isEqualToString:@"[object Document]"])
-    return web::WEB_VIEW_DOCUMENT_TYPE_GENERIC;
+
+  if (base::ios::IsRunningOnIOS9OrLater()) {
+    // On iOS 9, evaluating '' + document always results in [object
+    // HTMLDocument], even for PDFs. However, document.contentType is properly
+    // defined.
+    NSString* MIMEType = [_uiWebView
+        stringByEvaluatingJavaScriptFromString:@"document.contentType"];
+    return [self documentTypeFromMIMEType:MIMEType];
+  } else {
+    // On iOS 8 and below, document.contentType is always undefined. Use this
+    // instead.
+    NSString* documentType =
+        [_uiWebView stringByEvaluatingJavaScriptFromString:@"'' + document"];
+    if ([documentType isEqualToString:@"[object HTMLDocument]"])
+      return web::WEB_VIEW_DOCUMENT_TYPE_HTML;
+    else if ([documentType isEqualToString:@"[object Document]"])
+      return web::WEB_VIEW_DOCUMENT_TYPE_GENERIC;
+  }
+
   return web::WEB_VIEW_DOCUMENT_TYPE_UNKNOWN;
 }
 
@@ -903,9 +916,7 @@ const size_t kMaxMessageQueueSize = 262144;
   // Messages are queued and processed asynchronously. However, user
   // may initiate JavaScript at arbitrary times (e.g. through Omnibox
   // "javascript:alert('foo')"). This delays processing of queued messages
-  // until JavaScript execution is completed.
-  // TODO(pkl): This should have a unit test or UI Automation test case.
-  // See crbug.com/228125
+  // until JavaScript execution is completed. See crbug/228125 for details.
   if (_inJavaScriptContext) {
     [self performSelector:@selector(respondToJSInvoke)
                withObject:nil
@@ -955,8 +966,7 @@ const size_t kMaxMessageQueueSize = 262144;
     DLOG(WARNING) << "Messages from JS ignored due to excessive length";
     return;
   }
-  NSString* commandString = [[nsurl fragment]
-      stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+  NSString* commandString = [nsurl.fragment stringByRemovingPercentEncoding];
 
   GURL originURL(net::GURLWithNSURL(request.mainDocumentURL));
 

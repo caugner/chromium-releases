@@ -30,8 +30,14 @@ bool FakeSyncService::IsSyncActive() const {
   return false;
 }
 
+void FakeSyncService::TriggerRefresh(const syncer::ModelTypeSet& types) {}
+
 syncer::ModelTypeSet FakeSyncService::GetActiveDataTypes() const {
   return syncer::ModelTypeSet();
+}
+
+SyncClient* FakeSyncService::GetSyncClient() const {
+  return nullptr;
 }
 
 void FakeSyncService::AddObserver(SyncServiceObserver* observer) {

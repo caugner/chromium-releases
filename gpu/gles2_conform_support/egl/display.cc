@@ -35,7 +35,8 @@ Display::Display(EGLNativeDisplayType display_id)
 #endif
       create_offscreen_(false),
       create_offscreen_width_(0),
-      create_offscreen_height_(0) {
+      create_offscreen_height_(0),
+      next_fence_sync_release_(1) {
 }
 
 Display::~Display() {
@@ -275,6 +276,7 @@ bool Display::MakeCurrent(EGLSurface draw, EGLSurface read, EGLContext ctx) {
     DCHECK(IsValidSurface(read));
     DCHECK(IsValidContext(ctx));
     gles2::SetGLContext(context_.get());
+    gl_context_->MakeCurrent(gl_surface_.get());
   }
   return true;
 }
@@ -350,6 +352,31 @@ gpu::CommandBufferNamespace Display::GetNamespaceID() const {
 
 uint64_t Display::GetCommandBufferID() const {
   return 0;
+}
+
+uint64_t Display::GenerateFenceSyncRelease() {
+  return next_fence_sync_release_++;
+}
+
+bool Display::IsFenceSyncRelease(uint64_t release) {
+  return release > 0 && release < next_fence_sync_release_;
+}
+
+bool Display::IsFenceSyncFlushed(uint64_t release) {
+  return IsFenceSyncRelease(release);
+}
+
+bool Display::IsFenceSyncFlushReceived(uint64_t release) {
+  return IsFenceSyncRelease(release);
+}
+
+void Display::SignalSyncToken(const gpu::SyncToken& sync_token,
+                              const base::Closure& callback) {
+  NOTIMPLEMENTED();
+}
+
+bool Display::CanWaitUnverifiedSyncToken(const gpu::SyncToken* sync_token) {
+  return false;
 }
 
 }  // namespace egl

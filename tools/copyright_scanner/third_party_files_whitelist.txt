@@ -55,8 +55,6 @@ content/browser/frame_host/navigation_controller_impl.cc
 # Copyright Apple, Inc, Google Inc; BSD license. Not used on Android.
 # Moved from third_party/WebKit/.
 content/browser/renderer_host/input/web_input_event_builders_mac.mm
-# Copyright Alf Watt; BSD license. Not used on Android.
-content/browser/geolocation/osx_wifi.h
 # Copyright Apple Inc and Torch Mobile Inc; BSD license. Moved from
 # third_party/WebKit/.
 content/renderer/history_controller.h
@@ -81,6 +79,7 @@ media/filters/vp8_bool_decoder.cc
 # Native client not used in Android. Contains the word "Copyright"
 native_client_sdk/doc_generated/rest-devsite-examples.html
 # String '(c)' used in certificates organization names
+net/cert/x509_certificate_known_roots_win.h
 net/quic/crypto/common_cert_set_1a.inc
 net/quic/crypto/common_cert_set_1b.inc
 # String '(c)' used in certificates organization names
@@ -207,3 +206,6 @@ ui/webui/resources/js/cr/ui/array_data_model.js
 # code is taken from WebKit, the license for which we already pick up from
 # webkit/.
 components/test_runner/helper/layout_test_helper_mac.mm
+# Bundles of existing code.
+chrome/browser/resources/md_downloads/crisper.js
+chrome/browser/resources/md_downloads/vulcanized.html

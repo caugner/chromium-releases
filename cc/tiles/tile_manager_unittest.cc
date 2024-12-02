@@ -11,7 +11,7 @@
 #include "cc/test/begin_frame_args_test.h"
 #include "cc/test/fake_display_list_raster_source.h"
 #include "cc/test/fake_display_list_recording_source.h"
-#include "cc/test/fake_impl_proxy.h"
+#include "cc/test/fake_impl_task_runner_provider.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_output_surface_client.h"
@@ -37,7 +37,10 @@ namespace {
 
 class LowResTilingsSettings : public LayerTreeSettings {
  public:
-  LowResTilingsSettings() { create_low_res_tiling = true; }
+  LowResTilingsSettings() {
+    create_low_res_tiling = true;
+    verify_property_trees = true;
+  }
 };
 
 class TileManagerTilePriorityQueueTest : public testing::Test {
@@ -47,10 +50,10 @@ class TileManagerTilePriorityQueueTest : public testing::Test {
         max_tiles_(10000),
         ready_to_activate_(false),
         id_(7),
-        proxy_(base::ThreadTaskRunnerHandle::Get()),
+        task_runner_provider_(base::ThreadTaskRunnerHandle::Get()),
         output_surface_(FakeOutputSurface::Create3d()),
         host_impl_(LowResTilingsSettings(),
-                   &proxy_,
+                   &task_runner_provider_,
                    &shared_bitmap_manager_,
                    &task_graph_runner_,
                    &gpu_memory_buffer_manager_) {}
@@ -78,6 +81,7 @@ class TileManagerTilePriorityQueueTest : public testing::Test {
   }
 
   virtual void InitializeRenderer() {
+    host_impl_.SetVisible(true);
     host_impl_.InitializeRenderer(output_surface_.get());
   }
 
@@ -108,20 +112,20 @@ class TileManagerTilePriorityQueueTest : public testing::Test {
     active_layer_->set_fixed_tile_size(tile_size);
   }
 
-  void SetupTrees(scoped_refptr<RasterSource> pending_raster_source,
-                  scoped_refptr<RasterSource> active_raster_source) {
+  void SetupTrees(scoped_refptr<DisplayListRasterSource> pending_raster_source,
+                  scoped_refptr<DisplayListRasterSource> active_raster_source) {
     SetupPendingTree(active_raster_source);
     ActivateTree();
     SetupPendingTree(pending_raster_source);
   }
 
-  void SetupPendingTree(scoped_refptr<RasterSource> raster_source) {
+  void SetupPendingTree(scoped_refptr<DisplayListRasterSource> raster_source) {
     host_impl_.CreatePendingTree();
     LayerTreeImpl* pending_tree = host_impl_.pending_tree();
 
     // Steal from the recycled tree.
     scoped_ptr<LayerImpl> old_pending_root = pending_tree->DetachLayerTree();
-    DCHECK_IMPLIES(old_pending_root, old_pending_root->id() == id_);
+    DCHECK(!old_pending_root || old_pending_root->id() == id_);
 
     scoped_ptr<FakePictureLayerImpl> pending_layer;
     if (old_pending_root) {
@@ -143,6 +147,7 @@ class TileManagerTilePriorityQueueTest : public testing::Test {
 
     // Add tilings/tiles for the layer.
     bool update_lcd_text = false;
+    host_impl_.pending_tree()->BuildPropertyTreesForTesting();
     host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
   }
 
@@ -158,7 +163,7 @@ class TileManagerTilePriorityQueueTest : public testing::Test {
   int max_tiles_;
   bool ready_to_activate_;
   int id_;
-  FakeImplProxy proxy_;
+  FakeImplTaskRunnerProvider task_runner_provider_;
   scoped_ptr<OutputSurface> output_surface_;
   FakeLayerTreeHostImpl host_impl_;
   FakePictureLayerImpl* pending_layer_;
@@ -615,6 +620,8 @@ TEST_F(TileManagerTilePriorityQueueTest, ActivationComesBeforeEventually) {
   host_impl_.SetViewportSize(gfx::Size(200, 200));
   host_impl_.AdvanceToNextFrame(base::TimeDelta::FromMilliseconds(1));
   bool update_lcd_text = false;
+  host_impl_.pending_tree()->property_trees()->needs_rebuild = true;
+  host_impl_.pending_tree()->BuildPropertyTreesForTesting();
   host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
 
   host_impl_.SetRequiresHighResToDraw();
@@ -836,6 +843,8 @@ TEST_F(TileManagerTilePriorityQueueTest,
 
   host_impl_.AdvanceToNextFrame(base::TimeDelta::FromMilliseconds(1));
   bool update_lcd_text = false;
+  host_impl_.pending_tree()->property_trees()->needs_rebuild = true;
+  host_impl_.pending_tree()->BuildPropertyTreesForTesting();
   host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
 
   ActivateTree();
@@ -951,6 +960,8 @@ TEST_F(TileManagerTilePriorityQueueTest,
 
   host_impl_.AdvanceToNextFrame(base::TimeDelta::FromMilliseconds(1));
   bool update_lcd_text = false;
+  host_impl_.pending_tree()->property_trees()->needs_rebuild = true;
+  host_impl_.pending_tree()->BuildPropertyTreesForTesting();
   host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
 
   pending_child_layer->SetOpacity(0.0);
@@ -1363,6 +1374,22 @@ TEST_F(TileManagerTilePriorityQueueTest,
   host_impl_.resource_pool()->ReleaseResource(resource, 0);
 }
 
+TEST_F(TileManagerTilePriorityQueueTest, DefaultMemoryPolicy) {
+  const gfx::Size layer_bounds(1000, 1000);
+  host_impl_.SetViewportSize(layer_bounds);
+  SetupDefaultTrees(layer_bounds);
+
+  host_impl_.tile_manager()->PrepareTiles(host_impl_.global_tile_state());
+
+  // 64MB is the default mem limit.
+  EXPECT_EQ(67108864u,
+            host_impl_.global_tile_state().hard_memory_limit_in_bytes);
+  EXPECT_EQ(TileMemoryLimitPolicy::ALLOW_ANYTHING,
+            host_impl_.global_tile_state().memory_limit_policy);
+  EXPECT_EQ(ManagedMemoryPolicy::kDefaultNumResourcesLimit,
+            host_impl_.global_tile_state().num_resources_limit);
+}
+
 TEST_F(TileManagerTilePriorityQueueTest, RasterQueueAllUsesCorrectTileBounds) {
   // Verify that we use the real tile bounds when advancing phases during the
   // tile iteration.
@@ -1421,32 +1448,97 @@ TEST_F(TileManagerTilePriorityQueueTest, RasterQueueAllUsesCorrectTileBounds) {
   }
 }
 
+// TODO(vmpstr): Merge TileManagerTest and TileManagerTilePriorityQueueTest.
 class TileManagerTest : public testing::Test {
  public:
   TileManagerTest()
       : output_surface_(FakeOutputSurface::CreateSoftware(
-            make_scoped_ptr(new SoftwareOutputDevice))),
-        host_impl_(new MockLayerTreeHostImpl(&proxy_,
-                                             &shared_bitmap_manager_,
-                                             &task_graph_runner_)) {
+            make_scoped_ptr(new SoftwareOutputDevice))) {}
+
+  void SetUp() override {
+    LayerTreeSettings settings;
+    CustomizeSettings(&settings);
+    host_impl_.reset(new MockLayerTreeHostImpl(settings, &task_runner_provider_,
+                                               &shared_bitmap_manager_,
+                                               &task_graph_runner_));
+    host_impl_->SetVisible(true);
     host_impl_->InitializeRenderer(output_surface_.get());
+  }
+
+  void SetupDefaultTrees(const gfx::Size& layer_bounds) {
+    scoped_refptr<FakeDisplayListRasterSource> pending_raster_source =
+        FakeDisplayListRasterSource::CreateFilled(layer_bounds);
+    scoped_refptr<FakeDisplayListRasterSource> active_raster_source =
+        FakeDisplayListRasterSource::CreateFilled(layer_bounds);
+
+    SetupTrees(pending_raster_source, active_raster_source);
+  }
+
+  // This matches picture_layer_impl_unittest's ActivateTree.
+  void ActivateTree() {
+    host_impl_->ActivateSyncTree();
+    CHECK(!host_impl_->pending_tree());
+    bool update_lcd_text = false;
+    host_impl_->active_tree()->UpdateDrawProperties(update_lcd_text);
+  }
+
+  void SetupTrees(scoped_refptr<DisplayListRasterSource> pending_raster_source,
+                  scoped_refptr<DisplayListRasterSource> active_raster_source) {
+    SetupPendingTree(active_raster_source);
+    ActivateTree();
+    SetupPendingTree(pending_raster_source);
+  }
+
+  void SetupPendingTree(scoped_refptr<DisplayListRasterSource> raster_source) {
+    host_impl_->CreatePendingTree();
+    LayerTreeImpl* pending_tree = host_impl_->pending_tree();
+
+    // Steal from the recycled tree.
+    scoped_ptr<LayerImpl> old_pending_root = pending_tree->DetachLayerTree();
+    scoped_ptr<FakePictureLayerImpl> pending_layer;
+    if (old_pending_root) {
+      pending_layer.reset(
+          static_cast<FakePictureLayerImpl*>(old_pending_root.release()));
+      pending_layer->SetRasterSourceOnPending(raster_source, Region());
+    } else {
+      int id = 7;
+      pending_layer = FakePictureLayerImpl::CreateWithRasterSource(
+          pending_tree, id, raster_source);
+      pending_layer->SetDrawsContent(true);
+      pending_layer->SetHasRenderSurface(true);
+    }
+    // The bounds() just mirror the raster source size.
+    pending_layer->SetBounds(pending_layer->raster_source()->GetSize());
+    pending_tree->SetRootLayer(pending_layer.Pass());
+
+    // Add tilings/tiles for the layer.
+    bool update_lcd_text = false;
+    host_impl_->pending_tree()->BuildPropertyTreesForTesting();
+    host_impl_->pending_tree()->UpdateDrawProperties(update_lcd_text);
   }
 
  protected:
   // MockLayerTreeHostImpl allows us to intercept tile manager callbacks.
   class MockLayerTreeHostImpl : public FakeLayerTreeHostImpl {
    public:
-    MockLayerTreeHostImpl(Proxy* proxy,
+    MockLayerTreeHostImpl(const LayerTreeSettings& settings,
+                          TaskRunnerProvider* task_runner_provider,
                           SharedBitmapManager* manager,
                           TaskGraphRunner* task_graph_runner)
-        : FakeLayerTreeHostImpl(proxy, manager, task_graph_runner) {}
+        : FakeLayerTreeHostImpl(settings,
+                                task_runner_provider,
+                                manager,
+                                task_graph_runner) {}
 
     MOCK_METHOD0(NotifyAllTileTasksCompleted, void());
   };
 
+  // By default do no customization.
+  virtual void CustomizeSettings(LayerTreeSettings* settings) {}
+
   TestSharedBitmapManager shared_bitmap_manager_;
   TestTaskGraphRunner task_graph_runner_;
-  FakeImplProxy proxy_;
+  FakeImplTaskRunnerProvider task_runner_provider_;
   scoped_ptr<OutputSurface> output_surface_;
   scoped_ptr<MockLayerTreeHostImpl> host_impl_;
 };
@@ -1479,6 +1571,40 @@ TEST_F(TileManagerTest, AllWorkFinishedTest) {
   }
 }
 
+TEST_F(TileManagerTest, ActivateAndDrawWhenOOM) {
+  SetupDefaultTrees(gfx::Size(1000, 1000));
+
+  auto global_state = host_impl_->global_tile_state();
+  global_state.hard_memory_limit_in_bytes = 1u;
+  global_state.soft_memory_limit_in_bytes = 1u;
+
+  {
+    base::RunLoop run_loop;
+    EXPECT_FALSE(host_impl_->tile_manager()->HasScheduledTileTasksForTesting());
+    EXPECT_CALL(*host_impl_, NotifyAllTileTasksCompleted())
+        .WillOnce(testing::Invoke([&run_loop]() { run_loop.Quit(); }));
+    host_impl_->tile_manager()->PrepareTiles(global_state);
+    EXPECT_TRUE(host_impl_->tile_manager()->HasScheduledTileTasksForTesting());
+    run_loop.Run();
+  }
+
+  EXPECT_TRUE(host_impl_->tile_manager()->IsReadyToDraw());
+  EXPECT_TRUE(host_impl_->tile_manager()->IsReadyToActivate());
+  EXPECT_TRUE(host_impl_->notify_tile_state_changed_called());
+
+  // Next PrepareTiles should skip NotifyTileStateChanged since all tiles
+  // are marked oom already.
+  {
+    base::RunLoop run_loop;
+    host_impl_->set_notify_tile_state_changed_called(false);
+    EXPECT_CALL(*host_impl_, NotifyAllTileTasksCompleted())
+        .WillOnce(testing::Invoke([&run_loop]() { run_loop.Quit(); }));
+    host_impl_->tile_manager()->PrepareTiles(global_state);
+    run_loop.Run();
+    EXPECT_FALSE(host_impl_->notify_tile_state_changed_called());
+  }
+}
+
 TEST_F(TileManagerTest, LowResHasNoImage) {
   gfx::Size size(10, 12);
   TileResolution resolutions[] = {HIGH_RESOLUTION, LOW_RESOLUTION};
@@ -1486,7 +1612,7 @@ TEST_F(TileManagerTest, LowResHasNoImage) {
   for (size_t i = 0; i < arraysize(resolutions); ++i) {
     SCOPED_TRACE(resolutions[i]);
 
-    // Make a RasterSource that will draw a blue bitmap image.
+    // Make a DisplayListRasterSource that will draw a blue bitmap image.
     skia::RefPtr<SkSurface> surface = skia::AdoptRef(
         SkSurface::NewRasterN32Premul(size.width(), size.height()));
     ASSERT_NE(surface, nullptr);
@@ -1564,10 +1690,11 @@ TEST_F(TileManagerTest, LowResHasNoImage) {
   }
 }
 
-// Fake TileTaskRunner that just cancels all scheduled tasks immediately.
-class CancellingTileTaskRunner : public TileTaskRunner, public TileTaskClient {
+// Fake TileTaskRunner that just no-ops all calls.
+class FakeTileTaskRunner : public TileTaskRunner, public TileTaskClient {
  public:
-  CancellingTileTaskRunner() {}
+  FakeTileTaskRunner() {}
+  ~FakeTileTaskRunner() override {}
 
   // TileTaskRunner methods.
   void SetClient(TileTaskRunnerClient* client) override {}
@@ -1580,13 +1707,7 @@ class CancellingTileTaskRunner : public TileTaskRunner, public TileTaskClient {
     return false;
   }
 
-  void ScheduleTasks(TileTaskQueue* queue) override {
-    // Just call CompleteOnOriginThread on each item in the queue. As none of
-    // these items have run yet, they will be treated as cancelled tasks.
-    for (const auto& task : queue->items) {
-      task.task->CompleteOnOriginThread(this);
-    }
-  }
+  void ScheduleTasks(TileTaskQueue* queue) override {}
 
   // TileTaskClient methods.
   scoped_ptr<RasterBuffer> AcquireBufferForRaster(
@@ -1597,30 +1718,51 @@ class CancellingTileTaskRunner : public TileTaskRunner, public TileTaskClient {
     return nullptr;
   }
   void ReleaseBufferForRaster(scoped_ptr<RasterBuffer> buffer) override {}
+};
 
+// Fake TileTaskRunner that just cancels all scheduled tasks immediately.
+class CancellingTileTaskRunner : public FakeTileTaskRunner {
+ public:
+  CancellingTileTaskRunner() {}
   ~CancellingTileTaskRunner() override {}
+
+  void ScheduleTasks(TileTaskQueue* queue) override {
+    // Just call CompleteOnOriginThread on each item in the queue. As none of
+    // these items have run yet, they will be treated as cancelled tasks.
+    for (const auto& task : queue->items) {
+      task.task->CompleteOnOriginThread(this);
+    }
+  }
+};
+
+class PartialRasterTileManagerTest : public TileManagerTest {
+ public:
+  void CustomizeSettings(LayerTreeSettings* settings) override {
+    settings->use_partial_raster = true;
+  }
 };
 
 // Ensures that if a raster task is cancelled, it gets returned to the resource
 // pool with an invalid content ID, not with its invalidated content ID.
-TEST_F(TileManagerTest, CancelledTasksHaveNoContentId) {
+TEST_F(PartialRasterTileManagerTest, CancelledTasksHaveNoContentId) {
   // Create a CancellingTaskRunner and set it on the tile manager so that all
   // scheduled work is immediately cancelled.
   CancellingTileTaskRunner cancelling_runner;
   host_impl_->tile_manager()->SetTileTaskRunnerForTesting(&cancelling_runner);
 
   // Pick arbitrary IDs - they don't really matter as long as they're constant.
-  int layer_id = 7;
-  int invalidated_id = 43;
+  const int kLayerId = 7;
+  const uint64_t kInvalidatedId = 43;
+  const gfx::Size kTileSize(128, 128);
 
   scoped_refptr<FakeDisplayListRasterSource> pending_raster_source =
-      FakeDisplayListRasterSource::CreateFilled(gfx::Size(128, 128));
+      FakeDisplayListRasterSource::CreateFilled(kTileSize);
   host_impl_->CreatePendingTree();
   LayerTreeImpl* pending_tree = host_impl_->pending_tree();
 
   // Steal from the recycled tree.
   scoped_ptr<FakePictureLayerImpl> pending_layer =
-      FakePictureLayerImpl::CreateWithRasterSource(pending_tree, layer_id,
+      FakePictureLayerImpl::CreateWithRasterSource(pending_tree, kLayerId,
                                                    pending_raster_source);
   pending_layer->SetDrawsContent(true);
   pending_layer->SetHasRenderSurface(true);
@@ -1630,13 +1772,14 @@ TEST_F(TileManagerTest, CancelledTasksHaveNoContentId) {
   pending_tree->SetRootLayer(pending_layer.Pass());
 
   // Add tilings/tiles for the layer.
+  host_impl_->pending_tree()->BuildPropertyTreesForTesting();
   host_impl_->pending_tree()->UpdateDrawProperties(false /* update_lcd_text */);
 
   // Build the raster queue and invalidate the top tile.
   scoped_ptr<RasterTilePriorityQueue> queue(host_impl_->BuildRasterQueue(
       SAME_PRIORITY_FOR_BOTH_TREES, RasterTilePriorityQueue::Type::ALL));
   EXPECT_FALSE(queue->IsEmpty());
-  queue->Top().tile()->SetInvalidated(gfx::Rect(), invalidated_id);
+  queue->Top().tile()->SetInvalidated(gfx::Rect(), kInvalidatedId);
 
   // PrepareTiles to schedule tasks. Due to the CancellingTileTaskRunner, these
   // tasks will immediately be canceled.
@@ -1646,11 +1789,110 @@ TEST_F(TileManagerTest, CancelledTasksHaveNoContentId) {
   // with its invalidated resource ID.
   host_impl_->resource_pool()->CheckBusyResources();
   EXPECT_FALSE(host_impl_->resource_pool()->TryAcquireResourceWithContentId(
-      invalidated_id));
+      kInvalidatedId));
 
   // Free our host_impl_ before the cancelling_runner we passed it, as it will
   // use that class in clean up.
   host_impl_ = nullptr;
+}
+
+// Fake TileTaskRunner that verifies the resource content ID of raster tasks.
+class VerifyResourceContentIdTileTaskRunner : public FakeTileTaskRunner {
+ public:
+  explicit VerifyResourceContentIdTileTaskRunner(uint64_t expected_resource_id)
+      : expected_resource_id_(expected_resource_id) {}
+  ~VerifyResourceContentIdTileTaskRunner() override {}
+
+  void ScheduleTasks(TileTaskQueue* queue) override {
+    for (const auto& task : queue->items) {
+      // Triggers a call to AcquireBufferForRaster.
+      task.task->ScheduleOnOriginThread(this);
+      // Calls TileManager as though task was cancelled.
+      task.task->CompleteOnOriginThread(this);
+    }
+  }
+
+  // TileTaskClient methods.
+  scoped_ptr<RasterBuffer> AcquireBufferForRaster(
+      const Resource* resource,
+      uint64_t resource_content_id,
+      uint64_t previous_content_id) override {
+    EXPECT_EQ(expected_resource_id_, resource_content_id);
+    return nullptr;
+  }
+
+ private:
+  uint64_t expected_resource_id_;
+};
+
+// Runs a test to ensure that partial raster is either enabled or disabled,
+// depending on |partial_raster_enabled|'s value. Takes ownership of host_impl
+// so that cleanup order can be controlled.
+void RunPartialRasterCheck(scoped_ptr<LayerTreeHostImpl> host_impl,
+                           bool partial_raster_enabled) {
+  // Pick arbitrary IDs - they don't really matter as long as they're constant.
+  const int kLayerId = 7;
+  const uint64_t kInvalidatedId = 43;
+  const uint64_t kExpectedId = partial_raster_enabled ? kInvalidatedId : 0u;
+  const gfx::Size kTileSize(128, 128);
+
+  // Create a VerifyResourceContentIdTileTaskRunner to ensure that the raster
+  // task we see is created with |kExpectedId|.
+  VerifyResourceContentIdTileTaskRunner verifying_runner(kExpectedId);
+  host_impl->tile_manager()->SetTileTaskRunnerForTesting(&verifying_runner);
+
+  // Ensure there's a resource with our |kInvalidatedId| in the resource pool.
+  host_impl->resource_pool()->ReleaseResource(
+      host_impl->resource_pool()->AcquireResource(kTileSize, RGBA_8888),
+      kInvalidatedId);
+  host_impl->resource_pool()->CheckBusyResources();
+
+  scoped_refptr<FakeDisplayListRasterSource> pending_raster_source =
+      FakeDisplayListRasterSource::CreateFilled(kTileSize);
+  host_impl->CreatePendingTree();
+  LayerTreeImpl* pending_tree = host_impl->pending_tree();
+
+  // Steal from the recycled tree.
+  scoped_ptr<FakePictureLayerImpl> pending_layer =
+      FakePictureLayerImpl::CreateWithRasterSource(pending_tree, kLayerId,
+                                                   pending_raster_source);
+  pending_layer->SetDrawsContent(true);
+  pending_layer->SetHasRenderSurface(true);
+
+  // The bounds() just mirror the raster source size.
+  pending_layer->SetBounds(pending_layer->raster_source()->GetSize());
+  pending_tree->SetRootLayer(pending_layer.Pass());
+
+  // Add tilings/tiles for the layer.
+  host_impl->pending_tree()->BuildPropertyTreesForTesting();
+  host_impl->pending_tree()->UpdateDrawProperties(false /* update_lcd_text */);
+
+  // Build the raster queue and invalidate the top tile.
+  scoped_ptr<RasterTilePriorityQueue> queue(host_impl->BuildRasterQueue(
+      SAME_PRIORITY_FOR_BOTH_TREES, RasterTilePriorityQueue::Type::ALL));
+  EXPECT_FALSE(queue->IsEmpty());
+  queue->Top().tile()->SetInvalidated(gfx::Rect(), kInvalidatedId);
+
+  // PrepareTiles to schedule tasks. Due to the
+  // VerifyPreviousContentTileTaskRunner, these tasks will verified and
+  // cancelled.
+  host_impl->tile_manager()->PrepareTiles(host_impl->global_tile_state());
+
+  // Free our host_impl before the cancelling_runner we passed it, as it will
+  // use that class in clean up.
+  host_impl = nullptr;
+}
+
+// Ensures that the tile manager successfully reuses tiles when partial
+// raster is enabled.
+TEST_F(PartialRasterTileManagerTest, PartialRasterSuccessfullyEnabled) {
+  RunPartialRasterCheck(host_impl_.Pass(), true /* partial_raster_enabled */);
+}
+
+// Ensures that the tile manager does not attempt to reuse tiles when partial
+// raster is disabled.
+TEST_F(TileManagerTest, PartialRasterSuccessfullyDisabled) {
+  RunPartialRasterCheck(host_impl_.Pass(), false /* partial_raster_enabled */);
 }
 
 }  // namespace

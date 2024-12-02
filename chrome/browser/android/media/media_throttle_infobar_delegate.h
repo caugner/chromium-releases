@@ -42,6 +42,7 @@ class MediaThrottleInfoBarDelegate : public ConfirmInfoBarDelegate {
   // ConfirmInfoBarDelegate:
   MediaThrottleInfoBarDelegate* AsMediaThrottleInfoBarDelegate() override;
   base::string16 GetMessageText() const override;
+  int GetIconId() const override;
   base::string16 GetButtonLabel(InfoBarButton button) const override;
   bool Accept() override;
   bool Cancel() override;

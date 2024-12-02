@@ -14,6 +14,7 @@
 #include "content/common/dom_storage/dom_storage_types.h"
 #include "content/common/frame_messages.h"
 #include "content/common/input_messages.h"
+#include "content/common/site_isolation_policy.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/native_web_keyboard_event.h"
@@ -61,8 +62,13 @@ namespace {
 
 const int32 kRouteId = 5;
 const int32 kMainFrameRouteId = 6;
+// TODO(avi): Widget routing IDs should be distinct from the view routing IDs,
+// once RenderWidgetHost is distilled from RenderViewHostImpl.
+// https://crbug.com/545684
+const int32_t kMainFrameWidgetRouteId = 5;
 const int32 kNewWindowRouteId = 7;
 const int32 kNewFrameRouteId = 10;
+const int32_t kNewFrameWidgetRouteId = 7;
 
 // Converts |ascii_character| into |key_code| and returns true on success.
 // Handles only the characters needed by tests.
@@ -135,7 +141,7 @@ RenderViewTest::~RenderViewTest() {
 
 void RenderViewTest::ProcessPendingMessages() {
   msg_loop_.task_runner()->PostTask(FROM_HERE,
-                                    base::MessageLoop::QuitClosure());
+                                    base::MessageLoop::QuitWhenIdleClosure());
   msg_loop_.Run();
 }
 
@@ -175,8 +181,19 @@ void RenderViewTest::LoadHTML(const char* html) {
 }
 
 PageState RenderViewTest::GetCurrentPageState() {
-  RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
-  return HistoryEntryToPageState(impl->history_controller()->GetCurrentEntry());
+  RenderViewImpl* view_impl = static_cast<RenderViewImpl*>(view_);
+
+  if (SiteIsolationPolicy::UseSubframeNavigationEntries()) {
+    // This returns a PageState object for the main frame, excluding subframes.
+    // This could be extended to all local frames if needed by tests, but it
+    // cannot include out-of-process frames.
+    TestRenderFrame* frame =
+        static_cast<TestRenderFrame*>(view_impl->GetMainRenderFrame());
+    return SingleHistoryItemToPageState(frame->current_history_item());
+  } else {
+    return HistoryEntryToPageState(
+        view_impl->history_controller()->GetCurrentEntry());
+  }
 }
 
 void RenderViewTest::GoBack(const PageState& state) {
@@ -205,6 +222,8 @@ void RenderViewTest::SetUp() {
     render_thread_.reset(new MockRenderThread());
   render_thread_->set_routing_id(kRouteId);
   render_thread_->set_new_window_routing_id(kNewWindowRouteId);
+  render_thread_->set_new_window_main_frame_widget_routing_id(
+      kNewFrameWidgetRouteId);
   render_thread_->set_new_frame_routing_id(kNewFrameRouteId);
 
 #if defined(OS_MACOSX)
@@ -242,6 +261,7 @@ void RenderViewTest::SetUp() {
   view_params.web_preferences = WebPreferences();
   view_params.view_id = kRouteId;
   view_params.main_frame_routing_id = kMainFrameRouteId;
+  view_params.main_frame_widget_routing_id = kMainFrameWidgetRouteId;
   view_params.session_storage_namespace_id = kInvalidSessionStorageNamespaceId;
   view_params.swapped_out = false;
   view_params.replicated_frame_state = FrameReplicationState();
@@ -318,14 +338,14 @@ void RenderViewTest::SendWebKeyboardEvent(
     const blink::WebKeyboardEvent& key_event) {
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
   impl->OnMessageReceived(
-      InputMsg_HandleInputEvent(0, &key_event, ui::LatencyInfo(), false));
+      InputMsg_HandleInputEvent(0, &key_event, ui::LatencyInfo()));
 }
 
 void RenderViewTest::SendWebMouseEvent(
     const blink::WebMouseEvent& mouse_event) {
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
   impl->OnMessageReceived(
-      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo(), false));
+      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo()));
 }
 
 const char* const kGetCoordinatesScript =
@@ -392,10 +412,10 @@ void RenderViewTest::SimulatePointClick(const gfx::Point& point) {
   mouse_event.clickCount = 1;
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
   impl->OnMessageReceived(
-      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo(), false));
+      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo()));
   mouse_event.type = WebInputEvent::MouseUp;
   impl->OnMessageReceived(
-      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo(), false));
+      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo()));
 }
 
 
@@ -416,10 +436,10 @@ void RenderViewTest::SimulatePointRightClick(const gfx::Point& point) {
   mouse_event.clickCount = 1;
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
   impl->OnMessageReceived(
-      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo(), false));
+      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo()));
   mouse_event.type = WebInputEvent::MouseUp;
   impl->OnMessageReceived(
-      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo(), false));
+      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo()));
 }
 
 void RenderViewTest::SimulateRectTap(const gfx::Rect& rect) {
@@ -430,9 +450,10 @@ void RenderViewTest::SimulateRectTap(const gfx::Rect& rect) {
   gesture_event.data.tap.width = rect.width();
   gesture_event.data.tap.height = rect.height();
   gesture_event.type = WebInputEvent::GestureTap;
+  gesture_event.sourceDevice = blink::WebGestureDeviceTouchpad;
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
   impl->OnMessageReceived(
-      InputMsg_HandleInputEvent(0, &gesture_event, ui::LatencyInfo(), false));
+      InputMsg_HandleInputEvent(0, &gesture_event, ui::LatencyInfo()));
   impl->FocusChangeComplete();
 }
 
@@ -445,7 +466,8 @@ void RenderViewTest::Reload(const GURL& url) {
   CommonNavigationParams common_params(
       url, Referrer(), ui::PAGE_TRANSITION_LINK, FrameMsg_Navigate_Type::RELOAD,
       true, false, base::TimeTicks(),
-      FrameMsg_UILoadMetricsReportType::NO_REPORT, GURL(), GURL());
+      FrameMsg_UILoadMetricsReportType::NO_REPORT, GURL(), GURL(),
+      LOFI_UNSPECIFIED, base::TimeTicks::Now());
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
   TestRenderFrame* frame =
       static_cast<TestRenderFrame*>(impl->GetMainRenderFrame());
@@ -577,7 +599,8 @@ void RenderViewTest::GoToOffset(int offset, const PageState& state) {
   CommonNavigationParams common_params(
       GURL(), Referrer(), ui::PAGE_TRANSITION_FORWARD_BACK,
       FrameMsg_Navigate_Type::NORMAL, true, false, base::TimeTicks(),
-      FrameMsg_UILoadMetricsReportType::NO_REPORT, GURL(), GURL());
+      FrameMsg_UILoadMetricsReportType::NO_REPORT, GURL(), GURL(),
+      LOFI_UNSPECIFIED, base::TimeTicks::Now());
   RequestNavigationParams request_params;
   request_params.page_state = state;
   request_params.page_id = impl->page_id_ + offset;

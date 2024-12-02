@@ -13,7 +13,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/ui/libgtk2ui/gtk2_signal.h"
-#include "chrome/browser/ui/libgtk2ui/gtk2_signal_registrar.h"
 #include "chrome/browser/ui/libgtk2ui/libgtk2ui_export.h"
 #include "ui/events/linux/text_edit_key_bindings_delegate_auralinux.h"
 #include "ui/gfx/color_utils.h"
@@ -33,7 +32,6 @@ class Image;
 namespace libgtk2ui {
 class Gtk2Border;
 class Gtk2KeyBindingsHandler;
-class Gtk2SignalRegistrar;
 class GConfListener;
 
 // Interface to GTK2 desktop features.
@@ -76,6 +74,7 @@ class Gtk2UI : public views::LinuxUI {
   // ui::LinuxUI:
   void Initialize() override;
   gfx::Image GetThemeImageNamed(int id) const override;
+  bool GetTint(int id, color_utils::HSL* tint) const override;
   bool GetColor(int id, SkColor* color) const override;
   bool HasCustomImage(int id) const override;
   SkColor GetFocusRingColor() const override;
@@ -135,8 +134,8 @@ class Gtk2UI : public views::LinuxUI {
   // or generates them per our fallback algorithm.
   SkColor BuildFrameColors();
 
-  // Sets the underlying theme tints.
-  void SetThemeTint(int id, SkColor color);
+  // Gets a tint which depends on the default for |id| as well as |color|.
+  color_utils::HSL ColorToTint(int id, SkColor color);
 
   // Lazily generates each image used in the gtk theme.
   gfx::Image GenerateGtkThemeImage(int id) const;
@@ -176,10 +175,9 @@ class Gtk2UI : public views::LinuxUI {
   // Updates |default_font_*|.
   void UpdateDefaultFont();
 
-  // Tints and colors calculated by LoadGtkValues() that are given to the
+  // Colors calculated by LoadGtkValues() that are given to the
   // caller while |use_gtk_| is true.
   ColorMap colors_;
-  TintMap tints_;
 
   // Colors used to tint certain icons.
   color_utils::HSL button_tint_;

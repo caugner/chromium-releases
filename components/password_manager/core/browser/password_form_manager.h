@@ -74,11 +74,12 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // they match. The return value is a MatchResultMask bitmask.
   MatchResultMask DoesManage(const autofill::PasswordForm& form) const;
 
-  // Retrieves potential matching logins from the database.
+  // Retrieves potential matching logins from the database. In addition the
+  // statistics is retrived on platforms with the password bubble.
   // |prompt_policy| indicates whether it's permissible to prompt the user to
   // authorize access to locked passwords. This argument is only used on
   // platforms that support prompting the user for access (such as Mac OS).
-  void FetchMatchingLoginsFromPasswordStore(
+  void FetchDataFromPasswordStore(
       PasswordStore::AuthorizationPromptPolicy prompt_policy);
 
   // Simple state-check to verify whether this object as received a callback
@@ -119,8 +120,10 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // delayed until the data arrives.
   void ProcessFrame(const base::WeakPtr<PasswordManagerDriver>& driver);
 
+  // PasswordStoreConsumer:
   void OnGetPasswordStoreResults(
       ScopedVector<autofill::PasswordForm> results) override;
+  void OnGetSiteStatistics(ScopedVector<InteractionsStats> stats) override;
 
   // A user opted to 'never remember' passwords for this form.
   // Blacklist it so that from now on when it is seen we ignore it.
@@ -205,6 +208,12 @@ class PasswordFormManager : public PasswordStoreConsumer {
     // Just need to update the internal states.
     state_ = MATCHING_PHASE;
   }
+
+  // TODO(vasilii): remove the unit test restriction when it's needed in
+  // production code.
+  const std::vector<InteractionsStats*>& interactions_stats() const {
+    return interactions_stats_.get();
+  }
 #endif
 
   const autofill::PasswordForm& observed_form() const { return observed_form_; }
@@ -222,6 +231,12 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // username 'test', and the store also contains outdated entries for
   // 'test@gmail.com' and 'test@googlemail.com', those will be wiped).
   void WipeStoreCopyIfOutdated();
+
+  // Called when the user chose not to update password.
+  void OnNopeUpdateClicked();
+
+  // Called when the user didn't interact with Update UI.
+  void OnNoInteractionOnUpdate();
 
  private:
   // ManagerAction - What does the manager do with this form? Either it
@@ -351,8 +366,17 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // duplicates.
   void SanitizePossibleUsernames(autofill::PasswordForm* form);
 
-  // Helper function to delegate uploading to the AutofillManager. Returns true
-  // on success.
+  // Try to label password fields and upload |form_data|. This differs from
+  // AutofillManager::OnFormSubmitted() in a few ways.
+  //   - This function will only label the first <input type="password"> field
+  //     as |password_type|. Other fields will stay unlabeled, as they
+  //     should have been labeled during the upload for OnFormSubmitted().
+  //   - If the |username_field| attribute is nonempty, we will additionally
+  //     label the field with that name as the username field.
+  //   - This function does not assume that |form| is being uploaded during
+  //     the same browsing session as it was originally submitted (as we may
+  //     not have the necessary information to classify the form at that time)
+  //     so it bypasses the cache and doesn't log the same quality UMA metrics.
   // |login_form_signature| may be empty.  It is non-empty when the user fills
   // and submits a login form using a generated password. In this case,
   // |login_form_signature| should be set to the submitted form's signature.
@@ -363,6 +387,14 @@ class PasswordFormManager : public PasswordStoreConsumer {
                           const base::string16& username_field,
                           const autofill::ServerFieldType& password_type,
                           const std::string& login_form_signature);
+
+  // Try to label username, password and new password fields of |observed_form_|
+  // which is considered to be change password forms. Returns true on success.
+  // |password_type| should be equal to NEW_PASSWORD, PROBABLY_NEW_PASSWORD or
+  // NOT_NEW_PASSWORD. These values correspond to cases when the user conrirmed
+  // password update, did nothing or declined to update password respectively.
+  bool UploadChangePasswordForm(const autofill::ServerFieldType& password_type,
+                                const std::string& login_form_signature);
 
   // Create pending credentials from provisionally saved form and forms received
   // from password store.
@@ -397,8 +429,12 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // The PasswordForm from the page or dialog managed by |this|.
   const autofill::PasswordForm observed_form_;
 
-  // Stores provisionally saved form until |pending_credentials_| is created.
+  // Statistics for the current domain.
+  ScopedVector<InteractionsStats> interactions_stats_;
+
+  // Stores a submitted form.
   scoped_ptr<const autofill::PasswordForm> provisionally_saved_form_;
+
   // Stores if for creating |pending_credentials_| other possible usernames
   // option should apply.
   OtherPossibleUsernamesAction other_possible_username_action_;
@@ -407,8 +443,10 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // scoring.
   const std::vector<std::string> form_path_segments_;
 
-  // Stores updated credentials when the form was submitted but success is
-  // still unknown.
+  // Stores updated credentials when the form was submitted but success is still
+  // unknown. This variable contains credentials that are ready to be written
+  // (saved or updated) to a password store. It is calculated based on
+  // |provisionally_saved_form_| and |best_matches_|.
   autofill::PasswordForm pending_credentials_;
 
   // Whether pending_credentials_ stores a new login or is an update

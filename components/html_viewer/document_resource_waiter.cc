@@ -7,9 +7,9 @@
 #include "components/html_viewer/global_state.h"
 #include "components/html_viewer/html_document.h"
 #include "components/html_viewer/html_frame_tree_manager.h"
-#include "components/mus/public/cpp/view.h"
+#include "components/mus/public/cpp/window.h"
 
-using web_view::mojom::ViewConnectType;
+using web_view::mojom::WindowConnectType;
 
 namespace html_viewer {
 
@@ -21,8 +21,8 @@ DocumentResourceWaiter::DocumentResourceWaiter(GlobalState* global_state,
       response_(response.Pass()),
       root_(nullptr),
       change_id_(0u),
-      view_id_(0u),
-      view_connect_type_(web_view::mojom::VIEW_CONNECT_TYPE_USE_NEW),
+      window_id_(0u),
+      window_connect_type_(web_view::mojom::WINDOW_CONNECT_TYPE_USE_NEW),
       frame_client_binding_(this),
       is_ready_(false),
       waiting_for_change_id_(false),
@@ -40,16 +40,16 @@ void DocumentResourceWaiter::Release(
     web_view::mojom::FramePtr* frame,
     mojo::Array<web_view::mojom::FrameDataPtr>* frame_data,
     uint32_t* change_id,
-    uint32_t* view_id,
-    ViewConnectType* view_connect_type,
+    uint32_t* window_id,
+    WindowConnectType* window_connect_type,
     OnConnectCallback* on_connect_callback) {
   DCHECK(is_ready_);
   *frame_client_request = frame_client_request_.Pass();
   *frame = frame_.Pass();
   *frame_data = frame_data_.Pass();
   *change_id = change_id_;
-  *view_id = view_id_;
-  *view_connect_type = view_connect_type_;
+  *window_id = window_id_;
+  *window_connect_type = window_connect_type_;
   *on_connect_callback = on_connect_callback_;
 }
 
@@ -57,7 +57,7 @@ mojo::URLResponsePtr DocumentResourceWaiter::ReleaseURLResponse() {
   return response_.Pass();
 }
 
-void DocumentResourceWaiter::SetRoot(mus::View* root) {
+void DocumentResourceWaiter::SetRoot(mus::Window* root) {
   DCHECK(!root_);
   root_ = root;
   root_->AddObserver(this);
@@ -88,23 +88,24 @@ void DocumentResourceWaiter::UpdateIsReady() {
   }
 
   // The first portion of ready is when we have received OnConnect()
-  // (|frame_data_| is valid) and we have a view with valid metrics. The view
-  // is not necessary is ViewConnectType is USE_EXISTING, which means the
+  // (|frame_data_| is valid) and we have a window with valid metrics. The
+  // window is not necessary is WindowConnectType is USE_EXISTING, which means
+  // the
   // application is not asked for a ViewTreeClient. The metrics are necessary
-  // to initialize ResourceBundle. If USE_EXISTING is true, it means a View has
-  // already been provided to another HTMLDocument and there is no need to wait
-  // for metrics.
+  // to initialize ResourceBundle. If USE_EXISTING is true, it means a Window
+  // has already been provided to another HTMLDocument and there is no need to
+  // wait for metrics.
   bool is_ready =
       (!frame_data_.is_null() &&
-       ((view_connect_type_ ==
-         web_view::mojom::VIEW_CONNECT_TYPE_USE_EXISTING) ||
+       ((window_connect_type_ ==
+         web_view::mojom::WINDOW_CONNECT_TYPE_USE_EXISTING) ||
         (root_ && root_->viewport_metrics().device_pixel_ratio != 0.0f)));
   if (is_ready) {
     HTMLFrameTreeManager* frame_tree =
         HTMLFrameTreeManager::FindFrameTreeWithRoot(frame_data_[0]->frame_id);
-    // Once we've received OnConnect() and the view (if necessary), we determine
-    // which HTMLFrameTreeManager the new frame ends up in. If there is an
-    // existing HTMLFrameTreeManager then we must wait for the change_id
+    // Once we've received OnConnect() and the window (if necessary), we
+    // determine which HTMLFrameTreeManager the new frame ends up in. If there
+    // is an existing HTMLFrameTreeManager then we must wait for the change_id
     // supplied to OnConnect() to be <= that of the HTMLFrameTreeManager's
     // change_id. If we did not wait for the change id to be <= then the
     // structure of the tree is not in the expected state and it's possible the
@@ -123,16 +124,19 @@ void DocumentResourceWaiter::UpdateIsReady() {
 void DocumentResourceWaiter::OnConnect(
     web_view::mojom::FramePtr frame,
     uint32_t change_id,
-    uint32_t view_id,
-    ViewConnectType view_connect_type,
+    uint32_t window_id,
+    WindowConnectType window_connect_type,
     mojo::Array<web_view::mojom::FrameDataPtr> frame_data,
+    int64_t navigation_start_time_ticks,
     const OnConnectCallback& callback) {
   DCHECK(frame_data_.is_null());
   change_id_ = change_id;
-  view_id_ = view_id;
-  view_connect_type_ = view_connect_type;
+  window_id_ = window_id;
+  window_connect_type_ = window_connect_type;
   frame_ = frame.Pass();
   frame_data_ = frame_data.Pass();
+  navigation_start_time_ =
+      base::TimeTicks::FromInternalValue(navigation_start_time_ticks);
   on_connect_callback_ = callback;
   CHECK(frame_data_.size() > 0u);
   frame_client_request_ = frame_client_binding_.Unbind();
@@ -186,14 +190,42 @@ void DocumentResourceWaiter::OnDispatchFrameLoadEvent(uint32_t frame_id) {
   NOTREACHED();
 }
 
-void DocumentResourceWaiter::OnViewViewportMetricsChanged(
-    mus::View* view,
-    const mojo::ViewportMetrics& old_metrics,
-    const mojo::ViewportMetrics& new_metrics) {
+void DocumentResourceWaiter::Find(int32_t request_id,
+                                  const mojo::String& search_text,
+                                  web_view::mojom::FindOptionsPtr options,
+                                  bool wrap_within_frame,
+                                  const FindCallback& callback) {
+  // It is assumed we receive OnConnect() (which unbinds) before anything else.
+  NOTREACHED();
+}
+
+void DocumentResourceWaiter::StopFinding(bool clear_selection) {
+  // It is assumed we receive OnConnect() (which unbinds) before anything else.
+  NOTREACHED();
+}
+
+void DocumentResourceWaiter::HighlightFindResults(
+    int32_t request_id,
+    const mojo::String& search_test,
+    web_view::mojom::FindOptionsPtr options,
+    bool reset) {
+  // It is assumed we receive OnConnect() (which unbinds) before anything else.
+  NOTREACHED();
+}
+
+void DocumentResourceWaiter::StopHighlightingFindResults() {
+  // It is assumed we receive OnConnect() (which unbinds) before anything else.
+  NOTREACHED();
+}
+
+void DocumentResourceWaiter::OnWindowViewportMetricsChanged(
+    mus::Window* window,
+    const mus::mojom::ViewportMetrics& old_metrics,
+    const mus::mojom::ViewportMetrics& new_metrics) {
   UpdateIsReady();
 }
 
-void DocumentResourceWaiter::OnViewDestroyed(mus::View* view) {
+void DocumentResourceWaiter::OnWindowDestroyed(mus::Window* window) {
   root_->RemoveObserver(this);
   root_ = nullptr;
 }

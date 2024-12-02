@@ -89,7 +89,7 @@ void BrowserCdmCast::Initialize(
     const ::media::SessionExpirationUpdateCB& session_expiration_update_cb) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  player_tracker_impl_.reset(new ::media::PlayerTrackerImpl);
+  player_tracker_impl_.reset(new ::media::PlayerTrackerImpl());
 
   session_message_cb_ = session_message_cb;
   session_closed_cb_ = session_closed_cb;
@@ -109,11 +109,6 @@ int BrowserCdmCast::RegisterPlayer(const base::Closure& new_key_cb,
 void BrowserCdmCast::UnregisterPlayer(int registration_id) {
   DCHECK(thread_checker_.CalledOnValidThread());
   player_tracker_impl_->UnregisterPlayer(registration_id);
-}
-
-::media::CdmContext* BrowserCdmCast::GetCdmContext() {
-  NOTREACHED();
-  return nullptr;
 }
 
 void BrowserCdmCast::OnSessionMessage(
@@ -136,10 +131,8 @@ void BrowserCdmCast::OnSessionKeysChange(
     const ::media::KeyIdAndKeyPairs& keys) {
   ::media::CdmKeysInfo cdm_keys_info;
   for (const std::pair<std::string, std::string>& key : keys) {
-    scoped_ptr< ::media::CdmKeyInformation> cdm_key_information(
-        new ::media::CdmKeyInformation());
-    cdm_key_information->key_id.assign(key.first.begin(), key.first.end());
-    cdm_keys_info.push_back(cdm_key_information.release());
+    cdm_keys_info.push_back(new ::media::CdmKeyInformation(
+        key.first, ::media::CdmKeyInformation::USABLE, 0));
   }
   session_keys_change_cb_.Run(session_id, true, cdm_keys_info.Pass());
 
@@ -154,24 +147,16 @@ void BrowserCdmCast::OnSessionKeysChange(
                  base::Unretained(browser_cdm_cast_.get()), ##__VA_ARGS__))
 
 BrowserCdmCastUi::BrowserCdmCastUi(
-    scoped_ptr<BrowserCdmCast> browser_cdm_cast,
+    const scoped_refptr<BrowserCdmCast>& browser_cdm_cast,
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner)
-    : browser_cdm_cast_(browser_cdm_cast.Pass()), task_runner_(task_runner) {
-}
+    : browser_cdm_cast_(browser_cdm_cast), task_runner_(task_runner) {}
 
 BrowserCdmCastUi::~BrowserCdmCastUi() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  task_runner_->DeleteSoon(FROM_HERE, browser_cdm_cast_.release());
-}
-
-int BrowserCdmCastUi::RegisterPlayer(const base::Closure& new_key_cb,
-                                     const base::Closure& cdm_unset_cb) {
-  NOTREACHED() << "RegisterPlayer should be called on BrowserCdmCast";
-  return -1;
-}
-
-void BrowserCdmCastUi::UnregisterPlayer(int registration_id) {
-  NOTREACHED() << "UnregisterPlayer should be called on BrowserCdmCast";
+  browser_cdm_cast_->AddRef();
+  BrowserCdmCast* raw_cdm = browser_cdm_cast_.get();
+  browser_cdm_cast_ = nullptr;
+  task_runner_->ReleaseSoon(FROM_HERE, raw_cdm);
 }
 
 BrowserCdmCast* BrowserCdmCastUi::browser_cdm_cast() const {
@@ -239,11 +224,6 @@ void BrowserCdmCastUi::RemoveSession(
   DCHECK(thread_checker_.CalledOnValidThread());
   FORWARD_ON_CDM_THREAD(RemoveSession, session_id,
       base::Passed(BindPromiseToCurrentLoop(promise.Pass())));
-}
-
-::media::CdmContext* BrowserCdmCastUi::GetCdmContext() {
-  NOTREACHED();
-  return nullptr;
 }
 
 // A default empty implementation for subclasses that don't need to provide

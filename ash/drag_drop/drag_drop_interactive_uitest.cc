@@ -44,7 +44,7 @@ class TargetView : public views::View {
   // views::View overrides:
   bool GetDropFormats(
       int* formats,
-      std::set<OSExchangeData::CustomFormat>* custom_formats) override {
+      std::set<ui::Clipboard::FormatType>* format_types) override {
     *formats = ui::OSExchangeData::STRING;
     return true;
   }
@@ -82,7 +82,7 @@ views::Widget* CreateWidget(views::View* contents_view,
 }
 
 void QuitLoop() {
-  base::MessageLoop::current()->Quit();
+  base::MessageLoop::current()->QuitWhenIdle();
 }
 
 void DragDropAcrossMultiDisplay_Step4() {

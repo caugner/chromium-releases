@@ -25,11 +25,21 @@ using ::testing::UnorderedElementsAre;
 
 namespace {
 
+class MockPasswordManagerClient
+    : public password_manager::StubPasswordManagerClient {
+ public:
+  MOCK_CONST_METHOD0(GetPasswordManager,
+                     const password_manager::PasswordManager*());
+};
+
 class ManagePasswordsStateTest : public testing::Test {
  public:
-  ManagePasswordsStateTest() : password_manager_(&client_) {}
+  ManagePasswordsStateTest() : password_manager_(&mock_client_) {}
 
   void SetUp() override {
+    ON_CALL(mock_client_, GetPasswordManager())
+        .WillByDefault(testing::Return(&password_manager_));
+
     test_local_form_.origin = GURL("http://example.com");
     test_local_form_.username_value = base::ASCIIToUTF16("username");
     test_local_form_.password_value = base::ASCIIToUTF16("12345");
@@ -41,7 +51,7 @@ class ManagePasswordsStateTest : public testing::Test {
     test_federated_form_.origin = GURL("https://idp.com");
     test_federated_form_.username_value = base::ASCIIToUTF16("username");
 
-    passwords_data_.set_client(&client_);
+    passwords_data_.set_client(&mock_client_);
   }
 
   autofill::PasswordForm& test_local_form() { return test_local_form_; }
@@ -62,11 +72,11 @@ class ManagePasswordsStateTest : public testing::Test {
   // Pushes a blacklisted form and checks that it doesn't affect the state.
   void TestBlacklistedUpdates();
 
-  MOCK_METHOD1(OnChooseCredential,
+  MOCK_METHOD1(CredentialCallback,
                void(const password_manager::CredentialInfo&));
 
  private:
-  password_manager::StubPasswordManagerClient client_;
+  MockPasswordManagerClient mock_client_;
   password_manager::StubPasswordManagerDriver driver_;
   password_manager::PasswordManager password_manager_;
 
@@ -79,9 +89,9 @@ class ManagePasswordsStateTest : public testing::Test {
 scoped_ptr<password_manager::PasswordFormManager>
 ManagePasswordsStateTest::CreateFormManager() {
   scoped_ptr<password_manager::PasswordFormManager> test_form_manager(
-      new password_manager::PasswordFormManager(&password_manager_, &client_,
-                                                driver_.AsWeakPtr(),
-                                                test_local_form(), false));
+      new password_manager::PasswordFormManager(
+          &password_manager_, &mock_client_, driver_.AsWeakPtr(),
+          test_local_form(), false));
   test_form_manager->SimulateFetchMatchingLoginsFromPasswordStore();
   ScopedVector<autofill::PasswordForm> stored_forms;
   stored_forms.push_back(new autofill::PasswordForm(test_local_form()));
@@ -270,9 +280,8 @@ TEST_F(ManagePasswordsStateTest, OnRequestCredentials) {
   const GURL origin = test_local_form().origin;
   passwords_data().OnRequestCredentials(local_credentials.Pass(),
                                         federated_credentials.Pass(), origin);
-  passwords_data().set_credentials_callback(
-      base::Bind(&ManagePasswordsStateTest::OnChooseCredential,
-                 base::Unretained(this)));
+  passwords_data().set_credentials_callback(base::Bind(
+      &ManagePasswordsStateTest::CredentialCallback, base::Unretained(this)));
   EXPECT_THAT(passwords_data().GetCurrentForms(),
               ElementsAre(Pointee(test_local_form())));
   EXPECT_THAT(passwords_data().federated_credentials_forms(),
@@ -285,7 +294,7 @@ TEST_F(ManagePasswordsStateTest, OnRequestCredentials) {
   password_manager::CredentialInfo credential_info(
       test_local_form(),
       password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD);
-  EXPECT_CALL(*this, OnChooseCredential(_))
+  EXPECT_CALL(*this, CredentialCallback(_))
       .WillOnce(testing::SaveArg<0>(&credential_info));
   passwords_data().TransitionToState(password_manager::ui::MANAGE_STATE);
   EXPECT_EQ(password_manager::CredentialType::CREDENTIAL_TYPE_EMPTY,
@@ -421,9 +430,8 @@ TEST_F(ManagePasswordsStateTest, RequestCredentialsAddBlacklisted) {
   const GURL origin = test_local_form().origin;
   passwords_data().OnRequestCredentials(local_credentials.Pass(),
                                         federated_credentials.Pass(), origin);
-  passwords_data().set_credentials_callback(
-      base::Bind(&ManagePasswordsStateTest::OnChooseCredential,
-                 base::Unretained(this)));
+  passwords_data().set_credentials_callback(base::Bind(
+      &ManagePasswordsStateTest::CredentialCallback, base::Unretained(this)));
   EXPECT_EQ(password_manager::ui::CREDENTIAL_REQUEST_STATE,
             passwords_data().state());
 
@@ -494,6 +502,67 @@ TEST_F(ManagePasswordsStateTest, PasswordUpdateSubmitted) {
   EXPECT_EQ(test_submitted_form(),
             passwords_data().form_manager()->pending_credentials());
   TestAllUpdates();
+}
+
+TEST_F(ManagePasswordsStateTest, ChooseCredentialLocal) {
+  passwords_data().OnRequestCredentials(ScopedVector<autofill::PasswordForm>(),
+                                        ScopedVector<autofill::PasswordForm>(),
+                                        test_local_form().origin);
+  passwords_data().set_credentials_callback(base::Bind(
+      &ManagePasswordsStateTest::CredentialCallback, base::Unretained(this)));
+  password_manager::CredentialInfo credential_info(
+      test_local_form(),
+      password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD);
+  EXPECT_CALL(*this, CredentialCallback(credential_info));
+  passwords_data().ChooseCredential(
+      test_local_form(),
+      password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD);
+}
+
+TEST_F(ManagePasswordsStateTest, ChooseCredentialFederated) {
+  passwords_data().OnRequestCredentials(ScopedVector<autofill::PasswordForm>(),
+                                        ScopedVector<autofill::PasswordForm>(),
+                                        test_local_form().origin);
+  passwords_data().set_credentials_callback(base::Bind(
+      &ManagePasswordsStateTest::CredentialCallback, base::Unretained(this)));
+  password_manager::CredentialInfo credential_info(
+      test_federated_form(),
+      password_manager::CredentialType::CREDENTIAL_TYPE_FEDERATED);
+  EXPECT_CALL(*this, CredentialCallback(credential_info));
+  passwords_data().ChooseCredential(
+      test_federated_form(),
+      password_manager::CredentialType::CREDENTIAL_TYPE_FEDERATED);
+}
+
+TEST_F(ManagePasswordsStateTest, ChooseCredentialEmpty) {
+  passwords_data().OnRequestCredentials(ScopedVector<autofill::PasswordForm>(),
+                                        ScopedVector<autofill::PasswordForm>(),
+                                        test_local_form().origin);
+  autofill::PasswordForm password_form(test_local_form());
+  passwords_data().set_credentials_callback(base::Bind(
+      &ManagePasswordsStateTest::CredentialCallback, base::Unretained(this)));
+  password_manager::CredentialInfo credential_info(
+      test_federated_form(),
+      password_manager::CredentialType::CREDENTIAL_TYPE_EMPTY);
+  EXPECT_CALL(*this, CredentialCallback(credential_info));
+  passwords_data().ChooseCredential(
+      test_federated_form(),
+      password_manager::CredentialType::CREDENTIAL_TYPE_EMPTY);
+}
+
+TEST_F(ManagePasswordsStateTest, ChooseCredentialLocalWithNonEmptyFederation) {
+  passwords_data().OnRequestCredentials(ScopedVector<autofill::PasswordForm>(),
+                                        ScopedVector<autofill::PasswordForm>(),
+                                        test_local_form().origin);
+  autofill::PasswordForm form(test_federated_form());
+  form.federation_url = GURL("https://federation.test/");
+  passwords_data().set_credentials_callback(base::Bind(
+      &ManagePasswordsStateTest::CredentialCallback, base::Unretained(this)));
+  password_manager::CredentialInfo credential_info(
+      form, password_manager::CredentialType::CREDENTIAL_TYPE_FEDERATED);
+  EXPECT_CALL(*this, CredentialCallback(credential_info));
+  passwords_data().ChooseCredential(
+      form, password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD);
 }
 
 }  // namespace

@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_SYNC_DRIVER_FAKE_SYNC_SERVICE_H_
 #define COMPONENTS_SYNC_DRIVER_FAKE_SYNC_SERVICE_H_
 
+#include <string>
+
 #include "components/sync_driver/sync_service.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "sync/internal_api/public/sessions/sync_session_snapshot.h"
@@ -27,7 +29,9 @@ class FakeSyncService : public sync_driver::SyncService {
   bool HasSyncSetupCompleted() const override;
   bool IsSyncAllowed() const override;
   bool IsSyncActive() const override;
+  void TriggerRefresh(const syncer::ModelTypeSet& types) override;
   syncer::ModelTypeSet GetActiveDataTypes() const override;
+  SyncClient* GetSyncClient() const override;
   void AddObserver(SyncServiceObserver* observer) override;
   void RemoveObserver(SyncServiceObserver* observer) override;
   bool HasObserver(const SyncServiceObserver* observer) const override;

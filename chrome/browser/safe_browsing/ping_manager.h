@@ -13,6 +13,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/safe_browsing/hit_report.h"
 #include "chrome/browser/safe_browsing/protocol_manager_helper.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -27,6 +28,7 @@ class SSLInfo;
 class URLRequestContextGetter;
 }  // namespace net
 
+namespace safe_browsing {
 
 class SafeBrowsingPingManager : public net::URLFetcherDelegate {
  public:
@@ -40,20 +42,14 @@ class SafeBrowsingPingManager : public net::URLFetcherDelegate {
   // net::URLFetcherDelegate interface.
   void OnURLFetchComplete(const net::URLFetcher* source) override;
 
-  // For UMA users we report to Google when a SafeBrowsing interstitial is shown
-  // to the user.  |threat_type| should be one of the types known by
-  // SafeBrowsingHitUrl.
-  void ReportSafeBrowsingHit(const GURL& malicious_url,
-                             const GURL& page_url,
-                             const GURL& referrer_url,
-                             bool is_subresource,
-                             SBThreatType threat_type,
-                             const std::string& post_data,
-                             bool is_extended_reporting);
+  // Report to Google when a SafeBrowsing warning is shown to the user.
+  // |hit_report.threat_type| should be one of the types known by
+  // SafeBrowsingtHitUrl.
+  void ReportSafeBrowsingHit(const safe_browsing::HitReport& hit_report);
 
   // Users can opt-in on the SafeBrowsing interstitial to send detailed
-  // malware reports. |report| is the serialized report.
-  void ReportMalwareDetails(const std::string& report);
+  // threat reports. |report| is the serialized report.
+  void ReportThreatDetails(const std::string& report);
 
   // Users can opt-in on the SSL interstitial to send reports of invalid
   // certificate chains.
@@ -66,8 +62,7 @@ class SafeBrowsingPingManager : public net::URLFetcherDelegate {
  private:
   FRIEND_TEST_ALL_PREFIXES(SafeBrowsingPingManagerTest,
                            TestSafeBrowsingHitUrl);
-  FRIEND_TEST_ALL_PREFIXES(SafeBrowsingPingManagerTest,
-                           TestMalwareDetailsUrl);
+  FRIEND_TEST_ALL_PREFIXES(SafeBrowsingPingManagerTest, TestThreatDetailsUrl);
 
   typedef std::set<const net::URLFetcher*> Reports;
 
@@ -77,15 +72,11 @@ class SafeBrowsingPingManager : public net::URLFetcherDelegate {
       net::URLRequestContextGetter* request_context_getter,
       const SafeBrowsingProtocolConfig& config);
 
-  // Generates URL for reporting safe browsing hits for UMA users.
-  GURL SafeBrowsingHitUrl(const GURL& malicious_url,
-                          const GURL& page_url,
-                          const GURL& referrer_url,
-                          bool is_subresource,
-                          SBThreatType threat_type,
-                          bool is_extended_reporting) const;
-  // Generates URL for reporting malware details for users who opt-in.
-  GURL MalwareDetailsUrl() const;
+  // Generates URL for reporting safe browsing hits.
+  GURL SafeBrowsingHitUrl(const safe_browsing::HitReport& hit_report) const;
+
+  // Generates URL for reporting threat details for users who opt-in.
+  GURL ThreatDetailsUrl() const;
 
   // Current product version sent in each request.
   std::string version_;
@@ -97,7 +88,7 @@ class SafeBrowsingPingManager : public net::URLFetcherDelegate {
   scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
 
   // URL prefix where browser reports hits to the safebrowsing list and
-  // sends detaild malware reports for UMA users.
+  // sends detaild threat reports for UMA users.
   std::string url_prefix_;
 
   // Track outstanding SafeBrowsing report fetchers for clean up.
@@ -109,5 +100,7 @@ class SafeBrowsingPingManager : public net::URLFetcherDelegate {
 
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingPingManager);
 };
+
+}  // namespace safe_browsing
 
 #endif  // CHROME_BROWSER_SAFE_BROWSING_PING_MANAGER_H_

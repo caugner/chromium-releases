@@ -206,14 +206,14 @@ class AwContents : public FindHelper::Listener,
   void DetachFunctorFromView() override;
   void OnNewPicture() override;
   gfx::Point GetLocationOnScreen() override;
-  void ScrollContainerViewTo(gfx::Vector2d new_value) override;
-  void UpdateScrollState(gfx::Vector2d max_scroll_offset,
-                         gfx::SizeF contents_size_dip,
+  void ScrollContainerViewTo(const gfx::Vector2d& new_value) override;
+  void UpdateScrollState(const gfx::Vector2d& max_scroll_offset,
+                         const gfx::SizeF& contents_size_dip,
                          float page_scale_factor,
                          float min_page_scale_factor,
                          float max_page_scale_factor) override;
-  void DidOverscroll(gfx::Vector2d overscroll_delta,
-                     gfx::Vector2dF overscroll_velocity) override;
+  void DidOverscroll(const gfx::Vector2d& overscroll_delta,
+                     const gfx::Vector2dF& overscroll_velocity) override;
 
   void ParentDrawConstraintsUpdated(
       const ParentCompositorDrawConstraints& draw_constraints) override {}
@@ -256,6 +256,7 @@ class AwContents : public FindHelper::Listener,
   void SetDipScaleInternal(float dip_scale);
 
   JavaObjectWeakGlobalRef java_ref_;
+  BrowserViewRenderer browser_view_renderer_;  // Must outlive |web_contents_|.
   scoped_ptr<AwWebContentsDelegate> web_contents_delegate_;
   scoped_ptr<AwContentsClientBridge> contents_client_bridge_;
   scoped_ptr<content::WebContents> web_contents_;
@@ -263,7 +264,6 @@ class AwContents : public FindHelper::Listener,
   scoped_ptr<FindHelper> find_helper_;
   scoped_ptr<IconHelper> icon_helper_;
   scoped_ptr<AwContents> pending_contents_;
-  BrowserViewRenderer browser_view_renderer_;
   scoped_ptr<AwPdfExporter> pdf_exporter_;
   scoped_ptr<PermissionRequestHandler> permission_request_handler_;
   scoped_refptr<AwMessagePortMessageFilter> message_port_message_filter_;

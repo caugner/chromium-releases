@@ -6,7 +6,7 @@ import("//build/config/ui.gni")
 
 config("mesa_headers_config") {
   include_dirs = [ "src/include" ]
-  if (use_x11) {
+  if (!use_x11) {
     defines = [ "MESA_EGL_NO_X11_HEADERS" ]
   }
 }
@@ -687,7 +687,7 @@ if (!is_android) {  # TODO(GYP) enable for Android.
   #   osmesa.osmesa.obj : warning LNK4197: export 'OSMesaGetIntegerv' specified
   #   multiple times; using first specification
   # This also happens with the GYP build.
-  shared_library("osmesa") {
+  loadable_module("osmesa") {
     sources = [
       "src/src/mesa/drivers/common/driverfuncs.c",
       "src/src/mesa/drivers/common/driverfuncs.h",

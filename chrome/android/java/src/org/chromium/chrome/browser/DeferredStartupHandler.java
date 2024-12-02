@@ -79,8 +79,8 @@ public class DeferredStartupHandler {
                             new CrashFileManager(application.getCacheDir());
                     crashFileManager.cleanOutAllNonFreshMinidumpFiles();
 
-                    MinidumpUploadService.storeBreakpadUploadAttemptsInUma(
-                                ChromePreferenceManager.getInstance(application));
+                    MinidumpUploadService.storeBreakpadUploadStatsInUma(
+                            ChromePreferenceManager.getInstance(application));
 
                     // Force a widget refresh in order to wake up any possible zombie widgets.
                     // This is needed to ensure the right behavior when the process is suddenly
@@ -112,7 +112,7 @@ public class DeferredStartupHandler {
 
         application.initializeSharedClasses();
 
-        ShareHelper.clearSharedScreenshots(application);
+        ShareHelper.clearSharedImages(application);
 
         // Clear any media notifications that existed when Chrome was last killed.
         MediaCaptureNotificationService.clearMediaNotifications(application);
@@ -127,9 +127,11 @@ public class DeferredStartupHandler {
             ChromePreferenceManager.getInstance(application).setCustomTabsEnabled(true);
         }
 
-        // Start Physical Web
+        // Start or stop Physical Web
         if (PhysicalWeb.featureIsEnabled()) {
             PhysicalWeb.startPhysicalWeb(application);
+        } else {
+            PhysicalWeb.stopPhysicalWeb(application);
         }
 
         mDeferredStartupComplete = true;

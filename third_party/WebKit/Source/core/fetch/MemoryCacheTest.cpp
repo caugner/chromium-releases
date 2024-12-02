@@ -233,7 +233,7 @@ static void TestLiveResourceEvictionAtEndOfTask(Resource* cachedDeadResource, co
 
     private:
         ResourcePtr<Resource> m_live;
-        Resource* m_dead;
+        RawPtrWillBePersistent<Resource> m_dead;
     };
 
     class Task2 : public WebTaskRunner::Task {
@@ -253,8 +253,8 @@ static void TestLiveResourceEvictionAtEndOfTask(Resource* cachedDeadResource, co
     };
 
 
-    Platform::current()->currentThread()->taskRunner()->postTask(FROM_HERE, new Task1(cachedLiveResource, cachedDeadResource));
-    Platform::current()->currentThread()->taskRunner()->postTask(FROM_HERE, new Task2(cachedLiveResource->encodedSize() + cachedLiveResource->overheadSize()));
+    Platform::current()->currentThread()->taskRunner()->postTask(BLINK_FROM_HERE, new Task1(cachedLiveResource, cachedDeadResource));
+    Platform::current()->currentThread()->taskRunner()->postTask(BLINK_FROM_HERE, new Task2(cachedLiveResource->encodedSize() + cachedLiveResource->overheadSize()));
     testing::runPendingTasks();
 }
 

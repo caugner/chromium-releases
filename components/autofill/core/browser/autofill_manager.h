@@ -26,8 +26,8 @@
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/card_unmask_delegate.h"
 #include "components/autofill/core/browser/form_structure.h"
+#include "components/autofill/core/browser/payments/payments_client.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
-#include "components/autofill/core/browser/wallet/real_pan_wallet_client.h"
 #include "components/autofill/core/common/form_data.h"
 
 // This define protects some debugging code (see DumpAutofillData). This
@@ -71,7 +71,7 @@ struct FormFieldData;
 // forms. One per frame; owned by the AutofillDriver.
 class AutofillManager : public AutofillDownloadManager::Observer,
                         public CardUnmaskDelegate,
-                        public wallet::RealPanWalletClient::Delegate {
+                        public payments::PaymentsClientDelegate {
  public:
   enum AutofillDownloadManagerState {
     ENABLE_AUTOFILL_DOWNLOAD_MANAGER,
@@ -127,7 +127,7 @@ class AutofillManager : public AutofillDownloadManager::Observer,
   void RemoveAutocompleteEntry(const base::string16& name,
                                const base::string16& value);
 
-  // Returns true when the Wallet card unmask prompt is being displayed.
+  // Returns true when the Payments card unmask prompt is being displayed.
   bool IsShowingUnmaskPrompt();
 
   // Returns the present form structures seen by Autofill manager.
@@ -136,7 +136,11 @@ class AutofillManager : public AutofillDownloadManager::Observer,
   // Happens when the autocomplete dialog runs its callback when being closed.
   void RequestAutocompleteDialogClosed();
 
-  AutofillClient* client() const { return client_; }
+  AutofillClient* client() { return client_; }
+
+  AutofillDownloadManager* download_manager() {
+    return download_manager_.get();
+  }
 
   const std::string& app_locale() const { return app_locale_; }
 
@@ -145,6 +149,8 @@ class AutofillManager : public AutofillDownloadManager::Observer,
 
   void OnFormsSeen(const std::vector<FormData>& forms,
                    const base::TimeTicks& timestamp);
+
+  void set_app_locale(std::string app_locale) { app_locale_ = app_locale; }
 
   // IMPORTANT: On iOS, this method is called when the form is submitted,
   // immediately before OnFormSubmitted() is called. Do not assume that
@@ -174,33 +180,20 @@ class AutofillManager : public AutofillDownloadManager::Observer,
   void OnSetDataList(const std::vector<base::string16>& values,
                      const std::vector<base::string16>& labels);
 
-  // Try to label password fields and upload |form|. This differs from
-  // OnFormSubmitted() in a few ways.
-  //   - This function will only label the first <input type="password"> field
-  //     as |password_type|. Other fields will stay unlabeled, as they
-  //     should have been labeled during the upload for OnFormSubmitted().
-  //   - If the |username_field| attribute is nonempty, we will additionally
-  //     label the field with that name as the username field.
-  //   - This function does not assume that |form| is being uploaded during
-  //     the same browsing session as it was originally submitted (as we may
-  //     not have the necessary information to classify the form at that time)
-  //     so it bypasses the cache and doesn't log the same quality UMA metrics.
-  // |login_form_signature| may be empty. It is non-empty when the user fills
-  // and submits a login form using a generated password. In this case,
-  // |login_form_signature| should be set to the submitted form's signature.
-  // Note that in this case, |form.FormSignature()| gives the signature for the
-  // registration form on which the password was generated, rather than the
-  // submitted form's signature.
-  virtual bool UploadPasswordForm(const FormData& form,
-                                  const base::string16& username_field,
-                                  const ServerFieldType& pasword_type,
-                                  const std::string& login_form_signature);
-
   // Resets cache.
   virtual void Reset();
 
   // Returns the value of the AutofillEnabled pref.
   virtual bool IsAutofillEnabled() const;
+
+  // Returns true if all the conditions for enabling the upload of credit card
+  // are satisfied.
+  virtual bool IsCreditCardUploadEnabled();
+
+  // Shared code to determine if |form| should be uploaded to the Autofill
+  // server. It verifies that uploading is allowed and |form| meets conditions
+  // to be uploadable.
+  bool ShouldUploadForm(const FormStructure& form);
 
  protected:
   // Test code should prefer to use this constructor.
@@ -235,6 +228,7 @@ class AutofillManager : public AutofillDownloadManager::Observer,
 
   ScopedVector<FormStructure>* form_structures() { return &form_structures_; }
 
+ protected:
   // Exposed for testing.
   AutofillExternalDelegate* external_delegate() {
     return external_delegate_;
@@ -245,18 +239,42 @@ class AutofillManager : public AutofillDownloadManager::Observer,
     download_manager_.reset(manager);
   }
 
+  // Exposed for testing.
+  void set_payments_client(payments::PaymentsClient* payments_client) {
+    payments_client_.reset(payments_client);
+  }
+
  private:
   // AutofillDownloadManager::Observer:
-  void OnLoadedServerPredictions(const std::string& response_xml) override;
+  void OnLoadedServerPredictions(
+      const std::string& response_xml,
+      const std::vector<std::string>& form_signatures) override;
 
   // CardUnmaskDelegate:
   void OnUnmaskResponse(const UnmaskResponse& response) override;
   void OnUnmaskPromptClosed() override;
 
-  // wallet::RealPanWalletClient::Delegate:
+  // payments::PaymentsClientDelegate:
   IdentityProvider* GetIdentityProvider() override;
-  void OnDidGetRealPan(AutofillClient::GetRealPanResult result,
+  void OnDidGetRealPan(AutofillClient::PaymentsRpcResult result,
                        const std::string& real_pan) override;
+  void OnDidGetUploadDetails(
+      AutofillClient::PaymentsRpcResult result,
+      const base::string16& context_token,
+      scoped_ptr<base::DictionaryValue> legal_message) override;
+  void OnDidUploadCard(AutofillClient::PaymentsRpcResult result) override;
+
+  // Saves risk data in |unmasking_risk_data_| and calls UnmaskCard if the user
+  // has accepted the prompt.
+  void OnDidGetUnmaskRiskData(const std::string& risk_data);
+
+  // Sets |user_did_accept_upload_prompt_| and calls UploadCard if the risk data
+  // is available.
+  void OnUserDidAcceptUpload();
+
+  // Saves risk data in |uploading_risk_data_| and calls UploadCard if the user
+  // has accepted the prompt.
+  void OnDidGetUploadRiskData(const std::string& risk_data);
 
   // Returns false if Autofill is disabled or if no Autofill data is available.
   bool RefreshDataModels();
@@ -357,14 +375,17 @@ class AutofillManager : public AutofillDownloadManager::Observer,
   // Imports the form data, submitted by the user, into |personal_data_|.
   void ImportFormData(const FormStructure& submitted_form);
 
+  // Returns all web profiles known to the personal data manager whose names
+  // match the name on |card| and that have been created or used within the last
+  // 15 minutes.
+  std::vector<AutofillProfile> GetProfilesForCreditCardUpload(
+      const CreditCard& card);
+
   // If |initial_interaction_timestamp_| is unset or is set to a later time than
   // |interaction_timestamp|, updates the cached timestamp.  The latter check is
   // needed because IPC messages can arrive out of order.
   void UpdateInitialInteractionTimestamp(
       const base::TimeTicks& interaction_timestamp);
-
-  // Shared code to determine if |form| should be uploaded.
-  bool ShouldUploadForm(const FormStructure& form);
 
 #ifdef ENABLE_FORM_DEBUG_DUMP
   // Dumps the cached forms to a file on disk.
@@ -377,8 +398,8 @@ class AutofillManager : public AutofillDownloadManager::Observer,
 
   AutofillClient* const client_;
 
-  // Handles real PAN requests.
-  wallet::RealPanWalletClient real_pan_client_;
+  // Handles Payments service requests.
+  scoped_ptr<payments::PaymentsClient> payments_client_;
 
   std::string app_locale_;
 
@@ -423,16 +444,18 @@ class AutofillManager : public AutofillDownloadManager::Observer,
   // Our copy of the form data.
   ScopedVector<FormStructure> form_structures_;
 
-  // A copy of the credit card that's currently being unmasked, and data about
-  // the form.
-  CreditCard unmasking_card_;
-  // A copy of the latest card unmasking response.
-  UnmaskResponse unmask_response_;
+  // Collected information about a pending unmask request, and data about the
+  // form.
+  payments::PaymentsClient::UnmaskRequestDetails unmask_request_;
   int unmasking_query_id_;
   FormData unmasking_form_;
   FormFieldData unmasking_field_;
-  // Time when we requested the last real pan
+  // Time when we requested the last real pan.
   base::Time real_pan_request_timestamp_;
+
+  // Collected information about a pending upload request.
+  payments::PaymentsClient::UploadRequestDetails upload_request_;
+  bool user_did_accept_upload_prompt_;
 
   // Masked copies of recently unmasked cards, to help avoid double-asking to
   // save the card (in the prompt and in the infobar after submit).
@@ -485,8 +508,6 @@ class AutofillManager : public AutofillDownloadManager::Observer,
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest,
                            NoQualityMetricsForNonAutofillableForms);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, QualityMetrics);
-  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, QualityMetricsForFailure);
-  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, QualityMetricsWithExperimentId);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, SaneMetricsWithCacheMismatch);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, TestExternalDelegate);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
@@ -497,10 +518,26 @@ class AutofillManager : public AutofillDownloadManager::Observer,
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
                            FormSubmittedAutocompleteEnabled);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
+                           OnLoadedServerPredictions);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
+                           OnLoadedServerPredictions_ResetManager);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
+                           AutocompleteSuggestions_SomeWhenAutofillDisabled);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
+                           AutocompleteSuggestions_SomeWhenAutofillEmpty);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
+                           AutocompleteSuggestions_NoneWhenAutofillPresent);
+  FRIEND_TEST_ALL_PREFIXES(
+      AutofillManagerTest,
+      AutocompleteSuggestions_AutofillDisabledAndFieldShouldNotAutocomplete);
+  FRIEND_TEST_ALL_PREFIXES(
+      AutofillManagerTest,
+      AutocompleteSuggestions_NoneWhenAutofillEmptyFieldShouldNotAutocomplete);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
                            AutocompleteOffRespectedForAutocomplete);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
                            DontSaveCvcInAutocompleteHistory);
-  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, DontOfferToSaveWalletCard);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, DontOfferToSavePaymentsCard);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillInUpdatedExpirationDate);
   DISALLOW_COPY_AND_ASSIGN(AutofillManager);
 };

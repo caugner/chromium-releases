@@ -24,6 +24,7 @@ Pour en savoir plus sur la confidentialité, veuillez consulter les règles de c
 <translation id="1546934824884762070">Une erreur inattendue s'est produite. Veuillez signaler le problème aux développeurs.</translation>
 <translation id="1619813076098775562">Connexion avec l'appareil Cast interrompue</translation>
 <translation id="1643640058022401035">En quittant cette page, vous mettrez fin à la session Google Chromoting.</translation>
+<translation id="1646994964686260497">Aucun appareil auquel se connecter.</translation>
 <translation id="1654128982815600832">Activation des connexions à distance pour cet ordinateur en cours…</translation>
 <translation id="170207782578677537">Échec de l'enregistrement de cet ordinateur.</translation>
 <translation id="1704090719919187045">Préférences relatives à l'hôte Chromoting</translation>
@@ -33,7 +34,6 @@ Pour en savoir plus sur la confidentialité, veuillez consulter les règles de c
 <translation id="1770394049404108959">Je n'arrive pas à ouvrir l'application.</translation>
 <translation id="177096447311351977">Version de l'IP pour le client : <ph name="CLIENT_GAIA_IDENTIFIER" /> adresse IP = "<ph name="CLIENT_IP_ADDRESS_AND_PORT" />" adresse IP de l'hôte = "<ph name="HOST_IP_ADDRESS_AND_PORT" />" channel='<ph name="CHANNEL_TYPE" />' connection='<ph name="CONNECTION_TYPE" />'.</translation>
 <translation id="1779766957982586368">Fermer la fenêtre</translation>
-<translation id="1818475040640568770">Vous n'avez pas d'ordinateurs enregistrés.</translation>
 <translation id="1841799852846221389">Désactivation des connexions à distance pour cet ordinateur en cours…</translation>
 <translation id="189172778771606813">Fermer le panneau de navigation</translation>
 <translation id="195619862187186579">Dispositions de clavier</translation>
@@ -87,8 +87,6 @@ Pour en savoir plus sur la confidentialité, veuillez consulter les règles de c
 <translation id="2926340305933667314">Échec de la désactivation de l'accès à distance pour cet ordinateur. Veuillez réessayer ultérieurement.</translation>
 <translation id="2930135165929238380">Il manque certains composants obligatoires. Veuillez accéder à chrome://plugins et pour vous assurer que Native Client est activé.</translation>
 <translation id="2939145106548231838">S'authentifier auprès de l'hôte</translation>
-<translation id="2998137343848432918">• Ajout d'un écran de remerciements
-• Résolution d'un problème lors du passage au plein écran avec le clavier visible</translation>
 <translation id="3020807351229499221">Échec de la mise à jour du code d'accès. Veuillez réessayer ultérieurement.</translation>
 <translation id="3025388528294795783">Afin de nous aider à résoudre votre problème, veuillez nous fournir plus de détails :</translation>
 <translation id="3027681561976217984">Mode Écran tactile</translation>
@@ -97,7 +95,6 @@ Pour en savoir plus sur la confidentialité, veuillez consulter les règles de c
 <translation id="3150823315463303127">L'hôte n'est pas parvenu à lire les règles.</translation>
 <translation id="3194245623920924351">Bureau à distance Chrome</translation>
 <translation id="3197730452537982411">Bureau à distance</translation>
-<translation id="3244258558056547981">Afficher la vue Cardboard</translation>
 <translation id="3258789396564295715">Vous pouvez accéder à cet ordinateur en toute sécurité via le bureau à distance Google Chrome.</translation>
 <translation id="327263477022142889">Vous voulez nous aider à améliorer le Bureau à distance Chrome ? <ph name="LINK_BEGIN" />Répondez à notre enquête<ph name="LINK_END" />.</translation>
 <translation id="3286521253923406898">Contrôleur de l'hôte Chromoting</translation>
@@ -113,6 +110,7 @@ Pour en savoir plus sur la confidentialité, veuillez consulter les règles de c
 <translation id="3606997049964069799">Vous n'êtes pas connecté à Chromium. Veuillez vous connecter et réessayer.</translation>
 <translation id="3649256019230929621">Réduire la fenêtre</translation>
 <translation id="369442766917958684">Hors connexion</translation>
+<translation id="3695446226812920698">Comment procéder</translation>
 <translation id="3776024066357219166">La session du bureau à distance Google Chrome est terminée.</translation>
 <translation id="3785447812627779171">Hôte
 Chromoting</translation>
@@ -125,6 +123,11 @@ Chromoting</translation>
 <translation id="3950820424414687140">Ouvrir une session</translation>
 <translation id="3989511127559254552">Pour continuer, vous devez autoriser l'accès étendu à votre ordinateur. Vous n'aurez à effectuer cette opération qu'une seule fois.</translation>
 <translation id="4006787130661126000">Si vous souhaitez utiliser le bureau à distance Google Chrome pour accéder à cet ordinateur, vous devez activer les connexions à distance.</translation>
+<translation id="401121182145179743">Vous devez tout d'abord configurer votre ordinateur pour l'accès à distance.</translation>
+<translation id="4028465833180158312">• Mises à jour de l'interface utilisateur de Material Design
+• Crédits de licence tiers
+• Affichage d'informations pour les ordinateurs à distance qui sont hors connexion</translation>
+<translation id="405887016757208221">Échec de l'initialisation de la session par l'ordinateur distant. Si le problème persiste, veuillez réessayer de configurer l'hôte.</translation>
 <translation id="4068946408131579958">Toutes les connexions</translation>
 <translation id="409800995205263688">REMARQUE : Les paramètres des règles n'autorisent que les connexions entre les ordinateurs de votre réseau.</translation>
 <translation id="4155497795971509630">Certains composants nécessaires sont introuvables. Veuillez vous assurer que vous utilisez la dernière version du logiciel, puis réessayer.</translation>
@@ -149,6 +152,7 @@ Chromoting</translation>
 <translation id="4573676252416618192">Hôte Bureau à distance
 Google Chrome</translation>
 <translation id="4619978527973181021">Accepter et installer</translation>
+<translation id="4647791084836149355">Afficher la vue Cardboard</translation>
 <translation id="4703799847237267011">La session Google Chromoting est terminée.</translation>
 <translation id="4736223761657662401">Historique des connexions</translation>
 <translation id="4741792197137897469">Échec de l'authentification. Veuillez vous connecter de nouveau à Chrome.</translation>
@@ -170,7 +174,6 @@ Google Chrome</translation>
 <translation id="518094545883702183">Ces informations sont conservées 30 jours au maximum et mises à disposition uniquement de la personne chargée d'étudier votre rapport afin d'identifier le problème que vous avez relevé.</translation>
 <translation id="5222676887888702881">Déconnexion</translation>
 <translation id="5254120496627797685">En quittant cette page, vous mettrez fin à la session du bureau à distance Google Chrome.</translation>
-<translation id="5285241842433869526">Découvrez comment configurer l'accès à distance sur un ordinateur.</translation>
 <translation id="5308380583665731573">Connexion</translation>
 <translation id="5363265567587775042">Demandez à l'utilisateur de l'ordinateur auquel vous souhaitez accéder de cliquer sur "<ph name="SHARE" />" et de vous donner le code d'accès.</translation>
 <translation id="5379087427956679853">L'application Bureau à distance Google Chrome vous permet de partager votre ordinateur sur le Web en toute sécurité. Pour ce faire, les deux utilisateurs en question doivent exécuter cette application, disponible à l'adresse <ph name="URL" />.</translation>
@@ -207,6 +210,7 @@ Google Chrome</translation>
 <translation id="6284412385303060032">L'exécution de l'hôte sur l'écran de connexion de la console s'est arrêtée pour accepter le mode Rideau en passant à une exécution d'hôte dans une session propre à l'utilisateur.</translation>
 <translation id="629730747756840877">Compte</translation>
 <translation id="6304318647555713317">Client</translation>
+<translation id="6324708100353784493">Vous avez activé le mode d'intégration de Google Cardboard. Pour utiliser ce mode, insérez votre appareil dans une visionneuse compatible avec Google Cardboard.</translation>
 <translation id="6381670701864002291">Autre</translation>
 <translation id="6398765197997659313">Quitter le mode plein écran</translation>
 <translation id="6441316101718669559">L'intégration du Bureau est impossible sur cette plate-forme. Vous pouvez toujours utiliser l'application, mais avec une expérience utilisateur de moindre qualité.</translation>
@@ -257,6 +261,7 @@ Google Chrome</translation>
 <translation id="7869445566579231750">Vous n'êtes pas autorisé à exécuter cette application.</translation>
 <translation id="7948001860594368197">Options de l'écran</translation>
 <translation id="7970576581263377361">Échec de l'authentification. Veuillez vous connecter de nouveau à Chromium.</translation>
+<translation id="7981525049612125370">La session à distance est arrivée à expiration.</translation>
 <translation id="8041721485428375115">En téléchargeant le programme d'installation de l'hôte Bureau à distance Google Chrome, vous acceptez les <ph name="LINK_BEGIN" />Conditions d'utilisation<ph name="LINK_END" /> de Google.</translation>
 <translation id="8073845705237259513">Pour utiliser le bureau à distance Chrome, vous devez ajouter un compte Google à votre appareil.</translation>
 <translation id="80739703311984697">L'hôte distant nécessite votre authentification auprès d'un site Web tiers. Pour continuer, vous devez accorder à Google Chromoting des autorisations supplémentaires afin d'accéder à l'adresse suivante :</translation>

@@ -11,12 +11,12 @@ goog.provide('Output.EventType');
 
 goog.require('AutomationUtil.Dir');
 goog.require('EarconEngine');
+goog.require('Spannable');
 goog.require('cursors.Cursor');
 goog.require('cursors.Range');
 goog.require('cursors.Unit');
 goog.require('cvox.AbstractEarcons');
 goog.require('cvox.NavBraille');
-goog.require('cvox.Spannable');
 goog.require('cvox.ValueSelectionSpan');
 goog.require('cvox.ValueSpan');
 goog.require('goog.i18n.MessageFormat');
@@ -26,7 +26,7 @@ var Dir = AutomationUtil.Dir;
 
 /**
  * An Output object formats a cursors.Range into speech, braille, or both
- * representations. This is typically a cvox.Spannable.
+ * representations. This is typically a |Spannable|.
  *
  * The translation from Range to these output representations rely upon format
  * rules which specify how to convert AutomationNode objects into annotated
@@ -52,9 +52,9 @@ var Dir = AutomationUtil.Dir;
  */
 Output = function() {
   // TODO(dtseng): Include braille specific rules.
-  /** @type {!Array<!cvox.Spannable>} */
+  /** @type {!Array<!Spannable>} */
   this.speechBuffer_ = [];
-  /** @type {!Array<!cvox.Spannable>} */
+  /** @type {!Array<!Spannable>} */
   this.brailleBuffer_ = [];
   /** @type {!Array<!Object>} */
   this.locations_ = [];
@@ -215,13 +215,16 @@ Output.ROLE_INFO_ = {
     msgId: 'role_menubar',
   },
   menuItem: {
-    msgId: 'role_menuitem'
+    msgId: 'role_menuitem',
+    earconId: 'BUTTON'
   },
   menuItemCheckBox: {
-    msgId: 'role_menuitemcheckbox'
+    msgId: 'role_menuitemcheckbox',
+    earconId: 'BUTTON'
   },
   menuItemRadio: {
-    msgId: 'role_menuitemradio'
+    msgId: 'role_menuitemradio',
+    earconId: 'BUTTON'
   },
   menuListOption: {
     msgId: 'role_menuitem'
@@ -239,7 +242,6 @@ Output.ROLE_INFO_ = {
   },
   popUpButton: {
     msgId: 'role_button',
-    earcon: 'LISTBOX'
   },
   radioButton: {
     msgId: 'role_radio'
@@ -321,15 +323,12 @@ Output.ROLE_INFO_ = {
 Output.STATE_INFO_ = {
   checked: {
     on: {
-      earconId: 'CHECK_ON',
       msgId: 'checkbox_checked_state'
     },
     off: {
-      earconId: 'CHECK_OFF',
       msgId: 'checkbox_unchecked_state'
     },
     omitted: {
-      earconId: 'CHECK_OFF',
       msgId: 'checkbox_unchecked_state'
     }
   },
@@ -395,7 +394,8 @@ Output.RULES = {
       enter: '@column_granularity $tableCellColumnIndex'
     },
     checkBox: {
-      speak: '$name $role $checked'
+      speak: '$if($checked, $earcon(CHECK_ON), $earcon(CHECK_OFF)) ' +
+             '$name $role $checked'
     },
     dialog: {
       enter: '$name $role'
@@ -446,7 +446,7 @@ Output.RULES = {
       speak: '$descendants'
     },
     popUpButton: {
-      speak: '$value $name $role @aria_has_popup ' +
+      speak: '$earcon(POP_UP_BUTTON) $value $name $role @aria_has_popup ' +
           '$if($collapsed, @aria_expanded_false, @aria_expanded_true)'
     },
     radioButton: {
@@ -463,7 +463,7 @@ Output.RULES = {
       enter: '@row_granularity $tableRowIndex'
     },
     slider: {
-      speak: '@describe_slider($value, $name) $help'
+      speak: '$earcon(SLIDER) @describe_slider($value, $name) $help'
     },
     staticText: {
       speak: '$value='
@@ -585,7 +585,7 @@ Output.EventType = {
 Output.prototype = {
   /**
    * Gets the spoken output with separator '|'.
-   * @return {!cvox.Spannable}
+   * @return {!Spannable}
    */
   get speechOutputForTest() {
     return this.speechBuffer_.reduce(function(prev, cur) {
@@ -599,7 +599,7 @@ Output.prototype = {
 
   /**
    * Gets the output buffer for braille.
-   * @return {!cvox.Spannable}
+   * @return {!Spannable}
    */
   get brailleOutputForTest() {
     return this.createBrailleOutput_();
@@ -645,6 +645,16 @@ Output.prototype = {
   },
 
   /**
+   * Applies the given speech category to the output.
+   * @param {cvox.TtsCategory} category
+   * @return {!Output}
+   */
+  withSpeechCategory: function(category) {
+    this.speechProperties_['category'] = category;
+    return this;
+  },
+
+  /**
    * Apply a format string directly to the output buffer. This lets you
    * output a message directly to the buffer using the format syntax.
    * @param {string} formatStr
@@ -677,29 +687,28 @@ Output.prototype = {
    */
   go: function() {
     // Speech.
-    var queueMode = cvox.QueueMode.FLUSH;
+    var queueMode = this.speechProperties_['category'] ?
+        cvox.QueueMode.CATEGORY_FLUSH : cvox.QueueMode.FLUSH;
     this.speechBuffer_.forEach(function(buff, i, a) {
-      if (buff.toString()) {
-        (function() {
-          var scopedBuff = buff;
-          this.speechProperties_['startCallback'] = function() {
-            var actions = scopedBuff.getSpansInstanceOf(Output.Action);
-            if (actions) {
-              actions.forEach(function(a) {
-                a.run();
-              });
-            }
-          };
-        }.bind(this)());
+      (function() {
+        var scopedBuff = buff;
+        this.speechProperties_['startCallback'] = function() {
+          var actions = scopedBuff.getSpansInstanceOf(Output.Action);
+          if (actions) {
+            actions.forEach(function(a) {
+              a.run();
+            });
+          }
+        };
+      }.bind(this)());
 
-        if (this.speechEndCallback_ && i == a.length - 1)
-          this.speechProperties_['endCallback'] = this.speechEndCallback_;
-        else
-          this.speechProperties_['endCallback'] = null;
-        cvox.ChromeVox.tts.speak(
-            buff.toString(), queueMode, this.speechProperties_);
-        queueMode = cvox.QueueMode.QUEUE;
-      }
+      if (this.speechEndCallback_ && i == a.length - 1)
+        this.speechProperties_['endCallback'] = this.speechEndCallback_;
+      else
+        this.speechProperties_['endCallback'] = null;
+      cvox.ChromeVox.tts.speak(
+          buff.toString(), queueMode, this.speechProperties_);
+      queueMode = cvox.QueueMode.QUEUE;
     }.bind(this));
 
     // Braille.
@@ -709,11 +718,8 @@ Output.prototype = {
           buff.getSpanInstanceOf(Output.SelectionSpan);
       var startIndex = -1, endIndex = -1;
       if (selSpan) {
-        // Casts ok, since the span is known to be in the spannable.
-        var valueStart =
-            /** @type {number} */ (buff.getSpanStart(selSpan));
-        var valueEnd =
-            /** @type {number} */ (buff.getSpanEnd(selSpan));
+        var valueStart = buff.getSpanStart(selSpan);
+        var valueEnd = buff.getSpanEnd(selSpan);
         startIndex = valueStart + selSpan.startIndex;
         endIndex = valueStart + selSpan.endIndex;
         buff.setSpan(new cvox.ValueSpan(0), valueStart, valueEnd);
@@ -739,7 +745,7 @@ Output.prototype = {
    * @param {!cursors.Range} range
    * @param {cursors.Range} prevRange
    * @param {chrome.automation.EventType|string} type
-   * @param {!Array<cvox.Spannable>} buff Buffer to receive rendered output.
+   * @param {!Array<Spannable>} buff Buffer to receive rendered output.
    * @private
    */
   render_: function(range, prevRange, type, buff) {
@@ -754,7 +760,7 @@ Output.prototype = {
    * @param {chrome.automation.AutomationNode} node
    * @param {string|!Object} format The output format either specified as an
    * output template string or a parsed output format tree.
-   * @param {!Array<cvox.Spannable>} buff Buffer to receive rendered output.
+   * @param {!Array<Spannable>} buff Buffer to receive rendered output.
    * @param {!Object=} opt_exclude A set of attributes to exclude.
    * @private
    */
@@ -956,13 +962,10 @@ Output.prototype = {
             // Ignore unless we're generating speech output.
             if (!this.formatOptions_.speech)
               return;
-            // Assumes there's existing output in our buffer.
-            var lastBuff = buff[buff.length - 1];
-            if (!lastBuff)
-              return;
 
-            lastBuff.setSpan(
-                new Output.EarconAction(tree.firstChild.value), 0, 0);
+            options.annotation.push(
+                new Output.EarconAction(tree.firstChild.value));
+            this.append_(buff, '', options);
           } else if (token == 'countChildren') {
             var role = tree.firstChild.value;
             var count = node.children.filter(function(e) {
@@ -1036,14 +1039,13 @@ Output.prototype = {
    * @param {!cursors.Range} range
    * @param {cursors.Range} prevRange
    * @param {chrome.automation.EventType|string} type
-   * @param {!Array<cvox.Spannable>} rangeBuff
+   * @param {!Array<Spannable>} rangeBuff
    * @private
    */
   range_: function(range, prevRange, type, rangeBuff) {
     if (!prevRange)
       prevRange = cursors.Range.fromNode(range.start.node.root);
-
-    var cursor = range.start;
+    var cursor = cursors.Cursor.fromNode(range.start.node);
     var prevNode = prevRange.start.node;
 
     var formatNodeAndAncestors = function(node, prevNode) {
@@ -1075,7 +1077,7 @@ Output.prototype = {
    * @param {!chrome.automation.AutomationNode} node
    * @param {!chrome.automation.AutomationNode} prevNode
    * @param {chrome.automation.EventType|string} type
-   * @param {!Array<cvox.Spannable>} buff
+   * @param {!Array<Spannable>} buff
    * @param {!Object=} opt_exclude A list of attributes to exclude from
    * processing.
    * @private
@@ -1147,7 +1149,7 @@ Output.prototype = {
    * @param {!chrome.automation.AutomationNode} node
    * @param {!chrome.automation.AutomationNode} prevNode
    * @param {chrome.automation.EventType|string} type
-   * @param {!Array<cvox.Spannable>} buff
+   * @param {!Array<Spannable>} buff
    * @private
    */
   node_: function(node, prevNode, type, buff) {
@@ -1162,7 +1164,7 @@ Output.prototype = {
    * @param {!cursors.Range} range
    * @param {cursors.Range} prevRange
    * @param {chrome.automation.EventType|string} type
-   * @param {!Array<cvox.Spannable>} buff
+   * @param {!Array<Spannable>} buff
    * @private
    */
   subNode_: function(range, prevRange, type, buff) {
@@ -1173,8 +1175,8 @@ Output.prototype = {
     this.ancestry_(
         range.start.node, prevNode, type, buff,
         {stay: true, name: true, value: true});
-    var startIndex = range.start.getIndex();
-    var endIndex = range.end.getIndex();
+    var startIndex = range.start.index;
+    var endIndex = range.end.index;
     if (startIndex === endIndex)
       endIndex++;
     this.append_(
@@ -1183,8 +1185,8 @@ Output.prototype = {
 
   /**
    * Appends output to the |buff|.
-   * @param {!Array<cvox.Spannable>} buff
-   * @param {string|!cvox.Spannable} value
+   * @param {!Array<Spannable>} buff
+   * @param {string|!Spannable} value
    * @param {{isUnique: (boolean|undefined),
    *      annotation: !Array<*>}=} opt_options
    */
@@ -1195,9 +1197,9 @@ Output.prototype = {
     if ((!value || value.length == 0) && opt_options.annotation.length == 0)
       return;
 
-    var spannableToAdd = new cvox.Spannable(value);
+    var spannableToAdd = new Spannable(value);
     opt_options.annotation.forEach(function(a) {
-      spannableToAdd.setSpan(a, 0, spannableToAdd.getLength());
+      spannableToAdd.setSpan(a, 0, spannableToAdd.length);
     });
 
     // |isUnique| specifies an annotation that cannot be duplicated.
@@ -1208,10 +1210,10 @@ Output.prototype = {
           });
       var alreadyAnnotated = buff.some(function(s) {
         return annotationSansNodes.some(function(annotation) {
+          if (!s.hasSpan(annotation))
+            return false;
           var start = s.getSpanStart(annotation);
           var end = s.getSpanEnd(annotation);
-          if (start === undefined)
-            return false;
           return s.substring(start, end).toString() == value.toString();
         });
       });
@@ -1264,11 +1266,11 @@ Output.prototype = {
 
   /**
    * Converts the currently rendered braille buffers to a single spannable.
-   * @return {!cvox.Spannable}
+   * @return {!Spannable}
    * @private
    */
   createBrailleOutput_: function() {
-    var result = new cvox.Spannable();
+    var result = new Spannable();
     var separator = '';  // Changes to space as appropriate.
     this.brailleBuffer_.forEach(function(cur) {
       // If this chunk is empty, don't add it since it won't result
@@ -1278,7 +1280,7 @@ Output.prototype = {
       // case it will result in a cursor which has to be preserved.
       // In this case, having separators, potentially both before and after
       // the empty string is correct.
-      if (cur.getLength() == 0 && !cur.getSpanInstanceOf(Output.SelectionSpan))
+      if (cur.length == 0 && !cur.getSpanInstanceOf(Output.SelectionSpan))
         return;
       var spansToExtend = [];
       var spansToRemove = [];
@@ -1294,20 +1296,20 @@ Output.prototype = {
       // using getSpansInstanceOf and check the endpoints (isntead of doing
       // the opposite).
       result.getSpansInstanceOf(Output.NodeSpan).forEach(function(leftSpan) {
-        if (result.getSpanEnd(leftSpan) < result.getLength())
+        if (result.getSpanEnd(leftSpan) < result.length)
           return;
-        var newEnd = result.getLength();
+        var newEnd = result.length;
         cur.getSpansInstanceOf(Output.NodeSpan).forEach(function(rightSpan) {
           if (cur.getSpanStart(rightSpan) == 0 &&
               leftSpan.node === rightSpan.node) {
             newEnd = Math.max(
                 newEnd,
-                result.getLength() + separator.length +
+                result.length + separator.length +
                     cur.getSpanEnd(rightSpan));
             spansToRemove.push(rightSpan);
           }
         });
-        if (newEnd > result.getLength())
+        if (newEnd > result.length)
           spansToExtend.push({span: leftSpan, end: newEnd});
       });
       result.append(separator);
@@ -1315,8 +1317,7 @@ Output.prototype = {
       spansToExtend.forEach(function(elem) {
         result.setSpan(
             elem.span,
-            // Cast ok, since span is known to exist.
-            /** @type {number} */ (result.getSpanStart(elem.span)),
+            result.getSpanStart(elem.span),
             elem.end);
       });
       spansToRemove.forEach(result.removeSpan.bind(result));

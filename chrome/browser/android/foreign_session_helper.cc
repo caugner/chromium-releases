@@ -13,12 +13,12 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/sessions/session_restore.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/android/tab_model/tab_model.h"
 #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/sync_driver/open_tabs_ui_delegate.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -151,15 +151,13 @@ static jlong Init(JNIEnv* env,
 }
 
 ForeignSessionHelper::ForeignSessionHelper(Profile* profile)
-    : profile_(profile) {
+    : profile_(profile), scoped_observer_(this) {
   ProfileSyncService* service = ProfileSyncServiceFactory::GetInstance()->
       GetForProfile(profile);
-  registrar_.Add(this, chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
-                 content::Source<ProfileSyncService>(service));
-  registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED,
-                 content::Source<Profile>(profile));
-  registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_DISABLED,
-                 content::Source<Profile>(profile));
+
+  // NOTE: The ProfileSyncService can be null in tests.
+  if (service)
+    scoped_observer_.Add(service);
 }
 
 ForeignSessionHelper::~ForeignSessionHelper() {
@@ -176,11 +174,13 @@ jboolean ForeignSessionHelper::IsTabSyncEnabled(JNIEnv* env, jobject obj) {
 }
 
 void ForeignSessionHelper::TriggerSessionSync(JNIEnv* env, jobject obj) {
+  ProfileSyncService* service = ProfileSyncServiceFactory::GetInstance()->
+      GetForProfile(profile_);
+  if (!service)
+    return;
+
   const syncer::ModelTypeSet types(syncer::SESSIONS);
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_SYNC_REFRESH_LOCAL,
-      content::Source<Profile>(profile_),
-      content::Details<const syncer::ModelTypeSet>(&types));
+  service->TriggerRefresh(types);
 }
 
 void ForeignSessionHelper::SetOnForeignSessionCallback(JNIEnv* env,
@@ -189,27 +189,20 @@ void ForeignSessionHelper::SetOnForeignSessionCallback(JNIEnv* env,
   callback_.Reset(env, callback);
 }
 
-void ForeignSessionHelper::Observe(
-    int type, const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
+void ForeignSessionHelper::FireForeignSessionCallback() {
   if (callback_.is_null())
     return;
 
   JNIEnv* env = AttachCurrentThread();
+  Java_ForeignSessionCallback_onUpdated(env, callback_.obj());
+}
 
-  switch (type) {
-    case chrome::NOTIFICATION_FOREIGN_SESSION_DISABLED:
-      // Tab sync is disabled, so clean up data about collapsed sessions.
-      profile_->GetPrefs()->ClearPref(
-          prefs::kNtpCollapsedForeignSessions);
-      // Purposeful fall through.
-    case chrome::NOTIFICATION_SYNC_CONFIGURE_DONE:
-    case chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED:
-      Java_ForeignSessionCallback_onUpdated(env, callback_.obj());
-      break;
-    default:
-      NOTREACHED();
-  }
+void ForeignSessionHelper::OnSyncConfigurationCompleted() {
+  FireForeignSessionCallback();
+}
+
+void ForeignSessionHelper::OnForeignSessionUpdated() {
+  FireForeignSessionCallback();
 }
 
 jboolean ForeignSessionHelper::GetForeignSessions(JNIEnv* env,

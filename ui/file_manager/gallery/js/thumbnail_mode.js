@@ -674,7 +674,7 @@ ThumbnailView.prototype.selectByThumbnail_ = function(
 
 /**
  * Inserts an item.
- * @param {!Gallery.Item} galleryItem A gallery item.
+ * @param {!GalleryItem} galleryItem A gallery item.
  * @param {!ThumbnailView.Thumbnail} insertBefore A thumbnail before which new
  *     thumbnail is inserted. Set null for adding at the end of the list.
  * @private
@@ -698,7 +698,7 @@ ThumbnailView.prototype.insert_ = function(galleryItem, insertBefore) {
 
 /**
  * Removes an item.
- * @param {!Gallery.Item} galleryItem A gallery item.
+ * @param {!GalleryItem} galleryItem A gallery item.
  * @private
  */
 ThumbnailView.prototype.remove_ = function(galleryItem) {
@@ -793,13 +793,13 @@ ThumbnailView.prototype.focus = function() {
 
 /**
  * Thumbnail.
- * @param {!Gallery.Item} galleryItem A gallery item.
+ * @param {!GalleryItem} galleryItem A gallery item.
  * @constructor
  * @struct
  */
 ThumbnailView.Thumbnail = function(galleryItem) {
   /**
-   * @private {!Gallery.Item}
+   * @private {!GalleryItem}
    */
   this.galleryItem_ = galleryItem;
 
@@ -860,7 +860,7 @@ ThumbnailView.Thumbnail = function(galleryItem) {
 
 /**
  * Returns a gallery item.
- * @return {!Gallery.Item} A gallery item.
+ * @return {!GalleryItem} A gallery item.
  */
 ThumbnailView.Thumbnail.prototype.getGalleryItem = function() {
   return this.galleryItem_;

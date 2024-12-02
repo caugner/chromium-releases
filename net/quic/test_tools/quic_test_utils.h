@@ -14,7 +14,6 @@
 #include "base/strings/string_piece.h"
 #include "net/quic/congestion_control/loss_detection_interface.h"
 #include "net/quic/congestion_control/send_algorithm_interface.h"
-#include "net/quic/quic_ack_notifier.h"
 #include "net/quic/quic_client_session_base.h"
 #include "net/quic/quic_connection.h"
 #include "net/quic/quic_framer.h"
@@ -223,7 +222,7 @@ class MockFramerVisitor : public QuicFramerVisitorInterface {
   MOCK_METHOD1(OnAckFrame, bool(const QuicAckFrame& frame));
   MOCK_METHOD1(OnStopWaitingFrame, bool(const QuicStopWaitingFrame& frame));
   MOCK_METHOD1(OnPingFrame, bool(const QuicPingFrame& frame));
-  MOCK_METHOD1(OnFecData, void(const QuicFecData& fec));
+  MOCK_METHOD1(OnFecData, void(StringPiece redundancy));
   MOCK_METHOD1(OnRstStreamFrame, bool(const QuicRstStreamFrame& frame));
   MOCK_METHOD1(OnConnectionCloseFrame,
                bool(const QuicConnectionCloseFrame& frame));
@@ -257,7 +256,7 @@ class NoOpFramerVisitor : public QuicFramerVisitorInterface {
   bool OnAckFrame(const QuicAckFrame& frame) override;
   bool OnStopWaitingFrame(const QuicStopWaitingFrame& frame) override;
   bool OnPingFrame(const QuicPingFrame& frame) override;
-  void OnFecData(const QuicFecData& fec) override {}
+  void OnFecData(StringPiece redundancy) override {}
   bool OnRstStreamFrame(const QuicRstStreamFrame& frame) override;
   bool OnConnectionCloseFrame(const QuicConnectionCloseFrame& frame) override;
   bool OnGoAwayFrame(const QuicGoAwayFrame& frame) override;
@@ -295,10 +294,10 @@ class MockConnectionVisitor : public QuicConnectionVisitorInterface {
   DISALLOW_COPY_AND_ASSIGN(MockConnectionVisitor);
 };
 
-class MockHelper : public QuicConnectionHelperInterface {
+class MockConnectionHelper : public QuicConnectionHelperInterface {
  public:
-  MockHelper();
-  ~MockHelper() override;
+  MockConnectionHelper();
+  ~MockConnectionHelper() override;
   const QuicClock* GetClock() const override;
   QuicRandom* GetRandomGenerator() override;
   QuicAlarm* CreateAlarm(QuicAlarm::Delegate* delegate) override;
@@ -308,7 +307,7 @@ class MockHelper : public QuicConnectionHelperInterface {
   MockClock clock_;
   MockRandom random_generator_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockHelper);
+  DISALLOW_COPY_AND_ASSIGN(MockConnectionHelper);
 };
 
 class NiceMockPacketWriterFactory : public QuicConnection::PacketWriterFactory {
@@ -324,36 +323,34 @@ class NiceMockPacketWriterFactory : public QuicConnection::PacketWriterFactory {
 
 class MockConnection : public QuicConnection {
  public:
-  // Uses a MockHelper, ConnectionId of 42, and 127.0.0.1:123.
-  explicit MockConnection(Perspective perspective);
+  // Uses a ConnectionId of 42 and 127.0.0.1:123.
+  MockConnection(MockConnectionHelper* helper, Perspective perspective);
 
-  // Uses a MockHelper, ConnectionId of 42, and 127.0.0.1:123.
-  MockConnection(Perspective perspective, bool is_secure);
+  // Uses a ConnectionId of 42.
+  MockConnection(IPEndPoint address,
+                 MockConnectionHelper* helper,
+                 Perspective perspective);
 
-  // Uses a MockHelper, ConnectionId of 42.
-  MockConnection(IPEndPoint address, Perspective perspective);
-
-  // Uses a MockHelper, and 127.0.0.1:123.
-  MockConnection(QuicConnectionId connection_id, Perspective perspective);
-
-  // Uses a MockHelper, and 127.0.0.1:123.
+  // Uses 127.0.0.1:123.
   MockConnection(QuicConnectionId connection_id,
-                 Perspective perspective,
-                 bool is_secure);
+                 MockConnectionHelper* helper,
+                 Perspective perspective);
 
-  // Uses a Mock helper, ConnectionId of 42, and 127.0.0.1:123.
-  MockConnection(Perspective perspective,
+  // Uses a ConnectionId of 42, and 127.0.0.1:123.
+  MockConnection(MockConnectionHelper* helper,
+                 Perspective perspective,
                  const QuicVersionVector& supported_versions);
 
   MockConnection(QuicConnectionId connection_id,
                  IPEndPoint address,
+                 MockConnectionHelper* helper,
                  Perspective perspective,
-                 bool is_secure,
                  const QuicVersionVector& supported_versions);
 
   ~MockConnection() override;
 
-  // If the constructor that uses a MockHelper has been used then this method
+  // If the constructor that uses a MockConnectionHelper has been used then
+  // this method
   // will advance the time of the MockClock.
   void AdvanceTime(QuicTime::Delta delta);
 
@@ -403,16 +400,15 @@ class MockConnection : public QuicConnection {
   }
 
  private:
-  scoped_ptr<QuicConnectionHelperInterface> helper_;
-
   DISALLOW_COPY_AND_ASSIGN(MockConnection);
 };
 
 class PacketSavingConnection : public MockConnection {
  public:
-  explicit PacketSavingConnection(Perspective perspective);
+  PacketSavingConnection(MockConnectionHelper* helper, Perspective perspective);
 
-  PacketSavingConnection(Perspective perspective,
+  PacketSavingConnection(MockConnectionHelper* helper,
+                         Perspective perspective,
                          const QuicVersionVector& supported_versions);
 
   ~PacketSavingConnection() override;
@@ -433,15 +429,15 @@ class MockQuicSpdySession : public QuicSpdySession {
   QuicCryptoStream* GetCryptoStream() override { return crypto_stream_.get(); }
 
   MOCK_METHOD2(OnConnectionClosed, void(QuicErrorCode error, bool from_peer));
-  MOCK_METHOD1(CreateIncomingDynamicStream, QuicDataStream*(QuicStreamId id));
-  MOCK_METHOD0(CreateOutgoingDynamicStream, QuicDataStream*());
+  MOCK_METHOD1(CreateIncomingDynamicStream, QuicSpdyStream*(QuicStreamId id));
+  MOCK_METHOD0(CreateOutgoingDynamicStream, QuicSpdyStream*());
   MOCK_METHOD6(WritevData,
                QuicConsumedData(QuicStreamId id,
-                                const QuicIOVector& data,
+                                QuicIOVector data,
                                 QuicStreamOffset offset,
                                 bool fin,
                                 FecProtection fec_protection,
-                                QuicAckNotifier::DelegateInterface*));
+                                QuicAckListenerInterface*));
   MOCK_METHOD2(OnStreamHeaders, void(QuicStreamId stream_id,
                                      base::StringPiece headers_data));
   MOCK_METHOD2(OnStreamHeadersPriority, void(QuicStreamId stream_id,
@@ -453,6 +449,7 @@ class MockQuicSpdySession : public QuicSpdySession {
                                    QuicRstStreamErrorCode error,
                                    QuicStreamOffset bytes_written));
   MOCK_METHOD0(IsCryptoHandshakeConfirmed, bool());
+  MOCK_METHOD1(OnHeadersHeadOfLineBlocking, void(QuicTime::Delta delta));
 
   using QuicSession::ActivateStream;
 
@@ -469,8 +466,8 @@ class TestQuicSpdyServerSession : public QuicSpdySession {
                             const QuicCryptoServerConfig* crypto_config);
   ~TestQuicSpdyServerSession() override;
 
-  MOCK_METHOD1(CreateIncomingDynamicStream, QuicDataStream*(QuicStreamId id));
-  MOCK_METHOD0(CreateOutgoingDynamicStream, QuicDataStream*());
+  MOCK_METHOD1(CreateIncomingDynamicStream, QuicSpdyStream*(QuicStreamId id));
+  MOCK_METHOD0(CreateOutgoingDynamicStream, QuicSpdyStream*());
 
   QuicCryptoServerStream* GetCryptoStream() override;
 
@@ -495,8 +492,8 @@ class TestQuicSpdyClientSession : public QuicClientSessionBase {
                void(const ProofVerifyDetails& verify_details));
 
   // TestQuicSpdyClientSession
-  MOCK_METHOD1(CreateIncomingDynamicStream, QuicDataStream*(QuicStreamId id));
-  MOCK_METHOD0(CreateOutgoingDynamicStream, QuicDataStream*());
+  MOCK_METHOD1(CreateIncomingDynamicStream, QuicSpdyStream*(QuicStreamId id));
+  MOCK_METHOD0(CreateOutgoingDynamicStream, QuicSpdyStream*());
 
   QuicCryptoClientStream* GetCryptoStream() override;
 
@@ -548,6 +545,7 @@ class MockSendAlgorithm : public SendAlgorithmInterface {
                     QuicByteCount,
                     HasRetransmittableData));
   MOCK_METHOD1(OnRetransmissionTimeout, void(bool));
+  MOCK_METHOD0(OnConnectionMigration, void());
   MOCK_METHOD0(RevertRetransmissionTimeout, void());
   MOCK_CONST_METHOD3(TimeUntilSend,
                      QuicTime::Delta(QuicTime now,
@@ -612,21 +610,21 @@ class MockEntropyCalculator : public TestEntropyCalculator {
   DISALLOW_COPY_AND_ASSIGN(MockEntropyCalculator);
 };
 
-class MockAckNotifierDelegate : public QuicAckNotifier::DelegateInterface {
+class MockAckListener : public QuicAckListenerInterface {
  public:
-  MockAckNotifierDelegate();
+  MockAckListener();
 
-  MOCK_METHOD3(OnAckNotification,
-               void(int num_retransmitted_packets,
-                    int num_retransmitted_bytes,
-                    QuicTime::Delta delta_largest_observed));
+  MOCK_METHOD2(OnPacketAcked,
+               void(int acked_bytes, QuicTime::Delta delta_largest_observed));
+
+  MOCK_METHOD1(OnPacketRetransmitted, void(int retransmitted_bytes));
 
  protected:
   // Object is ref counted.
-  ~MockAckNotifierDelegate() override;
+  ~MockAckListener() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockAckNotifierDelegate);
+  DISALLOW_COPY_AND_ASSIGN(MockAckListener);
 };
 
 class MockNetworkChangeVisitor :
@@ -694,7 +692,7 @@ class MockQuicConnectionDebugVisitor : public QuicConnectionDebugVisitor {
                     QuicPacketNumber,
                     EncryptionLevel,
                     TransmissionType,
-                    const QuicEncryptedPacket&,
+                    size_t encrypted_length,
                     QuicTime));
 
   MOCK_METHOD3(OnPacketReceived,
@@ -735,6 +733,7 @@ class MockQuicConnectionDebugVisitor : public QuicConnectionDebugVisitor {
 //   Needed for strike-register nonce verification.  The client
 //   connection_start_time should be synchronized witht the server
 //   start time, otherwise nonce verification will fail.
+// helper: Pointer to the MockConnectionHelper to use for the session.
 // crypto_client_config: Pointer to the crypto client config.
 // client_connection: Pointer reference for newly created
 //   connection.  This object will be owned by the
@@ -744,6 +743,7 @@ class MockQuicConnectionDebugVisitor : public QuicConnectionDebugVisitor {
 void CreateClientSessionForTest(QuicServerId server_id,
                                 bool supports_stateless_rejects,
                                 QuicTime::Delta connection_start_time,
+                                MockConnectionHelper* helper,
                                 QuicCryptoClientConfig* crypto_client_config,
                                 PacketSavingConnection** client_connection,
                                 TestQuicSpdyClientSession** client_session);
@@ -755,6 +755,7 @@ void CreateClientSessionForTest(QuicServerId server_id,
 //   Needed for strike-register nonce verification.  The server
 //   connection_start_time should be synchronized witht the client
 //   start time, otherwise nonce verification will fail.
+// helper: Pointer to the MockConnectionHelper to use for the session.
 // crypto_server_config: Pointer to the crypto server config.
 // server_connection: Pointer reference for newly created
 //   connection.  This object will be owned by the
@@ -763,9 +764,14 @@ void CreateClientSessionForTest(QuicServerId server_id,
 //   session.  The new object will be owned by the caller.
 void CreateServerSessionForTest(QuicServerId server_id,
                                 QuicTime::Delta connection_start_time,
+                                MockConnectionHelper* helper,
                                 QuicCryptoServerConfig* crypto_server_config,
                                 PacketSavingConnection** server_connection,
                                 TestQuicSpdyServerSession** server_session);
+
+// Helper to generate client side stream ids, generalizes
+// kClientDataStreamId1 etc. above.
+QuicStreamId QuicClientDataStreamId(int i);
 
 }  // namespace test
 }  // namespace net

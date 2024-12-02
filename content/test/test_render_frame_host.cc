@@ -85,7 +85,8 @@ TestRenderFrameHost* TestRenderFrameHost::AppendChild(
     const std::string& frame_name) {
   OnCreateChildFrame(GetProcess()->GetNextRoutingID(),
                      blink::WebTreeScopeType::Document, frame_name,
-                     blink::WebSandboxFlags::None);
+                     blink::WebSandboxFlags::None,
+                     blink::WebFrameOwnerProperties());
   return static_cast<TestRenderFrameHost*>(
       child_creation_observer_.last_created_frame());
 }
@@ -285,6 +286,12 @@ void TestRenderFrameHost::SendNavigateWithParameters(
   params.history_list_was_cleared = simulate_history_list_was_cleared_;
   params.original_request_url = url_copy;
 
+  // In most cases, the origin will match the URL's origin.  Tests that need to
+  // check corner cases (like about:blank) should specify the origin param
+  // manually.
+  url::Origin origin(url_copy);
+  params.origin = origin;
+
   url::Replacements<char> replacements;
   replacements.ClearRef();
   params.was_within_same_page =
@@ -321,9 +328,8 @@ void TestRenderFrameHost::NavigateAndCommitRendererInitiated(
   bool browser_side_navigation =
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableBrowserSideNavigation);
-  CHECK_IMPLIES(browser_side_navigation, is_loading());
-  CHECK_IMPLIES(browser_side_navigation,
-                !frame_tree_node()->navigation_request());
+  CHECK(!browser_side_navigation || is_loading());
+  CHECK(!browser_side_navigation || !frame_tree_node()->navigation_request());
   SendNavigate(page_id, 0, did_create_new_entry, url);
 }
 
@@ -337,7 +343,8 @@ void TestRenderFrameHost::SendRendererInitiatedNavigationRequest(
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableBrowserSideNavigation)) {
     BeginNavigationParams begin_params("GET", std::string(), net::LOAD_NORMAL,
-                                       has_user_gesture);
+                                       has_user_gesture, false,
+                                       REQUEST_CONTEXT_TYPE_HYPERLINK);
     CommonNavigationParams common_params;
     common_params.url = url;
     common_params.referrer = Referrer(GURL(), blink::WebReferrerPolicyDefault);
@@ -396,8 +403,8 @@ void TestRenderFrameHost::PrepareForCommitWithServerRedirect(
 int32 TestRenderFrameHost::ComputeNextPageID() {
   const NavigationEntryImpl* entry = static_cast<NavigationEntryImpl*>(
       frame_tree_node()->navigator()->GetController()->GetPendingEntry());
-  DCHECK_IMPLIES(entry && entry->site_instance(),
-                 entry->site_instance() == GetSiteInstance());
+  DCHECK(!(entry && entry->site_instance()) ||
+         entry->site_instance() == GetSiteInstance());
   // Entry can be null when committing an error page (the pending entry was
   // cleared during DidFailProvisionalLoad).
   int page_id = entry ? entry->GetPageID() : -1;

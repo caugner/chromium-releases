@@ -10,24 +10,19 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "content/browser/android/in_process/synchronous_compositor_output_surface.h"
-#include "content/common/input/input_event_ack_state.h"
-#include "content/public/browser/android/synchronous_compositor.h"
-#include "content/public/browser/web_contents_user_data.h"
+#include "content/browser/android/synchronous_compositor_base.h"
+#include "content/renderer/android/synchronous_compositor_external_begin_frame_source.h"
+#include "content/renderer/android/synchronous_compositor_output_surface.h"
 #include "content/renderer/input/synchronous_input_handler_proxy.h"
 #include "ipc/ipc_message.h"
 
 namespace cc {
-struct BeginFrameArgs;
 class InputHandler;
-}
-
-namespace blink {
-class WebInputEvent;
 }
 
 namespace content {
 class InputHandlerManager;
+class RenderWidgetHostViewAndroid;
 class SynchronousCompositorExternalBeginFrameSource;
 struct DidOverscrollParams;
 
@@ -38,16 +33,18 @@ struct DidOverscrollParams;
 // from the Compositor thread.
 class SynchronousCompositorImpl
     : public SynchronousInputHandler,
-      public SynchronousCompositor,
-      public WebContentsUserData<SynchronousCompositorImpl> {
+      public SynchronousCompositorBase,
+      public SynchronousCompositorExternalBeginFrameSourceClient,
+      public SynchronousCompositorOutputSurfaceClient {
  public:
-  // When used from browser code, use both |process_id| and |routing_id|.
-  static SynchronousCompositorImpl* FromID(int process_id, int routing_id);
-  // When handling upcalls from renderer code, use this version; the process id
+  // For handling upcalls from renderer code; the process id
   // is implicitly that of the in-process renderer.
   static SynchronousCompositorImpl* FromRoutingID(int routing_id);
 
-  InputEventAckState HandleInputEvent(const blink::WebInputEvent& input_event);
+  static void SetGpuServiceInProc(
+      scoped_refptr<gpu::InProcessCommandBuffer::Service> service);
+
+  ~SynchronousCompositorImpl() override;
 
   // Called by SynchronousCompositorRegistry.
   void DidInitializeRendererObjects(
@@ -56,22 +53,19 @@ class SynchronousCompositorImpl
       SynchronousInputHandlerProxy* synchronous_input_handler_proxy);
   void DidDestroyRendererObjects();
 
-  // Called by SynchronousCompositorExternalBeginFrameSource.
-  void OnNeedsBeginFramesChange(bool needs_begin_frames);
+  // SynchronousCompositorExternalBeginFrameSourceClient overrides.
+  void OnNeedsBeginFramesChange(bool needs_begin_frames) override;
 
-  // Called by SynchronousCompositorOutputSurface.
-  void PostInvalidate();
+  // SynchronousCompositorOutputSurfaceClient overrides.
+  void Invalidate() override;
 
-  // Called by RenderWidgetHostViewAndroid.
-  void BeginFrame(const cc::BeginFrameArgs& args);
-
-  // SynchronousCompositor
+  // SynchronousCompositor overrides.
   scoped_ptr<cc::CompositorFrame> DemandDrawHw(
-      gfx::Size surface_size,
+      const gfx::Size& surface_size,
       const gfx::Transform& transform,
-      gfx::Rect viewport,
-      gfx::Rect clip,
-      gfx::Rect viewport_rect_for_tile_priority,
+      const gfx::Rect& viewport,
+      const gfx::Rect& clip,
+      const gfx::Rect& viewport_rect_for_tile_priority,
       const gfx::Transform& transform_for_tile_priority) override;
   bool DemandDrawSw(SkCanvas* canvas) override;
   void ReturnResources(const cc::CompositorFrameAck& frame_ack) override;
@@ -80,6 +74,12 @@ class SynchronousCompositorImpl
       const gfx::ScrollOffset& root_offset) override;
   void SetIsActive(bool is_active) override;
   void OnComputeScroll(base::TimeTicks animation_time) override;
+
+  // SynchronousCompositorBase overrides.
+  void BeginFrame(const cc::BeginFrameArgs& args) override;
+  InputEventAckState HandleInputEvent(
+      const blink::WebInputEvent& input_event) override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // SynchronousInputHandler
   void SetNeedsSynchronousAnimateInput() override;
@@ -94,12 +94,9 @@ class SynchronousCompositorImpl
   void DidStopFlinging();
 
  private:
-  friend class WebContentsUserData<SynchronousCompositorImpl>;
-  friend class SynchronousCompositor;
-  explicit SynchronousCompositorImpl(WebContents* contents);
-  ~SynchronousCompositorImpl() override;
-
-  void SetClient(SynchronousCompositorClient* compositor_client);
+  friend class SynchronousCompositorBase;
+  SynchronousCompositorImpl(RenderWidgetHostViewAndroid* rwhva,
+                            SynchronousCompositorClient* client);
   void RegisterWithClient();
   void UpdateFrameMetaData(const cc::CompositorFrameMetadata& frame_info);
   void DidActivatePendingTree();
@@ -107,11 +104,11 @@ class SynchronousCompositorImpl
   bool CalledOnValidThread() const;
   void UpdateNeedsBeginFrames();
 
-  SynchronousCompositorClient* compositor_client_;
+  RenderWidgetHostViewAndroid* const rwhva_;
+  const int routing_id_;
+  SynchronousCompositorClient* const compositor_client_;
   SynchronousCompositorOutputSurface* output_surface_;
   SynchronousCompositorExternalBeginFrameSource* begin_frame_source_;
-  WebContents* contents_;
-  const int routing_id_;
   SynchronousInputHandlerProxy* synchronous_input_handler_proxy_;
   bool registered_with_client_;
   bool is_active_;

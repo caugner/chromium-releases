@@ -19,7 +19,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tabs/tab_discard_state.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_order_controller.h"
 #include "chrome/browser/ui/tabs/test_tab_strip_model_delegate.h"
@@ -264,7 +263,6 @@ class MockTabStripModelObserver : public TabStripModelObserver {
  public:
   explicit MockTabStripModelObserver(TabStripModel* model)
       : empty_(true),
-        deleted_(false),
         model_(model) {}
   ~MockTabStripModelObserver() override {}
 
@@ -409,21 +407,18 @@ class MockTabStripModelObserver : public TabStripModelObserver {
   void CloseAllTabsCanceled() override {
     states_.push_back(State(NULL, -1, CLOSE_ALL_CANCELED));
   }
-  void TabStripModelDeleted() override { deleted_ = true; }
 
   void ClearStates() {
     states_.clear();
   }
 
   bool empty() const { return empty_; }
-  bool deleted() const { return deleted_; }
   TabStripModel* model() { return model_; }
 
  private:
   std::vector<State> states_;
 
   bool empty_;
-  bool deleted_;
   TabStripModel* model_;
 
   DISALLOW_COPY_AND_ASSIGN(MockTabStripModelObserver);
@@ -2121,114 +2116,6 @@ TEST_F(TabStripModelTest, ReplaceSendsSelected) {
   strip.CloseAllTabs();
 }
 
-// Ensures discarding tabs leaves TabStripModel in a good state.
-TEST_F(TabStripModelTest, DiscardWebContentsAt) {
-  typedef MockTabStripModelObserver::State State;
-
-  TabStripDummyDelegate delegate;
-  TabStripModel tabstrip(&delegate, profile());
-
-  // Fill it with some tabs.
-  WebContents* contents1 = CreateWebContents();
-  tabstrip.AppendWebContents(contents1, true);
-  WebContents* contents2 = CreateWebContents();
-  tabstrip.AppendWebContents(contents2, true);
-
-  // Start watching for events after the appends to avoid observing state
-  // transitions that aren't relevant to this test.
-  MockTabStripModelObserver tabstrip_observer(&tabstrip);
-  tabstrip.AddObserver(&tabstrip_observer);
-
-  // Discard one of the tabs.
-  WebContents* null_contents1 = tabstrip.DiscardWebContentsAt(0);
-  ASSERT_EQ(2, tabstrip.count());
-  EXPECT_TRUE(TabDiscardState::IsDiscarded(tabstrip.GetWebContentsAt(0)));
-  EXPECT_FALSE(TabDiscardState::IsDiscarded(tabstrip.GetWebContentsAt(1)));
-  ASSERT_EQ(null_contents1, tabstrip.GetWebContentsAt(0));
-  ASSERT_EQ(contents2, tabstrip.GetWebContentsAt(1));
-  ASSERT_EQ(1, tabstrip_observer.GetStateCount());
-  State state1(null_contents1, 0, MockTabStripModelObserver::REPLACED);
-  state1.src_contents = contents1;
-  EXPECT_TRUE(tabstrip_observer.StateEquals(0, state1));
-  tabstrip_observer.ClearStates();
-
-  // Discard the same tab again.
-  WebContents* null_contents2 = tabstrip.DiscardWebContentsAt(0);
-  ASSERT_EQ(2, tabstrip.count());
-  EXPECT_TRUE(TabDiscardState::IsDiscarded(tabstrip.GetWebContentsAt(0)));
-  EXPECT_FALSE(TabDiscardState::IsDiscarded(tabstrip.GetWebContentsAt(1)));
-  ASSERT_EQ(null_contents2, tabstrip.GetWebContentsAt(0));
-  ASSERT_EQ(contents2, tabstrip.GetWebContentsAt(1));
-  ASSERT_EQ(1, tabstrip_observer.GetStateCount());
-  State state2(null_contents2, 0, MockTabStripModelObserver::REPLACED);
-  state2.src_contents = null_contents1;
-  EXPECT_TRUE(tabstrip_observer.StateEquals(0, state2));
-  tabstrip_observer.ClearStates();
-
-  // Activating the tab should clear its discard state.
-  tabstrip.ActivateTabAt(0, true /* user_gesture */);
-  ASSERT_EQ(2, tabstrip.count());
-  EXPECT_FALSE(TabDiscardState::IsDiscarded(tabstrip.GetWebContentsAt(0)));
-  EXPECT_FALSE(TabDiscardState::IsDiscarded(tabstrip.GetWebContentsAt(1)));
-
-  // Don't discard active tab.
-  tabstrip.DiscardWebContentsAt(0);
-  ASSERT_EQ(2, tabstrip.count());
-  EXPECT_FALSE(TabDiscardState::IsDiscarded(tabstrip.GetWebContentsAt(0)));
-  EXPECT_FALSE(TabDiscardState::IsDiscarded(tabstrip.GetWebContentsAt(1)));
-
-  tabstrip.CloseAllTabs();
-}
-
-// Makes sure that reloading a discarded tab without activating it unmarks the
-// tab as discarded so it won't reload on activation.
-TEST_F(TabStripModelTest, ReloadDiscardedTabContextMenu) {
-  TabStripDummyDelegate delegate;
-  TabStripModel tabstrip(&delegate, profile());
-
-  // Create 2 tabs because the active tab cannot be discarded.
-  tabstrip.AppendWebContents(CreateWebContents(), true);
-  content::WebContents* test_contents =
-      WebContentsTester::CreateTestWebContents(browser_context(), nullptr);
-  tabstrip.AppendWebContents(test_contents, false);  // Opened in background.
-
-  // Navigate to a web page. This is necessary to set a current entry in memory
-  // so the reload can happen.
-  WebContentsTester::For(test_contents)
-      ->NavigateAndCommit(GURL("chrome://newtab"));
-  EXPECT_FALSE(TabDiscardState::IsDiscarded(tabstrip.GetWebContentsAt(1)));
-
-  tabstrip.DiscardWebContentsAt(1);
-  EXPECT_TRUE(TabDiscardState::IsDiscarded(tabstrip.GetWebContentsAt(1)));
-
-  tabstrip.GetWebContentsAt(1)->GetController().Reload(false);
-  EXPECT_FALSE(TabDiscardState::IsDiscarded(tabstrip.GetWebContentsAt(1)));
-
-  tabstrip.CloseAllTabs();
-}
-
-// Makes sure that the last active time property is saved even though the tab is
-// discarded.
-TEST_F(TabStripModelTest, DiscardedTabKeepsLastActiveTime) {
-  TabStripDummyDelegate delegate;
-  TabStripModel tabstrip(&delegate, profile());
-
-  tabstrip.AppendWebContents(CreateWebContents(), true);
-  WebContents* test_contents = CreateWebContents();
-  tabstrip.AppendWebContents(test_contents, false);
-
-  // Simulate an old inactive tab about to get discarded.
-  base::TimeTicks new_last_active_time =
-      base::TimeTicks::Now() - base::TimeDelta::FromMinutes(35);
-  test_contents->SetLastActiveTime(new_last_active_time);
-  EXPECT_EQ(new_last_active_time, test_contents->GetLastActiveTime());
-
-  WebContents* null_contents = tabstrip.DiscardWebContentsAt(1);
-  EXPECT_EQ(new_last_active_time, null_contents->GetLastActiveTime());
-
-  tabstrip.CloseAllTabs();
-}
-
 // Makes sure TabStripModel handles the case of deleting a tab while removing
 // another tab.
 TEST_F(TabStripModelTest, DeleteFromDestroy) {
@@ -2270,7 +2157,6 @@ TEST_F(TabStripModelTest, DeleteTabStripFromDestroy) {
   DeleteWebContentsOnDestroyedObserver observer(contents2, contents1, strip);
   strip->CloseAllTabs();
   EXPECT_TRUE(tab_strip_model_observer.empty());
-  EXPECT_TRUE(tab_strip_model_observer.deleted());
 }
 
 TEST_F(TabStripModelTest, MoveSelectedTabsTo) {

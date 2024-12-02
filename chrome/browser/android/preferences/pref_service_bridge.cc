@@ -31,7 +31,9 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/common/pref_names.h"
+#include "components/metrics/metrics_pref_names.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
+#include "components/signin/core/common/signin_pref_names.h"
 #include "components/translate/core/browser/translate_prefs.h"
 #include "components/translate/core/common/translate_pref_names.h"
 #include "components/version_info/version_info.h"
@@ -68,31 +70,9 @@ bool GetBooleanForContentSetting(ContentSettingsType type) {
     case CONTENT_SETTING_BLOCK:
       return false;
     case CONTENT_SETTING_ALLOW:
-      return true;
     case CONTENT_SETTING_ASK:
     default:
       return true;
-  }
-}
-
-std::string GetStringForContentSettingsType(
-    ContentSetting content_setting) {
-  switch (content_setting) {
-    case CONTENT_SETTING_BLOCK:
-      return "block";
-    case CONTENT_SETTING_ALLOW:
-      return "allow";
-    case CONTENT_SETTING_ASK:
-      return "ask";
-    case CONTENT_SETTING_SESSION_ONLY:
-      return "session";
-    case CONTENT_SETTING_DETECT_IMPORTANT_CONTENT:
-      return "detect";
-    case CONTENT_SETTING_NUM_SETTINGS:
-      return "num_settings";
-    case CONTENT_SETTING_DEFAULT:
-    default:
-      return "default";
   }
 }
 
@@ -150,18 +130,10 @@ static jboolean IsContentSettingEnabled(JNIEnv* env,
   // Before we migrate functions over to this central function, we must verify
   // that the functionality provided below is correct.
   DCHECK(content_settings_type == CONTENT_SETTINGS_TYPE_JAVASCRIPT ||
-         content_settings_type == CONTENT_SETTINGS_TYPE_IMAGES ||
          content_settings_type == CONTENT_SETTINGS_TYPE_POPUPS);
   ContentSettingsType type =
       static_cast<ContentSettingsType>(content_settings_type);
-  if (type == CONTENT_SETTINGS_TYPE_JAVASCRIPT ||
-      type == CONTENT_SETTINGS_TYPE_POPUPS)
-    return GetBooleanForContentSetting(type);
-
-  HostContentSettingsMap* content_settings =
-      HostContentSettingsMapFactory::GetForProfile(GetOriginalProfile());
-  return content_settings->GetDefaultContentSetting(
-      type, nullptr) == CONTENT_SETTING_ALLOW;
+  return GetBooleanForContentSetting(type);
 }
 
 static void SetContentSettingEnabled(JNIEnv* env,
@@ -170,9 +142,12 @@ static void SetContentSettingEnabled(JNIEnv* env,
                                      jboolean allow) {
   // Before we migrate functions over to this central function, we must verify
   // that the new category supports ALLOW/BLOCK pairs and, if not, handle them.
+  // IMAGES is included to allow migrating the setting back for users who had
+  // disabled images in M44 (see https://crbug.com/505844).
+  // TODO(bauerb): Remove this when the migration code is removed.
   DCHECK(content_settings_type == CONTENT_SETTINGS_TYPE_JAVASCRIPT ||
-         content_settings_type == CONTENT_SETTINGS_TYPE_IMAGES ||
-         content_settings_type == CONTENT_SETTINGS_TYPE_POPUPS);
+         content_settings_type == CONTENT_SETTINGS_TYPE_POPUPS ||
+         content_settings_type == CONTENT_SETTINGS_TYPE_IMAGES);
   HostContentSettingsMap* host_content_settings_map =
       HostContentSettingsMapFactory::GetForProfile(GetOriginalProfile());
   host_content_settings_map->SetDefaultContentSetting(
@@ -191,7 +166,7 @@ static void SetContentSettingForPattern(JNIEnv* env,
       ContentSettingsPattern::FromString(ConvertJavaStringToUTF8(env, pattern)),
       ContentSettingsPattern::Wildcard(),
       static_cast<ContentSettingsType>(content_settings_type),
-      "",
+      std::string(),
       static_cast<ContentSetting>(setting));
 }
 
@@ -210,8 +185,7 @@ static void GetContentSettingsExceptions(JNIEnv* env,
         content_settings_type,
         ConvertUTF8ToJavaString(
             env, entries[i].primary_pattern.ToString()).obj(),
-        ConvertUTF8ToJavaString(
-            env, GetStringForContentSettingsType(entries[i].setting)).obj(),
+        entries[i].setting,
         ConvertUTF8ToJavaString(env, entries[i].source).obj());
   }
 }
@@ -827,6 +801,31 @@ static void SetNetworkPredictionOptions(JNIEnv* env,
                                         const JavaParamRef<jobject>& obj,
                                         int option) {
   GetPrefService()->SetInteger(prefs::kNetworkPredictionOptions, option);
+}
+
+static jboolean NetworkPredictionEnabledHasUserSetting(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  return GetPrefService()->GetUserPrefValue(
+      prefs::kNetworkPredictionEnabled) != NULL;
+}
+
+static jboolean NetworkPredictionOptionsHasUserSetting(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  return GetPrefService()->GetUserPrefValue(
+      prefs::kNetworkPredictionOptions) != NULL;
+}
+
+static jboolean GetNetworkPredictionEnabledUserPrefValue(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  const base::Value* network_prediction_enabled =
+      GetPrefService()->GetUserPrefValue(prefs::kNetworkPredictionEnabled);
+  DCHECK(network_prediction_enabled);
+  bool value = false;
+  DCHECK(network_prediction_enabled->GetAsBoolean(&value));
+  return value;
 }
 
 static void SetResolveNavigationErrorEnabled(JNIEnv* env,

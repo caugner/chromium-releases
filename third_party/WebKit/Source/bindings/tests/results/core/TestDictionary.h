@@ -27,7 +27,7 @@
 namespace blink {
 
 class CORE_EXPORT TestDictionary {
-    ALLOW_ONLY_INLINE_ALLOCATION();
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 public:
     TestDictionary();
 
@@ -101,6 +101,10 @@ public:
     bool hasRestrictedDoubleMember() const { return !m_restrictedDoubleMember.isNull(); }
     double restrictedDoubleMember() const { return m_restrictedDoubleMember.get(); }
     void setRestrictedDoubleMember(double value) { m_restrictedDoubleMember = value; }
+
+    bool hasRuntimeMember() const { return !m_runtimeMember.isNull(); }
+    bool runtimeMember() const { return m_runtimeMember.get(); }
+    void setRuntimeMember(bool value) { m_runtimeMember = value; }
 
     bool hasStringArrayMember() const { return !m_stringArrayMember.isNull(); }
     const Vector<String>& stringArrayMember() const { return m_stringArrayMember.get(); }
@@ -190,6 +194,7 @@ private:
     ScriptValue m_objectOrNullMember;
     DoubleOrString m_otherDoubleOrStringMember;
     Nullable<double> m_restrictedDoubleMember;
+    Nullable<bool> m_runtimeMember;
     Nullable<Vector<String>> m_stringArrayMember;
     String m_stringMember;
     String m_stringOrNullMember;

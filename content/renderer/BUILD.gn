@@ -28,8 +28,9 @@ source_set("renderer") {
     "//base/allocator",
     "//cc",
     "//cc/blink",
-    "//components/url_formatter",
     "//components/scheduler:scheduler",
+    "//components/url_formatter",
+    "//components/webusb",
     "//content:resources",
     "//content/common:mojo_bindings",
     "//content/public/child:child_sources",
@@ -47,15 +48,16 @@ source_set("renderer") {
     "//mojo/environment:chromium",
     "//mojo/common:url_type_converters",
     "//mojo/converters/geometry",
+    "//mojo/public/cpp/bindings",
+    "//mojo/public/js",
     "//net",
     "//skia",
     "//skia/public",
     "//storage/common",
     "//third_party/icu",
     "//third_party/libjingle",
+    "//third_party/libyuv",
     "//third_party/mojo/src/mojo/edk/js",
-    "//third_party/mojo/src/mojo/public/cpp/bindings",
-    "//third_party/mojo/src/mojo/public/js",
     "//third_party/npapi",
     "//third_party/WebKit/public:blink",
     "//third_party/widevine/cdm:version_h",
@@ -103,6 +105,8 @@ source_set("renderer") {
       "//third_party/android_tools:cpu_features",
       "//third_party/libphonenumber",
     ]
+
+    deps -= [ "//components/webusb" ]
   } else {
     sources -= [
       "java/gin_java_bridge_dispatcher.cc",
@@ -143,14 +147,22 @@ source_set("renderer") {
             content_renderer_gypi_values.private_renderer_webrtc_sources,
             ".",
             "//content")
+    if (is_android) {
+      sources -= [
+        "media/media_recorder_handler.cc",
+        "media/media_recorder_handler.h",
+        "media/video_track_recorder.cc",
+        "media/video_track_recorder.h",
+      ]
+    }
+
     deps += [
       "//crypto",
-      "//third_party/libyuv",
-      "//third_party/webrtc/modules/audio_device",
-      "//third_party/webrtc/modules/audio_processing",
       "//third_party/libjingle:libjingle_webrtc",
       "//third_party/libjingle:libpeerconnection",
       "//third_party/libjingle:libstunprober",
+      "//third_party/webrtc/modules/audio_device",
+      "//third_party/webrtc/modules/audio_processing",
     ]
   } else {
     sources += [
@@ -169,7 +181,6 @@ source_set("renderer") {
       "//ppapi/proxy",
       "//ppapi/shared_impl",
       "//third_party/libvpx_new",
-      "//third_party/libyuv",
     ]
   }
 

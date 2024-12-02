@@ -4,6 +4,8 @@
 
 #include "components/sync_driver/generic_change_processor.h"
 
+#include <string>
+
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -95,6 +97,7 @@ class MockSyncApiComponentFactory : public SyncApiComponentFactory {
   };
   browser_sync::SyncBackendHost* CreateSyncBackendHost(
       const std::string& name,
+      SyncClient* sync_client,
       invalidation::InvalidationService* invalidator,
       const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs,
       const base::FilePath& sync_folder) override {

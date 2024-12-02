@@ -20,13 +20,16 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Process;
 import android.support.customtabs.CustomTabsIntent;
+import android.support.customtabs.CustomTabsService;
 import android.support.customtabs.ICustomTabsCallback;
 import android.support.customtabs.ICustomTabsService;
 import android.text.TextUtils;
 import android.view.WindowManager;
 
+import org.chromium.base.CommandLine;
 import org.chromium.base.FieldTrialList;
 import org.chromium.base.Log;
+import org.chromium.base.SysUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.SuppressFBWarnings;
@@ -63,6 +66,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class CustomTabsConnection extends ICustomTabsService.Stub {
     private static final String TAG = "cr.ChromeConnection";
+    private static final String LOG_SERVICE_REQUESTS = "custom-tabs-log-service-requests";
     @VisibleForTesting
     static final String NO_PRERENDERING_KEY =
             "android.support.customtabs.maylaunchurl.NO_PRERENDERING";
@@ -88,6 +92,7 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
     }
 
     protected final Application mApplication;
+    private final boolean mLogRequests;
     private final AtomicBoolean mWarmupHasBeenCalled = new AtomicBoolean();
     private final ClientManager mClientManager;
     private ExternalPrerenderHandler mExternalPrerenderHandler;
@@ -103,6 +108,7 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         super();
         mApplication = application;
         mClientManager = new ClientManager(mApplication);
+        mLogRequests = CommandLine.getInstance().hasSwitch(LOG_SERVICE_REQUESTS);
     }
 
     /**
@@ -112,13 +118,34 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
     public static CustomTabsConnection getInstance(Application application) {
         if (sInstance.get() == null) {
             ChromeApplication chromeApplication = (ChromeApplication) application;
+            chromeApplication.initCommandLine();
             sInstance.compareAndSet(null, chromeApplication.createCustomTabsConnection());
         }
         return sInstance.get();
     }
 
+    /**
+     * If service requests logging is enabled, logs that a call was made.
+     *
+     * No rate-limiting, can be spammy if the app is misbehaved.
+     *
+     * @param name Call name to log.
+     * @param success Whether the call was successful.
+     */
+    void logCall(String name, boolean success) {
+        if (mLogRequests) {
+            Log.w(TAG, "%s = %b, Calling UID = %d", name, success, Binder.getCallingUid());
+        }
+    }
+
     @Override
     public boolean newSession(ICustomTabsCallback callback) {
+        boolean success = newSessionInternal(callback);
+        logCall("newSession()", success);
+        return success;
+    }
+
+    private boolean newSessionInternal(ICustomTabsCallback callback) {
         ClientManager.DisconnectCallback onDisconnect = new ClientManager.DisconnectCallback() {
             @Override
             public void run(IBinder session) {
@@ -128,37 +155,57 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         return mClientManager.newSession(callback, Binder.getCallingUid(), onDisconnect);
     }
 
+    /** Warmup activities that should only happen once. */
+    @SuppressFBWarnings("DM_EXIT")
+    private static void initializeBrowser(final ChromeApplication app) {
+        ThreadUtils.assertOnUiThread();
+        try {
+            app.startBrowserProcessesAndLoadLibrariesSync(true);
+        } catch (ProcessInitException e) {
+            Log.e(TAG, "ProcessInitException while starting the browser process.");
+            // Cannot do anything without the native library, and cannot show a
+            // dialog to the user.
+            System.exit(-1);
+        }
+        final Context context = app.getApplicationContext();
+        new AsyncTask<Void, Void, Void>() {
+            @Override
+            protected Void doInBackground(Void... params) {
+                ChildProcessLauncher.warmUp(context);
+                return null;
+            }
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        ChromeBrowserInitializer.initNetworkChangeNotifier(context);
+        WarmupManager.getInstance().initializeViewHierarchy(
+                context, R.layout.custom_tabs_control_container);
+    }
+
     @Override
     public boolean warmup(long flags) {
+        boolean success = warmupInternal(true);
+        logCall("warmup()", success);
+        return success;
+    }
+
+    /**
+     * Starts as much as possible in anticipation of a future navigation.
+     *
+     * @param mayCreatesparewebcontents true if warmup() can create a spare renderer.
+     * @return true for success.
+     */
+    private boolean warmupInternal(final boolean mayCreateSpareWebContents) {
         // Here and in mayLaunchUrl(), don't do expensive work for background applications.
         if (!isCallerForegroundOrSelf()) return false;
         mClientManager.recordUidHasCalledWarmup(Binder.getCallingUid());
-        if (!mWarmupHasBeenCalled.compareAndSet(false, true)) return true;
+        final boolean initialized = !mWarmupHasBeenCalled.compareAndSet(false, true);
         // The call is non-blocking and this must execute on the UI thread, post a task.
         ThreadUtils.postOnUiThread(new Runnable() {
             @Override
-            @SuppressFBWarnings("DM_EXIT")
             public void run() {
-                ChromeApplication app = (ChromeApplication) mApplication;
-                try {
-                    app.startBrowserProcessesAndLoadLibrariesSync(true);
-                } catch (ProcessInitException e) {
-                    Log.e(TAG, "ProcessInitException while starting the browser process.");
-                    // Cannot do anything without the native library, and cannot show a
-                    // dialog to the user.
-                    System.exit(-1);
+                if (!initialized) initializeBrowser((ChromeApplication) mApplication);
+                if (mayCreateSpareWebContents && mPrerender == null && !SysUtils.isLowEndDevice()) {
+                    createSpareWebContents();
                 }
-                final Context context = app.getApplicationContext();
-                new AsyncTask<Void, Void, Void>() {
-                    @Override
-                    protected Void doInBackground(Void... params) {
-                        ChildProcessLauncher.warmUp(context);
-                        return null;
-                    }
-                }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
-                ChromeBrowserInitializer.initNetworkChangeNotifier(context);
-                WarmupManager.getInstance().initializeViewHierarchy(app.getApplicationContext(),
-                        R.layout.custom_tabs_control_container);
             }
         });
         return true;
@@ -182,40 +229,90 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         }
     }
 
+    /**
+     * High confidence mayLaunchUrl() call, that is:
+     * - Tries to prerender if possible.
+     * - An empty URL cancels the current prerender if any.
+     * - If prerendering is not possible, makes sure that there is a spare renderer.
+     */
+    private void highConfidenceMayLaunchUrl(
+            IBinder session, int uid, String url, Bundle extras, List<Bundle> otherLikelyBundles) {
+        ThreadUtils.assertOnUiThread();
+        if (TextUtils.isEmpty(url)) {
+            cancelPrerender(session);
+            return;
+        }
+        boolean noPrerendering =
+                extras != null ? extras.getBoolean(NO_PRERENDERING_KEY, false) : false;
+        WarmupManager.getInstance().maybePreconnectUrlAndSubResources(
+                Profile.getLastUsedProfile(), url);
+        boolean didStartPrerender = false;
+        if (!noPrerendering && mayPrerender()) {
+            didStartPrerender = prerenderUrl(session, url, extras, uid);
+        }
+        preconnectUrls(otherLikelyBundles);
+        if (!didStartPrerender) createSpareWebContents();
+    }
+
+    /**
+     * Low confidence mayLaunchUrl() call, that is:
+     * - Preconnects to the ordered list of URLs.
+     * - Makes sure that there is a spare renderer.
+     */
+    private void lowConfidenceMayLaunchUrl(List<Bundle> likelyBundles) {
+        ThreadUtils.assertOnUiThread();
+        preconnectUrls(likelyBundles);
+        createSpareWebContents();
+    }
+
+    private void preconnectUrls(List<Bundle> likelyBundles) {
+        if (likelyBundles == null) return;
+        WarmupManager warmupManager = WarmupManager.getInstance();
+        Profile profile = Profile.getLastUsedProfile();
+        for (Bundle bundle : likelyBundles) {
+            String url = bundle.getString(CustomTabsService.KEY_URL);
+            if (url != null) warmupManager.maybePreconnectUrlAndSubResources(profile, url);
+        }
+    }
+
     @Override
-    public boolean mayLaunchUrl(ICustomTabsCallback callback, Uri url, final Bundle extras,
+    public boolean mayLaunchUrl(ICustomTabsCallback callback, Uri url, Bundle extras,
             List<Bundle> otherLikelyBundles) {
+        boolean success = mayLaunchUrlInternal(callback, url, extras, otherLikelyBundles);
+        logCall("mayLaunchUrl()", success);
+        return success;
+    }
+
+    private boolean mayLaunchUrlInternal(ICustomTabsCallback callback, Uri url, final Bundle extras,
+            final List<Bundle> otherLikelyBundles) {
         // Don't do anything for unknown schemes. Not having a scheme is
         // allowed, as we allow "www.example.com".
-        String scheme = url.normalizeScheme().getScheme();
-        if (scheme != null && !scheme.equals("http") && !scheme.equals("https")) return false;
+        String scheme = url == null ? null : url.normalizeScheme().getScheme();
+        boolean allowedScheme = scheme == null || scheme.equals("http") || scheme.equals("https");
+        if (!allowedScheme) return false;
         // Things below need the browser process to be initialized.
-        if (!warmup(0)) return false; // Also does the foreground check.
+
+        // Forbids warmup() from creating a spare renderer, as prerendering wouldn't reuse
+        // it. Checking whether prerendering is enabled requires the native library to be loaded,
+        // which is not necessarily the case yet.
+        if (!warmupInternal(false)) return false; // Also does the foreground check.
 
         final IBinder session = callback.asBinder();
-        final String urlString = url.toString();
-        final boolean noPrerendering =
-                extras != null ? extras.getBoolean(NO_PRERENDERING_KEY, false) : false;
+        final String urlString = url == null ? null : url.toString();
         final int uid = Binder.getCallingUid();
-        if (!mClientManager.updateStatsAndReturnWhetherAllowed(session, uid, urlString)) {
+        final boolean lowConfidence = TextUtils.isEmpty(urlString) && otherLikelyBundles != null;
+        // TODO(lizeb): Also throttle low-confidence mode.
+        if (!lowConfidence
+                && !mClientManager.updateStatsAndReturnWhetherAllowed(session, uid, urlString)) {
             return false;
         }
         ThreadUtils.postOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (TextUtils.isEmpty(urlString)) {
-                    cancelPrerender(session);
-                    return;
-                }
-                WarmupManager warmupManager = WarmupManager.getInstance();
-                warmupManager.maybePrefetchDnsForUrlInBackground(
-                        mApplication.getApplicationContext(), urlString);
-                warmupManager.maybePreconnectUrlAndSubResources(
-                        Profile.getLastUsedProfile(), urlString);
-                if (!noPrerendering && mayPrerender()) {
-                    prerenderUrl(session, urlString, extras, uid);
+                if (lowConfidence) {
+                    lowConfidenceMayLaunchUrl(otherLikelyBundles);
                 } else {
-                    createSpareWebContents();
+                    highConfidenceMayLaunchUrl(session, uid, urlString, extras, otherLikelyBundles);
                 }
             }
         });
@@ -241,6 +338,12 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         WebContents result = mSpareWebContents;
         mSpareWebContents = null;
         return result;
+    }
+
+    private void destroySpareWebContents() {
+        ThreadUtils.assertOnUiThread();
+        WebContents webContents = takeSpareWebContents();
+        if (webContents != null) webContents.destroy();
     }
 
     @Override
@@ -468,22 +571,35 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         }
     }
 
-    private void prerenderUrl(IBinder session, String url, Bundle extras, int uid) {
+    /**
+     * Tries to request a prerender for a given URL.
+     *
+     * @param session Session the request comes from.
+     * @param url URL to prerender.
+     * @param extras extra parameters.
+     * @param uid UID of the caller.
+     * @return true if a prerender has been initiated.
+     */
+    private boolean prerenderUrl(IBinder session, String url, Bundle extras, int uid) {
         ThreadUtils.assertOnUiThread();
         // TODO(lizeb): Prerendering through ChromePrerenderService is
         // incompatible with prerendering through this service. Remove this
         // limitation, or remove ChromePrerenderService.
         WarmupManager.getInstance().disallowPrerendering();
         // Ignores mayPrerender() for an empty URL, since it cancels an existing prerender.
-        if (!mayPrerender() && !TextUtils.isEmpty(url)) return;
-        if (!mWarmupHasBeenCalled.get()) return;
+        if (!mayPrerender() && !TextUtils.isEmpty(url)) return false;
+        if (!mWarmupHasBeenCalled.get()) return false;
         // Last one wins and cancels the previous prerender.
         cancelPrerender(null);
-        if (TextUtils.isEmpty(url)) return;
-        if (!mClientManager.isPrerenderingAllowed(uid)) return;
+        if (TextUtils.isEmpty(url)) return false;
+        if (!mClientManager.isPrerenderingAllowed(uid)) return false;
+
+        // A prerender will be requested. Time to destroy the spare WebContents.
+        destroySpareWebContents();
+
         Intent extrasIntent = new Intent();
         if (extras != null) extrasIntent.putExtras(extras);
-        if (IntentHandler.getExtraHeadersFromIntent(extrasIntent) != null) return;
+        if (IntentHandler.getExtraHeadersFromIntent(extrasIntent) != null) return false;
         if (mExternalPrerenderHandler == null) {
             mExternalPrerenderHandler = new ExternalPrerenderHandler();
         }
@@ -496,10 +612,10 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         if (referrer == null) referrer = "";
         WebContents webContents = mExternalPrerenderHandler.addPrerender(
                 Profile.getLastUsedProfile(), url, referrer, contentSize.x, contentSize.y);
-        if (webContents != null) {
-            mClientManager.registerPrerenderRequest(uid, url);
-            mPrerender = new PrerenderedUrlParams(session, webContents, url, referrer, extras);
-        }
+        if (webContents == null) return false;
+        mClientManager.registerPrerenderRequest(uid, url);
+        mPrerender = new PrerenderedUrlParams(session, webContents, url, referrer, extras);
+        return true;
     }
 
     /**

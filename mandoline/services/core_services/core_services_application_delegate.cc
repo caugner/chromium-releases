@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/single_thread_task_runner.h"
+#include "base/threading/platform_thread.h"
 #include "base/threading/simple_thread.h"
 #include "components/clipboard/clipboard_application_delegate.h"
 #include "components/filesystem/file_system_app.h"
@@ -16,6 +17,7 @@
 #include "mojo/application/public/cpp/application_runner.h"
 #include "mojo/logging/init_logging.h"
 #include "mojo/message_pump/message_pump_mojo.h"
+#include "mojo/services/tracing/public/cpp/tracing_impl.h"
 #include "mojo/services/tracing/tracing_app.h"
 #include "url/gurl.h"
 
@@ -29,18 +31,21 @@ class ApplicationThread : public base::SimpleThread {
           core_services_application,
       const std::string& url,
       scoped_ptr<mojo::ApplicationDelegate> delegate,
-      mojo::InterfaceRequest<mojo::Application> request)
+      mojo::InterfaceRequest<mojo::Application> request,
+      const mojo::Callback<void()>& destruct_callback)
       : base::SimpleThread(url),
         core_services_application_(core_services_application),
         core_services_application_task_runner_(
             base::MessageLoop::current()->task_runner()),
         url_(url),
         delegate_(delegate.Pass()),
-        request_(request.Pass()) {
+        request_(request.Pass()),
+        destruct_callback_(destruct_callback) {
   }
 
   ~ApplicationThread() override {
     Join();
+    destruct_callback_.Run();
   }
 
   // Overridden from base::SimpleThread:
@@ -68,6 +73,7 @@ class ApplicationThread : public base::SimpleThread {
   std::string url_;
   scoped_ptr<mojo::ApplicationDelegate> delegate_;
   mojo::InterfaceRequest<mojo::Application> request_;
+  mojo::Callback<void()> destruct_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(ApplicationThread);
 };
@@ -91,7 +97,9 @@ void CoreServicesApplicationDelegate::ApplicationThreadDestroyed(
 }
 
 void CoreServicesApplicationDelegate::Initialize(mojo::ApplicationImpl* app) {
+  base::PlatformThread::SetName("CoreServicesDispatcher");
   mojo::logging::InitLogging();
+  tracing_.Initialize(app);
 }
 
 bool CoreServicesApplicationDelegate::ConfigureIncomingConnection(
@@ -115,7 +123,8 @@ void CoreServicesApplicationDelegate::Create(
 
 void CoreServicesApplicationDelegate::StartApplication(
     mojo::InterfaceRequest<mojo::Application> request,
-    mojo::URLResponsePtr response) {
+    mojo::URLResponsePtr response,
+    const mojo::Callback<void()>& destruct_callback) {
   const std::string url = response->url;
 
   scoped_ptr<mojo::ApplicationDelegate> delegate;
@@ -144,7 +153,7 @@ void CoreServicesApplicationDelegate::StartApplication(
 
   scoped_ptr<ApplicationThread> thread(
       new ApplicationThread(weak_factory_.GetWeakPtr(), url, delegate.Pass(),
-                            request.Pass()));
+                            request.Pass(), destruct_callback));
   thread->Start();
   application_threads_.push_back(thread.Pass());
 }

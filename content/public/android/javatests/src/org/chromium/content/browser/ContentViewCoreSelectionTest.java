@@ -12,6 +12,7 @@ import android.test.suitebuilder.annotation.SmallTest;
 import android.text.TextUtils;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.Criteria;
@@ -33,7 +34,6 @@ public class ContentViewCoreSelectionTest extends ContentShellTestBase {
             + "<br/><input id=\"input_password\" type=\"password\" value=\"SamplePassword\" />"
             + "<br/><p><span id=\"plain_text_1\">SamplePlainTextOne</span></p>"
             + "<br/><p><span id=\"plain_text_2\">SamplePlainTextTwo</span></p>"
-            + "<br/><input id=\"readonly_text\" type=\"text\" readonly value=\"Sample Text\"/>"
             + "<br/><input id=\"disabled_text\" type=\"text\" disabled value=\"Sample Text\" />"
             + "</form></body></html>");
     private ContentViewCore mContentViewCore;
@@ -173,18 +173,6 @@ public class ContentViewCoreSelectionTest extends ContentShellTestBase {
         assertWaitForPastePopupStatus(true);
         DOMUtils.longPressNode(this, mContentViewCore, "plain_text_2");
         assertWaitForPastePopupStatus(false);
-    }
-
-    @SmallTest
-    @Feature({"TextInput"})
-    public void testPastePopupNotShownOnLongPressingReadOnlyInput() throws Throwable {
-        copyStringToClipboard("SampleTextToCopy");
-        DOMUtils.longPressNode(this, mContentViewCore, "empty_input_text");
-        assertWaitForPastePopupStatus(true);
-        assertTrue(mContentViewCore.hasInsertion());
-        DOMUtils.longPressNode(this, mContentViewCore, "readonly_text");
-        assertWaitForPastePopupStatus(false);
-        assertFalse(mContentViewCore.hasInsertion());
     }
 
     @SmallTest
@@ -424,6 +412,29 @@ public class ContentViewCoreSelectionTest extends ContentShellTestBase {
     }
 
     @SmallTest
+    @Feature({"TextSelection", "TextInput"})
+    public void testCursorPositionAfterHidingActionMode() throws Exception {
+        DOMUtils.longPressNode(this, mContentViewCore, "textarea");
+        assertWaitForSelectActionBarVisible(true);
+        assertTrue(mContentViewCore.hasSelection());
+        assertNotNull(mContentViewCore.getSelectActionHandler());
+        selectActionBarSelectAll();
+        assertTrue(mContentViewCore.hasSelection());
+        assertWaitForSelectActionBarVisible(true);
+        assertEquals(mContentViewCore.getSelectedText(), "SampleTextArea");
+        hideSelectActionMode();
+        assertWaitForSelectActionBarVisible(false);
+        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return "SampleTextArea".equals(mContentViewCore.getImeAdapterForTest()
+                        .getInputConnectionForTest()
+                        .getTextBeforeCursor(50, 0));
+            }
+        }));
+    }
+
+    @SmallTest
     @Feature({"TextSelection"})
     public void testSelectActionBarPlainTextPaste() throws Exception {
         copyStringToClipboard("SampleTextToCopy");
@@ -440,8 +451,12 @@ public class ContentViewCoreSelectionTest extends ContentShellTestBase {
         assertNotSame(mContentViewCore.getSelectedText(), "SampleTextToCopy");
     }
 
-    @SmallTest
-    @Feature({"TextInput"})
+    /**
+     * Disabled due to being flaky. crbug.com/552387
+     * @SmallTest
+     * @Feature({"TextInput"})
+     */
+    @DisabledTest
     public void testSelectActionBarInputPaste() throws Exception {
         copyStringToClipboard("SampleTextToCopy");
         DOMUtils.longPressNode(this, mContentViewCore, "input_text");
@@ -566,6 +581,15 @@ public class ContentViewCoreSelectionTest extends ContentShellTestBase {
             @Override
             public void run() {
                 mContentViewCore.getSelectActionHandler().share();
+            }
+        });
+    }
+
+    private void hideSelectActionMode() {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                mContentViewCore.hideSelectActionMode();
             }
         });
     }

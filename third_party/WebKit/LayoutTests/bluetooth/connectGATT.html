@@ -9,15 +9,15 @@ test(t => { assert_true(window.testRunner instanceof Object); t.done(); },
      'window.testRunner is required for the following tests.');
 
 promise_test(() => {
-  testRunner.setBluetoothMockDataSet('GenericAccessAdapter');
-  return requestDeviceWithKeyDown({filters: [{services: ['generic_access']}]})
+  testRunner.setBluetoothMockDataSet('HeartRateAdapter');
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
     .then(device => {
       testRunner.setBluetoothMockDataSet('EmptyAdapter');
       return assert_promise_rejects_with_message(
-        device.connectGATT(),{
-          name: 'NetworkError',
-          message: 'Bluetooth Device is no longer in range.'
-        }, 'Device went out of range.');
+        device.connectGATT(),
+        new DOMException('Bluetooth Device is no longer in range.',
+                         'NetworkError'),
+        'Device went out of range.');
     });
 }, 'Device goes out of range. Reject with NetworkError.');
 
@@ -32,59 +32,43 @@ promise_test(() => {
 [{
   testName: 'Unknown error when connnecting.',
   uuid: errorUUID(0x0),
-  error: {
-    name: 'NetworkError',
-    message: 'Unknown error when connecting to the device.'
-  }
+  error: new DOMException('Unknown error when connecting to the device.',
+                          'NetworkError')
 }, {
   testName: 'Connection was already in progress.',
   uuid: errorUUID(0x1),
-  error: {
-    name: 'NetworkError',
-    message: 'Connection already in progress.'
-  }
+  error: new DOMException('Connection already in progress.',
+                          'NetworkError')
 }, {
   testName: 'Connection failed.',
   uuid: errorUUID(0x2),
-  error: {
-    name: 'NetworkError',
-    message: 'Connection failed for unknown reason.'
-  }
+  error: new DOMException('Connection failed for unknown reason.',
+                          'NetworkError')
 }, {
   testName: 'Authentication failed when connecting.',
   uuid: errorUUID(0x3),
-  error: {
-    name: 'NetworkError',
-    message: 'Authentication failed.'
-  }
+  error: new DOMException('Authentication failed.',
+                          'NetworkError')
 }, {
   testName: 'Authentication canceled when connecting.',
   uuid: errorUUID(0x4),
-  error: {
-    name: 'NetworkError',
-    message: 'Authentication canceled.'
-  }
+  error: new DOMException('Authentication canceled.',
+                          'NetworkError')
 }, {
   testName: 'Authentication rejected when connecting.',
   uuid: errorUUID(0x5),
-  error: {
-    name: 'NetworkError',
-    message: 'Authentication rejected.'
-  }
+  error: new DOMException('Authentication rejected.',
+                          'NetworkError')
 }, {
   testName: 'Authentication timed out when connecting.',
   uuid: errorUUID(0x6),
-  error: {
-    name: 'NetworkError',
-    message: 'Authentication timeout.'
-  }
+  error: new DOMException('Authentication timeout.',
+                          'NetworkError')
 }, {
   testName: 'Tried to connect to an unsupported device.',
   uuid: errorUUID(0x7),
-  error: {
-    name: 'NetworkError',
-    message: 'Unsupported device.'
-  }
+  error: new DOMException('Unsupported device.',
+                          'NetworkError')
 }].forEach(testSpec => {
   promise_test(() => {
     testRunner.setBluetoothMockDataSet('FailingConnectionsAdapter');
@@ -99,8 +83,8 @@ promise_test(() => {
 });
 
 promise_test(() => {
-  testRunner.setBluetoothMockDataSet('GenericAccessAdapter');
-  return requestDeviceWithKeyDown({filters: [{services: ['generic_access']}]})
+  testRunner.setBluetoothMockDataSet('HeartRateAdapter');
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
     .then(device => device.connectGATT())
     .then(gattServer => assert_true(gattServer.connected));
 }, 'Device will connect');

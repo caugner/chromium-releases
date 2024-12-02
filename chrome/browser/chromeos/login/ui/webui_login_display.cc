@@ -18,6 +18,7 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/login/user_names.h"
+#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_manager.h"
 #include "grit/components_strings.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
@@ -74,10 +75,6 @@ void WebUILoginDisplay::Init(const user_manager::UserList& users,
 
 void WebUILoginDisplay::HandleGetUsers() {
   SignInScreenController::Get()->SendUserList();
-}
-
-const user_manager::UserList& WebUILoginDisplay::GetUsers() const {
-  return SignInScreenController::Get()->GetUsers();
 }
 
 void WebUILoginDisplay::CheckUserStatus(const std::string& user_id) {
@@ -216,12 +213,6 @@ void WebUILoginDisplay::CancelUserAdding() {
   UserAddingScreen::Get()->Cancel();
 }
 
-void WebUILoginDisplay::CreateAccount() {
-  DCHECK(delegate_);
-  if (delegate_)
-    delegate_->CreateAccount();
-}
-
 void WebUILoginDisplay::CompleteLogin(const UserContext& user_context) {
   DCHECK(delegate_);
   if (delegate_)
@@ -247,7 +238,7 @@ void WebUILoginDisplay::LoadWallpaper(const std::string& username) {
 
 void WebUILoginDisplay::LoadSigninWallpaper() {
   WallpaperManager::Get()->SetDefaultWallpaperDelayed(
-      chromeos::login::kSignInUser);
+      login::SignInAccountId().GetUserEmail());
 }
 
 void WebUILoginDisplay::OnSigninScreenReady() {

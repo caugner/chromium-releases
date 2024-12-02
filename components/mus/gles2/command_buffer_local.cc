@@ -5,6 +5,7 @@
 #include "components/mus/gles2/command_buffer_local.h"
 
 #include "base/bind.h"
+#include "base/memory/shared_memory.h"
 #include "components/mus/gles2/command_buffer_local_client.h"
 #include "components/mus/gles2/gpu_memory_tracker.h"
 #include "components/mus/gles2/mojo_gpu_memory_buffer.h"
@@ -17,14 +18,15 @@
 #include "gpu/command_buffer/service/shader_translator_cache.h"
 #include "gpu/command_buffer/service/transfer_buffer_manager.h"
 #include "gpu/command_buffer/service/valuebuffer_manager.h"
+#include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/vsync_provider.h"
 #include "ui/gl/gl_context.h"
-#include "ui/gl/gl_image_memory.h"
+#include "ui/gl/gl_image_shared_memory.h"
 #include "ui/gl/gl_surface.h"
 
 namespace mus {
 
-const unsigned int GL_MAP_CHROMIUM = 0x78F1;
+const unsigned int GL_READ_WRITE_CHROMIUM = 0x78F2;
 
 CommandBufferLocal::CommandBufferLocal(CommandBufferLocalClient* client,
                                        gfx::AcceleratedWidget widget,
@@ -32,6 +34,7 @@ CommandBufferLocal::CommandBufferLocal(CommandBufferLocalClient* client,
     : widget_(widget),
       gpu_state_(gpu_state),
       client_(client),
+      next_fence_sync_release_(1),
       weak_factory_(this) {}
 
 CommandBufferLocal::~CommandBufferLocal() {
@@ -88,10 +91,12 @@ bool CommandBufferLocal::Initialize() {
   scheduler_.reset(new gpu::GpuScheduler(command_buffer_.get(), decoder_.get(),
                                          decoder_.get()));
   decoder_->set_engine(scheduler_.get());
-  decoder_->SetResizeCallback(
-      base::Bind(&CommandBufferLocal::OnResize, base::Unretained(this)));
   decoder_->SetWaitSyncPointCallback(
       base::Bind(&CommandBufferLocal::OnWaitSyncPoint, base::Unretained(this)));
+  decoder_->SetFenceSyncReleaseCallback(base::Bind(
+      &CommandBufferLocal::OnFenceSyncRelease, base::Unretained(this)));
+  decoder_->SetWaitFenceSyncCallback(
+      base::Bind(&CommandBufferLocal::OnWaitFenceSync, base::Unretained(this)));
 
   gpu::gles2::DisallowedFeatures disallowed_features;
 
@@ -130,12 +135,14 @@ int32_t CommandBufferLocal::CreateImage(ClientBuffer buffer,
   MojoGpuMemoryBufferImpl* gpu_memory_buffer =
       MojoGpuMemoryBufferImpl::FromClientBuffer(buffer);
 
-  scoped_refptr<gfx::GLImageMemory> image(new gfx::GLImageMemory(
+  gfx::GpuMemoryBufferHandle handle = gpu_memory_buffer->GetHandle();
+  scoped_refptr<gl::GLImageSharedMemory> image(new gl::GLImageSharedMemory(
       gfx::Size(static_cast<int>(width), static_cast<int>(height)),
       internalformat));
-  if (!image->Initialize(
-          static_cast<const unsigned char*>(gpu_memory_buffer->GetMemory()),
-          gpu_memory_buffer->GetFormat())) {
+  if (!image->Initialize(base::SharedMemory::DuplicateHandle(handle.handle),
+                         handle.id, gpu_memory_buffer->GetFormat(), 0,
+                         gfx::RowSizeForBufferFormat(
+                             width, gpu_memory_buffer->GetFormat(), 0))) {
     return -1;
   }
 
@@ -158,11 +165,11 @@ int32_t CommandBufferLocal::CreateGpuMemoryBufferImage(size_t width,
                                                        size_t height,
                                                        unsigned internalformat,
                                                        unsigned usage) {
-  DCHECK_EQ(usage, static_cast<unsigned>(GL_MAP_CHROMIUM));
+  DCHECK_EQ(usage, static_cast<unsigned>(GL_READ_WRITE_CHROMIUM));
   scoped_ptr<gfx::GpuMemoryBuffer> buffer(MojoGpuMemoryBufferImpl::Create(
       gfx::Size(static_cast<int>(width), static_cast<int>(height)),
       gpu::ImageFactory::DefaultBufferFormatForImageFormat(internalformat),
-      gpu::ImageFactory::ImageUsageToGpuMemoryBufferUsage(usage)));
+      gfx::BufferUsage::SCANOUT));
   if (!buffer)
     return -1;
   return CreateImage(buffer->AsClientBuffer(), width, height, internalformat);
@@ -220,6 +227,34 @@ uint64_t CommandBufferLocal::GetCommandBufferID() const {
   return 0;
 }
 
+uint64_t CommandBufferLocal::GenerateFenceSyncRelease() {
+  return next_fence_sync_release_++;
+}
+
+bool CommandBufferLocal::IsFenceSyncRelease(uint64_t release) {
+  return release > 0 && release < next_fence_sync_release_;
+}
+
+bool CommandBufferLocal::IsFenceSyncFlushed(uint64_t release) {
+  return IsFenceSyncRelease(release);
+}
+
+void CommandBufferLocal::SignalSyncToken(const gpu::SyncToken& sync_token,
+                                         const base::Closure& callback) {
+  // TODO(dyen)
+  NOTIMPLEMENTED();
+}
+
+bool CommandBufferLocal::IsFenceSyncFlushReceived(uint64_t release) {
+  return IsFenceSyncRelease(release);
+}
+
+bool CommandBufferLocal::CanWaitUnverifiedSyncToken(
+    const gpu::SyncToken* sync_token) {
+  // All sync tokens must be flushed before being waited on.
+  return false;
+}
+
 void CommandBufferLocal::PumpCommands() {
   if (!decoder_->MakeCurrent()) {
     command_buffer_->SetContextLostReason(decoder_->GetContextLostReason());
@@ -227,10 +262,6 @@ void CommandBufferLocal::PumpCommands() {
     return;
   }
   scheduler_->PutChanged();
-}
-
-void CommandBufferLocal::OnResize(gfx::Size size, float scale_factor) {
-  surface_->Resize(size);
 }
 
 void CommandBufferLocal::OnUpdateVSyncParameters(
@@ -250,6 +281,45 @@ bool CommandBufferLocal::OnWaitSyncPoint(uint32_t sync_point) {
   gpu_state_->sync_point_manager()->AddSyncPointCallback(
       sync_point, base::Bind(&CommandBufferLocal::OnSyncPointRetired,
                              weak_factory_.GetWeakPtr()));
+  return scheduler_->scheduled();
+}
+
+void CommandBufferLocal::OnFenceSyncRelease(uint64_t release) {
+  // TODO(dyen): Implement once CommandBufferID has been figured out and
+  // we have a SyncPointClient. It would probably look like what is commented
+  // out below:
+  // if (!sync_point_client_->client_state()->IsFenceSyncReleased(release))
+  //   sync_point_client_->ReleaseFenceSync(release);
+  NOTIMPLEMENTED();
+}
+
+bool CommandBufferLocal::OnWaitFenceSync(
+    gpu::CommandBufferNamespace namespace_id,
+    uint64_t command_buffer_id,
+    uint64_t release) {
+  gpu::SyncPointManager* sync_point_manager = gpu_state_->sync_point_manager();
+  DCHECK(sync_point_manager);
+
+  scoped_refptr<gpu::SyncPointClientState> release_state =
+      sync_point_manager->GetSyncPointClientState(namespace_id,
+                                                  command_buffer_id);
+
+  if (!release_state)
+    return true;
+
+  if (release_state->IsFenceSyncReleased(release))
+    return true;
+
+  // TODO(dyen): Implement once CommandBufferID has been figured out and
+  // we have a SyncPointClient. It would probably look like what is commented
+  // out below:
+  // scheduler_->SetScheduled(false);
+  // sync_point_client_->Wait(
+  //     release_state.get(),
+  //     release,
+  //     base::Bind(&CommandBufferLocal::OnSyncPointRetired,
+  //                weak_factory_.GetWeakPtr()));
+  NOTIMPLEMENTED();
   return scheduler_->scheduled();
 }
 

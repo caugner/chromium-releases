@@ -7,25 +7,26 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
-#include "chrome/browser/ui/views/toolbar/browser_actions_container_observer.h"
+#include "chrome/browser/ui/toolbar/toolbar_actions_bar_observer.h"
 #include "ui/views/controls/scroll_view.h"
 
+class AppMenu;
 class Browser;
 class BrowserActionsContainer;
-class WrenchMenu;
+class ToolbarActionsBar;
 
 // ExtensionToolbarMenuView is the view containing the extension actions that
 // overflowed from the BrowserActionsContainer, and is contained in and owned by
-// the wrench menu.
-// In the event that the WrenchMenu was opened for an Extension Action drag-and-
+// the app menu.
+// In the event that the app menu was opened for an Extension Action drag-and-
 // drop, this will also close the menu upon completion.
 class ExtensionToolbarMenuView : public views::ScrollView,
-                                 public BrowserActionsContainerObserver {
+                                 public ToolbarActionsBarObserver {
  public:
-  ExtensionToolbarMenuView(Browser* browser, WrenchMenu* wrench_menu);
+  ExtensionToolbarMenuView(Browser* browser, AppMenu* app_menu);
   ~ExtensionToolbarMenuView() override;
 
-  // Returns whether the wrench menu should show this view. This is true when
+  // Returns whether the app menu should show this view. This is true when
   // either |container_| has icons to display or the menu was opened for a drag-
   // and-drop operation.
   bool ShouldShow();
@@ -39,18 +40,21 @@ class ExtensionToolbarMenuView : public views::ScrollView,
     return container_;
   }
 
-  // Sets the time delay the wrench menu takes to close after a drag-and-drop
+  // Sets the time delay the app menu takes to close after a drag-and-drop
   // operation.
   static void set_close_menu_delay_for_testing(int delay);
 
  private:
-  // BrowserActionsContainerObserver:
-  void OnBrowserActionsContainerDestroyed(
-      BrowserActionsContainer* browser_actions_container) override;
-  void OnBrowserActionDragDone() override;
+  // ToolbarActionsBarObserver:
+  void OnToolbarActionsBarDestroyed() override;
+  void OnToolbarActionDragDone() override;
+  void OnToolbarActionsBarDidStartResize() override;
 
-  // Closes the |wrench_menu_|.
-  void CloseWrenchMenu();
+  // Closes the |app_menu_|.
+  void CloseAppMenu();
+
+  // Resizes and lays out the view.
+  void Redraw();
 
   // Returns the padding before the BrowserActionsContainer in the menu.
   int start_padding() const;
@@ -58,8 +62,8 @@ class ExtensionToolbarMenuView : public views::ScrollView,
   // The associated browser.
   Browser* browser_;
 
-  // The WrenchMenu, which may need to be closed after a drag-and-drop.
-  WrenchMenu* wrench_menu_;
+  // The app menu, which may need to be closed after a drag-and-drop.
+  AppMenu* app_menu_;
 
   // The overflow BrowserActionsContainer which is nested in this view.
   BrowserActionsContainer* container_;
@@ -67,8 +71,8 @@ class ExtensionToolbarMenuView : public views::ScrollView,
   // The maximum allowed height for the view.
   int max_height_;
 
-  ScopedObserver<BrowserActionsContainer, BrowserActionsContainerObserver>
-      browser_actions_container_observer_;
+  ScopedObserver<ToolbarActionsBar, ToolbarActionsBarObserver>
+      toolbar_actions_bar_observer_;
 
   base::WeakPtrFactory<ExtensionToolbarMenuView> weak_factory_;
 

@@ -210,6 +210,7 @@ class FakeFrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
 
   static void CallbackMethod(base::Callback<void(bool)> callback,
                              base::TimeTicks present_time,
+                             const gfx::Rect& region_in_frame,
                              bool success) {
     callback.Run(success);
   }
@@ -279,7 +280,7 @@ class FakeRenderWidgetHostViewAura : public RenderWidgetHostViewAura {
       GLHelper* gl_helper = ImageTransportFactory::GetInstance()->GetGLHelper();
       GLuint texture = gl_helper->ConsumeMailboxToTexture(
           last_copy_request_->texture_mailbox().mailbox(),
-          last_copy_request_->texture_mailbox().sync_point());
+          last_copy_request_->texture_mailbox().sync_token());
       gl_helper->ResizeTexture(texture, window()->bounds().size());
       gl_helper->DeleteTexture(texture);
     }
@@ -1110,17 +1111,11 @@ TEST_F(RenderWidgetHostViewAuraTest, TouchEventState) {
   // Start with no touch-event handler in the renderer.
   widget_host_->OnMessageReceived(ViewHostMsg_HasTouchEventHandlers(0, false));
 
-  ui::TouchEvent press(ui::ET_TOUCH_PRESSED,
-                       gfx::Point(30, 30),
-                       0,
+  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(30, 30), 0,
                        ui::EventTimeForNow());
-  ui::TouchEvent move(ui::ET_TOUCH_MOVED,
-                      gfx::Point(20, 20),
-                      0,
+  ui::TouchEvent move(ui::ET_TOUCH_MOVED, gfx::Point(20, 20), 0,
                       ui::EventTimeForNow());
-  ui::TouchEvent release(ui::ET_TOUCH_RELEASED,
-                         gfx::Point(20, 20),
-                         0,
+  ui::TouchEvent release(ui::ET_TOUCH_RELEASED, gfx::Point(20, 20), 0,
                          ui::EventTimeForNow());
 
   // The touch events should get forwarded from the view, but they should not
@@ -1176,14 +1171,14 @@ TEST_F(RenderWidgetHostViewAuraTest, TouchEventState) {
   EXPECT_EQ(0U, GetSentMessageCountAndResetSink());
 
   ui::TouchEvent move2(ui::ET_TOUCH_MOVED, gfx::Point(20, 20), 0,
-      base::Time::NowFromSystemTime() - base::Time());
+                       base::Time::NowFromSystemTime() - base::Time());
   view_->OnTouchEvent(&move2);
   EXPECT_TRUE(press.synchronous_handling_disabled());
   EXPECT_EQ(ui::MotionEvent::ACTION_MOVE, pointer_state().GetAction());
   EXPECT_EQ(1U, pointer_state().GetPointerCount());
 
   ui::TouchEvent release2(ui::ET_TOUCH_RELEASED, gfx::Point(20, 20), 0,
-      base::Time::NowFromSystemTime() - base::Time());
+                          base::Time::NowFromSystemTime() - base::Time());
   view_->OnTouchEvent(&release2);
   EXPECT_TRUE(press.synchronous_handling_disabled());
   EXPECT_EQ(0U, pointer_state().GetPointerCount());
@@ -1284,17 +1279,11 @@ TEST_F(RenderWidgetHostViewAuraTest, TouchEventSyncAsync) {
 
   widget_host_->OnMessageReceived(ViewHostMsg_HasTouchEventHandlers(0, true));
 
-  ui::TouchEvent press(ui::ET_TOUCH_PRESSED,
-                       gfx::Point(30, 30),
-                       0,
+  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(30, 30), 0,
                        ui::EventTimeForNow());
-  ui::TouchEvent move(ui::ET_TOUCH_MOVED,
-                      gfx::Point(20, 20),
-                      0,
+  ui::TouchEvent move(ui::ET_TOUCH_MOVED, gfx::Point(20, 20), 0,
                       ui::EventTimeForNow());
-  ui::TouchEvent release(ui::ET_TOUCH_RELEASED,
-                         gfx::Point(20, 20),
-                         0,
+  ui::TouchEvent release(ui::ET_TOUCH_RELEASED, gfx::Point(20, 20), 0,
                          ui::EventTimeForNow());
 
   view_->OnTouchEvent(&press);
@@ -2497,10 +2486,10 @@ TEST_F(RenderWidgetHostViewAuraTest, TouchEventPositionsArentRounded) {
   view_->InitAsChild(NULL);
   view_->Show();
 
-  ui::TouchEvent press(ui::ET_TOUCH_PRESSED,
-                       gfx::PointF(kX, kY),
-                       0,
+  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(), 0,
                        ui::EventTimeForNow());
+  press.set_location_f(gfx::PointF(kX, kY));
+  press.set_root_location_f(gfx::PointF(kX, kY));
 
   view_->OnTouchEvent(&press);
   EXPECT_EQ(ui::MotionEvent::ACTION_DOWN, pointer_state().GetAction());
@@ -2979,8 +2968,7 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest,
   // will reset the state. The scroll-end should therefore be dispatched to the
   // renderer, and the gesture-event-filter should await an ACK for it.
   base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::MessageLoop::QuitClosure(),
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
       base::TimeDelta::FromMilliseconds(15));
   base::MessageLoop::current()->Run();
 
@@ -3087,8 +3075,7 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest, OverscrollWithTouchEvents) {
   SimulateGestureEvent(blink::WebInputEvent::GestureScrollEnd,
                        blink::WebGestureDeviceTouchscreen);
   base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::MessageLoop::QuitClosure(),
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
       base::TimeDelta::FromMilliseconds(10));
   base::MessageLoop::current()->Run();
   EXPECT_EQ(1U, sink_->message_count());
@@ -3134,8 +3121,7 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest,
                        blink::WebGestureDeviceTouchscreen);
   EXPECT_EQ(0U, sink_->message_count());
   base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::MessageLoop::QuitClosure(),
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
       base::TimeDelta::FromMilliseconds(10));
   base::MessageLoop::current()->Run();
   EXPECT_EQ(OVERSCROLL_NONE, overscroll_mode());
@@ -3170,8 +3156,7 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest,
                        blink::WebGestureDeviceTouchscreen);
   EXPECT_EQ(0U, sink_->message_count());
   base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::MessageLoop::QuitClosure(),
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
       base::TimeDelta::FromMilliseconds(10));
   base::MessageLoop::current()->Run();
   EXPECT_EQ(OVERSCROLL_NONE, overscroll_mode());
@@ -3526,7 +3511,7 @@ TEST_F(RenderWidgetHostViewAuraTest, SetCanScrollForWebMouseWheelEvent) {
 
   // Simulates the scroll event with ctrl modifier applied.
   ui::ScrollEvent scroll(ui::ET_SCROLL, gfx::Point(2, 2), ui::EventTimeForNow(),
-      ui::EF_CONTROL_DOWN, 0, 5, 0, 5, 2);
+                         ui::EF_CONTROL_DOWN, 0, 5, 0, 5, 2);
   view_->OnScrollEvent(&scroll);
 
   input_event = GetInputEventFromMessage(*sink_->GetMessageAt(0));
@@ -3543,15 +3528,15 @@ TEST_F(RenderWidgetHostViewAuraTest, CorrectNumberOfAcksAreDispatched) {
   view_->Show();
   view_->UseFakeDispatcher();
 
-  ui::TouchEvent press1(
-      ui::ET_TOUCH_PRESSED, gfx::Point(30, 30), 0, ui::EventTimeForNow());
+  ui::TouchEvent press1(ui::ET_TOUCH_PRESSED, gfx::Point(30, 30), 0,
+                        ui::EventTimeForNow());
 
   view_->OnTouchEvent(&press1);
   SendTouchEventACK(blink::WebInputEvent::TouchStart,
                     INPUT_EVENT_ACK_STATE_CONSUMED, press1.unique_event_id());
 
-  ui::TouchEvent press2(
-      ui::ET_TOUCH_PRESSED, gfx::Point(20, 20), 1, ui::EventTimeForNow());
+  ui::TouchEvent press2(ui::ET_TOUCH_PRESSED, gfx::Point(20, 20), 1,
+                        ui::EventTimeForNow());
   view_->OnTouchEvent(&press2);
   SendTouchEventACK(blink::WebInputEvent::TouchStart,
                     INPUT_EVENT_ACK_STATE_CONSUMED, press2.unique_event_id());

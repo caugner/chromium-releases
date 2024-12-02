@@ -4,9 +4,10 @@
 
 #include "components/mus/mus_app.h"
 #include "mojo/application/public/cpp/application_runner.h"
-#include "third_party/mojo/src/mojo/public/c/system/main.h"
+#include "mojo/public/c/system/main.h"
 
 MojoResult MojoMain(MojoHandle shell_handle) {
   mojo::ApplicationRunner runner(new mus::MandolineUIServicesApp);
+  runner.set_message_loop_type(base::MessageLoop::TYPE_UI);
   return runner.Run(shell_handle);
 }

@@ -47,6 +47,8 @@ class HardwareRenderer : public cc::DisplayClient,
 
   // cc::SurfaceFactoryClient implementation.
   void ReturnResources(const cc::ReturnedResourceArray& resources) override;
+  void SetBeginFrameSource(cc::SurfaceId surface_id,
+                           cc::BeginFrameSource* begin_frame_source) override;
 
   void ReturnResourcesInChildFrame();
 
@@ -61,6 +63,9 @@ class HardwareRenderer : public cc::DisplayClient,
   // Infromation from UI on last commit.
   gfx::Vector2d scroll_offset_;
 
+  // This holds the last ChildFrame received. Contains the frame info of the
+  // last frame. The |frame| member may be null if it's already submitted to
+  // SurfaceFactory.
   scoped_ptr<ChildFrame> child_frame_;
 
   scoped_refptr<AwGLSurface> gl_surface_;

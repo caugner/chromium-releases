@@ -135,8 +135,11 @@ class TestJar(object):
         key = filters[0]
         value_list = filters[1].split(',')
         for value in value_list:
-          if key in annotations and value == annotations[key]:
-            return True
+          if key in annotations and annotations[key]['value']:
+            annotation_value = annotations[key]['value']
+            if ((isinstance(annotation_value, list) and
+                 value in annotation_value) or value == annotation_value):
+              return True
       elif annotation_filter in annotations:
         return True
     return False
@@ -165,8 +168,10 @@ class TestJar(object):
     return sorted(tests_missing_annotations)
 
   def _IsTestValidForSdkRange(self, test_name, attached_min_sdk_level):
-    required_min_sdk_level = int(
-        self.GetTestAnnotations(test_name).get('MinAndroidSdkLevel', 0))
+    required_min_sdk_level = self.GetTestAnnotations(
+      test_name).get('MinAndroidSdkLevel', None)
+    if required_min_sdk_level:
+      required_min_sdk_level = int(required_min_sdk_level['value'])
     return (required_min_sdk_level is None or
             attached_min_sdk_level >= required_min_sdk_level)
 

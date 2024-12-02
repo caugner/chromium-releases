@@ -9,7 +9,6 @@
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "net/quic/congestion_control/rtt_stats.h"
-#include "net/quic/quic_ack_notifier_manager.h"
 #include "net/quic/quic_unacked_packet_map.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,7 +24,7 @@ const uint32 kDefaultLength = 1000;
 
 class TcpLossAlgorithmTest : public ::testing::Test {
  protected:
-  TcpLossAlgorithmTest() : unacked_packets_(&ack_notifier_manager_) {
+  TcpLossAlgorithmTest() {
     rtt_stats_.UpdateRtt(QuicTime::Delta::FromMilliseconds(100),
                          QuicTime::Delta::Zero(),
                          clock_.Now());
@@ -40,7 +39,7 @@ class TcpLossAlgorithmTest : public ::testing::Test {
     SerializedPacket packet(
         packet_number, PACKET_1BYTE_PACKET_NUMBER, packets_.back(), 0,
         new RetransmittableFrames(ENCRYPTION_NONE), false, false);
-    unacked_packets_.AddSentPacket(packet, 0, NOT_RETRANSMISSION, clock_.Now(),
+    unacked_packets_.AddSentPacket(&packet, 0, NOT_RETRANSMISSION, clock_.Now(),
                                    1000, true);
   }
 
@@ -56,7 +55,6 @@ class TcpLossAlgorithmTest : public ::testing::Test {
   }
 
   vector<QuicEncryptedPacket*> packets_;
-  AckNotifierManager ack_notifier_manager_;
   QuicUnackedPacketMap unacked_packets_;
   TCPLossAlgorithm loss_algorithm_;
   RttStats rtt_stats_;

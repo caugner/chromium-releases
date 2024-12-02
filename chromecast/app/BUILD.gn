@@ -34,8 +34,6 @@ source_set("cast_crash_client") {
     "linux/cast_crash_reporter_client.h",
   ]
 
-  configs += [ "//chromecast:config" ]
-
   deps = [
     "//base",
     "//chromecast/base",
@@ -74,10 +72,11 @@ grit("resources") {
   ]
 }
 
+# GYP target: chromecast_locales.gyp:chromecast_settings
 grit("chromecast_settings") {
   source = "//chromecast/app/resources/chromecast_settings.grd"
-
   resource_ids = "//chromecast/app/resources/resource_ids"
+  output_dir = "$root_gen_dir/chromecast_strings"
 
   outputs = [
     "grit/chromecast_settings.h",

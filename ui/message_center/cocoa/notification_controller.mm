@@ -256,8 +256,11 @@
 // Initializes the closeButton_ ivar with the configured button.
 - (void)configureCloseButtonInFrame:(NSRect)rootFrame;
 
-// Initializes the smallImage_ ivar with the appropriate frame.
-- (void)configureSmallImageInFrame:(NSRect)rootFrame;
+// Initializes the settingsButton_ ivar with the configured button.
+- (void)configureSettingsButtonInFrame:(NSRect)rootFrame;
+
+// Creates the smallImage_ ivar with the appropriate frame.
+- (NSView*)createSmallImageInFrame:(NSRect)rootFrame;
 
 // Initializes title_ in the given frame.
 - (void)configureTitleInFrame:(NSRect)rootFrame;
@@ -328,6 +331,13 @@
 
   // Create the small image.
   [rootView addSubview:[self createSmallImageInFrame:rootFrame]];
+
+  // Create the settings button.
+  if (notification_->delegate() &&
+      notification_->delegate()->ShouldDisplaySettingsButton()) {
+    [self configureSettingsButtonInFrame:rootFrame];
+    [rootView addSubview:settingsButton_];
+  }
 
   NSRect contentFrame = [self currentContentRect];
 
@@ -447,6 +457,7 @@
           maxNumberOfLines:message_center::kContextMessageLineLimit];
   [contextMessage_ setString:base::SysUTF16ToNSString(elided)];
   [contextMessage_ sizeToFit];
+
   NSRect contextMessageFrame = [contextMessage_ frame];
 
   if (notification->context_message().empty() &&
@@ -462,6 +473,7 @@
         NSHeight(contextMessageFrame);
     contextMessageFrame.size.height = NSHeight([contextMessage_ frame]);
   }
+  NSRect settingsButtonFrame = [settingsButton_ frame];
 
   // Create the list item views (up to a maximum).
   [listView_ removeFromSuperview];
@@ -651,6 +663,7 @@
   [title_ setFrame:titleFrame];
   [message_ setFrame:messageFrame];
   [contextMessage_ setFrame:contextMessageFrame];
+  [settingsButton_ setFrame:settingsButtonFrame];
   [listView_ setFrame:listFrame];
   [progressBarView_ setFrame:progressBarFrame];
 
@@ -660,6 +673,10 @@
 - (void)close:(id)sender {
   [closeButton_ setTarget:nil];
   messageCenter_->RemoveNotification([self notificationID], /*by_user=*/true);
+}
+
+- (void)settingsClicked:(id)sender {
+  messageCenter_->ClickOnSettingsButton([self notificationID]);
 }
 
 - (void)buttonClicked:(id)button {
@@ -766,12 +783,49 @@
   [closeButton_ setAutoresizingMask:NSViewMinYMargin];
   [closeButton_ setTarget:self];
   [closeButton_ setAction:@selector(close:)];
+  [closeButton_ setDisableActivationOnClick:YES];
   [[closeButton_ cell]
       accessibilitySetOverrideValue:NSAccessibilityCloseButtonSubrole
                        forAttribute:NSAccessibilitySubroleAttribute];
   [[closeButton_ cell]
       accessibilitySetOverrideValue:
           l10n_util::GetNSString(IDS_APP_ACCNAME_CLOSE)
+                       forAttribute:NSAccessibilityTitleAttribute];
+}
+
+- (void)configureSettingsButtonInFrame:(NSRect)rootFrame {
+  // The settings button is configured to be the same size as the small image.
+  int settingsButtonOriginOffset =
+      message_center::kSmallImageSize + message_center::kSmallImagePadding;
+  NSRect settingsButtonFrame = NSMakeRect(
+      NSMaxX(rootFrame) - settingsButtonOriginOffset,
+      message_center::kSmallImagePadding, message_center::kSmallImageSize,
+      message_center::kSmallImageSize);
+
+  settingsButton_.reset(
+      [[HoverImageButton alloc] initWithFrame:settingsButtonFrame]);
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  [settingsButton_ setDefaultImage:rb.GetNativeImageNamed(
+                                         IDR_NOTIFICATION_SETTINGS_BUTTON_ICON)
+                                       .ToNSImage()];
+  [settingsButton_
+      setHoverImage:rb.GetNativeImageNamed(
+                          IDR_NOTIFICATION_SETTINGS_BUTTON_ICON_HOVER)
+                        .ToNSImage()];
+  [settingsButton_
+      setPressedImage:rb.GetNativeImageNamed(
+                            IDR_NOTIFICATION_SETTINGS_BUTTON_ICON_PRESSED)
+                          .ToNSImage()];
+  [[settingsButton_ cell] setHighlightsBy:NSOnState];
+  [settingsButton_ setTrackingEnabled:YES];
+  [settingsButton_ setBordered:NO];
+  [settingsButton_ setAutoresizingMask:NSViewMinYMargin];
+  [settingsButton_ setTarget:self];
+  [settingsButton_ setAction:@selector(settingsClicked:)];
+  [[settingsButton_ cell]
+      accessibilitySetOverrideValue:
+          l10n_util::GetNSString(
+              IDS_MESSAGE_NOTIFICATION_SETTINGS_BUTTON_ACCESSIBLE_NAME)
                        forAttribute:NSAccessibilityTitleAttribute];
 }
 

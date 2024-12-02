@@ -22,7 +22,9 @@
 #include "net/quic/crypto/quic_decrypter.h"
 #include "net/quic/crypto/quic_encrypter.h"
 #include "net/quic/crypto/quic_server_info.h"
+#include "net/quic/quic_flags.h"
 #include "net/quic/quic_packet_reader.h"
+#include "net/quic/quic_protocol.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/quic_chromium_client_session_peer.h"
 #include "net/quic/test_tools/quic_spdy_session_peer.h"
@@ -39,37 +41,37 @@ namespace net {
 namespace test {
 namespace {
 
-const char kServerHostname[] = "www.example.org";
-const uint16 kServerPort = 80;
+const char kServerHostname[] = "test.example.com";
+const uint16 kServerPort = 443;
 
 class QuicChromiumClientSessionTest
     : public ::testing::TestWithParam<QuicVersion> {
  protected:
   QuicChromiumClientSessionTest()
-      : connection_(new PacketSavingConnection(Perspective::IS_CLIENT,
+      : crypto_config_(CryptoTestUtils::ProofVerifierForTesting()),
+        connection_(new PacketSavingConnection(&helper_,
+                                               Perspective::IS_CLIENT,
                                                SupportedVersions(GetParam()))),
-        session_(connection_,
-                 GetSocket().Pass(),
-                 /*stream_factory=*/nullptr,
-                 /*crypto_client_stream_factory=*/nullptr,
-                 &clock_,
-                 &transport_security_state_,
-                 make_scoped_ptr((QuicServerInfo*)nullptr),
-                 QuicServerId(kServerHostname,
-                              kServerPort,
-                              /*is_secure=*/false,
-                              PRIVACY_MODE_DISABLED),
-                 kQuicYieldAfterPacketsRead,
-                 QuicTime::Delta::FromMilliseconds(
-                     kQuicYieldAfterDurationMilliseconds),
-                 /*cert_verify_flags=*/0,
-                 DefaultQuicConfig(),
-                 &crypto_config_,
-                 "CONNECTION_UNKNOWN",
-                 base::TimeTicks::Now(),
-                 base::ThreadTaskRunnerHandle::Get().get(),
-                 /*socket_performance_watcher=*/nullptr,
-                 &net_log_) {
+        session_(
+            connection_,
+            GetSocket().Pass(),
+            /*stream_factory=*/nullptr,
+            /*crypto_client_stream_factory=*/nullptr,
+            &clock_,
+            &transport_security_state_,
+            make_scoped_ptr((QuicServerInfo*)nullptr),
+            QuicServerId(kServerHostname, kServerPort, PRIVACY_MODE_DISABLED),
+            kQuicYieldAfterPacketsRead,
+            QuicTime::Delta::FromMilliseconds(
+                kQuicYieldAfterDurationMilliseconds),
+            /*cert_verify_flags=*/0,
+            DefaultQuicConfig(),
+            &crypto_config_,
+            "CONNECTION_UNKNOWN",
+            base::TimeTicks::Now(),
+            base::ThreadTaskRunnerHandle::Get().get(),
+            /*socket_performance_watcher=*/nullptr,
+            &net_log_) {
     session_.Initialize();
     // Advance the time, because timers do not like uninitialized times.
     connection_->AdvanceTime(QuicTime::Delta::FromSeconds(1));
@@ -89,11 +91,14 @@ class QuicChromiumClientSessionTest
   void CompleteCryptoHandshake() {
     ASSERT_EQ(ERR_IO_PENDING,
               session_.CryptoConnect(false, callback_.callback()));
-    CryptoTestUtils::HandshakeWithFakeServer(connection_,
-                                             session_.GetCryptoStream());
+    CryptoTestUtils::FakeServerOptions server_options;
+    CryptoTestUtils::HandshakeWithFakeServer(
+        &helper_, connection_, session_.GetCryptoStream(), server_options);
     ASSERT_EQ(OK, callback_.WaitForResult());
   }
 
+  MockConnectionHelper helper_;
+  QuicCryptoClientConfig crypto_config_;
   PacketSavingConnection* connection_;
   TestNetLog net_log_;
   MockClientSocketFactory socket_factory_;
@@ -104,7 +109,6 @@ class QuicChromiumClientSessionTest
   MockRandom random_;
   QuicConnectionVisitorInterface* visitor_;
   TestCompletionCallback callback_;
-  QuicCryptoClientConfig crypto_config_;
 };
 
 INSTANTIATE_TEST_CASE_P(Tests,
@@ -126,8 +130,16 @@ TEST_P(QuicChromiumClientSessionTest, MaxNumStreams) {
   }
   EXPECT_FALSE(session_.CreateOutgoingDynamicStream());
 
+  EXPECT_EQ(kDefaultMaxStreamsPerConnection, session_.GetNumOpenStreams());
+
   // Close a stream and ensure I can now open a new one.
-  session_.CloseStream(streams[0]->id());
+  QuicStreamId stream_id = streams[0]->id();
+  session_.CloseStream(stream_id);
+
+  EXPECT_FALSE(session_.CreateOutgoingDynamicStream());
+  QuicRstStreamFrame rst1(stream_id, QUIC_STREAM_NO_ERROR, 0);
+  session_.OnRstStream(rst1);
+  EXPECT_EQ(kDefaultMaxStreamsPerConnection - 1, session_.GetNumOpenStreams());
   EXPECT_TRUE(session_.CreateOutgoingDynamicStream());
 }
 
@@ -149,7 +161,10 @@ TEST_P(QuicChromiumClientSessionTest, MaxNumStreamsViaRequest) {
                                         callback.callback()));
 
   // Close a stream and ensure I can now open a new one.
-  session_.CloseStream(streams[0]->id());
+  QuicStreamId stream_id = streams[0]->id();
+  session_.CloseStream(stream_id);
+  QuicRstStreamFrame rst1(stream_id, QUIC_STREAM_NO_ERROR, 0);
+  session_.OnRstStream(rst1);
   ASSERT_TRUE(callback.have_result());
   EXPECT_EQ(OK, callback.WaitForResult());
   EXPECT_TRUE(stream != nullptr);
@@ -176,8 +191,8 @@ TEST_P(QuicChromiumClientSessionTest, CanPool) {
       ImportCertFromFile(GetTestCertsDirectory(), "spdy_pooling.pem");
   ASSERT_TRUE(details.cert_verify_result.verified_cert.get());
 
-  session_.OnProofVerifyDetailsAvailable(details);
   CompleteCryptoHandshake();
+  session_.OnProofVerifyDetailsAvailable(details);
 
   EXPECT_TRUE(session_.CanPool("www.example.org", PRIVACY_MODE_DISABLED));
   EXPECT_FALSE(session_.CanPool("www.example.org", PRIVACY_MODE_ENABLED));
@@ -197,8 +212,9 @@ TEST_P(QuicChromiumClientSessionTest, ConnectionPooledWithTlsChannelId) {
       ImportCertFromFile(GetTestCertsDirectory(), "spdy_pooling.pem");
   ASSERT_TRUE(details.cert_verify_result.verified_cert.get());
 
-  session_.OnProofVerifyDetailsAvailable(details);
   CompleteCryptoHandshake();
+  session_.OnProofVerifyDetailsAvailable(details);
+  QuicChromiumClientSessionPeer::SetHostname(&session_, "www.example.org");
   QuicChromiumClientSessionPeer::SetChannelIDSent(&session_, true);
 
   EXPECT_TRUE(session_.CanPool("www.example.org", PRIVACY_MODE_DISABLED));
@@ -223,8 +239,9 @@ TEST_P(QuicChromiumClientSessionTest, ConnectionNotPooledWithDifferentPin) {
 
   ASSERT_TRUE(details.cert_verify_result.verified_cert.get());
 
-  session_.OnProofVerifyDetailsAvailable(details);
   CompleteCryptoHandshake();
+  session_.OnProofVerifyDetailsAvailable(details);
+  QuicChromiumClientSessionPeer::SetHostname(&session_, "www.example.org");
   QuicChromiumClientSessionPeer::SetChannelIDSent(&session_, true);
 
   EXPECT_FALSE(session_.CanPool("mail.example.org", PRIVACY_MODE_DISABLED));
@@ -245,8 +262,9 @@ TEST_P(QuicChromiumClientSessionTest, ConnectionPooledWithMatchingPin) {
 
   ASSERT_TRUE(details.cert_verify_result.verified_cert.get());
 
-  session_.OnProofVerifyDetailsAvailable(details);
   CompleteCryptoHandshake();
+  session_.OnProofVerifyDetailsAvailable(details);
+  QuicChromiumClientSessionPeer::SetHostname(&session_, "www.example.org");
   QuicChromiumClientSessionPeer::SetChannelIDSent(&session_, true);
 
   EXPECT_TRUE(session_.CanPool("mail.example.org", PRIVACY_MODE_DISABLED));

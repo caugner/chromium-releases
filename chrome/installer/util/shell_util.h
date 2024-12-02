@@ -54,9 +54,9 @@ class ShellUtil {
     SHORTCUT_LOCATION_DESKTOP = SHORTCUT_LOCATION_FIRST,
     SHORTCUT_LOCATION_QUICK_LAUNCH,
     SHORTCUT_LOCATION_START_MENU_ROOT,
-    SHORTCUT_LOCATION_START_MENU_CHROME_DIR,
+    SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED,  // now placed in root
     SHORTCUT_LOCATION_START_MENU_CHROME_APPS_DIR,
-    SHORTCUT_LOCATION_TASKBAR_PINS,  // base::win::VERSION_WIN7 +
+    SHORTCUT_LOCATION_TASKBAR_PINS,   // base::win::VERSION_WIN7 +
     SHORTCUT_LOCATION_APP_SHORTCUTS,  // base::win::VERSION_WIN8 +
     NUM_SHORTCUT_LOCATIONS
   };
@@ -163,13 +163,6 @@ class ShellUtil {
       pin_to_taskbar = pin_to_taskbar_in;
     }
 
-    // Sets whether to pin this shortcut to the Win10+ start menu after creating
-    // it (ignored if the shortcut is only being updated).
-    // Note: This property doesn't have a mask in |options|.
-    void set_pin_to_start(bool pin_to_start_in) {
-      pin_to_start = pin_to_start_in;
-    }
-
     bool has_target() const {
       return (options & PROPERTIES_TARGET) != 0;
     }
@@ -211,7 +204,6 @@ class ShellUtil {
     base::string16 shortcut_name;
     bool dual_mode;
     bool pin_to_taskbar;
-    bool pin_to_start;
     // Bitfield made of IndividualProperties. Properties set in |options| will
     // be used to create/update the shortcut, others will be ignored on update
     // and possibly replaced by default values on create (see individual
@@ -319,16 +311,24 @@ class ShellUtil {
 
   // Returns true if the current Windows version supports the presence of
   // shortcuts at |location|.
-  static bool ShortcutLocationIsSupported(ShellUtil::ShortcutLocation location);
+  static bool ShortcutLocationIsSupported(ShortcutLocation location);
 
   // Sets |path| to the path for a shortcut at the |location| desired for the
   // given |level| (CURRENT_USER for per-user path and SYSTEM_LEVEL for
   // all-users path).
   // Returns false on failure.
-  static bool GetShortcutPath(ShellUtil::ShortcutLocation location,
+  static bool GetShortcutPath(ShortcutLocation location,
                               BrowserDistribution* dist,
                               ShellChange level,
                               base::FilePath* path);
+
+  // Move an existing shortcut from |old_location| to |new_location| for the
+  // set |shortcut_level|.  If the folder containing |old_location| is then
+  // empty, it will be removed.
+  static bool MoveExistingShortcut(ShortcutLocation old_location,
+                                   ShortcutLocation new_location,
+                                   BrowserDistribution* dist,
+                                   const ShortcutProperties& properties);
 
   // Updates shortcut in |location| (or creates it if |options| specify
   // SHELL_SHORTCUT_CREATE_ALWAYS).
@@ -340,10 +340,10 @@ class ShellUtil {
   // SHORTCUT_LOCATION_START_MENU_CHROME_DIR, or
   // SHORTCUT_LOCATION_START_MENU_CHROME_APPS_DIR.
   static bool CreateOrUpdateShortcut(
-      ShellUtil::ShortcutLocation location,
+      ShortcutLocation location,
       BrowserDistribution* dist,
-      const ShellUtil::ShortcutProperties& properties,
-      ShellUtil::ShortcutOperation operation);
+      const ShortcutProperties& properties,
+      ShortcutOperation operation);
 
   // Returns the string "|icon_path|,|icon_index|" (see, for example,
   // http://msdn.microsoft.com/library/windows/desktop/dd391573.aspx).
@@ -551,7 +551,7 @@ class ShellUtil {
   // If |location| is a Chrome-specific folder, it will be deleted as well.
   // Returns true if all shortcuts pointing to |target_exe| are successfully
   // deleted, including the case where no such shortcuts are found.
-  static bool RemoveShortcuts(ShellUtil::ShortcutLocation location,
+  static bool RemoveShortcuts(ShortcutLocation location,
                               BrowserDistribution* dist,
                               ShellChange level,
                               const base::FilePath& target_exe);
@@ -565,7 +565,7 @@ class ShellUtil {
   // Returns true if all updates to matching shortcuts are successful, including
   // the vacuous case where no matching shortcuts are found.
   static bool RetargetShortcutsWithArgs(
-      ShellUtil::ShortcutLocation location,
+      ShortcutLocation location,
       BrowserDistribution* dist,
       ShellChange level,
       const base::FilePath& old_target_exe,
@@ -578,7 +578,7 @@ class ShellUtil {
   // those shortcuts. This method will abort and return false if |cancel| is
   // non-NULL and gets set at any point during this call.
   static bool ShortcutListMaybeRemoveUnknownArgs(
-      ShellUtil::ShortcutLocation location,
+      ShortcutLocation location,
       BrowserDistribution* dist,
       ShellChange level,
       const base::FilePath& chrome_exe,

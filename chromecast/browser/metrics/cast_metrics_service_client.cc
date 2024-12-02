@@ -29,6 +29,7 @@
 #include "components/metrics/net/net_metrics_log_uploader.h"
 #include "components/metrics/net/network_metrics_provider.h"
 #include "components/metrics/profiler/profiler_metrics_provider.h"
+#include "components/metrics/ui/screen_info_metrics_provider.h"
 #include "components/metrics/url_constants.h"
 #include "content/public/common/content_switches.h"
 
@@ -95,6 +96,10 @@ scoped_ptr<CastMetricsServiceClient> CastMetricsServiceClient::Create(
 
 void CastMetricsServiceClient::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterStringPref(kMetricsOldClientID, std::string());
+}
+
+::metrics::MetricsService* CastMetricsServiceClient::GetMetricsService() {
+  return metrics_service_.get();
 }
 
 void CastMetricsServiceClient::SetMetricsClientId(
@@ -291,6 +296,14 @@ void CastMetricsServiceClient::OnApplicationNotIdle() {
   metrics_service_->OnApplicationNotIdle();
 }
 
+void CastMetricsServiceClient::ProcessExternalEvents(const base::Closure& cb) {
+#if defined(OS_LINUX)
+  external_metrics_->ProcessExternalEvents(cb);
+#else
+  cb.Run();
+#endif  // defined(OS_LINUX)
+}
+
 void CastMetricsServiceClient::SetForceClientId(
     const std::string& client_id) {
   DCHECK(force_client_id_.empty());
@@ -334,6 +347,12 @@ void CastMetricsServiceClient::Initialize(CastService* cast_service) {
     metrics_service_->RegisterMetricsProvider(
         scoped_ptr< ::metrics::MetricsProvider>(
             new ::metrics::GPUMetricsProvider));
+
+    // TODO(gfhuang): Does ChromeCast actually need metrics about screen info?
+    // crbug.com/541577
+    metrics_service_->RegisterMetricsProvider(
+        scoped_ptr< ::metrics::MetricsProvider>(
+            new ::metrics::ScreenInfoMetricsProvider));
   }
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr< ::metrics::MetricsProvider>(

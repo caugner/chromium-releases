@@ -67,6 +67,7 @@ class WebTestDelegateImpl : public test_runner::WebTestDelegate {
                     const std::string& frontend_url) override;
   void CloseDevTools() override;
   void EvaluateInWebInspector(long call_id, const std::string& script) override;
+  std::string EvaluateInWebInspectorOverlay(const std::string& script) override;
   void ClearAllDatabases() override;
   void SetDatabaseQuota(int quota) override;
   void SimulateWebNotificationClick(const std::string& title,
@@ -108,6 +109,7 @@ class WebTestDelegateImpl : public test_runner::WebTestDelegate {
                      const GURL& origin,
                      const GURL& embedding_origin) override;
   void ResetPermissions() override;
+  bool AddMediaStreamSourceAndTrack(blink::WebMediaStream* stream) override;
   cc::SharedBitmapManager* GetSharedBitmapManager() override;
   void DispatchBeforeInstallPromptEvent(
       int request_id,
@@ -120,7 +122,8 @@ class WebTestDelegateImpl : public test_runner::WebTestDelegate {
       const blink::WebPluginParams& params) override;
   void OnWebTestProxyBaseDestroy(test_runner::WebTestProxyBase* base) override;
 
-  test_runner::TestPreferences prefs_;
+  // Must not be constructed until after blink has been initialized.
+  scoped_ptr<test_runner::TestPreferences> prefs_;
   test_runner::WebTestInterfaces* test_interfaces_;
   test_runner::WebTestProxyBase* proxy_;
   base::Closure completion_callback_;

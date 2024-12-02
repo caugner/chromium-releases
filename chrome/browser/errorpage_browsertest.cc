@@ -54,6 +54,7 @@
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
+#include "policy/policy_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
@@ -61,9 +62,11 @@
 #include "chrome/browser/chromeos/chrome_browser_main_chromeos.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/stub_enterprise_install_attributes.h"
-#include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_types.h"
+#else
+#include "chrome/browser/policy/profile_policy_connector_factory.h"
 #endif
+#include "components/policy/core/common/mock_configuration_policy_provider.h"
 
 using content::BrowserThread;
 using content::NavigationController;
@@ -161,6 +164,9 @@ void ExpectDisplayingNavigationCorrections(Browser* browser,
   // The diagnostics button isn't displayed when corrections were
   // retrieved from a remote server.
   EXPECT_FALSE(IsDisplayingDiagnosticsButton(browser));
+
+  // Close help box again, to return page to original state.
+  ToggleHelpBox(browser);
 }
 
 std::string GetShowSavedButtonLabel() {
@@ -330,11 +336,10 @@ class ErrorPageTest : public InProcessBrowserTest {
                                     switches::kEnableShowSavedCopyPrimary);
   }
 
-  // Navigates the active tab to a mock url created for the file at |file_path|.
-  void NavigateToFileURL(const base::FilePath::StringType& file_path) {
-    ui_test_utils::NavigateToURL(
-        browser(),
-        net::URLRequestMockHTTPJob::GetMockUrl(base::FilePath(file_path)));
+  // Navigates the active tab to a mock url created for the file at |path|.
+  void NavigateToFileURL(const std::string& path) {
+    ui_test_utils::NavigateToURL(browser(),
+                                 net::URLRequestMockHTTPJob::GetMockUrl(path));
   }
 
   // Navigates to the given URL and waits for |num_navigations| to occur, and
@@ -584,7 +589,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_Basic) {
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack1) {
-  NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
+  NavigateToFileURL("title2.html");
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
        browser(), GetDnsErrorURL(), 2);
   ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
@@ -595,14 +600,14 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack1) {
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack2) {
-  NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
+  NavigateToFileURL("title2.html");
 
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
        browser(), GetDnsErrorURL(), 2);
   ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
   EXPECT_EQ(1, link_doctor_interceptor()->num_requests());
 
-  NavigateToFileURL(FILE_PATH_LITERAL("title3.html"));
+  NavigateToFileURL("title3.html");
 
   GoBackAndWaitForNavigations(2);
   ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
@@ -615,14 +620,14 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack2) {
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack2AndForward) {
-  NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
+  NavigateToFileURL("title2.html");
 
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
        browser(), GetDnsErrorURL(), 2);
   ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
   EXPECT_EQ(1, link_doctor_interceptor()->num_requests());
 
-  NavigateToFileURL(FILE_PATH_LITERAL("title3.html"));
+  NavigateToFileURL("title3.html");
 
   GoBackAndWaitForNavigations(2);
   ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
@@ -638,14 +643,14 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack2AndForward) {
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack2Forward2) {
-  NavigateToFileURL(FILE_PATH_LITERAL("title3.html"));
+  NavigateToFileURL("title3.html");
 
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
        browser(), GetDnsErrorURL(), 2);
   ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
   EXPECT_EQ(1, link_doctor_interceptor()->num_requests());
 
-  NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
+  NavigateToFileURL("title2.html");
 
   GoBackAndWaitForNavigations(2);
   ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
@@ -731,9 +736,56 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_DoReload) {
   nav_observer.Wait();
   ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
 
-  // There should have two more requests to the correction service:  One for the
-  // new error page, and one for tracking purposes.  Have to make sure to wait
-  // for the tracking request, since the new error page does not depend on it.
+  // There should have been two more requests to the correction service:  One
+  // for the new error page, and one for tracking purposes.  Have to make sure
+  // to wait for the tracking request, since the new error page does not depend
+  // on it.
+  link_doctor_interceptor()->WaitForRequests(3);
+  EXPECT_EQ(3, link_doctor_interceptor()->num_requests());
+}
+
+// Test that the reload button on a DNS error page works after a same page
+// navigation on the error page.  Error pages don't seem to do this, but some
+// traces indicate this may actually happen.  This test may hang on regression.
+IN_PROC_BROWSER_TEST_F(ErrorPageTest,
+                       DNSError_DoReloadAfterSamePageNavigation) {
+  // The first navigation should fail, and the second one should be the error
+  // page.
+  ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
+       browser(), GetDnsErrorURL(), 2);
+  ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
+  EXPECT_EQ(1, link_doctor_interceptor()->num_requests());
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  // Do a same page navigation.
+  content::TestNavigationObserver nav_observer1(web_contents, 1);
+  web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
+      base::ASCIIToUTF16("document.location='#';"));
+  // The same page navigation counts as a single navigation as far as the
+  // TestNavigationObserver is concerned.
+  nav_observer1.Wait();
+  // Page being displayed should not change.
+  ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
+  // No new requests should have been issued.
+  EXPECT_EQ(1, link_doctor_interceptor()->num_requests());
+
+  // Clicking the reload button should load the error page again, and there
+  // should be two commits, as before.
+  content::TestNavigationObserver nav_observer2(web_contents, 2);
+  // Can't use content::ExecuteScript because it waits for scripts to send
+  // notification that they've run, and scripts that trigger a navigation may
+  // not send that notification.
+  web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
+      base::ASCIIToUTF16("document.getElementById('reload-button').click();"));
+  nav_observer2.Wait();
+  ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
+
+  // There should have been two more requests to the correction service:  One
+  // for the new error page, and one for tracking purposes.  Have to make sure
+  // to wait for the tracking request, since the new error page does not depend
+  // on it.
   link_doctor_interceptor()->WaitForRequests(3);
   EXPECT_EQ(3, link_doctor_interceptor()->num_requests());
 }
@@ -780,9 +832,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_DoClickLink) {
 // navigation corrections.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, IFrameDNSError_Basic) {
   NavigateToURLAndWaitForTitle(
-      net::URLRequestMockHTTPJob::GetMockUrl(
-          base::FilePath(FILE_PATH_LITERAL("iframe_dns_error.html"))),
-      "Blah",
+      net::URLRequestMockHTTPJob::GetMockUrl("iframe_dns_error.html"), "Blah",
       1);
   // We expect to have two history entries, since we started off with navigation
   // to "about:blank" and then navigated to "iframe_dns_error.html".
@@ -801,8 +851,8 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, IFrameDNSError_Basic) {
 // Test that a DNS error occuring in an iframe does not result in an
 // additional session history entry.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_IFrameDNSError_GoBack) {
-  NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
-  NavigateToFileURL(FILE_PATH_LITERAL("iframe_dns_error.html"));
+  NavigateToFileURL("title2.html");
+  NavigateToFileURL("iframe_dns_error.html");
   GoBackAndWaitForTitle("Title Of Awesomeness", 1);
   EXPECT_EQ(0, link_doctor_interceptor()->num_requests());
 }
@@ -818,8 +868,8 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_IFrameDNSError_GoBack) {
 // Test that a DNS error occuring in an iframe does not result in an
 // additional session history entry.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_IFrameDNSError_GoBackAndForward) {
-  NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
-  NavigateToFileURL(FILE_PATH_LITERAL("iframe_dns_error.html"));
+  NavigateToFileURL("title2.html");
+  NavigateToFileURL("iframe_dns_error.html");
   GoBackAndWaitForTitle("Title Of Awesomeness", 1);
   GoForwardAndWaitForTitle("Blah", 1);
   EXPECT_EQ(0, link_doctor_interceptor()->num_requests());
@@ -836,7 +886,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, IFrameDNSError_JavaScript) {
       URLRequestFailedJob::GetMockHttpUrl(net::ERR_NAME_NOT_RESOLVED);
 
   // Load a regular web page, in which we will inject an iframe.
-  NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
+  NavigateToFileURL("title2.html");
 
   // We expect to have two history entries, since we started off with navigation
   // to "about:blank" and then navigated to "title2.html".
@@ -894,10 +944,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, IFrameDNSError_JavaScript) {
 // 404 page.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, Page404) {
   NavigateToURLAndWaitForTitle(
-      net::URLRequestMockHTTPJob::GetMockUrl(
-          base::FilePath(FILE_PATH_LITERAL("page404.html"))),
-      "SUCCESS",
-      1);
+      net::URLRequestMockHTTPJob::GetMockUrl("page404.html"), "SUCCESS", 1);
   EXPECT_EQ(0, link_doctor_interceptor()->num_requests());
 }
 
@@ -1066,6 +1113,41 @@ IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, ManualReloadNotSuppressed) {
   EXPECT_FALSE(IsDisplayingText(browser(), "error.page.auto.reload"));
 }
 
+// Make sure that a same page navigation does not cause issues with the
+// auto-reload timer.  Note that this test was added due to this case causing
+// a crash.  On regression, this test may hang due to a crashed renderer.
+IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, IgnoresSamePageNavigation) {
+  GURL test_url("http://error.page.auto.reload");
+  InstallInterceptor(test_url, 2);
+
+  // Wait for the error page and first autoreload, which happens immediately.
+  ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
+      browser(), test_url, 2);
+
+  EXPECT_EQ(2, interceptor()->failures());
+  EXPECT_EQ(2, interceptor()->requests());
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  content::TestNavigationObserver observer(web_contents, 1);
+  web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
+      base::ASCIIToUTF16("document.location='#';"));
+  // The same page navigation counts as a navigation as far as the
+  // TestNavigationObserver is concerned.
+  observer.Wait();
+
+  // No new requests should have been issued.
+  EXPECT_EQ(2, interceptor()->failures());
+  EXPECT_EQ(2, interceptor()->requests());
+
+  // Wait for the second auto reload, which succeeds.
+  content::TestNavigationObserver observer2(web_contents, 1);
+  observer2.Wait();
+
+  EXPECT_EQ(2, interceptor()->failures());
+  EXPECT_EQ(3, interceptor()->requests());
+}
+
 // Interceptor that fails all requests with net::ERR_ADDRESS_UNREACHABLE.
 class AddressUnreachableInterceptor : public net::URLRequestInterceptor {
  public:
@@ -1188,53 +1270,157 @@ IN_PROC_BROWSER_TEST_F(ErrorPageNavigationCorrectionsFailTest,
   EXPECT_FALSE(IsDisplayingText(browser(), GetShowSavedButtonLabel()));
 }
 
-#if defined(OS_CHROMEOS)
 class ErrorPageOfflineTest : public ErrorPageTest {
  protected:
-  // Mock policy provider for both user and device policies.
-  policy::MockConfigurationPolicyProvider policy_provider_;
 
   void SetUpInProcessBrowserTestFixture() override {
-    // Set up fake install attributes.
-    scoped_ptr<policy::StubEnterpriseInstallAttributes> attributes(
-        new policy::StubEnterpriseInstallAttributes());
-    attributes->SetDomain("example.com");
-    attributes->SetRegistrationUser("user@example.com");
-    policy::BrowserPolicyConnectorChromeOS::SetInstallAttributesForTesting(
-        attributes.release());
+#if defined(OS_CHROMEOS)
+    if (enroll_) {
+      // Set up fake install attributes.
+      scoped_ptr<policy::StubEnterpriseInstallAttributes> attributes(
+          new policy::StubEnterpriseInstallAttributes());
+      attributes->SetDomain("example.com");
+      attributes->SetRegistrationUser("user@example.com");
+      policy::BrowserPolicyConnectorChromeOS::SetInstallAttributesForTesting(
+          attributes.release());
+    }
+#endif
 
     // Sets up a mock policy provider for user and device policies.
     EXPECT_CALL(policy_provider_, IsInitializationComplete(testing::_))
         .WillRepeatedly(testing::Return(true));
+
+    policy::PolicyMap policy_map;
+#if defined(OS_CHROMEOS)
+    if (enroll_)
+      SetEnterpriseUsersDefaults(&policy_map);
+#endif
+    if (set_allow_dinosaur_easter_egg_) {
+      policy_map.Set(
+          policy::key::kAllowDinosaurEasterEgg, policy::POLICY_LEVEL_MANDATORY,
+          policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
+          new base::FundamentalValue(value_of_allow_dinosaur_easter_egg_),
+          nullptr);
+    }
+    policy_provider_.UpdateChromePolicy(policy_map);
+
+#if defined(OS_CHROMEOS)
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
         &policy_provider_);
+#else
+    policy::ProfilePolicyConnectorFactory::GetInstance()
+        ->PushProviderForTesting(&policy_provider_);
+#endif
 
     ErrorPageTest::SetUpInProcessBrowserTestFixture();
   }
+
+  std::string NavigateToPageAndReadText() {
+#if defined(OS_CHROMEOS)
+      // Check enterprise enrollment
+    policy::BrowserPolicyConnectorChromeOS* connector =
+        g_browser_process->platform_part()
+        ->browser_policy_connector_chromeos();
+    EXPECT_EQ(enroll_, connector->IsEnterpriseManaged());
+#endif
+
+    ui_test_utils::NavigateToURL(
+        browser(),
+        URLRequestFailedJob::GetMockHttpUrl(net::ERR_INTERNET_DISCONNECTED));
+
+    content::WebContents* web_contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
+
+    std::string command = base::StringPrintf(
+        "var hasText = document.querySelector('.snackbar');"
+        "domAutomationController.send(hasText ? hasText.innerText : '');");
+
+    std::string result;
+    EXPECT_TRUE(
+        content::ExecuteScriptAndExtractString(web_contents, command, &result));
+
+    return result;
+  }
+
+  // Whether to set AllowDinosaurEasterEgg policy
+  bool set_allow_dinosaur_easter_egg_ = false;
+
+  // The value of AllowDinosaurEasterEgg policy we want to set
+  bool value_of_allow_dinosaur_easter_egg_;
+
+#if defined(OS_CHROMEOS)
+  // Whether to enroll this CrOS device
+  bool enroll_ = true;
+#endif
+
+  // Mock policy provider for both user and device policies.
+  policy::MockConfigurationPolicyProvider policy_provider_;
 };
 
-IN_PROC_BROWSER_TEST_F(ErrorPageOfflineTest, CheckEasterEggIsDisabled) {
-  // Check for enterprise enrollment.
-  policy::BrowserPolicyConnectorChromeOS* connector =
-      g_browser_process->platform_part()->browser_policy_connector_chromeos();
-  EXPECT_TRUE(connector->IsEnterpriseManaged());
+class ErrorPageOfflineTestWithAllowDinosaurTrue : public ErrorPageOfflineTest {
+ protected:
+  void SetUpInProcessBrowserTestFixture() override {
+    set_allow_dinosaur_easter_egg_ = true;
+    value_of_allow_dinosaur_easter_egg_ = true;
+    ErrorPageOfflineTest::SetUpInProcessBrowserTestFixture();
+  }
+};
 
-  ui_test_utils::NavigateToURL(browser(),
-      URLRequestFailedJob::GetMockHttpUrl(net::ERR_INTERNET_DISCONNECTED));
+class ErrorPageOfflineTestWithAllowDinosaurFalse : public ErrorPageOfflineTest {
+ protected:
+  void SetUpInProcessBrowserTestFixture() override {
+    set_allow_dinosaur_easter_egg_ = true;
+    value_of_allow_dinosaur_easter_egg_ = false;
+    ErrorPageOfflineTest::SetUpInProcessBrowserTestFixture();
+  }
+};
 
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+#if defined(OS_CHROMEOS)
+class ErrorPageOfflineTestUnEnrolledChromeOS : public ErrorPageOfflineTest {
+ protected:
+  void SetUpInProcessBrowserTestFixture() override {
+    set_allow_dinosaur_easter_egg_ = false;
+    enroll_ = false;
+    ErrorPageOfflineTest::SetUpInProcessBrowserTestFixture();
+  }
+};
+#endif
 
-  std::string command = base::StringPrintf(
-      "var hasText = document.querySelector('.snackbar').innerText;"
-      "domAutomationController.send(hasText);");
-  std::string result = "";
-  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-               web_contents, command, &result));
+IN_PROC_BROWSER_TEST_F(ErrorPageOfflineTestWithAllowDinosaurTrue,
+                       CheckEasterEggIsAllowed) {
+  std::string result = NavigateToPageAndReadText();
+  EXPECT_EQ("", result);
+}
 
+IN_PROC_BROWSER_TEST_F(ErrorPageOfflineTestWithAllowDinosaurFalse,
+                       CheckEasterEggIsDisabled) {
+  std::string result = NavigateToPageAndReadText();
   std::string disabled_text =
       l10n_util::GetStringUTF8(IDS_ERRORPAGE_FUN_DISABLED);
   EXPECT_EQ(disabled_text, result);
+}
+
+#if defined(OS_CHROMEOS)
+IN_PROC_BROWSER_TEST_F(ErrorPageOfflineTest, CheckEasterEggIsDisabled) {
+  std::string result = NavigateToPageAndReadText();
+  std::string disabled_text =
+      l10n_util::GetStringUTF8(IDS_ERRORPAGE_FUN_DISABLED);
+  EXPECT_EQ(disabled_text, result);
+}
+#else
+IN_PROC_BROWSER_TEST_F(ErrorPageOfflineTest, CheckEasterEggIsAllowed) {
+  std::string result = NavigateToPageAndReadText();
+  EXPECT_EQ("", result);
+}
+#endif
+
+#if defined(OS_CHROMEOS)
+IN_PROC_BROWSER_TEST_F(ErrorPageOfflineTestUnEnrolledChromeOS,
+                       CheckEasterEggIsAllowed) {
+  std::string result = NavigateToPageAndReadText();
+  std::string disabled_text =
+      l10n_util::GetStringUTF8(IDS_ERRORPAGE_FUN_DISABLED);
+  EXPECT_EQ("", result);
 }
 #endif
 

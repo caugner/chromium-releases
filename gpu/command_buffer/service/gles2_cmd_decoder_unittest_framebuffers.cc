@@ -1604,8 +1604,7 @@ TEST_P(GLES2DecoderManualInitTest,
            GL_RGBA4,
            TestHelper::kMaxRenderbufferSize,
            1);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
 }
 
 class GLES2DecoderMultisampledRenderToTextureTest
@@ -1620,8 +1619,7 @@ class GLES2DecoderMultisampledRenderToTextureTest
              GL_RGBA4,
              TestHelper::kMaxRenderbufferSize,
              1);
-    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-    EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+    EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
   }
 
   void TestRenderbufferStorageMultisampleEXT(const char* extension,
@@ -1874,6 +1872,261 @@ TEST_P(GLES2DecoderWithShaderTest, UnClearedAttachmentsGetClearedOnReadPixels) {
            false);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, CopyTexImage2DValidInternalFormat) {
+  const GLuint kFBOClientTextureId = 4100;
+  const GLuint kFBOServiceTextureId = 4101;
+
+  GLenum target = GL_TEXTURE_2D;
+  GLint level = 0;
+  GLenum internal_format = GL_RG32I;
+  GLenum format = GL_RG_INTEGER;
+  GLenum type = GL_INT;
+  GLsizei width = 16;
+  GLsizei height = 8;
+  GLint border = 0;
+
+  EXPECT_CALL(*gl_, GenTextures(_, _))
+      .WillOnce(SetArgPointee<1>(kFBOServiceTextureId))
+      .RetiresOnSaturation();
+  GenHelper<GenTexturesImmediate>(kFBOClientTextureId);
+
+  DoBindTexture(GL_TEXTURE_2D, kFBOClientTextureId, kFBOServiceTextureId);
+  DoTexImage2D(GL_TEXTURE_2D,
+               level,
+               internal_format,
+               width,
+               height,
+               0,
+               format,
+               type,
+               kSharedMemoryId,
+               kSharedMemoryOffset);
+  DoBindFramebuffer(
+      GL_READ_FRAMEBUFFER, client_framebuffer_id_, kServiceFramebufferId);
+  DoFramebufferTexture2D(GL_READ_FRAMEBUFFER,
+                         GL_COLOR_ATTACHMENT0,
+                         GL_TEXTURE_2D,
+                         kFBOClientTextureId,
+                         kFBOServiceTextureId,
+                         0,
+                         GL_NO_ERROR);
+  EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(GL_READ_FRAMEBUFFER))
+      .WillOnce(Return(GL_FRAMEBUFFER_COMPLETE))
+      .RetiresOnSaturation();
+
+  EXPECT_CALL(*gl_,
+              CopyTexImage2D(
+                  target, level, internal_format, 0, 0, width, height, border))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+  CopyTexImage2D cmd;
+  cmd.Init(target, level, internal_format, 0, 0, width, height);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, CopyTexImage2DInvalidInternalFormat) {
+  const GLuint kFBOClientTextureId = 4100;
+  const GLuint kFBOServiceTextureId = 4101;
+
+  GLenum target = GL_TEXTURE_2D;
+  GLint level = 0;
+  GLenum internal_format = GL_RG_INTEGER;
+  GLenum format = GL_RG;
+  GLenum type = GL_UNSIGNED_BYTE;
+  GLsizei width = 16;
+  GLsizei height = 8;
+  GLint border = 0;
+
+  EXPECT_CALL(*gl_, GenTextures(_, _))
+      .WillOnce(SetArgPointee<1>(kFBOServiceTextureId))
+      .RetiresOnSaturation();
+  GenHelper<GenTexturesImmediate>(kFBOClientTextureId);
+
+  DoBindTexture(GL_TEXTURE_2D, kFBOClientTextureId, kFBOServiceTextureId);
+  DoTexImage2D(GL_TEXTURE_2D,
+               level,
+               GL_RG8,
+               width,
+               height,
+               0,
+               format,
+               type,
+               kSharedMemoryId,
+               kSharedMemoryOffset);
+  DoBindFramebuffer(
+      GL_READ_FRAMEBUFFER, client_framebuffer_id_, kServiceFramebufferId);
+  DoFramebufferTexture2D(GL_READ_FRAMEBUFFER,
+                         GL_COLOR_ATTACHMENT0,
+                         GL_TEXTURE_2D,
+                         kFBOClientTextureId,
+                         kFBOServiceTextureId,
+                         0,
+                         GL_NO_ERROR);
+  EXPECT_CALL(*gl_,
+              CopyTexImage2D(
+                  target, level, internal_format, 0, 0, width, height, border))
+      .Times(0);
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+  CopyTexImage2D cmd;
+  cmd.Init(target, level, internal_format, 0, 0, width, height);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, CopyTexImage2DInvalidInternalFormat_Float) {
+  const GLuint kFBOClientTextureId = 4100;
+  const GLuint kFBOServiceTextureId = 4101;
+
+  GLenum target = GL_TEXTURE_2D;
+  GLint level = 0;
+  GLenum internal_format = GL_RG16F;
+  GLenum format = GL_RG;
+  GLenum type = GL_HALF_FLOAT;
+  GLsizei width = 16;
+  GLsizei height = 8;
+  GLint border = 0;
+
+  EXPECT_CALL(*gl_, GenTextures(_, _))
+      .WillOnce(SetArgPointee<1>(kFBOServiceTextureId))
+      .RetiresOnSaturation();
+  GenHelper<GenTexturesImmediate>(kFBOClientTextureId);
+
+  DoBindTexture(GL_TEXTURE_2D, kFBOClientTextureId, kFBOServiceTextureId);
+  DoTexImage2D(GL_TEXTURE_2D,
+               level,
+               internal_format,
+               width,
+               height,
+               0,
+               format,
+               type,
+               kSharedMemoryId,
+               kSharedMemoryOffset);
+  DoBindFramebuffer(
+      GL_READ_FRAMEBUFFER, client_framebuffer_id_, kServiceFramebufferId);
+  DoFramebufferTexture2D(GL_READ_FRAMEBUFFER,
+                         GL_COLOR_ATTACHMENT0,
+                         GL_TEXTURE_2D,
+                         kFBOClientTextureId,
+                         kFBOServiceTextureId,
+                         0,
+                         GL_NO_ERROR);
+  EXPECT_CALL(*gl_,
+              CopyTexImage2D(
+                  target, level, internal_format, 0, 0, width, height, border))
+      .Times(0);
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+  CopyTexImage2D cmd;
+  cmd.Init(target, level, internal_format, 0, 0, width, height);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, CopyTexImage2DInvalidInternalFormat_Integer) {
+  const GLuint kFBOClientTextureId = 4100;
+  const GLuint kFBOServiceTextureId = 4101;
+
+  GLenum target = GL_TEXTURE_2D;
+  GLint level = 0;
+  GLenum internal_format = GL_RG8I;
+  GLenum format = GL_RG_INTEGER;
+  GLenum type = GL_UNSIGNED_BYTE;
+  GLsizei width = 16;
+  GLsizei height = 8;
+  GLint border = 0;
+
+  EXPECT_CALL(*gl_, GenTextures(_, _))
+      .WillOnce(SetArgPointee<1>(kFBOServiceTextureId))
+      .RetiresOnSaturation();
+  GenHelper<GenTexturesImmediate>(kFBOClientTextureId);
+
+  DoBindTexture(GL_TEXTURE_2D, kFBOClientTextureId, kFBOServiceTextureId);
+  DoTexImage2D(GL_TEXTURE_2D,
+               level,
+               GL_RG8UI,
+               width,
+               height,
+               0,
+               format,
+               type,
+               kSharedMemoryId,
+               kSharedMemoryOffset);
+  DoBindFramebuffer(
+      GL_READ_FRAMEBUFFER, client_framebuffer_id_, kServiceFramebufferId);
+  DoFramebufferTexture2D(GL_READ_FRAMEBUFFER,
+                         GL_COLOR_ATTACHMENT0,
+                         GL_TEXTURE_2D,
+                         kFBOClientTextureId,
+                         kFBOServiceTextureId,
+                         0,
+                         GL_NO_ERROR);
+  EXPECT_CALL(*gl_,
+              CopyTexImage2D(
+                  target, level, internal_format, 0, 0, width, height, border))
+      .Times(0);
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+  CopyTexImage2D cmd;
+  cmd.Init(target, level, internal_format, 0, 0, width, height);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, CopyTexImage2DInvalidInternalFormat_sRGB) {
+  const GLuint kFBOClientTextureId = 4100;
+  const GLuint kFBOServiceTextureId = 4101;
+
+  GLenum target = GL_TEXTURE_2D;
+  GLint level = 0;
+  GLenum internal_format = GL_SRGB8;
+  GLenum format = GL_RGB;
+  GLenum type = GL_UNSIGNED_BYTE;
+  GLsizei width = 16;
+  GLsizei height = 8;
+  GLint border = 0;
+
+  EXPECT_CALL(*gl_, GenTextures(_, _))
+      .WillOnce(SetArgPointee<1>(kFBOServiceTextureId))
+      .RetiresOnSaturation();
+  GenHelper<GenTexturesImmediate>(kFBOClientTextureId);
+
+  DoBindTexture(GL_TEXTURE_2D, kFBOClientTextureId, kFBOServiceTextureId);
+  DoTexImage2D(GL_TEXTURE_2D,
+               level,
+               GL_RGB,
+               width,
+               height,
+               0,
+               format,
+               type,
+               kSharedMemoryId,
+               kSharedMemoryOffset);
+  DoBindFramebuffer(
+      GL_READ_FRAMEBUFFER, client_framebuffer_id_, kServiceFramebufferId);
+  DoFramebufferTexture2D(GL_READ_FRAMEBUFFER,
+                         GL_COLOR_ATTACHMENT0,
+                         GL_TEXTURE_2D,
+                         kFBOClientTextureId,
+                         kFBOServiceTextureId,
+                         0,
+                         GL_NO_ERROR);
+  EXPECT_CALL(*gl_,
+              CopyTexImage2D(
+                  target, level, internal_format, 0, 0, width, height, border))
+      .Times(0);
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+  CopyTexImage2D cmd;
+  cmd.Init(target, level, internal_format, 0, 0, width, height);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
 }
 
 TEST_P(GLES2DecoderManualInitTest,
@@ -2271,8 +2524,8 @@ TEST_P(GLES2DecoderTest, DiscardFramebufferEXTUnsupported) {
   cmd.Init(target, count, attachments);
 
   // Should not result into a call into GL.
-  EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(cmd, sizeof(attachments)));
-  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+  EXPECT_EQ(error::kUnknownCommand,
+            ExecuteImmediateCmd(cmd, sizeof(attachments)));
 }
 
 TEST_P(GLES2DecoderManualInitTest,

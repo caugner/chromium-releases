@@ -56,6 +56,7 @@ const char kChromeUIInstantURL[] = "chrome://instant/";
 const char kChromeUIInterstitialURL[] = "chrome://interstitials/";
 const char kChromeUIInvalidationsURL[] = "chrome://invalidations/";
 const char kChromeUILargeIconURL[] = "chrome://large-icon/";
+const char kChromeUIMdPolicyURL[] = "chrome://md-policy/";
 const char kChromeUIMdSettingsURL[] = "chrome://md-settings/";
 const char kChromeUIMemoryRedirectURL[] = "chrome://memory-redirect/";
 const char kChromeUIMemoryURL[] = "chrome://memory/";
@@ -202,6 +203,7 @@ const char kChromeUIInvalidationsHost[] = "invalidations";
 const char kChromeUIKillHost[] = "kill";
 const char kChromeUILargeIconHost[] = "large-icon";
 const char kChromeUILocalStateHost[] = "local-state";
+const char kChromeUIMdPolicyHost[] = "md-policy";
 const char kChromeUIMdSettingsHost[] = "md-settings";
 const char kChromeUIMemoryHost[] = "memory";
 const char kChromeUIMemoryInternalsHost[] = "memory-internals";
@@ -350,6 +352,8 @@ const char kSearchEnginesSubPage[] = "searchEngines";
 const char kSearchSubPage[] = "search";
 const char kSearchUsersSubPage[] = "search#Users";
 const char kSyncSetupSubPage[] = "syncSetup";
+const char kTriggeredResetProfileSettingsSubPage[] =
+    "triggeredResetProfileSettings";
 #if defined(OS_CHROMEOS)
 const char kInternetOptionsSubPage[] = "internet";
 const char kChangeProfilePictureSubPage[] = "changePicture";
@@ -373,7 +377,8 @@ const char kPasswordManagerLearnMoreURL[] =
 #endif
 
 const char kUpgradeHelpCenterBaseURL[] =
-    "http://support.google.com/installer/?product={8A69D345-D564-463c-AFF1-A69D9E530F96}&error=";
+    "http://support.google.com/installer/?product="
+    "{8A69D345-D564-463c-AFF1-A69D9E530F96}&error=";
 
 const char kPasswordManagerAccountDashboardURL[] =
     "https://passwords.google.com/settings/passwords";
@@ -728,6 +733,9 @@ const char kChromeSearchRemoteNtpHost[] = "remote-ntp";
 const char kChromeSearchMostVisitedHost[] = "most-visited";
 const char kChromeSearchMostVisitedUrl[] = "chrome-search://most-visited/";
 
+const char kEasyUnlockLearnMoreUrl[] =
+    "https://support.google.com/chromebook/?p=smart_lock";
+
 // Google SafeSearch query parameters.
 const char kSafeSearchSafeParameter[] = "safe=active";
 const char kSafeSearchSsuiParameter[] = "ssui=on";
@@ -742,16 +750,21 @@ const char kLanguageSettingsLearnMoreUrl[] =
     "https://support.google.com/chrome/topic/1678461";
 #endif
 
-#if defined(OS_MACOSX)
-const char kMac32BitDeprecationURL[] =
-#if !defined(ARCH_CPU_64_BITS)
-    "https://support.google.com/chrome/?p=ui_mac_32bit_support";
-#else
-    "";
-#endif
+#if defined(GOOGLE_CHROME_BUILD) && defined(OS_LINUX) && !defined(OS_CHROMEOS)
+const char kLinuxWheezyPreciseDeprecationURL[] =
+    "https://support.google.com/chrome/answer/95346";
 #endif
 
-const char kEasyUnlockLearnMoreUrl[] =
-    "https://support.google.com/chromebook/?p=smart_lock";
+#if defined(OS_MACOSX)
+// TODO(mark): Change to a Help Center URL when one is available.
+// https://crbug.com/555044
+const char kMac10_678_DeprecationURL[] =
+    "http://chrome.blogspot.com/2015/11/updates-to-chrome-platform-support.html";
+#endif
+
+#if defined(OS_WIN)
+const char kWindowsXPVistaDeprecationURL[] =
+    "https://support.google.com/chrome/answer/95346";
+#endif
 
 }  // namespace chrome

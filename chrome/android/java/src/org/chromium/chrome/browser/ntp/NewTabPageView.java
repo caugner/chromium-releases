@@ -15,6 +15,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.support.v4.graphics.drawable.RoundedBitmapDrawable;
 import android.support.v4.graphics.drawable.RoundedBitmapDrawableFactory;
+import android.support.v7.widget.LinearLayoutManager;
+import android.support.v7.widget.RecyclerView;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
@@ -32,15 +34,19 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import org.chromium.base.CommandLine;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconAvailabilityCallback;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconImageCallback;
+import org.chromium.chrome.browser.favicon.FaviconHelper.IconAvailabilityCallback;
 import org.chromium.chrome.browser.favicon.LargeIconBridge.LargeIconCallback;
 import org.chromium.chrome.browser.ntp.LogoBridge.Logo;
 import org.chromium.chrome.browser.ntp.LogoBridge.LogoObserver;
 import org.chromium.chrome.browser.ntp.MostVisitedItem.MostVisitedItemManager;
 import org.chromium.chrome.browser.ntp.NewTabPage.OnSearchBoxScrollListener;
+import org.chromium.chrome.browser.ntp.snippets.SnippetsManager;
+import org.chromium.chrome.browser.preferences.DocumentModeManager;
 import org.chromium.chrome.browser.profiles.MostVisitedSites.MostVisitedURLsObserver;
 import org.chromium.chrome.browser.profiles.MostVisitedSites.ThumbnailCallback;
 import org.chromium.chrome.browser.util.ViewUtils;
@@ -59,30 +65,8 @@ import jp.tomorrowkey.android.gifplayer.BaseGifImage;
 public class NewTabPageView extends FrameLayout
         implements MostVisitedURLsObserver, OnLayoutChangeListener {
 
-    static final int MAX_MOST_VISITED_SITES = 12;
     private static final int SHADOW_COLOR = 0x11000000;
     private static final long SNAP_SCROLL_DELAY_MS = 30;
-
-    // Taken from https://support.google.com/googleplay/answer/1727131?hl=en-GB
-    private static final String[] SUPPORTED_SAMSUNG_DEVICES = {
-        "sm-g920", // Galaxy S6
-        "sm-g925", // Galaxy S6 Edge
-        "404sc",   // Galaxy S6 Edge
-        "scv31",   // Galaxy S6 Edge
-        "sm-g890", // Galaxy S6 Active
-        "sm-g800", // Galaxy S5 mini
-        "sm-g860", // Galaxy S5 K Sport
-        "sm-g870", // Galaxy S5 Active
-        "sm-g900", // Galaxy S5
-        "sm-g901", // Galaxy S5 LTE-A
-        "sm-g906", // Galaxy S5
-        "scl23",   // Galaxy S5
-        "sm-n915", // Galaxy Note Edge
-        "scl24",   // Galaxy Note Edge
-        "sm-n916", // Galaxy Note 4
-        "sm-n910", // Galaxy Note 4
-        "sm-g850", // Galaxy Alpha
-    };
 
     private ViewGroup mContentView;
     private NewTabScrollView mScrollView;
@@ -94,12 +78,14 @@ public class NewTabPageView extends FrameLayout
     private View mMostVisitedPlaceholder;
     private View mOptOutView;
     private View mNoSearchLogoSpacer;
+    private RecyclerView mSnippetsView;
 
     private OnSearchBoxScrollListener mSearchBoxScrollListener;
 
     private NewTabPageManager mManager;
     private MostVisitedDesign mMostVisitedDesign;
     private MostVisitedItem[] mMostVisitedItems;
+    private SnippetsManager mSnippetsManager;
     private boolean mFirstShow = true;
     private boolean mSearchProviderHasLogo = true;
     private boolean mHasReceivedMostVisitedSites;
@@ -145,6 +131,9 @@ public class NewTabPageView extends FrameLayout
         /** Opens the recent tabs page in the current tab. */
         void navigateToRecentTabs();
 
+        /** Opens a given URL in the current tab. */
+        void open(String url);
+
         /**
          * Animates the search box up into the omnibox and bring up the keyboard.
          * @param beginVoiceSearch Whether to begin a voice search.
@@ -184,14 +173,15 @@ public class NewTabPageView extends FrameLayout
         void getLargeIconForUrl(String url, int size, LargeIconCallback callback);
 
         /**
-         * Checks if a favicon with the given faviconUrl is available. If not,
-         * downloads it and stores it as a favicon for the given pageUrl.
+         * Checks if an icon with the given URL is available. If not,
+         * downloads it and stores it as a favicon/large icon for the given {@code pageUrl}.
          * @param pageUrl The URL of the site whose icon is being requested.
-         * @param faviconUrl The URL of the favicon.
+         * @param iconUrl The URL of the favicon/large icon.
+         * @param isLargeIcon Whether the {@code iconUrl} represents a large icon or favicon.
          * @param callback The callback to be notified when the favicon has been checked.
          */
-        void ensureFaviconIsAvailable(String pageUrl, String faviconUrl,
-                FaviconAvailabilityCallback callback);
+        void ensureIconIsAvailable(String pageUrl, String iconUrl, boolean isLargeIcon,
+                IconAvailabilityCallback callback);
 
         /**
          * Called when the user clicks on the logo.
@@ -327,18 +317,21 @@ public class NewTabPageView extends FrameLayout
                 mMostVisitedDesign.getNumberOfTiles(searchProviderHasLogo));
 
         if (mManager.shouldShowOptOutPromo()) showOptOutPromo();
+
+        // Set up snippets
+        if (CommandLine.getInstance().hasSwitch(ChromeSwitches.ENABLE_NTP_SNIPPETS)) {
+            mSnippetsView = (RecyclerView) findViewById(R.id.snippets_card_list);
+            mSnippetsView.setVisibility(View.VISIBLE);
+            mSnippetsView.setLayoutManager(new LinearLayoutManager(getContext()));
+            mSnippetsManager = new SnippetsManager(mManager, mSnippetsView);
+        }
     }
 
     private int getTabsMovedIllustration() {
         switch (Build.MANUFACTURER.toLowerCase(Locale.US)) {
             case "samsung":
-                String model = Build.MODEL.toLowerCase(Locale.US);
-                for (String supportedModel : SUPPORTED_SAMSUNG_DEVICES) {
-                    if (model.contains(supportedModel)) {
-                        return R.drawable.tabs_moved_samsung;
-                    }
-                }
-                return 0;
+                if (DocumentModeManager.isDeviceTabbedModeByDefault()) return 0;
+                return R.drawable.tabs_moved_samsung;
             case "htc":
                 return R.drawable.tabs_moved_htc;
             default:
@@ -372,7 +365,12 @@ public class NewTabPageView extends FrameLayout
         optOutText.setMovementMethod(LinkMovementMethod.getInstance());
 
         ImageView illustration = (ImageView) mOptOutView.findViewById(R.id.tabs_moved_illustration);
-        illustration.setImageResource(getTabsMovedIllustration());
+        int resourceId = getTabsMovedIllustration();
+        if (resourceId != 0) {
+            illustration.setImageResource(getTabsMovedIllustration());
+        } else {
+            illustration.setImageDrawable(null);
+        }
 
         mOptOutView.setVisibility(View.VISIBLE);
         mMostVisitedLayout.setVisibility(View.GONE);
@@ -729,6 +727,7 @@ public class NewTabPageView extends FrameLayout
         // Re-apply the url focus change amount after a rotation to ensure the views are correctly
         // placed with their new layout configurations.
         setUrlFocusChangeAnimationPercent(mUrlFocusChangePercent);
+        updateSearchBoxOnScroll();
     }
 
     // MostVisitedURLsObserver implementation
@@ -789,21 +788,26 @@ public class NewTabPageView extends FrameLayout
     }
 
     @Override
-    public void onPopularURLsAvailable(String[] urls, String[] faviconUrls) {
+    public void onPopularURLsAvailable(
+            String[] urls, String[] faviconUrls, String[] largeIconUrls) {
         for (int i = 0; i < urls.length; i++) {
             final String url = urls[i];
-            final String faviconUrl = faviconUrls[i];
-            if (faviconUrl.isEmpty()) continue;
+            boolean useLargeIcon =
+                    mMostVisitedDesign.preferLargeIcons() && !largeIconUrls[i].isEmpty();
+            // Only fetch one of favicon or large icon based on what is required on the NTP.
+            // The other will be fetched on visiting the site.
+            String iconUrl = useLargeIcon ? largeIconUrls[i] : faviconUrls[i];
+            if (iconUrl.isEmpty()) continue;
 
-            FaviconAvailabilityCallback callback = new FaviconAvailabilityCallback() {
+            IconAvailabilityCallback callback = new IconAvailabilityCallback() {
                 @Override
-                public void onFaviconAvailabilityChecked(boolean newlyAvailable) {
+                public void onIconAvailabilityChecked(boolean newlyAvailable) {
                     if (newlyAvailable) {
-                        mMostVisitedDesign.onFaviconUpdated(url);
+                        mMostVisitedDesign.onIconUpdated(url);
                     }
                 }
             };
-            mManager.ensureFaviconIsAvailable(url, faviconUrl, callback);
+            mManager.ensureIconIsAvailable(url, iconUrl, useLargeIcon, callback);
         }
     }
 
@@ -847,7 +851,8 @@ public class NewTabPageView extends FrameLayout
         void setSearchProviderHasLogo(View mostVisitedLayout, boolean hasLogo);
         View createMostVisitedItemView(LayoutInflater inflater, String url, String title,
                 String displayTitle, MostVisitedItem item, boolean isInitialLoad);
-        void onFaviconUpdated(String url);
+        void onIconUpdated(String url);
+        boolean preferLargeIcons();
     }
 
     /**
@@ -942,7 +947,8 @@ public class NewTabPageView extends FrameLayout
         }
 
         @Override
-        public void onFaviconUpdated(final String url) {
+        public void onIconUpdated(final String url) {
+            if (mMostVisitedItems == null) return;
             // Find a matching most visited item.
             for (MostVisitedItem item : mMostVisitedItems) {
                 if (!item.getUrl().equals(url)) continue;
@@ -961,6 +967,11 @@ public class NewTabPageView extends FrameLayout
                 mManager.getLocalFaviconImageForURL(url, mDesiredFaviconSize, faviconCallback);
                 break;
             }
+        }
+
+        @Override
+        public boolean preferLargeIcons() {
+            return false;
         }
     }
 
@@ -1079,7 +1090,8 @@ public class NewTabPageView extends FrameLayout
         }
 
         @Override
-        public void onFaviconUpdated(final String url) {
+        public void onIconUpdated(final String url) {
+            if (mMostVisitedItems == null) return;
             // Find a matching most visited item.
             for (MostVisitedItem item : mMostVisitedItems) {
                 if (item.getUrl().equals(url)) {
@@ -1088,6 +1100,11 @@ public class NewTabPageView extends FrameLayout
                     break;
                 }
             }
+        }
+
+        @Override
+        public boolean preferLargeIcons() {
+            return true;
         }
     }
 }

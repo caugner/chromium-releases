@@ -19,7 +19,11 @@ class MemoryMobile(perf_benchmark.PerfBenchmark):
     return 'memory.mobile_memory'
 
 
-@benchmark.Disabled('yosemite')  # crbug.com/517806
+# Disable on yosemite due to crbug.com/517806
+# Disable on reference due to crbug.com/539728
+# Disable on all Mac as it's also failing on 10.11 and retina.
+# crbug.com/555045
+@benchmark.Disabled('mac', 'reference')
 class MemoryTop7Stress(perf_benchmark.PerfBenchmark):
   """Use (recorded) real world web sites and measure memory consumption."""
   test = memory.Memory
@@ -41,6 +45,7 @@ class MemoryLongRunningIdleGmail(perf_benchmark.PerfBenchmark):
     return 'memory.long_running_idle_gmail'
 
 
+@benchmark.Disabled('android') # crbug.com/542682
 class MemoryLongRunningIdleGmailBackground(perf_benchmark.PerfBenchmark):
   """Use (recorded) real world web sites and measure memory consumption
   of long running idle Gmail page in background tab"""

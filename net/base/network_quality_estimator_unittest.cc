@@ -46,7 +46,7 @@ class TestNetworkQualityEstimator : public net::NetworkQualityEstimator {
     // Set up embedded test server.
     embedded_test_server_.ServeFilesFromDirectory(
         base::FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
-    EXPECT_TRUE(embedded_test_server_.InitializeAndWaitUntilReady());
+    EXPECT_TRUE(embedded_test_server_.Start());
     embedded_test_server_.RegisterRequestHandler(base::Bind(
         &TestNetworkQualityEstimator::HandleRequest, base::Unretained(this)));
   }
@@ -99,7 +99,7 @@ class TestNetworkQualityEstimator : public net::NetworkQualityEstimator {
   std::string current_network_id_;
 
   // Embedded server used for testing.
-  net::test_server::EmbeddedTestServer embedded_test_server_;
+  net::EmbeddedTestServer embedded_test_server_;
 
   DISALLOW_COPY_AND_ASSIGN(TestNetworkQualityEstimator);
 };
@@ -1058,6 +1058,26 @@ TEST(NetworkQualityEstimatorTest, TestObservers) {
     EXPECT_LE(0, (observation.timestamp - then).InMilliseconds());
     EXPECT_EQ(NetworkQualityEstimator::URL_REQUEST, observation.source);
   }
+
+  // Verify that observations from TCP and QUIC are passed on to the observers.
+  base::TimeDelta tcp_rtt(base::TimeDelta::FromMilliseconds(1));
+  base::TimeDelta quic_rtt(base::TimeDelta::FromMilliseconds(2));
+
+  scoped_ptr<SocketPerformanceWatcher> tcp_watcher =
+      estimator.CreateSocketPerformanceWatcher(
+          SocketPerformanceWatcherFactory::PROTOCOL_TCP);
+  scoped_ptr<SocketPerformanceWatcher> quic_watcher =
+      estimator.CreateSocketPerformanceWatcher(
+          SocketPerformanceWatcherFactory::PROTOCOL_QUIC);
+  tcp_watcher->OnUpdatedRTTAvailable(tcp_rtt);
+  quic_watcher->OnUpdatedRTTAvailable(quic_rtt);
+
+  EXPECT_EQ(4U, rtt_observer.observations().size());
+  EXPECT_EQ(2U, throughput_observer.observations().size());
+
+  EXPECT_EQ(tcp_rtt.InMilliseconds(), rtt_observer.observations().at(2).rtt_ms);
+  EXPECT_EQ(quic_rtt.InMilliseconds(),
+            rtt_observer.observations().at(3).rtt_ms);
 }
 
 }  // namespace net

@@ -45,7 +45,7 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeRstPacket(
   header.public_header.reset_flag = false;
   header.public_header.version_flag = include_version;
   header.public_header.packet_number_length = PACKET_1BYTE_PACKET_NUMBER;
-  header.packet_packet_number = num;
+  header.packet_number = num;
   header.entropy_flag = false;
   header.fec_flag = false;
   header.fec_group = 0;
@@ -67,7 +67,7 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeAckAndRstPacket(
   header.public_header.reset_flag = false;
   header.public_header.version_flag = include_version;
   header.public_header.packet_number_length = PACKET_1BYTE_PACKET_NUMBER;
-  header.packet_packet_number = num;
+  header.packet_number = num;
   header.entropy_flag = false;
   header.fec_flag = false;
   header.fec_group = 0;
@@ -92,11 +92,11 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeAckAndRstPacket(
   scoped_ptr<QuicPacket> packet(
       BuildUnsizedDataPacket(&framer, header, frames));
   char buffer[kMaxPacketSize];
-  scoped_ptr<QuicEncryptedPacket> encrypted(
-      framer.EncryptPayload(ENCRYPTION_NONE, header.packet_packet_number,
-                            *packet, buffer, kMaxPacketSize));
-  EXPECT_TRUE(encrypted != nullptr);
-  return scoped_ptr<QuicEncryptedPacket>(encrypted->Clone());
+  size_t encrypted_size = framer.EncryptPayload(
+      ENCRYPTION_NONE, header.packet_number, *packet, buffer, kMaxPacketSize);
+  EXPECT_NE(0u, encrypted_size);
+  QuicEncryptedPacket encrypted(buffer, encrypted_size, false);
+  return scoped_ptr<QuicEncryptedPacket>(encrypted.Clone());
 }
 
 scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeConnectionClosePacket(
@@ -106,7 +106,7 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeConnectionClosePacket(
   header.public_header.reset_flag = false;
   header.public_header.version_flag = false;
   header.public_header.packet_number_length = PACKET_1BYTE_PACKET_NUMBER;
-  header.packet_packet_number = num;
+  header.packet_number = num;
   header.entropy_flag = false;
   header.fec_flag = false;
   header.fec_group = 0;
@@ -127,7 +127,7 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeAckPacket(
   header.public_header.reset_flag = false;
   header.public_header.version_flag = false;
   header.public_header.packet_number_length = PACKET_1BYTE_PACKET_NUMBER;
-  header.packet_packet_number = packet_number;
+  header.packet_number = packet_number;
   header.entropy_flag = false;
   header.fec_flag = false;
   header.fec_group = 0;
@@ -150,11 +150,11 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeAckPacket(
   scoped_ptr<QuicPacket> packet(
       BuildUnsizedDataPacket(&framer, header, frames));
   char buffer[kMaxPacketSize];
-  scoped_ptr<QuicEncryptedPacket> encrypted(
-      framer.EncryptPayload(ENCRYPTION_NONE, header.packet_packet_number,
-                            *packet, buffer, kMaxPacketSize));
-  EXPECT_TRUE(encrypted != nullptr);
-  return scoped_ptr<QuicEncryptedPacket>(encrypted->Clone());
+  size_t encrypted_size = framer.EncryptPayload(
+      ENCRYPTION_NONE, header.packet_number, *packet, buffer, kMaxPacketSize);
+  EXPECT_NE(0u, encrypted_size);
+  QuicEncryptedPacket encrypted(buffer, encrypted_size, false);
+  return scoped_ptr<QuicEncryptedPacket>(encrypted.Clone());
 }
 
 // Returns a newly created packet to send kData on stream 1.
@@ -259,15 +259,8 @@ SpdyHeaderBlock QuicTestPacketMaker::GetRequestHeaders(
     const std::string& scheme,
     const std::string& path) {
   SpdyHeaderBlock headers;
-  if (version_ <= QUIC_VERSION_24) {
-    headers[":version"] = "HTTP/1.1";
-  }
   headers[":method"] = method;
-  if (version_ <= QUIC_VERSION_24) {
-    headers[":host"] = host_;
-  } else {
-    headers[":authority"] = host_;
-  }
+  headers[":authority"] = host_;
   headers[":scheme"] = scheme;
   headers[":path"] = path;
   return headers;
@@ -277,9 +270,6 @@ SpdyHeaderBlock QuicTestPacketMaker::GetResponseHeaders(
     const std::string& status) {
   SpdyHeaderBlock headers;
   headers[":status"] = status;
-  if (version_ <= QUIC_VERSION_24) {
-    headers[":version"] = "HTTP/1.1";
-  }
   headers["content-type"] = "text/plain";
   return headers;
 }
@@ -294,11 +284,11 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakePacket(
   scoped_ptr<QuicPacket> packet(
       BuildUnsizedDataPacket(&framer, header, frames));
   char buffer[kMaxPacketSize];
-  scoped_ptr<QuicEncryptedPacket> encrypted(
-      framer.EncryptPayload(ENCRYPTION_NONE, header.packet_packet_number,
-                            *packet, buffer, kMaxPacketSize));
-  EXPECT_TRUE(encrypted != nullptr);
-  return scoped_ptr<QuicEncryptedPacket>(encrypted->Clone());
+  size_t encrypted_size = framer.EncryptPayload(
+      ENCRYPTION_NONE, header.packet_number, *packet, buffer, kMaxPacketSize);
+  EXPECT_NE(0u, encrypted_size);
+  QuicEncryptedPacket encrypted(buffer, encrypted_size, false);
+  return scoped_ptr<QuicEncryptedPacket>(encrypted.Clone());
 }
 
 void QuicTestPacketMaker::InitializeHeader(QuicPacketNumber packet_number,
@@ -307,7 +297,7 @@ void QuicTestPacketMaker::InitializeHeader(QuicPacketNumber packet_number,
   header_.public_header.reset_flag = false;
   header_.public_header.version_flag = should_include_version;
   header_.public_header.packet_number_length = PACKET_1BYTE_PACKET_NUMBER;
-  header_.packet_packet_number = packet_number;
+  header_.packet_number = packet_number;
   header_.fec_group = 0;
   header_.entropy_flag = false;
   header_.fec_flag = false;

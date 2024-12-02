@@ -260,7 +260,11 @@ bool DevToolsEventForwarder::ForwardEvent(
 
   int key_code = ui::LocatedToNonLocatedKeyboardCode(
       static_cast<ui::KeyboardCode>(event.windowsKeyCode));
-  int key = CombineKeyCodeAndModifiers(key_code, event.modifiers);
+  int modifiers = event.modifiers & (WebInputEvent::ShiftKey |
+                                     WebInputEvent::ControlKey |
+                                     WebInputEvent::AltKey |
+                                     WebInputEvent::MetaKey);
+  int key = CombineKeyCodeAndModifiers(key_code, modifiers);
   if (whitelisted_keys_.find(key) == whitelisted_keys_.end())
     return false;
 
@@ -268,7 +272,7 @@ bool DevToolsEventForwarder::ForwardEvent(
   event_data.SetString("type", event_type);
   event_data.SetString("keyIdentifier", event.keyIdentifier);
   event_data.SetInteger("keyCode", key_code);
-  event_data.SetInteger("modifiers", event.modifiers);
+  event_data.SetInteger("modifiers", modifiers);
   devtools_window_->bindings_->CallClientFunction(
       "DevToolsAPI.keyEventUnhandled", &event_data, NULL, NULL);
   return true;
@@ -511,17 +515,22 @@ void DevToolsWindow::ToggleDevToolsWindow(
 
 // static
 void DevToolsWindow::InspectElement(
-    content::WebContents* inspected_web_contents,
+    content::RenderFrameHost* inspected_frame_host,
     int x,
     int y) {
   scoped_refptr<DevToolsAgentHost> agent(
-      DevToolsAgentHost::GetOrCreateFor(inspected_web_contents));
+      DevToolsAgentHost::GetOrCreateFor(inspected_frame_host));
   agent->InspectElement(x, y);
   bool should_measure_time = FindDevToolsWindow(agent.get()) == NULL;
   base::TimeTicks start_time = base::TimeTicks::Now();
   // TODO(loislo): we should initiate DevTools window opening from within
   // renderer. Otherwise, we still can hit a race condition here.
-  OpenDevToolsWindow(inspected_web_contents);
+  if (agent->GetType() == content::DevToolsAgentHost::TYPE_WEB_CONTENTS) {
+    OpenDevToolsWindow(agent->GetWebContents());
+  } else {
+    OpenDevToolsWindow(Profile::FromBrowserContext(agent->GetBrowserContext()),
+                       agent);
+  }
 
   DevToolsWindow* window = FindDevToolsWindow(agent.get());
   if (should_measure_time && window)
@@ -533,15 +542,8 @@ content::DevToolsExternalAgentProxyDelegate*
 DevToolsWindow::CreateWebSocketAPIChannel(const std::string& path) {
   if (path.find("/devtools/frontend_api") != 0)
     return nullptr;
-  DevToolsWindows* instances = g_instances.Pointer();
-  if (g_instances == nullptr)
-    return nullptr;
-  for (DevToolsWindow* window : *instances) {
-    auto result = window->bindings_->CreateWebSocketAPIChannel();
-    if (result)
-      return result;
-  }
-  return nullptr;
+
+  return DevToolsUIBindings::CreateWebSocketAPIChannel();
 }
 
 void DevToolsWindow::ScheduleShow(const DevToolsToggleAction& action) {
@@ -862,9 +864,14 @@ WebContents* DevToolsWindow::OpenURLFromTab(
 }
 
 void DevToolsWindow::ShowCertificateViewer(int certificate_id) {
-  ::ShowCertificateViewerByID(
-      is_docked_ ? GetInspectedWebContents() : main_web_contents_,
-      nullptr, certificate_id);
+  WebContents* inspected_contents = is_docked_ ?
+      GetInspectedWebContents() : main_web_contents_;
+  Browser* browser = NULL;
+  int tab = 0;
+  if (!FindInspectedBrowserAndTabIndex(inspected_contents, &browser, &tab))
+    return;
+  gfx::NativeWindow parent = browser->window()->GetNativeWindow();
+  ::ShowCertificateViewerByID(inspected_contents, parent, certificate_id);
 }
 
 void DevToolsWindow::ActivateContents(WebContents* contents) {
@@ -1189,11 +1196,18 @@ BrowserWindow* DevToolsWindow::GetInspectedBrowserWindow() {
 
 void DevToolsWindow::DoAction(const DevToolsToggleAction& action) {
   switch (action.type()) {
-    case DevToolsToggleAction::kShowConsole:
-      bindings_->CallClientFunction(
-          "DevToolsAPI.showConsole", NULL, NULL, NULL);
+    case DevToolsToggleAction::kShowConsole: {
+      base::StringValue panel_name("console");
+      bindings_->CallClientFunction("DevToolsAPI.showPanel", &panel_name, NULL,
+                                    NULL);
       break;
-
+    }
+    case DevToolsToggleAction::kShowSecurityPanel: {
+      base::StringValue panel_name("security");
+      bindings_->CallClientFunction("DevToolsAPI.showPanel", &panel_name, NULL,
+                                    NULL);
+      break;
+    }
     case DevToolsToggleAction::kInspect:
       bindings_->CallClientFunction(
           "DevToolsAPI.enterInspectElementMode", NULL, NULL, NULL);

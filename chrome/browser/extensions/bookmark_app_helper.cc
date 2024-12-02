@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/bookmark_app_helper.h"
 
 #include <cctype>
+#include <string>
 
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
@@ -62,6 +63,10 @@
 #include "chrome/browser/web_applications/web_app_mac.h"
 #include "chrome/common/chrome_switches.h"
 #endif
+
+#if defined(OS_WIN)
+#include "base/win/shortcut.h"
+#endif  // defined(OS_WIN)
 
 #if defined(USE_ASH)
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
@@ -508,8 +513,10 @@ BookmarkAppHelper::BookmarkAppHelper(Profile* profile,
     : profile_(profile),
       contents_(contents),
       web_app_info_(web_app_info),
-      crx_installer_(extensions::CrxInstaller::CreateSilent(
-          ExtensionSystem::Get(profile)->extension_service())) {
+      crx_installer_(
+          extensions::CrxInstaller::CreateSilent(ExtensionSystem::Get(profile)
+                                                     ->extension_service())),
+      weak_factory_(this) {
   web_app_info_.open_as_window =
       profile_->GetPrefs()->GetInteger(
           extensions::pref_names::kBookmarkAppCreationLaunchType) ==
@@ -543,7 +550,7 @@ void BookmarkAppHelper::Create(const CreateBookmarkAppCallback& callback) {
   if (contents_ &&
       !contents_->GetVisibleURL().SchemeIs(extensions::kExtensionScheme)) {
     contents_->GetManifest(base::Bind(&BookmarkAppHelper::OnDidGetManifest,
-                                     base::Unretained(this)));
+                                      weak_factory_.GetWeakPtr()));
   } else {
     OnIconsDownloaded(true, std::map<GURL, std::vector<SkBitmap>>());
   }
@@ -576,10 +583,9 @@ void BookmarkAppHelper::OnDidGetManifest(const content::Manifest& manifest) {
   }
 
   favicon_downloader_.reset(
-      new FaviconDownloader(contents_,
-                            web_app_info_icon_urls,
+      new FaviconDownloader(contents_, web_app_info_icon_urls,
                             base::Bind(&BookmarkAppHelper::OnIconsDownloaded,
-                                       base::Unretained(this))));
+                                       weak_factory_.GetWeakPtr())));
   favicon_downloader_->Start();
 }
 
@@ -643,7 +649,7 @@ void BookmarkAppHelper::OnIconsDownloaded(
   }
   browser->window()->ShowBookmarkAppBubble(
       web_app_info_, base::Bind(&BookmarkAppHelper::OnBubbleCompleted,
-                                base::Unretained(this)));
+                                weak_factory_.GetWeakPtr()));
 }
 
 void BookmarkAppHelper::OnBubbleCompleted(
@@ -693,21 +699,15 @@ void BookmarkAppHelper::FinishInstallation(const Extension* extension) {
     web_app::ShortcutLocations creation_locations;
 #if defined(OS_LINUX)
     creation_locations.on_desktop = true;
+#elif defined(OS_WIN)
+    // Create the shortcut on the desktop if it's not possible to pin to the
+    // taskbar.
+    creation_locations.on_desktop = !base::win::CanPinShortcutToTaskbar();
 #else
     creation_locations.on_desktop = false;
 #endif
     creation_locations.applications_menu_location =
         web_app::APP_MENU_LOCATION_SUBDIR_CHROMEAPPS;
-    web_app::CreateShortcuts(web_app::SHORTCUT_CREATION_BY_USER,
-                             creation_locations, current_profile, extension);
-    // Creating shortcuts in the start menu fails when the language is set
-    // to certain languages (e.g. Hindi). To work around this, the taskbar /
-    // quick launch icon is created separately to ensure it doesn't fail
-    // due to the start menu shortcut creation failing.
-    // See http://crbug.com/477297 and http://crbug.com/484577.
-    creation_locations.on_desktop = false;
-    creation_locations.applications_menu_location =
-        web_app::APP_MENU_LOCATION_NONE;
     creation_locations.in_quick_launch_bar = true;
     web_app::CreateShortcuts(web_app::SHORTCUT_CREATION_BY_USER,
                              creation_locations, current_profile, extension);
@@ -716,7 +716,7 @@ void BookmarkAppHelper::FinishInstallation(const Extension* extension) {
     ChromeLauncherController::instance()->PinAppWithID(extension->id());
 #endif
   }
-#endif
+#endif  // !defined(OS_MACOSX)
 
 #if defined(OS_MACOSX)
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(

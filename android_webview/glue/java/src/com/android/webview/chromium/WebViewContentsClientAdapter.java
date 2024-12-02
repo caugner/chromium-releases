@@ -4,6 +4,7 @@
 
 package com.android.webview.chromium;
 
+import android.annotation.TargetApi;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -77,6 +78,8 @@ import java.util.WeakHashMap;
  * choose the latter, because it makes for a cleaner design.
  */
 @SuppressWarnings("deprecation")
+// You shouldn't change TargetApi, please see how Android M API was added.
+@TargetApi(Build.VERSION_CODES.LOLLIPOP)
 public class WebViewContentsClientAdapter extends AwContentsClient {
     // TAG is chosen for consistency with classic webview tracing.
     private static final String TAG = "WebViewCallback";
@@ -268,8 +271,15 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
         public Map<String, String> getRequestHeaders() {
             return mRequest.requestHeaders;
         }
+
+        // TODO(mnaganov): Uncomment when we completely switch builds to the next API level.
+        //@Override
+        public boolean isRedirect() {
+            return mRequest.isRedirect;
+        }
     }
 
+    @TargetApi(Build.VERSION_CODES.M)
     private static class WebResourceErrorImpl extends WebResourceError {
         private final AwWebResourceError mError;
 
@@ -315,14 +325,15 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
     }
 
     /**
-     * @see AwContentsClient#shouldOverrideUrlLoading(java.lang.String)
+     * @see AwContentsClient#shouldOverrideUrlLoading(AwContentsClient.AwWebResourceRequest)
      */
     @Override
-    public boolean shouldOverrideUrlLoading(String url) {
+    public boolean shouldOverrideUrlLoading(AwContentsClient.AwWebResourceRequest request) {
         try {
             TraceEvent.begin("WebViewContentsClientAdapter.shouldOverrideUrlLoading");
-            if (TRACE) Log.d(TAG, "shouldOverrideUrlLoading=" + url);
-            boolean result = mWebViewClient.shouldOverrideUrlLoading(mWebView, url);
+            if (TRACE) Log.d(TAG, "shouldOverrideUrlLoading=" + request.url);
+            boolean result;
+            result = mWebViewClient.shouldOverrideUrlLoading(mWebView, request.url);
             return result;
         } finally {
             TraceEvent.end("WebViewContentsClientAdapter.shouldOverrideUrlLoading");

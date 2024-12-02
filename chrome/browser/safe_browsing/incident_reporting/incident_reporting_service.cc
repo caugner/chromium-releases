@@ -23,6 +23,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/browser/safe_browsing/incident_reporting/environment_data_collection.h"
+#include "chrome/browser/safe_browsing/incident_reporting/extension_data_collection.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_receiver.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_report_uploader_impl.h"
@@ -438,6 +439,11 @@ void IncidentReportingService::SetCollectEnvironmentHook(
   }
 }
 
+void IncidentReportingService::DoExtensionCollection(
+    ClientIncidentReport_ExtensionData* extension_data) {
+  CollectExtensionData(extension_data);
+}
+
 void IncidentReportingService::OnProfileAdded(Profile* profile) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -646,6 +652,38 @@ void IncidentReportingService::BeginIncidentCollation() {
   collation_timer_.Reset();
 }
 
+bool IncidentReportingService::WaitingToCollateIncidents() {
+  return collation_timeout_pending_;
+}
+
+void IncidentReportingService::CancelIncidentCollection() {
+  collation_timeout_pending_ = false;
+  last_incident_time_ = base::TimeTicks();
+  report_.reset();
+}
+
+void IncidentReportingService::OnCollationTimeout() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  // Exit early if collection was cancelled.
+  if (!collation_timeout_pending_)
+    return;
+
+  // Wait another round if profile-bound incidents have come in from a profile
+  // that has yet to complete creation.
+  for (ProfileContextCollection::iterator scan = profiles_.begin();
+       scan != profiles_.end(); ++scan) {
+    if (scan->first && !scan->second->added && scan->second->HasIncidents()) {
+      collation_timer_.Reset();
+      return;
+    }
+  }
+
+  collation_timeout_pending_ = false;
+
+  ProcessIncidentsIfCollectionComplete();
+}
+
 void IncidentReportingService::BeginEnvironmentCollection() {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(report_);
@@ -707,39 +745,6 @@ void IncidentReportingService::OnEnvironmentDataCollected(
   ProcessIncidentsIfCollectionComplete();
 }
 
-bool IncidentReportingService::WaitingToCollateIncidents() {
-  return collation_timeout_pending_;
-}
-
-void IncidentReportingService::CancelIncidentCollection() {
-  collation_timeout_pending_ = false;
-  last_incident_time_ = base::TimeTicks();
-  report_.reset();
-}
-
-void IncidentReportingService::OnCollationTimeout() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  // Exit early if collection was cancelled.
-  if (!collation_timeout_pending_)
-    return;
-
-  // Wait another round if profile-bound incidents have come in from a profile
-  // that has yet to complete creation.
-  for (ProfileContextCollection::iterator scan = profiles_.begin();
-       scan != profiles_.end();
-       ++scan) {
-    if (scan->first && !scan->second->added && scan->second->HasIncidents()) {
-      collation_timer_.Reset();
-      return;
-    }
-  }
-
-  collation_timeout_pending_ = false;
-
-  ProcessIncidentsIfCollectionComplete();
-}
-
 void IncidentReportingService::BeginDownloadCollection() {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(report_);
@@ -792,7 +797,9 @@ void IncidentReportingService::CancelDownloadCollection() {
 }
 
 void IncidentReportingService::OnLastDownloadFound(
-    scoped_ptr<ClientIncidentReport_DownloadDetails> last_download) {
+    scoped_ptr<ClientIncidentReport_DownloadDetails> last_binary_download,
+    scoped_ptr<ClientIncidentReport_NonBinaryDownloadDetails>
+        last_non_binary_download) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(report_);
 
@@ -803,8 +810,13 @@ void IncidentReportingService::OnLastDownloadFound(
   // Harvest the finder.
   last_download_finder_.reset();
 
-  if (last_download)
-    report_->set_allocated_download(last_download.release());
+  if (last_binary_download)
+    report_->set_allocated_download(last_binary_download.release());
+
+  if (last_non_binary_download) {
+    report_->set_allocated_non_binary_download(
+        last_non_binary_download.release());
+  }
 
   ProcessIncidentsIfCollectionComplete();
 }
@@ -813,8 +825,7 @@ void IncidentReportingService::ProcessIncidentsIfCollectionComplete() {
   DCHECK(report_);
   // Bail out if there are still outstanding collection tasks. Completion of any
   // of these will start another upload attempt.
-  if (WaitingForEnvironmentCollection() ||
-      WaitingToCollateIncidents() ||
+  if (WaitingForEnvironmentCollection() || WaitingToCollateIncidents() ||
       WaitingForMostRecentDownload()) {
     return;
   }
@@ -881,6 +892,9 @@ void IncidentReportingService::ProcessIncidentsIfCollectionComplete() {
   if (!HasIncidentsToUpload())
     return;
 
+  bool has_download =
+      report->has_download() || report->has_non_binary_download();
+
   // Collect incidents across all profiles participating in safe browsing. Drop
   // incidents if the profile stopped participating before collection completed.
   // Prune previously submitted incidents.
@@ -908,7 +922,7 @@ void IncidentReportingService::ProcessIncidentsIfCollectionComplete() {
       if (context->state_store->HasBeenReported(state.type, state.key,
                                                 state.digest)) {
         LogIncidentDataType(PRUNED, *incident);
-      } else if (!report->has_download()) {
+      } else if (!has_download) {
         LogIncidentDataType(NO_DOWNLOAD, *incident);
         // Drop the incident and mark for future pruning since no executable
         // download was found.
@@ -932,7 +946,7 @@ void IncidentReportingService::ProcessIncidentsIfCollectionComplete() {
 
   // Abandon the request if all incidents were pruned or otherwise dropped.
   if (!count) {
-    if (!report->has_download()) {
+    if (!has_download) {
       UMA_HISTOGRAM_ENUMERATION("SBIRS.UploadResult",
                                 IncidentReportUploader::UPLOAD_NO_DOWNLOAD,
                                 IncidentReportUploader::NUM_UPLOAD_RESULTS);
@@ -941,6 +955,9 @@ void IncidentReportingService::ProcessIncidentsIfCollectionComplete() {
   }
 
   UMA_HISTOGRAM_COUNTS_100("SBIRS.IncidentCount", count);
+
+  // Perform final synchronous collection tasks for the report.
+  DoExtensionCollection(report->mutable_extension_data());
 
   scoped_ptr<UploadContext> context(new UploadContext(report.Pass()));
   context->profiles_to_state.swap(profiles_to_state);

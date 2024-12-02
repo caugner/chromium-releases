@@ -59,6 +59,8 @@ using content::BrowserThread;
 #error This test requires the SAFE_BROWSING_DB_LOCAL implementation.
 #endif
 
+namespace safe_browsing {
+
 namespace {
 
 const base::FilePath::CharType kDataFile[] =
@@ -120,9 +122,6 @@ class FakeSafeBrowsingService : public SafeBrowsingService {
     // Makes sure the auto update is not triggered. The tests will force the
     // update when needed.
     config.disable_auto_update = true;
-#if defined(OS_ANDROID)
-    config.disable_connection_check = true;
-#endif
     config.client_name = "browser_tests";
     return config;
   }
@@ -472,7 +471,7 @@ class SafeBrowsingServerTestHelper
   // Stops UI loop after desired status is updated.
   void StopUILoop() {
     EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    base::MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->QuitWhenIdle();
   }
 
   // Fetch a URL. If message_loop_started is true, starts the message loop
@@ -581,3 +580,5 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingServerTest,
             safe_browsing_helper->VerifyTestComplete(test_server(), last_step));
   EXPECT_EQ("yes", safe_browsing_helper->response_data());
 }
+
+}  // namespace safe_browsing

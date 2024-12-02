@@ -24,6 +24,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/common/profile_management_switches.h"
+#include "components/signin/core/common/signin_pref_names.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/text_elider.h"
@@ -144,8 +145,7 @@ std::vector<std::string> GetSecondaryAccountsForProfile(
   // The vector returned by ProfileOAuth2TokenService::GetAccounts() contains
   // the primary account too, so we need to remove it from the list.
   std::vector<std::string>::iterator primary_index =
-      std::find_if(accounts.begin(), accounts.end(),
-                   std::bind1st(std::equal_to<std::string>(), primary_account));
+      std::find(accounts.begin(), accounts.end(), primary_account);
   DCHECK(primary_index != accounts.end());
   accounts.erase(primary_index);
 

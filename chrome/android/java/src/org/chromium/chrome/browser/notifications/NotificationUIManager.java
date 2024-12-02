@@ -14,22 +14,25 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
-import android.support.v4.app.NotificationCompat;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.text.style.StyleSpan;
 import android.util.Log;
 
+import org.chromium.base.CommandLine;
+import org.chromium.base.FieldTrialList;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.preferences.website.SingleCategoryPreferences;
 import org.chromium.chrome.browser.preferences.website.SingleWebsitePreferences;
 import org.chromium.chrome.browser.preferences.website.SiteSettingsCategory;
+import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.chrome.browser.widget.RoundedIconGenerator;
 
 import java.net.URI;
@@ -169,13 +172,19 @@ public class NotificationUIManager {
         String origin = intent.getStringExtra(NotificationConstants.EXTRA_NOTIFICATION_INFO_ORIGIN);
         String tag = intent.getStringExtra(NotificationConstants.EXTRA_NOTIFICATION_INFO_TAG);
 
+        Log.i(TAG, "Dispatching notification event to native: " + persistentNotificationId);
+
         if (NotificationConstants.ACTION_CLICK_NOTIFICATION.equals(intent.getAction())) {
             int actionIndex = intent.getIntExtra(
                     NotificationConstants.EXTRA_NOTIFICATION_INFO_ACTION_INDEX, -1);
             return sInstance.onNotificationClicked(persistentNotificationId, origin, tag,
                                                    actionIndex);
         } else if (NotificationConstants.ACTION_CLOSE_NOTIFICATION.equals(intent.getAction())) {
-            return sInstance.onNotificationClosed(persistentNotificationId, origin, tag);
+            // Notification deleteIntent is executed only "when the notification is explicitly
+            // dismissed by the user, either with the 'Clear All' button or by swiping it away
+            // individually" (though a third-party NotificationListenerService may also trigger it).
+            return sInstance.onNotificationClosed(persistentNotificationId, origin, tag,
+                                                  true /* byUser */);
         }
 
         Log.e(TAG, "Unrecognized Notification action: " + intent.getAction());
@@ -418,10 +427,9 @@ public class NotificationUIManager {
         PendingIntent pendingSettingsIntent = PendingIntent.getActivity(mAppContext,
                 PENDING_INTENT_REQUEST_CODE, settingsIntent, PendingIntent.FLAG_UPDATE_CURRENT);
 
-        NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(mAppContext)
-                .setContentTitle(title)
-                .setContentText(body)
-                .setStyle(new NotificationCompat.BigTextStyle().bigText(body))
+        NotificationBuilder notificationBuilder = createNotificationBuilder()
+                .setTitle(title)
+                .setBody(body)
                 .setLargeIcon(ensureNormalizedIcon(icon, origin))
                 .setSmallIcon(R.drawable.ic_chrome)
                 .setContentIntent(makePendingIntent(
@@ -431,7 +439,8 @@ public class NotificationUIManager {
                         NotificationConstants.ACTION_CLOSE_NOTIFICATION,
                         persistentNotificationId, origin, tag, -1 /* actionIndex */))
                 .setTicker(createTickerText(title, body))
-                .setSubText(origin);
+                .setOrigin(UrlUtilities.formatUrlForSecurityDisplay(
+                        origin, false /* showScheme */));
 
         for (int actionIndex = 0; actionIndex < actionTitles.length; actionIndex++) {
             notificationBuilder.addAction(
@@ -440,10 +449,16 @@ public class NotificationUIManager {
                                       persistentNotificationId, origin, tag, actionIndex));
         }
         // Site settings button is always the last action button.
-        notificationBuilder.addAction(R.drawable.settings_cog,
-                                      // TODO(johnme): Use shorter string to avoid truncation.
-                                      res.getString(R.string.page_info_site_settings_button),
-                                      pendingSettingsIntent);
+        if (actionTitles.length == 0) {
+            notificationBuilder.addAction(R.drawable.settings_cog,
+                                          res.getString(R.string.page_info_site_settings_button),
+                                          pendingSettingsIntent);
+        } else {
+            // Hide site settings icon and use shorter text when website provided action buttons.
+            notificationBuilder.addAction(0 /* actionIcon */,
+                                          res.getString(R.string.notification_site_settings_button),
+                                          pendingSettingsIntent);
+        }
 
         notificationBuilder.setDefaults(makeDefaults(vibrationPattern.length, silent));
         if (vibrationPattern.length > 0) {
@@ -452,6 +467,13 @@ public class NotificationUIManager {
 
         String platformTag = makePlatformTag(persistentNotificationId, origin, tag);
         mNotificationManager.notify(platformTag, PLATFORM_ID, notificationBuilder.build());
+    }
+
+    private NotificationBuilder createNotificationBuilder() {
+        if (useCustomLayouts()) {
+            return new CustomNotificationBuilder(mAppContext);
+        }
+        return new StandardNotificationBuilder(mAppContext);
     }
 
     /**
@@ -511,6 +533,28 @@ public class NotificationUIManager {
     }
 
     /**
+     * Determines whether to use standard notification layouts, using NotificationCompat.Builder,
+     * or custom layouts using Chrome's own templates.
+     *
+     * The --{enable,disable}-web-notification-custom-layouts
+     * command line flags take precedence over a running Finch trial.
+     *
+     * @return Whether custom layouts should be used.
+     */
+    private static boolean useCustomLayouts() {
+        // Query the field trial state first to ensure correct UMA reporting.
+        String groupName = FieldTrialList.findFullName("WebNotificationCustomLayouts");
+        CommandLine commandLine = CommandLine.getInstance();
+        if (commandLine.hasSwitch(ChromeSwitches.DISABLE_WEB_NOTIFICATION_CUSTOM_LAYOUTS)) {
+            return false;
+        }
+        if (commandLine.hasSwitch(ChromeSwitches.ENABLE_WEB_NOTIFICATION_CUSTOM_LAYOUTS)) {
+            return true;
+        }
+        return groupName.equals("Enabled");
+    }
+
+    /**
      * Returns whether a notification has been clicked in the last 5 seconds.
      * Used for Startup.BringToForegroundReason UMA histogram.
      */
@@ -551,18 +595,18 @@ public class NotificationUIManager {
 
     /**
      * Calls NotificationUIManagerAndroid::OnNotificationClosed in native code to indicate that
-     * the notification with the given parameters has been closed. This could be the result of
-     * user interaction or an action initiated by the framework.
+     * the notification with the given parameters has been closed.
      *
      * @param persistentNotificationId The persistent id of the notification.
      * @param origin The origin of the notification.
      * @param tag The tag of the notification. May be NULL.
+     * @param byUser Whether the notification was closed by a user gesture.
      * @return Whether the manager could handle the close event.
      */
     private boolean onNotificationClosed(long persistentNotificationId, String origin,
-                                         String tag) {
+                                         String tag, boolean byUser) {
         return nativeOnNotificationClosed(mNativeNotificationManager, persistentNotificationId,
-                                          origin, tag);
+                                          origin, tag, byUser);
     }
 
     private static native void nativeInitializeNotificationUIManager();
@@ -570,5 +614,5 @@ public class NotificationUIManager {
     private native boolean nativeOnNotificationClicked(long nativeNotificationUIManagerAndroid,
             long persistentNotificationId, String origin, String tag, int actionIndex);
     private native boolean nativeOnNotificationClosed(long nativeNotificationUIManagerAndroid,
-            long persistentNotificationId, String origin, String tag);
+            long persistentNotificationId, String origin, String tag, boolean byUser);
 }

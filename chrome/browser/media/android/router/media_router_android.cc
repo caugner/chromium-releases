@@ -5,11 +5,13 @@
 #include "chrome/browser/media/android/router/media_router_android.h"
 
 #include "base/android/jni_android.h"
+#include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/guid.h"
 #include "base/logging.h"
 #include "base/memory/scoped_vector.h"
 #include "base/strings/stringprintf.h"
+#include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/media/router/media_routes_observer.h"
 #include "chrome/browser/media/router/media_sinks_observer.h"
 #include "chrome/browser/media/router/presentation_session_messages_observer.h"
@@ -52,11 +54,20 @@ bool MediaRouterAndroid::Register(JNIEnv* env) {
   return ret;
 }
 
+const MediaRoute* MediaRouterAndroid::FindRouteBySource(
+    const MediaSource::Id& source_id) const {
+  for (const auto& route : active_routes_) {
+    if (route.media_source().id() == source_id)
+      return &route;
+  }
+  return nullptr;
+}
+
 void MediaRouterAndroid::CreateRoute(
     const MediaSource::Id& source_id,
     const MediaSink::Id& sink_id,
     const GURL& origin,
-    int tab_id,
+    content::WebContents* web_contents,
     const std::vector<MediaRouteResponseCallback>& callbacks) {
   if (!origin.is_valid()) {
     for (const MediaRouteResponseCallback& callback : callbacks)
@@ -68,6 +79,12 @@ void MediaRouterAndroid::CreateRoute(
   // https://crbug.com/522239
   std::string presentation_id("mr_");
   presentation_id += base::GenerateGUID();
+
+  int tab_id = -1;
+  TabAndroid* tab = web_contents
+      ? TabAndroid::FromWebContents(web_contents) : nullptr;
+  if (tab)
+    tab_id = tab->GetAndroidId();
 
   MediaRouteRequest* request = new MediaRouteRequest(
       MediaSource(source_id),
@@ -100,15 +117,22 @@ void MediaRouterAndroid::JoinRoute(
     const MediaSource::Id& source_id,
     const std::string& presentation_id,
     const GURL& origin,
-    int tab_id,
+    content::WebContents* web_contents,
     const std::vector<MediaRouteResponseCallback>& callbacks) {
-  DVLOG(2) << "JoinRoute: " << source_id << ", " << presentation_id << ", "
-           << origin.spec() << ", " << tab_id;
   if (!origin.is_valid()) {
     for (const MediaRouteResponseCallback& callback : callbacks)
       callback.Run(nullptr, "", "Invalid origin");
     return;
   }
+
+  int tab_id = -1;
+  TabAndroid* tab = web_contents
+      ? TabAndroid::FromWebContents(web_contents) : nullptr;
+  if (tab)
+    tab_id = tab->GetAndroidId();
+
+  DVLOG(2) << "JoinRoute: " << source_id << ", " << presentation_id << ", "
+           << origin.spec() << ", " << tab_id;
 
   MediaRouteRequest* request = new MediaRouteRequest(
       MediaSource(source_id),
@@ -165,7 +189,16 @@ void MediaRouterAndroid::SendRouteBinaryMessage(
     const MediaRoute::Id& route_id,
     scoped_ptr<std::vector<uint8>> data,
     const SendRouteMessageCallback& callback) {
-  NOTIMPLEMENTED();
+  int callback_id =
+      message_callbacks_.Add(new SendRouteMessageCallback(callback));
+  JNIEnv* env = base::android::AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> jroute_id =
+      base::android::ConvertUTF8ToJavaString(env, route_id);
+  ScopedJavaLocalRef<jbyteArray> jbyte_array =
+      base::android::ToJavaByteArray(env, &((*data)[0]), data->size());
+  Java_ChromeMediaRouter_sendBinaryMessage(env, java_media_router_.obj(),
+                                           jroute_id.obj(), jbyte_array.obj(),
+                                           callback_id);
 }
 
 void MediaRouterAndroid::AddIssue(const Issue& issue) {
@@ -183,6 +216,11 @@ void MediaRouterAndroid::OnPresentationSessionDetached(
           base::android::ConvertUTF8ToJavaString(env, route_id);
   Java_ChromeMediaRouter_detachRoute(
       env, java_media_router_.obj(), jroute_id.obj());
+}
+
+bool MediaRouterAndroid::HasLocalRoute() const {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 bool MediaRouterAndroid::RegisterMediaSinksObserver(
@@ -271,6 +309,26 @@ void MediaRouterAndroid::UnregisterPresentationSessionMessagesObserver(
   observer_list->RemoveObserver(observer);
   if (!observer_list->might_have_observers())
     messages_observers_.erase(route_id);
+}
+
+void MediaRouterAndroid::RegisterLocalMediaRoutesObserver(
+    LocalMediaRoutesObserver* observer) {
+  NOTIMPLEMENTED();
+}
+
+void MediaRouterAndroid::UnregisterLocalMediaRoutesObserver(
+    LocalMediaRoutesObserver* observer) {
+  NOTIMPLEMENTED();
+}
+
+void MediaRouterAndroid::RegisterPresentationConnectionStateObserver(
+    PresentationConnectionStateObserver* observer) {
+  NOTIMPLEMENTED();
+}
+
+void MediaRouterAndroid::UnregisterPresentationConnectionStateObserver(
+    PresentationConnectionStateObserver* observer) {
+  NOTIMPLEMENTED();
 }
 
 void MediaRouterAndroid::OnSinksReceived(

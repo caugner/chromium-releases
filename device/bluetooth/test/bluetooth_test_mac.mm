@@ -40,13 +40,13 @@ CBPeripheral* CreateMockPeripheral(NSString* peripheral_identifier) {
 NSDictionary* CreateAdvertisementData(NSString* name, NSArray* uuids) {
   NSMutableDictionary* advertisement_data =
       [NSMutableDictionary dictionaryWithDictionary:@{
-        @"CBAdvertisementDataLocalNameKey" : name,
-        @"CBAdvertisementDataServiceDataKey" : [NSDictionary dictionary],
-        @"CBAdvertisementDataIsConnectable" : @(YES),
+        CBAdvertisementDataLocalNameKey : name,
+        CBAdvertisementDataServiceDataKey : [NSDictionary dictionary],
+        CBAdvertisementDataIsConnectable : @(YES),
       }];
   if (uuids)
     [advertisement_data setObject:uuids
-                           forKey:@"CBAdvertisementDataServiceUUIDsKey"];
+                           forKey:CBAdvertisementDataServiceUUIDsKey];
   return advertisement_data;
 }
 
@@ -124,7 +124,7 @@ BluetoothDevice* BluetoothTestMac::DiscoverLowEnergyDevice(int device_ordinal) {
       [central_manager_delegate centralManager:central_manager
                          didDiscoverPeripheral:peripheral
                              advertisementData:advertisement_data
-                                          RSSI:0];
+                                          RSSI:[NSNumber numberWithInt:0]];
       break;
     }
     case 2: {
@@ -144,7 +144,7 @@ BluetoothDevice* BluetoothTestMac::DiscoverLowEnergyDevice(int device_ordinal) {
       [central_manager_delegate centralManager:central_manager
                          didDiscoverPeripheral:peripheral
                              advertisementData:advertisement_data
-                                          RSSI:0];
+                                          RSSI:[NSNumber numberWithInt:0]];
       break;
     }
     case 3: {
@@ -157,7 +157,7 @@ BluetoothDevice* BluetoothTestMac::DiscoverLowEnergyDevice(int device_ordinal) {
       [central_manager_delegate centralManager:central_manager
                          didDiscoverPeripheral:peripheral
                              advertisementData:advertisement_data
-                                          RSSI:0];
+                                          RSSI:[NSNumber numberWithInt:0]];
       break;
     }
     case 4: {
@@ -170,7 +170,7 @@ BluetoothDevice* BluetoothTestMac::DiscoverLowEnergyDevice(int device_ordinal) {
       [central_manager_delegate centralManager:central_manager
                          didDiscoverPeripheral:peripheral
                              advertisementData:advertisement_data
-                                          RSSI:0];
+                                          RSSI:[NSNumber numberWithInt:0]];
       break;
     }
   }

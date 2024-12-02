@@ -22,9 +22,9 @@ import android.widget.ImageView;
 import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.WebsiteSettingsPopup;
 import org.chromium.chrome.browser.WindowDelegate;
 import org.chromium.chrome.browser.appmenu.AppMenuButtonHelper;
 import org.chromium.chrome.browser.dom_distiller.DomDistillerServiceFactory;
@@ -35,9 +35,9 @@ import org.chromium.chrome.browser.omnibox.LocationBar;
 import org.chromium.chrome.browser.omnibox.LocationBarLayout;
 import org.chromium.chrome.browser.omnibox.UrlBar;
 import org.chromium.chrome.browser.omnibox.UrlFocusChangeListener;
+import org.chromium.chrome.browser.pageinfo.WebsiteSettingsPopup;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.ssl.ConnectionSecurityLevel;
-import org.chromium.chrome.browser.tab.ChromeTab;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.toolbar.ActionModeController.ActionBarDelegate;
 import org.chromium.chrome.browser.util.ColorUtils;
@@ -51,6 +51,8 @@ import org.chromium.ui.base.WindowAndroid;
  */
 public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
         View.OnLongClickListener {
+    private static final int TITLE_ANIM_DELAY_MS = 200;
+
     private View mLocationBarFrameLayout;
     private View mTitleUrlContainer;
     private UrlBar mUrlBar;
@@ -66,6 +68,14 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
 
     private CustomTabToolbarAnimationDelegate mAnimDelegate;
     private boolean mBackgroundColorSet;
+    private long mInitializeTimeStamp;
+
+    private Runnable mTitleAnimationStarter = new Runnable() {
+        @Override
+        public void run() {
+            mAnimDelegate.startTitleAnimation(getContext());
+        }
+    };
 
     /**
      * Constructor for getting this class inflated from an xml layout file.
@@ -106,6 +116,7 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
             ToolbarTabController tabController, AppMenuButtonHelper appMenuButtonHelper) {
         super.initialize(toolbarDataProvider, tabController, appMenuButtonHelper);
         updateVisualsForState();
+        mInitializeTimeStamp = System.currentTimeMillis();
     }
 
     @Override
@@ -173,8 +184,8 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
     }
 
     @Override
-    public ChromeTab getCurrentTab() {
-        return ChromeTab.fromTab(getToolbarDataProvider().getTab());
+    public Tab getCurrentTab() {
+        return getToolbarDataProvider().getTab();
     }
 
     @Override
@@ -204,7 +215,13 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
         // It takes some time to parse the title of the webcontent, and before that Tab#getTitle
         // always return the url. We postpone the title animation until the title is authentic.
         if (mShouldShowTitle && !TextUtils.equals(currentTab.getTitle(), currentTab.getUrl())) {
-            mAnimDelegate.startTitleAnimation(getContext());
+            long duration = System.currentTimeMillis() - mInitializeTimeStamp;
+            if (duration >= TITLE_ANIM_DELAY_MS) {
+                mTitleAnimationStarter.run();
+            } else {
+                ThreadUtils.postOnUiThreadDelayed(mTitleAnimationStarter,
+                        TITLE_ANIM_DELAY_MS - duration);
+            }
         }
 
         mTitleBar.setText(currentTab.getTitle());
@@ -368,9 +385,14 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
         if (securityLevel == ConnectionSecurityLevel.NONE) {
             mAnimDelegate.hideSecurityButton();
         } else {
+            int id = LocationBarLayout.getSecurityIconResource(
+                    securityLevel, !shouldEmphasizeHttpsScheme());
             // ImageView#setImageResource is no-op if given resource is the current one.
-            mSecurityButton.setImageResource(LocationBarLayout.getSecurityIconResource(
-                    securityLevel, !shouldEmphasizeHttpsScheme()));
+            if (id == 0) {
+                mSecurityButton.setImageDrawable(null);
+            } else {
+                mSecurityButton.setImageResource(id);
+            }
             mAnimDelegate.showSecurityButton();
         }
         mUrlBar.emphasizeUrl();
@@ -507,6 +529,9 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
 
     @Override
     public void setUrlBarFocus(boolean shouldBeFocused) { }
+
+    @Override
+    public void revertChanges() { }
 
     @Override
     public long getFirstUrlBarFocusTime() {

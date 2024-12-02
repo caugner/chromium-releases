@@ -12,13 +12,10 @@ import("//third_party/WebKit/Source/platform/platform_generated.gni")
 # Most targets in this file are private actions so use that as the default.
 visibility = [ ":*" ]
 
-if (!is_mac) {
-  # TODO(GYP): can't link Blink binaries yet on mac.
-  heap_gypi = exec_script("//build/gypi_to_gn.py",
-                          [ rebase_path("heap/blink_heap.gypi") ],
-                          "scope",
-                          [ "heap/blink_heap.gypi" ])
-}
+heap_gypi = exec_script("//build/gypi_to_gn.py",
+                        [ rebase_path("heap/blink_heap.gypi") ],
+                        "scope",
+                        [ "heap/blink_heap.gypi" ])
 
 blink_platform_neon_files = [ "graphics/cpu/arm/WebGLImageConversionNEON.h" ]
 
@@ -223,8 +220,8 @@ component("platform") {
       # Uses KillRingMac.mm instead.
       "KillRingNone.cpp",
       "fonts/skia/FontCacheSkia.cpp",
-      "scroll/ScrollAnimatorNone.cpp",
-      "scroll/ScrollAnimatorNone.h",
+      "scroll/ScrollAnimator.cpp",
+      "scroll/ScrollAnimator.h",
 
       # Mac uses only ScrollAnimatorMac.
       "scroll/ScrollbarThemeNonMacCommon.cpp",
@@ -235,15 +232,11 @@ component("platform") {
       "text/LocaleICU.h",
     ]
 
-    # Some Mac-specific parts of WebKit won't compile without having this
-    # prefix header injected.
-    cflags = [
-      "-include",
-      rebase_path("../build/mac/Prefix.h", root_build_dir),
-    ]
-
     defines += [ "WebFontCache=ChromiumWebCoreObjCWebFontCache" ]
-    configs += [ ":mac_objc_renaming" ]
+    configs += [
+      ":mac_objc_renaming",
+      "//third_party/WebKit/Source:mac_precompiled_headers",
+    ]
     libs = [
       "Accelerate.framework",
       "Carbon.framework",
@@ -335,70 +328,83 @@ source_set("test_support") {
   ]
 }
 
-if (!is_mac) {
-  # TODO(GYP): Can't link Blink binaries yet.
-  test("heap_unittests") {
-    visibility = []  # Allow re-assignment of list.
-    visibility = [ "*" ]
-    output_name = "blink_heap_unittests"
+# GYP: blink_heap_unittests
+test("heap_unittests") {
+  visibility = []  # Allow re-assignment of list.
+  visibility = [ "*" ]
+  output_name = "blink_heap_unittests"
 
-    sources = rebase_path(heap_gypi.platform_heap_test_files, ".", "heap")
-    sources += [ "heap/RunAllTests.cpp" ]
+  sources = rebase_path(heap_gypi.platform_heap_test_files, ".", "heap")
+  sources += [ "heap/RunAllTests.cpp" ]
 
-    configs += [
-      "//third_party/WebKit/Source/wtf:wtf_config",
-      "//third_party/WebKit/Source:config",
-    ]
+  configs += [
+    "//third_party/WebKit/Source/wtf:wtf_config",
+    "//third_party/WebKit/Source:config",
+  ]
 
-    defines = [ "INSIDE_BLINK" ]
+  defines = [ "INSIDE_BLINK" ]
 
-    deps = [
-      ":platform",
-      "//base",
-      "//base/allocator",
-      "//base/test:test_support",
-      "//testing/gmock",
-      "//testing/gtest",
-      "//third_party/WebKit/Source/wtf",
-      "//third_party/WebKit/Source/wtf:test_support",
-      "//content/test:test_support",
+  deps = [
+    ":platform",
+    "//base",
+    "//base/allocator",
+    "//base/test:test_support",
+    "//testing/gmock",
+    "//testing/gtest",
+    "//third_party/WebKit/Source/wtf",
+    "//third_party/WebKit/Source/wtf:test_support",
+    "//content/test:test_support",
+  ]
+  if (is_android) {
+    apk_deps = [
+      "//base:base_java",
+      "//content/shell/android:content_shell_assets",
+      "//net/android:net_java",
     ]
   }
+}
 
-  test("platform_unittests") {
-    visibility = []  # Allow re-assignment of list.
-    visibility = [ "*" ]
-    output_name = "blink_platform_unittests"
+test("platform_unittests") {
+  visibility = []  # Allow re-assignment of list.
+  visibility = [ "*" ]
+  output_name = "blink_platform_unittests"
 
-    sources = platform_test_files
+  sources = platform_test_files
 
-    sources += [ "testing/RunAllTests.cpp" ]
-
-    configs += [
-      "//third_party/WebKit/Source/wtf:wtf_config",
-      "//third_party/WebKit/Source:config",
-    ]
-
-    deps = [
-      ":blink_common",
-      ":platform",
-      ":test_support",
-      "//base",
-      "//base/allocator",
-      "//base/test:test_support",
-      "//skia",
-      "//testing/gmock",
-      "//testing/gtest",
-      "//third_party/harfbuzz-ng",
-      "//third_party/WebKit/Source/wtf",
-      "//third_party/WebKit/Source/wtf:test_support",
-      "//url",
-    ]
-
-    defines = [ "INSIDE_BLINK" ]
-
-    include_dirs = [ "$root_gen_dir/blink" ]
+  if (is_win) {
+    sources += [ "text/LocaleWinTest.cpp" ]
+  } else if (is_mac) {
+    sources += [ "text/LocaleMacTest.cpp" ]
+  } else if (is_posix) {
+    sources += [ "text/LocaleICUTest.cpp" ]
   }
+
+  sources += [ "testing/RunAllTests.cpp" ]
+
+  configs += [
+    "//third_party/WebKit/Source/wtf:wtf_config",
+    "//third_party/WebKit/Source:config",
+  ]
+
+  deps = [
+    ":blink_common",
+    ":platform",
+    ":test_support",
+    "//base",
+    "//base/allocator",
+    "//base/test:test_support",
+    "//skia",
+    "//testing/gmock",
+    "//testing/gtest",
+    "//third_party/harfbuzz-ng",
+    "//third_party/WebKit/Source/wtf",
+    "//third_party/WebKit/Source/wtf:test_support",
+    "//url",
+  ]
+
+  defines = [ "INSIDE_BLINK" ]
+
+  include_dirs = [ "$root_gen_dir/blink" ]
 }
 
 if (current_cpu == "arm") {

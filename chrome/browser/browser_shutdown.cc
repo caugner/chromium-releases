@@ -30,8 +30,10 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/switch_utils.h"
 #include "components/metrics/metrics_service.h"
+#include "components/tracing/tracing_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/tracing_controller.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/browser_util_win.h"
@@ -97,6 +99,7 @@ void RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(prefs::kShutdownType, NOT_VALID);
   registry->RegisterIntegerPref(prefs::kShutdownNumProcesses, 0);
   registry->RegisterIntegerPref(prefs::kShutdownNumProcessesSlow, 0);
+  registry->RegisterBooleanPref(prefs::kRestartLastSessionOnShutdown, false);
 }
 
 ShutdownType GetShutdownType() {
@@ -111,7 +114,7 @@ void OnShutdownStarting(ShutdownType type) {
 #if !defined(OS_CHROMEOS)
   // Start the shutdown tracing. Note that On ChromeOS this has already been
   // called in AttemptUserExit().
-  chrome::StartShutdownTracing();
+  StartShutdownTracing();
 #endif
 
   g_shutdown_type = type;
@@ -217,7 +220,7 @@ void ShutdownPostThreadsStop(bool restart_last_session) {
 
 #if defined(OS_WIN)
   if (!browser_util::IsBrowserAlreadyRunning() &&
-      g_shutdown_type != browser_shutdown::END_SESSION) {
+      g_shutdown_type != END_SESSION) {
     upgrade_util::SwapNewChromeExeIfPresent();
   }
 #endif
@@ -343,6 +346,19 @@ void SetTryingToQuit(bool quitting) {
 
 bool IsTryingToQuit() {
   return g_trying_to_quit;
+}
+
+void StartShutdownTracing() {
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kTraceShutdown)) {
+    base::trace_event::TraceConfig trace_config(
+        command_line.GetSwitchValueASCII(switches::kTraceShutdown), "");
+    content::TracingController::GetInstance()->StartTracing(
+        trace_config,
+        content::TracingController::StartTracingDoneCallback());
+  }
+  TRACE_EVENT0("shutdown", "StartShutdownTracing");
 }
 
 }  // namespace browser_shutdown

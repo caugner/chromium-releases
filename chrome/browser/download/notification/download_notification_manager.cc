@@ -24,9 +24,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 bool DownloadNotificationManager::IsEnabled() {
-  // Disabled by default.
-  bool enable_download_notification = false;
-
+  bool enable_download_notification = true;
   std::string arg = base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
       switches::kEnableDownloadNotification);
   if (!arg.empty()) {
@@ -80,12 +78,13 @@ DownloadNotificationManagerForProfile::DownloadNotificationManagerForProfile(
     DownloadNotificationManager* parent_manager)
     : profile_(profile),
       parent_manager_(parent_manager),
+      message_center_(g_browser_process->message_center()),
       items_deleter_(&items_) {
 }
 
 DownloadNotificationManagerForProfile::
     ~DownloadNotificationManagerForProfile() {
-  for (auto download : items_) {
+  for (const auto& download : items_) {
     download.first->RemoveObserver(this);
   }
 }
@@ -145,8 +144,19 @@ void DownloadNotificationManagerForProfile::OnNewDownloadReady(
 
   download->AddObserver(this);
 
-  // |item| object will be inserted to |items_| by |OnCreated()| called in the
-  // constructor.
+  for (auto& item : items_) {
+    content::DownloadItem* download_item = item.first;
+    DownloadItemNotification* download_notification = item.second;
+    if (download_item->GetState() == content::DownloadItem::IN_PROGRESS)
+      download_notification->DisablePopup();
+  }
+
   DownloadItemNotification* item = new DownloadItemNotification(download, this);
   items_.insert(std::make_pair(download, item));
+}
+
+void DownloadNotificationManagerForProfile::OverrideMessageCenterForTest(
+    message_center::MessageCenter* message_center) {
+  DCHECK(message_center);
+  message_center_ = message_center;
 }

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-module mojo;
+module mus.mojom;
 
 import "ui/mojo/geometry/geometry.mojom";
 import "components/mus/public/interfaces/quads.mojom";
@@ -17,10 +17,30 @@ enum ResourceFormat {
   ETC1,
 };
 
+// See src/gpu/command_buffer/common/constants.h
+enum CommandBufferNamespace {
+  INVALID = -1,
+
+  GPU_IO,
+  IN_PROCESS,
+  MOJO,
+  OLD_SYNC_POINTS,
+
+  NUM_COMMAND_BUFFER_NAMESPACES
+};
+
+// See src/gpu/command_buffer/common/sync_token.h
+struct SyncToken {
+  bool verified_flush;
+  CommandBufferNamespace namespace_id;
+  uint64 command_buffer_id;
+  uint64 release_count;
+};
+
 // See src/cc/resources/returned_resource.h.
 struct ReturnedResource {
   uint32 id;
-  uint32 sync_point;
+  SyncToken sync_token;
   int32 count;
   bool lost;
 };
@@ -33,21 +53,21 @@ struct Mailbox {
 // See src/gpu/command_buffer/common/mailbox_holder.h.
 struct MailboxHolder {
   Mailbox mailbox;
+  SyncToken sync_token;
   uint32 texture_target;
-  uint32 sync_point;
 };
 
 // A TransferableResource is a graphics resource such as a texture or a bitmap
-// in shared memory (software mode) that is shared between the View Manager and
+// in shared memory (software mode) that is shared between the window server and
 // a client. This data structure is used to manage reuse of
-// the memory once it is no longer needed by the View Manager and GPU service.
+// the memory once it is no longer needed by the window server and GPU service.
 struct TransferableResource {
   // |id| is an integer that uniquely identifies this resource  in the client so
-  // that the View Manager can return this resource back to the client.
+  // that the window server can return this resource back to the client.
   uint32 id;
   ResourceFormat format;
   uint32 filter;
-  Size size;
+  mojo.Size size;
   MailboxHolder mailbox_holder;
   bool is_repeated;
   bool is_software;

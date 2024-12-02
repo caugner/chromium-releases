@@ -50,12 +50,12 @@ namespace blink {
 
 static void preciselyCollectGarbage()
 {
-    Heap::collectGarbage(ThreadState::NoHeapPointersOnStack, ThreadState::GCWithSweep, Heap::ForcedGC);
+    Heap::collectGarbage(BlinkGC::NoHeapPointersOnStack, BlinkGC::GCWithSweep, BlinkGC::ForcedGC);
 }
 
 static void conservativelyCollectGarbage()
 {
-    Heap::collectGarbage(ThreadState::HeapPointersOnStack, ThreadState::GCWithSweep, Heap::ForcedGC);
+    Heap::collectGarbage(BlinkGC::HeapPointersOnStack, BlinkGC::GCWithSweep, BlinkGC::ForcedGC);
 }
 
 class IntWrapper : public GarbageCollectedFinalized<IntWrapper> {
@@ -87,13 +87,11 @@ private:
 };
 static_assert(WTF::NeedsTracing<IntWrapper>::value, "NeedsTracing macro failed to recognize trace method.");
 
-#if !ENABLE(GC_PROFILING)
 struct SameSizeAsPersistent {
     void* m_pointer[4];
 };
 
 static_assert(sizeof(Persistent<IntWrapper>) <= sizeof(SameSizeAsPersistent), "Persistent handle should stay small");
-#endif
 
 class ThreadMarker {
 public:
@@ -129,7 +127,7 @@ struct ThreadMarkerHash {
 typedef std::pair<Member<IntWrapper>, WeakMember<IntWrapper>> StrongWeakPair;
 
 struct PairWithWeakHandling : public StrongWeakPair {
-    ALLOW_ONLY_INLINE_ALLOCATION();
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 
 public:
     // Regular constructor.
@@ -242,7 +240,7 @@ namespace blink {
 
 class TestGCScope {
 public:
-    explicit TestGCScope(ThreadState::StackState state)
+    explicit TestGCScope(BlinkGC::StackState state)
         : m_state(ThreadState::current())
         , m_safePointScope(state)
         , m_parkedAllThreads(false)
@@ -261,7 +259,7 @@ public:
         // Only cleanup if we parked all threads in which case the GC happened
         // and we need to resume the other threads.
         if (LIKELY(m_parkedAllThreads)) {
-            Heap::postGC(ThreadState::GCWithSweep);
+            Heap::postGC(BlinkGC::GCWithSweep);
             ThreadState::resumeThreads();
         }
     }
@@ -465,10 +463,10 @@ protected:
         Vector<OwnPtr<WebThread>, numberOfThreads> m_threads;
         for (int i = 0; i < numberOfThreads; i++) {
             m_threads.append(adoptPtr(Platform::current()->createThread("blink gc testing thread")));
-            m_threads.last()->taskRunner()->postTask(FROM_HERE, new Task(threadSafeBind(threadFunc, AllowCrossThreadAccess(tester))));
+            m_threads.last()->taskRunner()->postTask(BLINK_FROM_HERE, new Task(threadSafeBind(threadFunc, AllowCrossThreadAccess(tester))));
         }
         while (tester->m_threadsToFinish) {
-            SafePointScope scope(ThreadState::NoHeapPointersOnStack);
+            SafePointScope scope(BlinkGC::NoHeapPointersOnStack);
             Platform::current()->yieldCurrentThread();
         }
         delete tester;
@@ -524,7 +522,7 @@ protected:
         longLivingPersistent = createGlobalPersistent(0x2a2a2a2a);
         int gcCount = 0;
         while (!done()) {
-            ThreadState::current()->safePoint(ThreadState::NoHeapPointersOnStack);
+            ThreadState::current()->safePoint(BlinkGC::NoHeapPointersOnStack);
             {
                 Persistent<IntWrapper> wrapper;
 
@@ -535,7 +533,7 @@ protected:
                     if (!(i % 10)) {
                         globalPersistent = createGlobalPersistent(0x0ed0cabb);
                     }
-                    SafePointScope scope(ThreadState::NoHeapPointersOnStack);
+                    SafePointScope scope(BlinkGC::NoHeapPointersOnStack);
                     Platform::current()->yieldCurrentThread();
                 }
 
@@ -548,12 +546,12 @@ protected:
                 // Taking snapshot shouldn't have any bad side effect.
                 // TODO(haraken): This snapshot GC causes crashes, so disable
                 // it at the moment. Fix the crash and enable it.
-                // Heap::collectGarbage(ThreadState::NoHeapPointersOnStack, ThreadState::TakeSnapshot, Heap::ForcedGC);
+                // Heap::collectGarbage(BlinkGC::NoHeapPointersOnStack, BlinkGC::TakeSnapshot, BlinkGC::ForcedGC);
                 preciselyCollectGarbage();
                 EXPECT_EQ(wrapper->value(), 0x0bbac0de);
                 EXPECT_EQ((*globalPersistent)->value(), 0x0ed0cabb);
             }
-            SafePointScope scope(ThreadState::NoHeapPointersOnStack);
+            SafePointScope scope(BlinkGC::NoHeapPointersOnStack);
             Platform::current()->yieldCurrentThread();
         }
 
@@ -582,7 +580,7 @@ private:
 
         int gcCount = 0;
         while (!done()) {
-            ThreadState::current()->safePoint(ThreadState::NoHeapPointersOnStack);
+            ThreadState::current()->safePoint(BlinkGC::NoHeapPointersOnStack);
             {
                 Persistent<HeapHashMap<ThreadMarker, WeakMember<IntWrapper>>> weakMap = new HeapHashMap<ThreadMarker, WeakMember<IntWrapper>>;
                 PersistentHeapHashMap<ThreadMarker, WeakMember<IntWrapper>> weakMap2;
@@ -590,7 +588,7 @@ private:
                 for (int i = 0; i < numberOfAllocations; i++) {
                     weakMap->add(static_cast<unsigned>(i), IntWrapper::create(0));
                     weakMap2.add(static_cast<unsigned>(i), IntWrapper::create(0));
-                    SafePointScope scope(ThreadState::NoHeapPointersOnStack);
+                    SafePointScope scope(BlinkGC::NoHeapPointersOnStack);
                     Platform::current()->yieldCurrentThread();
                 }
 
@@ -603,12 +601,12 @@ private:
                 // Taking snapshot shouldn't have any bad side effect.
                 // TODO(haraken): This snapshot GC causes crashes, so disable
                 // it at the moment. Fix the crash and enable it.
-                // Heap::collectGarbage(ThreadState::NoHeapPointersOnStack, ThreadState::TakeSnapshot, Heap::ForcedGC);
+                // Heap::collectGarbage(BlinkGC::NoHeapPointersOnStack, BlinkGC::TakeSnapshot, BlinkGC::ForcedGC);
                 preciselyCollectGarbage();
                 EXPECT_TRUE(weakMap->isEmpty());
                 EXPECT_TRUE(weakMap2.isEmpty());
             }
-            SafePointScope scope(ThreadState::NoHeapPointersOnStack);
+            SafePointScope scope(BlinkGC::NoHeapPointersOnStack);
             Platform::current()->yieldCurrentThread();
         }
         ThreadState::detach();
@@ -779,7 +777,7 @@ public:
     void* operator new(size_t size)
     {
         ThreadState* state = ThreadState::current();
-        return Heap::allocateOnHeapIndex(state, size, ThreadState::NodeHeapIndex, GCInfoTrait<IntNode>::index());
+        return Heap::allocateOnHeapIndex(state, size, BlinkGC::NodeHeapIndex, GCInfoTrait<IntNode>::index());
     }
 
     static IntNode* create(int i)
@@ -1548,7 +1546,7 @@ private:
 int UseMixin::s_traceCount = 0;
 
 class VectorObject {
-    ALLOW_ONLY_INLINE_ALLOCATION();
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 public:
     VectorObject()
     {
@@ -1567,7 +1565,7 @@ private:
 class VectorObjectInheritedTrace : public VectorObject { };
 
 class VectorObjectNoTrace {
-    ALLOW_ONLY_INLINE_ALLOCATION();
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 public:
     VectorObjectNoTrace()
     {
@@ -1579,7 +1577,7 @@ private:
 };
 
 class TerminatedArrayItem {
-    ALLOW_ONLY_INLINE_ALLOCATION();
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 public:
     TerminatedArrayItem(IntWrapper* payload) : m_payload(payload), m_isLast(false) { }
 
@@ -1971,7 +1969,7 @@ TEST(HeapTest, LazySweepingPages)
     EXPECT_EQ(0, SimpleFinalizedObject::s_destructorCalls);
     for (int i = 0; i < 1000; i++)
         SimpleFinalizedObject::create();
-    Heap::collectGarbage(ThreadState::NoHeapPointersOnStack, ThreadState::GCWithoutSweep, Heap::ForcedGC);
+    Heap::collectGarbage(BlinkGC::NoHeapPointersOnStack, BlinkGC::GCWithoutSweep, BlinkGC::ForcedGC);
     EXPECT_EQ(0, SimpleFinalizedObject::s_destructorCalls);
     for (int i = 0; i < 10000; i++)
         SimpleFinalizedObject::create();
@@ -1998,7 +1996,7 @@ TEST(HeapTest, LazySweepingLargeObjectPages)
     EXPECT_EQ(0, LargeHeapObject::s_destructorCalls);
     for (int i = 0; i < 10; i++)
         LargeHeapObject::create();
-    Heap::collectGarbage(ThreadState::NoHeapPointersOnStack, ThreadState::GCWithoutSweep, Heap::ForcedGC);
+    Heap::collectGarbage(BlinkGC::NoHeapPointersOnStack, BlinkGC::GCWithoutSweep, BlinkGC::ForcedGC);
     EXPECT_EQ(0, LargeHeapObject::s_destructorCalls);
     for (int i = 0; i < 10; i++) {
         LargeHeapObject::create();
@@ -2007,7 +2005,7 @@ TEST(HeapTest, LazySweepingLargeObjectPages)
     LargeHeapObject::create();
     LargeHeapObject::create();
     EXPECT_EQ(10, LargeHeapObject::s_destructorCalls);
-    Heap::collectGarbage(ThreadState::NoHeapPointersOnStack, ThreadState::GCWithoutSweep, Heap::ForcedGC);
+    Heap::collectGarbage(BlinkGC::NoHeapPointersOnStack, BlinkGC::GCWithoutSweep, BlinkGC::ForcedGC);
     EXPECT_EQ(10, LargeHeapObject::s_destructorCalls);
     preciselyCollectGarbage();
     EXPECT_EQ(22, LargeHeapObject::s_destructorCalls);
@@ -2082,7 +2080,7 @@ TEST(HeapTest, EagerlySweepingPages)
         SimpleFinalizedEagerObject::create();
     for (int i = 0; i < 100; i++)
         SimpleFinalizedObjectInstanceOfTemplate::create();
-    Heap::collectGarbage(ThreadState::NoHeapPointersOnStack, ThreadState::GCWithoutSweep, Heap::ForcedGC);
+    Heap::collectGarbage(BlinkGC::NoHeapPointersOnStack, BlinkGC::GCWithoutSweep, BlinkGC::ForcedGC);
     EXPECT_EQ(0, SimpleFinalizedObject::s_destructorCalls);
     EXPECT_EQ(100, SimpleFinalizedEagerObject::s_destructorCalls);
     EXPECT_EQ(100, SimpleFinalizedObjectInstanceOfTemplate::s_destructorCalls);
@@ -2336,13 +2334,6 @@ TEST(HeapTest, LargeHeapObjects)
         Persistent<LargeHeapObject> object = LargeHeapObject::create();
         ASSERT(ThreadState::current()->findPageFromAddress(object));
         ASSERT(ThreadState::current()->findPageFromAddress(reinterpret_cast<char*>(object.get()) + sizeof(LargeHeapObject) - 1));
-#if ENABLE(GC_PROFILING)
-        const GCInfo* info = ThreadState::current()->findGCInfo(reinterpret_cast<Address>(object.get()));
-        EXPECT_NE(reinterpret_cast<const GCInfo*>(0), info);
-        EXPECT_EQ(info, ThreadState::current()->findGCInfo(reinterpret_cast<Address>(object.get()) + sizeof(LargeHeapObject) - 1));
-        EXPECT_NE(info, ThreadState::current()->findGCInfo(reinterpret_cast<Address>(object.get()) + sizeof(LargeHeapObject)));
-        EXPECT_NE(info, ThreadState::current()->findGCInfo(reinterpret_cast<Address>(object.get()) - 1));
-#endif
         clearOutOldGarbage();
         size_t afterAllocation = Heap::allocatedSpace();
         {
@@ -2415,8 +2406,8 @@ public:
     }
 };
 
-struct ShouldBeTraced {
-    explicit ShouldBeTraced(IntWrapper* wrapper) : m_wrapper(wrapper) { }
+struct NeedsTracingTrait {
+    explicit NeedsTracingTrait(IntWrapper* wrapper) : m_wrapper(wrapper) { }
     DEFINE_INLINE_TRACE() { visitor->trace(m_wrapper); }
     Member<IntWrapper> m_wrapper;
 };
@@ -2867,7 +2858,7 @@ TEST(HeapTest, HeapCollectionTypes)
 }
 
 class NonTrivialObject final {
-    ALLOW_ONLY_INLINE_ALLOCATION();
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 public:
     NonTrivialObject()
     {
@@ -3799,7 +3790,7 @@ TEST(HeapTest, CheckAndMarkPointer)
     // to allocate anything again. We do this by forcing a GC after doing the
     // checkAndMarkPointer tests.
     {
-        TestGCScope scope(ThreadState::HeapPointersOnStack);
+        TestGCScope scope(BlinkGC::HeapPointersOnStack);
         EXPECT_TRUE(scope.allThreadsParked()); // Fail the test if we could not park all threads.
         Heap::flushHeapDoesNotContainCache();
         for (size_t i = 0; i < objectAddresses.size(); i++) {
@@ -3818,7 +3809,7 @@ TEST(HeapTest, CheckAndMarkPointer)
     // however we don't rely on that below since we don't have any allocations.
     clearOutOldGarbage();
     {
-        TestGCScope scope(ThreadState::HeapPointersOnStack);
+        TestGCScope scope(BlinkGC::HeapPointersOnStack);
         EXPECT_TRUE(scope.allThreadsParked());
         Heap::flushHeapDoesNotContainCache();
         for (size_t i = 0; i < objectAddresses.size(); i++) {
@@ -4132,7 +4123,7 @@ TEST(HeapTest, EmbeddedInDeque)
 }
 
 class InlinedVectorObject {
-    ALLOW_ONLY_INLINE_ALLOCATION();
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 public:
     InlinedVectorObject()
     {
@@ -4151,7 +4142,7 @@ public:
 int InlinedVectorObject::s_destructorCalls = 0;
 
 class InlinedVectorObjectWithVtable {
-    ALLOW_ONLY_INLINE_ALLOCATION();
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 public:
     InlinedVectorObjectWithVtable()
     {
@@ -4636,7 +4627,7 @@ public:
     static void test()
     {
         OwnPtr<WebThread> sleepingThread = adoptPtr(Platform::current()->createThread("SleepingThread"));
-        sleepingThread->taskRunner()->postTask(FROM_HERE, new Task(threadSafeBind(sleeperMainFunc)));
+        sleepingThread->taskRunner()->postTask(BLINK_FROM_HERE, new Task(threadSafeBind(sleeperMainFunc)));
 
         // Wait for the sleeper to run.
         while (!s_sleeperRunning) {
@@ -4645,7 +4636,7 @@ public:
 
         {
             // Expect the first attempt to park the sleeping thread to fail
-            TestGCScope scope(ThreadState::NoHeapPointersOnStack);
+            TestGCScope scope(BlinkGC::NoHeapPointersOnStack);
             EXPECT_FALSE(scope.allThreadsParked());
         }
 
@@ -4655,13 +4646,13 @@ public:
         while (s_sleeperRunning) {
             // We enter the safepoint here since the sleeper thread will detach
             // causing it to GC.
-            ThreadState::current()->safePoint(ThreadState::NoHeapPointersOnStack);
+            ThreadState::current()->safePoint(BlinkGC::NoHeapPointersOnStack);
             Platform::current()->yieldCurrentThread();
         }
 
         {
             // Since the sleeper thread has detached this is the only thread.
-            TestGCScope scope(ThreadState::NoHeapPointersOnStack);
+            TestGCScope scope(BlinkGC::NoHeapPointersOnStack);
             EXPECT_TRUE(scope.allThreadsParked());
         }
     }
@@ -5306,7 +5297,7 @@ public:
 
         MutexLocker locker(mainThreadMutex());
         OwnPtr<WebThread> workerThread = adoptPtr(Platform::current()->createThread("Test Worker Thread"));
-        workerThread->taskRunner()->postTask(FROM_HERE, new Task(threadSafeBind(workerThreadMain)));
+        workerThread->taskRunner()->postTask(BLINK_FROM_HERE, new Task(threadSafeBind(workerThreadMain)));
 
         // Wait for the worker thread to have done its initialization,
         // IE. the worker allocates an object and then throw aways any
@@ -5375,7 +5366,7 @@ private:
             // Wait for the main thread to do two GCs without sweeping this thread
             // heap. The worker waits within a safepoint, but there is no sweeping
             // until leaving the safepoint scope.
-            SafePointScope scope(ThreadState::NoHeapPointersOnStack);
+            SafePointScope scope(BlinkGC::NoHeapPointersOnStack);
             parkWorkerThread();
         }
 
@@ -5409,7 +5400,7 @@ public:
 
         MutexLocker locker(mainThreadMutex());
         OwnPtr<WebThread> workerThread = adoptPtr(Platform::current()->createThread("Test Worker Thread"));
-        workerThread->taskRunner()->postTask(FROM_HERE, new Task(threadSafeBind(workerThreadMain)));
+        workerThread->taskRunner()->postTask(BLINK_FROM_HERE, new Task(threadSafeBind(workerThreadMain)));
 
         // Wait for the worker thread initialization. The worker
         // allocates a weak collection where both collection and
@@ -5431,7 +5422,7 @@ public:
 
         // Wait for the worker thread to sweep its heaps before checking.
         {
-            SafePointScope scope(ThreadState::NoHeapPointersOnStack);
+            SafePointScope scope(BlinkGC::NoHeapPointersOnStack);
             parkMainThread();
         }
     }
@@ -5469,7 +5460,7 @@ private:
             // scope. If the weak collection backing is marked dead
             // because of this we will not get strongification in the
             // GC we force when we continue.
-            SafePointScope scope(ThreadState::NoHeapPointersOnStack);
+            SafePointScope scope(BlinkGC::NoHeapPointersOnStack);
             parkWorkerThread();
         }
 
@@ -5612,7 +5603,7 @@ public:
 
         MutexLocker locker(mainThreadMutex());
         OwnPtr<WebThread> workerThread = adoptPtr(Platform::current()->createThread("Test Worker Thread"));
-        workerThread->taskRunner()->postTask(FROM_HERE, new Task(threadSafeBind(workerThreadMain)));
+        workerThread->taskRunner()->postTask(BLINK_FROM_HERE, new Task(threadSafeBind(workerThreadMain)));
 
         // Park the main thread until the worker thread has initialized.
         parkMainThread();
@@ -5660,7 +5651,7 @@ private:
         // to acquire the same global lock that the thread just got and deadlock
         // unless the global lock is recursive.
         parkWorkerThread();
-        SafePointAwareMutexLocker recursiveLocker(recursiveMutex(), ThreadState::NoHeapPointersOnStack);
+        SafePointAwareMutexLocker recursiveLocker(recursiveMutex(), BlinkGC::NoHeapPointersOnStack);
 
         // We won't get here unless the lock is recursive since the sweep done
         // in the constructor of SafePointAwareMutexLocker after
@@ -5686,7 +5677,7 @@ public:
     {
         MutexLocker locker(mainThreadMutex());
         OwnPtr<WebThread> workerThread = adoptPtr(Platform::current()->createThread("Test Worker Thread"));
-        workerThread->taskRunner()->postTask(FROM_HERE, new Task(threadSafeBind(workerThreadMain)));
+        workerThread->taskRunner()->postTask(BLINK_FROM_HERE, new Task(threadSafeBind(workerThreadMain)));
 
         parkMainThread();
 
@@ -5743,7 +5734,7 @@ private:
 };
 
 class PartObject {
-    DISALLOW_ALLOCATION();
+    DISALLOW_NEW();
 public:
     PartObject() : m_obj(SimpleObject::create()) { }
     DEFINE_INLINE_TRACE() { visitor->trace(m_obj); }
@@ -6093,7 +6084,7 @@ private:
 };
 
 class PartObjectWithRef {
-    ALLOW_ONLY_INLINE_ALLOCATION();
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 public:
     PartObjectWithRef(int i)
         : m_value(SimpleRefValue::create(i))
@@ -6381,7 +6372,7 @@ void workerThreadMainForCrossThreadWeakPersistentTest(DestructorLockingObject** 
     parkWorkerThread();
 
     // Step 4: Run a GC.
-    Heap::collectGarbage(ThreadState::NoHeapPointersOnStack, ThreadState::GCWithSweep, Heap::ForcedGC);
+    Heap::collectGarbage(BlinkGC::NoHeapPointersOnStack, BlinkGC::GCWithSweep, BlinkGC::ForcedGC);
     wakeMainThread();
     parkWorkerThread();
 
@@ -6404,7 +6395,7 @@ TEST(HeapTest, CrossThreadWeakPersistent)
     MutexLocker mainThreadMutexLocker(mainThreadMutex());
     OwnPtr<WebThread> workerThread = adoptPtr(Platform::current()->createThread("Test Worker Thread"));
     DestructorLockingObject* object = nullptr;
-    workerThread->taskRunner()->postTask(FROM_HERE, new Task(threadSafeBind(workerThreadMainForCrossThreadWeakPersistentTest, AllowCrossThreadAccessWrapper<DestructorLockingObject**>(&object))));
+    workerThread->taskRunner()->postTask(BLINK_FROM_HERE, new Task(threadSafeBind(workerThreadMainForCrossThreadWeakPersistentTest, AllowCrossThreadAccessWrapper<DestructorLockingObject**>(&object))));
     parkMainThread();
 
     // Step 3: Set up a CrossThreadWeakPersistent.
@@ -6418,7 +6409,7 @@ TEST(HeapTest, CrossThreadWeakPersistent)
 
     {
         // Pretend we have no pointers on stack during the step 4.
-        SafePointScope scope(ThreadState::NoHeapPointersOnStack);
+        SafePointScope scope(BlinkGC::NoHeapPointersOnStack);
         wakeWorkerThread();
         parkMainThread();
     }
@@ -6432,6 +6423,36 @@ TEST(HeapTest, CrossThreadWeakPersistent)
 
     wakeWorkerThread();
     parkMainThread();
+}
+
+class TestPersistentHeapVectorWithUnusedSlots : public PersistentHeapVector<VectorObject, 16> {
+public:
+    void checkUnused()
+    {
+        checkUnusedSlots(end(), end() + (capacity() - size()));
+    }
+};
+
+TEST(HeapTest, TestPersistentHeapVectorWithUnusedSlots)
+{
+    TestPersistentHeapVectorWithUnusedSlots vector1;
+    TestPersistentHeapVectorWithUnusedSlots vector2(vector1);
+
+    vector1.checkUnused();
+    vector2.checkUnused();
+
+    vector2.append(VectorObject());
+    vector2.checkUnused();
+
+    EXPECT_EQ(0u, vector1.size());
+
+    EXPECT_EQ(1u, vector2.size());
+// TODO(Oilpan): when Vector.h's contiguous container support no longer disables
+// Vector<>s with inline capacity, remove.
+#if !defined(ANNOTATE_CONTIGUOUS_CONTAINER)
+    EXPECT_EQ(16u, vector1.capacity());
+    EXPECT_EQ(16u, vector2.capacity());
+#endif
 }
 
 } // namespace blink

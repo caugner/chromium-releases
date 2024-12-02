@@ -30,6 +30,9 @@ namespace gpu {
 
 class CommandBufferService;
 class GpuScheduler;
+class SyncPointClient;
+class SyncPointOrderData;
+class SyncPointManager;
 class TransferBuffer;
 
 namespace gles2 {
@@ -50,6 +53,8 @@ class GLManager : private GpuControl {
     Options();
     // The size of the backbuffer.
     gfx::Size size;
+    // If not null will have a corresponding sync point manager.
+    SyncPointManager* sync_point_manager;
     // If not null will share resources with this context.
     GLManager* share_group_manager;
     // If not null will share a mailbox manager with this context.
@@ -63,6 +68,8 @@ class GLManager : private GpuControl {
     // Whether or not it's ok to lose the context.
     bool context_lost_allowed;
     gles2::ContextType context_type;
+    // Force shader name hashing for all context types.
+    bool force_shader_name_hashing;
   };
   GLManager();
   ~GLManager() override;
@@ -127,12 +134,27 @@ class GLManager : private GpuControl {
   bool IsGpuChannelLost() override;
   gpu::CommandBufferNamespace GetNamespaceID() const override;
   uint64_t GetCommandBufferID() const override;
+  uint64_t GenerateFenceSyncRelease() override;
+  bool IsFenceSyncRelease(uint64_t release) override;
+  bool IsFenceSyncFlushed(uint64_t release) override;
+  bool IsFenceSyncFlushReceived(uint64_t release) override;
+  void SignalSyncToken(const gpu::SyncToken& sync_token,
+                       const base::Closure& callback) override;
+  bool CanWaitUnverifiedSyncToken(const gpu::SyncToken* sync_token) override;
 
  private:
   void PumpCommands();
   bool GetBufferChanged(int32 transfer_buffer_id);
   void SetupBaseContext();
+  void OnFenceSyncRelease(uint64_t release);
+  bool OnWaitFenceSync(gpu::CommandBufferNamespace namespace_id,
+                       uint64_t command_buffer_id,
+                       uint64_t release);
 
+  SyncPointManager* sync_point_manager_;  // Non-owning.
+
+  scoped_refptr<SyncPointOrderData> sync_point_order_data_;
+  scoped_ptr<SyncPointClient> sync_point_client_;
   scoped_refptr<gles2::MailboxManager> mailbox_manager_;
   scoped_refptr<gfx::GLShareGroup> share_group_;
   scoped_ptr<CommandBufferService> command_buffer_;
@@ -144,6 +166,9 @@ class GLManager : private GpuControl {
   scoped_ptr<TransferBuffer> transfer_buffer_;
   scoped_ptr<gles2::GLES2Implementation> gles2_implementation_;
   bool context_lost_allowed_;
+
+  const uint64_t command_buffer_id_;
+  uint64_t next_fence_sync_release_;
 
   // Used on Android to virtualize GL for all contexts.
   static int use_count_;

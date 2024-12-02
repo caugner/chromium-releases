@@ -12,6 +12,8 @@
 #include "base/threading/non_thread_safe.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/metrics/perf/cpu_identity.h"
+#include "chrome/browser/metrics/perf/random_selector.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/login/login_state.h"
@@ -35,6 +37,84 @@ class PerfProvider : public base::NonThreadSafe,
   bool GetSampledProfiles(std::vector<SampledProfile>* sampled_profiles);
 
  protected:
+  typedef int64_t TimeDeltaInternalType;
+
+  class CollectionParams {
+   public:
+    class TriggerParams {
+     public:
+      TriggerParams(int64_t sampling_factor,
+                    base::TimeDelta max_collection_delay);
+
+      int64_t sampling_factor() const { return sampling_factor_; }
+      void set_sampling_factor(int64_t factor) { sampling_factor_ = factor; }
+
+      base::TimeDelta max_collection_delay() const {
+        return base::TimeDelta::FromInternalValue(max_collection_delay_);
+      }
+      void set_max_collection_delay(base::TimeDelta delay) {
+        max_collection_delay_ = delay.ToInternalValue();
+      }
+
+     private:
+      TriggerParams() = default;  // POD
+
+      // Limit the number of profiles collected.
+      int64_t sampling_factor_;
+
+      // Add a random delay before collecting after the trigger.
+      // The delay should be randomly selected between 0 and this value.
+      TimeDeltaInternalType max_collection_delay_;
+    };
+
+    CollectionParams(base::TimeDelta collection_duration,
+                     base::TimeDelta periodic_interval,
+                     TriggerParams resume_from_suspend,
+                     TriggerParams restore_session);
+
+    base::TimeDelta collection_duration() const {
+      return base::TimeDelta::FromInternalValue(collection_duration_);
+    }
+    void set_collection_duration(base::TimeDelta duration) {
+      collection_duration_ = duration.ToInternalValue();
+    }
+
+    base::TimeDelta periodic_interval() const {
+      return base::TimeDelta::FromInternalValue(periodic_interval_);
+    }
+    void set_periodic_interval(base::TimeDelta interval) {
+      periodic_interval_ = interval.ToInternalValue();
+    }
+
+    const TriggerParams& resume_from_suspend() const {
+      return resume_from_suspend_;
+    }
+    TriggerParams* mutable_resume_from_suspend() {
+      return &resume_from_suspend_;
+    }
+    const TriggerParams& restore_session() const {
+      return restore_session_;
+    }
+    TriggerParams* mutable_restore_session() {
+      return &restore_session_;
+    }
+
+   private:
+    CollectionParams() = default;  // POD
+
+    // Time perf is run for.
+    TimeDeltaInternalType collection_duration_;
+
+    // For PERIODIC_COLLECTION, partition time since login into successive
+    // intervals of this duration. In each interval, a random time is picked to
+    // collect a profile.
+    TimeDeltaInternalType periodic_interval_;
+
+    // Parameters for RESUME_FROM_SUSPEND and RESTORE_SESSION collections:
+    TriggerParams resume_from_suspend_;
+    TriggerParams restore_session_;
+  };
+
   // Parses a PerfDataProto from serialized data |perf_data|, if it exists.
   // Parses a PerfStatProto from serialized data |perf_stat|, if it exists.
   // Only one of these may contain data. If both |perf_data| and |perf_stat|
@@ -52,7 +132,16 @@ class PerfProvider : public base::NonThreadSafe,
       const std::vector<uint8>& perf_data,
       const std::vector<uint8>& perf_stat);
 
+  const CollectionParams& collection_params() const {
+    return collection_params_;
+  }
+  const RandomSelector& command_selector() const {
+    return command_selector_;
+  }
+
  private:
+  static const CollectionParams kDefaultParameters;
+
   // Class that listens for changes to the login state. When a normal user logs
   // in, it updates PerfProvider to start collecting data.
   class LoginObserver : public chromeos::LoginState::Observer {
@@ -68,6 +157,11 @@ class PerfProvider : public base::NonThreadSafe,
     // the login state.
     PerfProvider* perf_provider_;
   };
+
+  // Change the values in |collection_params_| and the commands in
+  // |command_selector_| for any keys that are present in |params|.
+  void SetCollectionParamsFromVariationParams(
+      const std::map<std::string, std::string> &params);
 
   // Called when a suspend finishes. This is either a successful suspend
   // followed by a resume, or a suspend that was canceled. Inherited from
@@ -111,6 +205,12 @@ class PerfProvider : public base::NonThreadSafe,
       const base::TimeDelta& time_after_restore,
       int num_tabs_restored);
 
+  // Parameters controlling how profiles are collected.
+  CollectionParams collection_params_;
+
+  // Set of commands to choose from.
+  RandomSelector command_selector_;
+
   // Vector of SampledProfile protobufs containing perf profiles.
   std::vector<SampledProfile> cached_perf_data_;
 
@@ -142,6 +242,25 @@ class PerfProvider : public base::NonThreadSafe,
 
   DISALLOW_COPY_AND_ASSIGN(PerfProvider);
 };
+
+// Exposed for unit testing.
+namespace internal {
+
+// Return the default set of perf commands and their odds of selection given
+// the identity of the CPU in |cpuid|.
+std::vector<RandomSelector::WeightAndValue> GetDefaultCommandsForCpu(
+    const CPUIdentity& cpuid);
+
+// For the "PerfCommand::"-prefixed keys in |params|, return the cpu specifier
+// that is the narrowest match for the CPU identified by |cpuid|.
+// Valid CPU specifiers, in increasing order of specificity, are:
+// "default", a system architecture (e.g. "x86_64"), a CPU microarchitecture
+// (currently only Intel uarchs supported), or a CPU model name substring.
+std::string FindBestCpuSpecifierFromParams(
+    const std::map<std::string, std::string>& params,
+    const CPUIdentity& cpuid);
+
+}  // namespace internal
 
 }  // namespace metrics
 

@@ -50,9 +50,8 @@ public class TabUmaTest extends ChromeActivityTestCaseBase<ChromeActivity> {
             public Tab call() {
                 Tab bgTab = Tab.createTabForLazyLoad(getActivity(), false,
                         getActivity().getWindowAndroid(), TabLaunchType.FROM_LONGPRESS_BACKGROUND,
-                        Tab.INVALID_TAB_ID, new LoadUrlParams(TEST_URL),
-                        getActivity().getTabModelSelector());
-                bgTab.initialize(null, null, true);
+                        Tab.INVALID_TAB_ID, new LoadUrlParams(TEST_URL));
+                bgTab.initialize(null, null, new TabDelegateFactory(), true);
                 return bgTab;
             }
         });
@@ -104,8 +103,8 @@ public class TabUmaTest extends ChromeActivityTestCaseBase<ChromeActivity> {
             public Tab call() {
                 Tab bgTab = Tab.createLiveTab(Tab.INVALID_TAB_ID, getActivity(), false,
                         getActivity().getWindowAndroid(), TabLaunchType.FROM_LONGPRESS_BACKGROUND,
-                        Tab.INVALID_TAB_ID, true, getActivity().getTabModelSelector());
-                bgTab.initialize(null, null, true);
+                        Tab.INVALID_TAB_ID, true);
+                bgTab.initialize(null, null, new TabDelegateFactory(), true);
                 bgTab.loadUrl(new LoadUrlParams(TEST_URL));
                 bgTab.show(TabSelectionType.FROM_USER);
                 return bgTab;
@@ -121,8 +120,8 @@ public class TabUmaTest extends ChromeActivityTestCaseBase<ChromeActivity> {
             public Tab call() {
                 Tab bgTab = Tab.createLiveTab(Tab.INVALID_TAB_ID, getActivity(), false,
                         getActivity().getWindowAndroid(), TabLaunchType.FROM_LONGPRESS_BACKGROUND,
-                        Tab.INVALID_TAB_ID, true, getActivity().getTabModelSelector());
-                bgTab.initialize(null, null, true);
+                        Tab.INVALID_TAB_ID, true);
+                bgTab.initialize(null, null, new TabDelegateFactory(), true);
                 bgTab.loadUrl(new LoadUrlParams(TEST_URL));
                 // Simulate the renderer being killed by the OS.
                 bgTab.simulateRendererKilledForTesting(false);
@@ -140,9 +139,8 @@ public class TabUmaTest extends ChromeActivityTestCaseBase<ChromeActivity> {
             public Tab call() {
                 Tab bgTab = Tab.createTabForLazyLoad(getActivity(), false,
                         getActivity().getWindowAndroid(), TabLaunchType.FROM_LONGPRESS_BACKGROUND,
-                        Tab.INVALID_TAB_ID, new LoadUrlParams(TEST_URL),
-                        getActivity().getTabModelSelector());
-                bgTab.initialize(null, null, true);
+                        Tab.INVALID_TAB_ID, new LoadUrlParams(TEST_URL));
+                bgTab.initialize(null, null, new TabDelegateFactory(), true);
                 bgTab.show(TabSelectionType.FROM_USER);
                 return bgTab;
             }

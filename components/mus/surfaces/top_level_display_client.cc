@@ -35,11 +35,15 @@ TopLevelDisplayClient::TopLevelDisplayClient(
 
   // TODO(brianderson): Reconcile with SurfacesScheduler crbug.com/476676
   cc::DisplayScheduler* null_display_scheduler = nullptr;
-  display_->Initialize(
-      make_scoped_ptr(new DirectOutputSurface(
-          new SurfacesContextProvider(this, widget, gpu_state))),
-      null_display_scheduler);
 
+  if (gpu_state->HardwareRenderingAvailable()) {
+    display_->Initialize(
+        make_scoped_ptr(new DirectOutputSurface(
+            new SurfacesContextProvider(this, widget, gpu_state))),
+        null_display_scheduler);
+  } else {
+    // TODO(rjkroege): Implement software compositing.
+  }
   display_->Resize(last_submitted_frame_size_);
 
   // TODO(fsamuel): Plumb the proper device scale factor.
@@ -98,6 +102,12 @@ void TopLevelDisplayClient::OnVSyncParametersUpdated(int64_t timebase,
 void TopLevelDisplayClient::ReturnResources(
     const cc::ReturnedResourceArray& resources) {
   // TODO(fsamuel): Implement this.
+}
+
+void TopLevelDisplayClient::SetBeginFrameSource(
+    cc::SurfaceId surface_id,
+    cc::BeginFrameSource* begin_frame_source) {
+  // TODO(tansell): Implement this.
 }
 
 }  // namespace mus

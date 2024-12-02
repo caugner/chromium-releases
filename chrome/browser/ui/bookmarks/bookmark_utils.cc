@@ -14,6 +14,7 @@
 #include "chrome/common/url_constants.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node_data.h"
+#include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/search/search.h"
 #include "components/url_formatter/url_formatter.h"
 #include "components/user_prefs/user_prefs.h"
@@ -28,7 +29,7 @@
 #endif
 
 #if defined(TOOLKIT_VIEWS)
-#include "ui/gfx/color_palette.h"
+#include "ui/gfx/color_utils.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/vector_icons_public.h"
 #endif
@@ -91,8 +92,9 @@ BookmarkShortcutDisposition GetBookmarkShortcutDisposition(Profile* profile) {
 }
 
 #if defined(TOOLKIT_VIEWS)
-gfx::ImageSkia GetFolderIcon(gfx::VectorIconId id) {
-  return gfx::CreateVectorIcon(id, 16, gfx::kChromeIconGrey);
+gfx::ImageSkia GetFolderIcon(gfx::VectorIconId id, SkColor text_color) {
+  return gfx::CreateVectorIcon(id, 16,
+                               color_utils::DeriveDefaultIconColor(text_color));
 }
 #endif
 
@@ -287,7 +289,7 @@ bool IsValidBookmarkDropLocation(Profile* profile,
 }
 
 #if defined(TOOLKIT_VIEWS)
-gfx::ImageSkia GetBookmarkFolderIcon() {
+gfx::ImageSkia GetBookmarkFolderIcon(SkColor text_color) {
 #if defined(OS_WIN)
   if (!ui::MaterialDesignController::IsModeMaterial()) {
     return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
@@ -295,10 +297,10 @@ gfx::ImageSkia GetBookmarkFolderIcon() {
   }
 #endif
 
-  return GetFolderIcon(gfx::VectorIconId::FOLDER);
+  return GetFolderIcon(gfx::VectorIconId::FOLDER, text_color);
 }
 
-gfx::ImageSkia GetBookmarkSupervisedFolderIcon() {
+gfx::ImageSkia GetBookmarkSupervisedFolderIcon(SkColor text_color) {
 #if defined(OS_WIN)
   if (!ui::MaterialDesignController::IsModeMaterial()) {
     return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
@@ -306,10 +308,10 @@ gfx::ImageSkia GetBookmarkSupervisedFolderIcon() {
   }
 #endif
 
-  return GetFolderIcon(gfx::VectorIconId::FOLDER_SUPERVISED);
+  return GetFolderIcon(gfx::VectorIconId::FOLDER_SUPERVISED, text_color);
 }
 
-gfx::ImageSkia GetBookmarkManagedFolderIcon() {
+gfx::ImageSkia GetBookmarkManagedFolderIcon(SkColor text_color) {
 #if defined(OS_WIN)
   if (!ui::MaterialDesignController::IsModeMaterial()) {
     return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
@@ -317,7 +319,7 @@ gfx::ImageSkia GetBookmarkManagedFolderIcon() {
   }
 #endif
 
-  return GetFolderIcon(gfx::VectorIconId::FOLDER_MANAGED);
+  return GetFolderIcon(gfx::VectorIconId::FOLDER_MANAGED, text_color);
 }
 #endif
 

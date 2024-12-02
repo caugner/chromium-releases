@@ -1847,7 +1847,7 @@ system call NtDuplicateObject
 KERNELBASE.dll!DuplicateHandle
 KERNEL32.dll!DuplicateHandle
 base.dll!base::SharedMemory::ShareToProcessCommon
-gl_wrapper.dll!gfx::GLImageSharedMemory::Initialize
+gl_wrapper.dll!gl::GLImageSharedMemory::Initialize
 content.dll!content::GpuChannel::CreateImageForGpuMemoryBuffer
 content.dll!content::GpuCommandBufferStub::OnCreateImage
 
@@ -1871,7 +1871,7 @@ USER32.dll!UnregisterClassW
 USER32.dll!CreateWindowExW
 gfx.dll!gfx::WindowImpl::Init
 win_window.dll!ui::WinWindow::WinWindow
-aura.dll!aura::WindowTreeHostWin::WindowTreeHostWin
+aura.dll!aura::WindowTreeHostPlatform::WindowTreeHostPlatform
 aura.dll!aura::WindowTreeHost::Create
 
 UNINITIALIZED READ
@@ -2015,3 +2015,51 @@ webcore_shared.dll!blink::ScriptController::callFunction
 ...
 webcore_shared.dll!blink::LocalDOMWindow::dispatchEvent
 
+UNINITIALIZED READ
+name=bug_519041_a
+ntdll.dll!RtlSetLastWin32ErrorAndNtStatusFromNtStatus
+
+UNINITIALIZED READ
+name=bug_519041_b
+ntdll.dll!RtlDecodePointer
+
+UNADDRESSABLE ACCESS
+name=bug_545273
+v8.dll!v8::internal::LookupIterator::LookupIterator
+v8.dll!v8::internal::LookupIterator::PropertyOrElement
+v8.dll!v8::internal::Runtime::GetObjectProperty
+v8.dll!v8::internal::KeyedLoadIC::Load
+v8.dll!v8::internal::Runtime_KeyedLoadIC_Miss
+v8.dll!v8::internal::`anonymous namespace'::Invoke
+v8.dll!v8::internal::Execution::Call
+...
+net_with_v8.dll!net::ProxyResolverV8::Context::*
+
+HANDLE LEAK
+name=bug_548039
+system call NtCreateSection
+KERNELBASE.dll!CreateFileMappingW
+base.dll!base::SharedMemory::Create
+content.dll!content::ChildThreadImpl::AllocateSharedMemory
+content.dll!content::RenderThreadImpl::HostAllocateSharedMemoryBuffer
+content.dll!content::RenderThreadImpl::AllocateSharedMemory
+...
+content.dll!content::WebGraphicsContext3DCommandBufferImpl::CreateContext
+content.dll!content::WebGraphicsContext3DCommandBufferImpl::MaybeInitializeGL
+
+UNADDRESSABLE ACCESS
+name=https://github.com/DynamoRIO/drmemory/issues/1817
+system call NtUserBuildPropList parameter #1
+
+UNINITIALIZED READ
+name=https://github.com/DynamoRIO/drmemory/issues/1816
+USER32.dll!DdeEnableCallback
+USER32.dll!EnumPropsExW
+SHELL32.dll!SHGetIconOverlayIndexA
+
+# This is the same as the above uninitialized read when the symbols get fixed.
+UNINITIALIZED READ
+name=https://github.com/DynamoRIO/drmemory/issues/1815
+USER32.dll!InternalEnumProps
+USER32.dll!EnumPropsExW
+SHELL32.dll!CWindowPropStore::GetCount

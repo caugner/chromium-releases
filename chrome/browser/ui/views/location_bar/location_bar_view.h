@@ -14,7 +14,6 @@
 #include "chrome/browser/ssl/security_state_model.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/omnibox/chrome_omnibox_edit_controller.h"
-#include "chrome/browser/ui/search/search_model_observer.h"
 #include "chrome/browser/ui/toolbar/chrome_toolbar_model.h"
 #include "chrome/browser/ui/views/dropdown_bar_host.h"
 #include "chrome/browser/ui/views/dropdown_bar_host_delegate.h"
@@ -26,7 +25,6 @@
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/views/controls/button/button.h"
 #include "ui/views/drag_controller.h"
 
 class ActionBoxButtonView;
@@ -40,7 +38,7 @@ class InstantController;
 class KeywordHintView;
 class LocationIconView;
 class OpenPDFInReaderView;
-class ManagePasswordsIconView;
+class ManagePasswordsIconViews;
 class PageActionWithBadgeView;
 class PageActionImageView;
 class Profile;
@@ -50,10 +48,12 @@ class TemplateURLService;
 class TranslateIconView;
 class ZoomView;
 
+namespace autofill {
+class SaveCardIconView;
+}
+
 namespace views {
 class BubbleDelegateView;
-class ImageButton;
-class ImageView;
 class Label;
 class Widget;
 }
@@ -69,13 +69,11 @@ class Widget;
 class LocationBarView : public LocationBar,
                         public LocationBarTesting,
                         public views::View,
-                        public views::ButtonListener,
                         public views::DragController,
                         public gfx::AnimationDelegate,
                         public ChromeOmniboxEditController,
                         public DropdownBarHostDelegate,
                         public TemplateURLServiceObserver,
-                        public SearchModelObserver,
                         public ui_zoom::ZoomEventManagerObserver {
  public:
   // The location bar view's class name.
@@ -153,7 +151,7 @@ class LocationBarView : public LocationBar,
   ZoomView* zoom_view() { return zoom_view_; }
 
   // The passwords icon. It may not be visible.
-  ManagePasswordsIconView* manage_passwords_icon_view() {
+  ManagePasswordsIconViews* manage_passwords_icon_view() {
     return manage_passwords_icon_view_;
   }
 
@@ -174,8 +172,10 @@ class LocationBarView : public LocationBar,
   // The star. It may not be visible.
   StarView* star_view() { return star_view_; }
 
-  // Toggles the translate icon on or off.
-  void SetTranslateIconToggled(bool on);
+  // The save credit card icon. It may not be visible.
+  autofill::SaveCardIconView* save_credit_card_icon_view() {
+    return save_credit_card_icon_view_;
+  }
 
   // The translate icon. It may not be visible.
   TranslateIconView* translate_icon_view() { return translate_icon_view_; }
@@ -301,6 +301,9 @@ class LocationBarView : public LocationBar,
   // true if the visibility of the view changed.
   bool RefreshZoomView();
 
+  // Updates |save_credit_card_icon_view_|. Returns true if visibility changed.
+  bool RefreshSaveCreditCardIconView();
+
   // Updates the Translate icon based on the current tab's Translate status.
   void RefreshTranslateIcon();
 
@@ -335,6 +338,7 @@ class LocationBarView : public LocationBar,
   void FocusSearch() override;
   void UpdateContentSettingsIcons() override;
   void UpdateManagePasswordsIconAndBubble() override;
+  void UpdateSaveCreditCardIcon() override;
   void UpdatePageActions() override;
   void UpdateBookmarkStarVisibility() override;
   void UpdateLocationBarVisibility(bool visible, bool animation) override;
@@ -360,9 +364,6 @@ class LocationBarView : public LocationBar,
   void OnPaint(gfx::Canvas* canvas) override;
   void PaintChildren(const ui::PaintContext& context) override;
 
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
   // views::DragController:
   void WriteDragDataForView(View* sender,
                             const gfx::Point& press_pt,
@@ -387,10 +388,6 @@ class LocationBarView : public LocationBar,
 
   // TemplateURLServiceObserver:
   void OnTemplateURLServiceChanged() override;
-
-  // SearchModelObserver:
-  void ModelChanged(const SearchModel::State& old_state,
-                    const SearchModel::State& new_state) override;
 
   // The Browser this LocationBarView is in.  Note that at least
   // chromeos::SimpleWebViewDialog uses a LocationBarView outside any browser
@@ -433,9 +430,6 @@ class LocationBarView : public LocationBar,
   // Shown if the selected url has a corresponding keyword.
   KeywordHintView* keyword_hint_view_;
 
-  // The voice search icon.
-  views::ImageButton* mic_search_view_;
-
   // The content setting views.
   ContentSettingViews content_setting_views_;
 
@@ -446,10 +440,13 @@ class LocationBarView : public LocationBar,
   OpenPDFInReaderView* open_pdf_in_reader_view_;
 
   // The manage passwords icon.
-  ManagePasswordsIconView* manage_passwords_icon_view_;
+  ManagePasswordsIconViews* manage_passwords_icon_view_;
 
   // The page action icon views.
   PageActionViews page_action_views_;
+
+  // The save credit card icon.
+  autofill::SaveCardIconView* save_credit_card_icon_view_;
 
   // The icon for Translate.
   TranslateIconView* translate_icon_view_;

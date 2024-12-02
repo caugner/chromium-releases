@@ -35,7 +35,6 @@
 #include "chrome/browser/net/net_pref_observer.h"
 #include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/net/predictor.h"
-#include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/notifications/extension_welcome_notification.h"
 #include "chrome/browser/notifications/notifier_state_tracker.h"
 #include "chrome/browser/pepper_flash_settings_manager.h"
@@ -48,7 +47,7 @@
 #include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profiles_state.h"
-#include "chrome/browser/push_messaging/push_messaging_service_impl.h"
+#include "chrome/browser/push_messaging/push_messaging_app_identifier.h"
 #include "chrome/browser/renderer_host/pepper/device_id_fetcher.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -61,14 +60,12 @@
 #include "chrome/browser/ui/network_profile_bubble.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/search_engines/keyword_editor_controller.h"
-#include "chrome/browser/ui/startup/autolaunch_prompt.h"
 #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
 #include "chrome/browser/ui/webui/instant_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/print_preview/sticky_settings.h"
-#include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/pref_names.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -83,6 +80,7 @@
 #include "components/proxy_config/pref_proxy_config_tracker_impl.h"
 #include "components/rappor/rappor_service.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
+#include "components/ssl_config/ssl_config_service_manager.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/translate/core/browser/translate_prefs.h"
@@ -143,9 +141,11 @@
 #include "chrome/browser/android/bookmarks/partner_bookmarks_shim.h"
 #include "chrome/browser/android/most_visited_sites.h"
 #include "chrome/browser/android/new_tab_page_prefs.h"
+#include "chrome/browser/android/popular_sites.h"
 #else
 #include "chrome/browser/profile_resetter/automatic_profile_resetter_factory.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
+#include "chrome/browser/upgrade_detector.h"
 #endif
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
@@ -182,6 +182,7 @@
 #include "chrome/browser/chromeos/settings/device_settings_cache.h"
 #include "chrome/browser/chromeos/status/data_promo_notification.h"
 #include "chrome/browser/chromeos/system/automatic_reboot_manager.h"
+#include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/extensions/api/enterprise_platform_keys_private/enterprise_platform_keys_private_api.h"
 #include "chrome/browser/extensions/extension_assets_manager_chromeos.h"
 #include "chrome/browser/media/protected_media_identifier_permission_context.h"
@@ -226,14 +227,11 @@
 
 namespace {
 
-#if !defined(OS_ANDROID)
-// The AutomaticProfileResetter service used this preference to save that the
-// profile reset prompt had already been shown, however, the preference has been
-// renamed in Local State. We keep the name here for now so that we can clear
-// out legacy values.
-// TODO(engedy): Remove this and usages in M42 or later. See crbug.com/398813.
-const char kLegacyProfileResetPromptMemento[] = "profile.reset_prompt_memento";
-#endif
+#if defined(OS_WIN)
+// Deprecated 11/2015 (M48). TODO(gab): delete in M52+.
+const char kShownAutoLaunchInfobarDeprecated[] =
+    "browser.shown_autolaunch_infobar";
+#endif  // defined(OS_WIN)
 
 }  // namespace
 
@@ -263,8 +261,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   rappor::RapporService::RegisterPrefs(registry);
   RegisterScreenshotPrefs(registry);
   SigninManagerFactory::RegisterPrefs(registry);
-  SSLConfigServiceManager::RegisterPrefs(registry);
-  UpgradeDetector::RegisterPrefs(registry);
+  ssl_config::SSLConfigServiceManager::RegisterPrefs(registry);
   web_resource::PromoResourceService::RegisterPrefs(registry);
 
 #if defined(ENABLE_AUTOFILL_DIALOG)
@@ -300,6 +297,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   StartupBrowserCreator::RegisterLocalStatePrefs(registry);
   // The native GCM is used on Android instead.
   gcm::GCMChannelStatusSyncer::RegisterPrefs(registry);
+  UpgradeDetector::RegisterPrefs(registry);
 #if !defined(OS_CHROMEOS)
   RegisterDefaultBrowserPromptPrefs(registry);
 #endif  // !defined(OS_CHROMEOS)
@@ -326,6 +324,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   chromeos::SigninScreenHandler::RegisterPrefs(registry);
   chromeos::StartupUtils::RegisterPrefs(registry);
   chromeos::system::AutomaticRebootManager::RegisterPrefs(registry);
+  chromeos::system::InputDeviceSettings::RegisterPrefs(registry);
   chromeos::UserImageManager::RegisterPrefs(registry);
   chromeos::UserSessionManager::RegisterPrefs(registry);
   chromeos::WallpaperManager::RegisterPrefs(registry);
@@ -355,12 +354,6 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
 #if defined(TOOLKIT_VIEWS)
   RegisterBrowserViewLocalPrefs(registry);
 #endif
-
-  // Preferences registered only for migration (clearing or moving to a new key)
-  // go here.
-#if !defined(OS_ANDROID)
-  registry->RegisterDictionaryPref(kLegacyProfileResetPromptMemento);
-#endif  // !defined(OS_ANDROID)
 }
 
 // Register prefs applicable to all profiles.
@@ -380,7 +373,6 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   dom_distiller::DistilledPagePrefs::RegisterProfilePrefs(registry);
   DownloadPrefs::RegisterProfilePrefs(registry);
   enhanced_bookmarks::BookmarkServerClusterService::RegisterPrefs(registry);
-  PushMessagingServiceImpl::RegisterProfilePrefs(registry);
   HostContentSettingsMap::RegisterProfilePrefs(registry);
   IncognitoModePrefs::RegisterProfilePrefs(registry);
   InstantUI::RegisterProfilePrefs(registry);
@@ -396,6 +388,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   Profile::RegisterProfilePrefs(registry);
   ProfileImpl::RegisterProfilePrefs(registry);
   ProtocolHandlerRegistry::RegisterProfilePrefs(registry);
+  PushMessagingAppIdentifier::RegisterProfilePrefs(registry);
   RegisterBrowserUserPrefs(registry);
   SessionStartupPref::RegisterProfilePrefs(registry);
   TemplateURLPrepopulateData::RegisterProfilePrefs(registry);
@@ -466,6 +459,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   MostVisitedSites::RegisterProfilePrefs(registry);
   NewTabPagePrefs::RegisterProfilePrefs(registry);
   PartnerBookmarksShim::RegisterProfilePrefs(registry);
+  PopularSites::RegisterProfilePrefs(registry);
 #else
   AppShortcutManager::RegisterProfilePrefs(registry);
   DeviceIDFetcher::RegisterProfilePrefs(registry);
@@ -479,7 +473,6 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   NewTabUI::RegisterProfilePrefs(registry);
   PepperFlashSettingsManager::RegisterProfilePrefs(registry);
   PinnedTabCodec::RegisterProfilePrefs(registry);
-  RegisterAutolaunchUserPrefs(registry);
   signin::RegisterProfilePrefs(registry);
 #endif
 
@@ -519,6 +512,13 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
   browser_sync::ForeignSessionHandler::RegisterProfilePrefs(registry);
 #endif
+
+  // Preferences registered only for migration (clearing or moving to a new key)
+  // go here.
+
+#if defined(OS_WIN)
+  registry->RegisterIntegerPref(kShownAutoLaunchInfobarDeprecated, 0);
+#endif  // defined(OS_WIN)
 }
 
 void RegisterUserProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
@@ -547,11 +547,6 @@ void MigrateObsoleteBrowserPrefs(Profile* profile, PrefService* local_state) {
   // Added 05/2014.
   MigrateBrowserTabStripPrefs(local_state);
 #endif
-
-#if !defined(OS_ANDROID)
-  // Added 08/2014.
-  local_state->ClearPref(kLegacyProfileResetPromptMemento);
-#endif
 }
 
 // This method should be periodically pruned of year+ old migrations.
@@ -565,6 +560,11 @@ void MigrateObsoleteProfilePrefs(Profile* profile) {
 #if defined(OS_CHROMEOS) && defined(ENABLE_APP_LIST)
   // Added 02/2015.
   MigrateGoogleNowPrefs(profile);
+#endif
+
+#if defined(OS_WIN)
+  // Added 11/2015.
+  profile_prefs->ClearPref(kShownAutoLaunchInfobarDeprecated);
 #endif
 }
 

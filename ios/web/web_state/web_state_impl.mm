@@ -30,6 +30,7 @@ namespace web {
 
 WebStateImpl::WebStateImpl(BrowserState* browser_state)
     : is_loading_(false),
+      is_being_destroyed_(false),
       facade_delegate_(nullptr),
       web_controller_(nil),
       navigation_manager_(this, browser_state),
@@ -39,6 +40,8 @@ WebStateImpl::WebStateImpl(BrowserState* browser_state)
 }
 
 WebStateImpl::~WebStateImpl() {
+  is_being_destroyed_ = true;
+
   // WebUI depends on web state so it must be destroyed first in case any WebUI
   // implementations depends on accessing web state during destruction.
   ClearWebUI();
@@ -151,6 +154,10 @@ void WebStateImpl::SetIsLoading(bool is_loading) {
 
 bool WebStateImpl::IsLoading() const {
   return is_loading_;
+}
+
+bool WebStateImpl::IsBeingDestroyed() const {
+  return is_being_destroyed_;
 }
 
 void WebStateImpl::OnPageLoaded(const GURL& url, bool load_success) {
@@ -287,7 +294,6 @@ void WebStateImpl::ShowTransientContentView(CRWContentView* content_view) {
   DCHECK(Configured());
   DCHECK(content_view);
   DCHECK(content_view.scrollView);
-  DCHECK([content_view.scrollView isDescendantOfView:content_view]);
   [web_controller_ showTransientContentView:content_view];
 }
 
@@ -553,6 +559,15 @@ void WebStateImpl::OnProvisionalNavigationStarted(const GURL& url) {
 // NavigationControllerIO::GoBack() actually goes back.
 void WebStateImpl::NavigateToPendingEntry() {
   [web_controller_ loadCurrentURL];
+}
+
+void WebStateImpl::OnNavigationItemsPruned(size_t pruned_item_count) {
+  FOR_EACH_OBSERVER(WebStateObserver, observers_,
+                    NavigationItemsPruned(pruned_item_count));
+}
+
+void WebStateImpl::OnNavigationItemChanged() {
+  FOR_EACH_OBSERVER(WebStateObserver, observers_, NavigationItemChanged());
 }
 
 void WebStateImpl::OnNavigationItemCommitted(

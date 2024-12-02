@@ -29,7 +29,6 @@ import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilter;
 import org.chromium.chrome.browser.compositor.layouts.phone.StackLayout;
 import org.chromium.chrome.browser.compositor.layouts.phone.stack.Stack;
 import org.chromium.chrome.browser.compositor.layouts.phone.stack.StackTab;
-import org.chromium.chrome.browser.tab.ChromeTab;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
@@ -132,7 +131,7 @@ public class LayoutManagerTest extends InstrumentationTestCase
                     }
                 });
         mManager = mManagerPhone;
-        mManager.init(mTabModelSelector, null, null, container, null, null);
+        mManager.init(mTabModelSelector, null, null, container, null, null, null);
         initializeMotionEvent();
     }
 
@@ -523,6 +522,6 @@ public class LayoutManagerTest extends InstrumentationTestCase
 
     @Override
     public Tab createTab(int id, boolean incognito) {
-        return new ChromeTab(id, incognito);
+        return new Tab(id, incognito, null);
     }
 }

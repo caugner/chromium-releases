@@ -3,27 +3,39 @@
 # found in the LICENSE file.
 
 
+def _LicenseHeader(input_api):
+  """Returns the license header regexp."""
+  # Accept any year number from 2011 to the current year
+  current_year = int(input_api.time.strftime('%Y'))
+  allowed_years = (str(s) for s in reversed(xrange(2011, current_year + 1)))
+  years_re = '(' + '|'.join(allowed_years) + ')'
+  license_header = (
+      r'.*? Copyright %(year)s The Chromium Authors\. All rights reserved\.\n'
+      r'.*? Use of this source code is governed by a BSD-style license that '
+      r'can be\n'
+      r'.*? found in the LICENSE file.\n') % {'year': years_re}
+  return license_header
+
+
+def _CheckLicense(input_api, output_api):
+  results = input_api.canned_checks.CheckLicense(
+      input_api, output_api, _LicenseHeader(input_api))
+  if results:
+    results.append(
+        output_api.PresubmitError('License check failed. Please fix.'))
+  return results
+
+
 def _CommonChecks(input_api, output_api):
   results = []
 
-  # TODO(nduca): This should call update_docs.IsUpdateDocsNeeded().
-  # Disabled due to crbug.com/255326.
-  if False:
-    update_docs_path = input_api.os_path.join(
-      input_api.PresubmitLocalPath(), 'update_docs')
-    assert input_api.os_path.exists(update_docs_path)
-    results.append(output_api.PresubmitError(
-      'Docs are stale. Please run:\n' +
-      '$ %s' % input_api.os_path.abspath(update_docs_path)))
-
-  pylint_checks = input_api.canned_checks.GetPylint(
-    input_api, output_api, extra_paths_list=_GetPathsToPrepend(input_api),
-    pylintrc='pylintrc')
-
+  results.extend(_CheckLicense(input_api, output_api))
+  results.extend(input_api.RunTests(input_api.canned_checks.GetPylint(
+      input_api, output_api, extra_paths_list=_GetPathsToPrepend(input_api),
+      pylintrc='pylintrc')))
   results.extend(_CheckNoMoreUsageOfDeprecatedCode(
     input_api, output_api, deprecated_code='GetChromiumSrcDir()',
     crbug_number=511332))
-  results.extend(input_api.RunTests(pylint_checks))
   return results
 
 

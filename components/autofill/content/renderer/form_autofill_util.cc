@@ -30,7 +30,6 @@
 #include "third_party/WebKit/public/web/WebLabelElement.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebNode.h"
-#include "third_party/WebKit/public/web/WebNodeList.h"
 #include "third_party/WebKit/public/web/WebOptionElement.h"
 #include "third_party/WebKit/public/web/WebSelectElement.h"
 #include "third_party/WebKit/public/web/WebTextAreaElement.h"
@@ -44,7 +43,6 @@ using blink::WebFrame;
 using blink::WebInputElement;
 using blink::WebLabelElement;
 using blink::WebNode;
-using blink::WebNodeList;
 using blink::WebOptionElement;
 using blink::WebSelectElement;
 using blink::WebTextAreaElement;
@@ -134,13 +132,13 @@ bool IsTraversableContainerElement(const WebNode& node) {
   if (!node.isElementNode())
     return false;
 
-  std::string tag_name = node.toConst<WebElement>().tagName().utf8();
-  return (tag_name == "DD" ||
-          tag_name == "DIV" ||
-          tag_name == "FIELDSET" ||
-          tag_name == "LI" ||
-          tag_name == "TD" ||
-          tag_name == "TABLE");
+  const WebElement element = node.toConst<WebElement>();
+  return element.hasHTMLTagName("dd") ||
+          element.hasHTMLTagName("div") ||
+          element.hasHTMLTagName("fieldset") ||
+          element.hasHTMLTagName("li") ||
+          element.hasHTMLTagName("td") ||
+          element.hasHTMLTagName("table");
 }
 
 // Returns the colspan for a <td> / <th>. Defaults to 1.
@@ -1365,8 +1363,7 @@ bool WebFormElementToFormData(
                                    extract_mask, form, field);
 }
 
-std::vector<WebFormControlElement>
-GetUnownedAutofillableFormFieldElements(
+std::vector<WebFormControlElement> GetUnownedFormFieldElements(
     const WebElementCollection& elements,
     std::vector<WebElement>* fieldsets) {
   std::vector<WebFormControlElement> unowned_fieldset_children;
@@ -1384,7 +1381,14 @@ GetUnownedAutofillableFormFieldElements(
       fieldsets->push_back(element);
     }
   }
-  return ExtractAutofillableElementsFromSet(unowned_fieldset_children);
+  return unowned_fieldset_children;
+}
+
+std::vector<WebFormControlElement> GetUnownedAutofillableFormFieldElements(
+    const WebElementCollection& elements,
+    std::vector<WebElement>* fieldsets) {
+  return ExtractAutofillableElementsFromSet(
+      GetUnownedFormFieldElements(elements, fieldsets));
 }
 
 bool UnownedCheckoutFormElementsAndFieldSetsToFormData(
@@ -1406,11 +1410,26 @@ bool UnownedCheckoutFormElementsAndFieldSetsToFormData(
   std::string lang;
   if (!html_element.isNull())
     lang = html_element.getAttribute("lang").utf8();
-  if ((lang.empty() ||
-       base::StartsWith(lang, "en", base::CompareCase::INSENSITIVE_ASCII)) &&
-      !MatchesPattern(document.title(),
-          base::UTF8ToUTF16("payment|checkout|address|delivery|shipping"))) {
-    return false;
+  if (lang.empty() ||
+      base::StartsWith(lang, "en", base::CompareCase::INSENSITIVE_ASCII)) {
+    std::string title(base::UTF16ToUTF8(base::string16(document.title())));
+    const char* const kKeywords[] = {
+      "payment",
+      "checkout",
+      "address",
+      "delivery",
+      "shipping",
+    };
+
+    bool found = false;
+    for (const auto& keyword : kKeywords) {
+      if (title.find(keyword) != base::string16::npos) {
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+      return false;
   }
 
   return UnownedFormElementsAndFieldSetsToFormData(

@@ -75,7 +75,7 @@ void NavigationController::GoBack() {
 
   pending_entry_index_ = current_index - 1;
   // TODO(erg): Transition type handled here.
-  NavigateToPendingEntry(ReloadType::NO_RELOAD);
+  NavigateToPendingEntry(ReloadType::NO_RELOAD, true);
 }
 
 void NavigationController::GoForward() {
@@ -93,17 +93,19 @@ void NavigationController::GoForward() {
 
   pending_entry_index_ = current_index + 1;
   // TODO(erg): Transition type handled here.
-  NavigateToPendingEntry(ReloadType::NO_RELOAD);
+  NavigateToPendingEntry(ReloadType::NO_RELOAD, true);
 }
 
 void NavigationController::LoadURL(mojo::URLRequestPtr request) {
   // TODO(erg): This mimics part of NavigationControllerImpl::LoadURL(), minus
   // all the error checking.
   SetPendingEntry(make_scoped_ptr(new NavigationEntry(request.Pass())));
-  NavigateToPendingEntry(ReloadType::NO_RELOAD);
+  NavigateToPendingEntry(ReloadType::NO_RELOAD, false);
 }
 
-void NavigationController::NavigateToPendingEntry(ReloadType reload_type) {
+void NavigationController::NavigateToPendingEntry(
+    ReloadType reload_type,
+    bool update_navigation_start_time) {
   // TODO(erg): Deal with session history navigations while trying to navigate
   // to a slow-to-commit page.
 
@@ -117,7 +119,8 @@ void NavigationController::NavigateToPendingEntry(ReloadType reload_type) {
 
   // TODO(erg): Eventually, we need to deal with restoring the state of the
   // full tree. For now, we'll just shell back to the WebView.
-  delegate_->OnNavigate(pending_entry_->BuildURLRequest());
+  delegate_->OnNavigate(
+      pending_entry_->BuildURLRequest(update_navigation_start_time));
 }
 
 void NavigationController::DiscardPendingEntry(bool was_failure) {
@@ -157,14 +160,7 @@ void NavigationController::FrameDidCommitProvisionalLoad(Frame* frame) {
   // appears that blink can change some of the data during the navigation. Do
   // it for now for bootstrapping purposes.
   if (pending_entry_index_ == -1 && pending_entry_) {
-    int current_size = static_cast<int>(entries_.size());
-    if (current_size > 0) {
-      while (last_committed_entry_index_ < (current_size - 1)) {
-        entries_.pop_back();
-        current_size--;
-      }
-    }
-
+    ClearForwardEntries();
     entries_.push_back(pending_entry_);
     last_committed_entry_index_ = static_cast<int>(entries_.size() - 1);
     pending_entry_ = nullptr;
@@ -182,6 +178,35 @@ void NavigationController::FrameDidCommitProvisionalLoad(Frame* frame) {
   DiscardPendingEntry(false);
 
   delegate_->OnDidNavigate();
+}
+
+void NavigationController::FrameDidNavigateLocally(Frame* frame,
+                                                   const GURL& url) {
+  // If this is a local navigation of a non-top frame, don't try to commit
+  // it.
+  if (frame->parent())
+    return;
+
+  ClearForwardEntries();
+
+  // TODO(erg): This is overly cheap handling of local navigations in
+  // frames. We don't have all the information needed to construct a real
+  // URLRequest.
+
+  entries_.push_back(new NavigationEntry(url));
+  last_committed_entry_index_ = static_cast<int>(entries_.size() - 1);
+
+  delegate_->OnDidNavigate();
+}
+
+void NavigationController::ClearForwardEntries() {
+  int current_size = static_cast<int>(entries_.size());
+  if (current_size > 0) {
+    while (last_committed_entry_index_ < (current_size - 1)) {
+      entries_.pop_back();
+      current_size--;
+    }
+  }
 }
 
 }  // namespace web_view

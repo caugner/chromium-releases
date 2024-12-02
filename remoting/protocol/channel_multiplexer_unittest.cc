@@ -34,8 +34,8 @@ const char kTestChannelName2[] = "test2";
 
 
 void QuitCurrentThread() {
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-                                         base::MessageLoop::QuitClosure());
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
 }
 
 class MockSocketCallback {
@@ -73,20 +73,24 @@ class ChannelMultiplexerTest : public testing::Test {
   void SetUp() override {
     // Create pair of multiplexers and connect them to each other.
     host_mux_.reset(new ChannelMultiplexer(
-        host_session_.GetTransportChannelFactory(), kMuxChannelName));
+        host_session_.GetTransport()->GetStreamChannelFactory(),
+        kMuxChannelName));
     client_mux_.reset(new ChannelMultiplexer(
-        client_session_.GetTransportChannelFactory(), kMuxChannelName));
+        client_session_.GetTransport()->GetStreamChannelFactory(),
+        kMuxChannelName));
   }
 
   // Connect sockets to each other. Must be called after we've created at least
   // one channel with each multiplexer.
   void ConnectSockets() {
     FakeStreamSocket* host_socket =
-        host_session_.fake_channel_factory().GetFakeChannel(
-            ChannelMultiplexer::kMuxChannelName);
+        host_session_.GetTransport()
+            ->GetStreamChannelFactory()
+            ->GetFakeChannel(ChannelMultiplexer::kMuxChannelName);
     FakeStreamSocket* client_socket =
-        client_session_.fake_channel_factory().GetFakeChannel(
-            ChannelMultiplexer::kMuxChannelName);
+        client_session_.GetTransport()
+            ->GetStreamChannelFactory()
+            ->GetFakeChannel(ChannelMultiplexer::kMuxChannelName);
     host_socket->PairWith(client_socket);
 
     // Make writes asynchronous in one direction.
@@ -245,10 +249,11 @@ TEST_F(ChannelMultiplexerTest, WriteFailSync) {
 
   ConnectSockets();
 
-  host_session_.fake_channel_factory().GetFakeChannel(kMuxChannelName)->
-      set_next_write_error(net::ERR_FAILED);
-  host_session_.fake_channel_factory().GetFakeChannel(kMuxChannelName)->
-      set_async_write(false);
+  FakeStreamSocket* socket =
+      host_session_.GetTransport()->GetStreamChannelFactory()->GetFakeChannel(
+          kMuxChannelName);
+  socket->set_next_write_error(net::ERR_FAILED);
+  socket->set_async_write(false);
 
   scoped_refptr<net::IOBufferWithSize> buf = CreateTestBuffer(100);
 
@@ -280,10 +285,11 @@ TEST_F(ChannelMultiplexerTest, WriteFailAsync) {
 
   ConnectSockets();
 
-  host_session_.fake_channel_factory().GetFakeChannel(kMuxChannelName)->
-      set_next_write_error(net::ERR_FAILED);
-  host_session_.fake_channel_factory().GetFakeChannel(kMuxChannelName)->
-      set_async_write(true);
+  FakeStreamSocket* socket =
+      host_session_.GetTransport()->GetStreamChannelFactory()->GetFakeChannel(
+          kMuxChannelName);
+  socket->set_next_write_error(net::ERR_FAILED);
+  socket->set_async_write(true);
 
   scoped_refptr<net::IOBufferWithSize> buf = CreateTestBuffer(100);
 
@@ -314,10 +320,11 @@ TEST_F(ChannelMultiplexerTest, DeleteWhenFailed) {
 
   ConnectSockets();
 
-  host_session_.fake_channel_factory().GetFakeChannel(kMuxChannelName)->
-      set_next_write_error(net::ERR_FAILED);
-  host_session_.fake_channel_factory().GetFakeChannel(kMuxChannelName)->
-      set_async_write(true);
+  FakeStreamSocket* socket =
+      host_session_.GetTransport()->GetStreamChannelFactory()->GetFakeChannel(
+          kMuxChannelName);
+  socket->set_next_write_error(net::ERR_FAILED);
+  socket->set_async_write(true);
 
   scoped_refptr<net::IOBufferWithSize> buf = CreateTestBuffer(100);
 
@@ -349,8 +356,10 @@ TEST_F(ChannelMultiplexerTest, DeleteWhenFailed) {
 }
 
 TEST_F(ChannelMultiplexerTest, SessionFail) {
-  host_session_.fake_channel_factory().set_asynchronous_create(true);
-  host_session_.fake_channel_factory().set_fail_create(true);
+  host_session_.GetTransport()->GetStreamChannelFactory()
+      ->set_asynchronous_create(true);
+  host_session_.GetTransport()->GetStreamChannelFactory()
+      ->set_fail_create(true);
 
   MockConnectCallback cb1;
   MockConnectCallback cb2;

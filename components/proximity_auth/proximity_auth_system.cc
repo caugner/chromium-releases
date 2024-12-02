@@ -23,12 +23,13 @@ const int kWakeUpTimeoutSeconds = 2;
 }  // namespace
 
 ProximityAuthSystem::ProximityAuthSystem(
+    ScreenlockType screenlock_type,
     RemoteDevice remote_device,
     ProximityAuthClient* proximity_auth_client)
     : remote_device_(remote_device),
       proximity_auth_client_(proximity_auth_client),
       unlock_manager_(new UnlockManager(
-          UnlockManager::ScreenlockType::SESSION_LOCK,
+          screenlock_type,
           make_scoped_ptr<ProximityMonitor>(new ProximityMonitorImpl(
               remote_device,
               make_scoped_ptr(new base::DefaultTickClock()))),
@@ -56,6 +57,7 @@ void ProximityAuthSystem::OnSuspend() {
   PA_LOG(INFO) << "Preparing for device suspension.";
   DCHECK(!suspended_);
   suspended_ = true;
+  unlock_manager_->SetRemoteDeviceLifeCycle(nullptr);
   remote_device_life_cycle_.reset();
 }
 
@@ -79,7 +81,8 @@ void ProximityAuthSystem::OnSuspendDone() {
 void ProximityAuthSystem::ResumeAfterWakeUpTimeout() {
   PA_LOG(INFO) << "Resume after suspend";
   suspended_ = false;
-  OnFocusedUserChanged(ScreenlockBridge::Get()->focused_user_id());
+  if (ScreenlockBridge::Get()->IsLocked())
+    OnFocusedUserChanged(ScreenlockBridge::Get()->focused_user_id());
 }
 
 void ProximityAuthSystem::OnLifeCycleStateChanged(

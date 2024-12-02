@@ -21,18 +21,21 @@ declare_args() {
   content_shell_version = "19.77.34.5"
 }
 
+config("content_shell_lib_warnings") {
+  if (is_clang) {
+    # TODO(thakis): Remove this once http://crbug.com/383820 is figured out
+    cflags = [ "-Wno-nonnull" ]
+  }
+}
+
 static_library("content_shell_lib") {
   testonly = true
   sources = [
+    "android/shell_descriptors.h",
     "android/shell_jni_registrar.cc",
     "android/shell_jni_registrar.h",
     "android/shell_manager.cc",
     "android/shell_manager.h",
-    "app/blink_test_platform_support.h",
-    "app/blink_test_platform_support_android.cc",
-    "app/blink_test_platform_support_linux.cc",
-    "app/blink_test_platform_support_mac.mm",
-    "app/blink_test_platform_support_win.cc",
     "app/paths_mac.h",
     "app/paths_mac.mm",
     "app/shell_crash_reporter_client.cc",
@@ -43,8 +46,6 @@ static_library("content_shell_lib") {
     "app/shell_main_delegate_mac.mm",
     "browser/blink_test_controller.cc",
     "browser/blink_test_controller.h",
-    "browser/ipc_echo_message_filter.cc",
-    "browser/ipc_echo_message_filter.h",
     "browser/layout_test/layout_test_android.cc",
     "browser/layout_test/layout_test_android.h",
     "browser/layout_test/layout_test_bluetooth_adapter_provider.cc",
@@ -148,14 +149,10 @@ static_library("content_shell_lib") {
     "common/shell_switches.h",
     "common/shell_test_configuration.cc",
     "common/shell_test_configuration.h",
-    "renderer/ipc_echo.cc",
-    "renderer/ipc_echo.h",
     "renderer/layout_test/blink_test_helpers.cc",
     "renderer/layout_test/blink_test_helpers.h",
     "renderer/layout_test/blink_test_runner.cc",
     "renderer/layout_test/blink_test_runner.h",
-    "renderer/layout_test/gc_controller.cc",
-    "renderer/layout_test/gc_controller.h",
     "renderer/layout_test/layout_test_content_renderer_client.cc",
     "renderer/layout_test/layout_test_content_renderer_client.h",
     "renderer/layout_test/layout_test_render_frame_observer.cc",
@@ -177,6 +174,7 @@ static_library("content_shell_lib") {
   ]
 
   configs += [
+    ":content_shell_lib_warnings",
     "//build/config:precompiled_headers",
 
     # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
@@ -201,7 +199,7 @@ static_library("content_shell_lib") {
     "//base/allocator",
     "//base/third_party/dynamic_annotations",
     "//cc",
-    "//components/crash/content/app",
+    "//components/crash/content/app:app_breakpad_mac_to_be_deleted",
     "//components/devtools_discovery",
     "//components/devtools_http_handler",
     "//components/plugins/renderer",
@@ -261,7 +259,9 @@ static_library("content_shell_lib") {
   if (use_x11) {
     # Some tests rely on this tool at runtime. Note: it might be better if
     # the tests that needed it had this as a dep instead of adding it here.
-    data_deps = [ "//tools/xdisplaycheck" ]
+    data_deps = [
+      "//tools/xdisplaycheck",
+    ]
 
     deps += [ "//ui/events/devices" ]
   }
@@ -430,13 +430,20 @@ if (!is_android && !is_mac) {
     }
 
     if (is_mac) {
-      # TODO(GYP) lots of stuff from GYP file here.
+      # TODO(GYP) lots of stuff from GYP file here including helper_app and
+      # postbuilds.
+      output_name = content_shell_product_name
+      deps = [
+        ":framework",
+      ]
     }
 
     if (is_android) {
       # Some tests rely on this tool. It might be nicer if these tests relied on
       # image diff rather than having content shell depend on it.
-      data_deps = [ "//tools/imagediff($host_toolchain)" ]
+      data_deps = [
+        "//tools/imagediff($host_toolchain)",
+      ]
     }
   }
 } else {
@@ -463,5 +470,26 @@ if (is_win) {
 
     configs -= [ "//build/config/win:console" ]
     configs += [ "//build/config/win:windowed" ]
+  }
+}
+
+if (is_mac) {
+  # TODO(GYP) this should be a bundle. Lots of other stuff in this target.
+  # GYP version: content/content_shell.gypi:content_shell_framework
+  shared_library("framework") {
+    testonly = true
+
+    # TODO(GYP) bug 546894: Fix GN and toolchains to handle spaces here.
+    #output_name = "$content_shell_product_name Framework"
+    output_name = "content_shell_framework"  # Temporary one with no spaces.
+
+    sources = [
+      "app/shell_content_main.cc",
+      "app/shell_content_main.h",
+    ]
+
+    deps = [
+      ":content_shell_lib",
+    ]
   }
 }

@@ -4,7 +4,7 @@
 
 import("//build/config/features.gni")
 
-static_library("browser") {
+source_set("browser") {
   sources = [
     "content_settings_binary_value_map.cc",
     "content_settings_binary_value_map.h",
@@ -57,15 +57,12 @@ static_library("browser") {
     "//base",
     "//base:prefs",
     "//components/content_settings/core/common",
+    "//components/keyed_service/core",
     "//components/pref_registry:pref_registry",
     "//components/url_formatter",
     "//net",
     "//url",
   ]
-
-  if (enable_plugins) {
-    deps += [ "//components/plugins/common" ]
-  }
 
   configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 }
@@ -83,17 +80,17 @@ source_set("unit_tests") {
   ]
 
   if (enable_plugins) {
-    sources += [
-      "content_settings_provider_unittest.cc",
-      "plugins_field_trial_unittest.cc",
-    ]
+    sources += [ "content_settings_provider_unittest.cc" ]
   }
 
   deps = [
     ":browser",
     "//base",
+    "//base:prefs",
+    "//base/test:test_support",
     "//components/content_settings/core/common",
     "//components/content_settings/core/test:test_support",
+    "//components/pref_registry:test_support",
     "//testing/gtest",
     "//url",
   ]

@@ -65,12 +65,9 @@ class BridgedNativeWidgetTestApi {
   // Simulate a frame swap from the compositor. Assumes scale factor of 1.0f.
   void SimulateFrameSwap(const gfx::Size& size) {
     const float kScaleFactor = 1.0f;
-    SkBitmap bitmap;
-    bitmap.allocN32Pixels(size.width(), size.height());
-    SkCanvas canvas(bitmap);
-    bridge_->compositor_widget_->GotSoftwareFrame(kScaleFactor, &canvas);
-    std::vector<ui::LatencyInfo> latency_info;
-    bridge_->AcceleratedWidgetSwapCompleted(latency_info);
+    bridge_->compositor_widget_->GotFrame(
+        0, base::ScopedCFTypeRef<IOSurfaceRef>(), size, kScaleFactor);
+    bridge_->AcceleratedWidgetSwapCompleted();
   }
 
  private:
@@ -1081,7 +1078,7 @@ TEST_F(NativeWidgetMacTest, GetWorkAreaBoundsInScreen) {
   params.bounds = gfx::Rect(100, 100, 300, 200);
   widget.Init(params);
   widget.Show();
-  NSRect expected = [[[NSScreen screens] objectAtIndex:0] visibleFrame];
+  NSRect expected = [[[NSScreen screens] firstObject] visibleFrame];
   NSRect actual = gfx::ScreenRectToNSRect(widget.GetWorkAreaBoundsInScreen());
   EXPECT_FALSE(NSIsEmptyRect(actual));
   EXPECT_NSEQ(expected, actual);

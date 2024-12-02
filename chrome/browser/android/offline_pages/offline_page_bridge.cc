@@ -7,24 +7,19 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/basictypes.h"
-#include "base/files/file_path.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/android/offline_pages/offline_page_mhtml_archiver.h"
 #include "chrome/browser/android/offline_pages/offline_page_model_factory.h"
-#include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "components/offline_pages/offline_page_feature.h"
 #include "components/offline_pages/offline_page_item.h"
 #include "components/offline_pages/offline_page_model.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/download_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "jni/OfflinePageBridge_jni.h"
 #include "net/base/filename_util.h"
 
-using base::android::ConvertJavaStringToUTF8;
-using base::android::ConvertUTF16ToJavaString;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
@@ -62,7 +57,9 @@ void ToJavaOfflinePageList(JNIEnv* env,
         offline_page.bookmark_id,
         ConvertUTF8ToJavaString(env, offline_page.GetOfflineURL().spec()).obj(),
         offline_page.file_size,
-        offline_page.access_count);
+        offline_page.creation_time.ToJavaTime(),
+        offline_page.access_count,
+        offline_page.last_access_time.ToJavaTime());
   }
 }
 
@@ -73,13 +70,19 @@ static jboolean IsOfflinePagesEnabled(JNIEnv* env,
   return offline_pages::IsOfflinePagesEnabled();
 }
 
+static jboolean CanSavePage(JNIEnv* env,
+                            const JavaParamRef<jclass>& clazz,
+                            const JavaParamRef<jstring>& j_url) {
+  GURL url(base::android::ConvertJavaStringToUTF8(env, j_url));
+  return url.is_valid() && OfflinePageModel::CanSavePage(url);
+}
+
 OfflinePageBridge::OfflinePageBridge(JNIEnv* env,
                                      jobject obj,
                                      content::BrowserContext* browser_context)
     : weak_java_ref_(env, obj),
-      offline_page_model_(OfflinePageModelFactory::GetForBrowserContext(
-          browser_context)),
-      browser_context_(browser_context) {
+      offline_page_model_(
+          OfflinePageModelFactory::GetForBrowserContext(browser_context)) {
   NotifyIfDoneLoading();
   offline_page_model_->AddObserver(this);
 }
@@ -94,12 +97,29 @@ void OfflinePageBridge::OfflinePageModelLoaded(OfflinePageModel* model) {
   NotifyIfDoneLoading();
 }
 
+void OfflinePageBridge::OfflinePageModelChanged(OfflinePageModel* model) {
+  DCHECK_EQ(offline_page_model_, model);
+  JNIEnv* env = base::android::AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = weak_java_ref_.get(env);
+  if (obj.is_null())
+    return;
+  Java_OfflinePageBridge_offlinePageModelChanged(env, obj.obj());
+}
+
+void OfflinePageBridge::OfflinePageDeleted(int64 bookmark_id) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = weak_java_ref_.get(env);
+  if (obj.is_null())
+    return;
+  Java_OfflinePageBridge_offlinePageDeleted(env, obj.obj(), bookmark_id);
+}
+
 void OfflinePageBridge::GetAllPages(JNIEnv* env,
                                     jobject obj,
                                     jobject j_result_obj) {
   DCHECK(offline_page_model_->is_loaded());
   DCHECK(j_result_obj);
-  const std::vector<OfflinePageItem>& offline_pages =
+  const std::vector<OfflinePageItem> offline_pages =
       offline_page_model_->GetAllPages();
   ToJavaOfflinePageList(env, j_result_obj, offline_pages);
 }
@@ -109,7 +129,7 @@ void OfflinePageBridge::GetPagesToCleanUp(JNIEnv* env,
                                           jobject j_result_obj) {
   DCHECK(offline_page_model_->is_loaded());
   DCHECK(j_result_obj);
-  const std::vector<OfflinePageItem>& offline_pages =
+  const std::vector<OfflinePageItem> offline_pages =
       offline_page_model_->GetPagesToCleanUp();
   ToJavaOfflinePageList(env, j_result_obj, offline_pages);
 }
@@ -128,7 +148,9 @@ ScopedJavaLocalRef<jobject> OfflinePageBridge::GetPageByBookmarkId(
       offline_page->bookmark_id,
       ConvertUTF8ToJavaString(env, offline_page->GetOfflineURL().spec()).obj(),
       offline_page->file_size,
-      offline_page->access_count);
+      offline_page->creation_time.ToJavaTime(),
+      offline_page->access_count,
+      offline_page->last_access_time.ToJavaTime());
 }
 
 void OfflinePageBridge::SavePage(JNIEnv* env,
@@ -147,8 +169,7 @@ void OfflinePageBridge::SavePage(JNIEnv* env,
   GURL url(web_contents->GetLastCommittedURL());
 
   scoped_ptr<OfflinePageArchiver> archiver(
-      new OfflinePageMHTMLArchiver(
-          web_contents, GetDownloadsPath(browser_context_)));
+      new OfflinePageMHTMLArchiver(web_contents));
 
   offline_page_model_->SavePage(
       url, bookmark_id, archiver.Pass(),
@@ -192,6 +213,10 @@ void OfflinePageBridge::DeletePages(JNIEnv* env,
       base::Bind(&DeletePageCallback, j_callback_ref));
 }
 
+void OfflinePageBridge::CheckMetadataConsistency(JNIEnv* env, jobject obj) {
+  offline_page_model_->CheckForExternalFileDeletion();
+}
+
 void OfflinePageBridge::NotifyIfDoneLoading() const {
   if (!offline_page_model_->is_loaded())
     return;
@@ -210,19 +235,6 @@ bool OfflinePageBridge::MightBeOfflineURL(const GURL& url) {
          base::EndsWith(url.spec(),
                         OfflinePageMHTMLArchiver::GetFileNameExtension(),
                         base::CompareCase::INSENSITIVE_ASCII);
-}
-
-// static
-base::FilePath OfflinePageBridge::GetDownloadsPath(
-    content::BrowserContext* browser_context) {
-  content::DownloadManager* manager =
-      content::BrowserContext::GetDownloadManager(browser_context);
-  if (!manager) {
-    DVLOG(1) << "No download manager available in offline page bridge";
-    return base::FilePath();
-  }
-
-  return DownloadPrefs::FromDownloadManager(manager)->DownloadPath();
 }
 
 static jlong Init(JNIEnv* env,

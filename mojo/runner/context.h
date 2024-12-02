@@ -13,6 +13,7 @@
 #include "base/time/time.h"
 #include "mojo/runner/scoped_user_data_dir.h"
 #include "mojo/runner/task_runners.h"
+#include "mojo/runner/tracer.h"
 #include "mojo/shell/application_manager.h"
 #include "third_party/mojo/src/mojo/edk/embedder/process_delegate.h"
 #include "url/gurl.h"
@@ -30,7 +31,7 @@ class NativeApplicationLoader;
 //class Context : public edk::ProcessDelegate {
 class Context : public embedder::ProcessDelegate {
  public:
-  explicit Context(const base::FilePath& shell_file_root);
+  Context();
   ~Context() override;
 
   static void EnsureEmbedderIsInitialized();
@@ -38,7 +39,7 @@ class Context : public embedder::ProcessDelegate {
   // This must be called with a message loop set up for the current thread,
   // which must remain alive until after Shutdown() is called. Returns true on
   // success.
-  bool Init();
+  bool Init(const base::FilePath& shell_file_root);
 
   // If Init() was called and succeeded, this must be called before destruction.
   void Shutdown();
@@ -72,7 +73,9 @@ class Context : public embedder::ProcessDelegate {
   ScopedUserDataDir scoped_user_data_dir;
   std::set<GURL> app_urls_;
   scoped_ptr<TaskRunners> task_runners_;
-  base::FilePath shell_file_root_;
+  // Ensure this is destructed before task_runners_ since it owns a message pipe
+  // that needs the IO thread to destruct cleanly.
+  Tracer tracer_;
   // Owned by |application_manager_|.
   package_manager::PackageManagerImpl* package_manager_;
   scoped_ptr<shell::ApplicationManager> application_manager_;

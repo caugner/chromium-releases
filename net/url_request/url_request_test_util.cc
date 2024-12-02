@@ -108,10 +108,11 @@ void TestURLRequestContext::Init() {
     params.network_delegate = network_delegate();
     params.http_server_properties = http_server_properties();
     params.net_log = net_log();
-    context_storage_.set_http_transaction_factory(
-        make_scoped_ptr(new HttpCache(new HttpNetworkSession(params),
-                                      HttpCache::DefaultBackend::InMemory(0)))
-            .Pass());
+    context_storage_.set_http_network_session(
+        make_scoped_ptr(new HttpNetworkSession(params)));
+    context_storage_.set_http_transaction_factory(make_scoped_ptr(
+        new HttpCache(context_storage_.http_network_session(),
+                      HttpCache::DefaultBackend::InMemory(0), false)));
   }
   // In-memory cookie store.
   if (!cookie_store())
@@ -200,7 +201,7 @@ void TestDelegate::OnReceivedRedirect(URLRequest* request,
   if (quit_on_redirect_) {
     *defer_redirect = true;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::MessageLoop::QuitClosure());
+        FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
   } else if (cancel_in_rr_) {
     request->Cancel();
   }
@@ -211,7 +212,7 @@ void TestDelegate::OnBeforeNetworkStart(URLRequest* request, bool* defer) {
   if (quit_on_before_network_start_) {
     *defer = true;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::MessageLoop::QuitClosure());
+        FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
   }
 }
 
@@ -220,7 +221,7 @@ void TestDelegate::OnAuthRequired(URLRequest* request,
   auth_required_ = true;
   if (quit_on_auth_required_) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::MessageLoop::QuitClosure());
+        FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
     return;
   }
   if (!credentials_.Empty()) {
@@ -310,7 +311,7 @@ void TestDelegate::OnReadCompleted(URLRequest* request, int bytes_read) {
 void TestDelegate::OnResponseCompleted(URLRequest* request) {
   if (quit_on_complete_)
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::MessageLoop::QuitClosure());
+        FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
 }
 
 TestNetworkDelegate::TestNetworkDelegate()
@@ -332,7 +333,7 @@ TestNetworkDelegate::TestNetworkDelegate()
       has_load_timing_info_before_redirect_(false),
       has_load_timing_info_before_auth_(false),
       can_access_files_(true),
-      first_party_only_cookies_enabled_(false),
+      experimental_cookie_features_enabled_(false),
       cancel_request_with_policy_violating_referrer_(false),
       will_be_intercepted_on_next_error_(false) {}
 
@@ -505,15 +506,15 @@ void TestNetworkDelegate::OnResponseStarted(URLRequest* request) {
   }
 }
 
-void TestNetworkDelegate::OnNetworkBytesReceived(const URLRequest& request,
+void TestNetworkDelegate::OnNetworkBytesReceived(URLRequest* request,
                                                  int64_t bytes_received) {
-  event_order_[request.identifier()] += "OnNetworkBytesReceived\n";
+  event_order_[request->identifier()] += "OnNetworkBytesReceived\n";
   total_network_bytes_received_ += bytes_received;
 }
 
-void TestNetworkDelegate::OnNetworkBytesSent(const URLRequest& request,
+void TestNetworkDelegate::OnNetworkBytesSent(URLRequest* request,
                                              int64_t bytes_sent) {
-  event_order_[request.identifier()] += "OnNetworkBytesSent\n";
+  event_order_[request->identifier()] += "OnNetworkBytesSent\n";
   total_network_bytes_sent_ += bytes_sent;
 }
 
@@ -616,8 +617,8 @@ bool TestNetworkDelegate::OnCanAccessFile(const URLRequest& request,
   return can_access_files_;
 }
 
-bool TestNetworkDelegate::OnFirstPartyOnlyCookieExperimentEnabled() const {
-  return first_party_only_cookies_enabled_;
+bool TestNetworkDelegate::OnAreExperimentalCookieFeaturesEnabled() const {
+  return experimental_cookie_features_enabled_;
 }
 
 bool TestNetworkDelegate::OnCancelURLRequestWithPolicyViolatingReferrerHeader(

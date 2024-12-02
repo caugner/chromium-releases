@@ -27,6 +27,7 @@
 #include "content/test/accessibility_browser_test_utils.h"
 #include "content/test/content_browser_test_utils_internal.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
 
@@ -41,7 +42,7 @@ class SitePerProcessAccessibilityBrowserTest
 bool AccessibilityTreeContainsDocTitle(
     BrowserAccessibility* node,
     const std::string& title) {
-  if (node->GetStringAttribute(ui::AX_ATTR_DOC_TITLE) == title)
+  if (node->GetStringAttribute(ui::AX_ATTR_NAME) == title)
     return true;
   for (unsigned i = 0; i < node->PlatformChildCount(); i++) {
     if (AccessibilityTreeContainsDocTitle(node->PlatformGetChild(i), title))
@@ -53,9 +54,8 @@ bool AccessibilityTreeContainsDocTitle(
 // Utility function to determine if an accessibility tree has finished loading
 // or if the tree represents a page that hasn't finished loading yet.
 bool AccessibilityTreeIsLoaded(BrowserAccessibilityManager* manager) {
-  BrowserAccessibility* root = manager->GetRoot();
-  return (root->GetFloatAttribute(ui::AX_ATTR_DOC_LOADING_PROGRESS) == 1.0 &&
-          root->GetStringAttribute(ui::AX_ATTR_DOC_URL) != url::kAboutBlankURL);
+  return (manager->GetTreeData().loading_progress == 1.0 &&
+          manager->GetTreeData().url != url::kAboutBlankURL);
 }
 
 // Times out on Android, not clear if it's an actual bug or just slow.
@@ -70,8 +70,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessAccessibilityBrowserTest,
   BrowserAccessibilityState::GetInstance()->EnableAccessibility();
 
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
-  GURL main_url(test_server()->GetURL("files/site_per_process_main.html"));
+  GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
   NavigateToURL(shell(), main_url);
 
   // It is safe to obtain the root frame tree node here, as it doesn't change.
@@ -81,7 +80,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessAccessibilityBrowserTest,
 
   // Load same-site page into iframe.
   FrameTreeNode* child = root->child_at(0);
-  GURL http_url(test_server()->GetURL("files/title1.html"));
+  GURL http_url(embedded_test_server()->GetURL("/title1.html"));
   NavigateFrameToURL(child, http_url);
 
   // Load cross-site page into iframe.
@@ -89,7 +88,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessAccessibilityBrowserTest,
       child->render_manager()->current_frame_host();
   RenderFrameDeletedObserver deleted_observer(child_rfh);
   GURL::Replacements replace_host;
-  GURL cross_site_url(test_server()->GetURL("files/title2.html"));
+  GURL cross_site_url(embedded_test_server()->GetURL("/title2.html"));
   replace_host.SetHostStr("foo.com");
   cross_site_url = cross_site_url.ReplaceComponents(replace_host);
   NavigateFrameToURL(root->child_at(0), cross_site_url);

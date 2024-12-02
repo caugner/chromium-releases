@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "base/containers/scoped_ptr_map.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
@@ -45,8 +45,7 @@ class PermissionsData {
                      // the given page.
   };
 
-  using TabPermissionsMap =
-      base::ScopedPtrMap<int, scoped_ptr<const PermissionSet>>;
+  using TabPermissionsMap = std::map<int, scoped_ptr<const PermissionSet>>;
 
   // Delegate class to allow different contexts (e.g. browser vs renderer) to
   // have control over policy decisions.
@@ -71,14 +70,6 @@ class PermissionsData {
   // Returns true if the extension is a COMPONENT extension or is on the
   // whitelist of extensions that can script all pages.
   static bool CanExecuteScriptEverywhere(const Extension* extension);
-
-  // Returns true if the --scripts-require-action flag would possibly affect
-  // the given |extension| and |permissions|. We pass in the |permissions|
-  // explicitly, as we may need to check with permissions other than the ones
-  // that are currently on the extension's PermissionsData.
-  static bool ScriptsMayRequireActionForExtension(
-      const Extension* extension,
-      const PermissionSet& permissions);
 
   // Returns true if we should skip the permissions warning for the extension
   // with the given |extension_id|.

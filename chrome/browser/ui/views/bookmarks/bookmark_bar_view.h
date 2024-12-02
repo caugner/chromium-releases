@@ -174,7 +174,7 @@ class BookmarkBarView : public views::AccessiblePaneView,
   void PaintChildren(const ui::PaintContext& context) override;
   bool GetDropFormats(
       int* formats,
-      std::set<ui::OSExchangeData::CustomFormat>* custom_formats) override;
+      std::set<ui::Clipboard::FormatType>* format_types) override;
   bool AreDropTypesRequired() override;
   bool CanDrop(const ui::OSExchangeData& data) override;
   void OnDragEntered(const ui::DropTargetEvent& event) override;
@@ -366,8 +366,9 @@ class BookmarkBarView : public views::AccessiblePaneView,
       const bookmarks::BookmarkNode* parent,
       int old_index);
 
-  // Updates the colors for all the child objects in the bookmarks bar.
-  void UpdateColors();
+  // Sets/updates the colors and icons for all the child objects in the
+  // bookmarks bar.
+  void UpdateAppearanceForTheme();
 
   // Updates the visibility of |other_bookmarks_button_|,
   // |managed_bookmarks_button_|, and |supervised_bookmarks_button_|. Also

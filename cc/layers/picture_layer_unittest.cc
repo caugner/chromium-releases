@@ -23,9 +23,6 @@ namespace {
 
 class MockContentLayerClient : public ContentLayerClient {
  public:
-  void PaintContents(SkCanvas* canvas,
-                     const gfx::Rect& clip,
-                     PaintingControlSetting picture_control) override {}
   scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
       const gfx::Rect& clip,
       PaintingControlSetting picture_control) override {
@@ -59,23 +56,21 @@ TEST(PictureLayerTest, NoTilesIfEmptyBounds) {
   // Intentionally skipping Update since it would normally be skipped on
   // a layer with empty bounds.
 
-  FakeProxy proxy;
-  {
-    DebugScopedSetImplThread impl_thread(&proxy);
+  FakeImplTaskRunnerProvider impl_task_runner_provider;
 
-    TestSharedBitmapManager shared_bitmap_manager;
-    FakeLayerTreeHostImpl host_impl(LayerTreeSettings(), &proxy,
-                                    &shared_bitmap_manager, &task_graph_runner);
-    host_impl.CreatePendingTree();
-    scoped_ptr<FakePictureLayerImpl> layer_impl =
-        FakePictureLayerImpl::Create(host_impl.pending_tree(), 1);
+  TestSharedBitmapManager shared_bitmap_manager;
+  FakeLayerTreeHostImpl host_impl(LayerTreeSettings(),
+                                  &impl_task_runner_provider,
+                                  &shared_bitmap_manager, &task_graph_runner);
+  host_impl.CreatePendingTree();
+  scoped_ptr<FakePictureLayerImpl> layer_impl =
+      FakePictureLayerImpl::Create(host_impl.pending_tree(), 1);
 
-    layer->PushPropertiesTo(layer_impl.get());
-    EXPECT_FALSE(layer_impl->CanHaveTilings());
-    EXPECT_TRUE(layer_impl->bounds() == gfx::Size(0, 0));
-    EXPECT_EQ(gfx::Size(), layer_impl->raster_source()->GetSize());
-    EXPECT_FALSE(layer_impl->raster_source()->HasRecordings());
-  }
+  layer->PushPropertiesTo(layer_impl.get());
+  EXPECT_FALSE(layer_impl->CanHaveTilings());
+  EXPECT_TRUE(layer_impl->bounds() == gfx::Size(0, 0));
+  EXPECT_EQ(gfx::Size(), layer_impl->raster_source()->GetSize());
+  EXPECT_FALSE(layer_impl->raster_source()->HasRecordings());
 }
 
 TEST(PictureLayerTest, SuitableForGpuRasterization) {
@@ -101,7 +96,7 @@ TEST(PictureLayerTest, SuitableForGpuRasterization) {
   Region invalidation(layer_rect);
   recording_source->UpdateAndExpandInvalidation(
       &client, &invalidation, layer_bounds, layer_rect, 1,
-      RecordingSource::RECORD_NORMALLY);
+      DisplayListRecordingSource::RECORD_NORMALLY);
 
   // Layer is suitable for gpu rasterization by default.
   EXPECT_TRUE(recording_source->IsSuitableForGpuRasterization());
@@ -139,11 +134,13 @@ TEST(PictureLayerTest, NonMonotonicSourceFrameNumber) {
   params.main_task_runner = base::ThreadTaskRunnerHandle::Get();
   scoped_ptr<LayerTreeHost> host1 =
       LayerTreeHost::CreateSingleThreaded(&host_client1, &params);
+  host1->SetVisible(true);
   host_client1.SetLayerTreeHost(host1.get());
 
   params.client = &host_client2;
   scoped_ptr<LayerTreeHost> host2 =
       LayerTreeHost::CreateSingleThreaded(&host_client2, &params);
+  host2->SetVisible(true);
   host_client2.SetLayerTreeHost(host2.get());
 
   // The PictureLayer is put in one LayerTreeHost.

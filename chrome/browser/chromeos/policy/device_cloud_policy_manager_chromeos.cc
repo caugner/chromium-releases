@@ -63,9 +63,6 @@ const char kSharkRequisition[] = "shark";
 // does though!). The former sticker is the source of the serial number used by
 // device management service, so we prefer Product_S/N over serial number to
 // match the server.
-//
-// TODO(mnissler): Move serial_number back to the top once the server side uses
-// the correct serial number.
 const char* const kMachineInfoSerialNumberKeys[] = {
   "Product_S/N",    // Lumpy/Alex devices
   "serial_number",  // VPD v2+ devices
@@ -212,15 +209,19 @@ std::string DeviceCloudPolicyManagerChromeOS::GetMachineID() {
   chromeos::system::StatisticsProvider* provider =
       chromeos::system::StatisticsProvider::GetInstance();
   for (size_t i = 0; i < arraysize(kMachineInfoSerialNumberKeys); i++) {
-    if (provider->GetMachineStatistic(kMachineInfoSerialNumberKeys[i],
+    if (provider->HasMachineStatistic(kMachineInfoSerialNumberKeys[i]) &&
+        provider->GetMachineStatistic(kMachineInfoSerialNumberKeys[i],
                                       &machine_id) &&
         !machine_id.empty()) {
       break;
     }
   }
 
-  if (machine_id.empty())
-    LOG(WARNING) << "Failed to get machine id.";
+  if (machine_id.empty()) {
+    LOG(WARNING) << "Failed to get machine id. This is only an error if the "
+                    "device has not yet been enrolled or claimed by a local "
+                    "user.";
+  }
 
   return machine_id;
 }

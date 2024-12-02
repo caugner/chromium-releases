@@ -9,6 +9,14 @@
             "group_name": "Enabled"
         }
     ],
+    "AutofillProfileOrderByFrecency": [
+        {
+            "group_name": "EnabledLimitTo3",
+            "params": {
+                "limit": "3"
+            }
+        }
+    ],
     "CaptivePortalInterstitial": [
         {
             "group_name": "Enabled"
@@ -29,7 +37,7 @@
             "group_name": "Enabled"
         }
     ],
-    "PluginPowerSaver": [
+    "MaterialDesignDownloads": [
         {
             "group_name": "Enabled"
         }
@@ -100,6 +108,16 @@
             "params": {
                 "fetch_period_min": "30"
             }
+        }
+    ],
+    "WebRTC-LocalIPPermissionCheck": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "WebRTC-PeerConnectionDTLS1.2": [
+        {
+            "group_name": "Enabled"
         }
     ]
 }

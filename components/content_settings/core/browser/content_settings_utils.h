@@ -54,14 +54,13 @@ class MapValueIterator {
 // TODO(vabr): Get these constants through the ContentSettingsClient.
 const char kChromeDevToolsScheme[] = "chrome-devtools";
 const char kChromeUIScheme[] = "chrome";
-
-#if defined(ENABLE_EXTENSIONS)
 const char kExtensionScheme[] = "chrome-extension";
-#endif
 
 std::string ContentSettingToString(ContentSetting setting);
 
-ContentSetting ContentSettingFromString(const std::string& name);
+// Converts a content setting string to the corresponding ContentSetting.
+// Returns true if |name| specifies a valid content setting, false otherwise.
+bool ContentSettingFromString(const std::string& name, ContentSetting* setting);
 
 // Converts |Value| to |ContentSetting|.
 ContentSetting ValueToContentSetting(const base::Value* value);

@@ -68,6 +68,8 @@
 #include "ui/views/controls/styled_label.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/webview/webview.h"
+#include "ui/views/layout/box_layout.h"
+#include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
@@ -78,13 +80,17 @@ namespace {
 
 const int kFixedMenuWidth = 250;
 const int kButtonHeight = 32;
-const int kFixedGaiaViewHeight = 440;
-const int kFixedGaiaViewWidth = 360;
+const int kPasswordCombinedFixedGaiaViewHeight = 440;
+const int kPasswordCombinedFixedGaiaViewWidth = 360;
+const int kFixedGaiaViewHeight = 512;
+const int kFixedGaiaViewWidth = 448;
 const int kFixedAccountRemovalViewWidth = 280;
 const int kFixedSwitchUserViewWidth = 320;
 const int kLargeImageSide = 88;
 
 const int kVerticalSpacing = 16;
+
+const int kTitleViewNativeWidgetOffset = 8;
 
 bool IsProfileChooser(profiles::BubbleViewMode mode) {
   return mode == profiles::BUBBLE_VIEW_MODE_PROFILE_CHOOSER ||
@@ -132,6 +138,23 @@ std::string GetAuthErrorAccountId(Profile* profile) {
     return std::string();
 
   return error->error_account_id();
+}
+
+views::ImageButton* CreateBackButton(views::ButtonListener* listener) {
+  views::ImageButton* back_button = new views::ImageButton(listener);
+  back_button->SetImageAlignment(views::ImageButton::ALIGN_LEFT,
+                                 views::ImageButton::ALIGN_MIDDLE);
+  ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
+  back_button->SetImage(views::ImageButton::STATE_NORMAL,
+                        rb->GetImageSkiaNamed(IDR_BACK));
+  back_button->SetImage(views::ImageButton::STATE_HOVERED,
+                        rb->GetImageSkiaNamed(IDR_BACK_H));
+  back_button->SetImage(views::ImageButton::STATE_PRESSED,
+                        rb->GetImageSkiaNamed(IDR_BACK_P));
+  back_button->SetImage(views::ImageButton::STATE_DISABLED,
+                        rb->GetImageSkiaNamed(IDR_BACK_D));
+  back_button->SetFocusable(true);
+  return back_button;
 }
 
 // BackgroundColorHoverButton -------------------------------------------------
@@ -182,6 +205,55 @@ class SizedContainer : public views::View {
   gfx::Size preferred_size_;
 };
 
+// A view to host the GAIA webview overlapped with a back button.  This class
+// is needed to reparent the back button inside a native view so that on
+// windows, user input can be be properly routed to the button.
+class HostView : public views::View {
+ public:
+  HostView() {}
+
+  void Initialize(views::View* title_view, views::View* main_view);
+
+ private:
+  // views::View:
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override;
+
+  // The title itself and the overlaped widget that contains it.
+  views::View* title_view_ = nullptr;  // Not owned.
+  scoped_ptr<views::Widget> title_widget_;
+
+  DISALLOW_COPY_AND_ASSIGN(HostView);
+};
+
+void HostView::Initialize(views::View* title_view, views::View* main_view) {
+  title_view_ = title_view;
+  AddChildView(main_view);
+  SetLayoutManager(new views::FillLayout());
+}
+
+void HostView::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (title_widget_ != nullptr || GetWidget() == nullptr)
+    return;
+
+  // The title view must be placed within its own widget so that it can
+  // properly receive user input when overlapped on another view.
+  views::Widget::InitParams params(
+      views::Widget::InitParams::TYPE_CONTROL);
+  params.parent = GetWidget()->GetNativeView();
+  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  title_widget_.reset(new views::Widget);
+  title_widget_->Init(params);
+  title_widget_->SetContentsView(title_view_);
+
+  gfx::Rect bounds(title_view_->GetPreferredSize());
+  title_view_->SetBoundsRect(bounds);
+  bounds.Offset(kTitleViewNativeWidgetOffset, kTitleViewNativeWidgetOffset);
+  title_widget_->SetBounds(bounds);
+}
+
 }  // namespace
 
 // RightAlignedIconLabelButton -------------------------------------------------
@@ -203,6 +275,14 @@ class RightAlignedIconLabelButton : public views::LabelButton {
   }
 
  private:
+  void OnFocus() override {
+    SetState(STATE_HOVERED);
+  }
+
+  void OnBlur() override {
+    SetState(STATE_NORMAL);
+  }
+
   DISALLOW_COPY_AND_ASSIGN(RightAlignedIconLabelButton);
 };
 
@@ -296,22 +376,22 @@ class EditableProfilePhoto : public views::LabelButton {
 // EditableProfileName -------------------------------------------------
 
 // A custom text control that turns into a textfield for editing when clicked.
-class EditableProfileName : public RightAlignedIconLabelButton,
+class EditableProfileName : public views::View,
                             public views::ButtonListener {
  public:
   EditableProfileName(views::TextfieldController* controller,
                       const base::string16& text,
                       bool is_editing_allowed)
-      : RightAlignedIconLabelButton(this, text),
-        profile_name_textfield_(NULL) {
+      : button_(new RightAlignedIconLabelButton(this, text)),
+        profile_name_textfield_(new views::Textfield()) {
     ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
     const gfx::FontList& medium_font_list =
         rb->GetFontList(ui::ResourceBundle::MediumFont);
-    SetFontList(medium_font_list);
-    SetHorizontalAlignment(gfx::ALIGN_CENTER);
+    button_->SetFontList(medium_font_list);
+    button_->SetHorizontalAlignment(gfx::ALIGN_CENTER);
 
     if (!is_editing_allowed) {
-      SetBorder(views::Border::CreateEmptyBorder(2, 0, 2, 0));
+      button_->SetBorder(views::Border::CreateEmptyBorder(2, 0, 2, 0));
       return;
     }
 
@@ -320,27 +400,32 @@ class EditableProfileName : public RightAlignedIconLabelButton,
     // the text doesn't jump around when the hovered icon appears.
     // TODO(estade): revisit colors and press effect.
     const int kIconSize = 16;
-    SetImage(STATE_NORMAL, CreateSquarePlaceholderImage(kIconSize));
-    SetImage(STATE_HOVERED,
-             gfx::CreateVectorIcon(gfx::VectorIconId::MODE_EDIT, kIconSize,
-                                   SkColorSetRGB(0x33, 0x33, 0x33)));
-    SetImage(STATE_PRESSED,
-             gfx::CreateVectorIcon(gfx::VectorIconId::MODE_EDIT, kIconSize,
-                                   SkColorSetRGB(0x20, 0x20, 0x20)));
+    button_->SetImage(views::LabelButton::STATE_NORMAL,
+                      CreateSquarePlaceholderImage(kIconSize));
+    button_->SetImage(views::LabelButton::STATE_HOVERED,
+                      gfx::CreateVectorIcon(
+                          gfx::VectorIconId::MODE_EDIT, kIconSize,
+                          SkColorSetRGB(0x33, 0x33, 0x33)));
+    button_->SetImage(views::LabelButton::STATE_PRESSED,
+                      gfx::CreateVectorIcon(
+                          gfx::VectorIconId::MODE_EDIT, kIconSize,
+                          SkColorSetRGB(0x20, 0x20, 0x20)));
     // To center the text, we need to offest it by the width of the icon we
     // are adding and its padding. We need to also add a small top/bottom
     // padding to account for the textfield's border.
     const int kIconTextLabelButtonSpacing = 5;
-    SetBorder(views::Border::CreateEmptyBorder(
+    button_->SetBorder(views::Border::CreateEmptyBorder(
         2, kIconSize + kIconTextLabelButtonSpacing, 2, 0));
 
     // Textfield that overlaps the button.
-    profile_name_textfield_ = new views::Textfield();
     profile_name_textfield_->set_controller(controller);
     profile_name_textfield_->SetFontList(medium_font_list);
     profile_name_textfield_->SetHorizontalAlignment(gfx::ALIGN_CENTER);
-
     profile_name_textfield_->SetVisible(false);
+
+    SetLayoutManager(
+        new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0));
+    AddChildView(button_);
     AddChildView(profile_name_textfield_);
   }
 
@@ -350,19 +435,20 @@ class EditableProfileName : public RightAlignedIconLabelButton,
 
   // Hide the editable textfield to show the profile name button instead.
   void ShowReadOnlyView() {
-    if (profile_name_textfield_)
-      profile_name_textfield_->SetVisible(false);
+    button_->SetVisible(true);
+    profile_name_textfield_->SetVisible(false);
   }
 
  private:
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override {
-    if (profile_name_textfield_) {
-      profile_name_textfield_->SetVisible(true);
-      profile_name_textfield_->SetText(GetText());
-      profile_name_textfield_->SelectAll(false);
-      profile_name_textfield_->RequestFocus();
-    }
+    button_->SetVisible(false);
+    profile_name_textfield_->SetVisible(true);
+    profile_name_textfield_->SetText(button_->GetText());
+    profile_name_textfield_->SelectAll(false);
+    profile_name_textfield_->RequestFocus();
+    // Re-layouts the view after swaping the controls.
+    Layout();
   }
 
   // views::LabelButton:
@@ -373,21 +459,7 @@ class EditableProfileName : public RightAlignedIconLabelButton,
     return false;
   }
 
-  void Layout() override {
-    if (profile_name_textfield_)
-      profile_name_textfield_->SetBounds(0, 0, width(), height());
-    RightAlignedIconLabelButton::Layout();
-  }
-
-  void OnFocus() override {
-    RightAlignedIconLabelButton::OnFocus();
-    SetState(STATE_HOVERED);
-  }
-
-  void OnBlur() override {
-    RightAlignedIconLabelButton::OnBlur();
-    SetState(STATE_NORMAL);
-  }
+  RightAlignedIconLabelButton* button_;
 
   // Textfield that is shown when editing the profile name. Can be NULL if
   // the profile name isn't allowed to be edited (e.g. for guest profiles).
@@ -401,23 +473,12 @@ class TitleCard : public views::View {
  public:
   TitleCard(const base::string16& message, views::ButtonListener* listener,
             views::ImageButton** back_button) {
-    back_button_ = new views::ImageButton(listener);
-    back_button_->SetImageAlignment(views::ImageButton::ALIGN_LEFT,
-                                    views::ImageButton::ALIGN_MIDDLE);
-    ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
-    back_button_->SetImage(views::ImageButton::STATE_NORMAL,
-                           rb->GetImageSkiaNamed(IDR_BACK));
-    back_button_->SetImage(views::ImageButton::STATE_HOVERED,
-                           rb->GetImageSkiaNamed(IDR_BACK_H));
-    back_button_->SetImage(views::ImageButton::STATE_PRESSED,
-                           rb->GetImageSkiaNamed(IDR_BACK_P));
-    back_button_->SetImage(views::ImageButton::STATE_DISABLED,
-                           rb->GetImageSkiaNamed(IDR_BACK_D));
-    back_button_->SetFocusable(true);
+    back_button_ = CreateBackButton(listener);
     *back_button = back_button_;
 
     title_label_ = new views::Label(message);
     title_label_->SetHorizontalAlignment(gfx::ALIGN_CENTER);
+    ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
     const gfx::FontList& medium_font_list =
         rb->GetFontList(ui::ResourceBundle::MediumFont);
     title_label_->SetFontList(medium_font_list);
@@ -724,10 +785,13 @@ void ProfileChooserView::ShowView(profiles::BubbleViewMode view_to_display,
   switch (view_mode_) {
     case profiles::BUBBLE_VIEW_MODE_GAIA_SIGNIN:
     case profiles::BUBBLE_VIEW_MODE_GAIA_ADD_ACCOUNT:
-    case profiles::BUBBLE_VIEW_MODE_GAIA_REAUTH:
-      layout = CreateSingleColumnLayout(this, kFixedGaiaViewWidth);
+    case profiles::BUBBLE_VIEW_MODE_GAIA_REAUTH: {
+      const int width = switches::UsePasswordSeparatedSigninFlow()
+          ? kFixedGaiaViewWidth : kPasswordCombinedFixedGaiaViewWidth;
+      layout = CreateSingleColumnLayout(this, width);
       sub_view = CreateGaiaSigninView(&view_to_focus);
       break;
+    }
     case profiles::BUBBLE_VIEW_MODE_ACCOUNT_REMOVAL:
       layout = CreateSingleColumnLayout(this, kFixedAccountRemovalViewWidth);
       sub_view = CreateAccountRemovalView();
@@ -1579,24 +1643,36 @@ views::View* ProfileChooserView::CreateGaiaSigninView(
       return NULL;
   }
 
-  // Adds Gaia signin webview
+  // Adds Gaia signin webview.
+  const gfx::Size pref_size = switches::UsePasswordSeparatedSigninFlow()
+      ? gfx::Size(kFixedGaiaViewWidth, kFixedGaiaViewHeight)
+      : gfx::Size(kPasswordCombinedFixedGaiaViewWidth,
+                  kPasswordCombinedFixedGaiaViewHeight);
   Profile* profile = browser_->profile();
   views::WebView* web_view = new views::WebView(profile);
   web_view->LoadInitialURL(url);
   web_view->GetWebContents()->SetDelegate(this);
-  web_view->SetPreferredSize(
-      gfx::Size(kFixedGaiaViewWidth, kFixedGaiaViewHeight));
+  web_view->SetPreferredSize(pref_size);
   content::RenderWidgetHostView* rwhv =
       web_view->GetWebContents()->GetRenderWidgetHostView();
   if (rwhv)
     rwhv->SetBackgroundColor(profiles::kAvatarBubbleGaiaBackgroundColor);
+
+  if (signin_content_view)
+    *signin_content_view = web_view;
+
+  if (switches::UsePasswordSeparatedSigninFlow()) {
+    gaia_signin_cancel_button_ = CreateBackButton(this);
+    HostView* host = new HostView();
+    host->Initialize(gaia_signin_cancel_button_, web_view);
+    return host;
+  }
+
   TitleCard* title_card = new TitleCard(l10n_util::GetStringUTF16(message_id),
                                         this,
                                         &gaia_signin_cancel_button_);
-  if (signin_content_view)
-    *signin_content_view = web_view;
   return TitleCard::AddPaddedTitleCard(
-      web_view, title_card, kFixedGaiaViewWidth);
+      web_view, title_card, kPasswordCombinedFixedGaiaViewWidth);
 }
 
 views::View* ProfileChooserView::CreateAccountRemovalView() {

@@ -12,7 +12,6 @@
 #include "components/mus/gles2/gpu_memory_tracker.h"
 #include "components/mus/gles2/gpu_state.h"
 #include "components/mus/gles2/mojo_buffer_backing.h"
-#include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/common/value_state.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
 #include "gpu/command_buffer/service/context_group.h"
@@ -27,6 +26,7 @@
 #include "gpu/command_buffer/service/valuebuffer_manager.h"
 #include "mojo/converters/geometry/geometry_type_converters.h"
 #include "mojo/platform_handle/platform_handle_functions.h"
+#include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/vsync_provider.h"
 #include "ui/gl/gl_context.h"
@@ -45,15 +45,16 @@ CommandBufferDriver::~CommandBufferDriver() {
 }
 
 void CommandBufferDriver::Initialize(
-    mojo::CommandBufferSyncClientPtr sync_client,
-    mojo::CommandBufferLostContextObserverPtr loss_observer,
+    mojo::InterfacePtrInfo<mojom::CommandBufferSyncClient> sync_client,
+    mojo::InterfacePtrInfo<mojom::CommandBufferLostContextObserver>
+        loss_observer,
     mojo::ScopedSharedBufferHandle shared_state,
     mojo::Array<int32_t> attribs) {
-  sync_client_ = sync_client.Pass();
-  loss_observer_ = loss_observer.Pass();
+  sync_client_ = mojo::MakeProxy(sync_client.Pass());
+  loss_observer_ = mojo::MakeProxy(loss_observer.Pass());
   bool success = DoInitialize(shared_state.Pass(), attribs.Pass());
-  mojo::GpuCapabilitiesPtr capabilities =
-      success ? mojo::GpuCapabilities::From(decoder_->GetCapabilities())
+  mojom::GpuCapabilitiesPtr capabilities =
+      success ? mojom::GpuCapabilities::From(decoder_->GetCapabilities())
               : nullptr;
   sync_client_->DidInitialize(success, capabilities.Pass());
 }
@@ -113,10 +114,12 @@ bool CommandBufferDriver::DoInitialize(
   scheduler_.reset(new gpu::GpuScheduler(command_buffer_.get(), decoder_.get(),
                                          decoder_.get()));
   decoder_->set_engine(scheduler_.get());
-  decoder_->SetResizeCallback(
-      base::Bind(&CommandBufferDriver::OnResize, base::Unretained(this)));
   decoder_->SetWaitSyncPointCallback(base::Bind(
       &CommandBufferDriver::OnWaitSyncPoint, base::Unretained(this)));
+  decoder_->SetFenceSyncReleaseCallback(base::Bind(
+      &CommandBufferDriver::OnFenceSyncRelease, base::Unretained(this)));
+  decoder_->SetWaitFenceSyncCallback(base::Bind(
+      &CommandBufferDriver::OnWaitFenceSync, base::Unretained(this)));
 
   gpu::gles2::DisallowedFeatures disallowed_features;
 
@@ -164,7 +167,7 @@ void CommandBufferDriver::Flush(int32_t put_offset) {
 void CommandBufferDriver::MakeProgress(int32_t last_get_offset) {
   // TODO(piman): handle out-of-order.
   sync_client_->DidMakeProgress(
-      mojo::CommandBufferState::From(command_buffer_->GetLastState()));
+      mojom::CommandBufferState::From(command_buffer_->GetLastState()));
 }
 
 void CommandBufferDriver::RegisterTransferBuffer(
@@ -230,11 +233,6 @@ void CommandBufferDriver::CreateImage(int32_t id,
     return;
   }
 
-  gfx::GpuMemoryBufferHandle gfx_handle;
-  // TODO(jam): create mojo enum for this and converter
-  gfx_handle.type = static_cast<gfx::GpuMemoryBufferType>(type);
-  gfx_handle.id = gfx::GpuMemoryBufferId(id);
-
   MojoPlatformHandle platform_handle;
   MojoResult extract_result = MojoExtractPlatformHandle(
       memory_handle.release().value(), &platform_handle);
@@ -243,17 +241,19 @@ void CommandBufferDriver::CreateImage(int32_t id,
     return;
   }
 
+  base::SharedMemoryHandle handle;
 #if defined(OS_WIN)
-  gfx_handle.handle =
-      base::SharedMemoryHandle(platform_handle, base::GetCurrentProcId());
+  handle = base::SharedMemoryHandle(platform_handle, base::GetCurrentProcId());
 #else
-  gfx_handle.handle = base::FileDescriptor(platform_handle, false);
+  handle = base::FileDescriptor(platform_handle, false);
 #endif
 
-  scoped_refptr<gfx::GLImageSharedMemory> image =
-      new gfx::GLImageSharedMemory(gfx_size, internal_format);
+  scoped_refptr<gl::GLImageSharedMemory> image =
+      new gl::GLImageSharedMemory(gfx_size, internal_format);
   // TODO(jam): also need a mojo enum for this enum
-  if (!image->Initialize(gfx_handle, gpu_format)) {
+  if (!image->Initialize(
+          handle, gfx::GpuMemoryBufferId(id), gpu_format, 0,
+          gfx::RowSizeForBufferFormat(gfx_size.width(), gpu_format, 0))) {
     NOTREACHED();
     return;
   }
@@ -277,10 +277,6 @@ void CommandBufferDriver::OnParseError() {
   OnContextLost(state.context_lost_reason);
 }
 
-void CommandBufferDriver::OnResize(gfx::Size size, float scale_factor) {
-  surface_->Resize(size);
-}
-
 bool CommandBufferDriver::OnWaitSyncPoint(uint32_t sync_point) {
   if (!sync_point)
     return true;
@@ -290,6 +286,45 @@ bool CommandBufferDriver::OnWaitSyncPoint(uint32_t sync_point) {
   gpu_state_->sync_point_manager()->AddSyncPointCallback(
       sync_point, base::Bind(&CommandBufferDriver::OnSyncPointRetired,
                              weak_factory_.GetWeakPtr()));
+  return scheduler_->scheduled();
+}
+
+void CommandBufferDriver::OnFenceSyncRelease(uint64_t release) {
+  // TODO(dyen): Implement once CommandBufferID has been figured out and
+  // we have a SyncPointClient. It would probably look like what is commented
+  // out below:
+  // if (!sync_point_client_->client_state()->IsFenceSyncReleased(release))
+  //   sync_point_client_->ReleaseFenceSync(release);
+  NOTIMPLEMENTED();
+}
+
+bool CommandBufferDriver::OnWaitFenceSync(
+    gpu::CommandBufferNamespace namespace_id,
+    uint64_t command_buffer_id,
+    uint64_t release) {
+  gpu::SyncPointManager* sync_point_manager = gpu_state_->sync_point_manager();
+  DCHECK(sync_point_manager);
+
+  scoped_refptr<gpu::SyncPointClientState> release_state =
+      sync_point_manager->GetSyncPointClientState(namespace_id,
+                                                  command_buffer_id);
+
+  if (!release_state)
+    return true;
+
+  if (release_state->IsFenceSyncReleased(release))
+    return true;
+
+  // TODO(dyen): Implement once CommandBufferID has been figured out and
+  // we have a SyncPointClient. It would probably look like what is commented
+  // out below:
+  // scheduler_->SetScheduled(false);
+  // sync_point_client_->Wait(
+  //     release_state.get(),
+  //     release,
+  //     base::Bind(&CommandBufferDriver::OnSyncPointRetired,
+  //                weak_factory_.GetWeakPtr()));
+  NOTIMPLEMENTED();
   return scheduler_->scheduled();
 }
 

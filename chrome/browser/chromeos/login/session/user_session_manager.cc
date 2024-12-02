@@ -91,6 +91,7 @@
 #include "components/flags_ui/pref_service_flags_storage.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/session_manager/core/session_manager.h"
+#include "components/signin/core/account_id/account_id.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "components/user_manager/user.h"
@@ -99,6 +100,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/common/content_switches.h"
 #include "ui/base/ime/chromeos/input_method_descriptor.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "url/gurl.h"
@@ -169,6 +171,18 @@ void InitLocaleAndInputMethodsForNewUser(
   if (preferred_input_method.id().empty()) {
     preferred_input_method =
         session_manager->GetDefaultIMEState(profile)->GetCurrentInputMethod();
+    const input_method::InputMethodDescriptor* descriptor =
+        manager->GetInputMethodUtil()->GetInputMethodDescriptorFromId(
+            manager->GetInputMethodUtil()->GetHardwareInputMethodIds()[0]);
+    // If the hardware input method's keyboard layout is the same as the
+    // default input method (e.g. from GaiaScreen), use the hardware input
+    // method. Note that the hardware input method can be non-login-able.
+    // Refer to the issue chrome-os-partner:48623.
+    if (descriptor &&
+        descriptor->GetPreferredKeyboardLayout() ==
+            preferred_input_method.GetPreferredKeyboardLayout()) {
+      preferred_input_method = *descriptor;
+    }
   }
 
   // Derive kLanguagePreloadEngines from |locale| and |preferred_input_method|.
@@ -411,7 +425,8 @@ void UserSessionManager::CompleteGuestSessionLogin(const GURL& start_url) {
   if (!about_flags::AreSwitchesIdenticalToCurrentCommandLine(
           user_flags, *base::CommandLine::ForCurrentProcess(), NULL)) {
     DBusThreadManager::Get()->GetSessionManagerClient()->SetFlagsForUser(
-        chromeos::login::kGuestUserName, base::CommandLine::StringVector());
+        login::GuestAccountId().GetUserEmail(),
+        base::CommandLine::StringVector());
   }
 
   RestartChrome(command_line);
@@ -449,7 +464,8 @@ void UserSessionManager::StartSession(
   delegate_ = delegate;
   start_session_type_ = start_session_type;
 
-  VLOG(1) << "Starting session for " << user_context.GetUserID();
+  VLOG(1) << "Starting session for "
+          << user_context.GetAccountId().GetUserEmail();
 
   PreStartSession();
   CreateUserSession(user_context, has_auth_cookies);
@@ -463,7 +479,7 @@ void UserSessionManager::StartSession(
 
   if (!user_context.GetDeviceId().empty()) {
     user_manager::UserManager::Get()->SetKnownUserDeviceId(
-        user_context.GetUserID(), user_context.GetDeviceId());
+        user_context.GetAccountId(), user_context.GetDeviceId());
   }
 
   PrepareProfile();
@@ -699,7 +715,7 @@ bool UserSessionManager::RestartToApplyPerSessionFlagsIfNeed(
 }
 
 bool UserSessionManager::NeedsToUpdateEasyUnlockKeys() const {
-  return !user_context_.GetUserID().empty() &&
+  return user_context_.GetAccountId().is_valid() &&
          user_manager::User::TypeHasGaiaAccount(user_context_.GetUserType()) &&
          user_context_.GetKey() && !user_context_.GetKey()->GetSecret().empty();
 }
@@ -757,7 +773,7 @@ void UserSessionManager::OnSessionRestoreStateChanged(
   if (!connection_error) {
     // We are in one of "done" states here.
     user_manager::UserManager::Get()->SaveUserOAuthStatus(
-        user_manager::UserManager::Get()->GetLoggedInUser()->email(),
+        user_manager::UserManager::Get()->GetLoggedInUser()->GetAccountId(),
         user_status);
   }
 
@@ -860,7 +876,7 @@ void UserSessionManager::PreStartSession() {
 void UserSessionManager::StoreUserContextDataBeforeProfileIsCreated() {
   // Store obfuscated GAIA ID.
   if (!user_context_.GetGaiaID().empty()) {
-    user_manager::UserManager::Get()->UpdateGaiaID(user_context_.GetUserID(),
+    user_manager::UserManager::Get()->UpdateGaiaID(user_context_.GetAccountId(),
                                                    user_context_.GetGaiaID());
   }
 }
@@ -868,8 +884,8 @@ void UserSessionManager::StoreUserContextDataBeforeProfileIsCreated() {
 void UserSessionManager::StartCrosSession() {
   BootTimesRecorder* btl = BootTimesRecorder::Get();
   btl->AddLoginTimeMarker("StartSession-Start", false);
-  DBusThreadManager::Get()->GetSessionManagerClient()->
-      StartSession(user_context_.GetUserID());
+  DBusThreadManager::Get()->GetSessionManagerClient()->StartSession(
+      user_context_.GetAccountId().GetUserEmail());
   btl->AddLoginTimeMarker("StartSession-End", false);
 }
 
@@ -877,27 +893,22 @@ void UserSessionManager::NotifyUserLoggedIn() {
   BootTimesRecorder* btl = BootTimesRecorder::Get();
   btl->AddLoginTimeMarker("UserLoggedIn-Start", false);
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
-  user_manager->UserLoggedIn(user_context_.GetUserID(),
-                             user_context_.GetUserIDHash(),
-                             false);
+  user_manager->UserLoggedIn(user_context_.GetAccountId(),
+                             user_context_.GetUserIDHash(), false);
   btl->AddLoginTimeMarker("UserLoggedIn-End", false);
 }
 
 void UserSessionManager::PrepareProfile() {
-  bool is_demo_session =
-      DemoAppLauncher::IsDemoAppSession(user_context_.GetUserID());
+  const bool is_demo_session = DemoAppLauncher::IsDemoAppSession(
+      user_context_.GetAccountId().GetUserEmail());
 
   // TODO(nkostylev): Figure out whether demo session is using the right profile
   // path or not. See https://codereview.chromium.org/171423009
   g_browser_process->profile_manager()->CreateProfileAsync(
       ProfileHelper::GetProfilePathByUserIdHash(user_context_.GetUserIDHash()),
-      base::Bind(&UserSessionManager::OnProfileCreated,
-                 AsWeakPtr(),
-                 user_context_,
-                 is_demo_session),
-      base::string16(),
-      base::string16(),
-      std::string());
+      base::Bind(&UserSessionManager::OnProfileCreated, AsWeakPtr(),
+                 user_context_, is_demo_session),
+      base::string16(), std::string(), std::string());
 }
 
 void UserSessionManager::OnProfileCreated(const UserContext& user_context,
@@ -915,9 +926,8 @@ void UserSessionManager::OnProfileCreated(const UserContext& user_context,
       // Profile is created, extensions and promo resources are initialized.
       // At this point all other Chrome OS services will be notified that it is
       // safe to use this profile.
-      UserProfileInitialized(profile,
-                             is_incognito_profile,
-                             user_context.GetUserID());
+      UserProfileInitialized(profile, is_incognito_profile,
+                             user_context.GetAccountId());
       break;
     case Profile::CREATE_STATUS_LOCAL_FAIL:
     case Profile::CREATE_STATUS_REMOTE_FAIL:
@@ -967,8 +977,8 @@ void UserSessionManager::InitProfilePreferences(
     if (gaia_id.empty()) {
       AccountTrackerService* account_tracker =
           AccountTrackerServiceFactory::GetForProfile(profile);
-      AccountInfo info =
-          account_tracker->FindAccountInfoByEmail(user_context.GetUserID());
+      const AccountInfo info = account_tracker->FindAccountInfoByEmail(
+          user_context.GetAccountId().GetUserEmail());
       gaia_id = info.gaia;
       DCHECK(!gaia_id.empty());
     }
@@ -978,22 +988,22 @@ void UserSessionManager::InitProfilePreferences(
     // profiles that might not have it set yet).
     SigninManagerBase* signin_manager =
         SigninManagerFactory::GetForProfile(profile);
-    signin_manager->SetAuthenticatedAccountInfo(gaia_id,
-                                                user_context.GetUserID());
+    signin_manager->SetAuthenticatedAccountInfo(
+        gaia_id, user_context.GetAccountId().GetUserEmail());
 
     // Backfill GAIA ID in user prefs stored in Local State.
     std::string tmp_gaia_id;
     user_manager::UserManager* user_manager = user_manager::UserManager::Get();
-    if (!user_manager->FindGaiaID(user_context.GetUserID(), &tmp_gaia_id) &&
+    if (!user_manager->FindGaiaID(user_context.GetAccountId(), &tmp_gaia_id) &&
         !gaia_id.empty()) {
-      user_manager->UpdateGaiaID(user_context.GetUserID(), gaia_id);
+      user_manager->UpdateGaiaID(user_context.GetAccountId(), gaia_id);
     }
   }
 }
 
 void UserSessionManager::UserProfileInitialized(Profile* profile,
                                                 bool is_incognito_profile,
-                                                const std::string& user_id) {
+                                                const AccountId& account_id) {
   // Demo user signed in.
   if (is_incognito_profile) {
     profile->OnLogin();
@@ -1020,9 +1030,10 @@ void UserSessionManager::UserProfileInitialized(Profile* profile,
     // first.
     bool transfer_saml_auth_cookies_on_subsequent_login = false;
     if (has_auth_cookies_ &&
-        g_browser_process->platform_part()->
-            browser_policy_connector_chromeos()->GetUserAffiliation(user_id) ==
-                policy::USER_AFFILIATION_MANAGED) {
+        g_browser_process->platform_part()
+                ->browser_policy_connector_chromeos()
+                ->GetUserAffiliation(account_id.GetUserEmail()) ==
+            policy::USER_AFFILIATION_MANAGED) {
       CrosSettings::Get()->GetBoolean(
           kAccountsPrefTransferSAMLCookies,
           &transfer_saml_auth_cookies_on_subsequent_login);
@@ -1091,7 +1102,7 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   if (user_manager->IsLoggedInAsUserWithGaiaAccount()) {
     if (user_context_.GetAuthFlow() == UserContext::AUTH_FLOW_GAIA_WITH_SAML)
-      user_manager->UpdateUsingSAML(user_context_.GetUserID(), true);
+      user_manager->UpdateUsingSAML(user_context_.GetAccountId(), true);
     SAMLOfflineSigninLimiter* saml_offline_signin_limiter =
         SAMLOfflineSigninLimiterFactory::GetForProfile(profile);
     if (saml_offline_signin_limiter)
@@ -1124,10 +1135,10 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
   user_context_.ClearSecrets();
   if (TokenHandlesEnabled()) {
     CreateTokenUtilIfMissing();
-    if (token_handle_util_->ShouldObtainHandle(user->GetUserID())) {
+    if (token_handle_util_->ShouldObtainHandle(user->GetAccountId())) {
       if (!token_handle_fetcher_.get()) {
         token_handle_fetcher_.reset(new TokenHandleFetcher(
-            token_handle_util_.get(), user->GetUserID()));
+            token_handle_util_.get(), user->GetAccountId()));
         token_handle_fetcher_->BackfillToken(
             profile, base::Bind(&UserSessionManager::OnTokenHandleObtained,
                                 weak_factory_.GetWeakPtr()));
@@ -1439,7 +1450,7 @@ void UserSessionManager::RestorePendingUserSessions() {
   DCHECK(!user_already_logged_in);
 
   if (!user_already_logged_in) {
-    UserContext user_context(user_id);
+    UserContext user_context(AccountId::FromUserEmail(user_id));
     user_context.SetUserIDHash(user_id_hash);
     user_context.SetIsUsingOAuth(false);
 
@@ -1477,7 +1488,7 @@ void UserSessionManager::UpdateEasyUnlockKeys(const UserContext& user_context) {
   // TODO(xiyuan): Fix inconsistency user type of |user_context| introduced in
   // authenticator.
   const user_manager::User* user =
-      user_manager::UserManager::Get()->FindUser(user_context.GetUserID());
+      user_manager::UserManager::Get()->FindUser(user_context.GetAccountId());
   if (!user || !user->HasGaiaAccount())
     return;
 
@@ -1502,7 +1513,7 @@ void UserSessionManager::UpdateEasyUnlockKeys(const UserContext& user_context) {
   key_manager->RefreshKeys(
       user_context, *device_list,
       base::Bind(&UserSessionManager::OnEasyUnlockKeyOpsFinished, AsWeakPtr(),
-                 user_context.GetUserID()));
+                 user_context.GetAccountId().GetUserEmail()));
 }
 
 net::URLRequestContextGetter*
@@ -1563,8 +1574,8 @@ void UserSessionManager::OnEasyUnlockKeyOpsFinished(
   if (!easy_unlock_key_ops_finished_callback_.is_null())
     easy_unlock_key_ops_finished_callback_.Run();
 
-  const user_manager::User* user =
-      user_manager::UserManager::Get()->FindUser(user_id);
+  const user_manager::User* user = user_manager::UserManager::Get()->FindUser(
+      AccountId::FromUserEmail(user_id));
   EasyUnlockService* easy_unlock_service =
         EasyUnlockService::GetForUser(*user);
   easy_unlock_service->CheckCryptohomeKeysAndMaybeHardlock();
@@ -1725,9 +1736,9 @@ void UserSessionManager::SendUserPodsMetrics() {
 void UserSessionManager::OnOAuth2TokensFetched(UserContext context) {
   if (StartupUtils::IsWebviewSigninEnabled() && TokenHandlesEnabled()) {
     CreateTokenUtilIfMissing();
-    if (token_handle_util_->ShouldObtainHandle(context.GetUserID())) {
+    if (token_handle_util_->ShouldObtainHandle(context.GetAccountId())) {
       token_handle_fetcher_.reset(new TokenHandleFetcher(
-          token_handle_util_.get(), context.GetUserID()));
+          token_handle_util_.get(), context.GetAccountId()));
       token_handle_fetcher_->FillForNewUser(
           context.GetAccessToken(),
           base::Bind(&UserSessionManager::OnTokenHandleObtained,
@@ -1736,7 +1747,7 @@ void UserSessionManager::OnOAuth2TokensFetched(UserContext context) {
   }
 }
 
-void UserSessionManager::OnTokenHandleObtained(const user_manager::UserID& id,
+void UserSessionManager::OnTokenHandleObtained(const AccountId& account_id,
                                                bool success) {
   if (!success)
     LOG(ERROR) << "OAuth2 token handle fetch failed.";

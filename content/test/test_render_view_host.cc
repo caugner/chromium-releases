@@ -12,6 +12,7 @@
 #include "content/browser/site_instance_impl.h"
 #include "content/common/dom_storage/dom_storage_types.h"
 #include "content/common/frame_messages.h"
+#include "content/common/site_isolation_policy.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -136,8 +137,8 @@ void TestRenderWidgetHostView::CopyFromCompositingSurface(
 void TestRenderWidgetHostView::CopyFromCompositingSurfaceToVideoFrame(
     const gfx::Rect& src_subrect,
     const scoped_refptr<media::VideoFrame>& target,
-    const base::Callback<void(bool)>& callback) {
-  callback.Run(false);
+    const base::Callback<void(const gfx::Rect&, bool)>& callback) {
+  callback.Run(gfx::Rect(), false);
 }
 
 bool TestRenderWidgetHostView::CanCopyToVideoFrame() const {
@@ -267,10 +268,6 @@ bool TestRenderViewHost::CreateRenderView(
   return true;
 }
 
-bool TestRenderViewHost::IsFullscreenGranted() const {
-  return RenderViewHostImpl::IsFullscreenGranted();
-}
-
 MockRenderProcessHost* TestRenderViewHost::GetProcess() const {
   return static_cast<MockRenderProcessHost*>(RenderViewHostImpl::GetProcess());
 }
@@ -298,11 +295,13 @@ void TestRenderViewHost::TestOnStartDragging(
 void TestRenderViewHost::TestOnUpdateStateWithFile(
     int page_id,
     const base::FilePath& file_path) {
-  OnUpdateState(page_id,
-                PageState::CreateForTesting(GURL("http://www.google.com"),
-                                            false,
-                                            "data",
-                                            &file_path));
+  PageState state = PageState::CreateForTesting(GURL("http://www.google.com"),
+                                                false, "data", &file_path);
+  if (SiteIsolationPolicy::UseSubframeNavigationEntries()) {
+    static_cast<RenderFrameHostImpl*>(GetMainFrame())->OnUpdateState(state);
+  } else {
+    OnUpdateState(page_id, state);
+  }
 }
 
 RenderViewHostImplTestHarness::RenderViewHostImplTestHarness() {

@@ -109,6 +109,10 @@ class TestBrowserWindow : public BrowserWindow {
   void ShowBookmarkAppBubble(
       const WebApplicationInfo& web_app_info,
       const ShowBookmarkAppBubbleCallback& callback) override {}
+  autofill::SaveCardBubbleView* ShowSaveCreditCardBubble(
+      content::WebContents* contents,
+      autofill::SaveCardBubbleController* controller,
+      bool user_gesture) override;
   void ShowTranslateBubble(content::WebContents* contents,
                            translate::TranslateStep step,
                            translate::TranslateErrors::Type error_type,
@@ -169,6 +173,7 @@ class TestBrowserWindow : public BrowserWindow {
     void FocusSearch() override {}
     void UpdateContentSettingsIcons() override {}
     void UpdateManagePasswordsIconAndBubble() override {}
+    void UpdateSaveCreditCardIcon() override {}
     void UpdatePageActions() override {}
     void UpdateBookmarkStarVisibility() override {}
     void UpdateLocationBarVisibility(bool visible, bool animate) override {}

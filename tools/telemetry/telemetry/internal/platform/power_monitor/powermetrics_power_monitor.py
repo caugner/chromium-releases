@@ -16,6 +16,7 @@ from telemetry import decorators
 from telemetry.internal.platform import power_monitor
 
 
+# TODO: rename this class (seems like this is used by mac)
 class PowerMetricsPowerMonitor(power_monitor.PowerMonitor):
 
   def __init__(self, backend):
@@ -30,8 +31,7 @@ class PowerMetricsPowerMonitor(power_monitor.PowerMonitor):
     return '/usr/bin/powermetrics'
 
   def StartMonitoringPower(self, browser):
-    assert not self._powermetrics_process, (
-        'Must call StopMonitoringPower().')
+    self._CheckStart()
     # Empirically powermetrics creates an empty output file immediately upon
     # starting.  We detect file creation as a signal that measurement has
     # started.  In order to avoid various race conditions in tempfile creation
@@ -88,7 +88,7 @@ class PowerMetricsPowerMonitor(power_monitor.PowerMonitor):
     """
     if len(powermetrics_output) == 0:
       logging.warning('powermetrics produced zero length output')
-      return None
+      return {}
 
     # Container to collect samples for running averages.
     # out_path - list containing the key path in the output dictionary.
@@ -195,7 +195,12 @@ class PowerMetricsPowerMonitor(power_monitor.PowerMonitor):
         (float(processor.get('package_joules', 0)) / 3600.) * 10 ** 3)
 
     for m in metrics:
-      m.samples.append(DataWithMetricKeyPath(m, plist))
+      try:
+        m.samples.append(DataWithMetricKeyPath(m, plist))
+      except KeyError:
+        # Old CPUs don't have c-states, so if data is missing, just ignore it.
+        logging.info('Field missing from powermetrics output: %s', m.src_path)
+        continue
 
     # -------- Collect and Process Data --------
     out_dict = {}
@@ -236,17 +241,20 @@ class PowerMetricsPowerMonitor(power_monitor.PowerMonitor):
   def _KillPowerMetricsProcess(self):
     """Kill a running powermetrics process."""
     try:
-      self._powermetrics_process.terminate()
-    except OSError:
-      # terminate() can fail when Powermetrics does not have the SetUID set.
-      self._backend.LaunchApplication(
-        '/usr/bin/pkill',
-        ['-SIGTERM', os.path.basename(self.binary_path)],
-        elevate_privilege=True)
+      if self._powermetrics_process.poll() is None:
+        self._powermetrics_process.terminate()
+    except OSError as e:
+      logging.warning(
+          'Error when trying to terminate powermetric process: %s', repr(e))
+      if self._powermetrics_process.poll() is None:
+        # terminate() can fail when Powermetrics does not have the SetUID set.
+        self._backend.LaunchApplication(
+          '/usr/bin/pkill',
+          ['-SIGTERM', os.path.basename(self.binary_path)],
+          elevate_privilege=True)
 
   def StopMonitoringPower(self):
-    assert self._powermetrics_process, (
-        'StartMonitoringPower() not called.')
+    self._CheckStop()
     # Tell powermetrics to take an immediate sample.
     try:
       self._KillPowerMetricsProcess()
@@ -262,7 +270,10 @@ class PowerMetricsPowerMonitor(power_monitor.PowerMonitor):
         powermetrics_output = output_file.read()
       return PowerMetricsPowerMonitor.ParsePowerMetricsOutput(
           powermetrics_output)
-
+    except Exception as e:
+      logging.warning(
+          'Error when trying to collect power monitoring data: %s', repr(e))
+      return PowerMetricsPowerMonitor.ParsePowerMetricsOutput('')
     finally:
       shutil.rmtree(self._output_directory)
       self._output_directory = None

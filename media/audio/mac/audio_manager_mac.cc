@@ -751,7 +751,9 @@ bool AudioManagerMac::ShouldDeferStreamStart() {
 bool AudioManagerMac::MaybeChangeBufferSize(AudioDeviceID device_id,
                                             AudioUnit audio_unit,
                                             AudioUnitElement element,
-                                            size_t desired_buffer_size) {
+                                            size_t desired_buffer_size,
+                                            bool* size_was_changed) {
+  *size_was_changed = false;
   UInt32 buffer_size = 0;
   UInt32 property_size = sizeof(buffer_size);
   OSStatus result = AudioUnitGetProperty(audio_unit,
@@ -797,6 +799,9 @@ bool AudioManagerMac::MaybeChangeBufferSize(AudioDeviceID device_id,
     }
   }
 
+  if (buffer_size == desired_buffer_size)
+    return true;
+
   buffer_size = desired_buffer_size;
   result = AudioUnitSetProperty(audio_unit,
                                 kAudioDevicePropertyBufferFrameSize,
@@ -807,7 +812,7 @@ bool AudioManagerMac::MaybeChangeBufferSize(AudioDeviceID device_id,
   OSSTATUS_DLOG_IF(ERROR, result != noErr, result)
       << "AudioUnitSetProperty(kAudioDevicePropertyBufferFrameSize) failed.  "
       << "Size:: " << buffer_size;
-
+  *size_was_changed = (result == noErr);
   return (result == noErr);
 }
 

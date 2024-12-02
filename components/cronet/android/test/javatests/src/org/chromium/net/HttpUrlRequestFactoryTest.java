@@ -16,6 +16,7 @@ import java.util.regex.Pattern;
 /**
  * Tests for {@link HttpUrlRequestFactory}
  */
+@SuppressWarnings("deprecation")
 public class HttpUrlRequestFactoryTest extends CronetTestBase {
     // URL used for base tests.
     private static final String URL = "http://127.0.0.1:8000";
@@ -23,17 +24,14 @@ public class HttpUrlRequestFactoryTest extends CronetTestBase {
     @SmallTest
     @Feature({"Cronet"})
     public void testCreateFactory() throws Throwable {
-        HttpUrlRequestFactoryConfig config = new HttpUrlRequestFactoryConfig();
-        config.enableQUIC(true);
-        config.addQuicHint("www.google.com", 443, 443);
-        config.addQuicHint("www.youtube.com", 443, 443);
-        config.setLibraryName("cronet_tests");
-        String[] commandLineArgs = {
-                CronetTestActivity.CONFIG_KEY, config.toString() };
-        CronetTestActivity activity =
-                launchCronetTestAppWithUrlAndCommandLineArgs(URL,
-                                                             commandLineArgs);
-        HttpUrlRequestFactory factory = activity.mRequestFactory;
+        CronetEngine.Builder builder = new CronetEngine.Builder(getContext());
+        builder.enableQUIC(true);
+        builder.addQuicHint("www.google.com", 443, 443);
+        builder.addQuicHint("www.youtube.com", 443, 443);
+        builder.setLibraryName("cronet_tests");
+        CronetTestFramework testFramework =
+                startCronetTestFrameworkWithUrlAndCronetEngineBuilder(URL, builder);
+        HttpUrlRequestFactory factory = testFramework.mRequestFactory;
         assertNotNull("Factory should be created", factory);
         assertTrue("Factory should be Chromium/n.n.n.n@r but is "
                            + factory.getName(),
@@ -47,8 +45,7 @@ public class HttpUrlRequestFactoryTest extends CronetTestBase {
         HttpUrlRequestFactoryConfig config = new HttpUrlRequestFactoryConfig();
         config.enableLegacyMode(true);
 
-        HttpUrlRequestFactory factory = HttpUrlRequestFactory.createFactory(
-                getInstrumentation().getTargetContext(), config);
+        HttpUrlRequestFactory factory = HttpUrlRequestFactory.createFactory(getContext(), config);
         assertNotNull("Factory should be created", factory);
         assertTrue("Factory should be HttpUrlConnection/n.n.n.n@r but is "
                            + factory.getName(),
@@ -71,8 +68,7 @@ public class HttpUrlRequestFactoryTest extends CronetTestBase {
         UrlRequestContextConfig config = new UrlRequestContextConfig();
         config.enableLegacyMode(true);
 
-        HttpUrlRequestFactory factory = HttpUrlRequestFactory.createFactory(
-                getInstrumentation().getTargetContext(), config);
+        HttpUrlRequestFactory factory = HttpUrlRequestFactory.createFactory(getContext(), config);
         assertNotNull("Factory should be created", factory);
         assertTrue("Factory should be HttpUrlConnection/n.n.n.n@r but is "
                            + factory.getName(),
@@ -110,10 +106,8 @@ public class HttpUrlRequestFactoryTest extends CronetTestBase {
         String userAgentValue = "User-Agent-Value";
         config.setUserAgent(userAgentValue);
         config.setLibraryName("cronet_tests");
-        HttpUrlRequestFactory factory = HttpUrlRequestFactory.createFactory(
-                getInstrumentation().getTargetContext(), config);
-        assertTrue(NativeTestServer.startNativeTestServer(
-                getInstrumentation().getTargetContext()));
+        HttpUrlRequestFactory factory = HttpUrlRequestFactory.createFactory(getContext(), config);
+        assertTrue(NativeTestServer.startNativeTestServer(getContext()));
         String url = NativeTestServer.getEchoHeaderURL(userAgentName);
         TestHttpUrlRequestListener listener = new TestHttpUrlRequestListener();
         HashMap<String, String> headers = new HashMap<String, String>();
@@ -133,8 +127,7 @@ public class HttpUrlRequestFactoryTest extends CronetTestBase {
         String userAgentValue = "User-Agent-Value";
         config.setUserAgent(userAgentValue);
         config.enableLegacyMode(true);
-        HttpUrlRequestFactory factory = HttpUrlRequestFactory.createFactory(
-                getInstrumentation().getTargetContext(), config);
+        HttpUrlRequestFactory factory = HttpUrlRequestFactory.createFactory(getContext(), config);
         assertTrue("Factory should be HttpUrlConnection/n.n.n.n@r but is "
                            + factory.getName(),
                    Pattern.matches(
@@ -143,8 +136,7 @@ public class HttpUrlRequestFactoryTest extends CronetTestBase {
         // Load test library for starting the native test server.
         System.loadLibrary("cronet_tests");
 
-        assertTrue(NativeTestServer.startNativeTestServer(
-                getInstrumentation().getTargetContext()));
+        assertTrue(NativeTestServer.startNativeTestServer(getContext()));
         String url = NativeTestServer.getEchoHeaderURL(userAgentName);
         TestHttpUrlRequestListener listener = new TestHttpUrlRequestListener();
         HashMap<String, String> headers = new HashMap<String, String>();
@@ -176,8 +168,7 @@ public class HttpUrlRequestFactoryTest extends CronetTestBase {
         }
 
         // Create a new directory to hold the disk cache data.
-        File dir = getInstrumentation().getTargetContext().getDir(
-                "disk_cache_dir", Context.MODE_PRIVATE);
+        File dir = getContext().getDir("disk_cache_dir", Context.MODE_PRIVATE);
         String path = dir.getPath();
         config.setStoragePath(path);
         config.enableHttpCache(HttpUrlRequestFactoryConfig.HTTP_CACHE_DISK, 100);

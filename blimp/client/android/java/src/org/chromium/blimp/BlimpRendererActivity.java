@@ -5,22 +5,38 @@
 package org.chromium.blimp;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.os.Bundle;
 
 import org.chromium.base.Log;
 import org.chromium.base.library_loader.ProcessInitException;
+import org.chromium.blimp.auth.RetryingTokenSource;
+import org.chromium.blimp.auth.TokenSource;
+import org.chromium.blimp.auth.TokenSourceImpl;
+import org.chromium.blimp.toolbar.Toolbar;
+import org.chromium.ui.widget.Toast;
 
 /**
  * The {@link Activity} for rendering the main Blimp client.  This loads the Blimp rendering stack
  * and displays it.
  */
-public class BlimpRendererActivity extends Activity implements BlimpLibraryLoader.Callback {
-    private static final String TAG = "cr.Blimp";
+public class BlimpRendererActivity extends Activity implements BlimpLibraryLoader.Callback,
+        TokenSource.Callback {
+
+    private static final int ACCOUNT_CHOOSER_INTENT_REQUEST_CODE = 100;
+    private static final String TAG = "Blimp";
+    private TokenSource mTokenSource;
     private BlimpView mBlimpView;
+    private Toolbar mToolbar;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        mTokenSource = new RetryingTokenSource(new TokenSourceImpl(this));
+        mTokenSource.setCallback(this);
+        mTokenSource.getToken();
+
         try {
             BlimpLibraryLoader.startAsync(this, this);
         } catch (ProcessInitException e) {
@@ -37,7 +53,40 @@ public class BlimpRendererActivity extends Activity implements BlimpLibraryLoade
             mBlimpView = null;
         }
 
+        if (mToolbar != null) {
+            mToolbar.destroy();
+            mToolbar = null;
+        }
+
+        if (mTokenSource != null) {
+            mTokenSource.destroy();
+            mTokenSource = null;
+        }
+
         super.onDestroy();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        switch (requestCode) {
+            case ACCOUNT_CHOOSER_INTENT_REQUEST_CODE:
+                if (resultCode == RESULT_OK) {
+                    mTokenSource.onAccountSelected(data);
+                    mTokenSource.getToken();
+                } else {
+                    onTokenUnavailable(false);
+                }
+                break;
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        // Check if the toolbar can handle the back navigation.
+        if (mToolbar != null && mToolbar.onBackPressed()) return;
+
+        // If not, use the default Activity behavior.
+        super.onBackPressed();
     }
 
     // BlimpLibraryLoader.Callback implementation.
@@ -50,7 +99,31 @@ public class BlimpRendererActivity extends Activity implements BlimpLibraryLoade
         }
 
         setContentView(R.layout.blimp_main);
+
         mBlimpView = (BlimpView) findViewById(R.id.renderer);
         mBlimpView.initializeRenderer();
+
+        mToolbar = (Toolbar) findViewById(R.id.toolbar);
+        mToolbar.initialize();
+    }
+
+    // TokenSource.Callback implementation.
+    @Override
+    public void onTokenReceived(String token) {
+        // TODO(dtrainor): Do something with the token and the assigner!
+        Toast.makeText(this, R.string.signin_get_token_succeeded, Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    public void onTokenUnavailable(boolean isTransient) {
+        // Ignore isTransient here because we're relying on the auto-retry TokenSource.
+        // TODO(dtrainor): Show a better error dialog/message.
+        Toast.makeText(this, R.string.signin_get_token_failed, Toast.LENGTH_LONG).show();
+        finish();
+    }
+
+    @Override
+    public void onNeedsAccountToBeSelected(Intent suggestedIntent) {
+        startActivityForResult(suggestedIntent, ACCOUNT_CHOOSER_INTENT_REQUEST_CODE);
     }
 }

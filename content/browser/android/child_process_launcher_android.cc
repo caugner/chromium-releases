@@ -11,7 +11,6 @@
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/media/android/browser_media_player_manager.h"
 #include "content/browser/media/media_web_contents_observer.h"
-#include "content/browser/renderer_host/compositor_impl_android.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -37,6 +36,7 @@ static void SetSurfacePeer(
     base::ProcessHandle render_process_handle,
     int render_frame_id,
     int player_id) {
+#if !defined(USE_AURA)
   int render_process_id = 0;
   RenderProcessHost::iterator it = RenderProcessHost::AllHostsIterator();
   while (!it.IsAtEnd()) {
@@ -78,6 +78,9 @@ static void SetSurfacePeer(
     gfx::ScopedJavaSurface scoped_surface(surface);
     player->SetVideoSurface(scoped_surface.Pass());
   }
+#else
+  NOTREACHED();
+#endif
 }
 
 }  // anonymous namespace

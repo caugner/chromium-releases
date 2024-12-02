@@ -11,10 +11,10 @@ public interface RouteDelegate {
     /**
      * Called when the route is created successfully.
      * @param requestId The id of the request to create the route.
-     * @param route The route controller.
-     * @param wasLaunched Whether the presentation was freshly launched.
+     * @param route The route that was created.
+     * @param routeController the route controller the route was created with.
      */
-    void onRouteCreated(int requestId, RouteController route, boolean wasLaunched);
+    void onRouteCreated(int requestId, MediaRoute route, RouteController routeController);
 
     /**
      * Called when the route creation failed.
@@ -24,10 +24,14 @@ public interface RouteDelegate {
     void onRouteRequestError(String message, int requestId);
 
     /**
-     *
-     * @param route
+     * Called when the user wants to stop the session via the UI (e.g. notification).
      */
-    void onRouteClosed(RouteController route);
+    void onSessionStopAction();
+
+    /**
+     * Called when the session is closed.
+     */
+    void onSessionClosed();
 
     /**
      * Called when sending a message to the route has finished.
@@ -38,8 +42,8 @@ public interface RouteDelegate {
 
     /**
      * Called when the route receives a message.
-     * @param routeId The id of the route.
+     * @param clientId The id of the client receiving the message.
      * @param message The message received.
      */
-    void onMessage(String routeId, String message);
+    void onMessage(String clientId, String message);
 }

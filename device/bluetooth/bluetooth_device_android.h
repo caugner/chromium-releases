@@ -7,13 +7,12 @@
 
 #include "base/android/jni_android.h"
 #include "base/memory/weak_ptr.h"
+#include "device/bluetooth/bluetooth_adapter_android.h"
 #include "device/bluetooth/bluetooth_device.h"
 
 namespace device {
 
-class BluetoothAdapterAndroid;
-
-// BluetoothDeviceAndroid along with the Java class
+// BluetoothDeviceAndroid along with its owned Java class
 // org.chromium.device.bluetooth.ChromeBluetoothDevice implement
 // BluetoothDevice.
 class DEVICE_BLUETOOTH_EXPORT BluetoothDeviceAndroid final
@@ -38,6 +37,11 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDeviceAndroid final
 
   // Returns the associated ChromeBluetoothDevice Java object.
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject();
+
+  // Get owning BluetoothAdapter cast to BluetoothAdapterAndroid.
+  BluetoothAdapterAndroid* GetAdapter() {
+    return static_cast<BluetoothAdapterAndroid*>(adapter_);
+  }
 
   // Updates cached copy of advertised UUIDs discovered during a scan.
   // Returns true if new UUIDs differed from cached values.
@@ -73,7 +77,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDeviceAndroid final
   void CancelPairing() override;
   void Disconnect(const base::Closure& callback,
                   const ErrorCallback& error_callback) override;
-  void Forget(const ErrorCallback& error_callback) override;
+  void Forget(const base::Closure& callback,
+              const ErrorCallback& error_callback) override;
   void ConnectToService(
       const device::BluetoothUUID& uuid,
       const ConnectToServiceCallback& callback,
@@ -89,6 +94,18 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDeviceAndroid final
                                jobject jcaller,
                                int32_t status,
                                bool connected);
+
+  // Callback indicating when all services of the device have been
+  // discovered.
+  void OnGattServicesDiscovered(JNIEnv* env, jobject jcaller);
+
+  // Creates Bluetooth GATT service objects and adds them to
+  // BluetoothDevice::gatt_services_ if they are not already there.
+  void CreateGattRemoteService(
+      JNIEnv* env,
+      jobject caller,
+      const jstring& instanceId,
+      jobject /* BluetoothGattServiceWrapper */ bluetooth_gatt_service_wrapper);
 
  protected:
   BluetoothDeviceAndroid(BluetoothAdapterAndroid* adapter);

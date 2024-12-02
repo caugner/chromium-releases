@@ -46,6 +46,7 @@
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
+#include "components/signin/core/common/signin_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_utils.h"
@@ -104,7 +105,7 @@ class SendResponseDelegate
     response_.reset(new bool);
     *response_ = success;
     if (should_post_quit_) {
-      base::MessageLoopForUI::current()->Quit();
+      base::MessageLoopForUI::current()->QuitWhenIdle();
     }
   }
 

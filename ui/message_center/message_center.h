@@ -13,6 +13,7 @@
 #include "ui/message_center/notification_list.h"
 
 class DownloadNotification;
+class DownloadNotificationTestBase;
 
 namespace base {
 class DictionaryValue;
@@ -132,6 +133,11 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
   virtual void ClickOnNotificationButton(const std::string& id,
                                          int button_index) = 0;
 
+  // Called by the UI classes when the settings buttons is clicked
+  // to trigger the notification's delegate and update the message
+  // center observers.
+  virtual void ClickOnSettingsButton(const std::string& id) = 0;
+
   // This should be called by UI classes after a visible notification popup
   // closes, indicating that the notification has been shown to the user.
   // |mark_notification_as_read|, if false, will unset the read bit on a
@@ -176,12 +182,15 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
 
  protected:
   friend class ::DownloadNotification;
+  friend class ::DownloadNotificationTestBase;
   friend class MessageCenterImplTest;
+  friend class MessageCenterImplTestWithChangeQueue;
   friend class MessageCenterImplTestWithoutChangeQueue;
+  friend class MessageCenterTrayTest;
   friend class TrayViewControllerTest;
   friend class test::MessagePopupCollectionTest;
   virtual void DisableTimersForTest() = 0;
-  virtual void DisableChangeQueueForTest() = 0;
+  virtual void EnableChangeQueueForTest(bool enabled) = 0;
 
   MessageCenter();
   virtual ~MessageCenter();

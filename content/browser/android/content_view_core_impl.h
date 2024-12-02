@@ -13,12 +13,12 @@
 #include "base/i18n/rtl.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process/process.h"
-#include "content/browser/android/overscroll_refresh.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "ui/android/overscroll_refresh.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "url/gurl.h"
@@ -36,7 +36,7 @@ class RenderWidgetHostViewAndroid;
 struct MenuItem;
 
 class ContentViewCoreImpl : public ContentViewCore,
-                            public OverscrollRefreshHandler,
+                            public ui::OverscrollRefreshHandler,
                             public WebContentsObserver {
  public:
   static ContentViewCoreImpl* FromWebContents(WebContents* web_contents);
@@ -105,6 +105,8 @@ class ContentViewCoreImpl : public ContentViewCore,
                         jfloat touch_minor_1,
                         jfloat orientation_0,
                         jfloat orientation_1,
+                        jfloat tilt_0,
+                        jfloat tilt_1,
                         jfloat raw_pos_x,
                         jfloat raw_pos_y,
                         jint android_tool_type_0,
@@ -265,7 +267,7 @@ class ContentViewCoreImpl : public ContentViewCore,
                         const gfx::PointF& selection_anchor,
                         const gfx::RectF& selection_rect);
 
-  void StartContentIntent(const GURL& content_url);
+  void StartContentIntent(const GURL& content_url, bool is_main_frame);
 
   // Shows the disambiguation popup
   // |rect_pixels|   --> window coordinates which |zoomed_bitmap| represents

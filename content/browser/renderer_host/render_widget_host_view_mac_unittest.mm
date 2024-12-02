@@ -206,10 +206,10 @@ class RenderWidgetHostViewMacTest : public RenderViewHostImplTestHarness {
     // TestRenderViewHost's destruction assumes that its view is a
     // TestRenderWidgetHostView, so store its view and reset it back to the
     // stored view in |TearDown()|.
-    old_rwhv_ = rvh()->GetView();
+    old_rwhv_ = rvh()->GetWidget()->GetView();
 
     // Owned by its |cocoa_view()|, i.e. |rwhv_cocoa_|.
-    rwhv_mac_ = new RenderWidgetHostViewMac(rvh(), false);
+    rwhv_mac_ = new RenderWidgetHostViewMac(rvh()->GetWidget(), false);
     rwhv_cocoa_.reset([rwhv_mac_->cocoa_view() retain]);
   }
   void TearDown() override {
@@ -218,7 +218,8 @@ class RenderWidgetHostViewMacTest : public RenderViewHostImplTestHarness {
     RecycleAndWait();
 
     // See comment in SetUp().
-    test_rvh()->SetView(static_cast<RenderWidgetHostViewBase*>(old_rwhv_));
+    test_rvh()->GetWidget()->SetView(
+        static_cast<RenderWidgetHostViewBase*>(old_rwhv_));
 
     ImageTransportFactory::Terminate();
     RenderViewHostImplTestHarness::TearDown();
@@ -231,7 +232,7 @@ class RenderWidgetHostViewMacTest : public RenderViewHostImplTestHarness {
   }
 
   void DestroyHostViewRetainCocoaView() {
-    test_rvh()->SetView(nullptr);
+    test_rvh()->GetWidget()->SetView(nullptr);
     rwhv_mac_->Destroy();
   }
 
@@ -927,7 +928,7 @@ class RenderWidgetHostViewMacPinchTest : public RenderWidgetHostViewMacTest {
         break;
     }
     DCHECK(message);
-    base::Tuple<IPC::WebInputEventPointer, ui::LatencyInfo, bool> data;
+    base::Tuple<IPC::WebInputEventPointer, ui::LatencyInfo> data;
     InputMsg_HandleInputEvent::Read(message, &data);
     IPC::WebInputEventPointer ipc_event = base::get<0>(data);
     const blink::WebGestureEvent* gesture_event =

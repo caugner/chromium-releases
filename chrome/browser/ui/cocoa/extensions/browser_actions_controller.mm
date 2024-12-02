@@ -804,8 +804,7 @@ void ToolbarActionsBarBridge::ShowExtensionMessageBubble(
 
 - (void)containerMouseEntered:(NSNotification*)notification {
   if (!activeBubble_ &&  // only show one bubble at a time
-      ExtensionToolbarIconSurfacingBubbleDelegate::ShouldShowForProfile(
-          browser_->profile())) {
+      toolbarActionsBar_->show_icon_surfacing_bubble()) {
     scoped_ptr<ToolbarActionsBarBubbleDelegate> delegate(
         new ExtensionToolbarIconSurfacingBubbleDelegate(browser_->profile()));
     ToolbarActionsBarBubbleMac* bubble =
@@ -910,8 +909,13 @@ void ToolbarActionsBarBridge::ShowExtensionMessageBubble(
   // the container change).
   if ((currentX == NSMinX(buttonFrame) ||
        currentX == NSWidth([containerView_ frame]) - xLeft) &&
-      NSMinY([button frame]) == NSMinY(buttonFrame))
+      NSMinY([button frame]) == NSMinY(buttonFrame)) {
+    // If the button is in the right place, but animating, we need to stop the
+    // animation.
+    if ([button isAnimating])
+      [button stopAnimation];
     return;
+  }
 
   // It's possible the button is already animating to the right place. Don't
   // call move again, because it will stop the current animation.

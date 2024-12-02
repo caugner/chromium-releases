@@ -115,7 +115,11 @@ TestCompositorHostMac::~TestCompositorHostMac() {
   // Release reference to |compositor_|.  Important because the |compositor_|
   // holds |this| as its delegate, so that reference must be removed here.
   [[window_ contentView] setCompositor:NULL];
-  [window_ setContentView:nil];
+  {
+    base::scoped_nsobject<NSView> new_view(
+        [[NSView alloc] initWithFrame:NSZeroRect]);
+    [window_ setContentView:new_view.get()];
+  }
 
   [window_ orderOut:nil];
   [window_ close];
@@ -133,7 +137,7 @@ void TestCompositorHostMac::Show() {
                               defer:NO];
   base::scoped_nsobject<AcceleratedTestView> view(
       [[AcceleratedTestView alloc] init]);
-  compositor_.SetAcceleratedWidgetAndStartCompositor(view);
+  compositor_.SetAcceleratedWidget(view);
   compositor_.SetScaleAndSize(1.0f, bounds_.size());
   [view setCompositor:&compositor_];
   [window_ setContentView:view];

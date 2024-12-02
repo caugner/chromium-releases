@@ -23,6 +23,7 @@
 #include "media/base/test_helpers.h"
 #include "media/base/video_frame.h"
 #include "media/base/wall_clock_time_source.h"
+#include "media/renderers/mock_gpu_memory_buffer_video_frame_pool.h"
 #include "media/renderers/video_renderer_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -118,7 +119,7 @@ class VideoRendererImplTest
             DoAll(SaveArg<3>(&output_cb_), RunCallback<2>(expect_to_success)));
     EXPECT_CALL(*this, OnWaitingForDecryptionKey()).Times(0);
     renderer_->Initialize(
-        &demuxer_stream_, status_cb, media::SetDecryptorReadyCB(),
+        &demuxer_stream_, status_cb, SetCdmReadyCB(),
         base::Bind(&VideoRendererImplTest::OnStatisticsUpdate,
                    base::Unretained(this)),
         base::Bind(&StrictMock<MockCB>::BufferingStateChange,
@@ -676,6 +677,7 @@ TEST_F(VideoRendererImplTest, RenderingStartedThenStopped) {
     event.RunAndWait();
     Mock::VerifyAndClearExpectations(&mock_cb_);
     EXPECT_EQ(0u, last_pipeline_statistics_.video_frames_dropped);
+    EXPECT_EQ(460800, last_pipeline_statistics_.video_memory_usage);
   }
 
   // Consider the case that rendering is faster than we setup the test event.
@@ -703,6 +705,7 @@ TEST_F(VideoRendererImplTest, RenderingStartedThenStopped) {
   // reported
   EXPECT_EQ(0u, last_pipeline_statistics_.video_frames_dropped);
   EXPECT_EQ(4u, last_pipeline_statistics_.video_frames_decoded);
+  EXPECT_EQ(460800, last_pipeline_statistics_.video_memory_usage);
 
   AdvanceTimeInMs(30);
   WaitForEnded();
@@ -735,21 +738,6 @@ TEST_F(VideoRendererImplTest, StartPlayingFromThenFlushThenEOS) {
   EXPECT_CALL(mock_cb_, BufferingStateChange(BUFFERING_HAVE_ENOUGH));
   WaitForEnded();
   Destroy();
-}
-
-namespace {
-class MockGpuMemoryBufferVideoFramePool : public GpuMemoryBufferVideoFramePool {
- public:
-  MockGpuMemoryBufferVideoFramePool(std::vector<base::Closure>* frame_ready_cbs)
-      : frame_ready_cbs_(frame_ready_cbs) {}
-  void MaybeCreateHardwareFrame(const scoped_refptr<VideoFrame>& video_frame,
-                                const FrameReadyCB& frame_ready_cb) override {
-    frame_ready_cbs_->push_back(base::Bind(frame_ready_cb, video_frame));
-  }
-
- private:
-  std::vector<base::Closure>* frame_ready_cbs_;
-};
 }
 
 class VideoRendererImplAsyncAddFrameReadyTest : public VideoRendererImplTest {

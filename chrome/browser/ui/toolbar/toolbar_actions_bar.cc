@@ -22,6 +22,7 @@
 #include "chrome/browser/ui/toolbar/component_toolbar_actions_factory.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar_delegate.h"
+#include "chrome/browser/ui/toolbar/toolbar_actions_bar_observer.h"
 #include "chrome/common/pref_names.h"
 #include "components/crx_file/id_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -77,7 +78,7 @@ template<typename Type1, typename Type2, typename FunctionType>
 void SortContainer(std::vector<Type1>* to_sort,
                    const std::vector<Type2>& reference,
                    FunctionType equal) {
-  DCHECK_GE(to_sort->size(), reference.size()) <<
+  CHECK_GE(to_sort->size(), reference.size()) <<
       "|to_sort| must contain all elements in |reference|.";
   if (reference.empty())
     return;
@@ -137,6 +138,8 @@ ToolbarActionsBar::~ToolbarActionsBar() {
   // the order of deletion between the views and the ToolbarActionsBar.
   DCHECK(toolbar_actions_.empty()) <<
       "Must call DeleteActions() before destruction.";
+  FOR_EACH_OBSERVER(ToolbarActionsBarObserver, observers_,
+                    OnToolbarActionsBarDestroyed());
 }
 
 // static
@@ -161,12 +164,12 @@ void ToolbarActionsBar::RegisterProfilePrefs(
 }
 
 gfx::Size ToolbarActionsBar::GetPreferredSize() const {
-  int icon_count = GetIconCount();
   if (in_overflow_mode()) {
     // In overflow, we always have a preferred size of a full row (even if we
     // don't use it), and always of at least one row. The parent may decide to
     // show us even when empty, e.g. as a drag target for dragging in icons from
     // the main container.
+    int icon_count = GetEndIndexInBounds() - GetStartIndexInBounds();
     int row_count = ((std::max(0, icon_count - 1)) /
         platform_settings_.icons_per_overflow_menu_row) + 1;
     return gfx::Size(
@@ -179,7 +182,7 @@ gfx::Size ToolbarActionsBar::GetPreferredSize() const {
   if (toolbar_actions_.empty())
     return gfx::Size();
 
-  return gfx::Size(IconCountToWidth(icon_count), IconHeight());
+  return gfx::Size(IconCountToWidth(GetIconCount()), IconHeight());
 }
 
 int ToolbarActionsBar::GetMinimumWidth() const {
@@ -284,7 +287,7 @@ bool ToolbarActionsBar::NeedsOverflow() const {
   DCHECK(!in_overflow_mode());
   // We need an overflow view if either the end index is less than the number of
   // icons, or if a drag is in progress with the redesign turned on (since the
-  // user can drag an icon into the wrench menu).
+  // user can drag an icon into the app menu).
   return GetEndIndexInBounds() != toolbar_actions_.size() ||
          (is_drag_in_progress_ && !platform_settings_.chevron_enabled);
 }
@@ -452,9 +455,15 @@ void ToolbarActionsBar::OnDragStarted() {
 
 void ToolbarActionsBar::OnDragEnded() {
   // All drag-and-drop commands should go to the main bar.
-  ToolbarActionsBar* main_bar = in_overflow_mode() ? main_bar_ : this;
-  DCHECK(main_bar->is_drag_in_progress_);
-  main_bar->is_drag_in_progress_ = false;
+  if (in_overflow_mode()) {
+    main_bar_->OnDragEnded();
+    return;
+  }
+
+  DCHECK(is_drag_in_progress_);
+  is_drag_in_progress_ = false;
+  FOR_EACH_OBSERVER(ToolbarActionsBarObserver,
+                    observers_, OnToolbarActionDragDone());
 }
 
 void ToolbarActionsBar::OnDragDrop(int dragged_index,
@@ -469,7 +478,8 @@ void ToolbarActionsBar::OnDragDrop(int dragged_index,
   int delta = 0;
   if (drag_type == DRAG_TO_OVERFLOW)
     delta = -1;
-  else if (drag_type == DRAG_TO_MAIN)
+  else if (drag_type == DRAG_TO_MAIN &&
+           dragged_index >= static_cast<int>(model_->visible_icon_count()))
     delta = 1;
   model_->MoveActionIcon(toolbar_actions_[dragged_index]->GetId(),
                          dropped_index);
@@ -551,6 +561,14 @@ ToolbarActionViewController* ToolbarActionsBar::GetMainControllerForAction(
     ToolbarActionViewController* action) {
   return in_overflow_mode() ?
       main_bar_->GetActionForId(action->GetId()) : action;
+}
+
+void ToolbarActionsBar::AddObserver(ToolbarActionsBarObserver* observer) {
+  observers_.AddObserver(observer);
+}
+
+void ToolbarActionsBar::RemoveObserver(ToolbarActionsBarObserver* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 void ToolbarActionsBar::MaybeShowExtensionBubble(
@@ -696,20 +714,47 @@ void ToolbarActionsBar::ResizeDelegate(gfx::Tween::Type tween_type,
     // action and added a different one in quick succession).
     delegate_->Redraw(false);
   }
+
+  FOR_EACH_OBSERVER(ToolbarActionsBarObserver,
+                    observers_, OnToolbarActionsBarDidStartResize());
 }
 
 void ToolbarActionsBar::OnToolbarHighlightModeChanged(bool is_highlighting) {
   if (!model_->actions_initialized())
     return;
-  // It's a bit of a pain that we delete and recreate everything here, but given
-  // everything else going on (the lack of highlight, [n] more extensions
-  // appearing, etc), it's not worth the extra complexity to create and insert
-  // only the new actions.
-  DeleteActions();
-  CreateActions();
-  // Resize the delegate. We suppress the chevron so that we don't risk showing
-  // it only for the duration of the animation.
-  ResizeDelegate(gfx::Tween::LINEAR, true);
+
+  {
+    base::AutoReset<bool> layout_resetter(&suppress_layout_, true);
+    base::AutoReset<bool> animation_resetter(&suppress_animation_, true);
+    std::set<std::string> seen;
+    for (const ToolbarActionsModel::ToolbarItem item :
+         model_->toolbar_items()) {
+      auto current_pos =
+          std::find_if(toolbar_actions_.begin(), toolbar_actions_.end(),
+                       [&item](const ToolbarActionViewController* action) {
+                         return action->GetId() == item.id;
+                       });
+      if (current_pos == toolbar_actions_.end()) {
+        toolbar_actions_.push_back(
+            model_->CreateActionForItem(browser_, this, item).release());
+        delegate_->AddViewForAction(toolbar_actions_.back(),
+                                    toolbar_actions_.size() - 1);
+      }
+      seen.insert(item.id);
+    }
+
+    for (ToolbarActions::iterator iter = toolbar_actions_.begin();
+         iter != toolbar_actions_.end();) {
+      if (seen.count((*iter)->GetId()) == 0) {
+        delegate_->RemoveViewForAction(*iter);
+        iter = toolbar_actions_.erase(iter);
+      } else {
+        ++iter;
+      }
+    }
+  }
+
+  ReorderActions();
 }
 
 void ToolbarActionsBar::OnToolbarModelInitialized() {

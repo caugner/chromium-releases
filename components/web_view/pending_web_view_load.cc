@@ -19,6 +19,8 @@ PendingWebViewLoad::~PendingWebViewLoad() {}
 void PendingWebViewLoad::Init(mojo::URLRequestPtr request) {
   DCHECK(!frame_connection_);
   pending_url_ = GURL(request->url);
+  navigation_start_time_ =
+      base::TimeTicks::FromInternalValue(request->originating_time_ticks);
   frame_connection_.reset(new FrameConnection);
   frame_connection_->Init(web_view_->app_, request.Pass(),
                           base::Bind(&PendingWebViewLoad::OnGotContentHandlerID,
@@ -29,7 +31,7 @@ void PendingWebViewLoad::OnGotContentHandlerID() {
   is_content_handler_id_valid_ = true;
   if (web_view_->root_)
     web_view_->OnLoad(pending_url_);
-  // The else case is handled by WebViewImpl when it gets the View (|root_|).
+  // The else case is handled by WebViewImpl when it gets the Window (|root_|).
 }
 
 }  // namespace web_view

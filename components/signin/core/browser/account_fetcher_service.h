@@ -5,9 +5,6 @@
 #ifndef COMPONENTS_SIGNIN_CORE_BROWSER_ACCOUNT_FETCHER_SERVICE_H_
 #define COMPONENTS_SIGNIN_CORE_BROWSER_ACCOUNT_FETCHER_SERVICE_H_
 
-#include <list>
-#include <map>
-
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/timer/timer.h"
@@ -45,15 +42,10 @@ class AccountFetcherService : public KeyedService,
 
   void Initialize(SigninClient* signin_client,
                   OAuth2TokenService* token_service,
-                  AccountTrackerService* account_tracker_service,
-                  invalidation::InvalidationService* invalidation_service);
+                  AccountTrackerService* account_tracker_service);
 
   // KeyedService implementation
   void Shutdown() override;
-
-  // To be called after the Profile is fully initialized; permits network
-  // calls to be executed.
-  void EnableNetworkFetches();
 
   // Indicates if all user information has been fetched. If the result is false,
   // there are still unfininshed fetchers.
@@ -65,8 +57,21 @@ class AccountFetcherService : public KeyedService,
     return account_tracker_service_;
   }
 
+  // It is important that network fetches are not enabled until the profile is
+  // loaded independent of when we inject the invalidation service.
+  // See http://crbug.com/441399 for more context.
+  void SetupInvalidationsOnProfileLoad(
+      invalidation::InvalidationService* invalidation_service);
+
+  void EnableNetworkFetchesForTest();
+
   // Called by ChildAccountInfoFetcher.
   void SetIsChildAccount(const std::string& account_id, bool is_child_account);
+
+  // OAuth2TokenService::Observer implementation.
+  void OnRefreshTokenAvailable(const std::string& account_id) override;
+  void OnRefreshTokenRevoked(const std::string& account_id) override;
+  void OnRefreshTokensLoaded() override;
 
  private:
   friend class AccountInfoFetcher;
@@ -79,6 +84,8 @@ class AccountFetcherService : public KeyedService,
   // Called on all account state changes. Decides whether to fetch new child
   // status information or reset old values that aren't valid now.
   void UpdateChildInfo();
+
+  void MaybeEnableNetworkFetches();
 
   // Virtual so that tests can override the network fetching behaviour.
   // Further the two fetches are managed by a different refresh logic and
@@ -103,20 +110,18 @@ class AccountFetcherService : public KeyedService,
                               scoped_ptr<base::DictionaryValue> user_info);
   void OnUserInfoFetchFailure(const std::string& account_id);
 
-  // OAuth2TokenService::Observer implementation.
-  void OnRefreshTokenAvailable(const std::string& account_id) override;
-  void OnRefreshTokenRevoked(const std::string& account_id) override;
-  void OnRefreshTokensLoaded() override;
-
   AccountTrackerService* account_tracker_service_;  // Not owned.
   OAuth2TokenService* token_service_;  // Not owned.
   SigninClient* signin_client_;  // Not owned.
   invalidation::InvalidationService* invalidation_service_;  // Not owned.
   bool network_fetches_enabled_;
-  std::list<std::string> pending_user_info_fetches_;
+  bool profile_loaded_;
+  bool refresh_tokens_loaded_;
   base::Time last_updated_;
   base::OneShotTimer timer_;
   bool shutdown_called_;
+  // Only disabled in tests.
+  bool scheduled_refresh_enabled_;
 
   std::string child_request_account_id_;
   scoped_ptr<ChildAccountInfoFetcher> child_info_request_;

@@ -5,8 +5,8 @@
 #include "mandoline/ui/desktop_ui/browser_manager.h"
 
 #include "base/command_line.h"
-#include "components/mus/public/cpp/view.h"
-#include "components/mus/public/cpp/view_observer.h"
+#include "components/mus/public/cpp/window.h"
+#include "components/mus/public/cpp/window_observer.h"
 #include "mandoline/ui/desktop_ui/browser_window.h"
 
 namespace mandoline {
@@ -18,9 +18,11 @@ const char kGoogleURL[] = "http://www.google.com";
 }  // namespace
 
 BrowserManager::BrowserManager()
-    : app_(nullptr), startup_time_(base::Time::Now()) {}
+    : app_(nullptr), startup_ticks_(base::TimeTicks::Now()) {}
 
 BrowserManager::~BrowserManager() {
+  while (!browsers_.empty())
+    (*browsers_.begin())->Close();
   DCHECK(browsers_.empty());
 }
 

@@ -79,7 +79,6 @@ std::string GetChromeType() {
 }
 
 void UpdateAuthParams(base::DictionaryValue* params,
-                      bool has_users,
                       bool is_enrolling_consumer_management,
                       bool is_restrictive_proxy) {
   CrosSettings* cros_settings = CrosSettings::Get();
@@ -87,8 +86,6 @@ void UpdateAuthParams(base::DictionaryValue* params,
   cros_settings->GetBoolean(kAccountsPrefAllowNewUser, &allow_new_user);
   bool allow_guest = true;
   cros_settings->GetBoolean(kAccountsPrefAllowGuest, &allow_guest);
-  // Account creation depends on Guest sign-in (http://crosbug.com/24570).
-  params->SetBoolean("createAccount", allow_new_user && allow_guest);
   params->SetBoolean("guestSignin", allow_guest);
 
   // nosignup flow if new users are not allowed.
@@ -100,32 +97,11 @@ void UpdateAuthParams(base::DictionaryValue* params,
   // 2. Consumer device > owner exists.
   // 3. New users are allowed by owner.
   // 4. Supervised users are allowed by owner.
-  bool supervised_users_allowed =
-      user_manager::UserManager::Get()->AreSupervisedUsersAllowed();
-  bool supervised_users_can_create = true;
-  int message_id = -1;
-  if (!has_users) {
-    supervised_users_can_create = false;
-    message_id = IDS_CREATE_SUPERVISED_USER_NO_MANAGER_TEXT;
-  }
-  if (!allow_new_user || !supervised_users_allowed) {
-    supervised_users_can_create = false;
-    message_id = IDS_CREATE_SUPERVISED_USER_CREATION_RESTRICTED_TEXT;
-  }
-  if (supervised_users_can_create &&
-      ChromeUserManager::Get()
-          ->GetUsersAllowedForSupervisedUsersCreation()
-          .empty()) {
-    supervised_users_can_create = false;
-    message_id = IDS_CREATE_SUPERVISED_USER_NO_MANAGER_EXCEPT_KIDS_TEXT;
-  }
-
-  params->SetBoolean("supervisedUsersEnabled", supervised_users_allowed);
+  ChromeUserManager* user_manager = ChromeUserManager::Get();
+  bool supervised_users_can_create =
+      user_manager->AreSupervisedUsersAllowed() && allow_new_user &&
+      !user_manager->GetUsersAllowedForSupervisedUsersCreation().empty();
   params->SetBoolean("supervisedUsersCanCreate", supervised_users_can_create);
-  if (!supervised_users_can_create) {
-    params->SetString("supervisedUsersRestrictionReason",
-                      l10n_util::GetStringUTF16(message_id));
-  }
 
   // Now check whether we're in multi-profiles user adding scenario and
   // disable GAIA right panel features if that's the case.
@@ -135,7 +111,7 @@ void UpdateAuthParams(base::DictionaryValue* params,
       is_enrolling_consumer_management) {
     params->SetBoolean("createAccount", false);
     params->SetBoolean("guestSignin", false);
-    params->SetBoolean("supervisedUsersEnabled", false);
+    params->SetBoolean("supervisedUsersCanCreate", false);
   }
 }
 
@@ -199,11 +175,6 @@ void GaiaScreenHandler::LoadGaia(const GaiaContext& context) {
 void GaiaScreenHandler::LoadGaiaWithVersion(
     const GaiaContext& context,
     const std::string& platform_version) {
-  if (!auth_extension_) {
-    Profile* signin_profile = ProfileHelper::GetSigninProfile();
-    auth_extension_.reset(new ScopedGaiaAuthExtension(signin_profile));
-  }
-
   base::DictionaryValue params;
   const bool is_enrolling_consumer_management =
       context.is_enrolling_consumer_management;
@@ -213,12 +184,13 @@ void GaiaScreenHandler::LoadGaiaWithVersion(
   params.SetBoolean("isShowUsers", context.show_users);
   params.SetBoolean("useOffline", context.use_offline);
   params.SetString("gaiaId", context.gaia_id);
+  params.SetBoolean("readOnlyEmail", true);
   params.SetString("email", context.email);
   params.SetBoolean("isEnrollingConsumerManagement",
                     is_enrolling_consumer_management);
   params.SetString("gapsCookie", context.gaps_cookie);
 
-  UpdateAuthParams(&params, context.has_users, is_enrolling_consumer_management,
+  UpdateAuthParams(&params, is_enrolling_consumer_management,
                    IsRestrictiveProxy());
 
   if (!context.use_offline) {
@@ -226,24 +198,18 @@ void GaiaScreenHandler::LoadGaiaWithVersion(
     if (!app_locale.empty())
       params.SetString("hl", app_locale);
   } else {
-    base::DictionaryValue* localized_strings = new base::DictionaryValue();
-    const std::string enterprise_domain(
-        g_browser_process->platform_part()
-            ->browser_policy_connector_chromeos()
-            ->GetEnterpriseDomain());
+    policy::BrowserPolicyConnectorChromeOS* connector =
+        g_browser_process->platform_part()->browser_policy_connector_chromeos();
+    std::string enterprise_domain(connector->GetEnterpriseDomain());
     if (!enterprise_domain.empty()) {
-      localized_strings->SetString(
-          "stringEnterpriseInfo",
-          l10n_util::GetStringFUTF16(
-              IDS_NEWGAIA_OFFLINE_DEVICE_MANAGED_BY_NOTICE,
-              base::UTF8ToUTF16(enterprise_domain)));
+      params.SetString(
+          "enterpriseInfoMessage",
+          l10n_util::GetStringFUTF16(IDS_OFFLINE_LOGIN_DEVICE_MANAGED_BY_NOTICE,
+                                     base::UTF8ToUTF16(enterprise_domain)));
     }
-    params.Set("localizedStrings", localized_strings);
   }
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-
-  params.SetBoolean("useNewGaiaFlow", true);
 
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
@@ -267,6 +233,7 @@ void GaiaScreenHandler::LoadGaiaWithVersion(
     params.SetString("emailDomain", email_domain);
   }
 
+  GURL gaia_url;
   if (!command_line->HasSwitch(::switches::kGaiaUrl) &&
       command_line->HasSwitch(kGaiaSandboxUrlSwitch)) {
     // We can't use switch --gaia-url in this case cause we need get
@@ -275,16 +242,11 @@ void GaiaScreenHandler::LoadGaiaWithVersion(
     // Default to production Gaia for MM unless --gaia-url or --gaia-sandbox-url
     // is specified.
     // TODO(dpolukhin): crbug.com/462204
-    const GURL gaia_url =
-        GURL(command_line->GetSwitchValueASCII(kGaiaSandboxUrlSwitch));
-    params.SetString("gaiaUrl", gaia_url.spec());
+    gaia_url = GURL(command_line->GetSwitchValueASCII(kGaiaSandboxUrlSwitch));
   } else {
-    const GURL gaia_url =
-        command_line->HasSwitch(::switches::kGaiaUrl)
-            ? GURL(command_line->GetSwitchValueASCII(::switches::kGaiaUrl))
-            : GaiaUrls::GetInstance()->gaia_url();
-    params.SetString("gaiaUrl", gaia_url.spec());
+    gaia_url = GaiaUrls::GetInstance()->gaia_url();
   }
+  params.SetString("gaiaUrl", gaia_url.spec());
 
   if (use_easy_bootstrap_) {
     params.SetBoolean("useEafe", true);
@@ -329,14 +291,7 @@ void GaiaScreenHandler::MonitorOfflineIdle(bool is_online) {
 void GaiaScreenHandler::DeclareLocalizedValues(
     ::login::LocalizedValuesBuilder* builder) {
   builder->Add("signinScreenTitle", IDS_SIGNIN_SCREEN_TITLE_TAB_PROMPT);
-  builder->Add("createAccount", IDS_CREATE_ACCOUNT_HTML);
   builder->Add("guestSignin", IDS_BROWSE_WITHOUT_SIGNING_IN_HTML);
-  builder->Add("createSupervisedUser",
-               IDS_CREATE_SUPERVISED_USER_HTML);
-  builder->Add("createSupervisedUserFeatureName",
-               IDS_CREATE_SUPERVISED_USER_FEATURE_NAME);
-  builder->Add("consumerManagementEnrollmentSigninMessage",
-               IDS_LOGIN_CONSUMER_MANAGEMENT_ENROLLMENT);
   builder->Add("backButton", IDS_ACCNAME_BACK);
   builder->Add("closeButton", IDS_CLOSE);
   builder->Add("whitelistErrorConsumer", IDS_LOGIN_ERROR_WHITELIST);
@@ -344,7 +299,7 @@ void GaiaScreenHandler::DeclareLocalizedValues(
                IDS_ENTERPRISE_LOGIN_ERROR_WHITELIST);
   builder->Add("tryAgainButton", IDS_WHITELIST_ERROR_TRY_AGAIN_BUTTON);
   builder->Add("learnMoreButton", IDS_WHITELIST_ERROR_LEARN_MORE_BUTTON);
-  builder->Add("gaiaLoadingNewGaia", IDS_LOGIN_GAIA_LOADING_MESSAGE);
+  builder->Add("gaiaLoading", IDS_LOGIN_GAIA_LOADING_MESSAGE);
 
   // Strings used by the SAML fatal error dialog.
   builder->Add("fatalErrorMessageNoAccountDetails",
@@ -355,36 +310,29 @@ void GaiaScreenHandler::DeclareLocalizedValues(
                IDS_LOGIN_FATAL_ERROR_PASSWORD_VERIFICATION);
   builder->Add("fatalErrorMessageInsecureURL",
                IDS_LOGIN_FATAL_ERROR_TEXT_INSECURE_URL);
-  builder->Add("fatalErrorDismissButton", IDS_OK);
   builder->Add("fatalErrorDoneButton", IDS_DONE);
   builder->Add("fatalErrorTryAgainButton",
                IDS_LOGIN_FATAL_ERROR_TRY_AGAIN_BUTTON);
 
-  builder->AddF("offlineLoginWelcome", IDS_NEWGAIA_OFFLINE_WELCOME,
+  builder->AddF("offlineLoginWelcome", IDS_OFFLINE_LOGIN_WELCOME,
                 ash::GetChromeOSDeviceTypeResourceId());
-  builder->Add("offlineLoginEmail", IDS_NEWGAIA_OFFLINE_EMAIL);
-  builder->Add("offlineLoginPassword", IDS_NEWGAIA_OFFLINE_PASSWORD);
-  builder->Add("offlineLoginInvalidEmail", IDS_NEWGAIA_OFFLINE_INVALID_EMAIL);
+  builder->Add("offlineLoginEmail", IDS_OFFLINE_LOGIN_EMAIL);
+  builder->Add("offlineLoginPassword", IDS_OFFLINE_LOGIN_PASSWORD);
+  builder->Add("offlineLoginInvalidEmail", IDS_OFFLINE_LOGIN_INVALID_EMAIL);
   builder->Add("offlineLoginInvalidPassword",
-               IDS_NEWGAIA_OFFLINE_INVALID_PASSWORD);
-  builder->Add("offlineLoginNextBtn", IDS_NEWGAIA_OFFLINE_NEXT_BUTTON_TEXT);
+               IDS_OFFLINE_LOGIN_INVALID_PASSWORD);
+  builder->Add("offlineLoginNextBtn", IDS_OFFLINE_LOGIN_NEXT_BUTTON_TEXT);
   builder->Add("offlineLoginForgotPasswordBtn",
-               IDS_NEWGAIA_OFFLINE_FORGOT_PASSWORD_BUTTON_TEXT);
+               IDS_OFFLINE_LOGIN_FORGOT_PASSWORD_BUTTON_TEXT);
   builder->Add("offlineLoginForgotPasswordDlg",
-               IDS_NEWGAIA_OFFLINE_FORGOT_PASSWORD_DIALOG_TEXT);
-  builder->Add("offlineLoginCloseBtn", IDS_NEWGAIA_OFFLINE_CLOSE_BUTTON_TEXT);
-}
-
-void GaiaScreenHandler::GetAdditionalParameters(base::DictionaryValue* dict) {
-  dict->SetBoolean("isWebviewSignin", true);
+               IDS_OFFLINE_LOGIN_FORGOT_PASSWORD_DIALOG_TEXT);
+  builder->Add("offlineLoginCloseBtn", IDS_OFFLINE_LOGIN_CLOSE_BUTTON_TEXT);
 }
 
 void GaiaScreenHandler::Initialize() {
 }
 
 void GaiaScreenHandler::RegisterMessages() {
-  AddCallback("frameLoadingCompleted",
-              &GaiaScreenHandler::HandleFrameLoadingCompleted);
   AddCallback("webviewLoadAborted",
               &GaiaScreenHandler::HandleWebviewLoadAborted);
   AddCallback("completeLogin", &GaiaScreenHandler::HandleCompleteLogin);
@@ -401,6 +349,8 @@ void GaiaScreenHandler::RegisterMessages() {
   AddCallback("toggleEasyBootstrap",
               &GaiaScreenHandler::HandleToggleEasyBootstrap);
   AddCallback("identifierEntered", &GaiaScreenHandler::HandleIdentifierEntered);
+  AddCallback("updateOfflineLogin",
+              &GaiaScreenHandler::set_offline_login_is_active);
 }
 
 OobeUI::Screen GaiaScreenHandler::GetCurrentScreen() const {
@@ -414,47 +364,25 @@ OobeUI::Screen GaiaScreenHandler::GetCurrentScreen() const {
 void GaiaScreenHandler::OnPortalDetectionCompleted(
     const NetworkState* network,
     const NetworkPortalDetector::CaptivePortalState& state) {
-  VLOG(1) << "OnPortalDetectionCompleted " << state.status;
+  VLOG(1) << "OnPortalDetectionCompleted "
+          << NetworkPortalDetector::CaptivePortalStatusString(state.status);
 
   const NetworkPortalDetector::CaptivePortalStatus previous_status =
       captive_portal_status_;
   captive_portal_status_ = state.status;
-  if (IsOnline(captive_portal_status_) == IsOnline(previous_status) ||
+  if (offline_login_is_active() ||
+      IsOnline(captive_portal_status_) == IsOnline(previous_status) ||
       disable_restrictive_proxy_check_for_test_ ||
       GetCurrentScreen() != OobeUI::SCREEN_GAIA_SIGNIN)
     return;
 
-  LoadAuthExtension(true /* force */, true /* silent_load */,
-                    false /* offline */);
+  LoadAuthExtension(true /* force */, false /* offline */);
 }
 
 void GaiaScreenHandler::HandleIdentifierEntered(
     const std::string& account_identifier) {
   if (!Delegate()->IsUserWhitelisted(account_identifier))
     ShowWhitelistCheckFailedError();
-}
-
-void GaiaScreenHandler::HandleFrameLoadingCompleted(int status) {
-  const net::Error frame_error = static_cast<net::Error>(-status);
-  if (frame_error == net::ERR_ABORTED) {
-    LOG(WARNING) << "Ignoring Gaia frame error: " << frame_error;
-    return;
-  }
-  frame_error_ = frame_error;
-  if (frame_error == net::OK) {
-    VLOG(1) << "Gaia is loaded";
-    frame_state_ = FRAME_STATE_LOADED;
-  } else {
-    LOG(WARNING) << "Gaia frame error: " << frame_error_;
-    frame_state_ = FRAME_STATE_ERROR;
-  }
-
-  if (network_state_informer_->state() != NetworkStateInformer::ONLINE)
-    return;
-  if (frame_state_ == FRAME_STATE_LOADED)
-    UpdateState(NetworkError::ERROR_REASON_UPDATE);
-  else if (frame_state_ == FRAME_STATE_ERROR)
-    UpdateState(NetworkError::ERROR_REASON_FRAME_ERROR);
 }
 
 void GaiaScreenHandler::HandleWebviewLoadAborted(
@@ -491,27 +419,35 @@ void GaiaScreenHandler::HandleWebviewLoadAborted(
   UpdateState(error_reason);
 }
 
-std::string GaiaScreenHandler::GetCanonicalEmail(
+AccountId GaiaScreenHandler::GetAccountId(
     const std::string& authenticated_email,
     const std::string& gaia_id) const {
-  const std::string sanitized_email = gaia::SanitizeEmail(authenticated_email);
-
   const std::string canonicalized_email =
-      gaia::CanonicalizeEmail(sanitized_email);
+      gaia::CanonicalizeEmail(gaia::SanitizeEmail(authenticated_email));
+  const AccountId authenticated_account_id(
+      AccountId::FromUserEmailGaiaId(canonicalized_email, gaia_id));
+
+  // If we don't have UserManager instance (i.e. we are in unit test),
+  // or a known user has authenticated, just log in.
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
-  if (user_manager && !user_manager->IsKnownUser(canonicalized_email)) {
-    std::string old_canonical_email;
-    if (user_manager->GetKnownUserCanonicalEmail(gaia_id,
-                                                 &old_canonical_email)) {
-      if (old_canonical_email != canonicalized_email) {
-        LOG(WARNING) << "Existing user '" << old_canonical_email
-                     << "' authenticated by alias '" << sanitized_email << "'.";
-        return old_canonical_email;
-      }
-    }
+  if (!user_manager || user_manager->IsKnownUser(authenticated_account_id))
+    return authenticated_account_id;
+
+  // If [part of] user id has changed, update stored data and connect user
+  // to existing home directory.
+  AccountId old_account_id(EmptyAccountId());
+  if (!user_manager->GetKnownUserAccountId(authenticated_account_id,
+                                           &old_account_id)) {
+    return authenticated_account_id;
   }
-  // For compatibility reasons, sanitized email is used.
-  return sanitized_email;
+
+  if (old_account_id.GetUserEmail() != canonicalized_email) {
+    LOG(WARNING) << "Existing user '" << old_account_id.GetUserEmail()
+                 << "' authenticated by alias '" << canonicalized_email << "'.";
+    return old_account_id;
+  }
+
+  return authenticated_account_id;
 }
 
 void GaiaScreenHandler::HandleCompleteAuthentication(
@@ -529,8 +465,7 @@ void GaiaScreenHandler::HandleCompleteAuthentication(
   const std::string sanitized_email = gaia::SanitizeEmail(email);
   Delegate()->SetDisplayEmail(sanitized_email);
 
-  const std::string canonical_email = GetCanonicalEmail(email, gaia_id);
-  UserContext user_context(canonical_email);
+  UserContext user_context(GetAccountId(email, gaia_id));
   user_context.SetGaiaID(gaia_id);
   user_context.SetKey(Key(password));
   user_context.SetAuthCode(auth_code);
@@ -563,7 +498,7 @@ void GaiaScreenHandler::HandleCompleteLogin(const std::string& gaia_id,
 
   // Consumer management enrollment is in progress.
   const std::string owner_email =
-      user_manager::UserManager::Get()->GetOwnerEmail();
+      user_manager::UserManager::Get()->GetOwnerAccountId().GetUserEmail();
   if (typed_email != owner_email) {
     // Show Gaia sign-in screen again, since we only allow the owner to sign
     // in.
@@ -602,17 +537,22 @@ void GaiaScreenHandler::HandleScrapedPasswordVerificationFailed() {
 
 void GaiaScreenHandler::HandleToggleEasyBootstrap() {
   use_easy_bootstrap_ = !use_easy_bootstrap_;
-  LoadAuthExtension(true /* force */, true /* silent_load */,
-                    false /* offline */);
+  LoadAuthExtension(true /* force */, false /* offline */);
 }
 
 void GaiaScreenHandler::HandleGaiaUIReady() {
+  VLOG(1) << "Gaia is loaded";
+
   // As we could miss and window.onload could already be called, restore
   // focus to current pod (see crbug/175243).
   if (gaia_silent_load_)
     signin_screen_handler_->RefocusCurrentPod();
 
-  HandleFrameLoadingCompleted(0);
+  frame_error_ = net::OK;
+  frame_state_ = FRAME_STATE_LOADED;
+
+  if (network_state_informer_->state() == NetworkStateInformer::ONLINE)
+    UpdateState(NetworkError::ERROR_REASON_UPDATE);
 
   if (test_expects_complete_login_)
     SubmitLoginFormForTest();
@@ -651,8 +591,7 @@ void GaiaScreenHandler::DoCompleteLogin(const std::string& gaia_id,
   DCHECK(!gaia_id.empty());
   const std::string sanitized_email = gaia::SanitizeEmail(typed_email);
   Delegate()->SetDisplayEmail(sanitized_email);
-  const std::string canonical_email = GetCanonicalEmail(typed_email, gaia_id);
-  UserContext user_context(canonical_email);
+  UserContext user_context(GetAccountId(typed_email, gaia_id));
   user_context.SetGaiaID(gaia_id);
   user_context.SetKey(Key(password));
   user_context.SetAuthFlow(using_saml
@@ -811,7 +750,7 @@ void GaiaScreenHandler::ShowGaiaScreenIfReady() {
     std::vector<std::string> input_methods =
         imm->GetInputMethodUtil()->GetHardwareLoginInputMethodIds();
     const std::string owner_im = SigninScreenHandler::GetUserLRUInputMethod(
-        user_manager::UserManager::Get()->GetOwnerEmail());
+        user_manager::UserManager::Get()->GetOwnerAccountId().GetUserEmail());
     const std::string system_im = g_browser_process->local_state()->GetString(
         language_prefs::kPreferredKeyboardLayout);
 
@@ -828,8 +767,7 @@ void GaiaScreenHandler::ShowGaiaScreenIfReady() {
     }
   }
 
-  LoadAuthExtension(!gaia_silent_load_ /* force */, false /* silent_load */,
-                    false /* offline */);
+  LoadAuthExtension(!gaia_silent_load_ /* force */, false /* offline */);
   signin_screen_handler_->UpdateUIState(
       SigninScreenHandler::UI_STATE_GAIA_SIGNIN, nullptr);
 
@@ -851,15 +789,15 @@ void GaiaScreenHandler::ShowGaiaScreenIfReady() {
 }
 
 void GaiaScreenHandler::MaybePreloadAuthExtension() {
-  VLOG(1) << "MaybePreloadAuthExtension() call.";
+  VLOG(1) << "MaybePreloadAuthExtension";
 
   if (!network_portal_detector_) {
     NetworkPortalDetectorImpl* detector = new NetworkPortalDetectorImpl(
         g_browser_process->system_request_context(), false);
     detector->set_portal_test_url(GURL(kRestrictiveProxyURL));
     network_portal_detector_.reset(detector);
+    network_portal_detector_->AddObserver(this);
     network_portal_detector_->Enable(true);
-    network_portal_detector_->AddAndFireObserver(this);
   }
 
   // If cookies clearing was initiated or |dns_clear_task_running_| then auth
@@ -871,8 +809,7 @@ void GaiaScreenHandler::MaybePreloadAuthExtension() {
       network_state_informer_->state() == NetworkStateInformer::ONLINE) {
     gaia_silent_load_ = true;
     gaia_silent_load_network_ = network_state_informer_->network_path();
-    LoadAuthExtension(true /* force */, true /* silent_load */,
-                      false /* offline */);
+    LoadAuthExtension(true /* force */, false /* offline */);
   }
 }
 
@@ -886,8 +823,9 @@ void GaiaScreenHandler::ShowWhitelistCheckFailedError() {
 }
 
 void GaiaScreenHandler::LoadAuthExtension(bool force,
-                                          bool silent_load,
                                           bool offline) {
+  VLOG(1) << "LoadAuthExtension, force: " << force
+          << ", offline: " << offline;
   GaiaContext context;
   context.force_reload = force;
   context.is_local = offline;
@@ -896,18 +834,18 @@ void GaiaScreenHandler::LoadAuthExtension(bool force,
   context.is_enrolling_consumer_management = is_enrolling_consumer_management_;
 
   std::string gaia_id;
-  if (user_manager::UserManager::Get()->FindGaiaID(context.email, &gaia_id))
+  if (user_manager::UserManager::Get()->FindGaiaID(
+          AccountId::FromUserEmail(context.email), &gaia_id))
     context.gaia_id = gaia_id;
 
   if (Delegate()) {
     context.show_users = Delegate()->IsShowUsers();
-    context.has_users = !Delegate()->GetUsers().empty();
   }
 
   if (!context.email.empty()) {
     context.gaps_cookie =
         user_manager::UserManager::Get()->GetKnownUserGAPSCookie(
-            gaia::CanonicalizeEmail(context.email));
+            AccountId::FromUserEmail(gaia::CanonicalizeEmail(context.email)));
   }
 
   populated_email_.clear();

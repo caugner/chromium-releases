@@ -31,8 +31,8 @@
           'test_util.js',
         ],
         'externs': [
-          '<(EXTERNS_DIR)/chrome_send.js',
           '<(EXTERNS_DIR)/chrome_extensions.js',
+          '<(EXTERNS_DIR)/chrome_send.js',
           '<(EXTERNS_DIR)/file_manager_private.js',
           '<(EXTERNS_DIR)/metrics_private.js',
           '../../../../third_party/analytics/externs.js',
@@ -42,7 +42,7 @@
         ],
       },
       'includes': [
-        '../../../../third_party/closure_compiler/compile_js.gypi'
+        '../../compile_js.gypi',
       ],
     },
     {
@@ -50,6 +50,16 @@
       'variables': {
         'depends': [
           '../../../../third_party/jstemplate/compiled_resources.gyp:jstemplate',
+          '../../../../third_party/polymer/v1_0/components-chromium/iron-a11y-keys-behavior/iron-a11y-keys-behavior-extracted.js',
+          '../../../../third_party/polymer/v1_0/components-chromium/iron-behaviors/iron-button-state-extracted.js',
+          '../../../../third_party/polymer/v1_0/components-chromium/iron-behaviors/iron-control-state-extracted.js',
+          '../../../../third_party/polymer/v1_0/components-chromium/iron-form-element-behavior/iron-form-element-behavior-extracted.js',
+          '../../../../third_party/polymer/v1_0/components-chromium/iron-range-behavior/iron-range-behavior-extracted.js',
+          '../../../../third_party/polymer/v1_0/components-chromium/paper-behaviors/paper-inky-focus-behavior-extracted.js',
+          '../../../../third_party/polymer/v1_0/components-chromium/paper-behaviors/paper-ripple-behavior-extracted.js',
+          '../../../../third_party/polymer/v1_0/components-chromium/paper-progress/paper-progress-extracted.js',
+          '../../../../third_party/polymer/v1_0/components-chromium/paper-ripple/paper-ripple-extracted.js',
+          '../../../../third_party/polymer/v1_0/components-chromium/paper-slider/paper-slider-extracted.js',
           'error_util.js',
           '../../file_manager/common/js/metrics_base.js',
           'video_player_metrics.js',
@@ -88,8 +98,8 @@
           'media_controls.js',
         ],
         'externs': [
-          '<(EXTERNS_DIR)/chrome_send.js',
           '<(EXTERNS_DIR)/chrome_extensions.js',
+          '<(EXTERNS_DIR)/chrome_send.js',
           '<(EXTERNS_DIR)/file_manager_private.js',
           '<(EXTERNS_DIR)/media_player_private.js',
           '<(EXTERNS_DIR)/metrics_private.js',
@@ -103,7 +113,7 @@
         ],
       },
       'includes': [
-        '../../../../third_party/closure_compiler/compile_js.gypi'
+        '../../compile_js.gypi',
       ],
     }
   ],

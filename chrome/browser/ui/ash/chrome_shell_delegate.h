@@ -28,7 +28,7 @@ class WebContents;
 }
 
 namespace keyboard {
-class KeyboardControllerProxy;
+class KeyboardUI;
 }
 
 #if defined(OS_CHROMEOS)
@@ -58,13 +58,12 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   void PreInit() override;
   void PreShutdown() override;
   void Exit() override;
-  keyboard::KeyboardControllerProxy* CreateKeyboardControllerProxy() override;
+  keyboard::KeyboardUI* CreateKeyboardUI() override;
   void VirtualKeyboardActivated(bool activated) override;
   void AddVirtualKeyboardStateObserver(
       ash::VirtualKeyboardStateObserver* observer) override;
   void RemoveVirtualKeyboardStateObserver(
       ash::VirtualKeyboardStateObserver* observer) override;
-  content::BrowserContext* GetActiveBrowserContext() override;
   app_list::AppListViewDelegate* GetAppListViewDelegate() override;
   ash::ShelfDelegate* CreateShelfDelegate(ash::ShelfModel* model) override;
   ash::SystemTrayDelegate* CreateSystemTrayDelegate() override;
@@ -80,6 +79,8 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   base::string16 GetProductName() const override;
   void OpenKeyboardShortcutHelpPage() const override;
   gfx::Image GetDeprecatedAcceleratorImage() const override;
+  void ToggleTouchpad() override;
+  void ToggleTouchscreen() override;
 
   // content::NotificationObserver override:
   void Observe(int type,

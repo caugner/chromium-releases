@@ -48,7 +48,6 @@ function fillYouTubePlaceholders() {
 function showLoadingIndicator(isLastPage) {
   document.getElementById('loadingIndicator').className =
       isLastPage ? 'hidden' : 'visible';
-  updateLoadingIndicator(isLastPage);
 }
 
 // Sets the title.
@@ -120,24 +119,6 @@ function useFontScaling(scaling) {
   pincher.useFontScaling(scaling);
 }
 
-var updateLoadingIndicator = function() {
-  var colors = ["red", "yellow", "green", "blue"];
-  return function(isLastPage) {
-    if (!isLastPage && typeof this.colorShuffle == "undefined") {
-      var loader = document.getElementById("loader");
-      if (loader) {
-        var colorIndex = -1;
-        this.colorShuffle = setInterval(function() {
-          colorIndex = (colorIndex + 1) % colors.length;
-          loader.className = colors[colorIndex];
-        }, 600);
-      }
-    } else if (isLastPage && typeof this.colorShuffle != "undefined") {
-      clearInterval(this.colorShuffle);
-    }
-  };
-}();
-
 /**
  * Show the distiller feedback form.
  * @param questionText The i18n text for the feedback question.
@@ -160,7 +141,7 @@ function showFeedbackForm(questionText, yesText, noText) {
 document.getElementById('closeReaderView').addEventListener('click',
     function(e) {
       if (distiller) {
-        distiller.closePanel();
+        distiller.closePanel(true);
       }
     }, true);
 
@@ -393,6 +374,7 @@ var pincher = (function() {
     },
 
     handleTouchCancel: function(e) {
+      if (!pinching) return;
       endPinch();
     },
 

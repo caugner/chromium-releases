@@ -46,7 +46,6 @@
 // main thread for tests. This results in no frame received by
 // VideoCaptureAndroid.
 #define MAYBE_AllocateBadSize DISABLED_AllocateBadSize
-#define ReAllocateCamera DISABLED_ReAllocateCamera
 #define DeAllocateCameraWhileRunning DISABLED_DeAllocateCameraWhileRunning
 #define DeAllocateCameraWhileRunning DISABLED_DeAllocateCameraWhileRunning
 #define MAYBE_CaptureMjpeg DISABLED_CaptureMjpeg
@@ -79,7 +78,9 @@ class MockClient : public VideoCaptureDevice::Client {
   MOCK_METHOD0(DoReserveOutputBuffer, void(void));
   MOCK_METHOD0(DoOnIncomingCapturedBuffer, void(void));
   MOCK_METHOD0(DoOnIncomingCapturedVideoFrame, void(void));
-  MOCK_METHOD1(OnError, void(const std::string& reason));
+  MOCK_METHOD2(OnError,
+               void(const tracked_objects::Location& from_here,
+                    const std::string& reason));
   MOCK_CONST_METHOD0(GetBufferPoolUtilization, double(void));
 
   explicit MockClient(base::Callback<void(const VideoCaptureFormat&)> frame_cb)
@@ -281,7 +282,7 @@ TEST_F(VideoCaptureDeviceTest, MAYBE_OpenInvalidDevice) {
   } else {
     // The presence of the actual device is only checked on AllocateAndStart()
     // and not on creation for QTKit API in Mac OS X platform.
-    EXPECT_CALL(*client_, OnError(_)).Times(1);
+    EXPECT_CALL(*client_, OnError(_, _)).Times(1);
 
     VideoCaptureParams capture_params;
     capture_params.requested_format.frame_size.SetSize(640, 480);
@@ -311,7 +312,7 @@ TEST_P(VideoCaptureDeviceTest, CaptureWithSize) {
   ASSERT_TRUE(device);
   DVLOG(1) << names_->front().id();
 
-  EXPECT_CALL(*client_, OnError(_)).Times(0);
+  EXPECT_CALL(*client_, OnError(_, _)).Times(0);
 
   VideoCaptureParams capture_params;
   capture_params.requested_format.frame_size.SetSize(width, height);
@@ -329,7 +330,7 @@ TEST_P(VideoCaptureDeviceTest, CaptureWithSize) {
 }
 
 #if !defined(OS_ANDROID)
-INSTANTIATE_TEST_CASE_P(MAYBE_VideoCaptureDeviceTests,
+INSTANTIATE_TEST_CASE_P(VideoCaptureDeviceTests,
                         VideoCaptureDeviceTest,
                         testing::ValuesIn(kCaptureSizes));
 #endif
@@ -344,7 +345,7 @@ TEST_F(VideoCaptureDeviceTest, MAYBE_AllocateBadSize) {
       video_capture_device_factory_->Create(names_->front()));
   ASSERT_TRUE(device);
 
-  EXPECT_CALL(*client_, OnError(_)).Times(0);
+  EXPECT_CALL(*client_, OnError(_, _)).Times(0);
 
   const gfx::Size input_size(640, 480);
   VideoCaptureParams capture_params;
@@ -361,14 +362,8 @@ TEST_F(VideoCaptureDeviceTest, MAYBE_AllocateBadSize) {
     EXPECT_EQ(input_size.GetArea(), last_format().frame_size.GetArea());
 }
 
-// Cause hangs on Windows Debug. http://crbug.com/417824
-#if defined(OS_WIN) && !defined(NDEBUG)
-#define MAYBE_ReAllocateCamera DISABLED_ReAllocateCamera
-#else
-#define MAYBE_ReAllocateCamera ReAllocateCamera
-#endif
-
-TEST_F(VideoCaptureDeviceTest, MAYBE_ReAllocateCamera) {
+// Cause hangs on Windows, Linux. Fails Android. http://crbug.com/417824
+TEST_F(VideoCaptureDeviceTest, DISABLED_ReAllocateCamera) {
   names_ = EnumerateDevices();
   if (names_->empty()) {
     DVLOG(1) << "No camera available. Exiting test.";
@@ -422,7 +417,7 @@ TEST_F(VideoCaptureDeviceTest, DeAllocateCameraWhileRunning) {
       video_capture_device_factory_->Create(names_->front()));
   ASSERT_TRUE(device);
 
-  EXPECT_CALL(*client_, OnError(_)).Times(0);
+  EXPECT_CALL(*client_, OnError(_, _)).Times(0);
 
   VideoCaptureParams capture_params;
   capture_params.requested_format.frame_size.SetSize(640, 480);
@@ -449,7 +444,7 @@ TEST_F(VideoCaptureDeviceTest, MAYBE_CaptureMjpeg) {
       video_capture_device_factory_->Create(*name));
   ASSERT_TRUE(device);
 
-  EXPECT_CALL(*client_, OnError(_)).Times(0);
+  EXPECT_CALL(*client_, OnError(_, _)).Times(0);
 
   VideoCaptureParams capture_params;
   capture_params.requested_format.frame_size.SetSize(1280, 720);

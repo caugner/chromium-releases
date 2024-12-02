@@ -84,9 +84,9 @@ blink::WebURLRequest WebURLLoaderMock::ServeRedirect(
 
   base::WeakPtr<WebURLLoaderMock> self(weak_factory_.GetWeakPtr());
 
-  client_->willSendRequest(this, newRequest, redirectResponse);
+  client_->willFollowRedirect(this, newRequest, redirectResponse);
 
-  // |this| might be deleted in willSendRequest().
+  // |this| might be deleted in willFollowRedirect().
   if (!self)
     return newRequest;
 
@@ -146,4 +146,9 @@ void WebURLLoaderMock::setDefersLoading(bool deferred) {
     return;
   }
   NOTIMPLEMENTED();
+}
+
+void WebURLLoaderMock::setLoadingTaskRunner(blink::WebTaskRunner*) {
+  // In principle this is NOTIMPLEMENTED(), but if we put that here it floods
+  // the console during webkit unit tests, so we leave the function empty.
 }

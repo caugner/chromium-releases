@@ -18,18 +18,20 @@ import android.view.MenuItem.OnMenuItemClickListener;
 import android.view.View;
 
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.CommandLine;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.NativePage;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.compositor.layouts.content.InvalidationAwareThumbnailProvider;
 import org.chromium.chrome.browser.document.DocumentMetricIds;
 import org.chromium.chrome.browser.enhancedbookmarks.EnhancedBookmarkUtils;
 import org.chromium.chrome.browser.favicon.FaviconHelper;
-import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconAvailabilityCallback;
 import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconImageCallback;
+import org.chromium.chrome.browser.favicon.FaviconHelper.IconAvailabilityCallback;
 import org.chromium.chrome.browser.favicon.LargeIconBridge;
 import org.chromium.chrome.browser.favicon.LargeIconBridge.LargeIconCallback;
 import org.chromium.chrome.browser.metrics.StartupMetrics;
@@ -52,6 +54,7 @@ import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.net.NetworkChangeNotifier;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.PageTransition;
 
@@ -199,8 +202,6 @@ public class NewTabPage
             NewTabPageUma.recordAction(NewTabPageUma.ACTION_OPENED_MOST_VISITED_ENTRY);
             NewTabPageUma.recordExplicitUserNavigation(
                     item.getUrl(), NewTabPageUma.RAPPOR_ACTION_VISITED_SUGGESTED_TILE);
-            RecordHistogram.recordEnumeratedHistogram("NewTabPage.MostVisited", item.getIndex(),
-                    NewTabPageView.MAX_MOST_VISITED_SITES);
             RecordHistogram.recordMediumTimesHistogram("NewTabPage.MostVisitedTime",
                     System.nanoTime() - mConstructedTimeNs, TimeUnit.NANOSECONDS);
             mMostVisitedSites.recordOpenedMostVisitedItem(item.getIndex(), item.getTileType());
@@ -245,7 +246,12 @@ public class NewTabPage
         public void open(MostVisitedItem item) {
             if (mIsDestroyed) return;
             recordOpenedMostVisitedItem(item);
-            mTab.loadUrl(new LoadUrlParams(item.getUrl(), PageTransition.AUTO_BOOKMARK));
+            open(item.getUrl());
+        }
+
+        @Override
+        public void open(String url) {
+            mTab.loadUrl(new LoadUrlParams(url, PageTransition.AUTO_BOOKMARK));
         }
 
         @Override
@@ -348,12 +354,12 @@ public class NewTabPage
         }
 
         @Override
-        public void ensureFaviconIsAvailable(String pageUrl, String faviconUrl,
-                FaviconAvailabilityCallback callback) {
+        public void ensureIconIsAvailable(String pageUrl, String iconUrl, boolean isLargeIcon,
+                IconAvailabilityCallback callback) {
             if (mIsDestroyed) return;
             if (mFaviconHelper == null) mFaviconHelper = new FaviconHelper();
-            mFaviconHelper.ensureFaviconIsAvailable(mProfile, mTab.getWebContents(), pageUrl,
-                    faviconUrl, callback);
+            mFaviconHelper.ensureIconIsAvailable(
+                    mProfile, mTab.getWebContents(), pageUrl, iconUrl, isLargeIcon, callback);
         }
 
         @Override
@@ -442,6 +448,9 @@ public class NewTabPage
         mIsIconMode = true;
         mNewTabPageView.initialize(mNewTabPageManager, isInSingleUrlBarMode(activity),
                 mSearchProviderHasLogo, mIsIconMode);
+
+        RecordHistogram.recordBooleanHistogram(
+                "NewTabPage.MobileIsUserOnline", NetworkChangeNotifier.isOnline());
     }
 
     private static MostVisitedSites buildMostVisitedSites(Profile profile) {
@@ -474,8 +483,13 @@ public class NewTabPage
     }
 
     private void updateSearchProviderHasLogo() {
-        mSearchProviderHasLogo = !mOptOutPromoShown
-                && TemplateUrlService.getInstance().isDefaultSearchEngineGoogle();
+        if (CommandLine.getInstance().hasSwitch(ChromeSwitches.ENABLE_NTP_SNIPPETS)) {
+            mSearchProviderHasLogo = false;
+            if (mNewTabPageView != null) mNewTabPageView.setSearchProviderHasLogo(false);
+        } else {
+            mSearchProviderHasLogo = !mOptOutPromoShown
+                    && TemplateUrlService.getInstance().isDefaultSearchEngineGoogle();
+        }
     }
 
     private void onSearchEngineUpdated() {

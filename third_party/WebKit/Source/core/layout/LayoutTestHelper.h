@@ -17,9 +17,13 @@
 namespace blink {
 
 class RenderingTest : public testing::Test {
-    WTF_MAKE_FAST_ALLOCATED(RenderingTest);
+    USING_FAST_MALLOC(RenderingTest);
+public:
+    virtual FrameSettingOverrideFunction settingOverrider() const { return nullptr; }
+
 protected:
     void SetUp() override;
+    void TearDown() override;
 
     Document& document() const { return m_pageHolder->document(); }
 

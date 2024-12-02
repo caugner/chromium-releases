@@ -4,8 +4,11 @@
 
 package com.android.webview.chromium;
 
+import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
 import android.app.assist.AssistStructure.ViewNode;
 import android.content.Context;
+import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -60,6 +63,7 @@ import org.chromium.content_public.browser.NavigationHistory;
 
 import java.io.BufferedWriter;
 import java.io.File;
+import java.lang.reflect.Method;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Queue;
@@ -196,6 +200,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     @Override
     // BUG=6790250 |javaScriptInterfaces| was only ever used by the obsolete DumpRenderTree
     // so is ignored. TODO: remove it from WebViewProvider.
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     public void init(final Map<String, Object> javaScriptInterfaces,
             final boolean privateBrowsing) {
         if (privateBrowsing) {
@@ -1371,6 +1376,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     }
 
     @Override
+    @TargetApi(Build.VERSION_CODES.M)
     public void postMessageToMainFrame(final WebMessage message, final Uri targetOrigin) {
         if (checkNeedsPost()) {
             mRunQueue.addTask(new Runnable() {
@@ -1539,6 +1545,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         return mAwContents.getAccessibilityNodeProvider();
     }
 
+    @TargetApi(Build.VERSION_CODES.M)
     @Override
     public void onProvideVirtualStructure(final ViewStructure structure) {
         mFactory.startYourEngines(false);
@@ -1569,10 +1576,15 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
 
     // When creating the Assist structure, the left and top are relative to the parent node, and
     // scroll offsets are not needed.
+    @TargetApi(Build.VERSION_CODES.M)
     private void createAssistStructure(ViewStructure viewNode, AccessibilitySnapshotNode node,
             int parentX, int parentY) {
         viewNode.setClassName(node.className);
-        viewNode.setText(node.text);
+        if (node.hasSelection) {
+            viewNode.setText(node.text, node.startSelection, node.endSelection);
+        } else {
+            viewNode.setText(node.text);
+        }
         // Do not pass scroll information.
         viewNode.setDimens(node.x - parentX, node.y - parentY, 0, 0, node.width, node.height);
         viewNode.setChildCount(node.children.size());
@@ -1712,6 +1724,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     }
 
     @Override
+    @SuppressLint("DrawAllocation")
     public void onDraw(final Canvas canvas) {
         mFactory.startYourEngines(true);
         if (checkNeedsPost()) {
@@ -1744,6 +1757,21 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             return;
         }
         mAwContents.setLayoutParams(layoutParams);
+    }
+
+    // Overrides WebViewProvider.ViewDelegate.onActivityResult (not in system api jar yet).
+    // crbug.com/543272.
+    public void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
+        if (checkNeedsPost()) {
+            mRunQueue.addTask(new Runnable() {
+                @Override
+                public void run() {
+                    onActivityResult(requestCode, resultCode, data);
+                }
+            });
+            return;
+        }
+        mAwContents.onActivityResult(requestCode, resultCode, data);
     }
 
     @Override
@@ -2008,6 +2036,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     }
 
     @Override
+    @SuppressLint("DrawAllocation")
     public void onMeasure(final int widthMeasureSpec, final int heightMeasureSpec) {
         mFactory.startYourEngines(false);
         if (checkNeedsPost()) {
@@ -2237,6 +2266,19 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         @Override
         public int super_getScrollBarStyle() {
             return mWebViewPrivate.super_getScrollBarStyle();
+        }
+
+        @Override
+        public void super_startActivityForResult(Intent intent, int requestCode) {
+            // TODO(hush): Use mWebViewPrivate.super_startActivityForResult
+            // after N release. crbug.com/543272.
+            try {
+                Method startActivityForResultMethod =
+                        View.class.getMethod("startActivityForResult", Intent.class, int.class);
+                startActivityForResultMethod.invoke(mWebView, intent, requestCode);
+            } catch (Exception e) {
+                throw new RuntimeException("Invalid reflection", e);
+            }
         }
 
         @Override

@@ -8,6 +8,7 @@ source_set("service") {
     "ui_string_overrider.h",
     "variations_service.cc",
     "variations_service.h",
+    "variations_service_client.cc",
     "variations_service_client.h",
   ]
 
@@ -30,6 +31,7 @@ source_set("service") {
 source_set("unit_tests") {
   testonly = true
   sources = [
+    "ui_string_overrider_unittest.cc",
     "variations_service_unittest.cc",
   ]
 

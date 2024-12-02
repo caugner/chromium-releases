@@ -252,9 +252,6 @@ class AutofillTable : public WebDatabaseTable {
                                    std::vector<base::string16>* values,
                                    int limit);
 
-  // Returns whether any form elements are stored in the database.
-  bool HasFormElements();
-
   // Removes rows from the autofill table if they were created on or after
   // |delete_begin| and last used strictly before |delete_end|.  For rows where
   // the time range [date_created, date_last_used] overlaps with [delete_begin,
@@ -274,6 +271,12 @@ class AutofillTable : public WebDatabaseTable {
   // Removes the row from the autofill table for the given |name| |value| pair.
   virtual bool RemoveFormElement(const base::string16& name,
                                  const base::string16& value);
+
+  // Returns the number of unique values such that for all autofill entries with
+  // that value, the interval between creation date and last usage is entirely
+  // contained between [|begin|, |end|).
+  virtual int GetCountOfValuesContainedBetween(const base::Time& begin,
+                                               const base::Time& end);
 
   // Retrieves all of the entries in the autofill table.
   virtual bool GetAllAutofillEntries(std::vector<AutofillEntry>* entries);
@@ -410,6 +413,9 @@ class AutofillTable : public WebDatabaseTable {
  private:
   FRIEND_TEST_ALL_PREFIXES(AutofillTableTest, Autofill);
   FRIEND_TEST_ALL_PREFIXES(AutofillTableTest, Autofill_AddChanges);
+  FRIEND_TEST_ALL_PREFIXES(
+      AutofillTableTest,
+      Autofill_GetCountOfValuesContainedBetween);
   FRIEND_TEST_ALL_PREFIXES(AutofillTableTest, Autofill_RemoveBetweenChanges);
   FRIEND_TEST_ALL_PREFIXES(AutofillTableTest, Autofill_UpdateDontReplace);
   FRIEND_TEST_ALL_PREFIXES(

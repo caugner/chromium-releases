@@ -27,6 +27,8 @@
 #include "ui/ozone/public/surface_factory_ozone.h"
 #include "ui/ozone/public/surface_ozone_egl.h"
 
+using gl::GLImage;
+
 namespace gfx {
 
 namespace {
@@ -44,7 +46,7 @@ class GL_EXPORT GLSurfaceOzoneEGL : public NativeViewGLSurfaceEGL {
 
   // GLSurface:
   bool Initialize() override;
-  bool Resize(const gfx::Size& size) override;
+  bool Resize(const gfx::Size& size, float scale_factor) override;
   gfx::SwapResult SwapBuffers() override;
   bool ScheduleOverlayPlane(int z_order,
                             OverlayTransform transform,
@@ -77,14 +79,14 @@ bool GLSurfaceOzoneEGL::Initialize() {
   return Initialize(ozone_surface_->CreateVSyncProvider());
 }
 
-bool GLSurfaceOzoneEGL::Resize(const gfx::Size& size) {
+bool GLSurfaceOzoneEGL::Resize(const gfx::Size& size, float scale_factor) {
   if (!ozone_surface_->ResizeNativeWindow(size)) {
     if (!ReinitializeNativeSurface() ||
         !ozone_surface_->ResizeNativeWindow(size))
       return false;
   }
 
-  return NativeViewGLSurfaceEGL::Resize(size);
+  return NativeViewGLSurfaceEGL::Resize(size, scale_factor);
 }
 
 gfx::SwapResult GLSurfaceOzoneEGL::SwapBuffers() {
@@ -142,7 +144,7 @@ class GL_EXPORT GLSurfaceOzoneSurfaceless : public SurfacelessEGL {
 
   // GLSurface:
   bool Initialize() override;
-  bool Resize(const gfx::Size& size) override;
+  bool Resize(const gfx::Size& size, float scale_factor) override;
   gfx::SwapResult SwapBuffers() override;
   bool ScheduleOverlayPlane(int z_order,
                             OverlayTransform transform,
@@ -261,11 +263,12 @@ bool GLSurfaceOzoneSurfaceless::Initialize() {
   return true;
 }
 
-bool GLSurfaceOzoneSurfaceless::Resize(const gfx::Size& size) {
+bool GLSurfaceOzoneSurfaceless::Resize(const gfx::Size& size,
+                                       float scale_factor) {
   if (!ozone_surface_->ResizeNativeWindow(size))
     return false;
 
-  return SurfacelessEGL::Resize(size);
+  return SurfacelessEGL::Resize(size, scale_factor);
 }
 
 gfx::SwapResult GLSurfaceOzoneSurfaceless::SwapBuffers() {
@@ -280,12 +283,13 @@ gfx::SwapResult GLSurfaceOzoneSurfaceless::SwapBuffers() {
     EGLDisplay display = GetDisplay();
     WaitForFence(display, fence);
     eglDestroySyncKHR(display, fence);
-  } else if (ozone_surface_->IsUniversalDisplayLinkDevice()) {
-    glFinish();
   }
 
   unsubmitted_frames_.back()->ScheduleOverlayPlanes(widget_);
   unsubmitted_frames_.back()->overlays.clear();
+
+  if (ozone_surface_->IsUniversalDisplayLinkDevice())
+    glFinish();
 
   return ozone_surface_->OnSwapBuffers() ? gfx::SwapResult::SWAP_ACK
                                          : gfx::SwapResult::SWAP_FAILED;
@@ -355,8 +359,6 @@ bool GLSurfaceOzoneSurfaceless::SwapBuffersAsync(
     base::WorkerPool::PostTaskAndReply(FROM_HERE, fence_wait_task,
                                        fence_retired_callback, false);
     return true;
-  } else if (ozone_surface_->IsUniversalDisplayLinkDevice()) {
-    glFinish();
   }
 
   frame->ready = true;
@@ -385,9 +387,17 @@ void GLSurfaceOzoneSurfaceless::SubmitFrame() {
     unsubmitted_frames_.weak_erase(unsubmitted_frames_.begin());
     swap_buffers_pending_ = true;
 
-    last_swap_buffers_result_ =
-        frame->ScheduleOverlayPlanes(widget_) &&
-        ozone_surface_->OnSwapBuffersAsync(frame->callback);
+    if (!frame->ScheduleOverlayPlanes(widget_)) {
+      // |callback| is a wrapper for SwapCompleted(). Call it to properly
+      // propagate the failed state.
+      frame->callback.Run(gfx::SwapResult::SWAP_FAILED);
+      return;
+    }
+
+    if (ozone_surface_->IsUniversalDisplayLinkDevice())
+      glFinish();
+
+    ozone_surface_->OnSwapBuffersAsync(frame->callback);
   }
 }
 
@@ -410,6 +420,10 @@ void GLSurfaceOzoneSurfaceless::SwapCompleted(
     gfx::SwapResult result) {
   callback.Run(result);
   swap_buffers_pending_ = false;
+  if (result == gfx::SwapResult::SWAP_FAILED) {
+    last_swap_buffers_result_ = false;
+    return;
+  }
 
   SubmitFrame();
 }
@@ -426,7 +440,7 @@ class GL_EXPORT GLSurfaceOzoneSurfacelessSurfaceImpl
   // GLSurface:
   unsigned int GetBackingFrameBufferObject() override;
   bool OnMakeCurrent(GLContext* context) override;
-  bool Resize(const gfx::Size& size) override;
+  bool Resize(const gfx::Size& size, float scale_factor) override;
   bool SupportsPostSubBuffer() override;
   gfx::SwapResult SwapBuffers() override;
   bool SwapBuffersAsync(const SwapCompletionCallback& callback) override;
@@ -479,10 +493,12 @@ bool GLSurfaceOzoneSurfacelessSurfaceImpl::OnMakeCurrent(GLContext* context) {
   return SurfacelessEGL::OnMakeCurrent(context);
 }
 
-bool GLSurfaceOzoneSurfacelessSurfaceImpl::Resize(const gfx::Size& size) {
+bool GLSurfaceOzoneSurfacelessSurfaceImpl::Resize(const gfx::Size& size,
+                                                  float scale_factor) {
   if (size == GetSize())
     return true;
-  return GLSurfaceOzoneSurfaceless::Resize(size) && CreatePixmaps();
+  return GLSurfaceOzoneSurfaceless::Resize(size, scale_factor) &&
+         CreatePixmaps();
 }
 
 bool GLSurfaceOzoneSurfacelessSurfaceImpl::SupportsPostSubBuffer() {
@@ -518,7 +534,10 @@ bool GLSurfaceOzoneSurfacelessSurfaceImpl::SwapBuffersAsync(
 void GLSurfaceOzoneSurfacelessSurfaceImpl::Destroy() {
   if (!context_)
     return;
-  ui::ScopedMakeCurrent context(context_.get(), this);
+  scoped_refptr<gfx::GLContext> previous_context = gfx::GLContext::GetCurrent();
+  scoped_refptr<gfx::GLSurface> previous_surface = gfx::GLSurface::GetCurrent();
+  context_->MakeCurrent(this);
+
   glBindFramebufferEXT(GL_FRAMEBUFFER, 0);
   if (fbo_) {
     glDeleteTextures(arraysize(textures_), textures_);
@@ -531,6 +550,12 @@ void GLSurfaceOzoneSurfacelessSurfaceImpl::Destroy() {
     if (image)
       image->Destroy(true);
   }
+
+  if (previous_context.get()) {
+    previous_context->MakeCurrent(previous_surface.get());
+  } else {
+    context_->ReleaseCurrent(this);
+  }
 }
 
 bool GLSurfaceOzoneSurfacelessSurfaceImpl::IsSurfaceless() const {
@@ -538,9 +563,7 @@ bool GLSurfaceOzoneSurfacelessSurfaceImpl::IsSurfaceless() const {
 }
 
 GLSurfaceOzoneSurfacelessSurfaceImpl::~GLSurfaceOzoneSurfacelessSurfaceImpl() {
-  DCHECK(!fbo_);
-  for (size_t i = 0; i < arraysize(textures_); i++)
-    DCHECK(!textures_[i]) << "texture " << i << " not released";
+  Destroy();
 }
 
 void GLSurfaceOzoneSurfacelessSurfaceImpl::BindFramebuffer() {
@@ -563,7 +586,7 @@ bool GLSurfaceOzoneSurfacelessSurfaceImpl::CreatePixmaps() {
       return false;
     scoped_refptr<GLImageOzoneNativePixmap> image =
         new GLImageOzoneNativePixmap(GetSize(), GL_BGRA_EXT);
-    if (!image->Initialize(pixmap.get(), gfx::BufferFormat::BGRA_8888))
+    if (!image->Initialize(pixmap.get()))
       return false;
     images_[i] = image;
     // Bind image to texture.

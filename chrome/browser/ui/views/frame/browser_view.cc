@@ -26,6 +26,7 @@
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/mojo_runner_util.h"
 #include "chrome/browser/native_window_notification_source.h"
 #include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile.h"
@@ -59,6 +60,7 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/accelerator_table.h"
 #include "chrome/browser/ui/views/accessibility/invert_bubble_view.h"
+#include "chrome/browser/ui/views/autofill/save_card_bubble_views.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
@@ -86,10 +88,10 @@
 #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/reload_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
-#include "chrome/browser/ui/views/toolbar/wrench_toolbar_button.h"
 #include "chrome/browser/ui/views/translate/translate_bubble_view.h"
 #include "chrome/browser/ui/views/update_recommended_message_box.h"
 #include "chrome/browser/ui/views/website_settings/permissions_bubble_view.h"
@@ -133,6 +135,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/scoped_canvas.h"
 #include "ui/gfx/screen.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/controls/button/menu_button.h"
@@ -333,8 +336,8 @@ class BrowserViewLayoutDelegateImpl : public BrowserViewLayoutDelegate {
     return gfx::ToEnclosingRect(bounds_f);
   }
 
-  int GetTopInsetInBrowserView() const override {
-    return browser_view_->frame()->GetTopInset() -
+  int GetTopInsetInBrowserView(bool restored) const override {
+    return browser_view_->frame()->GetTopInset(restored) -
         browser_view_->y();
   }
 
@@ -550,18 +553,13 @@ BrowserView* BrowserView::GetBrowserViewForBrowser(const Browser* browser) {
 void BrowserView::Paint1pxHorizontalLine(gfx::Canvas* canvas,
                                          SkColor color,
                                          const gfx::Rect& bounds) {
-  canvas->Save();
-  SkScalar scale_factor = 1.0f / canvas->image_scale();
-  canvas->sk_canvas()->scale(scale_factor, scale_factor);
-
-  gfx::RectF line_rect =
-      gfx::ScaleRect(gfx::RectF(bounds), canvas->image_scale());
-  line_rect.Inset(0, line_rect.height() - 1, 0, 0);
-
+  gfx::ScopedCanvas scoped_canvas(canvas);
+  const float scale = canvas->UndoDeviceScaleFactor();
+  gfx::RectF rect(gfx::ScaleRect(gfx::RectF(bounds), scale));
+  rect.Inset(0, rect.height() - 1, 0, 0);
   SkPaint paint;
   paint.setColor(color);
-  canvas->sk_canvas()->drawRect(gfx::RectFToSkRect(line_rect), paint);
-  canvas->Restore();
+  canvas->sk_canvas()->drawRect(gfx::RectFToSkRect(rect), paint);
 }
 
 void BrowserView::InitStatusBubble() {
@@ -586,7 +584,8 @@ int BrowserView::GetTabStripHeight() const {
   // We want to return tabstrip_->height(), but we might be called in the midst
   // of layout, when that hasn't yet been updated to reflect the current state.
   // So return what the tabstrip height _ought_ to be right now.
-  return IsTabStripVisible() ? tabstrip_->GetPreferredSize().height() : 0;
+  return tabstrip_ && IsTabStripVisible() ?
+      tabstrip_->GetPreferredSize().height() : 0;
 }
 
 gfx::Point BrowserView::OffsetPointForToolbarBackgroundImage(
@@ -596,7 +595,7 @@ gfx::Point BrowserView::OffsetPointForToolbarBackgroundImage(
   // be).  We expect our parent's origin to be the window origin.
   gfx::Point window_point(point + GetMirroredPosition().OffsetFromOrigin());
   window_point.Offset(frame_->GetThemeBackgroundXInset(),
-                      -frame_->GetTopInset());
+                      -frame_->GetTopInset(false));
   return window_point;
 }
 
@@ -857,7 +856,7 @@ void BrowserView::SetStarredState(bool is_starred) {
 }
 
 void BrowserView::SetTranslateIconToggled(bool is_lit) {
-  GetLocationBarView()->SetTranslateIconToggled(is_lit);
+  // Translate icon is never active on Views.
 }
 
 void BrowserView::OnActiveTabChanged(content::WebContents* old_contents,
@@ -933,7 +932,7 @@ void BrowserView::OnActiveTabChanged(content::WebContents* old_contents,
 
 void BrowserView::ZoomChangedForActiveTab(bool can_show_bubble) {
   GetLocationBarView()->ZoomChangedForActiveTab(
-      can_show_bubble && !toolbar_->IsWrenchMenuShowing());
+      can_show_bubble && !toolbar_->app_menu_button()->IsMenuShowing());
 }
 
 gfx::Rect BrowserView::GetRestoredBounds() const {
@@ -1280,6 +1279,18 @@ void BrowserView::ShowBookmarkAppBubble(
   BookmarkAppBubbleView::ShowBubble(GetToolbarView(), web_app_info, callback);
 }
 
+autofill::SaveCardBubbleView* BrowserView::ShowSaveCreditCardBubble(
+    content::WebContents* web_contents,
+    autofill::SaveCardBubbleController* controller,
+    bool is_user_gesture) {
+  autofill::SaveCardBubbleViews* view = new autofill::SaveCardBubbleViews(
+      GetToolbarView()->GetSaveCreditCardBubbleAnchor(), web_contents,
+      controller);
+  view->Show(is_user_gesture ? autofill::SaveCardBubbleViews::USER_GESTURE
+                             : autofill::SaveCardBubbleViews::AUTOMATIC);
+  return view;
+}
+
 void BrowserView::ShowTranslateBubble(
     content::WebContents* web_contents,
     translate::TranslateStep step,
@@ -1303,7 +1314,8 @@ void BrowserView::ShowTranslateBubble(
 
   TranslateBubbleView::ShowBubble(
       GetToolbarView()->GetTranslateBubbleAnchor(), web_contents, step,
-      error_type, is_user_gesture);
+      error_type, is_user_gesture ? TranslateBubbleView::USER_GESTURE
+                                  : TranslateBubbleView::AUTOMATIC);
 }
 
 bool BrowserView::IsProfileResetBubbleSupported() const {
@@ -1326,7 +1338,7 @@ void BrowserView::ShowOneClickSigninBubble(
 
   views::View* anchor_view;
   if (type == BrowserWindow::ONE_CLICK_SIGNIN_BUBBLE_TYPE_BUBBLE)
-    anchor_view = toolbar_->app_menu();
+    anchor_view = toolbar_->app_menu_button();
   else
     anchor_view = toolbar_->location_bar();
 
@@ -1403,7 +1415,7 @@ void BrowserView::ShowAppMenu() {
       immersive_mode_controller_->GetRevealedLock(
           ImmersiveModeController::ANIMATE_REVEAL_NO));
 
-  toolbar_->app_menu()->Activate();
+  toolbar_->app_menu_button()->Activate();
 }
 
 bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
@@ -2374,6 +2386,12 @@ bool BrowserView::ShouldUseImmersiveFullscreenForUrl(const GURL& url) const {
 }
 
 void BrowserView::LoadAccelerators() {
+  // TODO(beng): for some reason GetFocusManager() returns null in this case,
+  //             investigate, but for now just disable accelerators in this
+  //             mode.
+  if (IsRunningInMojoRunner())
+    return;
+
   views::FocusManager* focus_manager = GetFocusManager();
   DCHECK(focus_manager);
 

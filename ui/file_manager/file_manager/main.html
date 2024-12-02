@@ -36,7 +36,9 @@
     <link rel="import" href="chrome://resources/polymer/v1_0/paper-input/paper-input-container.html">
     <link rel="import" href="chrome://resources/polymer/v1_0/paper-progress/paper-progress.html">
     <link rel="import" href="chrome://resources/polymer/v1_0/paper-ripple/paper-ripple.html">
+    <link rel="import" href="foreground/elements/files_ripple.html">
     <link rel="import" href="foreground/elements/files_toggle_ripple.html">
+    <link rel="import" href="foreground/elements/files_tooltip.html">
   </head>
 
   <body tabindex="-1">
@@ -132,10 +134,7 @@
       <cr-menu-item command="#open-with"
                 visibleif="full-page" hidden></cr-menu-item>
       <hr id="tasks-separator" visibleif="full-page" hidden>
-      <cr-menu-item command="#toggle-pinned" checkable></cr-menu-item>
-      <cr-menu-item command="#share"></cr-menu-item>
-      <cr-menu-item command="#create-folder-shortcut"></cr-menu-item>
-      <hr command="#share">
+      <hr id="actions-separator" hidden>
       <cr-menu-item command="#cut" visibleif="full-page"></cr-menu-item>
       <cr-menu-item command="#copy" visibleif="full-page"></cr-menu-item>
       <cr-menu-item command="#paste" visibleif="full-page"></cr-menu-item>
@@ -249,14 +248,14 @@
               i18n-values="aria-label:SHARE_BUTTON_LABEL"
               visibleif="full-page"
               has-tooltip>
-        <paper-ripple fit center class="circle"></paper-ripple>
+        <files-ripple></files-ripple>
         <div class="icon"></div>
       </button>
       <button id="delete-button" class="icon-button" tabindex="11" hidden
               i18n-values="aria-label:DELETE_BUTTON_LABEL"
               visibleif="full-page"
               has-tooltip>
-        <paper-ripple fit center class="circle"></paper-ripple>
+        <files-ripple></files-ripple>
         <div class="icon"></div>
       </button>
       <button id="search-button" class="icon-button" tabindex="12"
@@ -275,7 +274,7 @@
       <button id="refresh-button" class="icon-button" tabindex="14" hidden
               i18n-values="aria-label:REFRESH_BUTTON_LABEL"
               command="#refresh" has-tooltip>
-        <paper-ripple fit center class="circle"></paper-ripple>
+        <files-ripple></files-ripple>
         <div class="icon"></div>
       </button>
       <div id="cloud-import-combo-button"
@@ -283,14 +282,14 @@
            hidden>
         <div class="buttons">
           <button id="cloud-import-button"
-                  class="icon-button manual-display"
+                  class="icon-button"
                   tabindex="15"
                   i18n-values="aria-label:CLOUD_IMPORT_COMMAND"
                   has-tooltip>
             <iron-icon icon="cloud-queue"></iron-icon>
           </button>
           <button id="cloud-import-details-button"
-                  class="icon-button manual-display"
+                  class="icon-button"
                   tabindex="-1"
                   i18n-values="aria-label:CLOUD_IMPORT_SHOW_DETAILS"
                   has-tooltip>
@@ -305,7 +304,7 @@
       <button id="view-button" class="icon-button" tabindex="16"
               i18n-values="aria-label:CHANGE_TO_THUMBNAILVIEW_BUTTON_LABEL"
               has-tooltip>
-        <paper-ripple fit center class="circle"></paper-ripple>
+        <files-ripple></files-ripple>
         <div class="icon"></div>
       </button>
       <button id="sort-button" class="icon-button" tabindex="17"
@@ -444,9 +443,7 @@
       </div>
     </div>
     <div id="drag-container"></div>
-    <div id="tooltip">
-      <div id="tooltip-label"></div>
-    <div>
+    <files-tooltip></files-tooltip>
     <iframe id="command-dispatcher" hidden aria-hidden="true"></iframe>
 
     <script src="foreground/js/main_scripts.js"></script>

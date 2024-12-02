@@ -52,9 +52,6 @@ void JingleSessionManager::set_protocol_config(
 scoped_ptr<Session> JingleSessionManager::Connect(
     const std::string& host_jid,
     scoped_ptr<Authenticator> authenticator) {
-  // Notify |transport_factory_| that it may be used soon.
-  transport_factory_->PrepareTokens();
-
   scoped_ptr<JingleSession> session(new JingleSession(this));
   session->StartConnection(host_jid, authenticator.Pass());
   sessions_[session->session_id_] = session.get();
@@ -107,9 +104,6 @@ bool JingleSessionManager::OnSignalStrategyIncomingStanza(
 
     SendReply(stanza, JingleMessageReply::NONE);
 
-    // Notify |transport_factory_| that it may be used soon.
-    transport_factory_->PrepareTokens();
-
     scoped_ptr<Authenticator> authenticator =
         authenticator_factory_->CreateAuthenticator(
             signal_strategy_->GetLocalJid(), message.from,
@@ -147,7 +141,7 @@ bool JingleSessionManager::OnSignalStrategyIncomingStanza(
           error = SESSION_REJECTED;
       }
 
-      session->CloseInternal(error);
+      session->Close(error);
       delete session;
       DCHECK(sessions_.find(message.sid) == sessions_.end());
     }

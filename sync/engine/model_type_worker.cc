@@ -11,8 +11,8 @@
 #include "base/strings/stringprintf.h"
 #include "sync/engine/commit_contribution.h"
 #include "sync/engine/entity_tracker.h"
-#include "sync/engine/model_type_processor.h"
 #include "sync/engine/non_blocking_type_commit_contribution.h"
+#include "sync/internal_api/public/model_type_processor.h"
 #include "sync/syncable/syncable_util.h"
 #include "sync/util/cryptographer.h"
 #include "sync/util/time.h"
@@ -178,9 +178,9 @@ SyncerError ModelTypeWorker::ProcessGetUpdatesResponse(
   }
 
   DVLOG(1) << ModelTypeToString(type_) << ": "
-           << base::StringPrintf(
-                  "Delivering %zd applicable and %zd pending updates.",
-                  response_datas.size(), pending_updates.size());
+           << base::StringPrintf("Delivering %" PRIuS " applicable and %" PRIuS
+                                 " pending updates.",
+                                 response_datas.size(), pending_updates.size());
 
   // Forward these updates to the model thread so it can do the rest.
   model_type_processor_->OnUpdateReceived(data_type_state_, response_datas,
@@ -411,9 +411,9 @@ void ModelTypeWorker::OnCryptographerUpdated() {
 
   if (new_encryption_key || response_datas.size() > 0) {
     DVLOG(1) << ModelTypeToString(type_) << ": "
-             << base::StringPrintf(
-                    "Delivering encryption key and %zd decrypted updates.",
-                    response_datas.size());
+             << base::StringPrintf("Delivering encryption key and %" PRIuS
+                                   " decrypted updates.",
+                                   response_datas.size());
     model_type_processor_->OnUpdateReceived(data_type_state_, response_datas,
                                             UpdateResponseDataList());
   }

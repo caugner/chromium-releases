@@ -25,7 +25,7 @@ import java.util.HashSet;
  * Utility class for test signin functionality.
  */
 public final class SigninTestUtil {
-    private static final String TAG = "cr.Signin";
+    private static final String TAG = "Signin";
 
     private static final String DEFAULT_ACCOUNT = "test@gmail.com";
 
@@ -57,24 +57,25 @@ public final class SigninTestUtil {
         mAccountManager = new MockAccountManager(mContext, instrumentation.getContext());
         AccountManagerHelper.overrideAccountManagerHelperForTests(mContext, mAccountManager);
         overrideAccountIdProvider();
-        // Clear cached signed account name here or tests can flake.
-        ChromeSigninController.get(mContext).setSignedInAccountName(null);
-        // Clear cached accounts list here or tests can also flake. Needs to use the app context.
-        PreferenceManager.getDefaultSharedPreferences(mContext.getApplicationContext())
-                .edit()
-                .putStringSet(OAuth2TokenService.STORED_ACCOUNTS_KEY, new HashSet<String>())
-                .apply();
+        resetSigninState();
     }
 
     /**
      * Add an account with the default name.
      */
     public Account addTestAccount() {
-        Account account = createTestAccount(DEFAULT_ACCOUNT);
+        return addTestAccount(DEFAULT_ACCOUNT);
+    }
+
+    /**
+     * Add an account with a given name.
+     */
+    public Account addTestAccount(String name) {
+        Account account = createTestAccount(name);
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                AccountTrackerService.get(mContext).forceRefresh();
+                AccountTrackerService.get(mContext).invalidateAccountSeedStatus(true);
             }
         });
         return account;
@@ -89,7 +90,7 @@ public final class SigninTestUtil {
             @Override
             public void run() {
                 ChromeSigninController.get(mContext).setSignedInAccountName(DEFAULT_ACCOUNT);
-                AccountTrackerService.get(mContext).forceRefresh();
+                AccountTrackerService.get(mContext).invalidateAccountSeedStatus(true);
             }
         });
         return account;
@@ -120,5 +121,18 @@ public final class SigninTestUtil {
                 });
             }
         });
+    }
+
+    /**
+     * Should be called at setUp and tearDown so that the signin state is not leaked across tests.
+     * The setUp call is implicit inside the constructor.
+     */
+    public void resetSigninState() {
+        // Clear cached signed account name and accounts list.
+        ChromeSigninController.get(mContext).setSignedInAccountName(null);
+        PreferenceManager.getDefaultSharedPreferences(mContext.getApplicationContext())
+                .edit()
+                .putStringSet(OAuth2TokenService.STORED_ACCOUNTS_KEY, new HashSet<String>())
+                .apply();
     }
 }

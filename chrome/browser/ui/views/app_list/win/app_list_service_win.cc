@@ -39,6 +39,7 @@
 #include "chrome/installer/util/browser_distribution.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_switches.h"
 #include "ui/app_list/views/app_list_view.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/win/shell.h"
@@ -174,7 +175,7 @@ void CreateAppListShortcuts(
       web_app::internals::GetShortcutPaths(creation_locations);
 
   bool pin_to_taskbar = creation_locations.in_quick_launch_bar &&
-                        (base::win::GetVersion() >= base::win::VERSION_WIN7);
+                        base::win::CanPinShortcutToTaskbar();
 
   // Create a shortcut in the |user_data_dir| for taskbar pinning.
   if (pin_to_taskbar)
@@ -305,7 +306,7 @@ void AppListServiceWin::CreateShortcut() {
   shortcut_locations.on_desktop = true;
   shortcut_locations.in_quick_launch_bar = true;
   shortcut_locations.applications_menu_location =
-      web_app::APP_MENU_LOCATION_SUBDIR_CHROME;
+      web_app::APP_MENU_LOCATION_SUBDIR_CHROME_DEPRECATED;
   base::FilePath user_data_dir(
       g_browser_process->profile_manager()->user_data_dir());
 

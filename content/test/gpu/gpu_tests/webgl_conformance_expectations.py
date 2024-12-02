@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 import os
 
-from gpu_test_expectations import GpuTestExpectations
+from gpu_tests.gpu_test_expectations import GpuTestExpectations
 
 # See the GpuTestExpectations class for documentation.
 
@@ -36,8 +36,8 @@ class WebGLConformanceExpectations(GpuTestExpectations):
         bug=478572)
     self.Fail('deqp/data/gles2/shaders/scoping.html',
         bug=478572)
-    self.Fail('conformance/misc/expando-loss.html',
-        bug=485634)
+    self.Fail('conformance/extensions/ext-sRGB.html',
+        bug=540900)
 
     # Win failures
     self.Fail('conformance/glsl/bugs/' +
@@ -80,6 +80,10 @@ class WebGLConformanceExpectations(GpuTestExpectations):
     self.Skip('conformance/extensions/oes-texture-half-float-with-canvas.html',
         ['win', 'd3d9'], bug=896) # angle bug ID
 
+    # WIN / D3D9 / Intel failures
+    self.Fail('conformance/ogles/GL/cos/cos_001_to_006.html',
+        ['win', 'intel', 'd3d9'], bug=540538)
+
     # Win / OpenGL failures
     self.Fail('conformance/context/'+
         'context-attributes-alpha-depth-stencil-antialias.html',
@@ -94,7 +98,7 @@ class WebGLConformanceExpectations(GpuTestExpectations):
     # Win / OpenGL / AMD failures
     self.Skip('conformance/glsl/misc/shader-struct-scope.html',
         ['win', 'amd', 'opengl'], bug=1007) # angle bug ID
-    self.Fail('conformance/glsl/misc/shaders-with-invariance.html',
+    self.Skip('conformance/glsl/misc/shaders-with-invariance.html',
         ['win', 'amd', 'opengl'], bug=1007) # angle bug ID
     self.Fail('conformance/glsl/misc/struct-nesting-of-variable-names.html',
         ['win', 'amd', 'opengl'], bug=1007) # angle bug ID
@@ -107,8 +111,15 @@ class WebGLConformanceExpectations(GpuTestExpectations):
     self.Fail('deqp/data/gles2/shaders/swizzles.html',
         ['win', 'amd', 'opengl'], bug=1007) # angle bug ID
 
-    # Skip all WebGL CTS on OpenGL+Intel
-    self.Skip('*', ['win', 'opengl', 'intel'], bug=1007) # angle bug ID
+    # Win / OpenGL / Intel failures
+    self.Fail('conformance/extensions/webgl-draw-buffers.html',
+        ['win', 'intel', 'opengl'], bug=1007) # angle bug ID
+    self.Fail('conformance/glsl/functions/glsl-function-normalize.html',
+        ['win', 'intel', 'opengl'], bug=1007) # angle bug ID
+    self.Fail('conformance/glsl/misc/shader-struct-scope.html',
+        ['win', 'intel', 'opengl'], bug=1007) # angle bug ID
+    self.Fail('conformance/uniforms/uniform-default-values.html',
+        ['win', 'intel', 'opengl'], bug=1007) # angle bug ID
 
     # Mac failures
     self.Fail('conformance/glsl/misc/shaders-with-invariance.html',
@@ -206,6 +217,8 @@ class WebGLConformanceExpectations(GpuTestExpectations):
     # NVIDIA
     self.Fail('conformance/textures/misc/default-texture.html',
         ['linux', ('nvidia', 0x104a)], bug=422152)
+    self.Flaky('conformance/extensions/angle-instanced-arrays.html',
+               ['linux', 'nvidia'], bug=544989)
     self.Flaky('conformance/extensions/oes-element-index-uint.html',
                ['linux', 'nvidia'], bug=524144)
     # AMD Radeon 5450
@@ -315,9 +328,6 @@ class WebGLConformanceExpectations(GpuTestExpectations):
     self.Fail('conformance/textures/video/tex-image-and-sub-image-2d-with-' +
         'video-rgb-rgb-unsigned_byte.html',
         ['android', 'android-content-shell'], bug=499555)
-    self.Fail('conformance/textures/video/tex-image-and-sub-image-2d-with-' +
-        'video-rgba-rgba-unsigned_byte.html',
-        ['android', 'android-content-shell'], bug=499555)
     self.Fail('conformance/textures/misc/texture-npot-video.html',
         ['android', 'android-content-shell'], bug=520638)
     # These are failing on the Nexus 5 and 6
@@ -339,6 +349,10 @@ class WebGLConformanceExpectations(GpuTestExpectations):
               ['android', ('qualcomm', 'Adreno (TM) 420')], bug=499555)
     self.Fail('conformance/extensions/oes-texture-float-with-image.html',
               ['android', ('qualcomm', 'Adreno (TM) 420')], bug=499555)
+    self.Fail('conformance/textures/video/tex-image-and-sub-image-2d-with-' +
+        'video-rgba-rgba-unsigned_byte.html',
+        ['android', 'android-content-shell',
+         ('qualcomm', 'Adreno (TM) 420')], bug=499555)
     self.Fail('conformance/textures/video/tex-image-and-sub-image-2d-with-' +
         'video-rgb-rgb-unsigned_short_5_6_5.html',
         ['android', 'android-content-shell',
@@ -467,9 +481,3 @@ class WebGLConformanceExpectations(GpuTestExpectations):
         ['chromeos', ('intel', 0xa011)], bug=375554)
     self.Skip('conformance/uniforms/uniform-default-values.html',
         ['chromeos', ('intel', 0xa011)], bug=375554)
-
-    # Flaky on Mac & Linux
-    self.Fail('conformance/textures/misc/texture-upload-size.html',
-        ['mac'], bug=436493)
-    self.Fail('conformance/textures/misc/texture-upload-size.html',
-        ['linux'], bug=436493)

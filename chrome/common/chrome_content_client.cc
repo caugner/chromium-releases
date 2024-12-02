@@ -61,9 +61,15 @@
 #include "components/nacl/common/nacl_sandbox_type.h"
 #endif
 
+#if defined(ENABLE_EXTENSIONS)
+#include "chrome/common/extensions/extension_process_policy.h"
+#include "extensions/common/features/behavior_feature.h"
+#include "extensions/common/features/feature_provider.h"
+#endif
+
 #if defined(ENABLE_PLUGINS)
 #include "content/public/common/pepper_plugin_info.h"
-#include "flapper_version.h"  // In SHARED_INTERMEDIATE_DIR.
+#include "flapper_version.h"  // nogncheck  In SHARED_INTERMEDIATE_DIR.
 #include "ppapi/shared_impl/ppapi_permissions.h"
 #endif
 
@@ -195,13 +201,15 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
 }
 
 content::PepperPluginInfo CreatePepperFlashInfo(const base::FilePath& path,
-                                                const std::string& version) {
+                                                const std::string& version,
+                                                bool is_debug) {
   content::PepperPluginInfo plugin;
 
   plugin.is_out_of_process = true;
   plugin.name = content::kFlashPluginName;
   plugin.path = path;
   plugin.permissions = chrome::kPepperFlashPermissions;
+  plugin.is_debug = is_debug;
 
   std::vector<std::string> flash_version_numbers = base::SplitString(
       version, ".", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
@@ -244,7 +252,7 @@ void AddPepperFlashFromCommandLine(
           switches::kPpapiFlashVersion);
 
   plugins->push_back(
-      CreatePepperFlashInfo(base::FilePath(flash_path), flash_version));
+      CreatePepperFlashInfo(base::FilePath(flash_path), flash_version, false));
 }
 
 #if defined(OS_LINUX)
@@ -278,7 +286,7 @@ bool GetComponentUpdatedPepperFlash(content::PepperPluginInfo* plugin) {
                         "bundled or system plugin.";
         return false;
       }
-      *plugin = CreatePepperFlashInfo(flash_path, version);
+      *plugin = CreatePepperFlashInfo(flash_path, version, false);
       return true;
     }
     LOG(ERROR)
@@ -307,14 +315,13 @@ bool GetBundledPepperFlash(content::PepperPluginInfo* plugin) {
   if (!PathService::Get(chrome::FILE_PEPPER_FLASH_PLUGIN, &flash_path))
     return false;
 
-  *plugin = CreatePepperFlashInfo(flash_path, FLAPPER_VERSION_STRING);
+  *plugin = CreatePepperFlashInfo(flash_path, FLAPPER_VERSION_STRING, false);
   return true;
 #else
   return false;
 #endif  // FLAPPER_AVAILABLE
 }
 
-#if defined(FLAPPER_AVAILABLE)
 bool IsSystemFlashScriptDebuggerPresent() {
 #if defined(OS_WIN)
   const wchar_t kFlashRegistryRoot[] =
@@ -323,7 +330,7 @@ bool IsSystemFlashScriptDebuggerPresent() {
 
   base::win::RegKey path_key(HKEY_LOCAL_MACHINE, kFlashRegistryRoot, KEY_READ);
   DWORD debug_value;
-  if (FAILED(path_key.ReadValueDW(kIsDebuggerValueName, &debug_value)))
+  if (path_key.ReadValueDW(kIsDebuggerValueName, &debug_value) != ERROR_SUCCESS)
     return false;
 
   return (debug_value == 1);
@@ -332,18 +339,19 @@ bool IsSystemFlashScriptDebuggerPresent() {
   return false;
 #endif
 }
-#endif
 
 bool GetSystemPepperFlash(content::PepperPluginInfo* plugin) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  bool system_flash_is_debug = IsSystemFlashScriptDebuggerPresent();
 
 #if defined(FLAPPER_AVAILABLE)
   // If flapper is available, only try the system plugin if either:
   // --disable-bundled-ppapi-flash is specified, or the system debugger is the
   // Flash Script Debugger.
-  if (!command_line->HasSwitch(switches::kDisableBundledPpapiFlash) &&
-      !IsSystemFlashScriptDebuggerPresent())
+  if (!(command_line->HasSwitch(switches::kDisableBundledPpapiFlash) ||
+        system_flash_is_debug)) {
     return false;
+  }
 #endif  // defined(FLAPPER_AVAILABLE)
 
   // Do not try and find System Pepper Flash if there is a specific path on
@@ -377,7 +385,8 @@ bool GetSystemPepperFlash(content::PepperPluginInfo* plugin) {
   if (!chrome::CheckPepperFlashManifest(*manifest, &version))
     return false;
 
-  *plugin = CreatePepperFlashInfo(flash_filename, version.GetString());
+  *plugin = CreatePepperFlashInfo(flash_filename, version.GetString(),
+                                  system_flash_is_debug);
   return true;
 }
 #endif  //  defined(ENABLE_PLUGINS)
@@ -461,7 +470,10 @@ content::PepperPluginInfo* ChromeContentClient::FindMostRecentPlugin(
       plugins.begin(), plugins.end(),
       [](content::PepperPluginInfo* x, content::PepperPluginInfo* y) {
         Version version_x(x->version);
-        DCHECK(version_x.IsValid());
+        Version version_y(y->version);
+        DCHECK(version_x.IsValid() && version_y.IsValid());
+        if (version_x.Equals(version_y))
+          return !x->is_debug && y->is_debug;
         return version_x.IsOlderThan(y->version);
       });
   return it != plugins.end() ? *it : nullptr;
@@ -542,7 +554,7 @@ void ChromeContentClient::AddAdditionalSchemes(
 
 bool ChromeContentClient::CanSendWhileSwappedOut(const IPC::Message* message) {
   return message->type() ==
-         DataReductionProxyViewHostMsg_DataReductionProxyStatus::ID;
+         DataReductionProxyViewHostMsg_IsDataReductionProxy::ID;
 }
 
 std::string ChromeContentClient::GetProduct() const {
@@ -614,12 +626,19 @@ void ChromeContentClient::AddSecureSchemesAndOrigins(
 
 void ChromeContentClient::AddServiceWorkerSchemes(
     std::set<std::string>* schemes) {
-  schemes->insert(extensions::kExtensionScheme);
+#if defined(ENABLE_EXTENSIONS)
+  if (extensions::FeatureProvider::GetBehaviorFeature(
+          extensions::BehaviorFeature::kServiceWorker)
+          ->IsAvailableToEnvironment()
+          .is_available())
+    schemes->insert(extensions::kExtensionScheme);
+#endif
 }
 
-void ChromeContentClient::AddIsolatedSchemes(std::set<std::string>* schemes) {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kIsolateExtensions)) {
-    schemes->insert(extensions::kExtensionScheme);
-  }
+bool ChromeContentClient::IsSupplementarySiteIsolationModeEnabled() {
+#if defined(ENABLE_EXTENSIONS)
+  return extensions::IsIsolateExtensionsEnabled();
+#else
+  return false;
+#endif
 }

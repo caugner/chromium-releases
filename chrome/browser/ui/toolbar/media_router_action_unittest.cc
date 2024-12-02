@@ -25,7 +25,7 @@ class MockToolbarActionViewDelegate : public ToolbarActionViewDelegate {
   MockToolbarActionViewDelegate() {}
   ~MockToolbarActionViewDelegate() {}
 
-  MOCK_CONST_METHOD0(GetCurrentWebContents, content::WebContents*());
+  MOCK_CONST_METHOD0(GetCurrentWebContents, WebContents*());
   MOCK_METHOD0(UpdateState, void());
   MOCK_CONST_METHOD0(IsMenuRunning, bool());
   MOCK_METHOD1(OnPopupShown, void(bool by_user));
@@ -36,8 +36,6 @@ class TestMediaRouterAction : public MediaRouterAction {
  public:
   explicit TestMediaRouterAction(Browser* browser)
       : MediaRouterAction(browser),
-        web_contents_(WebContents::Create(WebContents::CreateParams(
-            browser->profile()))),
         controller_(nullptr),
         platform_delegate_(nullptr) {}
   ~TestMediaRouterAction() override {}
@@ -58,7 +56,6 @@ class TestMediaRouterAction : public MediaRouterAction {
     return platform_delegate_;
   }
 
-  scoped_ptr<WebContents> web_contents_;
   MediaRouterDialogControllerImpl* controller_;
   MediaRouterActionPlatformDelegate* platform_delegate_;
 };
@@ -96,20 +93,6 @@ class MediaRouterActionUnitTest : public MediaRouterTest {
             std::string())),
         fake_source1_("fakeSource1"),
         fake_source2_("fakeSource2"),
-        fake_route_local_("route1",
-                          fake_source1_,
-                          "fakeSink1",
-                          "desc1",
-                          true,
-                          "path.html",
-                          false),
-        fake_route_remote_("route2",
-                           fake_source2_,
-                           "fakeSink2",
-                           "desc2",
-                           false,
-                           "path.html",
-                           true),
         active_icon_(ui::ResourceBundle::GetSharedInstance().GetImageNamed(
             IDR_MEDIA_ROUTER_ACTIVE_ICON)),
         error_icon_(ui::ResourceBundle::GetSharedInstance().GetImageNamed(
@@ -121,15 +104,15 @@ class MediaRouterActionUnitTest : public MediaRouterTest {
 
   ~MediaRouterActionUnitTest() override {}
 
-  // BrowserWithTestWindowTest:
+  // MediaRouterTest:
   void SetUp() override {
-    BrowserWithTestWindowTest::SetUp();
+    MediaRouterTest::SetUp();
     action_.reset(new TestMediaRouterAction(browser()));
   }
 
   void TearDown() override {
     action_.reset();
-    BrowserWithTestWindowTest::TearDown();
+    MediaRouterTest::TearDown();
   }
 
   TestMediaRouterAction* action() { return action_.get(); }
@@ -141,12 +124,6 @@ class MediaRouterActionUnitTest : public MediaRouterTest {
   }
   const media_router::Issue* fake_issue_fatal() {
     return &fake_issue_fatal_;
-  }
-  const media_router::MediaRoute fake_route_local() {
-    return fake_route_local_;
-  }
-  const media_router::MediaRoute fake_route_remote() {
-    return fake_route_remote_;
   }
   const gfx::Image active_icon() { return active_icon_; }
   const gfx::Image error_icon() { return error_icon_; }
@@ -164,10 +141,6 @@ class MediaRouterActionUnitTest : public MediaRouterTest {
   // Fake Sources, used for the Routes.
   const media_router::MediaSource fake_source1_;
   const media_router::MediaSource fake_source2_;
-
-  // Fake Routes.
-  const media_router::MediaRoute fake_route_local_;
-  const media_router::MediaRoute fake_route_remote_;
 
   // Cached images.
   const gfx::Image active_icon_;
@@ -214,41 +187,26 @@ TEST_F(MediaRouterActionUnitTest, UpdateIssues) {
                                  action()->GetIcon(nullptr, gfx::Size())));
 }
 
-// Tests the MediaRouterAction state based on updates to routes.
+// Tests the MediaRouterAction state updates based on whether there are local
+// routes.
 TEST_F(MediaRouterActionUnitTest, UpdateRoutes) {
-  scoped_ptr<std::vector<media_router::MediaRoute>> routes(
-      new std::vector<media_router::MediaRoute>());
-
   // Initially, there are no routes.
   EXPECT_TRUE(gfx::test::AreImagesEqual(
       idle_icon(), action()->GetIcon(nullptr, gfx::Size())));
 
   // Update |current_icon_| since there is a local route.
-  routes->push_back(fake_route_local());
-  routes->push_back(fake_route_remote());
-  action()->OnRoutesUpdated(*routes.get());
+  action()->OnHasLocalRouteUpdated(true);
   EXPECT_TRUE(gfx::test::AreImagesEqual(
       active_icon(), action()->GetIcon(nullptr, gfx::Size())));
 
-  // Update |current_icon_| since there are no more local routes.
-  routes->clear();
-  routes->push_back(fake_route_remote());
-  action()->OnRoutesUpdated(*routes.get());
-  EXPECT_TRUE(gfx::test::AreImagesEqual(
-      idle_icon(), action()->GetIcon(nullptr, gfx::Size())));
-
-  // |current_icon_| stays the same if there are no local routes or no routes.
-  routes->clear();
-  action()->OnRoutesUpdated(*routes.get());
+  // Update |current_icon_| since there are no local routes.
+  action()->OnHasLocalRouteUpdated(false);
   EXPECT_TRUE(gfx::test::AreImagesEqual(
       idle_icon(), action()->GetIcon(nullptr, gfx::Size())));
 }
 
 // Tests the MediaRouterAction icon based on updates to both issues and routes.
 TEST_F(MediaRouterActionUnitTest, UpdateIssuesAndRoutes) {
-  scoped_ptr<std::vector<media_router::MediaRoute>> routes(
-      new std::vector<media_router::MediaRoute>());
-
   // Initially, there are no issues or routes.
   EXPECT_TRUE(gfx::test::AreImagesEqual(
       idle_icon(), action()->GetIcon(nullptr, gfx::Size())));
@@ -260,15 +218,12 @@ TEST_F(MediaRouterActionUnitTest, UpdateIssuesAndRoutes) {
       idle_icon(), action()->GetIcon(nullptr, gfx::Size())));
 
   // Non-local routes also do not have an effect on |current_icon_|.
-  routes->push_back(fake_route_remote());
-  action()->OnRoutesUpdated(*routes.get());
+  action()->OnHasLocalRouteUpdated(false);
   EXPECT_TRUE(gfx::test::AreImagesEqual(
       idle_icon(), action()->GetIcon(nullptr, gfx::Size())));
 
   // Update |current_icon_| since there is a local route.
-  routes->clear();
-  routes->push_back(fake_route_local());
-  action()->OnRoutesUpdated(*routes.get());
+  action()->OnHasLocalRouteUpdated(true);
   EXPECT_TRUE(gfx::test::AreImagesEqual(
       active_icon(), action()->GetIcon(nullptr, gfx::Size())));
 
@@ -278,11 +233,8 @@ TEST_F(MediaRouterActionUnitTest, UpdateIssuesAndRoutes) {
   EXPECT_TRUE(gfx::test::AreImagesEqual(
       warning_icon(), action()->GetIcon(nullptr, gfx::Size())));
 
-  // Swapping the local route for a non-local one makes no difference to the
-  // |current_icon_|.
-  routes->clear();
-  routes->push_back(fake_route_remote());
-  action()->OnRoutesUpdated(*routes.get());
+  // Closing a local route makes no difference to |current_icon_|.
+  action()->OnHasLocalRouteUpdated(false);
   EXPECT_TRUE(gfx::test::AreImagesEqual(
       warning_icon(), action()->GetIcon(nullptr, gfx::Size())));
 
@@ -292,9 +244,7 @@ TEST_F(MediaRouterActionUnitTest, UpdateIssuesAndRoutes) {
       error_icon(), action()->GetIcon(nullptr, gfx::Size())));
 
   // Fatal issues still take precedent over local routes.
-  routes->clear();
-  routes->push_back(fake_route_local());
-  action()->OnRoutesUpdated(*routes.get());
+  action()->OnHasLocalRouteUpdated(true);
   EXPECT_TRUE(gfx::test::AreImagesEqual(
       error_icon(), action()->GetIcon(nullptr, gfx::Size())));
 
@@ -304,11 +254,8 @@ TEST_F(MediaRouterActionUnitTest, UpdateIssuesAndRoutes) {
   EXPECT_TRUE(gfx::test::AreImagesEqual(
       active_icon(), action()->GetIcon(nullptr, gfx::Size())));
 
-  // Update |current_icon_| when the local route is swapped out for a non-local
-  // route.
-  routes->clear();
-  routes->push_back(fake_route_remote());
-  action()->OnRoutesUpdated(*routes.get());
+  // Update |current_icon_| when the local route is closed.
+  action()->OnHasLocalRouteUpdated(false);
   EXPECT_TRUE(gfx::test::AreImagesEqual(
       idle_icon(), action()->GetIcon(nullptr, gfx::Size())));
 }
@@ -337,21 +284,18 @@ TEST_F(MediaRouterActionUnitTest, IconPressedState) {
 
   EXPECT_CALL(*mock_delegate, GetCurrentWebContents()).WillOnce(
       testing::Return(initiator_));
-  EXPECT_CALL(*mock_delegate, OnPopupClosed()).WillOnce(testing::Return());
+  EXPECT_CALL(*mock_delegate, OnPopupClosed()).Times(1);
   action()->SetDelegate(mock_delegate.get());
 
-  EXPECT_CALL(*mock_delegate, OnPopupShown(true)).WillOnce(testing::Return());
+  EXPECT_CALL(*mock_delegate, OnPopupShown(true)).Times(1);
   action()->ExecuteAction(true);
 
-  EXPECT_CALL(*mock_delegate, OnPopupClosed()).WillOnce(testing::Return());
-  dialog_controller_->CloseMediaRouterDialog();
+  EXPECT_CALL(*mock_delegate, OnPopupClosed()).Times(1);
+  dialog_controller_->HideMediaRouterDialog();
 
-  EXPECT_CALL(*mock_delegate, OnPopupClosed()).WillOnce(testing::Return());
-  dialog_controller_->Reset();
-
-  EXPECT_CALL(*mock_delegate, OnPopupShown(true)).WillOnce(testing::Return());
+  EXPECT_CALL(*mock_delegate, OnPopupShown(true)).Times(1);
   dialog_controller_->CreateMediaRouterDialog();
 
-  EXPECT_CALL(*mock_delegate, OnPopupClosed()).WillOnce(testing::Return());
-  dialog_controller_->CloseMediaRouterDialog();
+  EXPECT_CALL(*mock_delegate, OnPopupClosed()).Times(1);
+  dialog_controller_->HideMediaRouterDialog();
 }

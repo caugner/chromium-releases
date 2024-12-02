@@ -115,11 +115,11 @@ class FakeBackendDataTypeConfigurer : public BackendDataTypeConfigurer {
   void ActivateNonBlockingDataType(
       syncer::ModelType type,
       scoped_ptr<syncer_v2::ActivationContext> activation_context) override {
-    // TODO (stanisc): crbug.com/515962: Add test coverage.
+    // TODO(stanisc): crbug.com/515962: Add test coverage.
   }
 
   void DeactivateNonBlockingDataType(syncer::ModelType type) override {
-    // TODO (stanisc): crbug.com/515962: Add test coverage.
+    // TODO(stanisc): crbug.com/515962: Add test coverage.
   }
 
   base::Callback<void(ModelTypeSet, ModelTypeSet)> last_ready_task() const {
@@ -228,7 +228,7 @@ FakeDataTypeEncryptionHandler::GetEncryptedDataTypes() const {
   return encrypted_types_;
 }
 
-} // namespace
+}  // namespace
 
 class TestDataTypeManager : public DataTypeManagerImpl {
  public:
@@ -239,8 +239,7 @@ class TestDataTypeManager : public DataTypeManagerImpl {
       const DataTypeController::TypeMap* controllers,
       const DataTypeEncryptionHandler* encryption_handler,
       DataTypeManagerObserver* observer)
-      : DataTypeManagerImpl(base::Closure(),
-                            debug_info_listener,
+      : DataTypeManagerImpl(debug_info_listener,
                             controllers,
                             encryption_handler,
                             configurer,
@@ -280,13 +279,13 @@ class SyncDataTypeManagerImplTest : public testing::Test {
 
  protected:
   void SetUp() override {
-   dtm_.reset(
-       new TestDataTypeManager(
-           syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
-           &configurer_,
-           &controllers_,
-           &encryption_handler_,
-           &observer_));
+    dtm_.reset(
+        new TestDataTypeManager(
+            syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+            &configurer_,
+            &controllers_,
+            &encryption_handler_,
+            &observer_));
   }
 
   void SetConfigureStartExpectation() {

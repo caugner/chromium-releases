@@ -10,11 +10,12 @@
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/test_timeouts.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "components/html_viewer/public/interfaces/test_html_viewer.mojom.h"
-#include "components/mus/public/cpp/tests/view_manager_test_base.h"
-#include "components/mus/public/cpp/view.h"
-#include "components/mus/public/cpp/view_tree_connection.h"
+#include "components/mus/public/cpp/tests/window_server_test_base.h"
+#include "components/mus/public/cpp/window.h"
+#include "components/mus/public/cpp/window_tree_connection.h"
 #include "components/web_view/frame.h"
 #include "components/web_view/frame_connection.h"
 #include "components/web_view/frame_tree.h"
@@ -24,7 +25,8 @@
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "third_party/mojo_services/src/accessibility/public/interfaces/accessibility.mojom.h"
 
-using mus::ViewManagerTestBase;
+using mus::mojom::WindowTreeClientPtr;
+using mus::WindowServerTestBase;
 using web_view::Frame;
 using web_view::FrameConnection;
 using web_view::FrameTree;
@@ -42,7 +44,7 @@ const char kAddFrameWithEmptyPageScript[] =
 
 void OnGotContentHandlerForRoot(bool* got_callback) {
   *got_callback = true;
-  ignore_result(ViewManagerTestBase::QuitRunLoop());
+  ignore_result(WindowServerTestBase::QuitRunLoop());
 }
 
 mojo::ApplicationConnection* ApplicationConnectionForFrame(Frame* frame) {
@@ -56,9 +58,9 @@ std::string GetFrameText(ApplicationConnection* connection) {
   std::string result;
   test_html_viewer->GetContentAsText([&result](const String& mojo_string) {
     result = mojo_string;
-    ASSERT_TRUE(ViewManagerTestBase::QuitRunLoop());
+    ASSERT_TRUE(WindowServerTestBase::QuitRunLoop());
   });
-  if (!ViewManagerTestBase::DoRunLoopWithTimeout())
+  if (!WindowServerTestBase::DoRunLoopWithTimeout())
     ADD_FAILURE() << "Timed out waiting for execute to complete";
   //  test_html_viewer.WaitForIncomingResponse();
   return result;
@@ -71,9 +73,9 @@ scoped_ptr<base::Value> ExecuteScript(ApplicationConnection* connection,
   scoped_ptr<base::Value> result;
   test_html_viewer->ExecuteScript(script, [&result](const String& json_string) {
     result = base::JSONReader::Read(json_string.To<std::string>());
-    ASSERT_TRUE(ViewManagerTestBase::QuitRunLoop());
+    ASSERT_TRUE(WindowServerTestBase::QuitRunLoop());
   });
-  if (!ViewManagerTestBase::DoRunLoopWithTimeout())
+  if (!WindowServerTestBase::DoRunLoopWithTimeout())
     ADD_FAILURE() << "Timed out waiting for execute to complete";
   return result.Pass();
 }
@@ -99,7 +101,7 @@ class TestFrameTreeDelegateImpl : public web_view::TestFrameTreeDelegate {
     waiting_for_frame_child_count_->frame = frame;
     waiting_for_frame_child_count_->count = count;
 
-    return ViewManagerTestBase::DoRunLoopWithTimeout();
+    return WindowServerTestBase::DoRunLoopWithTimeout();
   }
 
   // Returns true if |frame| has navigated. If |frame| hasn't navigated runs
@@ -109,7 +111,7 @@ class TestFrameTreeDelegateImpl : public web_view::TestFrameTreeDelegate {
       return true;
 
     frames_waiting_for_navigate_.insert(frame);
-    return ViewManagerTestBase::DoRunLoopWithTimeout();
+    return WindowServerTestBase::DoRunLoopWithTimeout();
   }
 
   // TestFrameTreeDelegate:
@@ -120,12 +122,12 @@ class TestFrameTreeDelegateImpl : public web_view::TestFrameTreeDelegate {
         DidChildNavigate(waiting_for_frame_child_count_->frame,
                          waiting_for_frame_child_count_->count)) {
       waiting_for_frame_child_count_.reset();
-      ASSERT_TRUE(ViewManagerTestBase::QuitRunLoop());
+      ASSERT_TRUE(WindowServerTestBase::QuitRunLoop());
     }
 
     if (frames_waiting_for_navigate_.count(frame)) {
       frames_waiting_for_navigate_.erase(frame);
-      ignore_result(ViewManagerTestBase::QuitRunLoop());
+      ignore_result(WindowServerTestBase::QuitRunLoop());
     }
   }
 
@@ -158,7 +160,7 @@ class TestFrameTreeDelegateImpl : public web_view::TestFrameTreeDelegate {
 
 }  // namespace
 
-class HTMLFrameTest : public ViewManagerTestBase {
+class HTMLFrameTest : public WindowServerTestBase {
  public:
   HTMLFrameTest() {}
   ~HTMLFrameTest() override {}
@@ -167,11 +169,11 @@ class HTMLFrameTest : public ViewManagerTestBase {
   // Creates the frame tree showing an empty page at the root and adds (via
   // script) a frame showing the same empty page.
   Frame* LoadEmptyPageAndCreateFrame() {
-    mus::View* embed_view = window_manager()->CreateView();
+    mus::Window* embed_window = window_manager()->NewWindow();
     frame_tree_delegate_.reset(
         new TestFrameTreeDelegateImpl(application_impl()));
-    FrameConnection* root_connection =
-        InitFrameTree(embed_view, "http://127.0.0.1:%u/files/empty_page2.html");
+    FrameConnection* root_connection = InitFrameTree(
+        embed_window, "http://127.0.0.1:%u/files/empty_page2.html");
     if (!root_connection) {
       ADD_FAILURE() << "unable to establish root connection";
       return nullptr;
@@ -197,7 +199,7 @@ class HTMLFrameTest : public ViewManagerTestBase {
     if (HasFatalFailure())
       return nullptr;
 
-    return parent->FindFrame(parent->view()->children().back()->id());
+    return parent->FindFrame(parent->window()->children().back()->id());
   }
 
   std::string AddPortToString(const std::string& string) {
@@ -211,7 +213,7 @@ class HTMLFrameTest : public ViewManagerTestBase {
     return request.Pass();
   }
 
-  FrameConnection* InitFrameTree(mus::View* view,
+  FrameConnection* InitFrameTree(mus::Window* view,
                                  const std::string& url_string) {
     frame_tree_delegate_.reset(
         new TestFrameTreeDelegateImpl(application_impl()));
@@ -220,23 +222,23 @@ class HTMLFrameTest : public ViewManagerTestBase {
     frame_connection->Init(
         application_impl(), BuildRequestForURL(url_string),
         base::Bind(&OnGotContentHandlerForRoot, &got_callback));
-    ignore_result(ViewManagerTestBase::DoRunLoopWithTimeout());
+    ignore_result(WindowServerTestBase::DoRunLoopWithTimeout());
     if (!got_callback)
       return nullptr;
     FrameConnection* result = frame_connection.get();
     FrameClient* frame_client = frame_connection->frame_client();
-    ViewTreeClientPtr tree_client = frame_connection->GetViewTreeClient();
-    frame_tree_.reset(
-        new FrameTree(result->GetContentHandlerID(), view, tree_client.Pass(),
-                      frame_tree_delegate_.get(), frame_client,
-                      frame_connection.Pass(), Frame::ClientPropertyMap()));
+    WindowTreeClientPtr tree_client = frame_connection->GetWindowTreeClient();
+    frame_tree_.reset(new FrameTree(
+        result->GetContentHandlerID(), view, tree_client.Pass(),
+        frame_tree_delegate_.get(), frame_client, frame_connection.Pass(),
+        Frame::ClientPropertyMap(), base::TimeTicks::Now()));
     frame_tree_delegate_->set_frame_tree(frame_tree_.get());
     return result;
   }
 
   // ViewManagerTest:
   void SetUp() override {
-    ViewManagerTestBase::SetUp();
+    WindowServerTestBase::SetUp();
 
     // Start a test server.
     http_server_.reset(new net::SpawnedTestServer(
@@ -247,7 +249,7 @@ class HTMLFrameTest : public ViewManagerTestBase {
   void TearDown() override {
     frame_tree_.reset();
     http_server_.reset();
-    ViewManagerTestBase::TearDown();
+    WindowServerTestBase::TearDown();
   }
 
   scoped_ptr<net::SpawnedTestServer> http_server_;
@@ -260,10 +262,10 @@ class HTMLFrameTest : public ViewManagerTestBase {
 };
 
 TEST_F(HTMLFrameTest, PageWithSingleFrame) {
-  mus::View* embed_view = window_manager()->CreateView();
+  mus::Window* embed_window = window_manager()->NewWindow();
 
   FrameConnection* root_connection = InitFrameTree(
-      embed_view, "http://127.0.0.1:%u/files/page_with_single_frame.html");
+      embed_window, "http://127.0.0.1:%u/files/page_with_single_frame.html");
   ASSERT_TRUE(root_connection);
 
   ASSERT_EQ("Page with single frame",
@@ -272,9 +274,9 @@ TEST_F(HTMLFrameTest, PageWithSingleFrame) {
   ASSERT_NO_FATAL_FAILURE(
       frame_tree_delegate_->WaitForChildFrameCount(frame_tree_->root(), 1u));
 
-  ASSERT_EQ(1u, embed_view->children().size());
+  ASSERT_EQ(1u, embed_window->children().size());
   Frame* child_frame =
-      frame_tree_->root()->FindFrame(embed_view->children()[0]->id());
+      frame_tree_->root()->FindFrame(embed_window->children()[0]->id());
   ASSERT_TRUE(child_frame);
 
   ASSERT_EQ("child",
@@ -285,10 +287,10 @@ TEST_F(HTMLFrameTest, PageWithSingleFrame) {
 // Creates two frames. The parent navigates the child frame by way of changing
 // the location of the child frame.
 TEST_F(HTMLFrameTest, ChangeLocationOfChildFrame) {
-  mus::View* embed_view = window_manager()->CreateView();
+  mus::Window* embed_window = window_manager()->NewWindow();
 
   ASSERT_TRUE(InitFrameTree(
-      embed_view, "http://127.0.0.1:%u/files/page_with_single_frame.html"));
+      embed_window, "http://127.0.0.1:%u/files/page_with_single_frame.html"));
 
   // page_with_single_frame contains a child frame. The child frame should
   // create a new View and Frame.

@@ -19,10 +19,11 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.Locale;
+import java.util.TimeZone;
 
 /** Class to represent a Host returned by {@link HostListLoader}. */
 public class HostInfo {
-    private static final String TAG = "cr.Chromoting";
+    private static final String TAG = "Chromoting";
 
     public final String name;
     public final String id;
@@ -57,6 +58,7 @@ public class HostInfo {
 
         ParsePosition parsePosition = new ParsePosition(0);
         SimpleDateFormat format = new SimpleDateFormat(RFC_3339_FORMAT, Locale.US);
+        format.setTimeZone(TimeZone.getTimeZone("UTC"));
         Date updatedTimeCandidate = format.parse(updatedTime, parsePosition);
         if (updatedTimeCandidate == null) {
             Log.e(TAG, "Unparseable host.updatedTime JSON: errorIndex = %d, input = %s",

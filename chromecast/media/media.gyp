@@ -9,7 +9,8 @@
   },
   'target_defaults': {
     'include_dirs': [
-      '../public/', # Public APIs
+      '../..',  # Root of Chromium checkout
+      '../public/',  # Public APIs
     ],
   },
   'targets': [
@@ -119,8 +120,6 @@
         'cma/base/buffering_frame_provider.h',
         'cma/base/buffering_state.cc',
         'cma/base/buffering_state.h',
-        'cma/base/cast_decoder_buffer_impl.cc',
-        'cma/base/cast_decoder_buffer_impl.h',
         'cma/base/cast_decrypt_config_impl.cc',
         'cma/base/cast_decrypt_config_impl.h',
         'cma/base/cma_logging.h',
@@ -146,16 +145,12 @@
         '../..',
       ],
       'sources': [
-        'cma/backend/audio_pipeline_device_default.cc',
-        'cma/backend/audio_pipeline_device_default.h',
-        'cma/backend/media_clock_device_default.cc',
-        'cma/backend/media_clock_device_default.h',
-        'cma/backend/media_component_device_default.cc',
-        'cma/backend/media_component_device_default.h',
+        'cma/backend/audio_decoder_default.cc',
+        'cma/backend/audio_decoder_default.h',
         'cma/backend/media_pipeline_backend_default.cc',
         'cma/backend/media_pipeline_backend_default.h',
-        'cma/backend/video_pipeline_device_default.cc',
-        'cma/backend/video_pipeline_device_default.h',
+        'cma/backend/video_decoder_default.cc',
+        'cma/backend/video_decoder_default.h',
       ],
     },
     {
@@ -209,8 +204,6 @@
         '../../third_party/boringssl/boringssl.gyp:boringssl',
       ],
       'sources': [
-        'cma/pipeline/audio_pipeline.cc',
-        'cma/pipeline/audio_pipeline.h',
         'cma/pipeline/audio_pipeline_impl.cc',
         'cma/pipeline/audio_pipeline_impl.h',
         'cma/pipeline/av_pipeline_client.cc',
@@ -219,41 +212,15 @@
         'cma/pipeline/av_pipeline_impl.h',
         'cma/pipeline/decrypt_util.cc',
         'cma/pipeline/decrypt_util.h',
-        'cma/pipeline/frame_status_cb_impl.cc',
-        'cma/pipeline/frame_status_cb_impl.h',
         'cma/pipeline/load_type.h',
-        'cma/pipeline/media_component_device_client_impl.cc',
-        'cma/pipeline/media_component_device_client_impl.h',
-        'cma/pipeline/media_pipeline.h',
         'cma/pipeline/media_pipeline_client.cc',
         'cma/pipeline/media_pipeline_client.h',
         'cma/pipeline/media_pipeline_impl.cc',
         'cma/pipeline/media_pipeline_impl.h',
-        'cma/pipeline/video_pipeline.cc',
-        'cma/pipeline/video_pipeline.h',
         'cma/pipeline/video_pipeline_client.cc',
         'cma/pipeline/video_pipeline_client.h',
-        'cma/pipeline/video_pipeline_device_client_impl.cc',
-        'cma/pipeline/video_pipeline_device_client_impl.h',
         'cma/pipeline/video_pipeline_impl.cc',
         'cma/pipeline/video_pipeline_impl.h',
-      ],
-    },
-    {
-      'target_name': 'cma_filters',
-      'type': '<(component)',
-      'dependencies': [
-        '../../base/base.gyp:base',
-        '../../media/media.gyp:media',
-        'cma_base',
-      ],
-      'sources': [
-        'cma/filters/cma_renderer.cc',
-        'cma/filters/cma_renderer.h',
-        'cma/filters/demuxer_stream_adapter.cc',
-        'cma/filters/demuxer_stream_adapter.h',
-        'cma/filters/hole_frame_factory.cc',
-        'cma/filters/hole_frame_factory.h',
       ],
     },
     {
@@ -261,7 +228,6 @@
       'type': 'none',
       'dependencies': [
         'cma_base',
-        'cma_filters',
         'cma_ipc',
         'cma_ipc_streamer',
         'cma_pipeline',
@@ -293,26 +259,36 @@
         'cma/base/balanced_media_task_runner_unittest.cc',
         'cma/base/buffering_controller_unittest.cc',
         'cma/base/buffering_frame_provider_unittest.cc',
-        'cma/filters/demuxer_stream_adapter_unittest.cc',
-        'cma/filters/multi_demuxer_stream_adapter_unittest.cc',
         'cma/ipc/media_message_fifo_unittest.cc',
         'cma/ipc/media_message_unittest.cc',
         'cma/ipc_streamer/av_streamer_unittest.cc',
         'cma/pipeline/audio_video_pipeline_impl_unittest.cc',
-        'cma/test/cma_end_to_end_test.cc',
-        'cma/test/demuxer_stream_for_test.cc',
-        'cma/test/demuxer_stream_for_test.h',
         'cma/test/frame_generator_for_test.cc',
         'cma/test/frame_generator_for_test.h',
         'cma/test/frame_segmenter_for_test.cc',
         'cma/test/frame_segmenter_for_test.h',
-        'cma/test/media_component_device_feeder_for_test.cc',
-        'cma/test/media_component_device_feeder_for_test.h',
         'cma/test/mock_frame_consumer.cc',
         'cma/test/mock_frame_consumer.h',
         'cma/test/mock_frame_provider.cc',
         'cma/test/mock_frame_provider.h',
         'cma/test/run_all_unittests.cc',
+      ],
+      'ldflags': [
+        # Allow  OEMs to override default libraries that are shipped with
+        # cast receiver package by installed OEM-specific libraries in
+        # /oem_cast_shlib.
+        '-Wl,-rpath=/oem_cast_shlib',
+        # Some shlibs are built in same directory of executables.
+        '-Wl,-rpath=\$$ORIGIN',
+      ],
+      'conditions': [
+        ['chromecast_branding=="public"', {
+          'dependencies': [
+            # Link default libcast_media_1.0 statically not to link dummy one
+            # dynamically for public unittests.
+            'libcast_media_1.0_default_core',
+          ],
+        }],
       ],
     },
     { # Target for OEM partners to override media shared library, i.e.
@@ -322,14 +298,36 @@
       'type': 'shared_library',
       'dependencies': [
         '../../chromecast/chromecast.gyp:cast_public_api',
-        'default_cma_backend'
       ],
-      'include_dirs': [
-        '../..',
+      'sources': [
+        'base/cast_media_dummy.cc',
+      ],
+    },
+    { # This target can be statically linked into unittests, but production
+      # binaries should not depend on this target.
+      'target_name': 'libcast_media_1.0_default_core',
+      'type': '<(component)',
+      'dependencies': [
+        '../../chromecast/chromecast.gyp:cast_public_api',
+        'default_cma_backend'
       ],
       'sources': [
         'base/cast_media_default.cc',
       ],
-    }
+    },
+    { # Default implementation of libcast_media_1.0.so.
+      'target_name': 'libcast_media_1.0_default',
+      'type': 'loadable_module',
+      # Cannot depend on libcast_media_1.0_default_core since a loadable_module
+      # include only symbols necessary for source files. So, it should include
+      # top-level .cc, here cast_media_default.cc explicitly.
+      'dependencies': [
+        '../../chromecast/chromecast.gyp:cast_public_api',
+        'default_cma_backend'
+      ],
+      'sources': [
+        'base/cast_media_default.cc',
+      ],
+    },
   ], # end of targets
 }

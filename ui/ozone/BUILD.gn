@@ -19,9 +19,9 @@ if (ozone_platform_egltest) {
   ozone_platform_deps += [ "platform/egltest" ]
 }
 
-if (ozone_platform_test) {
-  ozone_platforms += [ "test" ]
-  ozone_platform_deps += [ "platform/test" ]
+if (ozone_platform_headless) {
+  ozone_platforms += [ "headless" ]
+  ozone_platform_deps += [ "platform/headless" ]
 }
 
 if (ozone_platform_caca) {
@@ -44,6 +44,12 @@ platform_list_cc_file = "$target_gen_dir/platform_list.cc"
 platform_list_h_file = "$target_gen_dir/platform_list.h"
 platform_list_txt_file = "$target_gen_dir/platform_list.txt"
 constructor_list_cc_file = "$target_gen_dir/constructor_list.cc"
+
+config("vgem_map") {
+  if (use_vgem_map) {
+    defines = [ "USE_VGEM_MAP" ]
+  }
+}
 
 # GYP version: ui/ozone/ozone.gyp:ozone_base
 component("ozone_base") {
@@ -125,6 +131,7 @@ component("ozone") {
         "//ui/display/types",
         "//ui/display/util",
         "//ui/events",
+        "//ui/events/devices",
         "//ui/events/ozone:events_ozone",
         "//ui/gfx",
         "//ui/gfx/geometry",

@@ -16,7 +16,6 @@ import org.chromium.chrome.browser.compositor.layouts.Layout;
 import org.chromium.chrome.browser.compositor.layouts.Layout.Orientation;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
-import org.chromium.chrome.browser.tab.ChromeTab;
 import org.chromium.ui.resources.ResourceManager;
 
 /**
@@ -74,8 +73,7 @@ public class TabListSceneLayer extends SceneLayer {
             nativePutLayer(mNativePtr, t.getId(), R.id.control_container, closeBtnResource,
                     R.drawable.tabswitcher_border_frame_shadow,
                     R.drawable.tabswitcher_border_frame_decoration, R.drawable.logo_card_back,
-                    borderResource, t.canUseLiveTexture(),
-                    (t.getFallbackThumbnailId() == ChromeTab.NTP_TAB_ID), t.getBackgroundColor(),
+                    borderResource, t.canUseLiveTexture(), t.getBackgroundColor(),
                     ApiCompatibilityUtils.getColor(res, R.color.tab_switcher_background),
                     ApiCompatibilityUtils.getColor(res, borderColorResource), t.isIncognito(),
                     layout.getOrientation() == Orientation.PORTRAIT, t.getRenderX() * dpToPx,
@@ -92,8 +90,8 @@ public class TabListSceneLayer extends SceneLayer {
                     t.getBorderCloseButtonAlpha() * decoration,
                     LayoutTab.CLOSE_BUTTON_WIDTH_DP * dpToPx, t.getStaticToViewBlend(),
                     t.getBorderScale(), t.getSaturation(), t.getBrightness(), t.showToolbar(),
-                    t.getToolbarBackgroundColor(), t.anonymizeToolbar(),
-                    t.getTextBoxBackgroundColor(), t.getToolbarAlpha(),
+                    t.getToolbarBackgroundColor(), t.anonymizeToolbar(), R.drawable.textbox,
+                    t.getTextBoxBackgroundColor(), t.getTextBoxAlpha(), t.getToolbarAlpha(),
                     t.getToolbarYOffset() * dpToPx, t.getSideBorderScale(), true,
                     t.insetBorderVertical(), layerTitleCache,
                     tabContentManager, resourceManager);
@@ -125,17 +123,17 @@ public class TabListSceneLayer extends SceneLayer {
     private native void nativePutLayer(long nativeTabListSceneLayer, int id, int toolbarResourceId,
             int closeButtonResourceId, int shadowResourceId, int contourResourceId,
             int backLogoResourceId, int borderResourceId, boolean canUseLiveLayer,
-            boolean canUseNtpFallback, int tabBackgroundColor, int backgroundColor,
-            int backLogoColor, boolean incognito, boolean isPortrait, float x, float y, float width,
-            float height, float contentWidth, float contentHeight, float visibleContentHeight,
-            float viewportX, float viewportY, float viewportWidth, float viewportHeight,
-            float shadowX, float shadowY, float shadowWidth, float shadowHeight, float pivotX,
-            float pivotY, float rotationX, float rotationY, float alpha, float borderAlpha,
-            float contourAlpha, float shadowAlpha, float closeAlpha, float closeBtnWidth,
-            float staticToViewBlend, float borderScale, float saturation, float brightness,
-            boolean showToolbar, int toolbarBackgroundColor, boolean anonymizeToolbar,
-            int toolbarTextBoxBackgroundColor, float toolbarAlpha, float toolbarYOffset,
-            float sideBorderScale, boolean attachContent, boolean insetVerticalBorder,
-            LayerTitleCache layerTitleCache, TabContentManager tabContentManager,
-            ResourceManager resourceManager);
+            int tabBackgroundColor, int backgroundColor, int backLogoColor, boolean incognito,
+            boolean isPortrait, float x, float y, float width, float height, float contentWidth,
+            float contentHeight, float visibleContentHeight, float viewportX, float viewportY,
+            float viewportWidth, float viewportHeight, float shadowX, float shadowY,
+            float shadowWidth, float shadowHeight, float pivotX, float pivotY, float rotationX,
+            float rotationY, float alpha, float borderAlpha, float contourAlpha, float shadowAlpha,
+            float closeAlpha, float closeBtnWidth, float staticToViewBlend, float borderScale,
+            float saturation, float brightness, boolean showToolbar, int toolbarBackgroundColor,
+            boolean anonymizeToolbar, int toolbarTextBoxResource, int toolbarTextBoxBackgroundColor,
+            float toolbarTextBoxAlpha, float toolbarAlpha,
+            float toolbarYOffset, float sideBorderScale, boolean attachContent,
+            boolean insetVerticalBorder, LayerTitleCache layerTitleCache,
+            TabContentManager tabContentManager, ResourceManager resourceManager);
 }

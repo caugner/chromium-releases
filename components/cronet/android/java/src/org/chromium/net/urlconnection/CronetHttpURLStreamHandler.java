@@ -4,7 +4,7 @@
 
 package org.chromium.net.urlconnection;
 
-import org.chromium.net.UrlRequestContext;
+import org.chromium.net.CronetEngine;
 
 import java.io.IOException;
 import java.net.Proxy;
@@ -22,11 +22,11 @@ import java.net.URLStreamHandler;
  * <b>Note:</b> Cronet's {@code HttpURLConnection} implementation is subject to some limitations
  * listed {@link CronetURLStreamHandlerFactory here}.
  */
-public class CronetHttpURLStreamHandler extends URLStreamHandler {
-    private final UrlRequestContext mUrlRequestContext;
+class CronetHttpURLStreamHandler extends URLStreamHandler {
+    private final CronetEngine mCronetEngine;
 
-    public CronetHttpURLStreamHandler(UrlRequestContext urlRequestContext) {
-        mUrlRequestContext = urlRequestContext;
+    public CronetHttpURLStreamHandler(CronetEngine cronetEngine) {
+        mCronetEngine = cronetEngine;
     }
 
     /**
@@ -35,12 +35,7 @@ public class CronetHttpURLStreamHandler extends URLStreamHandler {
      */
     @Override
     public URLConnection openConnection(URL url) throws IOException {
-        String protocol = url.getProtocol();
-        if ("http".equals(protocol) || "https".equals(protocol)) {
-            return new CronetHttpURLConnection(url, mUrlRequestContext);
-        }
-        throw new UnsupportedOperationException(
-                "Unexpected protocol:" + protocol);
+        return mCronetEngine.openConnection(url);
     }
 
     /**
@@ -50,6 +45,6 @@ public class CronetHttpURLStreamHandler extends URLStreamHandler {
      */
     @Override
     public URLConnection openConnection(URL url, Proxy proxy) {
-        throw new UnsupportedOperationException();
+        return mCronetEngine.openConnection(url, proxy);
     }
 }

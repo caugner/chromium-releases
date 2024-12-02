@@ -114,7 +114,8 @@ DisplayInfo DisplayInfo::CreateFromSpec(const std::string& spec) {
 DisplayInfo DisplayInfo::CreateFromSpecWithID(const std::string& spec,
                                               int64 id) {
 #if defined(OS_WIN)
-  gfx::Rect bounds_in_native(aura::WindowTreeHost::GetNativeScreenSize());
+  gfx::Rect bounds_in_native(
+      gfx::Size(GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)));
 #else
   // Default bounds for a display.
   const int kDefaultHostWindowX = 200;
@@ -304,7 +305,7 @@ void DisplayInfo::Copy(const DisplayInfo& native_info) {
     // cleared, or has non empty insts.
     if (native_info.clear_overscan_insets())
       overscan_insets_in_dip_.Set(0, 0, 0, 0);
-    else if (!native_info.overscan_insets_in_dip_.empty())
+    else if (!native_info.overscan_insets_in_dip_.IsEmpty())
       overscan_insets_in_dip_ = native_info.overscan_insets_in_dip_;
 
     rotations_ = native_info.rotations_;
@@ -337,7 +338,7 @@ float DisplayInfo::GetEffectiveUIScale() const {
 
 void DisplayInfo::UpdateDisplaySize() {
   size_in_pixel_ = bounds_in_native_.size();
-  if (!overscan_insets_in_dip_.empty()) {
+  if (!overscan_insets_in_dip_.IsEmpty()) {
     gfx::Insets insets_in_pixel =
         overscan_insets_in_dip_.Scale(device_scale_factor_);
     size_in_pixel_.Enlarge(-insets_in_pixel.width(), -insets_in_pixel.height());

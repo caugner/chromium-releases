@@ -28,8 +28,6 @@
 #include "content/public/browser/notification_registrar.h"
 
 class Profile;
-class SafeBrowsingDatabaseManager;
-class SafeBrowsingService;
 class TrackedPreferenceValidationDelegate;
 
 namespace base {
@@ -52,9 +50,12 @@ class ClientDownloadRequest;
 class ClientIncidentReport;
 class ClientIncidentReport_DownloadDetails;
 class ClientIncidentReport_EnvironmentData;
+class ClientIncidentReport_ExtensionData;
 class ClientIncidentReport_IncidentData;
 class Incident;
 class IncidentReceiver;
+class SafeBrowsingDatabaseManager;
+class SafeBrowsingService;
 
 // A class that manages the collection of incidents and submission of incident
 // reports to the safe browsing client-side detection service. The service
@@ -70,9 +71,10 @@ class IncidentReceiver;
 // remaining are uploaded in an incident report.
 class IncidentReportingService : public content::NotificationObserver {
  public:
-  IncidentReportingService(SafeBrowsingService* safe_browsing_service,
-                           const scoped_refptr<net::URLRequestContextGetter>&
-                               request_context_getter);
+  IncidentReportingService(
+      SafeBrowsingService* safe_browsing_service,
+      const scoped_refptr<net::URLRequestContextGetter>&
+          request_context_getter);
 
   // All incident collection, data collection, and uploads in progress are
   // dropped at destruction.
@@ -119,6 +121,11 @@ class IncidentReportingService : public content::NotificationObserver {
   void SetCollectEnvironmentHook(
       CollectEnvironmentDataFn collect_environment_data_hook,
       const scoped_refptr<base::TaskRunner>& task_runner);
+
+  // Initiates extension collection. Overriden by unit tests to provide fake
+  // extension data.
+  virtual void DoExtensionCollection(
+      ClientIncidentReport_ExtensionData* extension_data);
 
   // Handles the addition of a new profile to the ProfileManager. Creates a new
   // context for |profile| if one does not exist, drops any received incidents
@@ -182,6 +189,19 @@ class IncidentReportingService : public content::NotificationObserver {
   // arrive. This function is idempotent.
   void BeginIncidentCollation();
 
+  // Returns true if the service is waiting for additional incidents before
+  // uploading a report.
+  bool WaitingToCollateIncidents();
+
+  // Cancels the collection timeout.
+  void CancelIncidentCollection();
+
+  // A callback invoked on the UI thread after which incident collation has
+  // completed. Incident report processing continues, either by waiting for
+  // environment data or the most recent download to arrive or by sending an
+  // incident report.
+  void OnCollationTimeout();
+
   // Starts a task to collect environment data in the blocking pool.
   void BeginEnvironmentCollection();
 
@@ -198,19 +218,6 @@ class IncidentReportingService : public content::NotificationObserver {
   void OnEnvironmentDataCollected(
       scoped_ptr<ClientIncidentReport_EnvironmentData> environment_data);
 
-  // Returns true if the service is waiting for additional incidents before
-  // uploading a report.
-  bool WaitingToCollateIncidents();
-
-  // Cancels the collection timeout.
-  void CancelIncidentCollection();
-
-  // A callback invoked on the UI thread after which incident collation has
-  // completed. Incident report processing continues, either by waiting for
-  // environment data or the most recent download to arrive or by sending an
-  // incident report.
-  void OnCollationTimeout();
-
   // Starts the asynchronous process of finding the most recent executable
   // download if one is not currently being search for and/or has not already
   // been found.
@@ -225,9 +232,12 @@ class IncidentReportingService : public content::NotificationObserver {
   void CancelDownloadCollection();
 
   // A callback invoked on the UI thread by the last download finder when the
-  // search for the most recent binary download is complete.
+  // search for the most recent binary download and most recent non-binary
+  // download is complete.
   void OnLastDownloadFound(
-      scoped_ptr<ClientIncidentReport_DownloadDetails> last_download);
+      scoped_ptr<ClientIncidentReport_DownloadDetails> last_binary_download,
+      scoped_ptr<ClientIncidentReport_NonBinaryDownloadDetails>
+          last_non_binary_download);
 
   // Processes all received incidents once all data collection is
   // complete. Incidents originating from profiles that do not participate in

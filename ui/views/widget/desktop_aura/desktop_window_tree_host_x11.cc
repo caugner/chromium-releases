@@ -1084,10 +1084,11 @@ void DesktopWindowTreeHostX11::OnCursorVisibilityChangedNative(bool show) {
 
 void DesktopWindowTreeHostX11::InitX11Window(
     const Widget::InitParams& params) {
-  unsigned long attribute_mask = CWBackPixmap;
+  unsigned long attribute_mask = CWBackPixmap | CWBitGravity;
   XSetWindowAttributes swa;
   memset(&swa, 0, sizeof(swa));
   swa.background_pixmap = None;
+  swa.bit_gravity = NorthWestGravity;
 
   ::Atom window_type;
   switch (params.type) {
@@ -1543,8 +1544,9 @@ void DesktopWindowTreeHostX11::ConvertEventToDifferentHost(
             display_dest.device_scale_factor());
   gfx::Vector2d offset = GetLocationOnNativeScreen() -
                          host->GetLocationOnNativeScreen();
-  gfx::Point location_in_pixel_in_host = located_event->location() + offset;
-  located_event->set_location(location_in_pixel_in_host);
+  gfx::PointF location_in_pixel_in_host =
+      located_event->location_f() + gfx::Vector2dF(offset);
+  located_event->set_location_f(location_in_pixel_in_host);
 }
 
 void DesktopWindowTreeHostX11::ResetWindowRegion() {

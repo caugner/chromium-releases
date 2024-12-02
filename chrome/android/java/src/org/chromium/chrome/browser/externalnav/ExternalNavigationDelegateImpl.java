@@ -27,11 +27,12 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.IntentHandler;
-import org.chromium.chrome.browser.UrlUtilities;
+import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler.OverrideUrlLoadingResult;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.IntentUtils;
+import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.common.Referrer;
 import org.chromium.ui.base.PageTransition;
@@ -273,7 +274,8 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         PermissionCallback permissionCallback = new PermissionCallback() {
             @Override
             public void onRequestPermissionsResult(String[] permissions, int[] grantResults) {
-                if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                if (grantResults.length > 0
+                        && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     loadIntent(intent, referrerUrl, null, tab, needsToCloseTab, tab.isIncognito());
                 } else {
                     // TODO(tedchoc): Show an indication to the user that the navigation failed
@@ -310,7 +312,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
             intent.putExtra(Browser.EXTRA_APPLICATION_ID, getPackageName());
             if (launchIncogntio) intent.putExtra(IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_TAB, true);
             intent.addCategory(Intent.CATEGORY_BROWSABLE);
-            intent.setPackage(getPackageName());
+            intent.setClassName(getPackageName(), ChromeLauncherActivity.class.getName());
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             IntentHandler.addTrustedIntentExtras(intent, mActivity);
             startActivity(intent);

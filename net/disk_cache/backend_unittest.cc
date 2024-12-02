@@ -89,6 +89,10 @@ class DiskCacheBackendTest : public DiskCacheTestWithCache {
                              std::set<std::string>* keys_to_match,
                              size_t* count);
 
+  // Computes the expected size of entry metadata, i.e. the total size without
+  // the actual data stored. This depends only on the entry's |key| size.
+  int GetEntryMetadataSize(std::string key);
+
   // Actual tests:
   void BackendBasics();
   void BackendKeying();
@@ -110,6 +114,7 @@ class DiskCacheBackendTest : public DiskCacheTestWithCache {
   void BackendFixEnumerators();
   void BackendDoomRecent();
   void BackendDoomBetween();
+  void BackendCalculateSizeOfAllEntries();
   void BackendTransaction(const std::string& name, int num_entries, bool load);
   void BackendRecoverInsert();
   void BackendRecoverRemove();
@@ -279,6 +284,18 @@ bool DiskCacheBackendTest::EnumerateAndMatchKeys(
   };
 
   return true;
+}
+
+int DiskCacheBackendTest::GetEntryMetadataSize(std::string key) {
+  // For blockfile and memory backends, it is just the key size.
+  if (!simple_cache_mode_)
+    return key.size();
+
+  // For the simple cache, we must add the file header and EOF, and that for
+  // every stream.
+  return disk_cache::kSimpleEntryStreamCount *
+         (sizeof(disk_cache::SimpleFileHeader) +
+          sizeof(disk_cache::SimpleFileEOF) + key.size());
 }
 
 void DiskCacheBackendTest::BackendBasics() {
@@ -1672,6 +1689,83 @@ TEST_F(DiskCacheBackendTest, DoomEntriesBetweenSparse) {
   end = base::Time::Now();
   DoomEntriesBetween(start, end);
   EXPECT_EQ(3, cache_->GetEntryCount());
+}
+
+void DiskCacheBackendTest::BackendCalculateSizeOfAllEntries() {
+  InitCache();
+
+  // The cache is initially empty.
+  EXPECT_EQ(0, CalculateSizeOfAllEntries());
+
+  // Generate random entries and populate them with data of respective
+  // sizes 0, 1, ..., count - 1 bytes.
+  std::set<std::string> key_pool;
+  CreateSetOfRandomEntries(&key_pool);
+
+  int count = 0;
+  for (std::string key : key_pool) {
+    std::string data(count, ' ');
+    scoped_refptr<net::StringIOBuffer> buffer = new net::StringIOBuffer(data);
+
+    // Alternate between writing to first two streams to test that we do not
+    // take only one stream into account.
+    disk_cache::Entry* entry;
+    ASSERT_EQ(net::OK, OpenEntry(key, &entry));
+    ASSERT_EQ(count, WriteData(entry, count % 2, 0, buffer.get(), count, true));
+    entry->Close();
+
+    ++count;
+  }
+
+  // The resulting size should be (0 + 1 + ... + count - 1) plus keys.
+  int result = CalculateSizeOfAllEntries();
+  int total_metadata_size = 0;
+  for (std::string key : key_pool)
+    total_metadata_size += GetEntryMetadataSize(key);
+  EXPECT_EQ((count - 1) * count / 2 + total_metadata_size, result);
+
+  // Add another entry and test if the size is updated. Then remove it and test
+  // if the size is back to original value.
+  {
+    const int last_entry_size = 47;
+    std::string data(last_entry_size, ' ');
+    scoped_refptr<net::StringIOBuffer> buffer = new net::StringIOBuffer(data);
+
+    disk_cache::Entry* entry;
+    std::string key = GenerateKey(true);
+    ASSERT_EQ(net::OK, CreateEntry(key, &entry));
+    ASSERT_EQ(last_entry_size,
+              WriteData(entry, 0, 0, buffer.get(), last_entry_size, true));
+    entry->Close();
+
+    int new_result = CalculateSizeOfAllEntries();
+    EXPECT_EQ(result + last_entry_size + GetEntryMetadataSize(key), new_result);
+
+    DoomEntry(key);
+    new_result = CalculateSizeOfAllEntries();
+    EXPECT_EQ(result, new_result);
+  }
+
+  // After dooming the entries, the size should be back to zero.
+  ASSERT_EQ(net::OK, DoomAllEntries());
+  EXPECT_EQ(0, CalculateSizeOfAllEntries());
+}
+
+TEST_F(DiskCacheBackendTest, CalculateSizeOfAllEntries) {
+  BackendCalculateSizeOfAllEntries();
+}
+
+TEST_F(DiskCacheBackendTest, MemoryOnlyCalculateSizeOfAllEntries) {
+  SetMemoryOnlyMode();
+  BackendCalculateSizeOfAllEntries();
+}
+
+TEST_F(DiskCacheBackendTest, SimpleCacheCalculateSizeOfAllEntries) {
+  // Use net::APP_CACHE to make size estimations deterministic via
+  // non-optimistic writes.
+  SetCacheType(net::APP_CACHE);
+  SetSimpleCacheMode();
+  BackendCalculateSizeOfAllEntries();
 }
 
 void DiskCacheBackendTest::BackendTransaction(const std::string& name,

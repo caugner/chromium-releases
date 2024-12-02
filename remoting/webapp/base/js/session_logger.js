@@ -11,14 +11,13 @@ var remoting = remoting || {};
 'use strict';
 
 /**
- * This class defines a remoting.Logger implementation that generates
- * log entries in the format of remoting.ChromotingEvent.
+ * |remoting.SessionLogger| is responsible for reporting telemetry entries for
+ * a Chromoting session.
  *
  * @param {remoting.ChromotingEvent.Role} role
  * @param {function(!Object)} writeLogEntry
  *
  * @constructor
- * @implements {remoting.Logger}
  */
 remoting.SessionLogger = function(role, writeLogEntry) {
   /** @private */
@@ -32,7 +31,9 @@ remoting.SessionLogger = function(role, writeLogEntry) {
   /** @private */
   this.sessionIdGenerationTime_ = 0;
   /** @private */
-  this.sessionStartTime_ = new Date().getTime();
+  this.sessionStartTime_ = Date.now();
+  /** @private */
+  this.sessionEndTime_ = 0;
   /** @private {remoting.ChromotingEvent.ConnectionType} */
   this.connectionType_;
   /** @private {remoting.ChromotingEvent.SessionEntryPoint} */
@@ -53,6 +54,10 @@ remoting.SessionLogger = function(role, writeLogEntry) {
   this.mode_ = remoting.ChromotingEvent.Mode.ME2ME;
   /** @private {remoting.ChromotingEvent.AuthMethod} */
   this.authMethod_;
+  /** @private {remoting.ChromotingEvent} */
+  this.lastSessionEntry_ = null;
+  /** @private {remoting.ChromotingEvent.SessionSummary} */
+  this.previousSessionSummary_ = null;
 
   this.setSessionId_();
 };
@@ -64,58 +69,109 @@ remoting.SessionLogger.prototype.setEntryPoint = function(entryPoint) {
   this.entryPoint_ = entryPoint;
 };
 
-/** @override {remoting.Logger} */
+/**
+ * @param {number} totalTime The value of time taken to complete authorization.
+ * @return {void} Nothing.
+ */
 remoting.SessionLogger.prototype.setAuthTotalTime = function(totalTime) {
   this.authTotalTime_ = totalTime;
 };
 
-/** @override {remoting.Logger} */
+/**
+ * @param {string} hostVersion Version of the host for current session.
+ * @return {void} Nothing.
+ */
 remoting.SessionLogger.prototype.setHostVersion = function(hostVersion) {
   this.hostVersion_ = hostVersion;
 };
 
-/** @override {remoting.Logger} */
+/**
+ * @param {remoting.ChromotingEvent.Os} hostOs Type of the OS the host
+ *        for the current session.
+ * @return {void} Nothing.
+ */
 remoting.SessionLogger.prototype.setHostOs = function(hostOs) {
   this.hostOs_ = hostOs;
 };
 
-/** @override {remoting.Logger} */
+/**
+ * @param {string} hostOsVersion Version of the host Os for current session.
+ * @return {void} Nothing.
+ */
 remoting.SessionLogger.prototype.setHostOsVersion = function(hostOsVersion) {
   this.hostOsVersion_ = hostOsVersion;
 };
 
-/** @override {remoting.Logger} */
+/**
+ * @param {number} time Time in milliseconds since the last host status update.
+ * @return {void} Nothing.
+ */
 remoting.SessionLogger.prototype.setHostStatusUpdateElapsedTime =
     function(time) {
   this.hostStatusUpdateElapsedTime_ = time;
 };
 
-/** @override {remoting.Logger} */
-remoting.SessionLogger.prototype.setHostOsVersion = function(hostOsVersion) {
-  this.hostOsVersion_ = hostOsVersion;
-};
-
-/** @override {remoting.Logger} */
+/**
+ * Set the connection type (direct, stun relay).
+ *
+ * @param {string} connectionType
+ */
 remoting.SessionLogger.prototype.setConnectionType = function(connectionType) {
   this.connectionType_ = toConnectionType(connectionType);
 };
 
-/** @override {remoting.Logger} */
+/**
+ * @param {remoting.ChromotingEvent.Mode} mode
+ */
 remoting.SessionLogger.prototype.setLogEntryMode = function(mode) {
   this.mode_ = mode;
 };
 
-/** @override {remoting.Logger} */
-remoting.SessionLogger.prototype.setAuthMethod = function(authMethod) {
-  this.authMethod_ = authMethod;
+/**
+ * @param {remoting.ChromotingEvent.AuthMethod} method
+ */
+remoting.SessionLogger.prototype.setAuthMethod = function(method) {
+  this.authMethod_ = method;
 };
 
-/** @override {remoting.Logger} */
+/**
+ * @param {remoting.ChromotingEvent.SessionSummary} summary
+ */
+remoting.SessionLogger.prototype.setPreviousSessionSummary =
+    function(summary) {
+  this.previousSessionSummary_ = summary;
+};
+
+/**
+ * @return {string} The current session id. This is random GUID, refreshed
+ *     every 24hrs.
+ */
 remoting.SessionLogger.prototype.getSessionId = function() {
   return this.sessionId_;
 };
 
-/** @override {remoting.Logger} */
+/**
+ * @return {remoting.ChromotingEvent.SessionSummary} A snapshot of the current
+ *     session.
+ */
+remoting.SessionLogger.prototype.createSummary = function() {
+  var summary = new remoting.ChromotingEvent.SessionSummary();
+  summary.session_id = this.lastSessionEntry_.session_id;
+  summary.last_state = this.lastSessionEntry_.session_state;
+  summary.last_error = this.lastSessionEntry_.connection_error;
+  summary.entry_point = this.lastSessionEntry_.session_entry_point;
+  summary.duration = this.lastSessionEntry_.session_duration;
+  if (this.sessionEndTime_ > 0) {
+    summary.session_end_elapsed_time =
+        (Date.now() - this.sessionEndTime_) / 1000;
+  }
+  return summary;
+};
+
+/**
+ * @param {remoting.SignalStrategy.Type} strategyType
+ * @param {remoting.FallbackSignalStrategy.Progress} progress
+ */
 remoting.SessionLogger.prototype.logSignalStrategyProgress =
     function(strategyType, progress) {
   this.maybeExpireSessionId_();
@@ -128,38 +184,38 @@ remoting.SessionLogger.prototype.logSignalStrategyProgress =
   this.log_(entry);
 };
 
-/** @override {remoting.Logger} */
-remoting.SessionLogger.prototype.logClientSessionStateChange = function(
-    state, stateError, xmppError) {
-  this.logSessionStateChange(
-      toSessionState(state),
-      stateError.toConnectionError(),
-      xmppError);
-};
-
 /**
  * @param {remoting.ChromotingEvent.SessionState} state
- * @param {remoting.ChromotingEvent.ConnectionError} error
- * @param {remoting.ChromotingEvent.XmppError=} opt_XmppError
+ * @param {remoting.Error=} opt_error
  */
-remoting.SessionLogger.prototype.logSessionStateChange = function(
-    state, error, opt_XmppError) {
+remoting.SessionLogger.prototype.logSessionStateChange =
+    function(state, opt_error) {
   this.maybeExpireSessionId_();
 
-  var entry = this.makeSessionStateChange_(
-      state, error,
-      /** @type {?remoting.ChromotingEvent.XmppError} */ (opt_XmppError));
+  var entry = this.makeSessionStateChange_(state, opt_error);
   entry.previous_session_state = this.previousSessionState_;
   this.previousSessionState_ = state;
 
   this.log_(entry);
+
+  this.lastSessionEntry_ =
+      /** @type {remoting.ChromotingEvent} */ (base.deepCopy(entry));
+
+  // Update the session summary.
+  if (remoting.ChromotingEvent.isEndOfSession(entry)) {
+    this.sessionEndTime_ = Date.now();
+  }
 
   // Don't accumulate connection statistics across state changes.
   this.logAccumulatedStatistics_();
   this.statsAccumulator_.empty();
 };
 
-/** @override {remoting.Logger} */
+/**
+ * Logs connection statistics.
+ *
+ * @param {Object<number>} stats The connection statistics
+ */
 remoting.SessionLogger.prototype.logStatistics = function(stats) {
   this.maybeExpireSessionId_();
   // Store the statistics.
@@ -167,28 +223,33 @@ remoting.SessionLogger.prototype.logStatistics = function(stats) {
   // Send statistics to the server if they've been accumulating for at least
   // 60 seconds.
   if (this.statsAccumulator_.getTimeSinceFirstValue() >=
-      remoting.Logger.CONNECTION_STATS_ACCUMULATE_TIME) {
+      remoting.SessionLogger.CONNECTION_STATS_ACCUMULATE_TIME) {
     this.logAccumulatedStatistics_();
   }
 };
 
 /**
  * @param {remoting.ChromotingEvent.SessionState} state
- * @param {remoting.ChromotingEvent.ConnectionError} error
- * @param {?remoting.ChromotingEvent.XmppError} xmppError
+ * @param {remoting.Error=} opt_error
  * @return {remoting.ChromotingEvent}
  * @private
  */
 remoting.SessionLogger.prototype.makeSessionStateChange_ =
-    function(state, error, xmppError) {
+    function(state, opt_error) {
   var entry = new remoting.ChromotingEvent(
       remoting.ChromotingEvent.Type.SESSION_STATE);
-  entry.connection_error = error;
-  entry.session_state = state;
 
-  if (Boolean(xmppError)) {
-    entry.xmpp_error = xmppError;
+  var ConnectionError = remoting.ChromotingEvent.ConnectionError;
+
+  if (!opt_error) {
+    entry.connection_error = ConnectionError.NONE;
+  } else if (opt_error instanceof remoting.Error) {
+    entry.setError(opt_error);
+  } else {
+    entry.connection_error = ConnectionError.UNKNOWN_ERROR;
   }
+
+  entry.session_state = state;
 
   this.fillEvent_(entry);
   return entry;
@@ -275,6 +336,9 @@ remoting.SessionLogger.prototype.fillEvent_ = function(entry) {
   if (this.authMethod_ != undefined) {
     entry.auth_method = this.authMethod_;
   }
+  if (this.previousSessionSummary_) {
+    entry.previous_session = this.previousSessionSummary_;
+  }
   entry.host_version = this.hostVersion_;
   entry.host_os = this.hostOs_;
   entry.host_os_version = this.hostOsVersion_;
@@ -282,6 +346,7 @@ remoting.SessionLogger.prototype.fillEvent_ = function(entry) {
 
 /**
  * Sends a log entry to the server.
+ *
  * @param {remoting.ChromotingEvent} entry
  * @private
  */
@@ -291,6 +356,7 @@ remoting.SessionLogger.prototype.log_ = function(entry) {
 
 /**
  * Sets the session ID to a random string.
+ *
  * @private
  */
 remoting.SessionLogger.prototype.setSessionId_ = function() {
@@ -321,7 +387,7 @@ remoting.SessionLogger.prototype.clearSessionId_ = function() {
 remoting.SessionLogger.prototype.maybeExpireSessionId_ = function() {
   if ((this.sessionId_ !== '') &&
       (new Date().getTime() - this.sessionIdGenerationTime_ >=
-      remoting.Logger.MAX_SESSION_ID_AGE)) {
+      remoting.SessionLogger.MAX_SESSION_ID_AGE)) {
     // Log the old session ID.
     var entry = this.makeSessionIdOld_();
     this.log_(entry);
@@ -338,37 +404,6 @@ remoting.SessionLogger.createForClient = function() {
   return new remoting.SessionLogger(remoting.ChromotingEvent.Role.CLIENT,
                                     remoting.TelemetryEventWriter.Client.write);
 };
-
-/**
- * TODO(kelvinp): Consolidate the two enums (crbug.com/504200)
- * @param {remoting.ClientSession.State} state
- * @return {remoting.ChromotingEvent.SessionState}
- */
-function toSessionState(state) {
-  var SessionState = remoting.ChromotingEvent.SessionState;
-  switch(state) {
-    case remoting.ClientSession.State.UNKNOWN:
-      return SessionState.UNKNOWN;
-    case remoting.ClientSession.State.INITIALIZING:
-      return SessionState.INITIALIZING;
-    case remoting.ClientSession.State.CONNECTING:
-      return SessionState.CONNECTING;
-    case remoting.ClientSession.State.AUTHENTICATED:
-      return SessionState.AUTHENTICATED;
-    case remoting.ClientSession.State.CONNECTED:
-      return SessionState.CONNECTED;
-    case remoting.ClientSession.State.CLOSED:
-      return SessionState.CLOSED;
-    case remoting.ClientSession.State.FAILED:
-      return SessionState.CONNECTION_FAILED;
-    case remoting.ClientSession.State.CONNECTION_DROPPED:
-      return SessionState.CONNECTION_DROPPED;
-    case remoting.ClientSession.State.CONNECTION_CANCELED:
-      return SessionState.CONNECTION_CANCELED;
-    default:
-      throw new Error('Unknown session state : ' + state);
-  }
-}
 
 /**
  * @param {remoting.SignalStrategy.Type} type
@@ -423,5 +458,12 @@ function toConnectionType(type) {
       throw new Error('Unknown ConnectionType :=' + type);
   }
 }
+
+// The maximum age of a session ID, in milliseconds.
+remoting.SessionLogger.MAX_SESSION_ID_AGE = 24 * 60 * 60 * 1000;
+
+// The time over which to accumulate connection statistics before logging them
+// to the server, in milliseconds.
+remoting.SessionLogger.CONNECTION_STATS_ACCUMULATE_TIME = 60 * 1000;
 
 })();

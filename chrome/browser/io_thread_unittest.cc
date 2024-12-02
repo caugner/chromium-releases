@@ -40,6 +40,11 @@ class IOThreadPeer {
                                    spdy_trial_params, globals);
   }
 
+  static void ConfigureNPNGlobals(base::StringPiece npn_trial_group,
+                                  IOThread::Globals* globals) {
+    IOThread::ConfigureNPNGlobals(npn_trial_group, globals);
+  }
+
   static void InitializeNetworkSessionParamsFromGlobals(
       const IOThread::Globals& globals,
       net::HttpNetworkSession::Params* params) {
@@ -66,6 +71,10 @@ class IOThreadTest : public testing::Test {
   void ConfigureSpdyGlobals() {
     IOThreadPeer::ConfigureSpdyGlobals(command_line_, field_trial_group_,
                                        field_trial_params_, &globals_);
+  }
+
+  void ConfigureNPNGlobals() {
+    IOThreadPeer::ConfigureNPNGlobals(field_trial_group_, &globals_);
   }
 
   void InitializeNetworkSessionParams(net::HttpNetworkSession::Params* params) {
@@ -100,8 +109,7 @@ TEST_F(IOThreadTest, SpdyFieldTrialSpdy31Enabled) {
   field_trial_group_ = "Spdy31Enabled";
   ConfigureSpdyGlobals();
   EXPECT_THAT(globals_.next_protos,
-              ElementsAre(net::kProtoHTTP11,
-                          net::kProtoSPDY31));
+              ElementsAre(net::kProtoSPDY31, net::kProtoHTTP11));
 }
 
 TEST_F(IOThreadTest, SpdyFieldTrialSpdy4Enabled) {
@@ -109,7 +117,7 @@ TEST_F(IOThreadTest, SpdyFieldTrialSpdy4Enabled) {
   ConfigureSpdyGlobals();
   EXPECT_THAT(
       globals_.next_protos,
-      ElementsAre(net::kProtoHTTP11, net::kProtoSPDY31, net::kProtoHTTP2));
+      ElementsAre(net::kProtoHTTP2, net::kProtoSPDY31, net::kProtoHTTP11));
 }
 
 TEST_F(IOThreadTest, SpdyFieldTrialDefault) {
@@ -117,7 +125,7 @@ TEST_F(IOThreadTest, SpdyFieldTrialDefault) {
   ConfigureSpdyGlobals();
   EXPECT_THAT(
       globals_.next_protos,
-      ElementsAre(net::kProtoHTTP11, net::kProtoSPDY31, net::kProtoHTTP2));
+      ElementsAre(net::kProtoHTTP2, net::kProtoSPDY31, net::kProtoHTTP11));
 }
 
 TEST_F(IOThreadTest, SpdyFieldTrialParametrized) {
@@ -127,7 +135,7 @@ TEST_F(IOThreadTest, SpdyFieldTrialParametrized) {
   field_trial_group_ = "ParametrizedHTTP2Only";
   ConfigureSpdyGlobals();
   EXPECT_THAT(globals_.next_protos,
-              ElementsAre(net::kProtoHTTP11, net::kProtoHTTP2));
+              ElementsAre(net::kProtoHTTP2, net::kProtoHTTP11));
 }
 
 TEST_F(IOThreadTest, SpdyCommandLineUseSpdyOff) {
@@ -136,6 +144,22 @@ TEST_F(IOThreadTest, SpdyCommandLineUseSpdyOff) {
   field_trial_group_ = "Spdy4Enabled";
   ConfigureSpdyGlobals();
   EXPECT_EQ(0u, globals_.next_protos.size());
+}
+
+TEST_F(IOThreadTest, NPNFieldTrialEnabled) {
+  field_trial_group_ = "Enable-experiment";
+  ConfigureNPNGlobals();
+  net::HttpNetworkSession::Params params;
+  InitializeNetworkSessionParams(&params);
+  EXPECT_TRUE(params.enable_npn);
+}
+
+TEST_F(IOThreadTest, NPNFieldTrialDisabled) {
+  field_trial_group_ = "Disable-holdback";
+  ConfigureNPNGlobals();
+  net::HttpNetworkSession::Params params;
+  InitializeNetworkSessionParams(&params);
+  EXPECT_FALSE(params.enable_npn);
 }
 
 TEST_F(IOThreadTest, DisableQuicByDefault) {
@@ -155,7 +179,6 @@ TEST_F(IOThreadTest, EnableQuicFromFieldTrialGroup) {
   net::HttpNetworkSession::Params params;
   InitializeNetworkSessionParams(&params);
   EXPECT_TRUE(params.enable_quic);
-  EXPECT_FALSE(params.enable_insecure_quic);
   EXPECT_TRUE(params.enable_quic_for_proxies);
   EXPECT_EQ(1350u, params.quic_max_packet_length);
   EXPECT_EQ(1.0, params.alternative_service_probability_threshold);
@@ -173,7 +196,9 @@ TEST_F(IOThreadTest, EnableQuicFromFieldTrialGroup) {
   EXPECT_EQ(0, params.quic_max_number_of_lossy_connections);
   EXPECT_EQ(1.0f, params.quic_packet_loss_threshold);
   EXPECT_FALSE(params.quic_delay_tcp_race);
+  EXPECT_FALSE(params.quic_close_sessions_on_ip_change);
   EXPECT_FALSE(IOThread::ShouldEnableQuicForDataReductionProxy());
+  EXPECT_TRUE(params.quic_host_whitelist.empty());
 }
 
 TEST_F(IOThreadTest, EnableQuicFromQuicProxyFieldTrialGroup) {
@@ -250,26 +275,6 @@ TEST_F(IOThreadTest, EnableAlternativeServicesFromCommandLineWithQuicEnabled) {
   EXPECT_TRUE(params.use_alternative_services);
 }
 
-TEST_F(IOThreadTest, EnableInsecureQuicFromFieldTrialParams) {
-  field_trial_group_ = "Enabled";
-  field_trial_params_["enable_insecure_quic"] = "true";
-
-  ConfigureQuicGlobals();
-  net::HttpNetworkSession::Params params;
-  InitializeNetworkSessionParams(&params);
-  EXPECT_TRUE(params.enable_insecure_quic);
-}
-
-TEST_F(IOThreadTest, EnableInsecureQuicCommandLine) {
-  command_line_.AppendSwitch("enable-quic");
-  command_line_.AppendSwitch("enable-insecure-quic");
-
-  ConfigureQuicGlobals();
-  net::HttpNetworkSession::Params params;
-  InitializeNetworkSessionParams(&params);
-  EXPECT_TRUE(params.enable_insecure_quic);
-}
-
 TEST_F(IOThreadTest, PacketLengthFromCommandLine) {
   command_line_.AppendSwitch("enable-quic");
   command_line_.AppendSwitchASCII("quic-max-packet-length", "1450");
@@ -278,6 +283,15 @@ TEST_F(IOThreadTest, PacketLengthFromCommandLine) {
   net::HttpNetworkSession::Params params;
   InitializeNetworkSessionParams(&params);
   EXPECT_EQ(1450u, params.quic_max_packet_length);
+}
+
+TEST_F(IOThreadTest, QuicCloseSessionsOnIpChangeFromFieldTrialParams) {
+  field_trial_group_ = "Enabled";
+  field_trial_params_["close_sessions_on_ip_change"] = "true";
+  ConfigureQuicGlobals();
+  net::HttpNetworkSession::Params params;
+  InitializeNetworkSessionParams(&params);
+  EXPECT_TRUE(params.quic_close_sessions_on_ip_change);
 }
 
 TEST_F(IOThreadTest, PacketLengthFromFieldTrialParams) {
@@ -498,6 +512,32 @@ TEST_F(IOThreadTest, AlternativeServiceProbabilityThresholdFromParams) {
   net::HttpNetworkSession::Params params;
   InitializeNetworkSessionParams(&params);
   EXPECT_EQ(.5, params.alternative_service_probability_threshold);
+}
+
+TEST_F(IOThreadTest, QuicWhitelistFromCommandLinet) {
+  command_line_.AppendSwitch("enable-quic");
+  command_line_.AppendSwitchASCII("quic-host-whitelist",
+                                  "www.example.org, www.example.com");
+
+  ConfigureQuicGlobals();
+  net::HttpNetworkSession::Params params;
+  InitializeNetworkSessionParams(&params);
+  EXPECT_EQ(2u, params.quic_host_whitelist.size());
+  EXPECT_TRUE(ContainsKey(params.quic_host_whitelist, "www.example.org"));
+  EXPECT_TRUE(ContainsKey(params.quic_host_whitelist, "www.example.com"));
+}
+
+TEST_F(IOThreadTest, QuicWhitelistFromParams) {
+  field_trial_group_ = "Enabled";
+  field_trial_params_["quic_host_whitelist"] =
+      "www.example.org, www.example.com";
+
+  ConfigureQuicGlobals();
+  net::HttpNetworkSession::Params params;
+  InitializeNetworkSessionParams(&params);
+  EXPECT_EQ(2u, params.quic_host_whitelist.size());
+  EXPECT_TRUE(ContainsKey(params.quic_host_whitelist, "www.example.org"));
+  EXPECT_TRUE(ContainsKey(params.quic_host_whitelist, "www.example.com"));
 }
 
 TEST_F(IOThreadTest, QuicDisallowedByPolicy) {

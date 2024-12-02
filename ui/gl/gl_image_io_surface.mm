@@ -8,6 +8,9 @@
 
 #include "base/lazy_instance.h"
 #include "base/mac/foundation_util.h"
+#include "base/trace_event/memory_allocator_dump.h"
+#include "base/trace_event/memory_dump_manager.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
 
@@ -15,18 +18,21 @@
 #include <OpenGL/CGLIOSurface.h>
 #include <Quartz/Quartz.h>
 
-namespace gfx {
+using gfx::BufferFormat;
+
+namespace gl {
 namespace {
 
-typedef std::map<gfx::AcceleratedWidget,CALayer*> WidgetToLayerMap;
+using WidgetToLayerMap = std::map<gfx::AcceleratedWidget, CALayer*>;
 base::LazyInstance<WidgetToLayerMap> g_widget_to_layer_map;
 
 bool ValidInternalFormat(unsigned internalformat) {
   switch (internalformat) {
-    case GL_R8:
+    case GL_RED:
     case GL_BGRA_EXT:
     case GL_RGB:
     case GL_RGB_YCBCR_422_CHROMIUM:
+    case GL_RGBA:
       return true;
     default:
       return false;
@@ -37,6 +43,7 @@ bool ValidFormat(BufferFormat format) {
   switch (format) {
     case BufferFormat::R_8:
     case BufferFormat::BGRA_8888:
+    case BufferFormat::RGBA_8888:
     case BufferFormat::UYVY_422:
     case BufferFormat::YUV_420_BIPLANAR:
       return true;
@@ -46,7 +53,7 @@ bool ValidFormat(BufferFormat format) {
     case BufferFormat::DXT5:
     case BufferFormat::ETC1:
     case BufferFormat::RGBA_4444:
-    case BufferFormat::RGBA_8888:
+    case BufferFormat::RGBX_8888:
     case BufferFormat::BGRX_8888:
     case BufferFormat::YUV_420:
       return false;
@@ -62,6 +69,7 @@ GLenum TextureFormat(BufferFormat format) {
     case BufferFormat::YUV_420_BIPLANAR:
       return GL_RED;
     case BufferFormat::BGRA_8888:
+    case BufferFormat::RGBA_8888:
       return GL_RGBA;
     case BufferFormat::UYVY_422:
       return GL_RGB;
@@ -71,7 +79,7 @@ GLenum TextureFormat(BufferFormat format) {
     case BufferFormat::DXT5:
     case BufferFormat::ETC1:
     case BufferFormat::RGBA_4444:
-    case BufferFormat::RGBA_8888:
+    case BufferFormat::RGBX_8888:
     case BufferFormat::BGRX_8888:
     case BufferFormat::YUV_420:
       NOTREACHED();
@@ -88,6 +96,7 @@ GLenum DataFormat(BufferFormat format) {
     case BufferFormat::YUV_420_BIPLANAR:
       return GL_RED;
     case BufferFormat::BGRA_8888:
+    case BufferFormat::RGBA_8888:
       return GL_BGRA;
     case BufferFormat::UYVY_422:
       return GL_YCBCR_422_APPLE;
@@ -98,7 +107,7 @@ GLenum DataFormat(BufferFormat format) {
     case BufferFormat::DXT5:
     case BufferFormat::ETC1:
     case BufferFormat::RGBA_4444:
-    case BufferFormat::RGBA_8888:
+    case BufferFormat::RGBX_8888:
     case BufferFormat::BGRX_8888:
     case BufferFormat::YUV_420:
       NOTREACHED();
@@ -115,6 +124,7 @@ GLenum DataType(BufferFormat format) {
     case BufferFormat::YUV_420_BIPLANAR:
       return GL_UNSIGNED_BYTE;
     case BufferFormat::BGRA_8888:
+    case BufferFormat::RGBA_8888:
       return GL_UNSIGNED_INT_8_8_8_8_REV;
     case BufferFormat::UYVY_422:
       return GL_UNSIGNED_SHORT_8_8_APPLE;
@@ -125,7 +135,7 @@ GLenum DataType(BufferFormat format) {
     case BufferFormat::DXT5:
     case BufferFormat::ETC1:
     case BufferFormat::RGBA_4444:
-    case BufferFormat::RGBA_8888:
+    case BufferFormat::RGBX_8888:
     case BufferFormat::BGRX_8888:
     case BufferFormat::YUV_420:
       NOTREACHED();
@@ -138,11 +148,9 @@ GLenum DataType(BufferFormat format) {
 
 }  // namespace
 
-GLImageIOSurface::GLImageIOSurface(gfx::GenericSharedMemoryId io_surface_id,
-                                   const gfx::Size& size,
+GLImageIOSurface::GLImageIOSurface(const gfx::Size& size,
                                    unsigned internalformat)
-    : io_surface_id_(io_surface_id),
-      size_(size),
+    : size_(size),
       internalformat_(internalformat),
       format_(BufferFormat::RGBA_8888) {}
 
@@ -152,6 +160,7 @@ GLImageIOSurface::~GLImageIOSurface() {
 }
 
 bool GLImageIOSurface::Initialize(IOSurfaceRef io_surface,
+                                  gfx::GenericSharedMemoryId io_surface_id,
                                   BufferFormat format) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!io_surface_);
@@ -168,6 +177,7 @@ bool GLImageIOSurface::Initialize(IOSurfaceRef io_surface,
 
   format_ = format;
   io_surface_.reset(io_surface, base::scoped_policy::RETAIN);
+  io_surface_id_ = io_surface_id;
   return true;
 }
 
@@ -176,7 +186,9 @@ void GLImageIOSurface::Destroy(bool have_context) {
   io_surface_.reset();
 }
 
-gfx::Size GLImageIOSurface::GetSize() { return size_; }
+gfx::Size GLImageIOSurface::GetSize() {
+  return size_;
+}
 
 unsigned GLImageIOSurface::GetInternalFormat() { return internalformat_; }
 
@@ -190,7 +202,7 @@ bool GLImageIOSurface::BindTexImage(unsigned target) {
   }
 
   CGLContextObj cgl_context =
-      static_cast<CGLContextObj>(GLContext::GetCurrent()->GetHandle());
+      static_cast<CGLContextObj>(gfx::GLContext::GetCurrent()->GetHandle());
 
   DCHECK(io_surface_);
   CGLError cgl_error =
@@ -205,17 +217,21 @@ bool GLImageIOSurface::BindTexImage(unsigned target) {
   return true;
 }
 
+bool GLImageIOSurface::CopyTexImage(unsigned target) {
+  return false;
+}
+
 bool GLImageIOSurface::CopyTexSubImage(unsigned target,
-                                       const Point& offset,
-                                       const Rect& rect) {
+                                       const gfx::Point& offset,
+                                       const gfx::Rect& rect) {
   return false;
 }
 
 bool GLImageIOSurface::ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
                                             int z_order,
-                                            OverlayTransform transform,
-                                            const Rect& bounds_rect,
-                                            const RectF& crop_rect) {
+                                            gfx::OverlayTransform transform,
+                                            const gfx::Rect& bounds_rect,
+                                            const gfx::RectF& crop_rect) {
   NOTREACHED();
   return false;
 }
@@ -233,8 +249,8 @@ void GLImageIOSurface::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
                   base::trace_event::MemoryAllocatorDump::kUnitsBytes,
                   static_cast<uint64_t>(size_bytes));
 
-  auto guid = gfx::GetGenericSharedMemoryGUIDForTracing(process_tracing_id,
-                                                        io_surface_id_);
+  auto guid =
+      GetGenericSharedMemoryGUIDForTracing(process_tracing_id, io_surface_id_);
   pmd->CreateSharedGlobalAllocatorDump(guid);
   pmd->AddOwnershipEdge(dump->guid(), guid);
 }
@@ -244,8 +260,8 @@ base::ScopedCFTypeRef<IOSurfaceRef> GLImageIOSurface::io_surface() {
 }
 
 // static
-void GLImageIOSurface::SetLayerForWidget(
-    gfx::AcceleratedWidget widget, CALayer* layer) {
+void GLImageIOSurface::SetLayerForWidget(gfx::AcceleratedWidget widget,
+                                         CALayer* layer) {
   if (layer)
     g_widget_to_layer_map.Pointer()->insert(std::make_pair(widget, layer));
   else

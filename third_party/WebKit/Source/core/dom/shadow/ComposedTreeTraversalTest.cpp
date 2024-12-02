@@ -35,6 +35,8 @@ protected:
     // calling member functions in |ComposedTreeTraversal|.
     void setupSampleHTML(const char* mainHTML, const char* shadowHTML, unsigned);
 
+    void attachV0ShadowRoot(Element& shadowHost, const char* shadowInnerHTML);
+
 private:
     void SetUp() override;
 
@@ -59,9 +61,16 @@ void ComposedTreeTraversalTest::setupSampleHTML(const char* mainHTML, const char
     RefPtrWillBeRawPtr<Element> body = document().body();
     body->setInnerHTML(String::fromUTF8(mainHTML), ASSERT_NO_EXCEPTION);
     RefPtrWillBeRawPtr<Element> shadowHost = toElement(NodeTraversal::childAt(*body, index));
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = shadowHost->createShadowRootInternal(ShadowRootType::OpenByDefault, ASSERT_NO_EXCEPTION);
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = shadowHost->createShadowRootInternal(ShadowRootType::V0, ASSERT_NO_EXCEPTION);
     shadowRoot->setInnerHTML(String::fromUTF8(shadowHTML), ASSERT_NO_EXCEPTION);
     body->updateDistribution();
+}
+
+void ComposedTreeTraversalTest::attachV0ShadowRoot(Element& shadowHost, const char* shadowInnerHTML)
+{
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = shadowHost.createShadowRootInternal(ShadowRootType::V0, ASSERT_NO_EXCEPTION);
+    shadowRoot->setInnerHTML(String::fromUTF8(shadowInnerHTML), ASSERT_NO_EXCEPTION);
+    document().body()->updateDistribution();
 }
 
 void testCommonAncestor(Node* expectedResult, const Node& nodeA, const Node& nodeB)
@@ -370,6 +379,69 @@ TEST_F(ComposedTreeTraversalTest, previousPostOrder)
     EXPECT_EQ(*s120->firstChild(), ComposedTreeTraversal::previousPostOrder(*s120));
     EXPECT_EQ(*s11, ComposedTreeTraversal::previousPostOrder(*s120->firstChild()));
     EXPECT_EQ(nullptr, ComposedTreeTraversal::previousPostOrder(*s120->firstChild(), s12.get()));
+}
+
+TEST_F(ComposedTreeTraversalTest, nextSiblingNotInDocumentComposedTree)
+{
+    const char* mainHTML =
+        "<div id='m0'>m0</div>"
+        "<div id='m1'>"
+            "<span id='m10'>m10</span>"
+            "<span id='m11'>m11</span>"
+        "</div>"
+        "<div id='m2'>m2</div>";
+    const char* shadowHTML =
+        "<content select='#m11'></content>";
+    setupSampleHTML(mainHTML, shadowHTML, 1);
+
+    RefPtrWillBeRawPtr<Element> body = document().body();
+    RefPtrWillBeRawPtr<Element> m10 = body->querySelector("#m10", ASSERT_NO_EXCEPTION);
+
+    EXPECT_EQ(nullptr, ComposedTreeTraversal::nextSibling(*m10));
+    EXPECT_EQ(nullptr, ComposedTreeTraversal::previousSibling(*m10));
+}
+
+TEST_F(ComposedTreeTraversalTest, redistribution)
+{
+    const char* mainHTML =
+        "<div id='m0'>m0</div>"
+        "<div id='m1'>"
+        "<span id='m10'>m10</span>"
+        "<span id='m11'>m11</span>"
+        "</div>"
+        "<div id='m2'>m2</div>";
+    const char* shadowHTML1 =
+        "<div id='s1'>"
+        "<content></content>"
+        "</div>";
+
+    setupSampleHTML(mainHTML, shadowHTML1, 1);
+
+    const char* shadowHTML2 =
+        "<div id='s2'>"
+        "<content select='#m10'></content>"
+        "<span id='s21'>s21</span>"
+        "</div>";
+
+    RefPtrWillBeRawPtr<Element> body = document().body();
+    RefPtrWillBeRawPtr<Element> m1 = body->querySelector("#m1", ASSERT_NO_EXCEPTION);
+    RefPtrWillBeRawPtr<Element> m10 = body->querySelector("#m10", ASSERT_NO_EXCEPTION);
+
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot1 = m1->openShadowRoot();
+    RefPtrWillBeRawPtr<Element> s1 = shadowRoot1->querySelector("#s1", ASSERT_NO_EXCEPTION);
+
+    attachV0ShadowRoot(*s1, shadowHTML2);
+
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot2 = s1->openShadowRoot();
+    RefPtrWillBeRawPtr<Element> s21 = shadowRoot2->querySelector("#s21", ASSERT_NO_EXCEPTION);
+
+    EXPECT_EQ(s21.get(), ComposedTreeTraversal::nextSibling(*m10));
+    EXPECT_EQ(m10.get(), ComposedTreeTraversal::previousSibling(*s21));
+
+    // ComposedTreeTraversal::traverseSiblings does not work for a node which is not in a document composed tree.
+    // e.g. The following test fails. The result of ComposedTreeTraversal::previousSibling(*m11)) will be #m10, instead of nullptr.
+    // RefPtrWillBeRawPtr<Element> m11 = body->querySelector("#m11", ASSERT_NO_EXCEPTION);
+    // EXPECT_EQ(nullptr, ComposedTreeTraversal::previousSibling(*m11));
 }
 
 } // namespace blink

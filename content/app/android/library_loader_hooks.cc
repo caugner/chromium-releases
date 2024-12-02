@@ -30,9 +30,13 @@
 #include "net/android/net_jni_registrar.h"
 #include "ui/android/ui_android_jni_registrar.h"
 #include "ui/base/android/ui_base_jni_registrar.h"
+#include "ui/events/android/events_jni_registrar.h"
 #include "ui/gfx/android/gfx_jni_registrar.h"
 #include "ui/gl/android/gl_jni_registrar.h"
+
+#if !defined(USE_AURA)
 #include "ui/shell_dialogs/android/shell_dialogs_jni_registrar.h"
+#endif
 
 namespace content {
 
@@ -55,8 +59,13 @@ bool EnsureJniRegistered(JNIEnv* env) {
     if (!ui::gl::android::RegisterJni(env))
       return false;
 
+    if (!ui::events::android::RegisterJni(env))
+      return false;
+
+#if !defined(USE_AURA)
     if (!ui::shell_dialogs::RegisterJni(env))
       return false;
+#endif
 
     if (!content::android::RegisterCommonJni(env))
       return false;
@@ -88,22 +97,21 @@ bool EnsureJniRegistered(JNIEnv* env) {
 bool LibraryLoaded(JNIEnv* env, jclass clazz) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
+  // Enable startup tracing asap to avoid early TRACE_EVENT calls being ignored.
   if (command_line->HasSwitch(switches::kTraceStartup)) {
     base::trace_event::TraceConfig trace_config(
         command_line->GetSwitchValueASCII(switches::kTraceStartup), "");
     base::trace_event::TraceLog::GetInstance()->SetEnabled(
         trace_config, base::trace_event::TraceLog::RECORDING_MODE);
-  } else {
-    if (tracing::TraceConfigFile::GetInstance()->IsEnabled()) {
-      base::trace_event::TraceLog::GetInstance()->SetEnabled(
-          tracing::TraceConfigFile::GetInstance()->GetTraceConfig(),
-          base::trace_event::TraceLog::RECORDING_MODE);
-    }
+  } else if (tracing::TraceConfigFile::GetInstance()->IsEnabled()) {
+    // This checks kTraceConfigFile switch.
+    base::trace_event::TraceLog::GetInstance()->SetEnabled(
+        tracing::TraceConfigFile::GetInstance()->GetTraceConfig(),
+        base::trace_event::TraceLog::RECORDING_MODE);
   }
 
   // Android's main browser loop is custom so we set the browser
   // name here as early as possible.
-  TRACE_EVENT_BEGIN_ETW("BrowserMain", 0, "");
   base::trace_event::TraceLog::GetInstance()->SetProcessName("Browser");
   base::trace_event::TraceLog::GetInstance()->SetProcessSortIndex(
       kTraceEventBrowserProcessSortIndex);

@@ -14,7 +14,7 @@
 #include "media/base/media_keys.h"
 #include "media/mojo/interfaces/content_decryption_module.mojom.h"
 #include "media/mojo/services/mojo_type_trait.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/binding.h"
 
 namespace mojo {
 class ServiceProvider;
@@ -40,8 +40,6 @@ class MojoCdm : public MediaKeys,
       const media::SessionKeysChangeCB& session_keys_change_cb,
       const media::SessionExpirationUpdateCB& session_expiration_update_cb,
       const media::CdmCreatedCB& cdm_created_cb);
-
-  ~MojoCdm() final;
 
   // MediaKeys implementation.
   void SetServerCertificate(const std::vector<uint8_t>& certificate,
@@ -75,6 +73,8 @@ class MojoCdm : public MediaKeys,
           const SessionKeysChangeCB& session_keys_change_cb,
           const SessionExpirationUpdateCB& session_expiration_update_cb);
 
+  ~MojoCdm() final;
+
   void InitializeCdm(const std::string& key_system,
                      const GURL& security_origin,
                      const media::CdmConfig& cdm_config,
@@ -97,6 +97,13 @@ class MojoCdm : public MediaKeys,
   void OnSessionExpirationUpdate(const mojo::String& session_id,
                                  double new_expiry_time_sec) final;
 
+  // Callback for InitializeCdm.
+  // Note: Cannot use OnPromiseResult() below since we need an extra parameter
+  // |cdm_id|, which isn't needed in CdmInitializedPromise.
+  void OnCdmInitialized(scoped_ptr<CdmInitializedPromise> promise,
+                        interfaces::CdmPromiseResultPtr result,
+                        int cdm_id);
+
   // Callbacks to handle CDM promises.
   // We have to inline this method, since MS VS 2013 compiler fails to compile
   // it when this method is not inlined. It fails with error C2244
@@ -110,8 +117,6 @@ class MojoCdm : public MediaKeys,
     else
       RejectPromise(promise.Pass(), result.Pass());
   }
-
-  static int next_cdm_id_;
 
   interfaces::ContentDecryptionModulePtr remote_cdm_;
   mojo::Binding<ContentDecryptionModuleClient> binding_;

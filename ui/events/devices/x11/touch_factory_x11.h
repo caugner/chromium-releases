@@ -97,6 +97,9 @@ class EVENTS_DEVICES_EXPORT TouchFactory {
   // X server.
   void SetPointerDeviceForTest(const std::vector<int>& devices);
 
+  // Sets the status of the touch screens to |enabled|.
+  void SetTouchscreensEnabled(bool enabled);
+
  private:
   // Requirement for Singleton
   friend struct base::DefaultSingletonTraits<TouchFactory>;
@@ -119,9 +122,6 @@ class EVENTS_DEVICES_EXPORT TouchFactory {
   // A quick lookup table for determining if a device is a touch device.
   std::bitset<kMaxDeviceNum> touch_device_lookup_;
 
-  // Indicates whether touch events are explicitly disabled.
-  bool touch_events_disabled_;
-
   // The list of touch devices. For testing/debugging purposes, a single-pointer
   // device (mouse or touch screen without sufficient X/driver support for MT)
   // can sometimes be treated as a touch device. The key in the map represents
@@ -139,6 +139,13 @@ class EVENTS_DEVICES_EXPORT TouchFactory {
 
   // Associate each device ID with its master device ID.
   std::map<int, int> device_master_id_list_;
+
+  // Indicates whether touch events are explicitly disabled by the flag
+  // #touch-events.
+  bool touch_events_flag_disabled_;
+
+  // The status of the touch screens devices themselves.
+  bool touch_screens_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(TouchFactory);
 };

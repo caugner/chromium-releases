@@ -888,10 +888,6 @@ NSView* BridgedNativeWidget::AcceleratedWidgetGetNSView() const {
   return compositor_superview_;
 }
 
-bool BridgedNativeWidget::AcceleratedWidgetShouldIgnoreBackpressure() const {
-  return true;
-}
-
 void BridgedNativeWidget::AcceleratedWidgetGetVSyncParameters(
   base::TimeTicks* timebase, base::TimeDelta* interval) const {
   // TODO(tapted): Add vsync support.
@@ -899,8 +895,7 @@ void BridgedNativeWidget::AcceleratedWidgetGetVSyncParameters(
   *interval = base::TimeDelta();
 }
 
-void BridgedNativeWidget::AcceleratedWidgetSwapCompleted(
-    const std::vector<ui::LatencyInfo>& latency_info) {
+void BridgedNativeWidget::AcceleratedWidgetSwapCompleted() {
   // Ignore frames arriving "late" for an old size. A frame at the new size
   // should arrive soon.
   if (!compositor_widget_->HasFrameOfSize(GetClientAreaSize()))
@@ -910,10 +905,6 @@ void BridgedNativeWidget::AcceleratedWidgetSwapCompleted(
     invalidate_shadow_on_frame_swap_ = false;
     [window_ invalidateShadow];
   }
-}
-
-void BridgedNativeWidget::AcceleratedWidgetHitError() {
-  compositor_->ScheduleFullRedraw();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1028,8 +1019,7 @@ void BridgedNativeWidget::CreateCompositor() {
       new ui::AcceleratedWidgetMac(needs_gl_finish_workaround));
   compositor_.reset(
       new ui::Compositor(context_factory, GetCompositorTaskRunner()));
-  compositor_->SetAcceleratedWidgetAndStartCompositor(
-      compositor_widget_->accelerated_widget());
+  compositor_->SetAcceleratedWidget(compositor_widget_->accelerated_widget());
   compositor_widget_->SetNSView(this);
 }
 

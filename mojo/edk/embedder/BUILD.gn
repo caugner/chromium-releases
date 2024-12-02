@@ -18,7 +18,6 @@ mojo_edk_source_set("embedder") {
     "embedder.h",
     "embedder_internal.h",
     "entrypoints.cc",
-    "system_impl_private_entrypoints.cc",
 
     # Test-only code:
     # TODO(vtl): It's a little unfortunate that these end up in the same
@@ -38,8 +37,7 @@ mojo_edk_source_set("embedder") {
   public_deps = [
     ":delegates",
     ":platform",
-    "//third_party/mojo/src/mojo/public/cpp/system",
-    "//third_party/mojo/src/mojo/public/platform/native:system_impl_private_api",
+    "//mojo/public/cpp/system",
   ]
 
   deps = [
@@ -85,7 +83,7 @@ mojo_edk_source_set("platform") {
   configs = [ "//mojo/edk/system:system_config" ]
 
   public_deps = [
-    "//third_party/mojo/src/mojo/public/cpp/system",
+    "//mojo/public/cpp/system",
   ]
 
   deps = [
@@ -114,7 +112,7 @@ mojo_edk_source_set("delegates") {
   configs = [ "//mojo/edk/system:system_config" ]
 
   public_deps = [
-    "//third_party/mojo/src/mojo/public/cpp/system",
+    "//mojo/public/cpp/system",
   ]
 }
 
@@ -135,7 +133,6 @@ mojo_edk_source_set("embedder_unittests2") {
   deps = [
     "//base",
     "//base/test:test_support",
-    "//mojo/edk/system",
     "//mojo/message_pump",
 
     # TODO(use_chrome_edk): temporary since the Mojo wrapper primitives are
@@ -144,5 +141,9 @@ mojo_edk_source_set("embedder_unittests2") {
     "//mojo/edk/system:test_utils",
     "//mojo/edk/test:test_support",
     "//testing/gtest",
+
+    # TODO(use_chrome_edk): temporary since the Mojo wrapper primitives are
+    # declared in third party only for now.
+    "//third_party/mojo/src/mojo/edk/system",
   ]
 }

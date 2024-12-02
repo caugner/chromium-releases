@@ -6,6 +6,7 @@
 
 #include "base/thread_task_runner_handle.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/statistics_table.h"
 
 namespace password_manager {
 
@@ -107,6 +108,12 @@ PasswordStoreChangeList TestPasswordStore::RemoveLoginsSyncedBetweenImpl(
   return changes;
 }
 
+bool TestPasswordStore::RemoveStatisticsCreatedBetweenImpl(
+    base::Time delete_begin,
+    base::Time delete_end) {
+  return false;
+}
+
 bool TestPasswordStore::FillAutofillableLogins(
     ScopedVector<autofill::PasswordForm>* forms) {
   for (const auto& forms_for_realm : stored_passwords_) {
@@ -127,9 +134,9 @@ void TestPasswordStore::AddSiteStatsImpl(const InteractionsStats& stats) {
 void TestPasswordStore::RemoveSiteStatsImpl(const GURL& origin_domain) {
 }
 
-scoped_ptr<InteractionsStats> TestPasswordStore::GetSiteStatsImpl(
+ScopedVector<InteractionsStats> TestPasswordStore::GetSiteStatsImpl(
     const GURL& origin_domain) {
-  return scoped_ptr<InteractionsStats>();
+  return ScopedVector<InteractionsStats>();
 }
 
 }  // namespace password_manager

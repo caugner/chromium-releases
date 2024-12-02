@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 import unittest
 
-import test_expectations
+from gpu_tests import test_expectations
 
 from telemetry.page import page as page_module
 from telemetry.story import story_set
@@ -28,9 +28,6 @@ class StubBrowser(object):
   @property
   def supports_system_info(self):
     return False
-
-  def GetSystemInfo(self):
-    return self.system_info
 
 
 class SampleExpectationSubclass(test_expectations.Expectation):
@@ -221,4 +218,10 @@ class TestExpectationsTest(unittest.TestCase):
     page = page_module.Page('http://test.com/conformance/glsl/page00.html', ps)
     self.assertExpectationEquals('fail', page)
     page = page_module.Page('http://test.com/conformance/glsl/page15.html', ps)
+    self.assertExpectationEquals('skip', page)
+
+  def testQueryArgsAreStrippedFromFileURLs(self):
+    ps = story_set.StorySet()
+    page = page_module.Page(
+      'file://conformance/glsl/page15.html?webglVersion=2', ps)
     self.assertExpectationEquals('skip', page)

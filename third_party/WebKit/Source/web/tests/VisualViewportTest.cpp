@@ -8,6 +8,7 @@
 
 #include "core/dom/Document.h"
 #include "core/frame/FrameHost.h"
+#include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLBodyElement.h"
 #include "core/html/HTMLElement.h"
@@ -141,7 +142,7 @@ public:
 
     void forceFullCompositingUpdate()
     {
-        webViewImpl()->layout();
+        webViewImpl()->updateAllLifecyclePhases();
     }
 
     void registerMockedHttpURLLoad(const std::string& fileName)
@@ -184,12 +185,6 @@ protected:
 
 private:
     FrameTestHelpers::WebViewHelper m_helper;
-
-    // To prevent platform differneces in content layout, use mock
-    // scrollbars. This is especially needed for Mac, where the presence
-    // or absence of a mouse will change frame sizes because of different
-    // scrollbar themes.
-    FrameTestHelpers::UseMockScrollbarSettings m_useMockScrollbars;
 };
 
 typedef void (*SettingOverrideFunction)(WebSettings*);
@@ -436,7 +431,7 @@ TEST_P(ParameterizedVisualViewportTest, TestWebViewResizedBeforeAttachment)
     navigateTo("about:blank");
     forceFullCompositingUpdate();
     webViewImpl()->settings()->setAcceleratedCompositingEnabled(true);
-    webViewImpl()->layout();
+    webViewImpl()->updateAllLifecyclePhases();
 
     VisualViewport& visualViewport = frame()->page()->frameHost().visualViewport();
     EXPECT_FLOAT_SIZE_EQ(FloatSize(320, 240), visualViewport.containerLayer()->size());
@@ -460,7 +455,7 @@ TEST_P(ParameterizedVisualViewportTest, TestVisibleRect)
     // Viewport is whole frame.
     IntSize size = IntSize(400, 200);
     webViewImpl()->resize(size);
-    webViewImpl()->layout();
+    webViewImpl()->updateAllLifecyclePhases();
     visualViewport.setSize(size);
 
     // Scale the viewport to 2X; size should not change.
@@ -660,7 +655,7 @@ TEST_P(ParameterizedVisualViewportTest, TestOffsetClampingWithResizeAndScale)
 
     // Resize both the viewport and the frame to be larger.
     webViewImpl()->resize(IntSize(640, 480));
-    webViewImpl()->layout();
+    webViewImpl()->updateAllLifecyclePhases();
     EXPECT_SIZE_EQ(IntSize(webViewImpl()->size()), visualViewport.size());
     EXPECT_SIZE_EQ(IntSize(webViewImpl()->size()), frame()->view()->frameRect().size());
     visualViewport.setLocation(FloatPoint(1000, 1000));
@@ -685,7 +680,7 @@ TEST_P(ParameterizedVisualViewportTest, TestFrameViewSizedToContent)
     navigateTo(m_baseURL + "200-by-300-viewport.html");
 
     webViewImpl()->resize(IntSize(600, 800));
-    webViewImpl()->layout();
+    webViewImpl()->updateAllLifecyclePhases();
 
     // Note: the size is ceiled and should match the behavior in CC's LayerImpl::bounds().
     EXPECT_SIZE_EQ(IntSize(200, 267),
@@ -704,7 +699,7 @@ TEST_P(ParameterizedVisualViewportTest, TestFrameViewSizedToMinimumScale)
     navigateTo(m_baseURL + "200-by-300.html");
 
     webViewImpl()->resize(IntSize(100, 160));
-    webViewImpl()->layout();
+    webViewImpl()->updateAllLifecyclePhases();
 
     EXPECT_SIZE_EQ(IntSize(100, 160),
         webViewImpl()->mainFrameImpl()->frameView()->frameRect().size());
@@ -721,7 +716,7 @@ TEST_P(ParameterizedVisualViewportTest, TestAttachingNewFrameSetsInnerScrollLaye
     // the smaller size on the second navigation.
     registerMockedHttpURLLoad("content-width-1000.html");
     navigateTo(m_baseURL + "content-width-1000.html");
-    webViewImpl()->layout();
+    webViewImpl()->updateAllLifecyclePhases();
 
     VisualViewport& visualViewport = frame()->page()->frameHost().visualViewport();
     visualViewport.setScale(2);
@@ -755,7 +750,7 @@ TEST_P(ParameterizedVisualViewportTest, TestFrameViewSizedToViewportMetaMinimumS
     navigateTo(m_baseURL + "200-by-300-min-scale-2.html");
 
     webViewImpl()->resize(IntSize(100, 160));
-    webViewImpl()->layout();
+    webViewImpl()->updateAllLifecyclePhases();
 
     EXPECT_SIZE_EQ(IntSize(50, 80),
         webViewImpl()->mainFrameImpl()->frameView()->frameRect().size());
@@ -816,7 +811,7 @@ TEST_P(ParameterizedVisualViewportTest, TestSavedToHistoryItem)
 {
     initializeWithDesktopSettings();
     webViewImpl()->resize(IntSize(200, 300));
-    webViewImpl()->layout();
+    webViewImpl()->updateAllLifecyclePhases();
 
     registerMockedHttpURLLoad("200-by-300.html");
     navigateTo(m_baseURL + "200-by-300.html");
@@ -891,7 +886,7 @@ TEST_P(ParameterizedVisualViewportTest, TestNavigateToSmallerFrameViewHistoryIte
 {
     initializeWithAndroidSettings();
     webViewImpl()->resize(IntSize(400, 400));
-    webViewImpl()->layout();
+    webViewImpl()->updateAllLifecyclePhases();
 
     registerMockedHttpURLLoad("content-width-1000.html");
     navigateTo(m_baseURL + "content-width-1000.html");
@@ -1116,64 +1111,6 @@ TEST_P(ParameterizedVisualViewportTest, TestClientNotifiedOfScrollEvents)
 
     // Reset the old client so destruction can occur naturally.
     webViewImpl()->mainFrameImpl()->setClient(oldClient);
-}
-
-// Tests that calling scroll into view on a visible element doesn cause
-// a scroll due to a fractional offset. Bug crbug.com/463356.
-TEST_P(ParameterizedVisualViewportTest, ScrollIntoViewFractionalOffset)
-{
-    initializeWithAndroidSettings();
-
-    webViewImpl()->resize(IntSize(1000, 1000));
-
-    registerMockedHttpURLLoad("scroll-into-view.html");
-    navigateTo(m_baseURL + "scroll-into-view.html");
-
-    FrameView& frameView = *webViewImpl()->mainFrameImpl()->frameView();
-    ScrollableArea* layoutViewportScrollableArea = frameView.layoutViewportScrollableArea();
-    VisualViewport& visualViewport = frame()->page()->frameHost().visualViewport();
-    Element* inputBox = frame()->document()->getElementById("box");
-
-    webViewImpl()->setPageScaleFactor(2);
-
-    // The element is already in the view so the scrollIntoView shouldn't move
-    // the viewport at all.
-    webViewImpl()->setVisualViewportOffset(WebFloatPoint(250.25f, 100.25f));
-    layoutViewportScrollableArea->setScrollPosition(DoublePoint(0, 900.75), ProgrammaticScroll);
-    inputBox->scrollIntoViewIfNeeded(false);
-
-    EXPECT_POINT_EQ(DoublePoint(0, 900.75), layoutViewportScrollableArea->scrollPositionDouble());
-    EXPECT_POINT_EQ(FloatPoint(250.25f, 100.25f), visualViewport.location());
-
-    // Change the fractional part of the frameview to one that would round down.
-    layoutViewportScrollableArea->setScrollPosition(DoublePoint(0, 900.125), ProgrammaticScroll);
-    inputBox->scrollIntoViewIfNeeded(false);
-
-    EXPECT_POINT_EQ(DoublePoint(0, 900.125), layoutViewportScrollableArea->scrollPositionDouble());
-    EXPECT_POINT_EQ(FloatPoint(250.25f, 100.25f), visualViewport.location());
-
-    // Repeat both tests above with the visual viewport at a high fractional.
-    webViewImpl()->setVisualViewportOffset(WebFloatPoint(250.875f, 100.875f));
-    layoutViewportScrollableArea->setScrollPosition(DoublePoint(0, 900.75), ProgrammaticScroll);
-    inputBox->scrollIntoViewIfNeeded(false);
-
-    EXPECT_POINT_EQ(DoublePoint(0, 900.75), layoutViewportScrollableArea->scrollPositionDouble());
-    EXPECT_POINT_EQ(FloatPoint(250.875f, 100.875f), visualViewport.location());
-
-    // Change the fractional part of the frameview to one that would round down.
-    layoutViewportScrollableArea->setScrollPosition(DoublePoint(0, 900.125), ProgrammaticScroll);
-    inputBox->scrollIntoViewIfNeeded(false);
-
-    EXPECT_POINT_EQ(DoublePoint(0, 900.125), layoutViewportScrollableArea->scrollPositionDouble());
-    EXPECT_POINT_EQ(FloatPoint(250.875f, 100.875f), visualViewport.location());
-
-    // Both viewports with a 0.5 fraction.
-    webViewImpl()->setVisualViewportOffset(WebFloatPoint(250.5f, 100.5f));
-    layoutViewportScrollableArea->setScrollPosition(DoublePoint(0, 900.5), ProgrammaticScroll);
-    inputBox->scrollIntoViewIfNeeded(false);
-
-    EXPECT_POINT_EQ(DoublePoint(0, 900.5), layoutViewportScrollableArea->scrollPositionDouble());
-    EXPECT_POINT_EQ(FloatPoint(250.5f, 100.5f), visualViewport.location());
 }
 
 // Top controls can make an unscrollable page temporarily scrollable, causing
@@ -1428,7 +1365,7 @@ TEST_P(ParameterizedVisualViewportTest, ResizeVisualViewportStaysWithinOuterView
     webViewImpl()->resize(IntSize(100, 200));
 
     navigateTo("about:blank");
-    webViewImpl()->layout();
+    webViewImpl()->updateAllLifecyclePhases();
 
     webViewImpl()->resizeVisualViewport(IntSize(100, 100));
 
@@ -1466,84 +1403,6 @@ TEST_P(ParameterizedVisualViewportTest, ElementBoundsInViewportSpaceAccountsForV
     EXPECT_POINT_EQ(IntPoint(bounds.location() - scrollDelta),
         boundsInViewport.location());
     EXPECT_SIZE_EQ(bounds.size(), boundsInViewport.size());
-}
-
-// Test that the various window.scroll and document.body.scroll properties and
-// methods work unchanged from the pre-virtual viewport mode.
-TEST_P(ParameterizedVisualViewportTest, bodyAndWindowScrollPropertiesAccountForViewport)
-{
-    initializeWithAndroidSettings();
-
-    webViewImpl()->resize(IntSize(200, 300));
-
-    // Load page with no main frame scrolling.
-    registerMockedHttpURLLoad("200-by-300-viewport.html");
-    navigateTo(m_baseURL + "200-by-300-viewport.html");
-
-    VisualViewport& visualViewport = frame()->page()->frameHost().visualViewport();
-    visualViewport.setScale(2);
-
-    // Chrome's quirky behavior regarding viewport scrolling means we treat the
-    // body element as the viewport and don't apply scrolling to the HTML
-    // element.
-    RuntimeEnabledFeatures::setScrollTopLeftInteropEnabled(false);
-
-    LocalDOMWindow* window = webViewImpl()->mainFrameImpl()->frame()->localDOMWindow();
-    window->scrollTo(100, 150);
-    EXPECT_EQ(100, window->scrollX());
-    EXPECT_EQ(150, window->scrollY());
-    EXPECT_FLOAT_POINT_EQ(FloatPoint(100, 150), visualViewport.location());
-
-    HTMLElement* body = toHTMLBodyElement(window->document()->body());
-    body->setScrollLeft(50);
-    body->setScrollTop(130);
-    EXPECT_EQ(50, body->scrollLeft());
-    EXPECT_EQ(130, body->scrollTop());
-    EXPECT_FLOAT_POINT_EQ(FloatPoint(50, 130), visualViewport.location());
-
-    HTMLElement* documentElement = toHTMLElement(window->document()->documentElement());
-    documentElement->setScrollLeft(40);
-    documentElement->setScrollTop(50);
-    EXPECT_EQ(0, documentElement->scrollLeft());
-    EXPECT_EQ(0, documentElement->scrollTop());
-    EXPECT_FLOAT_POINT_EQ(FloatPoint(50, 130), visualViewport.location());
-
-    visualViewport.setLocation(FloatPoint(10, 20));
-    EXPECT_EQ(10, body->scrollLeft());
-    EXPECT_EQ(20, body->scrollTop());
-    EXPECT_EQ(0, documentElement->scrollLeft());
-    EXPECT_EQ(0, documentElement->scrollTop());
-    EXPECT_EQ(10, window->scrollX());
-    EXPECT_EQ(20, window->scrollY());
-
-    // Turning on the standards-compliant viewport scrolling impl should make
-    // the document element the viewport and not body.
-    RuntimeEnabledFeatures::setScrollTopLeftInteropEnabled(true);
-
-    window->scrollTo(100, 150);
-    EXPECT_EQ(100, window->scrollX());
-    EXPECT_EQ(150, window->scrollY());
-    EXPECT_FLOAT_POINT_EQ(FloatPoint(100, 150), visualViewport.location());
-
-    body->setScrollLeft(50);
-    body->setScrollTop(130);
-    EXPECT_EQ(0, body->scrollLeft());
-    EXPECT_EQ(0, body->scrollTop());
-    EXPECT_FLOAT_POINT_EQ(FloatPoint(100, 150), visualViewport.location());
-
-    documentElement->setScrollLeft(40);
-    documentElement->setScrollTop(50);
-    EXPECT_EQ(40, documentElement->scrollLeft());
-    EXPECT_EQ(50, documentElement->scrollTop());
-    EXPECT_FLOAT_POINT_EQ(FloatPoint(40, 50), visualViewport.location());
-
-    visualViewport.setLocation(FloatPoint(10, 20));
-    EXPECT_EQ(0, body->scrollLeft());
-    EXPECT_EQ(0, body->scrollTop());
-    EXPECT_EQ(10, documentElement->scrollLeft());
-    EXPECT_EQ(20, documentElement->scrollTop());
-    EXPECT_EQ(10, window->scrollX());
-    EXPECT_EQ(20, window->scrollY());
 }
 
 // Tests that when a new frame is created, it is created with the intended
@@ -1587,7 +1446,7 @@ TEST_P(ParameterizedVisualViewportTest, FractionalMaxScrollOffset)
 
 // Tests that the slow scrolling after an impl scroll on the visual viewport
 // is continuous. crbug.com/453460 was caused by the impl-path not updating the
-// ScrollAnimator class.
+// ScrollAnimatorBase class.
 TEST_P(ParameterizedVisualViewportTest, SlowScrollAfterImplScroll)
 {
     initializeWithDesktopSettings();
@@ -1612,7 +1471,7 @@ TEST_P(ParameterizedVisualViewportTest, SlowScrollAfterImplScroll)
         IntPoint(0, 0),
         IntPoint(0, 0),
         IntSize(5, 5),
-        0, false, false, false, false);
+        0, PlatformEvent::NoModifiers, PlatformGestureSourceTouchpad);
     gsu.setScrollGestureData(-50, -60, 1, 1, false, false, -1 /* null plugin id */);
 
     frame()->eventHandler().handleGestureEvent(gsu);
@@ -1635,7 +1494,7 @@ TEST_P(ParameterizedVisualViewportTest, AccessibilityHitTestWhileZoomedIn)
     navigateTo(m_baseURL + "hit-test.html");
 
     webViewImpl()->resize(IntSize(500, 500));
-    webViewImpl()->layout();
+    webViewImpl()->updateAllLifecyclePhases();
 
     WebDocument webDoc = webViewImpl()->mainFrame()->document();
     FrameView& frameView = *webViewImpl()->mainFrameImpl()->frameView();
@@ -1738,6 +1597,7 @@ TEST_P(ParameterizedVisualViewportTest, PinchZoomGestureScrollsVisualViewportOnl
 
     WebGestureEvent pinchUpdate;
     pinchUpdate.type = WebInputEvent::GesturePinchUpdate;
+    pinchUpdate.sourceDevice = WebGestureDeviceTouchpad;
     pinchUpdate.x = 100;
     pinchUpdate.y = 100;
     pinchUpdate.data.pinchUpdate.scale = 2;

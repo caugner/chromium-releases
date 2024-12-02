@@ -2,6 +2,7 @@
 <!DOCTYPE translationbundle>
 <translationbundle lang="da">
 <translation id="1013923882670373915">Bluetooth-enheden "<ph name="DEVICE_NAME" />" vil gerne have parringstilladelse. Indtast denne pinkode på den pågældende enhed: <ph name="PINCODE" /></translation>
+<translation id="1021311941847921177">Genvejen til at skifte til den næste indtastningsmetode er ændret. Brug <ph name="NEW_SHORTCUT" /> i stedet for <ph name="OLD_SHORTCUT" />.</translation>
 <translation id="112308213915226829">Skjul hylde automatisk</translation>
 <translation id="1195412055398077112">overscan</translation>
 <translation id="1270290102613614947">Skærmtastaturet er deaktiveret</translation>
@@ -25,10 +26,10 @@
 <translation id="1812696562331527143">Din inputmetode er ændret til <ph name="INPUT_METHOD_ID" />*(<ph name="BEGIN_LINK" />tredjepart<ph name="END_LINK" />).
 Tryk på Shift+Alt for at ændre den.</translation>
 <translation id="1882897271359938046">Spejler mod <ph name="DISPLAY_NAME" /></translation>
+<translation id="1919743966458266018">Genvejen til at åbne Jobliste er ændret. Brug <ph name="NEW_SHORTCUT" /> i stedet for <ph name="OLD_SHORTCUT" />.</translation>
 <translation id="1923539912171292317">Automatiske klik</translation>
-<translation id="1950626184269948555">Genvejen til Jobliste er blevet ændret. Brug Søg+Esc i stedet for Shift+Esc.</translation>
+<translation id="1938872420421548906">Shift+Alt</translation>
 <translation id="1957803754585243749">0°</translation>
-<translation id="1963814843110128691">Caster $1 til $2</translation>
 <translation id="1969011864782743497"><ph name="DEVICE_NAME" /> (USB)</translation>
 <translation id="1987317783729300807">Konti</translation>
 <translation id="2127372758936585790">Oplader ved lav kraft</translation>
@@ -94,6 +95,7 @@ Tryk på Søg eller Shift for at annullere.</translation>
 <translation id="3783640748446814672">alt</translation>
 <translation id="3784455785234192852">Lås</translation>
 <translation id="3799026279081545374">Din oplader er muligvis beskadiget. Hvis du er bosiddende i USA, skal du ringe på 866-628-1371 for at få hjælp og en ny oplader. Hvis du er bosiddende i Storbritannien, skal du ringe på 0800-026-0613. Hvis du er bosiddende i Irland, skal du ringe på 1-800-832-664. Hvis du er bosiddende i Canada, skal du ringe på 866-628-1372. Hvis du er bosiddende i Australien, skal du ringe på 1-800-067-460.</translation>
+<translation id="3866182280516392520">IPv6-adresse</translation>
 <translation id="3891340733213178823">Tryk på Ctrl+Shift+Q to gange for at logge ud.</translation>
 <translation id="3892641579809465218">Intern skærm</translation>
 <translation id="3963445509666917109">Højttaler (indbygget)</translation>
@@ -109,6 +111,7 @@ Tryk på Søg eller Shift for at annullere.</translation>
 <translation id="4421231901400348175">Skærmdeling med <ph name="HELPER_NAME" /> via Fjernsupport.</translation>
 <translation id="4430019312045809116">Lydstyrke</translation>
 <translation id="4527045527269911712">Bluetooth-enheden "<ph name="DEVICE_NAME" />" vil gerne have parringstilladelse.</translation>
+<translation id="4544944664594876241">Genvejen til at låse skærmen er ændret. Brug <ph name="NEW_SHORTCUT" /> i stedet for <ph name="OLD_SHORTCUT" />.</translation>
 <translation id="479989351350248267">søg</translation>
 <translation id="4804818685124855865">Afbryd</translation>
 <translation id="4872237917498892622">Alt+Søg eller Shift</translation>
@@ -117,6 +120,7 @@ Tryk på Søg eller Shift for at annullere.</translation>
 <translation id="4957722034734105353">Flere oplysninger...</translation>
 <translation id="4961318399572185831">Cast skærm</translation>
 <translation id="5011233892417813670">Chromebook</translation>
+<translation id="5012744545445585468">Ctrl+Shift+mellemrum</translation>
 <translation id="5045002648206642691">Google Drev-indstillinger...</translation>
 <translation id="5102001756192215136"><ph name="HOUR" />:<ph name="MINUTE" /> tilbage</translation>
 <translation id="511445211639755999"><ph name="RESOLUTION" />, <ph name="OVERSCAN" /></translation>
@@ -136,6 +140,7 @@ Tryk på Søg eller Shift for at annullere.</translation>
 Tryk på Shift+Alt for at ændre den.</translation>
 <translation id="5871632337994001636">Administrer enheder...</translation>
 <translation id="5895138241574237353">Genstart</translation>
+<translation id="5901316534475909376">Shift+Esc</translation>
 <translation id="5927132638760172455">Caster til en ukendt modtager</translation>
 <translation id="5932901536148835538">Chromebit</translation>
 <translation id="5947494881799873997">Fortryd</translation>
@@ -152,7 +157,6 @@ Tryk på Shift+Alt for at ændre den.</translation>
 <translation id="6165508094623778733">Flere oplysninger</translation>
 <translation id="6247708409970142803"><ph name="PERCENTAGE" /> %</translation>
 <translation id="6248847161401822652">Tryk på Ctrl+Shift+Q to gange for at afslutte.</translation>
-<translation id="6287020362823083378">Genvejen til skærmlås er blevet ændret. Brug Søg+L i stedet for Ctrl+Shift+L.</translation>
 <translation id="6310121235600822547"><ph name="DISPLAY_NAME" /> er roteret til <ph name="ROTATION" /></translation>
 <translation id="6359806961507272919">Sms fra <ph name="PHONE_NUMBER" /></translation>
 <translation id="639644700271529076">CAPS LOCK er deaktiveret</translation>
@@ -160,6 +164,7 @@ Tryk på Shift+Alt for at ændre den.</translation>
 <translation id="6426039856985689743">Deaktiver mobildata</translation>
 <translation id="6452181791372256707">Afvis</translation>
 <translation id="6459472438155181876">Udvider skærmen til <ph name="DISPLAY_NAME" /></translation>
+<translation id="6501401484702599040">Caster skærmen til <ph name="RECEIVER_NAME" /></translation>
 <translation id="6550675742724504774">Valgmuligheder</translation>
 <translation id="6585808820553845416">Sessionen slutter om <ph name="SESSION_TIME_REMAINING" />.</translation>
 <translation id="6596816719288285829">IP-adresse</translation>
@@ -167,6 +172,7 @@ Tryk på Shift+Alt for at ændre den.</translation>
 <translation id="6713285437468012787">Bluetooth-enheden "<ph name="DEVICE_NAME" />" er blevet parret og er nu tilgængelig for alle brugere, Du kan fjerne denne parring i Indstillinger.</translation>
 <translation id="6785414152754474415">Batteriet er <ph name="PERCENTAGE" /> % opladet og oplades nu.</translation>
 <translation id="6803622936009808957">Skærmene kunne ikke spejles, da der ikke fandtes en understøttet opløsning. I stedet anvendes Udvidet skrivebord.</translation>
+<translation id="683971173229319003">Søg+L</translation>
 <translation id="68610848741840742">ChromeVox (talefeedback)</translation>
 <translation id="6895424601869865703">Føj en konto til <ph name="GIVEN_NAME" /></translation>
 <translation id="6911468394164995108">Vælg et andet...</translation>
@@ -175,6 +181,7 @@ Tryk på Shift+Alt for at ændre den.</translation>
 <translation id="6981982820502123353">Hjælpefunktioner</translation>
 <translation id="7029814467594812963">Afslut session</translation>
 <translation id="703171847531699602">Ingen Cast-enheder</translation>
+<translation id="7034339000180558234">Caster <ph name="TAB_NAME" /> til <ph name="RECEIVER_NAME" /></translation>
 <translation id="7052914147756339792">Vælg baggrund...</translation>
 <translation id="7097613348211027502">ChromeVox (talefeedback) er aktiveret.
 Tryk på Ctrl+Alt+Z for at deaktivere dette.</translation>
@@ -186,6 +193,7 @@ Tryk på Alt+Søg eller Shift for at annullere.</translation>
 <translation id="737451040872859086">Mikrofon (indbygget)</translation>
 <translation id="742594950370306541">Kameraet er i brug.</translation>
 <translation id="743058460480092004">Kamera og mikrofon er i brug.</translation>
+<translation id="7510334386202674593">Ctrl+Shift+L</translation>
 <translation id="7561014039265304140"><ph name="DISPLAY_NAME" /> understøtter ikke <ph name="SPECIFIED_RESOLUTION" />. Opløsningen blev ændret til <ph name="FALLBACK_RESOLUTION" /></translation>
 <translation id="7573962313813535744">Tilstanden Tilsluttet dockingstation</translation>
 <translation id="7593891976182323525">Søg eller Shift</translation>
@@ -194,6 +202,7 @@ Tryk på Alt+Søg eller Shift for at annullere.</translation>
 <translation id="7823564328645135659">Sproget er blevet ændret fra "<ph name="FROM_LOCALE" />" til "<ph name="TO_LOCALE" />", efter at du har synkroniseret dine indstillinger.</translation>
 <translation id="785750925697875037">Vis mobilkonto</translation>
 <translation id="7864539943188674973">Deaktiver Bluetooth</translation>
+<translation id="7893838033650689677">Slå Wi-Fi til</translation>
 <translation id="7904094684485781019">Administratoren for denne konto tillader ikke samlet login fra flere konti.</translation>
 <translation id="7957227661277029961">Din <ph name="DEVICE_TYPE" /> kan muligvis ikke oplades, mens den er tændt. Overvej at bruge den officielle oplader.</translation>
 <translation id="7982789257301363584">Netværk</translation>
@@ -204,16 +213,15 @@ Tryk på Alt+Søg eller Shift for at annullere.</translation>
 <translation id="8308637677604853869">Forrige menu</translation>
 <translation id="8356164830168736643">Luk <ph name="WINDOW_TITLE" /></translation>
 <translation id="8428213095426709021">Indstillinger</translation>
-<translation id="8443356412772935865">Caster skærm til $1</translation>
 <translation id="8456362689280298700"><ph name="HOUR" />:<ph name="MINUTE" /> indtil fuldt opladet</translation>
 <translation id="8517041960877371778">Din <ph name="DEVICE_TYPE" /> kan muligvis ikke oplades, mens den er tændt.</translation>
 <translation id="8528322925433439945">Mobil...</translation>
-<translation id="8654520615680304441">Slå Wi-Fi til...</translation>
 <translation id="8673028979667498656">270°</translation>
 <translation id="8676770494376880701">Oplader med lav kraft er tilsluttet</translation>
 <translation id="8814190375133053267">Wi-Fi</translation>
 <translation id="882279321799040148">Klik for at se det</translation>
 <translation id="8828714802988429505">90°</translation>
+<translation id="8850991929411075241">Søg+Esc</translation>
 <translation id="8878886163241303700">Udvider skærm</translation>
 <translation id="8940956008527784070">Batteriniveauet er lavt (<ph name="PERCENTAGE" /> %)</translation>
 <translation id="9074739597929991885">Bluetooth</translation>

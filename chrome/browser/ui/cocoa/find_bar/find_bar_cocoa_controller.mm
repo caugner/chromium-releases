@@ -20,6 +20,7 @@
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/theme_resources.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
@@ -132,15 +133,11 @@ const float kRightEdgeOffset = 25;
 }
 
 - (IBAction)close:(id)sender {
-  if (findBarBridge_)
+  if (findBarBridge_) {
     findBarBridge_->GetFindBarController()->EndFindSession(
         FindBarController::kKeepSelectionOnPage,
         FindBarController::kKeepResultsInFindBox);
-
-  // Turn off hover state on close button else the button will remain
-  // hovered when we bring the find bar back up.
-  // crbug.com/227424
-  [[closeButton_ cell] setIsMouseInside:NO];
+  }
 }
 
 - (IBAction)previousResult:(id)sender {
@@ -279,7 +276,8 @@ const float kRightEdgeOffset = 25;
     // the list above.
     content::RenderViewHost* render_view_host =
         web_contents->GetRenderViewHost();
-    render_view_host->ForwardKeyboardEvent(NativeWebKeyboardEvent(event));
+    render_view_host->GetWidget()->ForwardKeyboardEvent(
+        NativeWebKeyboardEvent(event));
     return YES;
   }
 
@@ -310,6 +308,12 @@ const float kRightEdgeOffset = 25;
   NSRect frame = [findBarView_ frame];
   frame.origin = NSZeroPoint;
   [self setFindBarFrame:frame animate:animate duration:kFindBarOpenDuration];
+
+  // Clear the "mouse inside" state on the close button cell, so that the close
+  // button isn't shown highlighted if previously the mouse was inside it. Done
+  // here instead of in -close:, as it's possible for the cell to receive a
+  // -mouseEntered: right after -close: is called.
+  [[closeButton_ cell] setIsMouseInside:NO];
 }
 
 - (void)hideFindBar:(BOOL)animate {

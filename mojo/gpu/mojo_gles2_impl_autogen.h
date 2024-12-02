@@ -14,7 +14,7 @@
 #define MOJO_GPU_MOJO_GLES2_IMPL_AUTOGEN_H_
 
 #include "gpu/command_buffer/client/gles2_interface.h"
-#include "third_party/mojo/src/mojo/public/c/gles2/gles2.h"
+#include "mojo/public/c/gles2/gles2.h"
 
 namespace mojo {
 
@@ -765,6 +765,11 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
   void LoseContextCHROMIUM(GLenum current, GLenum other) override;
   GLuint InsertSyncPointCHROMIUM() override;
   void WaitSyncPointCHROMIUM(GLuint sync_point) override;
+  GLuint64 InsertFenceSyncCHROMIUM() override;
+  void GenSyncTokenCHROMIUM(GLuint64 fence_sync, GLbyte* sync_token) override;
+  void GenUnverifiedSyncTokenCHROMIUM(GLuint64 fence_sync,
+                                      GLbyte* sync_token) override;
+  void WaitSyncTokenCHROMIUM(const GLbyte* sync_token) override;
   void DrawBuffersEXT(GLsizei count, const GLenum* bufs) override;
   void DiscardBackbufferCHROMIUM() override;
   void ScheduleOverlayPlaneCHROMIUM(GLint plane_z_order,
@@ -778,6 +783,12 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
                                     GLfloat uv_y,
                                     GLfloat uv_width,
                                     GLfloat uv_height) override;
+  void ScheduleCALayerCHROMIUM(GLuint contents_texture_id,
+                               const GLfloat* contents_rect,
+                               GLfloat opacity,
+                               const GLuint background_color,
+                               const GLfloat* bounds_size,
+                               const GLfloat* transform) override;
   void SwapInterval(GLint interval) override;
   void FlushDriverCachesCHROMIUM() override;
   void MatrixLoadfCHROMIUM(GLenum matrixMode, const GLfloat* m) override;
@@ -812,6 +823,67 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
                                           GLint reference,
                                           GLuint mask,
                                           GLenum coverMode) override;
+  void StencilFillPathInstancedCHROMIUM(
+      GLsizei numPaths,
+      GLenum pathNameType,
+      const GLvoid* paths,
+      GLuint pathBase,
+      GLenum fillMode,
+      GLuint mask,
+      GLenum transformType,
+      const GLfloat* transformValues) override;
+  void StencilStrokePathInstancedCHROMIUM(
+      GLsizei numPaths,
+      GLenum pathNameType,
+      const GLvoid* paths,
+      GLuint pathBase,
+      GLint reference,
+      GLuint mask,
+      GLenum transformType,
+      const GLfloat* transformValues) override;
+  void CoverFillPathInstancedCHROMIUM(GLsizei numPaths,
+                                      GLenum pathNameType,
+                                      const GLvoid* paths,
+                                      GLuint pathBase,
+                                      GLenum coverMode,
+                                      GLenum transformType,
+                                      const GLfloat* transformValues) override;
+  void CoverStrokePathInstancedCHROMIUM(
+      GLsizei numPaths,
+      GLenum pathNameType,
+      const GLvoid* paths,
+      GLuint pathBase,
+      GLenum coverMode,
+      GLenum transformType,
+      const GLfloat* transformValues) override;
+  void StencilThenCoverFillPathInstancedCHROMIUM(
+      GLsizei numPaths,
+      GLenum pathNameType,
+      const GLvoid* paths,
+      GLuint pathBase,
+      GLenum fillMode,
+      GLuint mask,
+      GLenum coverMode,
+      GLenum transformType,
+      const GLfloat* transformValues) override;
+  void StencilThenCoverStrokePathInstancedCHROMIUM(
+      GLsizei numPaths,
+      GLenum pathNameType,
+      const GLvoid* paths,
+      GLuint pathBase,
+      GLint reference,
+      GLuint mask,
+      GLenum coverMode,
+      GLenum transformType,
+      const GLfloat* transformValues) override;
+  void BindFragmentInputLocationCHROMIUM(GLuint program,
+                                         GLint location,
+                                         const char* name) override;
+  void ProgramPathFragmentInputGenCHROMIUM(GLuint program,
+                                           GLint location,
+                                           GLenum genMode,
+                                           GLint components,
+                                           const GLfloat* coeffs) override;
   GLenum GetGraphicsResetStatusKHR() override;
   void BlendBarrierKHR() override;
   void ApplyScreenSpaceAntialiasingCHROMIUM() override;

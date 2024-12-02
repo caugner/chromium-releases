@@ -131,7 +131,6 @@ class CCMessagesTest : public testing::Test {
     EXPECT_EQ(a->io_surface_size.ToString(), b->io_surface_size.ToString());
     EXPECT_EQ(a->io_surface_resource_id(), b->io_surface_resource_id());
     EXPECT_EQ(a->orientation, b->orientation);
-    EXPECT_EQ(a->allow_overlay, b->allow_overlay);
   }
 
   void Compare(const RenderPassDrawQuad* a, const RenderPassDrawQuad* b) {
@@ -161,7 +160,6 @@ class CCMessagesTest : public testing::Test {
   void Compare(const StreamVideoDrawQuad* a, const StreamVideoDrawQuad* b) {
     EXPECT_EQ(a->resource_id(), b->resource_id());
     EXPECT_EQ(a->resource_size_in_pixels(), b->resource_size_in_pixels());
-    EXPECT_EQ(a->allow_overlay(), b->allow_overlay());
     EXPECT_EQ(a->matrix, b->matrix);
   }
 
@@ -172,7 +170,6 @@ class CCMessagesTest : public testing::Test {
   void Compare(const TextureDrawQuad* a, const TextureDrawQuad* b) {
     EXPECT_EQ(a->resource_id(), b->resource_id());
     EXPECT_EQ(a->resource_size_in_pixels(), b->resource_size_in_pixels());
-    EXPECT_EQ(a->allow_overlay(), b->allow_overlay());
     EXPECT_EQ(a->premultiplied_alpha, b->premultiplied_alpha);
     EXPECT_EQ(a->uv_top_left, b->uv_top_left);
     EXPECT_EQ(a->uv_bottom_right, b->uv_bottom_right);
@@ -215,8 +212,8 @@ class CCMessagesTest : public testing::Test {
                 b.mailbox_holder.mailbox.name[i]);
     }
     EXPECT_EQ(a.mailbox_holder.texture_target, b.mailbox_holder.texture_target);
-    EXPECT_EQ(a.mailbox_holder.sync_point, b.mailbox_holder.sync_point);
-    EXPECT_EQ(a.allow_overlay, b.allow_overlay);
+    EXPECT_EQ(a.mailbox_holder.sync_token, b.mailbox_holder.sync_token);
+    EXPECT_EQ(a.is_overlay_candidate, b.is_overlay_candidate);
   }
 };
 
@@ -269,7 +266,6 @@ TEST_F(CCMessagesTest, AllQuads) {
   SkXfermode::Mode arbitrary_blend_mode3 = SkXfermode::kOverlay_Mode;
   IOSurfaceDrawQuad::Orientation arbitrary_orientation =
       IOSurfaceDrawQuad::UNFLIPPED;
-  bool arbitrary_allow_overlay = true;
   ResourceId arbitrary_resourceid1 = 55;
   ResourceId arbitrary_resourceid2 = 47;
   ResourceId arbitrary_resourceid3 = 23;
@@ -339,8 +335,7 @@ TEST_F(CCMessagesTest, AllQuads) {
                        arbitrary_bool1,
                        arbitrary_size1,
                        arbitrary_resourceid3,
-                       arbitrary_orientation,
-                       arbitrary_allow_overlay);
+                       arbitrary_orientation);
   pass_cmp->CopyFromAndAppendDrawQuad(iosurface_in,
                                       iosurface_in->shared_quad_state);
 
@@ -389,7 +384,7 @@ TEST_F(CCMessagesTest, AllQuads) {
   streamvideo_in->SetAll(
       shared_state3_in, arbitrary_rect2, arbitrary_rect2_inside_rect2,
       arbitrary_rect1_inside_rect2, arbitrary_bool1, arbitrary_resourceid2,
-      arbitrary_size1, arbitrary_bool2, arbitrary_matrix1);
+      arbitrary_size1, arbitrary_matrix1);
   pass_cmp->CopyFromAndAppendDrawQuad(streamvideo_in,
                                       streamvideo_in->shared_quad_state);
 
@@ -412,7 +407,7 @@ TEST_F(CCMessagesTest, AllQuads) {
   texture_in->SetAll(shared_state3_in, arbitrary_rect2,
                      arbitrary_rect2_inside_rect2, arbitrary_rect1_inside_rect2,
                      arbitrary_bool1, arbitrary_resourceid1, arbitrary_size1,
-                     arbitrary_bool2, arbitrary_bool3, arbitrary_pointf1,
+                     arbitrary_bool2, arbitrary_pointf1,
                      arbitrary_pointf2, arbitrary_color, arbitrary_float_array,
                      arbitrary_bool4, arbitrary_bool5);
   pass_cmp->CopyFromAndAppendDrawQuad(texture_in,
@@ -624,8 +619,8 @@ TEST_F(CCMessagesTest, UnusedSharedQuadStates) {
 TEST_F(CCMessagesTest, Resources) {
   IPC::Message msg(1, 2, IPC::Message::PRIORITY_NORMAL);
   gfx::Size arbitrary_size(757, 1281);
-  unsigned int arbitrary_uint1 = 71234838;
-  unsigned int arbitrary_uint2 = 53589793;
+  gpu::SyncToken arbitrary_token1(71234838);
+  gpu::SyncToken arbitrary_token2(53589793);
 
   GLbyte arbitrary_mailbox1[GL_MAILBOX_SIZE_CHROMIUM] = {
       1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2,
@@ -644,8 +639,8 @@ TEST_F(CCMessagesTest, Resources) {
   arbitrary_resource1.size = gfx::Size(37189, 123123);
   arbitrary_resource1.mailbox_holder.mailbox.SetName(arbitrary_mailbox1);
   arbitrary_resource1.mailbox_holder.texture_target = GL_TEXTURE_2D;
-  arbitrary_resource1.mailbox_holder.sync_point = arbitrary_uint1;
-  arbitrary_resource1.allow_overlay = true;
+  arbitrary_resource1.mailbox_holder.sync_token = arbitrary_token1;
+  arbitrary_resource1.is_overlay_candidate = true;
 
   TransferableResource arbitrary_resource2;
   arbitrary_resource2.id = 789132;
@@ -654,8 +649,8 @@ TEST_F(CCMessagesTest, Resources) {
   arbitrary_resource2.size = gfx::Size(89123, 23789);
   arbitrary_resource2.mailbox_holder.mailbox.SetName(arbitrary_mailbox2);
   arbitrary_resource2.mailbox_holder.texture_target = GL_TEXTURE_EXTERNAL_OES;
-  arbitrary_resource2.mailbox_holder.sync_point = arbitrary_uint2;
-  arbitrary_resource2.allow_overlay = false;
+  arbitrary_resource2.mailbox_holder.sync_token = arbitrary_token2;
+  arbitrary_resource2.is_overlay_candidate = false;
 
   scoped_ptr<RenderPass> renderpass_in = RenderPass::Create();
   renderpass_in->SetNew(

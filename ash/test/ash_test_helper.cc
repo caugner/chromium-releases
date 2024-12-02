@@ -10,6 +10,7 @@
 #include "ash/shell.h"
 #include "ash/shell_init_params.h"
 #include "ash/test/ash_test_views_delegate.h"
+#include "ash/test/content/test_shell_content_state.h"
 #include "ash/test/display_manager_test_api.h"
 #include "ash/test/shell_test_api.h"
 #include "ash/test/test_screenshot_delegate.h"
@@ -47,11 +48,14 @@ namespace test {
 
 AshTestHelper::AshTestHelper(base::MessageLoopForUI* message_loop)
     : message_loop_(message_loop),
-      test_shell_delegate_(NULL),
-      test_screenshot_delegate_(NULL) {
+      test_shell_delegate_(nullptr),
+      test_screenshot_delegate_(nullptr),
+      content_state_(nullptr),
+      test_shell_content_state_(nullptr) {
   CHECK(message_loop_);
 #if defined(OS_CHROMEOS)
   dbus_thread_manager_initialized_ = false;
+  bluez_dbus_manager_initialized_ = false;
 #endif
 #if defined(USE_X11)
   aura::test::SetUseOverrideRedirectWindowByDefault(true);
@@ -87,17 +91,28 @@ void AshTestHelper::SetUp(bool start_session) {
   // Create DBusThreadManager for testing.
   if (!chromeos::DBusThreadManager::IsInitialized()) {
     chromeos::DBusThreadManager::Initialize();
+    dbus_thread_manager_initialized_ = true;
+  }
+
+  if (!bluez::BluezDBusManager::IsInitialized()) {
     bluez::BluezDBusManager::Initialize(
         chromeos::DBusThreadManager::Get()->GetSystemBus(),
         chromeos::DBusThreadManager::Get()->IsUsingStub(
             chromeos::DBusClientBundle::BLUETOOTH));
-    dbus_thread_manager_initialized_ = true;
+    bluez_dbus_manager_initialized_ = true;
   }
 
   // Create CrasAudioHandler for testing since g_browser_process is not
   // created in AshTestBase tests.
   chromeos::CrasAudioHandler::InitializeForTesting();
 #endif
+  ShellContentState* content_state = content_state_;
+  if (!content_state) {
+    test_shell_content_state_ = new TestShellContentState;
+    content_state = test_shell_content_state_;
+  }
+  ShellContentState::SetInstance(content_state);
+
   ShellInitParams init_params;
   init_params.delegate = test_shell_delegate_;
   init_params.context_factory = context_factory;
@@ -123,6 +138,8 @@ void AshTestHelper::SetUp(bool start_session) {
 void AshTestHelper::TearDown() {
   // Tear down the shell.
   Shell::DeleteInstance();
+  ShellContentState::DestroyInstance();
+
   test_screenshot_delegate_ = NULL;
 
   // Remove global message center state.
@@ -130,8 +147,11 @@ void AshTestHelper::TearDown() {
 
 #if defined(OS_CHROMEOS)
   chromeos::CrasAudioHandler::Shutdown();
-  if (dbus_thread_manager_initialized_) {
+  if (bluez_dbus_manager_initialized_) {
     bluez::BluezDBusManager::Shutdown();
+    bluez_dbus_manager_initialized_ = false;
+  }
+  if (dbus_thread_manager_initialized_) {
     chromeos::DBusThreadManager::Shutdown();
     dbus_thread_manager_initialized_ = false;
   }

@@ -27,7 +27,8 @@ class _Smoothness(perf_benchmark.PerfBenchmark):
     return 'smoothness'
 
   @classmethod
-  def ValueCanBeAddedPredicate(cls, value, _):
+  def ValueCanBeAddedPredicate(cls, value, is_first_result):
+    del is_first_result  # unused
     if (value.name == 'first_gesture_scroll_update_latency' and
         value.page.url in cls._PAGES_WITHOUT_SCROLL_GESTURE_BLACKLIST and
         value.values is None):
@@ -35,6 +36,7 @@ class _Smoothness(perf_benchmark.PerfBenchmark):
     return True
 
 
+@benchmark.Disabled('reference') # crbug.com/547833
 class SmoothnessTop25(_Smoothness):
   """Measures rendering statistics while scrolling down the top 25 web pages.
 
@@ -153,7 +155,8 @@ class SmoothnessKeySilkCases(_Smoothness):
     return stories
 
 
-@benchmark.Enabled('android')
+@benchmark.Enabled('android', 'mac')
+@benchmark.Disabled('reference') # crbug.com/547833
 class SmoothnessGpuRasterizationTop25(_Smoothness):
   """Measures rendering statistics for the top 25 with GPU rasterization.
   """
@@ -258,16 +261,63 @@ class SmoothnessFlingSimpleMobilePages(_Smoothness):
     return 'smoothness.fling.simple_mobile_sites'
 
 
-@benchmark.Enabled('android', 'chromeos', 'mac')
+@benchmark.Enabled('android')
 class SmoothnessToughPinchZoomCases(_Smoothness):
-  """Measures rendering statistics for pinch-zooming into the tough pinch zoom
+  """Measures rendering statistics for pinch-zooming in the tough pinch zoom
   cases.
   """
-  page_set = page_sets.ToughPinchZoomCasesPageSet
+  page_set = page_sets.AndroidToughPinchZoomCasesPageSet
 
   @classmethod
   def Name(cls):
     return 'smoothness.tough_pinch_zoom_cases'
+
+
+@benchmark.Enabled('chromeos', 'mac')
+class SmoothnessDesktopToughPinchZoomCases(_Smoothness):
+  """Measures rendering statistics for pinch-zooming in the tough pinch zoom
+  cases. Uses lower zoom levels customized for desktop limits.
+  """
+  page_set = page_sets.DesktopToughPinchZoomCasesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'smoothness.desktop_tough_pinch_zoom_cases'
+
+
+@benchmark.Enabled('android')
+class SmoothnessGpuRasterizationToughPinchZoomCases(_Smoothness):
+  """Measures rendering statistics for pinch-zooming in the tough pinch zoom
+  cases with GPU rasterization.
+  """
+  tag = 'gpu_rasterization'
+  test = smoothness.Smoothness
+  page_set = page_sets.AndroidToughPinchZoomCasesPageSet
+
+  def SetExtraBrowserOptions(self, options):
+    silk_flags.CustomizeBrowserOptionsForGpuRasterization(options)
+
+  @classmethod
+  def Name(cls):
+    return 'smoothness.gpu_rasterization.tough_pinch_zoom_cases'
+
+
+@benchmark.Enabled('chromeos', 'mac')
+class SmoothnessGpuRasterizationDesktopToughPinchZoomCases(_Smoothness):
+  """Measures rendering statistics for pinch-zooming in the tough pinch zoom
+  cases with GPU rasterization. Uses lower zoom levels customized for desktop
+  limits.
+  """
+  tag = 'gpu_rasterization'
+  test = smoothness.Smoothness
+  page_set = page_sets.DesktopToughPinchZoomCasesPageSet
+
+  def SetExtraBrowserOptions(self, options):
+    silk_flags.CustomizeBrowserOptionsForGpuRasterization(options)
+
+  @classmethod
+  def Name(cls):
+    return 'smoothness.gpu_rasterization.desktop_tough_pinch_zoom_cases'
 
 
 @benchmark.Enabled('android', 'chromeos')
@@ -306,12 +356,35 @@ class SmoothnessGpuRasterizationPolymer(_Smoothness):
     return 'smoothness.gpu_rasterization.polymer'
 
 
+@benchmark.Disabled('reference')  # crbug.com/549429
 class SmoothnessToughScrollingCases(_Smoothness):
   page_set = page_sets.ToughScrollingCasesPageSet
 
   @classmethod
+  def ValueCanBeAddedPredicate(cls, value, is_first_result):
+    del is_first_result  # unused
+    # Only keep 'mean_pixels_approximated' and 'mean_pixels_checkerboarded'
+    # metrics. (crbug.com/529331)
+    return value.name in ('mean_pixels_approximated',
+                          'mean_pixels_checkerboarded')
+
+  @classmethod
   def Name(cls):
     return 'smoothness.tough_scrolling_cases'
+
+
+@benchmark.Enabled('android', "mac")
+class SmoothnessGpuRasterizationToughScrollingCases(_Smoothness):
+  tag = 'gpu_rasterization'
+  test = smoothness.Smoothness
+  page_set = page_sets.ToughScrollingCasesPageSet
+
+  def SetExtraBrowserOptions(self, options):
+    silk_flags.CustomizeBrowserOptionsForGpuRasterization(options)
+
+  @classmethod
+  def Name(cls):
+    return 'smoothness.gpu_rasterization.tough_scrolling_cases'
 
 @benchmark.Disabled('android')  # http://crbug.com/531593
 class SmoothnessToughImageDecodeCases(_Smoothness):

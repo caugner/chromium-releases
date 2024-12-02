@@ -28,7 +28,6 @@
 #include "chrome/browser/prefs/chrome_pref_model_associator_client.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
 #include "chrome/browser/prefs/profile_pref_store_manager.h"
-#include "chrome/browser/profiles/file_path_verifier_win.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
 #include "chrome/browser/ui/profile_error_dialog.h"
@@ -41,6 +40,7 @@
 #include "components/search_engines/default_search_manager.h"
 #include "components/search_engines/default_search_pref_migration.h"
 #include "components/search_engines/search_engines_pref_names.h"
+#include "components/signin/core/common/signin_pref_names.h"
 #include "components/sync_driver/pref_names.h"
 #include "components/syncable_prefs/pref_model_associator.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
@@ -530,19 +530,6 @@ scoped_ptr<syncable_prefs::PrefServiceSyncable> CreateProfilePrefs(
   ConfigureDefaultSearchPrefMigrationToDictionaryValue(pref_service.get());
 
   return pref_service.Pass();
-}
-
-void SchedulePrefsFilePathVerification(const base::FilePath& profile_path) {
-#if defined(OS_WIN)
-  // Only do prefs file verification on Windows.
-  const int kVerifyPrefsFileDelaySeconds = 60;
-  BrowserThread::GetBlockingPool()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&VerifyPreferencesFile,
-                 ProfilePrefStoreManager::GetPrefFilePathFromProfilePath(
-                     profile_path)),
-      base::TimeDelta::FromSeconds(kVerifyPrefsFileDelaySeconds));
-#endif
 }
 
 void DisableDomainCheckForTesting() {

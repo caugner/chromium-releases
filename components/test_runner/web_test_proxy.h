@@ -17,6 +17,7 @@
 #include "third_party/WebKit/public/platform/WebImage.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
+#include "third_party/WebKit/public/platform/WebSetSinkIdCallbacks.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebAXEnums.h"
@@ -165,7 +166,6 @@ class TEST_RUNNER_EXPORT WebTestProxyBase {
   blink::WebPlugin* CreatePlugin(blink::WebLocalFrame* frame,
                                  const blink::WebPluginParams& params);
   void SetStatusText(const blink::WebString& text);
-  void DidStopLoading();
   void ShowContextMenu(const blink::WebContextMenuData& data);
   blink::WebUserMediaClient* GetUserMediaClient();
   void PrintPage(blink::WebLocalFrame* frame);
@@ -174,16 +174,15 @@ class TEST_RUNNER_EXPORT WebTestProxyBase {
   void RequestPointerUnlock();
   bool IsPointerLocked();
   void DidFocus();
-  void DidBlur();
   void SetToolTipText(const blink::WebString& text,
                       blink::WebTextDirection direction);
   void DidAddMessageToConsole(const blink::WebConsoleMessage& text,
                               const blink::WebString& source_name,
                               unsigned source_line);
-  void LoadURLExternally(blink::WebLocalFrame* frame,
-                         const blink::WebURLRequest& request,
+  void LoadURLExternally(const blink::WebURLRequest& request,
                          blink::WebNavigationPolicy policy,
-                         const blink::WebString& suggested_name);
+                         const blink::WebString& suggested_name,
+                         bool replaces_current_history_item);
   void DidStartProvisionalLoad(blink::WebLocalFrame*);
   void DidReceiveServerRedirectForProvisionalLoad(blink::WebLocalFrame* frame);
   bool DidFailProvisionalLoad(blink::WebLocalFrame* frame,
@@ -227,6 +226,10 @@ class TEST_RUNNER_EXPORT WebTestProxyBase {
                                         blink::WebSecurityOrigin target,
                                         blink::WebDOMMessageEvent event);
   void ResetInputMethod();
+  void CheckIfAudioSinkExistsAndIsAuthorized(
+      const blink::WebString& sink_id,
+      const blink::WebSecurityOrigin& security_origin,
+      blink::WebSetSinkIdCallbacks* web_callbacks);
 
   blink::WebString acceptLanguages();
 
@@ -357,10 +360,6 @@ class WebTestProxy : public Base, public WebTestProxyBase {
   virtual void didFocus() {
     WebTestProxyBase::DidFocus();
     Base::didFocus();
-  }
-  virtual void didBlur() {
-    WebTestProxyBase::DidBlur();
-    Base::didBlur();
   }
   virtual void setToolTipText(const blink::WebString& text,
                               blink::WebTextDirection hint) {

@@ -91,7 +91,7 @@ NSString* const kXCallbackParametersKey = @"xCallbackParameters";
   BOOL _useDesktopUserAgentForNextPendingEntry;
 
   // The browser state associated with this CRWSessionController;
-  __weak web::BrowserState* _browserState;
+  web::BrowserState* _browserState;  // weak
 
   // Time smoother for navigation entry timestamps; see comment in
   // navigation_controller_impl.h
@@ -465,9 +465,8 @@ NSString* const kXCallbackParametersKey = @"xCallbackParameters";
   [_entries removeObjectsInRange:remove];
   if (_previousNavigationIndex >= forwardEntryStartIndex)
     _previousNavigationIndex = -1;
-  if (_navigationManager && _navigationManager->GetFacadeDelegate()) {
-    _navigationManager->GetFacadeDelegate()->OnNavigationItemsPruned(
-        remove.length);
+  if (_navigationManager) {
+    _navigationManager->OnNavigationItemsPruned(remove.length);
   }
 }
 

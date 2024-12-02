@@ -27,6 +27,7 @@ component("ash") {
     "//base/third_party/dynamic_annotations",
     "//cc",
     "//components/device_event_log",
+    "//components/signin/core/account_id",
     "//components/user_manager",
     "//components/wallpaper",
     "//content/public/browser",
@@ -47,6 +48,7 @@ component("ash") {
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/keyboard",
+    "//ui/keyboard:keyboard_with_content",
     "//ui/message_center",
     "//ui/resources",
     "//ui/strings",
@@ -157,6 +159,7 @@ component("ash_with_content") {
     "//ui/events",
     "//ui/gfx",
     "//ui/gfx/geometry",
+    "//ui/keyboard:keyboard_with_content",
     "//ui/resources",
     "//ui/strings",
     "//ui/views",
@@ -175,8 +178,9 @@ source_set("test_support") {
     ":ash",
   ]
   deps = [
+    ":test_support_with_content",  # TODO(beng): reverse this direction.
     "//ash/resources",
-    "//content/test:test_support",
+    "//components/signin/core/account_id",
     "//skia",
     "//testing/gtest",
     "//ui/accessibility",
@@ -190,19 +194,20 @@ source_set("test_support") {
   ]
 
   if (is_win) {
-    sources += [
-      "test/test_metro_viewer_process_host.cc",
-      "test/test_metro_viewer_process_host.h",
-    ]
-    deps += [
-      "//ipc",
-      "//ui/metro_viewer",
-      "//ui/platform_window/win",
-      "//win8:metro_viewer",
-      "//win8:test_support_win8",
-      "//win8:test_registrar",
-    ]
+    deps += [ "//ui/platform_window/win" ]
   }
+}
+
+source_set("test_support_with_content") {
+  testonly = true
+  sources = gypi_values.ash_test_support_with_content_sources
+  configs += [ "//build/config:precompiled_headers" ]
+
+  deps = [
+    ":ash_with_content",
+    "//content/test:test_support",
+    "//skia",
+  ]
 }
 
 source_set("interactive_ui_test_support") {
@@ -250,6 +255,7 @@ static_library("ash_shell_lib") {
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/keyboard",
+    "//ui/keyboard:keyboard_with_content",
     "//ui/message_center",
     "//ui/resources",
     "//ui/views",
@@ -285,6 +291,7 @@ test("ash_unittests") {
     "//base",
     "//base/allocator",
     "//base/test:test_support",
+    "//components/signin/core/account_id",
     "//components/user_manager",
     "//content/public/browser",
     "//content/test:test_support",
@@ -306,6 +313,7 @@ test("ash_unittests") {
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/keyboard",
+    "//ui/keyboard:keyboard_with_content",
     "//ui/message_center",
     "//ui/message_center:test_support",
     "//ui/resources",
@@ -351,6 +359,7 @@ test("ash_unittests") {
     deps += [
       "//device/bluetooth",
       "//ui/display",
+      "//ui/display:test_support",
       "//ui/display:test_util",
       "//ui/display/types",
       "//chromeos:power_manager_proto",

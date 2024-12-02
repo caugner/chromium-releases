@@ -2,6 +2,7 @@
 <!DOCTYPE translationbundle>
 <translationbundle lang="tr">
 <translation id="1013923882670373915">"<ph name="DEVICE_NAME" />" adlı Bluetooth cihaz eşleme izni istiyor. Lütfen söz konusu cihazda şu PIN kodunu girin: <ph name="PINCODE" /></translation>
+<translation id="1021311941847921177">Sonraki giriş yöntemine geçme kısayolu değişti. Lütfen <ph name="OLD_SHORTCUT" /> yerine <ph name="NEW_SHORTCUT" /> kısayolunu kullanın.</translation>
 <translation id="112308213915226829">Rafı otomatik gizle</translation>
 <translation id="1195412055398077112">fazla tarama</translation>
 <translation id="1270290102613614947">Dokunmatik klavye devre dışı</translation>
@@ -25,10 +26,10 @@
 <translation id="1812696562331527143">Giriş yönteminiz <ph name="INPUT_METHOD_ID" />*(<ph name="BEGIN_LINK" />3. taraf<ph name="END_LINK" />) olarak değiştirildi.
 Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="1882897271359938046">Şuraya yansıtılıyor: <ph name="DISPLAY_NAME" /></translation>
+<translation id="1919743966458266018">Görev yöneticisini açma kısayolu değişti. Lütfen <ph name="OLD_SHORTCUT" /> yerine <ph name="NEW_SHORTCUT" /> kısayolunu kullanın.</translation>
 <translation id="1923539912171292317">Otomatik tıklamalar</translation>
-<translation id="1950626184269948555">Görev yöneticisi kısayolu değişti. Lütfen Üst Karakter+Esc yerine Arama+Esc tuşlarını kullanın.</translation>
+<translation id="1938872420421548906">Üst Karakter+Alt</translation>
 <translation id="1957803754585243749">0°</translation>
-<translation id="1963814843110128691">$1, şuraya yayınlanıyor: $2</translation>
 <translation id="1969011864782743497"><ph name="DEVICE_NAME" /> (USB)</translation>
 <translation id="1987317783729300807">Hesaplar</translation>
 <translation id="2127372758936585790">Düşük güçlü şarj cihazı</translation>
@@ -94,6 +95,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="3783640748446814672">alt</translation>
 <translation id="3784455785234192852">Kilitle</translation>
 <translation id="3799026279081545374">Şarj cihazınız sorunlu olabilir. ABD'de yaşıyorsanız yardım almak ve cihazı yenisiyle değiştirmek için lütfen 866-628-1371 numaralı telefonu arayın. İngiltere'de yaşıyorsanız 0800-026-0613 numaralı telefonu, İrlanda'da yaşıyorsanız 1-800-832-664 numaralı telefonu, Kanada'da yaşıyorsanız 866-628-1372 numaralı telefonu, Avustralya'da yaşıyorsanız lütfen 1-800-067-460 numaralı telefonu arayın.</translation>
+<translation id="3866182280516392520">IPv6 Adresi</translation>
 <translation id="3891340733213178823">Oturumu kapatmak için Ctrl+ÜstKrktr+Q tuşlarına iki defa basın.</translation>
 <translation id="3892641579809465218">Dahili Ekran</translation>
 <translation id="3963445509666917109">Hoparlör (Dahili)</translation>
@@ -109,6 +111,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="4421231901400348175">Ekranınızın kontrolü, Uzaktan Yardım kullanılarak <ph name="HELPER_NAME" /> ile paylaşılıyor.</translation>
 <translation id="4430019312045809116">Ses</translation>
 <translation id="4527045527269911712">"<ph name="DEVICE_NAME" />" adlı Bluetooth cihaz eşleme izni istiyor.</translation>
+<translation id="4544944664594876241">Ekranı kilitleme kısayolu değişti. Lütfen <ph name="OLD_SHORTCUT" /> yerine <ph name="NEW_SHORTCUT" /> kısayolunu kullanın.</translation>
 <translation id="479989351350248267">ara</translation>
 <translation id="4804818685124855865">Bağlantıyı kes</translation>
 <translation id="4872237917498892622">Alt+Arama veya Üst Karakter</translation>
@@ -117,6 +120,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="4957722034734105353">Daha fazla bilgi edinin...</translation>
 <translation id="4961318399572185831">Ekranı yayınla</translation>
 <translation id="5011233892417813670">Chromebook</translation>
+<translation id="5012744545445585468">Ctrl+Üst Karakter+Boşluk</translation>
 <translation id="5045002648206642691">Google Drive ayarları...</translation>
 <translation id="5102001756192215136"><ph name="HOUR" />:<ph name="MINUTE" /> kaldı</translation>
 <translation id="511445211639755999"><ph name="RESOLUTION" />, <ph name="OVERSCAN" /></translation>
@@ -136,6 +140,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="5871632337994001636">Cihazları yönet...</translation>
 <translation id="5895138241574237353">Yeniden başlat</translation>
+<translation id="5901316534475909376">Üst Karakter+Esc</translation>
 <translation id="5927132638760172455">Bilinmeyen bir alıcıya yayınlanıyor</translation>
 <translation id="5932901536148835538">Chromebit</translation>
 <translation id="5947494881799873997">Geri döndür</translation>
@@ -153,7 +158,6 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="6165508094623778733">Daha fazla bilgi edinin</translation>
 <translation id="6247708409970142803">%<ph name="PERCENTAGE" /></translation>
 <translation id="6248847161401822652">Çıkmak için Ctrl+ÜstKrktr+Q tuşlarına iki kez basın.</translation>
-<translation id="6287020362823083378">Ekran kilidi kısayolu değişti. Lütfen Ctrl+Üst Karakter+L yerine Arama+L tuşunu kullanın.</translation>
 <translation id="6310121235600822547"><ph name="DISPLAY_NAME" /> dönme ayarı <ph name="ROTATION" /> olarak değiştirildi</translation>
 <translation id="6359806961507272919"><ph name="PHONE_NUMBER" /> numaradan SMS alındı</translation>
 <translation id="639644700271529076">CAPS LOCK kapalı</translation>
@@ -161,6 +165,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="6426039856985689743">Mobil verileri devre dışı bırak</translation>
 <translation id="6452181791372256707">Reddet</translation>
 <translation id="6459472438155181876">Ekran şuraya genişletiliyor: <ph name="DISPLAY_NAME" /></translation>
+<translation id="6501401484702599040">Ekran, <ph name="RECEIVER_NAME" /> üzerinde yayınlanıyor</translation>
 <translation id="6550675742724504774">Seçenekler</translation>
 <translation id="6585808820553845416">Oturumun süresi <ph name="SESSION_TIME_REMAINING" /> içinde bitiyor.</translation>
 <translation id="6596816719288285829">IP Adresi</translation>
@@ -168,6 +173,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="6713285437468012787">"<ph name="DEVICE_NAME" />" adlı Bluetooth cihaz eşlendi ve artık tüm kullanıcılar tarafından kullanılabilir. Bu eşlemeyi Ayarlar'ı kullanarak kaldırabilirsiniz.</translation>
 <translation id="6785414152754474415">Pil %<ph name="PERCENTAGE" /> dolu ve şarj oluyor.</translation>
 <translation id="6803622936009808957">Desteklenen bir çözünürlük bulunamadığı için ekranlar yansıtılamıyor. Bunun yerine genişletilmiş masaüstüne geçiliyor.</translation>
+<translation id="683971173229319003">Ara+L</translation>
 <translation id="68610848741840742">ChromeVox (Sesli geri bildirim)</translation>
 <translation id="6895424601869865703"><ph name="GIVEN_NAME" /> için bir hesap ekle</translation>
 <translation id="6911468394164995108">Başka ağa katıl...</translation>
@@ -176,6 +182,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="6981982820502123353">Erişilebilirlik</translation>
 <translation id="7029814467594812963">Oturumdan çık</translation>
 <translation id="703171847531699602">Yayın cihazı yok</translation>
+<translation id="7034339000180558234"><ph name="TAB_NAME" /> sekmesi <ph name="RECEIVER_NAME" /> üzerinde yayınlanıyor</translation>
 <translation id="7052914147756339792">Duvar kağıdını ayarla...</translation>
 <translation id="7097613348211027502">ChromeVox (sesli geri bildirim) etkin.
 Devre dışı bırakmak için Ctrl+Alt+Z tuşlarına basın.</translation>
@@ -187,6 +194,7 @@ Devre dışı bırakmak için Ctrl+Alt+Z tuşlarına basın.</translation>
 <translation id="737451040872859086">Mikrofon (Dahili)</translation>
 <translation id="742594950370306541">Kamera kullanımda.</translation>
 <translation id="743058460480092004">Kamera ve mikrofon kullanımda.</translation>
+<translation id="7510334386202674593">Ctrl + Üst Karakter + L</translation>
 <translation id="7561014039265304140"><ph name="DISPLAY_NAME" />, <ph name="SPECIFIED_RESOLUTION" /> çözünürlüğünü desteklemiyor. Çözünürlük <ph name="FALLBACK_RESOLUTION" /> olarak değiştirildi</translation>
 <translation id="7573962313813535744">Yuva modu</translation>
 <translation id="7593891976182323525">Arama veya Üst Karakter</translation>
@@ -195,6 +203,7 @@ Devre dışı bırakmak için Ctrl+Alt+Z tuşlarına basın.</translation>
 <translation id="7823564328645135659">Ayarlarınız senkronize edildikten sonra "<ph name="FROM_LOCALE" />" olan dil "<ph name="TO_LOCALE" />" olarak değiştirildi.</translation>
 <translation id="785750925697875037">Mobil hesabı görüntüle</translation>
 <translation id="7864539943188674973">Bluetooth'u devre dışı bırak</translation>
+<translation id="7893838033650689677">Kablosuz'u aç</translation>
 <translation id="7904094684485781019">Bu hesabın yöneticisi, çoklu oturum açmayı engelledi.</translation>
 <translation id="7957227661277029961"><ph name="DEVICE_TYPE" /> cihazınız açıkken şarj olmayabilir. Onaylı bir şarj cihazı kullanmayı düşünün.</translation>
 <translation id="7982789257301363584">Ağ</translation>
@@ -205,16 +214,15 @@ Devre dışı bırakmak için Ctrl+Alt+Z tuşlarına basın.</translation>
 <translation id="8308637677604853869">Önceki menü</translation>
 <translation id="8356164830168736643"><ph name="WINDOW_TITLE" /> penceresini kapat</translation>
 <translation id="8428213095426709021">Ayarlar</translation>
-<translation id="8443356412772935865">Ekran şuraya yayınlanıyor: $1</translation>
 <translation id="8456362689280298700">Dolması için gereken süre: <ph name="HOUR" />:<ph name="MINUTE" /> </translation>
 <translation id="8517041960877371778"><ph name="DEVICE_TYPE" /> cihazınız açıkken şarj olmayabilir.</translation>
 <translation id="8528322925433439945">Mobile...</translation>
-<translation id="8654520615680304441">Kablosuz'u aç...</translation>
 <translation id="8673028979667498656">270°</translation>
 <translation id="8676770494376880701">Düşük güçlü şarj cihazı bağlandı</translation>
 <translation id="8814190375133053267">Kablosuz</translation>
 <translation id="882279321799040148">Görüntülemek için tıklayın</translation>
 <translation id="8828714802988429505">90°</translation>
+<translation id="8850991929411075241">Ara+Esc</translation>
 <translation id="8878886163241303700">Genişletilmiş ekran</translation>
 <translation id="8940956008527784070">Pil gücü az (%<ph name="PERCENTAGE" />)</translation>
 <translation id="9074739597929991885">Bluetooth</translation>

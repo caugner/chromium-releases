@@ -108,15 +108,18 @@
 #include "chromeos/network/portal_detector/network_portal_detector_stub.h"
 #include "chromeos/system/statistics_provider.h"
 #include "chromeos/tpm/tpm_token_loader.h"
+#include "components/browser_sync/common/browser_sync_switches.h"
 #include "components/device_event_log/device_event_log.h"
 #include "components/metrics/metrics_service.h"
 #include "components/ownership/owner_key_util.h"
 #include "components/session_manager/core/session_manager.h"
+#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/wallpaper/wallpaper_manager_base.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/dbus/bluez_dbus_manager.h"
@@ -305,8 +308,8 @@ void ChromeBrowserMainPartsChromeos::PreEarlyInitialization() {
       !parsed_command_line().HasSwitch(switches::kLoginManager) &&
       !parsed_command_line().HasSwitch(switches::kLoginUser) &&
       !parsed_command_line().HasSwitch(switches::kGuestSession)) {
-    singleton_command_line->AppendSwitchASCII(switches::kLoginUser,
-                                              chromeos::login::kStubUser);
+    singleton_command_line->AppendSwitchASCII(
+        switches::kLoginUser, login::StubAccountId().GetUserEmail());
     if (!parsed_command_line().HasSwitch(switches::kLoginProfile)) {
       singleton_command_line->AppendSwitchASCII(switches::kLoginProfile,
                                                 chrome::kTestUserProfileDir);
@@ -475,12 +478,13 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
   ChromeBrowserMainPartsLinux::PreProfileInit();
 
   if (immediate_login) {
-    const std::string user_id = login::CanonicalizeUserID(
+    const std::string user_email = login::CanonicalizeUserID(
         parsed_command_line().GetSwitchValueASCII(switches::kLoginUser));
     user_manager::UserManager* user_manager = user_manager::UserManager::Get();
 
-    if (policy::IsDeviceLocalAccountUser(user_id, NULL) &&
-        !user_manager->IsKnownUser(user_id)) {
+    const AccountId account_id(AccountId::FromUserEmail(user_email));
+    if (policy::IsDeviceLocalAccountUser(account_id.GetUserEmail(), NULL) &&
+        !user_manager->IsKnownUser(account_id)) {
       // When a device-local account is removed, its policy is deleted from disk
       // immediately. If a session using this account happens to be in progress,
       // the session is allowed to continue with policy served from an in-memory
@@ -494,8 +498,8 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
     // In case of multi-profiles --login-profile will contain user_id_hash.
     std::string user_id_hash =
         parsed_command_line().GetSwitchValueASCII(switches::kLoginProfile);
-    user_manager->UserLoggedIn(user_id, user_id_hash, true);
-    VLOG(1) << "Relaunching browser for user: " << user_id
+    user_manager->UserLoggedIn(account_id, user_id_hash, true);
+    VLOG(1) << "Relaunching browser for user: " << user_email
             << " with hash: " << user_id_hash;
   }
 }
@@ -670,6 +674,8 @@ void ChromeBrowserMainPartsChromeos::PreBrowserStart() {
 }
 
 void ChromeBrowserMainPartsChromeos::PostBrowserStart() {
+  system::InputDeviceSettings::Get()->InitTouchDevicesStatusFromLocalPrefs();
+
   // These are dependent on the ash::Shell singleton already having been
   // initialized.
   // TODO(oshima): Remove ash dependency in PowerButtonObserver.

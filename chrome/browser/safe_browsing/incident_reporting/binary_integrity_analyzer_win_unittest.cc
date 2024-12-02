@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/safe_browsing/incident_reporting/binary_integrity_analyzer.h"
+#include "chrome/browser/safe_browsing/incident_reporting/binary_integrity_analyzer_win.h"
 
 #include "base/bind.h"
 #include "base/files/file_util.h"
@@ -13,10 +13,10 @@
 #include "chrome/browser/safe_browsing/incident_reporting/incident.h"
 #include "chrome/browser/safe_browsing/incident_reporting/mock_incident_receiver.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_version.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "version.h"  // NOLINT
 
 using ::testing::_;
 using ::testing::StrictMock;
@@ -56,7 +56,7 @@ class BinaryIntegrityAnalyzerWinTest : public ::testing::Test {
 };
 
 BinaryIntegrityAnalyzerWinTest::BinaryIntegrityAnalyzerWinTest() {
-  temp_dir_.CreateUniqueTempDir();
+  EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
   base::CreateDirectory(temp_dir_.path().AppendASCII(CHROME_VERSION_STRING));
 
   // We retrieve DIR_TEST_DATA here because it is based on DIR_EXE and we are

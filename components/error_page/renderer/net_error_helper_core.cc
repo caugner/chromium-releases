@@ -369,21 +369,26 @@ void ReportAutoReloadFailure(const blink::WebURLError& error, size_t count) {
 }  // namespace
 
 struct NetErrorHelperCore::ErrorPageInfo {
-  ErrorPageInfo(blink::WebURLError error, bool was_failed_post)
+  ErrorPageInfo(blink::WebURLError error,
+                bool was_failed_post,
+                bool was_ignoring_cache)
       : error(error),
         was_failed_post(was_failed_post),
+        was_ignoring_cache(was_ignoring_cache),
         needs_dns_updates(false),
         needs_load_navigation_corrections(false),
         reload_button_in_page(false),
         show_saved_copy_button_in_page(false),
         show_cached_copy_button_in_page(false),
+        show_offline_pages_button_in_page(false),
+        show_offline_copy_button_in_page(false),
         is_finished_loading(false),
-        auto_reload_triggered(false) {
-  }
+        auto_reload_triggered(false) {}
 
   // Information about the failed page load.
   blink::WebURLError error;
   bool was_failed_post;
+  bool was_ignoring_cache;
 
   // Information about the status of the error page.
 
@@ -411,6 +416,8 @@ struct NetErrorHelperCore::ErrorPageInfo {
   bool reload_button_in_page;
   bool show_saved_copy_button_in_page;
   bool show_cached_copy_button_in_page;
+  bool show_offline_pages_button_in_page;
+  bool show_offline_copy_button_in_page;
 
   // True if a page has completed loading, at which point it can receive
   // updates.
@@ -465,6 +472,9 @@ NetErrorHelperCore::NetErrorHelperCore(Delegate* delegate,
       online_(true),
       visible_(is_visible),
       auto_reload_count_(0),
+#if defined(OS_ANDROID)
+      offline_page_status_(OfflinePageStatus::NONE),
+#endif  // defined(OS_ANDROID)
       navigation_from_button_(NO_BUTTON) {
 }
 
@@ -590,6 +600,12 @@ void NetErrorHelperCore::OnFinishLoad(FrameType frame_type) {
   if (committed_error_page_info_->show_saved_copy_button_in_page) {
     RecordEvent(NETWORK_ERROR_PAGE_SHOW_SAVED_COPY_BUTTON_SHOWN);
   }
+  if (committed_error_page_info_->show_offline_pages_button_in_page) {
+    RecordEvent(NETWORK_ERROR_PAGE_SHOW_OFFLINE_PAGES_BUTTON_SHOWN);
+  }
+  if (committed_error_page_info_->show_offline_copy_button_in_page) {
+    RecordEvent(NETWORK_ERROR_PAGE_SHOW_OFFLINE_COPY_BUTTON_SHOWN);
+  }
   if (committed_error_page_info_->reload_button_in_page &&
       committed_error_page_info_->show_saved_copy_button_in_page) {
     RecordEvent(NETWORK_ERROR_PAGE_BOTH_BUTTONS_SHOWN);
@@ -623,18 +639,19 @@ void NetErrorHelperCore::OnFinishLoad(FrameType frame_type) {
   UpdateErrorPage();
 }
 
-void NetErrorHelperCore::GetErrorHTML(
-    FrameType frame_type,
-    const blink::WebURLError& error,
-    bool is_failed_post,
-    std::string* error_html) {
+void NetErrorHelperCore::GetErrorHTML(FrameType frame_type,
+                                      const blink::WebURLError& error,
+                                      bool is_failed_post,
+                                      bool is_ignoring_cache,
+                                      std::string* error_html) {
   if (frame_type == MAIN_FRAME) {
     // If navigation corrections were needed before, that should have been
     // cancelled earlier by starting a new page load (Which has now failed).
     DCHECK(!committed_error_page_info_ ||
            !committed_error_page_info_->needs_load_navigation_corrections);
 
-    pending_error_page_info_.reset(new ErrorPageInfo(error, is_failed_post));
+    pending_error_page_info_.reset(
+        new ErrorPageInfo(error, is_failed_post, is_ignoring_cache));
     pending_error_page_info_->navigation_correction_params.reset(
         new NavigationCorrectionParams(navigation_correction_params_));
     GetErrorHtmlForMainFrame(pending_error_page_info_.get(), error_html);
@@ -643,13 +660,17 @@ void NetErrorHelperCore::GetErrorHTML(
     bool reload_button_in_page;
     bool show_saved_copy_button_in_page;
     bool show_cached_copy_button_in_page;
+    bool show_offline_pages_button_in_page;
+    bool show_offline_copy_button_in_page;
 
     delegate_->GenerateLocalizedErrorPage(
         error, is_failed_post,
         false /* No diagnostics dialogs allowed for subframes. */,
+        OfflinePageStatus::NONE /* No offline button provided in subframes */,
         scoped_ptr<ErrorPageParams>(), &reload_button_in_page,
         &show_saved_copy_button_in_page, &show_cached_copy_button_in_page,
-        error_html);
+        &show_offline_pages_button_in_page,
+        &show_offline_copy_button_in_page, error_html);
   }
 }
 
@@ -685,6 +706,13 @@ void NetErrorHelperCore::OnSetNavigationCorrectionInfo(
   navigation_correction_params_.search_url = search_url;
 }
 
+void NetErrorHelperCore::OnSetOfflinePageInfo(
+    OfflinePageStatus offline_page_status) {
+#if defined(OS_ANDROID)
+  offline_page_status_ = offline_page_status;
+#endif  // defined(OS_ANDROID)
+}
+
 void NetErrorHelperCore::GetErrorHtmlForMainFrame(
     ErrorPageInfo* pending_error_page_info,
     std::string* error_html) {
@@ -712,10 +740,13 @@ void NetErrorHelperCore::GetErrorHtmlForMainFrame(
   delegate_->GenerateLocalizedErrorPage(
       error, pending_error_page_info->was_failed_post,
       can_show_network_diagnostics_dialog_,
+      GetOfflinePageStatus(),
       scoped_ptr<ErrorPageParams>(),
       &pending_error_page_info->reload_button_in_page,
       &pending_error_page_info->show_saved_copy_button_in_page,
       &pending_error_page_info->show_cached_copy_button_in_page,
+      &pending_error_page_info->show_offline_pages_button_in_page,
+      &pending_error_page_info->show_offline_copy_button_in_page,
       error_html);
 }
 
@@ -739,7 +770,8 @@ void NetErrorHelperCore::UpdateErrorPage() {
   delegate_->UpdateErrorPage(
       GetUpdatedError(committed_error_page_info_->error),
       committed_error_page_info_->was_failed_post,
-      can_show_network_diagnostics_dialog_);
+      can_show_network_diagnostics_dialog_,
+      GetOfflinePageStatus());
 }
 
 void NetErrorHelperCore::OnNavigationCorrectionsFetched(
@@ -753,9 +785,10 @@ void NetErrorHelperCore::OnNavigationCorrectionsFetched(
   DCHECK(committed_error_page_info_->needs_load_navigation_corrections);
   DCHECK(committed_error_page_info_->navigation_correction_params);
 
-  pending_error_page_info_.reset(
-      new ErrorPageInfo(committed_error_page_info_->error,
-                        committed_error_page_info_->was_failed_post));
+  pending_error_page_info_.reset(new ErrorPageInfo(
+      committed_error_page_info_->error,
+      committed_error_page_info_->was_failed_post,
+      committed_error_page_info_->was_ignoring_cache));
   pending_error_page_info_->navigation_correction_response =
       ParseNavigationCorrectionResponse(corrections);
 
@@ -776,10 +809,13 @@ void NetErrorHelperCore::OnNavigationCorrectionsFetched(
         pending_error_page_info_->error,
         pending_error_page_info_->was_failed_post,
         can_show_network_diagnostics_dialog_,
+        GetOfflinePageStatus(),
         params.Pass(),
         &pending_error_page_info_->reload_button_in_page,
         &pending_error_page_info_->show_saved_copy_button_in_page,
         &pending_error_page_info_->show_cached_copy_button_in_page,
+        &pending_error_page_info_->show_offline_pages_button_in_page,
+        &pending_error_page_info_->show_offline_copy_button_in_page,
         &error_html);
   } else {
     // Since |navigation_correction_params| in |pending_error_page_info_| is
@@ -790,9 +826,8 @@ void NetErrorHelperCore::OnNavigationCorrectionsFetched(
   // TODO(mmenke):  Once the new API is in place, look into replacing this
   //                double page load by just updating the error page, like DNS
   //                probes do.
-  delegate_->LoadErrorPageInMainFrame(
-      error_html,
-      pending_error_page_info_->error.unreachableURL);
+  delegate_->LoadErrorPage(error_html,
+                           pending_error_page_info_->error.unreachableURL);
 }
 
 blink::WebURLError NetErrorHelperCore::GetUpdatedError(
@@ -812,11 +847,11 @@ blink::WebURLError NetErrorHelperCore::GetUpdatedError(
   return updated_error;
 }
 
-void NetErrorHelperCore::Reload() {
+void NetErrorHelperCore::Reload(bool ignore_cache) {
   if (!committed_error_page_info_) {
     return;
   }
-  delegate_->ReloadPage();
+  delegate_->ReloadPage(ignore_cache);
 }
 
 bool NetErrorHelperCore::MaybeStartAutoReloadTimer() {
@@ -860,7 +895,7 @@ void NetErrorHelperCore::AutoReloadTimerFired() {
 
   auto_reload_count_++;
   auto_reload_in_flight_ = true;
-  Reload();
+  Reload(committed_error_page_info_->was_ignoring_cache);
 }
 
 void NetErrorHelperCore::PauseAutoReloadTimer() {
@@ -919,7 +954,7 @@ void NetErrorHelperCore::ExecuteButtonPress(Button button) {
         RecordEvent(NETWORK_ERROR_PAGE_BOTH_BUTTONS_RELOAD_CLICKED);
       }
       navigation_from_button_ = RELOAD_BUTTON;
-      Reload();
+      Reload(false);
       return;
     case SHOW_SAVED_COPY_BUTTON:
       RecordEvent(NETWORK_ERROR_PAGE_SHOW_SAVED_COPY_BUTTON_CLICKED);
@@ -943,6 +978,15 @@ void NetErrorHelperCore::ExecuteButtonPress(Button button) {
     case DIAGNOSE_ERROR:
       RecordEvent(NETWORK_ERROR_DIAGNOSE_BUTTON_CLICKED);
       delegate_->DiagnoseError(
+          committed_error_page_info_->error.unreachableURL);
+      return;
+    case SHOW_OFFLINE_PAGES_BUTTON:
+      RecordEvent(NETWORK_ERROR_PAGE_SHOW_OFFLINE_PAGES_BUTTON_CLICKED);
+      delegate_->ShowOfflinePages();
+      return;
+    case SHOW_OFFLINE_COPY_BUTTON:
+      RecordEvent(NETWORK_ERROR_PAGE_SHOW_OFFLINE_COPY_BUTTON_CLICKED);
+      delegate_->LoadOfflineCopy(
           committed_error_page_info_->error.unreachableURL);
       return;
     case NO_BUTTON:
@@ -985,6 +1029,14 @@ void NetErrorHelperCore::TrackClick(int tracking_id) {
   delegate_->SendTrackingRequest(
       committed_error_page_info_->navigation_correction_params->url,
       request_body);
+}
+
+OfflinePageStatus NetErrorHelperCore::GetOfflinePageStatus() const {
+#if defined(OS_ANDROID)
+  return offline_page_status_;
+#else
+  return OfflinePageStatus::NONE;
+#endif  // defined(OS_ANDROID)
 }
 
 }  // namespace error_page

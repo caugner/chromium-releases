@@ -20,7 +20,7 @@
 #include "cc/test/fake_content_layer_client.h"
 #include "cc/test/fake_display_list_raster_source.h"
 #include "cc/test/fake_display_list_recording_source.h"
-#include "cc/test/fake_impl_proxy.h"
+#include "cc/test/fake_impl_task_runner_provider.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_picture_layer_impl.h"
@@ -80,6 +80,7 @@ class PictureLayerImplTestSettings : public GpuRasterizationEnabledSettings {
  public:
   PictureLayerImplTestSettings() {
     layer_transforms_should_scale_layer_contents = true;
+    verify_property_trees = true;
   }
 };
 
@@ -93,10 +94,10 @@ class LowResTilingsSettings : public PictureLayerImplTestSettings {
 class PictureLayerImplTest : public testing::Test {
  public:
   PictureLayerImplTest()
-      : proxy_(base::ThreadTaskRunnerHandle::Get()),
+      : task_runner_provider_(base::ThreadTaskRunnerHandle::Get()),
         output_surface_(FakeOutputSurface::Create3d()),
         host_impl_(LowResTilingsSettings(),
-                   &proxy_,
+                   &task_runner_provider_,
                    &shared_bitmap_manager_,
                    &task_graph_runner_),
         root_id_(6),
@@ -108,10 +109,10 @@ class PictureLayerImplTest : public testing::Test {
   }
 
   explicit PictureLayerImplTest(const LayerTreeSettings& settings)
-      : proxy_(base::ThreadTaskRunnerHandle::Get()),
+      : task_runner_provider_(base::ThreadTaskRunnerHandle::Get()),
         output_surface_(FakeOutputSurface::Create3d()),
         host_impl_(settings,
-                   &proxy_,
+                   &task_runner_provider_,
                    &shared_bitmap_manager_,
                    &task_graph_runner_),
         root_id_(6),
@@ -124,6 +125,7 @@ class PictureLayerImplTest : public testing::Test {
   void SetUp() override { InitializeRenderer(); }
 
   virtual void InitializeRenderer() {
+    host_impl_.SetVisible(true);
     host_impl_.InitializeRenderer(output_surface_.get());
   }
 
@@ -147,7 +149,13 @@ class PictureLayerImplTest : public testing::Test {
                                invalidation);
   }
 
+  void RebuildPropertyTreesOnPendingTree() {
+    host_impl_.pending_tree()->property_trees()->needs_rebuild = true;
+    host_impl_.pending_tree()->BuildPropertyTreesForTesting();
+  }
+
   void ActivateTree() {
+    RebuildPropertyTreesOnPendingTree();
     host_impl_.ActivateSyncTree();
     CHECK(!host_impl_.pending_tree());
     CHECK(host_impl_.recycle_tree());
@@ -172,16 +180,16 @@ class PictureLayerImplTest : public testing::Test {
                                 tile_size, invalidation);
   }
 
-  void SetupTrees(scoped_refptr<RasterSource> pending_raster_source,
-                  scoped_refptr<RasterSource> active_raster_source) {
+  void SetupTrees(scoped_refptr<DisplayListRasterSource> pending_raster_source,
+                  scoped_refptr<DisplayListRasterSource> active_raster_source) {
     SetupPendingTree(active_raster_source);
     ActivateTree();
     SetupPendingTreeInternal(pending_raster_source, gfx::Size(), Region());
   }
 
   void SetupTreesWithInvalidation(
-      scoped_refptr<RasterSource> pending_raster_source,
-      scoped_refptr<RasterSource> active_raster_source,
+      scoped_refptr<DisplayListRasterSource> pending_raster_source,
+      scoped_refptr<DisplayListRasterSource> active_raster_source,
       const Region& pending_invalidation) {
     SetupPendingTreeInternal(active_raster_source, gfx::Size(), Region());
     ActivateTree();
@@ -190,8 +198,8 @@ class PictureLayerImplTest : public testing::Test {
   }
 
   void SetupTreesWithFixedTileSize(
-      scoped_refptr<RasterSource> pending_raster_source,
-      scoped_refptr<RasterSource> active_raster_source,
+      scoped_refptr<DisplayListRasterSource> pending_raster_source,
+      scoped_refptr<DisplayListRasterSource> active_raster_source,
       const gfx::Size& tile_size,
       const Region& pending_invalidation) {
     SetupPendingTreeInternal(active_raster_source, tile_size, Region());
@@ -200,26 +208,27 @@ class PictureLayerImplTest : public testing::Test {
                              pending_invalidation);
   }
 
-  void SetupPendingTree(scoped_refptr<RasterSource> raster_source) {
+  void SetupPendingTree(scoped_refptr<DisplayListRasterSource> raster_source) {
     SetupPendingTreeInternal(raster_source, gfx::Size(), Region());
   }
 
   void SetupPendingTreeWithInvalidation(
-      scoped_refptr<RasterSource> raster_source,
+      scoped_refptr<DisplayListRasterSource> raster_source,
       const Region& invalidation) {
     SetupPendingTreeInternal(raster_source, gfx::Size(), invalidation);
   }
 
   void SetupPendingTreeWithFixedTileSize(
-      scoped_refptr<RasterSource> raster_source,
+      scoped_refptr<DisplayListRasterSource> raster_source,
       const gfx::Size& tile_size,
       const Region& invalidation) {
     SetupPendingTreeInternal(raster_source, tile_size, invalidation);
   }
 
-  void SetupPendingTreeInternal(scoped_refptr<RasterSource> raster_source,
-                                const gfx::Size& tile_size,
-                                const Region& invalidation) {
+  void SetupPendingTreeInternal(
+      scoped_refptr<DisplayListRasterSource> raster_source,
+      const gfx::Size& tile_size,
+      const Region& invalidation) {
     host_impl_.CreatePendingTree();
     host_impl_.pending_tree()->PushPageScaleFromMainThread(1.f, 0.00001f,
                                                            100000.f);
@@ -230,7 +239,7 @@ class PictureLayerImplTest : public testing::Test {
     // Steal from the recycled tree if possible.
     scoped_ptr<LayerImpl> pending_root = pending_tree->DetachLayerTree();
     scoped_ptr<FakePictureLayerImpl> pending_layer;
-    DCHECK_IMPLIES(pending_root, pending_root->id() == root_id_);
+    DCHECK(!pending_root || pending_root->id() == root_id_);
     if (!pending_root) {
       pending_root = LayerImpl::Create(pending_tree, root_id_);
       pending_layer = FakePictureLayerImpl::Create(pending_tree, id_);
@@ -256,6 +265,7 @@ class PictureLayerImplTest : public testing::Test {
 
     // Add tilings/tiles for the layer.
     bool update_lcd_text = false;
+    RebuildPropertyTreesOnPendingTree();
     host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
   }
 
@@ -285,7 +295,7 @@ class PictureLayerImplTest : public testing::Test {
   }
   static void VerifyAllPrioritizedTilesExistAndHaveRasterSource(
       const PictureLayerTiling* tiling,
-      RasterSource* raster_source) {
+      DisplayListRasterSource* raster_source) {
     auto prioritized_tiles =
         tiling->UpdateAndGetAllPrioritizedTilesForTesting();
     for (PictureLayerTiling::CoverageIterator iter(
@@ -369,7 +379,7 @@ class PictureLayerImplTest : public testing::Test {
  protected:
   void TestQuadsForSolidColor(bool test_for_solid);
 
-  FakeImplProxy proxy_;
+  FakeImplTaskRunnerProvider task_runner_provider_;
   TestSharedBitmapManager shared_bitmap_manager_;
   TestTaskGraphRunner task_graph_runner_;
   scoped_ptr<OutputSurface> output_surface_;
@@ -560,15 +570,13 @@ TEST_F(PictureLayerImplTest, InvalidViewportForPrioritizingTiles) {
   // software draw.
   bool resourceless_software_draw = false;
   gfx::Rect viewport = gfx::Rect(layer_bounds);
-  gfx::Transform transform;
-  host_impl_.SetExternalDrawConstraints(transform,
-                                        viewport,
-                                        viewport,
-                                        viewport,
-                                        transform,
+  gfx::Transform draw_transform;
+  gfx::Transform tile_priority_transform;
+  host_impl_.SetExternalDrawConstraints(draw_transform, viewport, viewport,
+                                        viewport, tile_priority_transform,
                                         resourceless_software_draw);
   active_layer_->draw_properties().visible_layer_rect = viewport;
-  active_layer_->draw_properties().screen_space_transform = transform;
+  active_layer_->draw_properties().screen_space_transform = draw_transform;
   active_layer_->UpdateTiles(resourceless_software_draw);
 
   gfx::Rect visible_rect_for_tile_priority =
@@ -582,38 +590,57 @@ TEST_F(PictureLayerImplTest, InvalidViewportForPrioritizingTiles) {
   host_impl_.AdvanceToNextFrame(base::TimeDelta::FromMilliseconds(200));
   resourceless_software_draw = true;
   viewport = gfx::ScaleToEnclosingRect(viewport, 2);
-  transform.Translate(1.f, 1.f);
+  tile_priority_transform.Translate(1.f, 0.f);
+  draw_transform.Translate(0.f, 1.f);
   active_layer_->draw_properties().visible_layer_rect = viewport;
-  active_layer_->draw_properties().screen_space_transform = transform;
-  host_impl_.SetExternalDrawConstraints(transform,
-                                        viewport,
-                                        viewport,
-                                        viewport,
-                                        transform,
+  active_layer_->draw_properties().screen_space_transform = draw_transform;
+  host_impl_.SetExternalDrawConstraints(draw_transform, viewport, viewport,
+                                        viewport, tile_priority_transform,
                                         resourceless_software_draw);
   active_layer_->UpdateTiles(resourceless_software_draw);
 
-  // Transform for tile priority is updated.
-  EXPECT_TRANSFORMATION_MATRIX_EQ(transform,
-                                  active_layer_->screen_space_transform());
+  // Transform for tile priority is not updated.
+  EXPECT_TRANSFORMATION_MATRIX_EQ(
+      screen_space_transform_for_tile_priority,
+      active_layer_->screen_space_transform_for_tile_priority());
   // Visible rect for tile priority retains old value.
   EXPECT_EQ(visible_rect_for_tile_priority,
             active_layer_->visible_rect_for_tile_priority());
+  ASSERT_GT(active_layer_->picture_layer_tiling_set()->num_tilings(), 0u);
+  EXPECT_EQ(active_layer_->viewport_rect_for_tile_priority_in_content_space(),
+            active_layer_->picture_layer_tiling_set()
+                ->tiling_at(0)
+                ->GetCurrentVisibleRectForTesting());
 
   // Keep expanded viewport but mark it valid. Should update tile viewport.
   host_impl_.AdvanceToNextFrame(base::TimeDelta::FromMilliseconds(200));
   resourceless_software_draw = false;
-  host_impl_.SetExternalDrawConstraints(transform,
-                                        viewport,
-                                        viewport,
-                                        viewport,
-                                        transform,
+  host_impl_.SetExternalDrawConstraints(draw_transform, viewport, viewport,
+                                        viewport, tile_priority_transform,
                                         resourceless_software_draw);
   active_layer_->UpdateTiles(resourceless_software_draw);
 
-  EXPECT_TRANSFORMATION_MATRIX_EQ(transform,
-                                  active_layer_->screen_space_transform());
+  EXPECT_TRANSFORMATION_MATRIX_EQ(
+      draw_transform,
+      active_layer_->screen_space_transform_for_tile_priority());
   EXPECT_EQ(viewport, active_layer_->visible_rect_for_tile_priority());
+
+  gfx::RectF visible_rect_in_content_space(viewport);
+  gfx::Transform inverse_draw_transform;
+  gfx::Transform inverse_tile_priority_transform;
+  EXPECT_TRUE(draw_transform.GetInverse(&inverse_draw_transform));
+  EXPECT_TRUE(
+      tile_priority_transform.GetInverse(&inverse_tile_priority_transform));
+  visible_rect_in_content_space = MathUtil::ProjectClippedRect(
+      inverse_tile_priority_transform, visible_rect_in_content_space);
+  visible_rect_in_content_space = MathUtil::ProjectClippedRect(
+      inverse_draw_transform, visible_rect_in_content_space);
+
+  ASSERT_GT(active_layer_->picture_layer_tiling_set()->num_tilings(), 0u);
+  EXPECT_EQ(gfx::ToEnclosingRect(visible_rect_in_content_space),
+            active_layer_->picture_layer_tiling_set()
+                ->tiling_at(0)
+                ->GetCurrentVisibleRectForTesting());
 }
 
 TEST_F(PictureLayerImplTest, ViewportRectForTilePriorityIsCached) {
@@ -1355,7 +1382,7 @@ TEST_F(PictureLayerImplTest, HugeMasksGetScaledDown) {
   pending_layer_->SetMaskLayer(mask_ptr.Pass());
   pending_layer_->SetHasRenderSurface(true);
 
-  host_impl_.pending_tree()->BuildPropertyTreesForTesting();
+  RebuildPropertyTreesOnPendingTree();
   host_impl_.AdvanceToNextFrame(base::TimeDelta::FromMilliseconds(1));
   bool update_lcd_text = false;
   host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
@@ -1484,7 +1511,7 @@ TEST_F(PictureLayerImplTest, ScaledMaskLayer) {
   pending_layer_->SetMaskLayer(mask_ptr.Pass());
   pending_layer_->SetHasRenderSurface(true);
 
-  host_impl_.pending_tree()->BuildPropertyTreesForTesting();
+  RebuildPropertyTreesOnPendingTree();
   host_impl_.AdvanceToNextFrame(base::TimeDelta::FromMilliseconds(1));
   bool update_lcd_text = false;
   host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
@@ -1570,6 +1597,7 @@ TEST_F(PictureLayerImplTest, ClampTilesToMaxTileSize) {
   host_impl_.DidLoseOutputSurface();
   scoped_ptr<OutputSurface> new_output_surface =
       FakeOutputSurface::Create3d(context.Pass());
+  host_impl_.SetVisible(true);
   host_impl_.InitializeRenderer(new_output_surface.get());
   output_surface_ = new_output_surface.Pass();
 
@@ -1609,6 +1637,7 @@ TEST_F(PictureLayerImplTest, ClampSingleTileToToMaxTileSize) {
   host_impl_.DidLoseOutputSurface();
   scoped_ptr<OutputSurface> new_output_surface =
       FakeOutputSurface::Create3d(context.Pass());
+  host_impl_.SetVisible(true);
   host_impl_.InitializeRenderer(new_output_surface.get());
   output_surface_ = new_output_surface.Pass();
 
@@ -3816,6 +3845,7 @@ class PictureLayerImplTestWithDelegatingRenderer : public PictureLayerImplTest {
   }
 
   void InitializeRenderer() override {
+    host_impl_.SetVisible(true);
     host_impl_.InitializeRenderer(output_surface_.get());
   }
 };
@@ -3930,7 +3960,7 @@ TEST_F(OcclusionTrackingPictureLayerImplTest,
   gfx::Size tile_size(102, 102);
   gfx::Size layer_bounds(1000, 1000);
   gfx::Size viewport_size(500, 500);
-  gfx::Point occluding_layer_position(310, 0);
+  gfx::PointF occluding_layer_position(310.f, 0.f);
 
   host_impl_.SetViewportSize(viewport_size);
 
@@ -3967,6 +3997,7 @@ TEST_F(OcclusionTrackingPictureLayerImplTest,
   layer1->SetContentsOpaque(true);
   layer1->SetPosition(occluding_layer_position);
 
+  RebuildPropertyTreesOnPendingTree();
   host_impl_.AdvanceToNextFrame(base::TimeDelta::FromMilliseconds(200));
   bool update_lcd_text = false;
   host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
@@ -3989,8 +4020,9 @@ TEST_F(OcclusionTrackingPictureLayerImplTest,
   EXPECT_EQ(20, unoccluded_tile_count);
 
   // Full occlusion.
-  layer1->SetPosition(gfx::Point(0, 0));
+  layer1->SetPosition(gfx::PointF());
 
+  RebuildPropertyTreesOnPendingTree();
   host_impl_.AdvanceToNextFrame(base::TimeDelta::FromMilliseconds(200));
   host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
 
@@ -4019,7 +4051,7 @@ TEST_F(OcclusionTrackingPictureLayerImplTest,
   gfx::Size tile_size(102, 102);
   gfx::Size layer_bounds(1000, 1000);
   gfx::Size viewport_size(500, 500);
-  gfx::Point occluding_layer_position(310, 0);
+  gfx::PointF occluding_layer_position(310.f, 0.f);
 
   host_impl_.SetViewportSize(viewport_size);
 
@@ -4059,6 +4091,7 @@ TEST_F(OcclusionTrackingPictureLayerImplTest,
   layer1->SetContentsOpaque(true);
   layer1->SetPosition(occluding_layer_position);
 
+  RebuildPropertyTreesOnPendingTree();
   host_impl_.AdvanceToNextFrame(base::TimeDelta::FromMilliseconds(200));
   bool update_lcd_text = false;
   host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
@@ -4094,8 +4127,9 @@ TEST_F(OcclusionTrackingPictureLayerImplTest,
   }
 
   // Full occlusion.
-  layer1->SetPosition(gfx::PointF(0, 0));
+  layer1->SetPosition(gfx::PointF());
 
+  RebuildPropertyTreesOnPendingTree();
   host_impl_.AdvanceToNextFrame(base::TimeDelta::FromMilliseconds(200));
   host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
 
@@ -4136,7 +4170,7 @@ TEST_F(OcclusionTrackingPictureLayerImplTest, OcclusionForDifferentScales) {
   gfx::Size tile_size(102, 102);
   gfx::Size layer_bounds(1000, 1000);
   gfx::Size viewport_size(500, 500);
-  gfx::Point occluding_layer_position(310, 0);
+  gfx::PointF occluding_layer_position(310.f, 0.f);
 
   scoped_refptr<FakeDisplayListRasterSource> pending_raster_source =
       FakeDisplayListRasterSource::CreateFilled(layer_bounds);
@@ -4161,6 +4195,7 @@ TEST_F(OcclusionTrackingPictureLayerImplTest, OcclusionForDifferentScales) {
   pending_layer_->AddTiling(1.0f)->set_resolution(HIGH_RESOLUTION);
   pending_layer_->AddTiling(2.0f)->set_resolution(HIGH_RESOLUTION);
 
+  RebuildPropertyTreesOnPendingTree();
   host_impl_.AdvanceToNextFrame(base::TimeDelta::FromMilliseconds(1));
   // UpdateDrawProperties with the occluding layer.
   bool update_lcd_text = false;
@@ -4208,7 +4243,7 @@ TEST_F(OcclusionTrackingPictureLayerImplTest, OcclusionForDifferentScales) {
 TEST_F(OcclusionTrackingPictureLayerImplTest, DifferentOcclusionOnTrees) {
   gfx::Size layer_bounds(1000, 1000);
   gfx::Size viewport_size(1000, 1000);
-  gfx::Point occluding_layer_position(310, 0);
+  gfx::PointF occluding_layer_position(310.f, 0.f);
   gfx::Rect invalidation_rect(230, 230, 102, 102);
 
   scoped_refptr<FakeDisplayListRasterSource> pending_raster_source =
@@ -4298,8 +4333,8 @@ TEST_F(OcclusionTrackingPictureLayerImplTest,
   gfx::Size tile_size(102, 102);
   gfx::Size layer_bounds(1000, 1000);
   gfx::Size viewport_size(1000, 1000);
-  gfx::Point pending_occluding_layer_position(310, 0);
-  gfx::Point active_occluding_layer_position(0, 310);
+  gfx::PointF pending_occluding_layer_position(310.f, 0.f);
+  gfx::PointF active_occluding_layer_position(0.f, 310.f);
   gfx::Rect invalidation_rect(230, 230, 152, 152);
 
   host_impl_.SetViewportSize(viewport_size);
@@ -4338,6 +4373,7 @@ TEST_F(OcclusionTrackingPictureLayerImplTest,
   EXPECT_EQ(1u, pending_layer_->num_tilings());
   EXPECT_EQ(2u, active_layer_->num_tilings());
 
+  RebuildPropertyTreesOnPendingTree();
   host_impl_.AdvanceToNextFrame(base::TimeDelta::FromMilliseconds(1));
   // UpdateDrawProperties with the occluding layer.
   bool update_lcd_text = false;
@@ -4481,7 +4517,8 @@ void PictureLayerImplTest::TestQuadsForSolidColor(bool test_for_solid) {
   scoped_ptr<FakeLayerTreeHost> host =
       FakeLayerTreeHost::Create(&host_client, &task_graph_runner);
   host->SetRootLayer(layer);
-  RecordingSource* recording_source = layer->GetRecordingSourceForTesting();
+  DisplayListRecordingSource* recording_source =
+      layer->GetDisplayListRecordingSourceForTesting();
 
   int frame_number = 0;
 
@@ -4490,9 +4527,9 @@ void PictureLayerImplTest::TestQuadsForSolidColor(bool test_for_solid) {
   Region invalidation(layer_rect);
   recording_source->UpdateAndExpandInvalidation(
       &client, &invalidation, layer_bounds, layer_rect, frame_number++,
-      RecordingSource::RECORD_NORMALLY);
+      DisplayListRecordingSource::RECORD_NORMALLY);
 
-  scoped_refptr<RasterSource> pending_raster_source =
+  scoped_refptr<DisplayListRasterSource> pending_raster_source =
       recording_source->CreateRasterSource(true);
 
   SetupPendingTreeWithFixedTileSize(pending_raster_source, tile_size, Region());
@@ -4544,7 +4581,8 @@ TEST_F(PictureLayerImplTest, NonSolidToSolidNoTilings) {
   scoped_ptr<FakeLayerTreeHost> host =
       FakeLayerTreeHost::Create(&host_client, &task_graph_runner);
   host->SetRootLayer(layer);
-  RecordingSource* recording_source = layer->GetRecordingSourceForTesting();
+  DisplayListRecordingSource* recording_source =
+      layer->GetDisplayListRecordingSourceForTesting();
 
   int frame_number = 0;
 
@@ -4553,9 +4591,9 @@ TEST_F(PictureLayerImplTest, NonSolidToSolidNoTilings) {
   Region invalidation1(layer_rect);
   recording_source->UpdateAndExpandInvalidation(
       &client, &invalidation1, layer_bounds, layer_rect, frame_number++,
-      RecordingSource::RECORD_NORMALLY);
+      DisplayListRecordingSource::RECORD_NORMALLY);
 
-  scoped_refptr<RasterSource> raster_source1 =
+  scoped_refptr<DisplayListRasterSource> raster_source1 =
       recording_source->CreateRasterSource(true);
 
   SetupPendingTree(raster_source1);
@@ -4572,9 +4610,9 @@ TEST_F(PictureLayerImplTest, NonSolidToSolidNoTilings) {
   Region invalidation2(layer_rect);
   recording_source->UpdateAndExpandInvalidation(
       &client, &invalidation2, layer_bounds, layer_rect, frame_number++,
-      RecordingSource::RECORD_NORMALLY);
+      DisplayListRecordingSource::RECORD_NORMALLY);
 
-  scoped_refptr<RasterSource> raster_source2 =
+  scoped_refptr<DisplayListRasterSource> raster_source2 =
       recording_source->CreateRasterSource(true);
 
   SetupPendingTree(raster_source2);
