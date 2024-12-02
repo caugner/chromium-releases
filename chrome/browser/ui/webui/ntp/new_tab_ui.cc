@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,15 @@
 
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 
+#include <set>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
+#include "base/lazy_instance.h"
 #include "base/memory/singleton.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/threading/thread.h"
@@ -20,8 +24,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
@@ -31,8 +35,8 @@
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_sync_handler.h"
 #include "chrome/browser/ui/webui/ntp/ntp_login_handler.h"
-#include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
+#include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 #include "chrome/browser/ui/webui/ntp/recently_closed_tabs_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -41,15 +45,19 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
+using content::UserMetricsAction;
+using content::WebContents;
+using content::WebUIController;
 
 namespace {
 
@@ -62,45 +70,51 @@ const int kTimeoutMs = 2000;
 const char kRTLHtmlTextDirection[] = "rtl";
 const char kLTRHtmlTextDirection[] = "ltr";
 
+static base::LazyInstance<std::set<const WebUIController*> > g_live_new_tabs;
+
+// The Web Store footer experiment FieldTrial name.
+const char kWebStoreLinkExperiment[] = "WebStoreLinkExperiment";
+
 }  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
 // NewTabUI
 
-NewTabUI::NewTabUI(TabContents* contents)
-    : ChromeWebUI(contents) {
+NewTabUI::NewTabUI(content::WebUI* web_ui)
+    : WebUIController(web_ui),
+      showing_sync_bubble_(false) {
+  g_live_new_tabs.Pointer()->insert(this);
   // Override some options on the Web UI.
-  hide_favicon_ = true;
+  web_ui->HideFavicon();
 
-  focus_location_bar_by_default_ = true;
-  should_hide_url_ = true;
-  overridden_title_ = l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE);
+  web_ui->FocusLocationBarByDefault();
+  web_ui->HideURL();
+  web_ui->OverrideTitle(l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE));
 
   // We count all link clicks as AUTO_BOOKMARK, so that site can be ranked more
   // highly. Note this means we're including clicks on not only most visited
   // thumbnails, but also clicks on recently bookmarked.
-  link_transition_type_ = content::PAGE_TRANSITION_AUTO_BOOKMARK;
+  web_ui->SetLinkTransitionType(content::PAGE_TRANSITION_AUTO_BOOKMARK);
 
   if (!GetProfile()->IsOffTheRecord()) {
-    AddMessageHandler((new browser_sync::ForeignSessionHandler())->
-        Attach(this));
-    AddMessageHandler((new MostVisitedHandler())->Attach(this));
-    AddMessageHandler((new RecentlyClosedTabsHandler())->Attach(this));
-    AddMessageHandler((new MetricsHandler())->Attach(this));
+    web_ui->AddMessageHandler(new browser_sync::ForeignSessionHandler());
+    web_ui->AddMessageHandler(new MostVisitedHandler());
+    web_ui->AddMessageHandler(new RecentlyClosedTabsHandler());
+    web_ui->AddMessageHandler(new MetricsHandler());
     if (GetProfile()->IsSyncAccessible())
-      AddMessageHandler((new NewTabPageSyncHandler())->Attach(this));
+      web_ui->AddMessageHandler(new NewTabPageSyncHandler());
     ExtensionService* service = GetProfile()->GetExtensionService();
     // We might not have an ExtensionService (on ChromeOS when not logged in
     // for example).
     if (service)
-      AddMessageHandler((new AppLauncherHandler(service))->Attach(this));
+      web_ui->AddMessageHandler(new AppLauncherHandler(service));
 
-    AddMessageHandler((new NewTabPageHandler())->Attach(this));
-    AddMessageHandler((new FaviconWebUIHandler())->Attach(this));
+    web_ui->AddMessageHandler(new NewTabPageHandler());
+    web_ui->AddMessageHandler(new FaviconWebUIHandler());
   }
 
   if (NTPLoginHandler::ShouldShow(GetProfile()))
-    AddMessageHandler((new NTPLoginHandler())->Attach(this));
+    web_ui->AddMessageHandler(new NTPLoginHandler());
 
   // Initializing the CSS and HTML can require some CPU, so do it after
   // we've hooked up the most visited handler.  This allows the DB query
@@ -108,8 +122,7 @@ NewTabUI::NewTabUI(TabContents* contents)
   InitializeCSSCaches();
   NewTabHTMLSource* html_source =
       new NewTabHTMLSource(GetProfile()->GetOriginalProfile());
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
-  profile->GetChromeURLDataManager()->AddDataSource(html_source);
+  GetProfile()->GetChromeURLDataManager()->AddDataSource(html_source);
 
   // Listen for theme installation.
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
@@ -118,6 +131,7 @@ NewTabUI::NewTabUI(TabContents* contents)
 }
 
 NewTabUI::~NewTabUI() {
+  g_live_new_tabs.Pointer()->erase(this);
 }
 
 // The timer callback.  If enough time has elapsed since the last paint
@@ -154,22 +168,20 @@ void NewTabUI::StartTimingPaint(RenderViewHost* render_view_host) {
 
 }
 
-void NewTabUI::RenderViewCreated(RenderViewHost* render_view_host) {
-  StartTimingPaint(render_view_host);
-  ChromeWebUI::RenderViewCreated(render_view_host);
-}
-
-void NewTabUI::RenderViewReused(RenderViewHost* render_view_host) {
-  StartTimingPaint(render_view_host);
-  ChromeWebUI::RenderViewReused(render_view_host);
-}
-
 bool NewTabUI::CanShowBookmarkBar() const {
   PrefService* prefs = GetProfile()->GetPrefs();
   bool disabled_by_policy =
       prefs->IsManagedPreference(prefs::kShowBookmarkBar) &&
       !prefs->GetBoolean(prefs::kShowBookmarkBar);
   return browser_defaults::bookmarks_enabled && !disabled_by_policy;
+}
+
+void NewTabUI::RenderViewCreated(RenderViewHost* render_view_host) {
+  StartTimingPaint(render_view_host);
+}
+
+void NewTabUI::RenderViewReused(RenderViewHost* render_view_host) {
+  StartTimingPaint(render_view_host);
 }
 
 void NewTabUI::Observe(int type,
@@ -183,7 +195,7 @@ void NewTabUI::Observe(int type,
           ThemeServiceFactory::GetForProfile(GetProfile())->HasCustomImage(
               IDR_THEME_NTP_ATTRIBUTION) ?
           "true" : "false"));
-      CallJavascriptFunction("themeChanged", args);
+      web_ui()->CallJavascriptFunction("themeChanged", args);
       break;
     }
     case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT: {
@@ -206,6 +218,33 @@ void NewTabUI::RegisterUserPrefs(PrefService* prefs) {
   NewTabPageHandler::RegisterUserPrefs(prefs);
   AppLauncherHandler::RegisterUserPrefs(prefs);
   MostVisitedHandler::RegisterUserPrefs(prefs);
+}
+
+// static
+void NewTabUI::SetupFieldTrials() {
+  scoped_refptr<base::FieldTrial> trial(
+      new base::FieldTrial("WebStoreLinkExperiment", 1000, "Disabled",
+                           2012, 6, 1));
+
+  // Try to give the user a consistent experience, if possible.
+  if (base::FieldTrialList::IsOneTimeRandomizationEnabled())
+    trial->UseOneTimeRandomization();
+
+  // 4% in Enabled group.
+  trial->AppendGroup("Enabled", 40);
+}
+
+// static
+bool NewTabUI::IsWebStoreExperimentEnabled() {
+  const CommandLine* cli = CommandLine::ForCurrentProcess();
+  if (cli->HasSwitch(switches::kEnableWebStoreLink))
+    return true;
+
+  if (!base::FieldTrialList::TrialExists(kWebStoreLinkExperiment))
+    return false;
+
+  return base::FieldTrialList::FindValue(kWebStoreLinkExperiment) !=
+             base::FieldTrial::kDefaultGroupNumber;
 }
 
 // static
@@ -242,6 +281,17 @@ void NewTabUI::SetURLTitleAndDirection(DictionaryValue* dictionary,
   }
   dictionary->SetString("title", title_to_set);
   dictionary->SetString("direction", direction);
+}
+
+// static
+NewTabUI* NewTabUI::FromWebUIController(content::WebUIController* ui) {
+  if (!g_live_new_tabs.Pointer()->count(ui))
+    return NULL;
+  return static_cast<NewTabUI*>(ui);
+}
+
+Profile* NewTabUI::GetProfile() const {
+  return Profile::FromWebUI(web_ui());
 }
 
 ///////////////////////////////////////////////////////////////////////////////

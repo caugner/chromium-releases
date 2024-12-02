@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,8 +27,8 @@
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"
+#include "chrome/app/chrome_main_delegate.h"
 #include "chrome/browser/automation/automation_provider_list.h"
-#include "chrome/browser/browser_process_impl.h"  // TODO(joi): Remove
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -49,12 +49,14 @@
 #include "chrome_frame/test/simulate_input.h"
 #include "chrome_frame/test/win_event_receiver.h"
 #include "chrome_frame/utils.h"
-#include "content/browser/plugin_service.h"
-#include "content/browser/notification_service_impl.h"
+#include "content/app/content_main.h"
+#include "content/public/app/startup_helper_win.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
-#include "content/test/test_browser_thread.h"  // TODO(joi): Remove
+#include "sandbox/src/sandbox_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
@@ -62,6 +64,13 @@
 using content::BrowserThread;
 
 namespace {
+
+// We must store this globally so that our main delegate can set it.
+static CFUrlRequestUnittestRunner* g_test_suite = NULL;
+
+// Copied here for access by CreateBrowserMainParts and InitGoogleTest.
+static int g_argc = 0;
+static char** g_argv = NULL;
 
 // A special command line switch to allow developers to manually launch the
 // browser and debug CF inside the browser.
@@ -113,6 +122,198 @@ bool SetFocusToAccessibleWindow(HWND hwnd) {
   return ret;
 }
 
+class FakeContentBrowserClient : public chrome::ChromeContentBrowserClient {
+ public:
+  virtual ~FakeContentBrowserClient() {}
+
+  virtual content::BrowserMainParts* CreateBrowserMainParts(
+      const content::MainFunctionParams& parameters) OVERRIDE;
+};
+
+base::LazyInstance<chrome::ChromeContentClient>
+    g_chrome_content_client = LAZY_INSTANCE_INITIALIZER;
+
+// Override the default ContentBrowserClient to let Chrome participate in
+// content logic.  Must be done before any tabs are created.
+base::LazyInstance<FakeContentBrowserClient>
+    g_browser_client = LAZY_INSTANCE_INITIALIZER;
+
+base::LazyInstance<chrome::ChromeContentRendererClient>
+    g_renderer_client = LAZY_INSTANCE_INITIALIZER;
+
+class FakeMainDelegate : public content::ContentMainDelegate {
+ public:
+  virtual ~FakeMainDelegate() {}
+
+  virtual bool BasicStartupComplete(int* exit_code) OVERRIDE {
+    return false;
+  }
+
+  virtual void PreSandboxStartup() OVERRIDE {
+    // Initialize the content client.
+    content::SetContentClient(&g_chrome_content_client.Get());
+
+    // Override the default ContentBrowserClient to let Chrome participate in
+    // content logic.  We use a subclass of Chrome's implementation,
+    // FakeContentBrowserClient, to override CreateBrowserMainParts.  Must
+    // be done before any tabs are created.
+    content::GetContentClient()->set_browser(&g_browser_client.Get());
+
+    content::GetContentClient()->set_renderer(&g_renderer_client.Get());
+  }
+
+  virtual void SandboxInitialized(const std::string& process_type) OVERRIDE {}
+
+  virtual int RunProcess(
+      const std::string& process_type,
+      const content::MainFunctionParams& main_function_params) OVERRIDE {
+    return -1;
+  }
+  virtual void ProcessExiting(const std::string& process_type) OVERRIDE {}
+};
+
+void FilterDisabledTests() {
+  if (::testing::FLAGS_gtest_filter.length() &&
+      ::testing::FLAGS_gtest_filter.Compare("*") != 0) {
+    // Don't override user specified filters.
+    return;
+  }
+
+  const char* disabled_tests[] = {
+    // Tests disabled since they're testing the same functionality used
+    // by the TestAutomationProvider.
+    "URLRequestTest.Intercept",
+    "URLRequestTest.InterceptNetworkError",
+    "URLRequestTest.InterceptRestartRequired",
+    "URLRequestTest.InterceptRespectsCancelMain",
+    "URLRequestTest.InterceptRespectsCancelRedirect",
+    "URLRequestTest.InterceptRespectsCancelFinal",
+    "URLRequestTest.InterceptRespectsCancelInRestart",
+    "URLRequestTest.InterceptRedirect",
+    "URLRequestTest.InterceptServerError",
+    "URLRequestTestFTP.*",
+
+    // Tests that are currently not working:
+
+    // Temporarily disabled because they needs user input (login dialog).
+    "URLRequestTestHTTP.BasicAuth",
+    "URLRequestTestHTTP.BasicAuthWithCookies",
+
+    // HTTPS tests temporarily disabled due to the certificate error dialog.
+    // TODO(tommi): The tests currently fail though, so need to fix.
+    "HTTPSRequestTest.HTTPSMismatchedTest",
+    "HTTPSRequestTest.HTTPSExpiredTest",
+    "HTTPSRequestTest.ClientAuthTest",
+
+    // Tests chrome's network stack's cache (might not apply to CF).
+    "URLRequestTestHTTP.VaryHeader",
+    "URLRequestTestHTTP.GetZippedTest",
+
+    // Tests that requests can be cancelled while blocking in
+    // OnBeforeSendHeaders state. But this state is not supported by CF.
+    "URLRequestTestHTTP.NetworkDelegateCancelWhileWaiting2",
+
+    // Tests that requests can be cancelled while blocking in
+    // OnHeadersRecevied state. At first glance, this state does not appear to
+    // be supported by CF.
+    "URLRequestTestHTTP.NetworkDelegateCancelWhileWaiting3",
+
+    // Tests that requests can be cancelled while blocking in OnAuthRequired
+    // state. At first glance, this state does not appear to be supported by CF.
+    // IE displays a credentials prompt during this test - I (erikwright)
+    // believe that, from Chrome's point of view this is not a state change. In
+    // any case, I also believe that we do not have support for handling the
+    // credentials dialog during tests.
+    "URLRequestTestHTTP.NetworkDelegateCancelWhileWaiting4",
+
+    // I suspect we can only get this one to work (if at all) on IE8 and
+    // later by using the new INTERNET_OPTION_SUPPRESS_BEHAVIOR flags
+    // See http://msdn.microsoft.com/en-us/library/aa385328(VS.85).aspx
+    "URLRequestTest.DoNotSaveCookies",
+    "URLRequestTest.DelayedCookieCallback",
+
+    // TODO(ananta): This test has been consistently failing. Disabling it for
+    // now.
+    "URLRequestTestHTTP.GetTest_NoCache",
+
+    // These tests have been disabled as the Chrome cookie policies don't make
+    // sense or have not been implemented for the host network stack.
+    "URLRequestTest.DoNotSaveCookies_ViaPolicy",
+    "URLRequestTest.DoNotSendCookies_ViaPolicy",
+    "URLRequestTest.DoNotSaveCookies_ViaPolicy_Async",
+    "URLRequestTest.CookiePolicy_ForceSession",
+    "URLRequestTest.DoNotSendCookies",
+    "URLRequestTest.DoNotSendCookies_ViaPolicy_Async",
+    "URLRequestTest.CancelTest_During_OnGetCookies",
+    "URLRequestTest.CancelTest_During_OnSetCookie",
+
+    // These tests are disabled as the rely on functionality provided by
+    // Chrome's HTTP stack like the ability to set the proxy for a URL, etc.
+    "URLRequestTestHTTP.ProxyTunnelRedirectTest",
+    "URLRequestTestHTTP.UnexpectedServerAuthTest",
+
+    // This test is disabled as it expects an empty UA to be echoed back from
+    // the server which is not the case in ChromeFrame.
+    "URLRequestTestHTTP.DefaultUserAgent",
+    // This test modifies the UploadData object after it has been marshaled to
+    // ChromeFrame. We don't support this.
+    "URLRequestTestHTTP.TestPostChunkedDataAfterStart",
+
+    // Do not work in CF, it may well be that IE is unconditionally
+    // adding Accept-Encoding header by default to outgoing requests.
+    "URLRequestTestHTTP.DefaultAcceptEncoding",
+    "URLRequestTestHTTP.OverrideAcceptEncoding",
+
+    // Not supported in ChromeFrame as we use IE's network stack.
+    "URLRequestTest.NetworkDelegateProxyError",
+
+    // URLRequestAutomationJob needs to support NeedsAuth.
+    // http://crbug.com/98446
+    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredSyncNoAction",
+    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredSyncSetAuth",
+    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredSyncCancel",
+    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredAsyncNoAction",
+    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredAsyncSetAuth",
+    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredAsyncCancel",
+
+    // Flaky on the tryservers, http://crbug.com/103097
+    "URLRequestTestHTTP.MultipleRedirectTest",
+    "URLRequestTestHTTP.NetworkDelegateRedirectRequest",
+
+    // These tests are unsupported in CF.
+    "HTTPSRequestTest.HTTPSPreloadedHSTSTest",
+    "HTTPSRequestTest.ResumeTest",
+    "HTTPSRequestTest.SSLSessionCacheShardTest",
+  };
+
+  const char* ie9_disabled_tests[] = {
+    // These always hang on Joi's box with IE9, http://crbug.com/105435.
+    // Several other tests, e.g. URLRequestTestHTTP.CancelTest2, 3 and
+    // 5, often hang but not always.
+    "URLRequestTestHTTP.NetworkDelegateRedirectRequestPost",
+    "URLRequestTestHTTP.GetTest",
+    "HTTPSRequestTest.HTTPSPreloadedHSTSTest",
+  };
+
+  std::string filter("-");  // All following filters will be negative.
+  for (int i = 0; i < arraysize(disabled_tests); ++i) {
+    if (i > 0)
+      filter += ":";
+    filter += disabled_tests[i];
+  }
+
+  if (chrome_frame_test::GetInstalledIEVersion() >= IE_9) {
+    for (int i = 0; i < arraysize(ie9_disabled_tests); ++i) {
+      filter += ":";
+      filter += ie9_disabled_tests[i];
+    }
+  }
+
+  ::testing::FLAGS_gtest_filter = filter;
+}
+
+}  // namespace
+
 // Same as BrowserProcessImpl, but uses custom profile manager.
 class FakeBrowserProcessImpl : public BrowserProcessImpl {
  public:
@@ -121,7 +322,9 @@ class FakeBrowserProcessImpl : public BrowserProcessImpl {
     profiles_dir_.CreateUniqueTempDir();
   }
 
-  virtual ProfileManager* profile_manager() {
+  virtual ~FakeBrowserProcessImpl() {}
+
+  virtual ProfileManager* profile_manager() OVERRIDE {
     if (!profile_manager_.get()) {
       profile_manager_.reset(
           new ProfileManagerWithoutInit(profiles_dir_.path()));
@@ -129,28 +332,18 @@ class FakeBrowserProcessImpl : public BrowserProcessImpl {
     return profile_manager_.get();
   }
 
-  virtual MetricsService* metrics_service() {
+  virtual MetricsService* metrics_service() OVERRIDE {
     return NULL;
+  }
+
+  void DestroyProfileManager() {
+    profile_manager_.reset();
   }
 
  private:
   ScopedTempDir profiles_dir_;
   scoped_ptr<ProfileManager> profile_manager_;
 };
-
-base::LazyInstance<chrome::ChromeContentClient>
-    g_chrome_content_client = LAZY_INSTANCE_INITIALIZER;
-
-// Override the default ContentBrowserClient to let Chrome participate in
-// content logic.  Must be done before any tabs are created.
-base::LazyInstance<chrome::ChromeContentBrowserClient>
-    g_browser_client = LAZY_INSTANCE_INITIALIZER;
-
-base::LazyInstance<chrome::ChromeContentRendererClient>
-    g_renderer_client = LAZY_INSTANCE_INITIALIZER;
-
-}  // namespace
-
 
 class SupplyProxyCredentials : public WindowObserver {
  public:
@@ -238,18 +431,7 @@ FakeExternalTab::~FakeExternalTab() {
 void FakeExternalTab::Initialize() {
   DCHECK(g_browser_process == NULL);
 
-  notificaton_service_.reset(new NotificationServiceImpl);
-
-  base::SystemMonitor system_monitor;
-
-  icu_util::Initialize();
   TestTimeouts::Initialize();
-
-  // Do not call chrome::RegisterPathProvider() since it is also called by our
-  // test runner, CFUrlRequestUnittestRunner, and calling it twice unfortunately
-  // causes a DCHECK().
-  content::RegisterPathProvider();
-  ui::RegisterPathProvider();
 
   // Load Chrome.dll as our resource dll.
   FilePath dll;
@@ -260,7 +442,7 @@ void FakeExternalTab::Initialize() {
   DCHECK(res_mod);
   _AtlBaseModule.SetResourceInstance(res_mod);
 
-  ResourceBundle::InitSharedInstance("en-US");
+  ResourceBundle::InitSharedInstanceWithLocale("en-US");
 
   CommandLine* cmd = CommandLine::ForCurrentProcess();
   cmd->AppendSwitch(switches::kDisableWebResources);
@@ -275,15 +457,6 @@ void FakeExternalTab::Initialize() {
 
   browser_process_->local_state()->RegisterBooleanPref(
       prefs::kMetricsReportingEnabled, false);
-
-  // Initialize the content client which that code uses to talk to Chrome.
-  content::SetContentClient(&g_chrome_content_client.Get());
-
-  // Override the default ContentBrowserClient to let Chrome participate in
-  // content logic.  Must be done before any tabs are created.
-  content::GetContentClient()->set_browser(&g_browser_client.Get());
-
-  content::GetContentClient()->set_renderer(&g_renderer_client.Get());
 }
 
 void FakeExternalTab::InitializePostThreadsCreated() {
@@ -300,46 +473,18 @@ void FakeExternalTab::Shutdown() {
   ResourceBundle::CleanupSharedInstance();
 }
 
-// TODO(joi): Remove!
-class ChromeFrameFriendOfBrowserProcessImpl {
- public:
-  static void CreateIOThreadState() {
-    reinterpret_cast<BrowserProcessImpl*>(
-        g_browser_process)->CreateIOThreadState();
-  }
-};
+FakeBrowserProcessImpl* FakeExternalTab::browser_process() const {
+  return browser_process_.get();
+}
 
 CFUrlRequestUnittestRunner::CFUrlRequestUnittestRunner(int argc, char** argv)
-    : NetTestSuite(argc, argv),
+    : NetTestSuite(argc, argv, false),
       chrome_frame_html_("/chrome_frame", kChromeFrameHtml),
       registrar_(chrome_frame_test::GetTestBedType()),
       test_result_(0) {
-  // Register the main thread by instantiating it, but don't call any methods.
-  main_thread_.reset(new content::TestBrowserThread(
-      BrowserThread::UI, MessageLoop::current()));
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  fake_chrome_.Initialize();
-
-  db_thread_.reset(new content::TestBrowserThread(BrowserThread::DB));
-  db_thread_->Start();
-
-  file_thread_.reset(new content::TestBrowserThread(BrowserThread::FILE));
-  file_thread_->Start();
-
-  ChromeFrameFriendOfBrowserProcessImpl::CreateIOThreadState();
-
-  io_thread_.reset(new content::TestBrowserThread(BrowserThread::IO));
-  io_thread_->StartIOThread();
-
-  fake_chrome_.InitializePostThreadsCreated();
-
-  pss_subclass_.reset(new ProcessSingletonSubclass(this));
-  EXPECT_TRUE(pss_subclass_->Subclass(fake_chrome_.user_data()));
-  StartChromeFrameInHostBrowser();
 }
 
 CFUrlRequestUnittestRunner::~CFUrlRequestUnittestRunner() {
-  fake_chrome_.Shutdown();
 }
 
 void CFUrlRequestUnittestRunner::StartChromeFrameInHostBrowser() {
@@ -382,14 +527,13 @@ void CFUrlRequestUnittestRunner::Initialize() {
   // directly because it will attempt to initialize some things such as
   // ICU that have already been initialized for this process.
   CFUrlRequestUnittestRunner::InitializeLogging();
-  base::Time::EnableHighResolutionTimer(true);
 
   SuppressErrorDialogs();
   base::debug::SetSuppressDebugUI(true);
   logging::SetLogAssertHandler(UnitTestAssertHandler);
 
   // Next, do some initialization for NetTestSuite.
-  NetTestSuite::InitializeTestThread();
+  NetTestSuite::InitializeTestThreadNoNetworkChangeNotifier();
 }
 
 void CFUrlRequestUnittestRunner::Shutdown() {
@@ -401,7 +545,7 @@ void CFUrlRequestUnittestRunner::Shutdown() {
 void CFUrlRequestUnittestRunner::OnConnectAutomationProviderToChannel(
     const std::string& channel_id) {
   Profile* profile = g_browser_process->profile_manager()->
-      GetDefaultProfile(fake_chrome_.user_data());
+      GetDefaultProfile(fake_chrome_->user_data());
 
   AutomationProviderList* list = g_browser_process->GetAutomationProviderList();
   DCHECK(list);
@@ -412,12 +556,6 @@ void CFUrlRequestUnittestRunner::OnConnectAutomationProviderToChannel(
 void CFUrlRequestUnittestRunner::OnInitialTabLoaded() {
   test_http_server_.reset();
   StartTests();
-}
-
-void CFUrlRequestUnittestRunner::RunMainUIThread() {
-  DCHECK(MessageLoop::current());
-  DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
-  MessageLoop::current()->Run();
 }
 
 void CFUrlRequestUnittestRunner::StartTests() {
@@ -433,13 +571,12 @@ void CFUrlRequestUnittestRunner::StartTests() {
 // static
 DWORD CFUrlRequestUnittestRunner::RunAllUnittests(void* param) {
   base::PlatformThread::SetName("CFUrlRequestUnittestRunner");
-  // Needed for some url request tests like the intercept job tests, etc.
-  NotificationServiceImpl service;
   CFUrlRequestUnittestRunner* me =
       reinterpret_cast<CFUrlRequestUnittestRunner*>(param);
   me->test_result_ = me->Run();
-  me->fake_chrome_.ui_loop()->PostTask(FROM_HERE,
-      base::Bind(TakeDownBrowser, me));
+  BrowserThread::PostTask(BrowserThread::UI,
+                          FROM_HERE,
+                          base::Bind(TakeDownBrowser, me));
   return 0;
 }
 
@@ -450,9 +587,10 @@ void CFUrlRequestUnittestRunner::TakeDownBrowser(
     MessageBoxA(NULL, "click ok to exit", "", MB_OK);
 
   me->ShutDownHostBrowser();
-  me->fake_chrome_.ui_loop()->PostDelayedTask(FROM_HERE,
-                                              new MessageLoop::QuitTask,
-                                              TestTimeouts::tiny_timeout_ms());
+  BrowserThread::PostDelayedTask(BrowserThread::UI,
+                                 FROM_HERE,
+                                 MessageLoop::QuitClosure(),
+                                 TestTimeouts::tiny_timeout_ms());
 }
 
 void CFUrlRequestUnittestRunner::InitializeLogging() {
@@ -470,122 +608,62 @@ void CFUrlRequestUnittestRunner::InitializeLogging() {
   logging::SetLogItems(true, true, true, true);
 }
 
-void FilterDisabledTests() {
-  if (::testing::FLAGS_gtest_filter.length() &&
-      ::testing::FLAGS_gtest_filter.Compare("*") != 0) {
-    // Don't override user specified filters.
-    return;
-  }
-
-  const char* disabled_tests[] = {
-    // Tests disabled since they're testing the same functionality used
-    // by the TestAutomationProvider.
-    "URLRequestTest.Intercept",
-    "URLRequestTest.InterceptNetworkError",
-    "URLRequestTest.InterceptRestartRequired",
-    "URLRequestTest.InterceptRespectsCancelMain",
-    "URLRequestTest.InterceptRespectsCancelRedirect",
-    "URLRequestTest.InterceptRespectsCancelFinal",
-    "URLRequestTest.InterceptRespectsCancelInRestart",
-    "URLRequestTest.InterceptRedirect",
-    "URLRequestTest.InterceptServerError",
-    "URLRequestTestFTP.*",
-
-    // Tests that are currently not working:
-
-    // Temporarily disabled because they needs user input (login dialog).
-    "URLRequestTestHTTP.BasicAuth",
-    "URLRequestTestHTTP.BasicAuthWithCookies",
-
-    // HTTPS tests temporarily disabled due to the certificate error dialog.
-    // TODO(tommi): The tests currently fail though, so need to fix.
-    "HTTPSRequestTest.HTTPSMismatchedTest",
-    "HTTPSRequestTest.HTTPSExpiredTest",
-    "HTTPSRequestTest.ClientAuthTest",
-
-    // Tests chrome's network stack's cache (might not apply to CF).
-    "URLRequestTestHTTP.VaryHeader",
-    "URLRequestTestHTTP.GetZippedTest",
-
-    // I suspect we can only get this one to work (if at all) on IE8 and
-    // later by using the new INTERNET_OPTION_SUPPRESS_BEHAVIOR flags
-    // See http://msdn.microsoft.com/en-us/library/aa385328(VS.85).aspx
-    "URLRequestTest.DoNotSaveCookies",
-    "URLRequestTest.DelayedCookieCallback",
-
-    // TODO(ananta): This test has been consistently failing. Disabling it for
-    // now.
-    "URLRequestTestHTTP.GetTest_NoCache",
-
-    // These tests have been disabled as the Chrome cookie policies don't make
-    // sense or have not been implemented for the host network stack.
-    "URLRequestTest.DoNotSaveCookies_ViaPolicy",
-    "URLRequestTest.DoNotSendCookies_ViaPolicy",
-    "URLRequestTest.DoNotSaveCookies_ViaPolicy_Async",
-    "URLRequestTest.CookiePolicy_ForceSession",
-    "URLRequestTest.DoNotSendCookies",
-    "URLRequestTest.DoNotSendCookies_ViaPolicy_Async",
-    "URLRequestTest.CancelTest_During_OnGetCookies",
-    "URLRequestTest.CancelTest_During_OnSetCookie",
-
-    // These tests are disabled as the rely on functionality provided by
-    // Chrome's HTTP stack like the ability to set the proxy for a URL, etc.
-    "URLRequestTestHTTP.ProxyTunnelRedirectTest",
-    "URLRequestTestHTTP.UnexpectedServerAuthTest",
-
-    // This test is disabled as it expects an empty UA to be echoed back from
-    // the server which is not the case in ChromeFrame.
-    "URLRequestTestHTTP.DefaultUserAgent",
-    // This test modifies the UploadData object after it has been marshaled to
-    // ChromeFrame. We don't support this.
-    "URLRequestTestHTTP.TestPostChunkedDataAfterStart",
-
-    // Do not work in CF, it may well be that IE is unconditionally
-    // adding Accept-Encoding header by default to outgoing requests.
-    "URLRequestTestHTTP.DefaultAcceptEncoding",
-    "URLRequestTestHTTP.OverrideAcceptEncoding",
-
-    // Not supported in ChromeFrame as we use IE's network stack.
-    "URLRequestTest.NetworkDelegateProxyError",
-
-    // URLRequestAutomationJob needs to support NeedsAuth.
-    // http://crbug.com/98446
-    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredSyncNoAction",
-    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredSyncSetAuth",
-    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredSyncCancel",
-    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredAsyncNoAction",
-    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredAsyncSetAuth",
-    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredAsyncCancel",
-
-    // Flaky on the tryservers, http://crbug.com/103097
-    "URLRequestTestHTTP.MultipleRedirectTest",
-    "URLRequestTestHTTP.NetworkDelegateRedirectRequest",
-  };
-
-  std::string filter("-");  // All following filters will be negative.
-  for (int i = 0; i < arraysize(disabled_tests); ++i) {
-    if (i > 0)
-      filter += ":";
-    filter += disabled_tests[i];
-  }
-
-  ::testing::FLAGS_gtest_filter = filter;
+void CFUrlRequestUnittestRunner::PreEarlyInitialization() {
+  testing::InitGoogleTest(&g_argc, g_argv);
+  FilterDisabledTests();
 }
 
-// We need a module since some of the accessibility code that gets pulled
-// in here uses ATL.
-class ObligatoryModule: public CAtlExeModuleT<ObligatoryModule> {
- public:
-  static HRESULT InitializeCom() {
-    return OleInitialize(NULL);
-  }
+int CFUrlRequestUnittestRunner::PreCreateThreads() {
+  fake_chrome_.reset(new FakeExternalTab());
+  fake_chrome_->Initialize();
+  fake_chrome_->browser_process()->PreCreateThreads();
 
-  static void UninitializeCom() {
-    OleUninitialize();
-  }
-};
+  pss_subclass_.reset(new ProcessSingletonSubclass(this));
+  EXPECT_TRUE(pss_subclass_->Subclass(fake_chrome_->user_data()));
+  StartChromeFrameInHostBrowser();
+  return 0;
+}
 
-ObligatoryModule g_obligatory_atl_module;
+void CFUrlRequestUnittestRunner::PreMainMessageLoopRun() {
+  fake_chrome_->InitializePostThreadsCreated();
+}
+
+bool CFUrlRequestUnittestRunner::MainMessageLoopRun(int* result_code) {
+  DCHECK(MessageLoop::current());
+  DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
+
+  // We need to allow IO on the main thread for these tests.
+  base::ThreadRestrictions::SetIOAllowed(true);
+
+  return false;
+}
+
+void CFUrlRequestUnittestRunner::PostMainMessageLoopRun() {
+  fake_chrome_->browser_process()->StartTearDown();
+
+  // Must do this separately as the mock profile_manager_ is not the
+  // same member as BrowserProcessImpl::StartTearDown resets.
+  fake_chrome_->browser_process()->DestroyProfileManager();
+
+  if (crash_service_)
+    base::KillProcess(crash_service_, 0, false);
+
+  base::KillProcesses(chrome_frame_test::kIEImageName, 0, NULL);
+  base::KillProcesses(chrome_frame_test::kIEBrokerImageName, 0, NULL);
+}
+
+void CFUrlRequestUnittestRunner::PostDestroyThreads() {
+  fake_chrome_->browser_process()->PostDestroyThreads();
+  fake_chrome_->Shutdown();
+  fake_chrome_.reset();
+
+#ifndef NDEBUG
+  // Avoid CRT cleanup in debug test runs to ensure that webkit ASSERTs which
+  // check if globals are created and destroyed on the same thread don't fire.
+  // Webkit global objects are created on the inproc renderer thread.
+  ExitProcess(test_result());
+#endif
+}
 
 const char* IEVersionToString(IEVersion version) {
   switch (version) {
@@ -608,27 +686,53 @@ const char* IEVersionToString(IEVersion version) {
   }
 }
 
+content::BrowserMainParts* FakeContentBrowserClient::CreateBrowserMainParts(
+    const content::MainFunctionParams& parameters) {
+  // We never delete this, as the content module takes ownership.
+  //
+  // We must not construct this earlier, or we will have out-of-order
+  // AtExitManager creation/destruction.
+  g_test_suite = new CFUrlRequestUnittestRunner(g_argc, g_argv);
+  g_test_suite->set_crash_service(chrome_frame_test::StartCrashService());
+  return g_test_suite;
+}
+
+// We must provide a few functions content/ expects to link with.  They
+// are never called for this executable.
+int PluginMain(const content::MainFunctionParams& parameters) {
+  NOTREACHED();
+  return 0;
+}
+
+int PpapiBrokerMain(const content::MainFunctionParams& parameters) {
+  return PluginMain(parameters);
+}
+
+int PpapiPluginMain(const content::MainFunctionParams& parameters) {
+  return PluginMain(parameters);
+}
+
+int WorkerMain(const content::MainFunctionParams& parameters) {
+  return PluginMain(parameters);
+}
+
 int main(int argc, char** argv) {
-  // TODO(joi): Remove the "true" part here and fix the log statement below.
-  if (true || chrome_frame_test::GetInstalledIEVersion() >= IE_9) {
+  ScopedChromeFrameRegistrar::RegisterAndExitProcessIfDirected();
+  g_argc = argc;
+  g_argv = argv;
+
+  if (chrome_frame_test::GetInstalledIEVersion() >= IE_9) {
     // Adding this here as the command line and the logging stuff gets
     // initialized in the NetTestSuite constructor. Did not want to break that.
     base::AtExitManager at_exit_manager;
     CommandLine::Init(argc, argv);
     CFUrlRequestUnittestRunner::InitializeLogging();
-    LOG(INFO) << "Temporarily not running any ChromeFrame "
-              << "net tests (http://crbug.com/105435)";
+    LOG(INFO) << "Not running ChromeFrame net tests on IE9+";
     return 0;
   }
 
   google_breakpad::scoped_ptr<google_breakpad::ExceptionHandler> breakpad(
       InitializeCrashReporting(HEADLESS));
-
-  // TODO(tommi): Stuff be broke. Needs a fixin'.
-  // This is awkward: the TestSuite derived CFUrlRequestUnittestRunner contains
-  // the instance of the AtExitManager that RegisterPathProvider() and others
-  // below require. So we have to instantiate this first.
-  CFUrlRequestUnittestRunner test_suite(argc, argv);
 
   // Display the IE version we run with. This must be done after
   // CFUrlRequestUnittestRunner is constructed since that initializes logging.
@@ -636,26 +740,20 @@ int main(int argc, char** argv) {
   LOG(INFO) << "Running CF net tests with IE version: "
             << IEVersionToString(ie_version);
 
-  base::ProcessHandle crash_service = chrome_frame_test::StartCrashService();
-
-  WindowWatchdog watchdog;
   // See url_request_unittest.cc for these credentials.
   SupplyProxyCredentials credentials("user", "secret");
+  WindowWatchdog watchdog;
   watchdog.AddObserver(&credentials, "Windows Security", "");
-  testing::InitGoogleTest(&argc, argv);
-  FilterDisabledTests();
-  test_suite.RunMainUIThread();
 
-  if (crash_service)
-    base::KillProcess(crash_service, 0, false);
+  sandbox::SandboxInterfaceInfo sandbox_info = {0};
+  // This would normally be done, but is probably not needed for these tests.
+  // content::InitializeSandboxInfo(&sandbox_info);
+  FakeMainDelegate delegate;
+  content::ContentMain(
+      reinterpret_cast<HINSTANCE>(GetModuleHandle(NULL)),
+      &sandbox_info,
+      &delegate);
 
-  base::KillProcesses(chrome_frame_test::kIEImageName, 0, NULL);
-  base::KillProcesses(chrome_frame_test::kIEBrokerImageName, 0, NULL);
-  // Avoid CRT cleanup in debug test runs to ensure that webkit ASSERTs which
-  // check if globals are created and destroyed on the same thread don't fire.
-  // Webkit global objects are created on the inproc renderer thread.
-#if !defined(NDEBUG)
-  ExitProcess(test_suite.test_result());
-#endif  // NDEBUG
-  return test_suite.test_result();
+  // Note:  In debug builds, we ExitProcess during PostDestroyThreads.
+  return g_test_suite->test_result();
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,18 @@
 #define CHROME_BROWSER_TABS_TAB_STRIP_MODEL_DELEGATE_H_
 #pragma once
 
+#include <vector>
+
 #include "content/public/common/page_transition_types.h"
 
 class Browser;
 class DockInfo;
 class GURL;
 class Profile;
-class SiteInstance;
 class TabContents;
 class TabContentsWrapper;
 namespace content {
+class SiteInstance;
 struct Referrer;
 }
 namespace gfx {
@@ -70,7 +72,7 @@ class TabStripModelDelegate {
       Profile* profile,
       content::PageTransition transition,
       bool defer_load,
-      SiteInstance* instance) const = 0;
+      content::SiteInstance* instance) const = 0;
 
   // Returns whether some contents can be duplicated.
   virtual bool CanDuplicateContentsAt(int index) = 0;

@@ -18,6 +18,7 @@ extern const int kActionTimeoutMs;
 const PPB_Testing_Dev* GetTestingInterface();
 std::string ReportError(const char* method, int32_t error);
 void PlatformSleep(int duration_ms);
+bool GetLocalHostPort(PP_Instance instance, std::string* host, uint16_t* port);
 
 class TestCompletionCallback {
  public:
@@ -77,22 +78,6 @@ class TestCompletionCallback {
 #if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__) || \
     defined(__OpenBSD__) || defined(__sun) || defined(__native_client__)
 #define PPAPI_POSIX 1
-#endif
-
-// This is roughly copied from base/compiler_specific.h, and makes it possible
-// to pass 'this' in a constructor initializer list, when you really mean it.
-//
-// Example usage:
-// Foo::Foo(MyInstance* instance)
-//     : ALLOW_THIS_IN_INITIALIZER_LIST(callback_factory_(this)) {}
-#if defined(COMPILER_MSVC)
-#define PP_ALLOW_THIS_IN_INITIALIZER_LIST(code) \
-    __pragma(warning(push)) \
-    __pragma(warning(disable:4355)) \
-    code \
-    __pragma(warning(pop))
-#else
-#define PP_ALLOW_THIS_IN_INITIALIZER_LIST(code) code
 #endif
 
 #endif  // PPAPI_TESTS_TEST_UTILS_H_

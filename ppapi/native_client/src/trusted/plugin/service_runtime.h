@@ -1,6 +1,6 @@
 /* -*- c++ -*- */
 /*
- * Copyright (c) 2011 The Chromium Authors. All rights reserved.
+ * Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -19,7 +19,6 @@
 #include "native_client/src/shared/srpc/nacl_srpc.h"
 #include "native_client/src/trusted/reverse_service/reverse_service.h"
 #include "native_client/src/trusted/plugin/utility.h"
-#include "native_client/src/trusted/plugin/file_downloader.h"
 #include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
 #include "native_client/src/trusted/weak_ref/weak_ref.h"
 
@@ -34,6 +33,7 @@ namespace plugin {
 
 class BrowserInterface;
 class ErrorInfo;
+class Manifest;
 class Plugin;
 class SrpcClient;
 class ServiceRuntime;
@@ -47,9 +47,16 @@ struct LogToJavaScriptConsoleResource {
   std::string message;
 };
 
+struct PostMessageResource {
+ public:
+  explicit PostMessageResource(std::string msg)
+      : message(msg) {}
+  std::string message;
+};
+
 struct OpenManifestEntryResource {
  public:
-  OpenManifestEntryResource(std::string target_url,
+  OpenManifestEntryResource(const std::string& target_url,
                             int32_t* descp,
                             ErrorInfo* infop,
                             bool* portablep,
@@ -90,6 +97,7 @@ class PluginReverseInterface: public nacl::ReverseInterface {
  public:
   PluginReverseInterface(nacl::WeakRefAnchor* anchor,
                          Plugin* plugin,
+                         const Manifest* manifest,
                          ServiceRuntime* service_runtime,
                          pp::CompletionCallback init_done_cb,
                          pp::CompletionCallback crash_cb);
@@ -99,6 +107,8 @@ class PluginReverseInterface: public nacl::ReverseInterface {
   void ShutDown();
 
   virtual void Log(nacl::string message);
+
+  virtual void DoPostMessage(nacl::string message);
 
   virtual void StartupInitializationComplete();
 
@@ -116,6 +126,9 @@ class PluginReverseInterface: public nacl::ReverseInterface {
   virtual void Log_MainThreadContinuation(LogToJavaScriptConsoleResource* p,
                                           int32_t err);
 
+  virtual void PostMessage_MainThreadContinuation(PostMessageResource* p,
+                                                  int32_t err);
+
   virtual void OpenManifestEntry_MainThreadContinuation(
       OpenManifestEntryResource* p,
       int32_t err);
@@ -132,6 +145,7 @@ class PluginReverseInterface: public nacl::ReverseInterface {
   nacl::WeakRefAnchor* anchor_;  // holds a ref
   Plugin* plugin_;  // value may be copied, but should be used only in
                     // main thread in WeakRef-protected callbacks.
+  const Manifest* manifest_;
   ServiceRuntime* service_runtime_;
   NaClMutex mu_;
   NaClCondVar cv_;
@@ -147,6 +161,8 @@ class ServiceRuntime {
   // TODO(sehr): This class should also implement factory methods, using the
   // Start method below.
   ServiceRuntime(Plugin* plugin,
+                 const Manifest* manifest,
+                 bool should_report_uma,
                  pp::CompletionCallback init_done_cb,
                  pp::CompletionCallback crash_cb);
   // The destructor terminates the sel_ldr process.
@@ -182,6 +198,7 @@ class ServiceRuntime {
 
   NaClSrpcChannel command_channel_;
   Plugin* plugin_;
+  bool should_report_uma_;
   BrowserInterface* browser_interface_;
   nacl::ReverseService* reverse_service_;
   nacl::scoped_ptr<nacl::SelLdrLauncher> subprocess_;

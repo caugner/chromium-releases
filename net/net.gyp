@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -55,6 +55,8 @@
         'base/backoff_entry.h',
         'base/bandwidth_metrics.cc',
         'base/bandwidth_metrics.h',
+        'base/big_endian.cc',
+        'base/big_endian.h',
         'base/cache_type.h',
         'base/capturing_net_log.cc',
         'base/capturing_net_log.h',
@@ -95,8 +97,6 @@
         'base/dns_reloader.h',
         'base/dns_util.cc',
         'base/dns_util.h',
-        'base/dnsrr_resolver.cc',
-        'base/dnsrr_resolver.h',
         'base/dnssec_chain_verifier.cc',
         'base/dnssec_chain_verifier.h',
         'base/dnssec_keyset.cc',
@@ -107,8 +107,8 @@
         'base/ev_root_ca_metadata.cc',
         'base/ev_root_ca_metadata.h',
         'base/file_stream.h',
-        'base/file_stream_metrics.h',
         'base/file_stream_metrics.cc',
+        'base/file_stream_metrics.h',
         'base/file_stream_metrics_posix.cc',
         'base/file_stream_metrics_win.cc',
         'base/file_stream_posix.cc',
@@ -199,9 +199,13 @@
         'base/platform_mime_util_linux.cc',
         'base/platform_mime_util_mac.cc',
         'base/platform_mime_util_win.cc',
+        'base/prioritized_dispatcher.cc',
+        'base/prioritized_dispatcher.h',
+        'base/priority_queue.h',
         'base/rand_callback.h',
         'base/registry_controlled_domain.cc',
         'base/registry_controlled_domain.h',
+        'base/request_priority.h',
         'base/sdch_filter.cc',
         'base/sdch_filter.h',
         'base/sdch_manager.cc',
@@ -226,7 +230,6 @@
         'base/static_cookie_policy.cc',
         'base/static_cookie_policy.h',
         'base/sys_addrinfo.h',
-        'base/sys_byteorder.h',
         'base/test_data_stream.cc',
         'base/test_data_stream.h',
         'base/test_root_certs.cc',
@@ -248,6 +251,7 @@
         'base/x509_cert_types.cc',
         'base/x509_cert_types.h',
         'base/x509_cert_types_mac.cc',
+        'base/x509_cert_types_win.cc',
         'base/x509_certificate.cc',
         'base/x509_certificate.h',
         'base/x509_certificate_mac.cc',
@@ -335,6 +339,8 @@
         'dns/dns_query.h',
         'dns/dns_response.cc',
         'dns/dns_response.h',
+        'dns/dns_session.cc',
+        'dns/dns_session.h',
         'dns/dns_transaction.cc',
         'dns/dns_transaction.h',
         'dns/serial_worker.cc',
@@ -412,6 +418,8 @@
         'http/http_cache.h',
         'http/http_cache_transaction.cc',
         'http/http_cache_transaction.h',
+        'http/http_content_disposition.cc',
+        'http/http_content_disposition.h',
         'http/http_chunked_decoder.cc',
         'http/http_chunked_decoder.h',
         'http/http_mac_signature.cc',
@@ -430,6 +438,7 @@
         'http/http_pipelined_connection_impl.cc',
         'http/http_pipelined_connection_impl.h',
         'http/http_pipelined_host.h',
+        'http/http_pipelined_host_capability.h',
         'http/http_pipelined_host_impl.cc',
         'http/http_pipelined_host_impl.h',
         'http/http_pipelined_host_pool.cc',
@@ -496,8 +505,6 @@
         'proxy/dhcp_proxy_script_fetcher_win.h',
         'proxy/dhcpcsvc_init_win.cc',
         'proxy/dhcpcsvc_init_win.h',
-        'proxy/init_proxy_resolver.cc',
-        'proxy/init_proxy_resolver.h',
         'proxy/multi_threaded_proxy_resolver.cc',
         'proxy/multi_threaded_proxy_resolver.h',
         'proxy/network_delegate_error_observer.cc',
@@ -536,6 +543,8 @@
         'proxy/proxy_resolver_winhttp.cc',
         'proxy/proxy_resolver_winhttp.h',
         'proxy/proxy_retry_info.h',
+        'proxy/proxy_script_decider.cc',
+        'proxy/proxy_script_decider.h',
         'proxy/proxy_script_fetcher.h',
         'proxy/proxy_script_fetcher_impl.cc',
         'proxy/proxy_script_fetcher_impl.h',
@@ -561,8 +570,6 @@
         'socket/client_socket_pool_manager.h',
         'socket/client_socket_pool_manager_impl.cc',
         'socket/client_socket_pool_manager_impl.h',
-        'socket/dns_cert_provenance_checker.cc',
-        'socket/dns_cert_provenance_checker.h',
         'socket/nss_ssl_util.cc',
         'socket/nss_ssl_util.h',
         'socket/server_socket.h',
@@ -619,6 +626,8 @@
         'socket_stream/socket_stream_job_manager.h',
         'socket_stream/socket_stream_metrics.cc',
         'socket_stream/socket_stream_metrics.h',
+        'spdy/buffered_spdy_framer.cc',
+        'spdy/buffered_spdy_framer.h',
         'spdy/spdy_bitmasks.h',
         'spdy/spdy_frame_builder.cc',
         'spdy/spdy_frame_builder.h',
@@ -763,6 +772,11 @@
             'USE_KERBEROS',
           ],
           'conditions': [
+            ['OS=="openbsd"', {
+              'include_dirs': [
+                '/usr/include/kerberosV'
+              ],
+            }],
             ['linux_link_kerberos==1', {
               'link_settings': {
                 'ldflags': [
@@ -798,8 +812,6 @@
               'base/x509_util_nss.h',
               'ocsp/nss_ocsp.cc',
               'ocsp/nss_ocsp.h',
-              'socket/dns_cert_provenance_check.cc',
-              'socket/dns_cert_provenance_check.h',
               'socket/nss_ssl_util.cc',
               'socket/nss_ssl_util.h',
               'socket/ssl_client_socket_nss.cc',
@@ -907,7 +919,7 @@
             'dependencies': [
               '../third_party/nss/nss.gyp:nspr',
               '../third_party/nss/nss.gyp:nss',
-              'third_party/nss/ssl.gyp:ssl',
+              'third_party/nss/ssl.gyp:libssl',
               'tld_cleanup',
             ],
           }, { # else: OS != "win"
@@ -925,7 +937,7 @@
             'dependencies': [
               '../third_party/nss/nss.gyp:nspr',
               '../third_party/nss/nss.gyp:nss',
-              'third_party/nss/ssl.gyp:ssl',
+              'third_party/nss/ssl.gyp:libssl',
             ],
             'link_settings': {
               'libraries': [
@@ -991,6 +1003,7 @@
       'sources': [
         'base/address_list_unittest.cc',
         'base/backoff_entry_unittest.cc',
+        'base/big_endian_unittest.cc',
         'base/cert_database_nss_unittest.cc',
         'base/cert_verifier_unittest.cc',
         'base/cookie_monster_unittest.cc',
@@ -1000,7 +1013,6 @@
         'base/directory_lister_unittest.cc',
         'base/dnssec_unittest.cc',
         'base/dns_util_unittest.cc',
-        'base/dnsrr_resolver_unittest.cc',
         'base/escape_unittest.cc',
         'base/file_stream_unittest.cc',
         'base/filter_unittest.cc',
@@ -1025,6 +1037,8 @@
         'base/network_change_notifier_win_unittest.cc',
         'base/origin_bound_cert_service_unittest.cc',
         'base/pem_tokenizer_unittest.cc',
+        'base/prioritized_dispatcher_unittest.cc',
+        'base/priority_queue_unittest.cc',
         'base/registry_controlled_domain_unittest.cc',
         'base/run_all_unittests.cc',
         'base/sdch_filter_unittest.cc',
@@ -1034,12 +1048,13 @@
         'base/ssl_config_service_unittest.cc',
         'base/ssl_false_start_blacklist_unittest.cc',
         'base/static_cookie_policy_unittest.cc',
-        'base/transport_security_state_unittest.cc',
         'base/test_certificate_data.h',
         'base/test_completion_callback_unittest.cc',
+        'base/transport_security_state_unittest.cc',
+        'base/upload_data_unittest.cc',
         'base/upload_data_stream_unittest.cc',
         'base/x509_certificate_unittest.cc',
-        'base/x509_cert_types_mac_unittest.cc',
+        'base/x509_cert_types_unittest.cc',
         'base/x509_util_nss_unittest.cc',
         'base/x509_util_openssl_unittest.cc',
         'disk_cache/addr_unittest.cc',
@@ -1066,6 +1081,7 @@
         'ftp/ftp_directory_listing_parser_netware_unittest.cc',
         'ftp/ftp_directory_listing_parser_os2_unittest.cc',
         'ftp/ftp_directory_listing_parser_unittest.cc',
+        'ftp/ftp_directory_listing_parser_unittest.h',
         'ftp/ftp_directory_listing_parser_vms_unittest.cc',
         'ftp/ftp_directory_listing_parser_windows_unittest.cc',
         'ftp/ftp_network_transaction_unittest.cc',
@@ -1088,6 +1104,7 @@
         'http/http_byte_range_unittest.cc',
         'http/http_cache_unittest.cc',
         'http/http_chunked_decoder_unittest.cc',
+        'http/http_content_disposition_unittest.cc',
         'http/http_mac_signature_unittest.cc',
         'http/http_network_layer_unittest.cc',
         'http/http_network_transaction_unittest.cc',
@@ -1101,6 +1118,7 @@
         'http/http_response_headers_unittest.cc',
         'http/http_server_properties_impl_unittest.cc',
         'http/http_stream_factory_impl_unittest.cc',
+        'http/http_stream_parser_unittest.cc',
         'http/http_transaction_unittest.cc',
         'http/http_transaction_unittest.h',
         'http/http_util_unittest.cc',
@@ -1117,7 +1135,6 @@
         'proxy/dhcp_proxy_script_adapter_fetcher_win_unittest.cc',
         'proxy/dhcp_proxy_script_fetcher_factory_unittest.cc',
         'proxy/dhcp_proxy_script_fetcher_win_unittest.cc',
-        'proxy/init_proxy_resolver_unittest.cc',
         'proxy/multi_threaded_proxy_resolver_unittest.cc',
         'proxy/network_delegate_error_observer_unittest.cc',
         'proxy/proxy_bypass_rules_unittest.cc',
@@ -1127,6 +1144,7 @@
         'proxy/proxy_list_unittest.cc',
         'proxy/proxy_resolver_js_bindings_unittest.cc',
         'proxy/proxy_resolver_v8_unittest.cc',
+        'proxy/proxy_script_decider_unittest.cc',
         'proxy/proxy_script_fetcher_impl_unittest.cc',
         'proxy/proxy_server_unittest.cc',
         'proxy/proxy_service_unittest.cc',
@@ -1138,7 +1156,6 @@
         'socket/socks5_client_socket_unittest.cc',
         'socket/socks_client_socket_pool_unittest.cc',
         'socket/socks_client_socket_unittest.cc',
-        'socket/ssl_client_socket_nss_unittest.cc',
         'socket/ssl_client_socket_pool_unittest.cc',
         'socket/ssl_client_socket_unittest.cc',
         'socket/ssl_server_socket_unittest.cc',
@@ -1149,6 +1166,7 @@
         'socket/web_socket_server_socket_unittest.cc',
         'socket_stream/socket_stream_metrics_unittest.cc',
         'socket_stream/socket_stream_unittest.cc',
+        'spdy/buffered_spdy_framer_unittest.cc',
         'spdy/spdy_framer_test.cc',
         'spdy/spdy_http_stream_unittest.cc',
         'spdy/spdy_network_transaction_unittest.cc',
@@ -1234,7 +1252,6 @@
               'base/x509_util_nss_unittest.cc',
               'base/cert_database_nss_unittest.cc',
               'base/dnssec_unittest.cc',
-              'socket/ssl_client_socket_nss_unittest.cc',
             ],
           }, {  # else !use_openssl: remove the unneeded files
             'sources!': [
@@ -1253,7 +1270,7 @@
               '../third_party/icu/icu.gyp:icudata',
               '../third_party/nss/nss.gyp:nspr',
               '../third_party/nss/nss.gyp:nss',
-              'third_party/nss/ssl.gyp:ssl',
+              'third_party/nss/ssl.gyp:libssl',
             ],
           },
         ],
@@ -1261,7 +1278,7 @@
             'dependencies': [
               '../third_party/nss/nss.gyp:nspr',
               '../third_party/nss/nss.gyp:nss',
-              'third_party/nss/ssl.gyp:ssl',
+              'third_party/nss/ssl.gyp:libssl',
             ],
           },
         ],
@@ -1281,6 +1298,11 @@
             ],
           },
         ],
+        [ 'OS != "win" and OS != "mac"', {
+          'sources!': [
+            'base/x509_cert_types_unittest.cc',
+          ],
+        }]
       ],
     },
     {
@@ -1389,7 +1411,6 @@
         'disk_cache/disk_cache_test_base.h',
         'disk_cache/disk_cache_test_util.cc',
         'disk_cache/disk_cache_test_util.h',
-        'dns/dns_test_util.cc',
         'dns/dns_test_util.h',
         'proxy/mock_proxy_resolver.cc',
         'proxy/mock_proxy_resolver.h',
@@ -1524,7 +1545,18 @@
       ],
       'sources': [
         'tools/dnssec_chain_verify/dnssec_chain_verify.cc',
-      ]
+      ],
+    },
+    {
+      'target_name': 'crl_set_dump',
+      'type': 'executable',
+      'dependencies': [
+        'net',
+        '../base/base.gyp:base',
+      ],
+      'sources': [
+        'tools/crl_set_dump/crl_set_dump.cc',
+      ],
     },
     {
       'target_name': 'ssl_false_start_blacklist_process',
@@ -1540,6 +1572,13 @@
       'sources': [
         'base/ssl_false_start_blacklist_process.cc',
         'base/ssl_false_start_blacklist.h',
+      ],
+      'conditions': [
+        ['OS == "android" and host_os == "linux"', {
+          'ldflags': [
+            '-ldl',
+          ],
+        }],
       ],
     },
   ],

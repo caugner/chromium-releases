@@ -11,7 +11,6 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/ui_test.h"
-#include "content/browser/download/save_package.h"
 #include "content/browser/net/url_request_mock_http_job.h"
 
 static const FilePath::CharType* kTestDir = FILE_PATH_LITERAL("encoding_tests");
@@ -152,7 +151,7 @@ TEST_F(BrowserEncodingTest, FLAKY_TestOverrideEncoding) {
   // name to save sub resources in it. Although this test file does not have
   // sub resources, but the directory name is still required.
   EXPECT_TRUE(tab_proxy->SavePage(full_file_name, temp_sub_resource_dir_,
-                                  SavePackage::SAVE_AS_COMPLETE_HTML));
+                                  content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML));
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
   EXPECT_TRUE(WaitForDownloadShelfVisible(browser.get()));
@@ -249,7 +248,7 @@ TEST_F(BrowserEncodingTest, MAYBE_TestEncodingAutoDetect) {
   // Set the default charset to one of encodings not supported by the current
   // auto-detector (Please refer to the above comments) to make sure we
   // incorrectly decode the page. Now we use ISO-8859-4.
-  ASSERT_TRUE(browser->SetStringPreference(prefs::kDefaultCharset,
+  ASSERT_TRUE(browser->SetStringPreference(prefs::kGlobalDefaultCharset,
                                            "ISO-8859-4"));
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
@@ -297,7 +296,7 @@ TEST_F(BrowserEncodingTest, MAYBE_TestEncodingAutoDetect) {
     expected_result_file_name = expected_result_file_name.AppendASCII(
         kTestDatas[i].expected_result);
     EXPECT_TRUE(tab->SavePage(full_saved_file_name, temp_sub_resource_dir_,
-                              SavePackage::SAVE_AS_COMPLETE_HTML));
+                              content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML));
     EXPECT_TRUE(WaitForDownloadShelfVisible(browser.get()));
     CheckFile(full_saved_file_name, expected_result_file_name, true);
   }

@@ -1,12 +1,17 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/http/http_pipelined_host_impl.h"
 
 #include "base/stl_util.h"
+#include "base/values.h"
 #include "net/http/http_pipelined_connection_impl.h"
 #include "net/http/http_pipelined_stream.h"
+
+using base::DictionaryValue;
+using base::ListValue;
+using base::Value;
 
 namespace net {
 
@@ -20,13 +25,16 @@ class HttpPipelinedConnectionImplFactory :
   HttpPipelinedConnection* CreateNewPipeline(
       ClientSocketHandle* connection,
       HttpPipelinedConnection::Delegate* delegate,
+      const HostPortPair& origin,
       const SSLConfig& used_ssl_config,
       const ProxyInfo& used_proxy_info,
       const BoundNetLog& net_log,
-      bool was_npn_negotiated) OVERRIDE {
-    return new HttpPipelinedConnectionImpl(connection, delegate,
+      bool was_npn_negotiated,
+      SSLClientSocket::NextProto protocol_negotiated) OVERRIDE {
+    return new HttpPipelinedConnectionImpl(connection, delegate, origin,
                                            used_ssl_config, used_proxy_info,
-                                           net_log, was_npn_negotiated);
+                                           net_log, was_npn_negotiated,
+                                           protocol_negotiated);
   }
 };
 
@@ -34,7 +42,7 @@ HttpPipelinedHostImpl::HttpPipelinedHostImpl(
     HttpPipelinedHost::Delegate* delegate,
     const HostPortPair& origin,
     HttpPipelinedConnection::Factory* factory,
-    Capability capability)
+    HttpPipelinedHostCapability capability)
     : delegate_(delegate),
       origin_(origin),
       factory_(factory),
@@ -53,13 +61,14 @@ HttpPipelinedStream* HttpPipelinedHostImpl::CreateStreamOnNewPipeline(
     const SSLConfig& used_ssl_config,
     const ProxyInfo& used_proxy_info,
     const BoundNetLog& net_log,
-    bool was_npn_negotiated) {
-  if (capability_ == INCAPABLE) {
+    bool was_npn_negotiated,
+    SSLClientSocket::NextProto protocol_negotiated) {
+  if (capability_ == PIPELINE_INCAPABLE) {
     return NULL;
   }
   HttpPipelinedConnection* pipeline = factory_->CreateNewPipeline(
-      connection, this, used_ssl_config, used_proxy_info, net_log,
-      was_npn_negotiated);
+      connection, this, origin_, used_ssl_config, used_proxy_info, net_log,
+      was_npn_negotiated, protocol_negotiated);
   PipelineInfo info;
   pipelines_.insert(std::make_pair(pipeline, info));
   return pipeline->CreateNewStream();
@@ -69,9 +78,7 @@ HttpPipelinedStream* HttpPipelinedHostImpl::CreateStreamOnExistingPipeline() {
   HttpPipelinedConnection* available_pipeline = NULL;
   for (PipelineInfoMap::iterator it = pipelines_.begin();
        it != pipelines_.end(); ++it) {
-    if (it->first->usable() &&
-        it->first->active() &&
-        it->first->depth() < GetPipelineCapacity() &&
+    if (CanPipelineAcceptRequests(it->first) &&
         (!available_pipeline ||
          it->first->depth() < available_pipeline->depth())) {
       available_pipeline = it->first;
@@ -86,9 +93,7 @@ HttpPipelinedStream* HttpPipelinedHostImpl::CreateStreamOnExistingPipeline() {
 bool HttpPipelinedHostImpl::IsExistingPipelineAvailable() const {
   for (PipelineInfoMap::const_iterator it = pipelines_.begin();
        it != pipelines_.end(); ++it) {
-    if (it->first->usable() &&
-        it->first->active() &&
-        it->first->depth() < GetPipelineCapacity()) {
+    if (CanPipelineAcceptRequests(it->first)) {
       return true;
     }
   }
@@ -112,9 +117,7 @@ void HttpPipelinedHostImpl::OnPipelineEmpty(HttpPipelinedConnection* pipeline) {
 void HttpPipelinedHostImpl::OnPipelineHasCapacity(
     HttpPipelinedConnection* pipeline) {
   CHECK(ContainsKey(pipelines_, pipeline));
-  if (pipeline->usable() &&
-      capability_ != INCAPABLE &&
-      pipeline->depth() < GetPipelineCapacity()) {
+  if (CanPipelineAcceptRequests(pipeline)) {
     delegate_->OnHostHasAdditionalCapacity(this);
   }
   if (!pipeline->depth()) {
@@ -130,24 +133,34 @@ void HttpPipelinedHostImpl::OnPipelineFeedback(
   switch (feedback) {
     case HttpPipelinedConnection::OK:
       ++pipelines_[pipeline].num_successes;
-      if (capability_ == UNKNOWN) {
-        capability_ = PROBABLY_CAPABLE;
-        for (PipelineInfoMap::iterator it = pipelines_.begin();
-             it != pipelines_.end(); ++it) {
-          OnPipelineHasCapacity(it->first);
-        }
-      } else if (capability_ == PROBABLY_CAPABLE &&
+      if (capability_ == PIPELINE_UNKNOWN) {
+        capability_ = PIPELINE_PROBABLY_CAPABLE;
+        NotifyAllPipelinesHaveCapacity();
+      } else if (capability_ == PIPELINE_PROBABLY_CAPABLE &&
                  pipelines_[pipeline].num_successes >=
                      kNumKnownSuccessesThreshold) {
-        capability_ = CAPABLE;
-        delegate_->OnHostDeterminedCapability(this, CAPABLE);
+        capability_ = PIPELINE_CAPABLE;
+        delegate_->OnHostDeterminedCapability(this, PIPELINE_CAPABLE);
       }
       break;
 
     case HttpPipelinedConnection::PIPELINE_SOCKET_ERROR:
+      // Socket errors on the initial request - when no other requests are
+      // pipelined - can't be due to pipelining.
+      if (pipelines_[pipeline].num_successes > 0 || pipeline->depth() > 1) {
+        // TODO(simonjam): This may be needlessly harsh. For example, pogo.com
+        // only returns a socket error once after the root document, but is
+        // otherwise able to pipeline just fine. Consider being more persistent
+        // and only give up on pipelining if we get a couple of failures.
+        capability_ = PIPELINE_INCAPABLE;
+        delegate_->OnHostDeterminedCapability(this, PIPELINE_INCAPABLE);
+      }
+      break;
+
     case HttpPipelinedConnection::OLD_HTTP_VERSION:
-      capability_ = INCAPABLE;
-      delegate_->OnHostDeterminedCapability(this, INCAPABLE);
+    case HttpPipelinedConnection::AUTHENTICATION_REQUIRED:
+      capability_ = PIPELINE_INCAPABLE;
+      delegate_->OnHostDeterminedCapability(this, PIPELINE_INCAPABLE);
       break;
 
     case HttpPipelinedConnection::MUST_CLOSE_CONNECTION:
@@ -158,15 +171,15 @@ void HttpPipelinedHostImpl::OnPipelineFeedback(
 int HttpPipelinedHostImpl::GetPipelineCapacity() const {
   int capacity = 0;
   switch (capability_) {
-    case CAPABLE:
-    case PROBABLY_CAPABLE:
+    case PIPELINE_CAPABLE:
+    case PIPELINE_PROBABLY_CAPABLE:
       capacity = max_pipeline_depth();
       break;
 
-    case INCAPABLE:
+    case PIPELINE_INCAPABLE:
       CHECK(false);
 
-    case UNKNOWN:
+    case PIPELINE_UNKNOWN:
       capacity = 1;
       break;
 
@@ -174,6 +187,42 @@ int HttpPipelinedHostImpl::GetPipelineCapacity() const {
       CHECK(false) << "Unkown pipeline capability: " << capability_;
   }
   return capacity;
+}
+
+bool HttpPipelinedHostImpl::CanPipelineAcceptRequests(
+    HttpPipelinedConnection* pipeline) const {
+  return capability_ != PIPELINE_INCAPABLE &&
+      pipeline->usable() &&
+      pipeline->active() &&
+      pipeline->depth() < GetPipelineCapacity();
+}
+
+void HttpPipelinedHostImpl::NotifyAllPipelinesHaveCapacity() {
+  // Calling OnPipelineHasCapacity() can have side effects that include
+  // deleting and removing entries from |pipelines_|.
+  PipelineInfoMap pipelines_to_notify = pipelines_;
+  for (PipelineInfoMap::iterator it = pipelines_to_notify.begin();
+       it != pipelines_to_notify.end(); ++it) {
+    if (pipelines_.find(it->first) != pipelines_.end()) {
+      OnPipelineHasCapacity(it->first);
+    }
+  }
+}
+
+Value* HttpPipelinedHostImpl::PipelineInfoToValue() const {
+  ListValue* list_value = new ListValue();
+  for (PipelineInfoMap::const_iterator it = pipelines_.begin();
+       it != pipelines_.end(); ++it) {
+    DictionaryValue* pipeline_dict = new DictionaryValue;
+    pipeline_dict->SetString("host", origin_.ToString());
+    pipeline_dict->SetInteger("depth", it->first->depth());
+    pipeline_dict->SetInteger("capacity", GetPipelineCapacity());
+    pipeline_dict->SetBoolean("usable", it->first->usable());
+    pipeline_dict->SetBoolean("active", it->first->active());
+    pipeline_dict->SetInteger("source_id", it->first->net_log().source().id);
+    list_value->Append(pipeline_dict);
+  }
+  return list_value;
 }
 
 HttpPipelinedHostImpl::PipelineInfo::PipelineInfo()

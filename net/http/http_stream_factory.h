@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,19 @@
 #include <string>
 #include <vector>
 
+#include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
 #include "net/base/completion_callback.h"
 #include "net/base/load_states.h"
 #include "net/base/net_export.h"
+#include "net/socket/ssl_client_socket.h"
 
 class GURL;
+
+namespace base {
+class Value;
+}
 
 namespace net {
 
@@ -139,6 +145,9 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
   // Returns true if TLS/NPN was negotiated for this stream.
   virtual bool was_npn_negotiated() const = 0;
 
+  // Protocol negotiated with the server.
+  virtual SSLClientSocket::NextProto protocol_negotiated() const = 0;
+
   // Returns true if this stream is being fetched over SPDY.
   virtual bool using_spdy() const = 0;
 };
@@ -168,11 +177,15 @@ class NET_EXPORT HttpStreamFactory {
   virtual void PreconnectStreams(int num_streams,
                                  const HttpRequestInfo& info,
                                  const SSLConfig& server_ssl_config,
-                                 const SSLConfig& proxy_ssl_config,
-                                 const BoundNetLog& net_log) = 0;
+                                 const SSLConfig& proxy_ssl_config) = 0;
 
   virtual void AddTLSIntolerantServer(const HostPortPair& server) = 0;
   virtual bool IsTLSIntolerantServer(const HostPortPair& server) const = 0;
+
+  // If pipelining is supported, creates a Value summary of the currently active
+  // pipelines. Caller assumes ownership of the returned value. Otherwise,
+  // returns an empty Value.
+  virtual base::Value* PipelineInfoToValue() const = 0;
 
   // Static settings
 
@@ -243,6 +256,16 @@ class NET_EXPORT HttpStreamFactory {
   }
   static bool http_pipelining_enabled() { return http_pipelining_enabled_; }
 
+  static void set_testing_fixed_http_port(int port) {
+    testing_fixed_http_port_ = port;
+  }
+  static uint16 testing_fixed_http_port() { return testing_fixed_http_port_; }
+
+  static void set_testing_fixed_https_port(int port) {
+    testing_fixed_https_port_ = port;
+  }
+  static uint16 testing_fixed_https_port() { return testing_fixed_https_port_; }
+
  protected:
   HttpStreamFactory();
 
@@ -258,6 +281,8 @@ class NET_EXPORT HttpStreamFactory {
   static std::list<HostPortPair>* forced_spdy_exclusions_;
   static bool ignore_certificate_errors_;
   static bool http_pipelining_enabled_;
+  static uint16 testing_fixed_http_port_;
+  static uint16 testing_fixed_https_port_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpStreamFactory);
 };

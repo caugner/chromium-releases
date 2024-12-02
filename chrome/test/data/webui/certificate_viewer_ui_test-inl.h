@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,8 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/base/test_html_dialog_observer.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/webui/web_ui.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "net/base/test_certificate_data.h"
 #include "net/base/x509_certificate.h"
 
@@ -28,7 +28,7 @@ class CertificateViewerUITest : public WebUIBrowserTest {
 
 void CertificateViewerUITest::ShowCertificateViewer() {
   // Enable more WebUI to use WebUI certificate viewer.
-  ChromeWebUI::OverrideMoreWebUI(true);
+  chrome_web_ui::OverrideMoreWebUI(true);
 
   scoped_refptr<net::X509Certificate> google_cert(
       net::X509Certificate::CreateFromBytes(
@@ -39,9 +39,8 @@ void CertificateViewerUITest::ShowCertificateViewer() {
 
   TestHtmlDialogObserver dialog_observer(this);
   ::ShowCertificateViewer(browser()->window()->GetNativeHandle(), google_cert);
-  WebUI* webui = dialog_observer.GetWebUI();
-  webui->tab_contents()->render_view_host()->SetWebUIProperty(
+  content::WebUI* webui = dialog_observer.GetWebUI();
+  webui->GetWebContents()->GetRenderViewHost()->SetWebUIProperty(
       "expectedUrl", chrome::kChromeUICertificateViewerURL);
   SetWebUIInstance(webui);
-  WebUIBrowserTest::SetUpOnMainThread();
 }

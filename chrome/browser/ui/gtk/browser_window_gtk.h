@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,7 +77,7 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void Activate() OVERRIDE;
   virtual void Deactivate() OVERRIDE;
   virtual bool IsActive() const OVERRIDE;
-  virtual void FlashFrame() OVERRIDE;
+  virtual void FlashFrame(bool flash) OVERRIDE;
   virtual gfx::NativeWindow GetNativeHandle() OVERRIDE;
   virtual BrowserWindowTesting* GetBrowserWindowTesting() OVERRIDE;
   virtual StatusBubble* GetStatusBubble() OVERRIDE;
@@ -86,6 +86,7 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void BookmarkBarStateChanged(
       BookmarkBar::AnimateChangeType change_type) OVERRIDE;
   virtual void UpdateDevTools() OVERRIDE;
+  virtual void SetDevToolsDockSide(DevToolsDockSide side) OVERRIDE;
   virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE;
   virtual void SetStarredState(bool is_starred) OVERRIDE;
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
@@ -117,6 +118,8 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual bool IsBookmarkBarAnimating() const OVERRIDE;
   virtual bool IsTabStripEditable() const OVERRIDE;
   virtual bool IsToolbarVisible() const OVERRIDE;
+  virtual gfx::Rect GetRootWindowResizerRect() const OVERRIDE;
+  virtual bool IsPanel() const OVERRIDE;
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) OVERRIDE;
   virtual void ToggleBookmarkBar() OVERRIDE;
@@ -128,16 +131,15 @@ class BrowserWindowGtk : public BrowserWindow,
                                   bool already_bookmarked) OVERRIDE;
   virtual bool IsDownloadShelfVisible() const OVERRIDE;
   virtual DownloadShelf* GetDownloadShelf() OVERRIDE;
-  virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) OVERRIDE;
   virtual void ShowCollectedCookiesDialog(
       TabContentsWrapper* tab_contents) OVERRIDE;
   virtual void ConfirmBrowserCloseWithPendingDownloads() OVERRIDE;
   virtual void UserChangedTheme() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
-  virtual void TabContentsFocused(TabContents* tab_contents) OVERRIDE;
+  virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE;
   virtual void ShowPageInfo(Profile* profile,
                             const GURL& url,
-                            const NavigationEntry::SSLStatus& ssl,
+                            const content::SSLStatus& ssl,
                             bool show_history) OVERRIDE;
   virtual void ShowAppMenu() OVERRIDE;
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
@@ -158,7 +160,7 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
-  virtual void ShowAvatarBubble(TabContents* tab_contents,
+  virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) OVERRIDE;
   virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE;
 
@@ -185,7 +187,13 @@ class BrowserWindowGtk : public BrowserWindow,
   // Accessor for the tab strip.
   TabStripGtk* tabstrip() const { return tabstrip_.get(); }
 
-  void UpdateDevToolsForContents(TabContents* contents);
+  void UpdateDevToolsForContents(content::WebContents* contents);
+
+  // Shows docked devtools.
+  void ShowDevToolsContainer();
+
+  // Hides docked devtools.
+  void HideDevToolsContainer();
 
   void OnDebouncedBoundsChanged();
 
@@ -221,6 +229,8 @@ class BrowserWindowGtk : public BrowserWindow,
   Browser* browser() const { return browser_.get(); }
 
   GtkWindow* window() const { return window_; }
+
+  BrowserTitlebar* titlebar() const { return titlebar_.get(); }
 
   GtkWidget* titlebar_widget() const;
 
@@ -478,8 +488,13 @@ class BrowserWindowGtk : public BrowserWindow,
   // selected tab contents.
   scoped_ptr<TabContentsContainerGtk> devtools_container_;
 
+  DevToolsDockSide devtools_dock_side_;
+
   // Split pane containing the contents_container_ and the devtools_container_.
-  GtkWidget* contents_split_;
+  GtkWidget* contents_hsplit_;
+
+  // Split pane containing the contents_hsplit_ and the devtools_container_.
+  GtkWidget* contents_vsplit_;
 
   // The tab strip.  Always non-NULL.
   scoped_ptr<TabStripGtk> tabstrip_;

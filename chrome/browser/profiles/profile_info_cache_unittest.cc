@@ -15,6 +15,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -22,30 +23,42 @@
 
 using content::BrowserThread;
 
-ProfileNameVerifierObserver::ProfileNameVerifierObserver() {
+ProfileNameVerifierObserver::ProfileNameVerifierObserver(
+    TestingProfileManager* testing_profile_manager)
+    : testing_profile_manager_(testing_profile_manager) {
+  DCHECK(testing_profile_manager_);
 }
 
 ProfileNameVerifierObserver::~ProfileNameVerifierObserver() {
 }
 
 void ProfileNameVerifierObserver::OnProfileAdded(
-    const string16& profile_name,
-    const string16& profile_base_dir,
-    const FilePath& profile_path,
-    const gfx::Image* avatar_image) {
+    const FilePath& profile_path) {
+  string16 profile_name = GetCache()->GetNameOfProfileAtIndex(
+      GetCache()->GetIndexOfProfileWithPath(profile_path));
   EXPECT_TRUE(profile_names_.find(profile_name) == profile_names_.end());
   profile_names_.insert(profile_name);
 }
 
-void ProfileNameVerifierObserver::OnProfileRemoved(
-    const string16& profile_name) {
+void ProfileNameVerifierObserver::OnProfileWillBeRemoved(
+    const FilePath& profile_path) {
+  string16 profile_name = GetCache()->GetNameOfProfileAtIndex(
+      GetCache()->GetIndexOfProfileWithPath(profile_path));
   EXPECT_TRUE(profile_names_.find(profile_name) != profile_names_.end());
   profile_names_.erase(profile_name);
 }
 
+void ProfileNameVerifierObserver::OnProfileWasRemoved(
+    const FilePath& profile_path,
+    const string16& profile_name) {
+  EXPECT_TRUE(profile_names_.find(profile_name) == profile_names_.end());
+}
+
 void ProfileNameVerifierObserver::OnProfileNameChanged(
-    const string16& old_profile_name,
-    const string16& new_profile_name) {
+    const FilePath& profile_path,
+    const string16& old_profile_name) {
+  string16 new_profile_name = GetCache()->GetNameOfProfileAtIndex(
+      GetCache()->GetIndexOfProfileWithPath(profile_path));
   EXPECT_TRUE(profile_names_.find(old_profile_name) != profile_names_.end());
   EXPECT_TRUE(profile_names_.find(new_profile_name) == profile_names_.end());
   profile_names_.erase(old_profile_name);
@@ -53,18 +66,22 @@ void ProfileNameVerifierObserver::OnProfileNameChanged(
 }
 
 void ProfileNameVerifierObserver::OnProfileAvatarChanged(
-    const string16& profile_name,
-    const string16& profile_base_dir,
-    const FilePath& profile_path,
-    const gfx::Image* avatar_image) {
+    const FilePath& profile_path) {
+  string16 profile_name = GetCache()->GetNameOfProfileAtIndex(
+      GetCache()->GetIndexOfProfileWithPath(profile_path));
   EXPECT_TRUE(profile_names_.find(profile_name) != profile_names_.end());
+}
+
+ProfileInfoCache* ProfileNameVerifierObserver::GetCache() {
+  return testing_profile_manager_->profile_info_cache();
 }
 
 ProfileInfoCacheTest::ProfileInfoCacheTest()
     : testing_profile_manager_(
         static_cast<TestingBrowserProcess*>(g_browser_process)),
       ui_thread_(BrowserThread::UI, &ui_loop_),
-      file_thread_(BrowserThread::FILE, &ui_loop_) {
+      file_thread_(BrowserThread::FILE, &ui_loop_),
+      name_observer_(&testing_profile_manager_) {
 }
 
 ProfileInfoCacheTest::~ProfileInfoCacheTest() {

@@ -1,9 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/login/webui_login_view.h"
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
@@ -36,13 +37,20 @@ WebUILoginDisplay::WebUILoginDisplay(LoginDisplay::Delegate* delegate)
 
 void WebUILoginDisplay::Init(const UserList& users,
                              bool show_guest,
+                             bool show_users,
                              bool show_new_user) {
   // Testing that the delegate has been set.
   DCHECK(delegate_);
 
   users_ = users;
   show_guest_ = show_guest;
+  show_users_ = show_users;
   show_new_user_ = show_new_user;
+}
+
+void WebUILoginDisplay::OnPreferencesChanged() {
+  if (webui_handler_)
+    webui_handler_->OnPreferencesChanged();
 }
 
 void WebUILoginDisplay::OnBeforeUserRemoved(const std::string& username) {
@@ -100,7 +108,9 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
   }
 
   // Display a warning if Caps Lock is on and error is authentication-related.
-  if (input_method::XKeyboard::CapsLockIsEnabled() &&
+  input_method::InputMethodManager* ime_manager =
+      input_method::InputMethodManager::GetInstance();
+  if (ime_manager->GetXKeyboard()->CapsLockIsEnabled() &&
       error_msg_id != IDS_LOGIN_ERROR_WHITELIST) {
     // TODO(ivankr): use a format string instead of concatenation.
     error_text += "\n" +
@@ -128,6 +138,10 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
                             help_topic_id);
   WizardAccessibilityHelper::GetInstance()->MaybeSpeak(
       error_text.c_str(), false, false);
+}
+
+void WebUILoginDisplay::ShowGaiaPasswordChanged(const std::string& username) {
+  webui_handler_->ShowGaiaPasswordChanged(username);
 }
 
 // WebUILoginDisplay, SigninScreenHandlerDelegate implementation: --------------
@@ -190,6 +204,10 @@ const UserList& WebUILoginDisplay::GetUsers() const {
 
 bool WebUILoginDisplay::IsShowGuest() const {
   return show_guest_;
+}
+
+bool WebUILoginDisplay::IsShowUsers() const {
+  return show_users_;
 }
 
 bool WebUILoginDisplay::IsShowNewUser() const {

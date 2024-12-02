@@ -1,10 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_COMMON_AUTOMATION_CONSTANTS_H__
 #define CHROME_COMMON_AUTOMATION_CONSTANTS_H__
 #pragma once
+
+#include <string>
 
 namespace automation {
 
@@ -43,12 +45,24 @@ enum KeyModifierMasks {
   kControlKeyMask = 1 << 1,
   kAltKeyMask     = 1 << 2,
   kMetaKeyMask    = 1 << 3,
+  kNumLockKeyMask = 1 << 4,
+};
+
+// Recognized by the AutomationProvider's ProcessWebMouseEvent command.
+enum MouseEventType {
+  kMouseDown = 0,
+  kMouseUp,
+  kMouseMove,
+  kMouseEnter,
+  kMouseLeave,
+  kContextMenu,
 };
 
 enum MouseButton {
   kLeftButton = 0,
   kMiddleButton,
   kRightButton,
+  kNoButton,
 };
 
 // The current version of ChromeDriver automation supported by Chrome.
@@ -59,6 +73,48 @@ enum MouseButton {
 //   incompatible way
 // TODO(kkania): Investigate a better backwards compatible automation solution.
 extern const int kChromeDriverAutomationVersion;
+
+// Automation error codes. These provide the client a simple way
+// to detect certain types of errors it may be interested in handling.
+// The error code values must stay consistent across compatible versions.
+enum ErrorCode {
+  // An unknown error occurred.
+  kUnknownError = 0,
+  // Trying to operate on a JavaScript modal dialog when none is open.
+  kNoJavaScriptModalDialogOpen = 1,
+  // An open modal dialog blocked the operation. The operation may have
+  // partially completed.
+  kBlockedByModalDialog = 2,
+  // An ID was supplied that is invalid or does not refer to an existing object.
+  kInvalidId = 3,
+};
+
+// Represents an automation error. Each error has a code and an error message.
+class Error {
+ public:
+  // Creates an invalid error.
+  Error();
+
+  // Creates an error for the given code. A default message for the given code
+  // will be used as the error message.
+  explicit Error(ErrorCode code);
+
+  // Creates an error for the given message. The |kUnknownError| type will
+  // be used.
+  explicit Error(const std::string& error_msg);
+
+  // Creates an error for the given code and message.
+  Error(ErrorCode code, const std::string& error_msg);
+
+  virtual ~Error();
+
+  ErrorCode code() const;
+  const std::string& message() const;
+
+ private:
+  ErrorCode code_;
+  std::string message_;
+};
 
 }  // namespace automation
 

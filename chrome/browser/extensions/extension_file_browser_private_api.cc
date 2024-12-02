@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,16 +27,17 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/select_file_dialog_extension.h"
-#include "chrome/browser/ui/webui/extension_icon_source.h"
+#include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/file_browser_handler.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/site_instance.h"
+#include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/platform_locale_settings.h"
@@ -44,13 +45,13 @@
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_file_util.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
-#include "webkit/fileapi/file_system_operation.h"
 #include "webkit/fileapi/file_system_operation_context.h"
-#include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_util.h"
 
 using content::BrowserThread;
+using content::SiteInstance;
+using content::WebContents;
 
 namespace {
 
@@ -130,10 +131,10 @@ bool GetFileBrowserHandlers(Profile* profile,
   if (!service)
     return false;  // In unit-tests, we may not have an ExtensionService.
 
-  for (ExtensionList::const_iterator iter = service->extensions()->begin();
+  for (ExtensionSet::const_iterator iter = service->extensions()->begin();
        iter != service->extensions()->end();
        ++iter) {
-    const Extension* extension = iter->get();
+    const Extension* extension = *iter;
     if (!extension->file_browser_handlers())
       continue;
 
@@ -307,16 +308,14 @@ base::DictionaryValue* MountPointToValue(Profile* profile,
 class RequestLocalFileSystemFunction::LocalFileSystemCallbackDispatcher
     : public fileapi::FileSystemCallbackDispatcher {
  public:
-  explicit LocalFileSystemCallbackDispatcher(
+  static scoped_ptr<FileSystemCallbackDispatcher> Create(
       RequestLocalFileSystemFunction* function,
       Profile* profile,
       int child_id,
-      scoped_refptr<const Extension> extension)
-      : function_(function),
-        profile_(profile),
-        child_id_(child_id),
-        extension_(extension)  {
-    DCHECK(function_);
+      scoped_refptr<const Extension> extension) {
+    return scoped_ptr<fileapi::FileSystemCallbackDispatcher>(
+        new LocalFileSystemCallbackDispatcher(
+            function, profile, child_id, extension));
   }
 
   // fileapi::FileSystemCallbackDispatcher overrides.
@@ -367,6 +366,17 @@ class RequestLocalFileSystemFunction::LocalFileSystemCallbackDispatcher
   }
 
  private:
+  LocalFileSystemCallbackDispatcher(
+      RequestLocalFileSystemFunction* function,
+      Profile* profile,
+      int child_id,
+      scoped_refptr<const Extension> extension)
+      : function_(function),
+        profile_(profile),
+        child_id_(child_id),
+        extension_(extension)  {
+    DCHECK(function_);
+  }
 
   // Grants file system access permissions to file browser component.
   bool SetupFileSystemAccessPermissions() {
@@ -375,21 +385,14 @@ class RequestLocalFileSystemFunction::LocalFileSystemCallbackDispatcher
 
     // Make sure that only component extension can access the entire
     // local file system.
-    if (extension_->location() != Extension::COMPONENT
-#ifndef NDEBUG
-      && !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kExposePrivateExtensionApi)
-#endif
-        ) {
+    if (extension_->location() != Extension::COMPONENT) {
       NOTREACHED() << "Private method access by non-component extension "
                    << extension_->id();
       return false;
     }
 
-    fileapi::FileSystemPathManager* path_manager =
-        profile_->GetFileSystemContext()->path_manager();
     fileapi::ExternalFileSystemMountPointProvider* provider =
-        path_manager->external_provider();
+        profile_->GetFileSystemContext()->external_provider();
     if (!provider)
       return false;
 
@@ -419,18 +422,14 @@ class RequestLocalFileSystemFunction::LocalFileSystemCallbackDispatcher
 
 void RequestLocalFileSystemFunction::RequestOnFileThread(
     const GURL& source_url, int child_id) {
-  fileapi::FileSystemOperation* operation =
-      new fileapi::FileSystemOperation(
-          new LocalFileSystemCallbackDispatcher(
-              this,
-              profile(),
-              child_id,
-              GetExtension()),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-          profile()->GetFileSystemContext());
   GURL origin_url = source_url.GetOrigin();
-  operation->OpenFileSystem(origin_url, fileapi::kFileSystemTypeExternal,
-                            false);     // create
+  profile()->GetFileSystemContext()->OpenFileSystem(
+      origin_url, fileapi::kFileSystemTypeExternal, false, // create
+      LocalFileSystemCallbackDispatcher::Create(
+          this,
+          profile(),
+          child_id,
+          GetExtension()));
 }
 
 bool RequestLocalFileSystemFunction::RunImpl() {
@@ -468,8 +467,6 @@ void RequestLocalFileSystemFunction::RespondFailedOnUIThread(
 
 bool FileWatchBrowserFunctionBase::GetLocalFilePath(
     const GURL& file_url, FilePath* local_path, FilePath* virtual_path) {
-  fileapi::FileSystemPathManager* path_manager =
-      profile_->GetFileSystemContext()->path_manager();
   GURL file_origin_url;
   fileapi::FileSystemType type;
   if (!CrackFileSystemURL(file_url, &file_origin_url, &type,
@@ -479,8 +476,8 @@ bool FileWatchBrowserFunctionBase::GetLocalFilePath(
   if (type != fileapi::kFileSystemTypeExternal)
     return false;
 
-  FilePath root_path =
-      path_manager->ValidateFileSystemRootAndGetPathOnFileThread(
+  FilePath root_path = profile_->GetFileSystemContext()->external_provider()->
+      GetFileSystemRootPathOnFileThread(
           file_origin_url,
           fileapi::kFileSystemTypeExternal,
           *virtual_path,
@@ -625,23 +622,18 @@ bool GetFileTasksFileBrowserFunction::RunImpl() {
 class ExecuteTasksFileBrowserFunction::ExecuteTasksFileSystemCallbackDispatcher
     : public fileapi::FileSystemCallbackDispatcher {
  public:
-  explicit ExecuteTasksFileSystemCallbackDispatcher(
+  static scoped_ptr<fileapi::FileSystemCallbackDispatcher> Create(
       ExecuteTasksFileBrowserFunction* function,
       Profile* profile,
       int child_id,
       const GURL& source_url,
       scoped_refptr<const Extension> extension,
       const std::string task_id,
-      const std::vector<GURL>& file_urls)
-      : function_(function),
-        target_process_id_(0),
-        profile_(profile),
-        source_url_(source_url),
-        extension_(extension),
-        task_id_(task_id),
-        origin_file_urls_(file_urls) {
-    DCHECK(function_);
-    ExtractTargetExtensionAndProcessID();
+      const std::vector<GURL>& file_urls) {
+    return scoped_ptr<fileapi::FileSystemCallbackDispatcher>(
+        new ExecuteTasksFileSystemCallbackDispatcher(
+            function, profile, child_id, source_url, extension,
+            task_id, file_urls));
   }
 
   // fileapi::FileSystemCallbackDispatcher overrides.
@@ -708,6 +700,25 @@ class ExecuteTasksFileBrowserFunction::ExecuteTasksFileSystemCallbackDispatcher
   }
 
  private:
+  ExecuteTasksFileSystemCallbackDispatcher(
+      ExecuteTasksFileBrowserFunction* function,
+      Profile* profile,
+      int child_id,
+      const GURL& source_url,
+      const scoped_refptr<const Extension>& extension,
+      const std::string task_id,
+      const std::vector<GURL>& file_urls)
+      : function_(function),
+        target_process_id_(0),
+        profile_(profile),
+        source_url_(source_url),
+        extension_(extension),
+        task_id_(task_id),
+        origin_file_urls_(file_urls) {
+    DCHECK(function_);
+    ExtractTargetExtensionAndProcessID();
+  }
+
   // Extracts target extension's id and process from the tasks's id.
   void ExtractTargetExtensionAndProcessID() {
     // Get task details.
@@ -719,7 +730,8 @@ class ExecuteTasksFileBrowserFunction::ExecuteTasksFileSystemCallbackDispatcher
         Extension::GetBaseURLFromExtensionId(target_extension_id_);
     ExtensionProcessManager* manager = profile_->GetExtensionProcessManager();
 
-    SiteInstance* site_instance = manager->GetSiteInstanceForURL(extension_url);
+    SiteInstance* site_instance = manager->GetSiteInstanceForURL(
+        extension_url);
     if (!site_instance || !site_instance->HasProcess())
       return;
     content::RenderProcessHost* process = site_instance->GetProcess();
@@ -748,11 +760,14 @@ class ExecuteTasksFileBrowserFunction::ExecuteTasksFileSystemCallbackDispatcher
     if (type != fileapi::kFileSystemTypeExternal)
       return false;
 
-    fileapi::FileSystemPathManager* path_manager =
-        profile_->GetFileSystemContext()->path_manager();
-    if (!path_manager->IsAccessAllowed(file_origin_url,
-                                       type,
-                                       virtual_path)) {
+    fileapi::ExternalFileSystemMountPointProvider* external_provider =
+        profile_->GetFileSystemContext()->external_provider();
+    if (!external_provider)
+      return false;
+
+    if (!external_provider->IsAccessAllowed(file_origin_url,
+                                            type,
+                                            virtual_path)) {
       return false;
     }
 
@@ -763,17 +778,12 @@ class ExecuteTasksFileBrowserFunction::ExecuteTasksFileSystemCallbackDispatcher
     }
 
     FilePath root_path =
-        path_manager->ValidateFileSystemRootAndGetPathOnFileThread(
+        external_provider->GetFileSystemRootPathOnFileThread(
           file_origin_url,
           fileapi::kFileSystemTypeExternal,
           virtual_path,
           false);     // create
     FilePath final_file_path = root_path.Append(virtual_path);
-
-    fileapi::ExternalFileSystemMountPointProvider* external_provider =
-        path_manager->external_provider();
-    if (!external_provider)
-      return false;
 
     // Check if this file system entry exists first.
     base::PlatformFileInfo file_info;
@@ -877,21 +887,17 @@ void ExecuteTasksFileBrowserFunction::RequestFileEntryOnFileThread(
     const GURL& source_url, const std::string& task_id,
     const std::vector<GURL>& file_urls) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  fileapi::FileSystemOperation* operation =
-      new fileapi::FileSystemOperation(
-          new ExecuteTasksFileSystemCallbackDispatcher(
-              this,
-              profile(),
-              render_view_host()->process()->GetID(),
-              source_url,
-              GetExtension(),
-              task_id,
-              file_urls),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-          profile()->GetFileSystemContext());
   GURL origin_url = source_url.GetOrigin();
-  operation->OpenFileSystem(origin_url, fileapi::kFileSystemTypeExternal,
-                            false);     // create
+  profile()->GetFileSystemContext()->OpenFileSystem(
+      origin_url, fileapi::kFileSystemTypeExternal, false, // create
+      ExecuteTasksFileSystemCallbackDispatcher::Create(
+          this,
+          profile(),
+          render_view_host()->process()->GetID(),
+          source_url,
+          GetExtension(),
+          task_id,
+          file_urls));
 }
 
 void ExecuteTasksFileBrowserFunction::ExecuteFailedOnUIThread() {
@@ -952,7 +958,7 @@ void ExecuteTasksFileBrowserFunction::ExecuteFileActionsOnUIThread(
   // Get tab id.
   Browser* browser = GetCurrentBrowser();
   if (browser) {
-    TabContents* contents = browser->GetSelectedTabContents();
+    WebContents* contents = browser->GetSelectedWebContents();
     if (contents)
       details->SetInteger("tab_id", ExtensionTabUtil::GetTabId(contents));
   }
@@ -983,13 +989,13 @@ int32 FileBrowserFunction::GetTabId() const {
     LOG(WARNING) << "No delegate";
     return 0;
   }
-  TabContents* tab_contents =
-      dispatcher()->delegate()->GetAssociatedTabContents();
-  if (!tab_contents) {
+  WebContents* web_contents =
+      dispatcher()->delegate()->GetAssociatedWebContents();
+  if (!web_contents) {
     LOG(WARNING) << "No associated tab contents";
     return 0;
   }
-  return ExtensionTabUtil::GetTabId(tab_contents);
+  return ExtensionTabUtil::GetTabId(web_contents);
 }
 
 void FileBrowserFunction::GetLocalPathsOnFileThreadAndRunCallbackOnUIThread(
@@ -1015,10 +1021,16 @@ void FileBrowserFunction::GetLocalPathsOnFileThread(
 
   // FilePath(virtual_path) doesn't work on win, so limit this to ChromeOS.
 #if defined(OS_CHROMEOS)
-  GURL origin_url = source_url().GetOrigin();
-  fileapi::FileSystemPathManager* path_manager =
-      profile()->GetFileSystemContext()->path_manager();
+  fileapi::ExternalFileSystemMountPointProvider* provider =
+      profile_->GetFileSystemContext()->external_provider();
+  if (!provider) {
+    LOG(WARNING) << "External provider is not available";
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(callback, selected_files));
+    return;
+  }
 
+  GURL origin_url = source_url().GetOrigin();
   size_t len = file_urls.size();
   selected_files.reserve(len);
   for (size_t i = 0; i < len; ++i) {
@@ -1034,7 +1046,7 @@ void FileBrowserFunction::GetLocalPathsOnFileThread(
       NOTREACHED();
       continue;
     }
-    FilePath root = path_manager->ValidateFileSystemRootAndGetPathOnFileThread(
+    FilePath root = provider->GetFileSystemRootPathOnFileThread(
         origin_url,
         fileapi::kFileSystemTypeExternal,
         FilePath(virtual_path),
@@ -1523,9 +1535,10 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING(IDS, WEB_FONT_SIZE);
 
   SET_STRING(IDS_FILE_BROWSER, ROOT_DIRECTORY_LABEL);
-  SET_STRING(IDS_FILE_BROWSER, DOWNLOADS_DIRECTORY_LABEL);
   SET_STRING(IDS_FILE_BROWSER, ARCHIVE_DIRECTORY_LABEL);
   SET_STRING(IDS_FILE_BROWSER, REMOVABLE_DIRECTORY_LABEL);
+  dict->SetString("CHROMEBOOK_DIRECTORY_LABEL",
+      l10n_util::GetStringUTF16(IDS_DOWNLOAD_TITLE));
   SET_STRING(IDS_FILE_BROWSER, NAME_COLUMN_LABEL);
   SET_STRING(IDS_FILE_BROWSER, SIZE_COLUMN_LABEL);
   SET_STRING(IDS_FILE_BROWSER, TYPE_COLUMN_LABEL);
@@ -1612,6 +1625,9 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING(IDS_FILE_BROWSER, SAVE_LABEL);
   SET_STRING(IDS_FILE_BROWSER, OK_LABEL);
 
+  SET_STRING(IDS_FILE_BROWSER, ERROR_VIEWING_FILE_TITLE);
+  SET_STRING(IDS_FILE_BROWSER, ERROR_VIEWING_FILE);
+
   SET_STRING(IDS_FILE_BROWSER, DEFAULT_NEW_FOLDER_NAME);
   SET_STRING(IDS_FILE_BROWSER, MORE_FILES);
 
@@ -1628,7 +1644,6 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING(IDS_FILE_BROWSER, SELECT_SAVEAS_FILE_TITLE);
 
   SET_STRING(IDS_FILE_BROWSER, COMPUTING_SELECTION);
-  SET_STRING(IDS_FILE_BROWSER, NOTHING_SELECTED);
   SET_STRING(IDS_FILE_BROWSER, ONE_FILE_SELECTED);
   SET_STRING(IDS_FILE_BROWSER, ONE_DIRECTORY_SELECTED);
   SET_STRING(IDS_FILE_BROWSER, MANY_FILES_SELECTED);

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,12 @@
 #include "content/common/content_export.h"
 
 class RenderViewHost;
-class RenderViewHostDelegate;
 class SessionStorageNamespace;
+
+namespace content {
+class RenderViewHostDelegate;
 class SiteInstance;
+}
 
 // A factory for creating RenderViewHosts. There is a global factory function
 // that can be installed for the purposes of testing to provide a specialized
@@ -22,8 +25,8 @@ class RenderViewHostFactory {
   // Creates a RenderViewHost using the currently registered factory, or the
   // default one if no factory is registered. Ownership of the returned
   // pointer will be passed to the caller.
-  static RenderViewHost* Create(SiteInstance* instance,
-                                RenderViewHostDelegate* delegate,
+  static RenderViewHost* Create(content::SiteInstance* instance,
+                                content::RenderViewHostDelegate* delegate,
                                 int routing_id,
                                 SessionStorageNamespace* session_storage);
 
@@ -39,8 +42,8 @@ class RenderViewHostFactory {
   // You can derive from this class and specify an implementation for this
   // function to create a different kind of RenderViewHost for testing.
   virtual RenderViewHost* CreateRenderViewHost(
-      SiteInstance* instance,
-      RenderViewHostDelegate* delegate,
+      content::SiteInstance* instance,
+      content::RenderViewHostDelegate* delegate,
       int routing_id,
       SessionStorageNamespace* session_storage_namespace) = 0;
 

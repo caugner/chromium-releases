@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,6 @@ enum TouchStatus;
 namespace views {
 
 class Widget;
-class GestureManager;
 
 // This is a views-internal API and should not be used externally.
 // Widget exposes this object as a View*.
@@ -69,9 +68,6 @@ class VIEWS_EXPORT RootView : public View, public FocusTraversable {
   // it. Returns whether anyone consumed the event.
   bool OnKeyEvent(const KeyEvent& event);
 
-  // Provided only for testing:
-  void SetGestureManagerForTesting(GestureManager* g) { gesture_manager_ = g; }
-
   // Focus ---------------------------------------------------------------------
 
   // Used to set the FocusTraversable parent after the view has been created
@@ -99,7 +95,7 @@ class VIEWS_EXPORT RootView : public View, public FocusTraversable {
   // Overridden from View:
   virtual const Widget* GetWidget() const OVERRIDE;
   virtual Widget* GetWidget() OVERRIDE;
-  virtual bool IsVisibleInRootView() const OVERRIDE;
+  virtual bool IsDrawn() const OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
@@ -110,8 +106,10 @@ class VIEWS_EXPORT RootView : public View, public FocusTraversable {
   virtual void OnMouseExited(const MouseEvent& event) OVERRIDE;
   virtual bool OnMouseWheel(const MouseWheelEvent& event) OVERRIDE;
   virtual ui::TouchStatus OnTouchEvent(const TouchEvent& event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event) OVERRIDE;
   virtual void SetMouseHandler(View* new_mouse_handler) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  virtual void ReorderChildLayers(ui::Layer* parent_layer) OVERRIDE;
 
  protected:
   // Overridden from View:
@@ -125,10 +123,6 @@ class VIEWS_EXPORT RootView : public View, public FocusTraversable {
  private:
   friend class View;
   friend class Widget;
-
-  // Required so the GestureManager can call the Process* entry points
-  // with synthetic events as necessary.
-  friend class GestureManager;
 
   // Input ---------------------------------------------------------------------
 
@@ -172,11 +166,11 @@ class VIEWS_EXPORT RootView : public View, public FocusTraversable {
   int last_mouse_event_x_;
   int last_mouse_event_y_;
 
-  // The gesture_manager_ for this.
-  GestureManager* gesture_manager_;
-
   // The view currently handling touch events.
   View* touch_pressed_handler_;
+
+  // The view currently handling gesture events.
+  View* gesture_handling_view_;
 
   // Focus ---------------------------------------------------------------------
 
@@ -196,7 +190,7 @@ class VIEWS_EXPORT RootView : public View, public FocusTraversable {
   // Drag and drop -------------------------------------------------------------
 
   // Tracks drag state for a view.
-  View::DragInfo drag_info;
+  View::DragInfo drag_info_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(RootView);
 };

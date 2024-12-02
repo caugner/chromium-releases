@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -186,6 +186,9 @@ class GL_EXPORT GLInterface {
                             const void* indices) = 0;
 
   virtual void EGLImageTargetTexture2DOES(
+      GLenum target, GLeglImageOES image) = 0;
+
+  virtual void EGLImageTargetRenderbufferStorageOES(
       GLenum target, GLeglImageOES image) = 0;
 
   virtual void Enable(GLenum cap) = 0;
@@ -461,6 +464,12 @@ class GL_EXPORT GLInterface {
                               GLenum pname,
                               const GLint* params) = 0;
 
+  virtual void TexStorage2DEXT(GLenum target,
+                               GLsizei levels,
+                               GLenum internalformat,
+                               GLsizei width,
+                               GLsizei height) = 0;
+
   virtual void TexSubImage2D(GLenum target,
                              GLint level,
                              GLint xoffset, GLint yoffset,
@@ -583,6 +592,16 @@ class GL_EXPORT GLInterface {
   virtual void SetSurfaceCHROMIUM(GLuint id) = 0;
 
   virtual GLenum GetGraphicsResetStatusARB() = 0;
+
+  virtual GLsync FenceSync(GLenum condition, GLbitfield flags) = 0;
+
+  virtual void DeleteSync(GLsync sync) = 0;
+
+  virtual void GetSynciv(GLsync sync,
+                         GLenum pname,
+                         GLsizei bufSize,
+                         GLsizei* length,
+                         GLint* values) = 0;
 
  private:
   static GLInterface* interface_;

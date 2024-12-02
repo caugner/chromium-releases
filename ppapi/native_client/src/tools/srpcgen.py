@@ -1,5 +1,5 @@
-# -*- python -*-
-# Copyright (c) 2011 The Native Client Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Native Client Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -18,14 +18,11 @@ server or client stub file, as determined by the command line flag -s or -c.
 """
 
 import getopt
-#import re
-#import string
-#import StringIO
 import sys
 import os
 
 COPYRIGHT_AND_AUTOGEN_COMMENT = """\
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -81,7 +78,7 @@ types = {'bool': ['b', 'bool', 'u.bval', ''],
          'PP_Instance': ['i', 'PP_Instance', 'u.ival', ''],
          'PP_Module': ['i', 'PP_Module', 'u.ival', ''],
          'PP_Resource': ['i', 'PP_Resource', 'u.ival', ''],
-         'string': ['s', 'char*', 'arrays.str', ''],
+         'string': ['s', 'const char*', 'arrays.str', ''],
         }
 
 def AddInclude(name):
@@ -412,12 +409,14 @@ def main(argv):
   # Get the name of the header file to be generated.
   h_file_name = pargs[2]
   MakePath(h_file_name)
-  h_file = open(h_file_name, 'w')
+  # Note we open output files in binary mode so that on Windows the files
+  # will always get LF line-endings rather than CRLF.
+  h_file = open(h_file_name, 'wb')
   # Get the name of the source file to be generated.  Depending upon whether
   # -c or -s is generated, this file contains either client or server methods.
   cc_file_name = pargs[3]
   MakePath(cc_file_name)
-  cc_file = open(cc_file_name, 'w')
+  cc_file = open(cc_file_name, 'wb')
   # The remaining arguments are the spec files to be compiled.
   spec_files = pargs[4:]
 

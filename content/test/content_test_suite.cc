@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,11 +13,11 @@
 #include "content/test/test_content_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ui_base_paths.h"
-#include "ui/gfx/test/gfx_test_utils.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
+#include "ui/gfx/compositor/compositor_setup.h"
 
 namespace {
 
@@ -75,9 +75,10 @@ void ContentTestSuite::Initialize() {
   ui::RegisterPathProvider();
 
   // Mock out the compositor on platforms that use it.
-  ui::gfx_test_utils::SetupTestCompositor();
+  ui::SetupTestCompositor();
 
   testing::TestEventListeners& listeners =
       testing::UnitTest::GetInstance()->listeners();
   listeners.Append(new TestContentClientInitializer);
 }
+

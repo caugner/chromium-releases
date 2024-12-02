@@ -5,13 +5,17 @@
 #include "chrome/browser/favicon/favicon_handler.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
-#include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/public/browser/invalidate_type.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/favicon_status.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image.h"
 
 class TestFaviconHandler;
+
+using content::NavigationEntry;
 
 namespace {
 
@@ -145,7 +149,7 @@ class TestFaviconHandlerDelegate : public FaviconHandlerDelegate {
   }
 
   virtual void NotifyFaviconUpdated() {
-    tab_contents_->NotifyNavigationStateChanged(TabContents::INVALIDATE_TAB);
+    tab_contents_->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);
   }
 
  private:
@@ -162,8 +166,9 @@ class TestFaviconHandler : public FaviconHandler {
                      Type type)
       : FaviconHandler(profile, delegate, type),
         download_image_size_(0),
+        entry_(NavigationEntry::Create()),
         download_id_(0) {
-    entry_.set_url(page_url);
+    entry_->SetURL(page_url);
   }
 
   virtual ~TestFaviconHandler() {
@@ -188,7 +193,7 @@ class TestFaviconHandler : public FaviconHandler {
   }
 
   virtual NavigationEntry* GetEntry() {
-    return &entry_;
+    return entry_.get();
   }
 
   const std::vector<FaviconURL>& urls() {
@@ -271,7 +276,7 @@ class TestFaviconHandler : public FaviconHandler {
   int download_image_size_;
 
  private:
-  NavigationEntry entry_;
+  scoped_ptr<NavigationEntry> entry_;
 
   // The unique id of a download request. It will be returned to a
   // FaviconHandler.
@@ -312,7 +317,8 @@ TEST_F(FaviconHandlerTest, GetFaviconFromHistory) {
   const GURL icon_url("http://www.google.com/favicon");
 
   TestFaviconHandlerDelegate delegate(contents());
-  Profile* profile = Profile::FromBrowserContext(contents()->browser_context());
+  Profile* profile = Profile::FromBrowserContext(
+      contents()->GetBrowserContext());
   TestFaviconHandler helper(page_url, profile,
                             &delegate, FaviconHandler::FAVICON);
 
@@ -336,8 +342,8 @@ TEST_F(FaviconHandlerTest, GetFaviconFromHistory) {
   // Send history response.
   history_handler->InvokeCallback();
   // Verify FaviconHandler status
-  EXPECT_TRUE(helper.GetEntry()->favicon().is_valid());
-  EXPECT_EQ(icon_url, helper.GetEntry()->favicon().url());
+  EXPECT_TRUE(helper.GetEntry()->GetFavicon().valid);
+  EXPECT_EQ(icon_url, helper.GetEntry()->GetFavicon().url);
 
   // Simulates update favicon url.
   std::vector<FaviconURL> urls;
@@ -360,7 +366,8 @@ TEST_F(FaviconHandlerTest, DownloadFavicon) {
   const GURL icon_url("http://www.google.com/favicon");
 
   TestFaviconHandlerDelegate delegate(contents());
-  Profile* profile = Profile::FromBrowserContext(contents()->browser_context());
+  Profile* profile = Profile::FromBrowserContext(
+      contents()->GetBrowserContext());
   TestFaviconHandler helper(page_url, profile,
                             &delegate, FaviconHandler::FAVICON);
 
@@ -380,8 +387,8 @@ TEST_F(FaviconHandlerTest, DownloadFavicon) {
   // Send history response.
   history_handler->InvokeCallback();
   // Verify FaviconHandler status
-  EXPECT_TRUE(helper.GetEntry()->favicon().is_valid());
-  EXPECT_EQ(icon_url, helper.GetEntry()->favicon().url());
+  EXPECT_TRUE(helper.GetEntry()->GetFavicon().valid);
+  EXPECT_EQ(icon_url, helper.GetEntry()->GetFavicon().url);
 
   // Simulates update favicon url.
   std::vector<FaviconURL> urls;
@@ -416,9 +423,9 @@ TEST_F(FaviconHandlerTest, DownloadFavicon) {
   EXPECT_EQ(page_url, history_handler->page_url_);
 
   // Verify NavigationEntry.
-  EXPECT_EQ(icon_url, helper.GetEntry()->favicon().url());
-  EXPECT_TRUE(helper.GetEntry()->favicon().is_valid());
-  EXPECT_FALSE(helper.GetEntry()->favicon().bitmap().empty());
+  EXPECT_EQ(icon_url, helper.GetEntry()->GetFavicon().url);
+  EXPECT_TRUE(helper.GetEntry()->GetFavicon().valid);
+  EXPECT_FALSE(helper.GetEntry()->GetFavicon().bitmap.empty());
 }
 
 TEST_F(FaviconHandlerTest, UpdateAndDownloadFavicon) {
@@ -427,7 +434,8 @@ TEST_F(FaviconHandlerTest, UpdateAndDownloadFavicon) {
   const GURL new_icon_url("http://www.google.com/new_favicon");
 
   TestFaviconHandlerDelegate delegate(contents());
-  Profile* profile = Profile::FromBrowserContext(contents()->browser_context());
+  Profile* profile = Profile::FromBrowserContext(
+      contents()->GetBrowserContext());
   TestFaviconHandler helper(page_url, profile,
                             &delegate, FaviconHandler::FAVICON);
 
@@ -451,8 +459,8 @@ TEST_F(FaviconHandlerTest, UpdateAndDownloadFavicon) {
   // Send history response.
   history_handler->InvokeCallback();
   // Verify FaviconHandler status.
-  EXPECT_TRUE(helper.GetEntry()->favicon().is_valid());
-  EXPECT_EQ(icon_url, helper.GetEntry()->favicon().url());
+  EXPECT_TRUE(helper.GetEntry()->GetFavicon().valid);
+  EXPECT_EQ(icon_url, helper.GetEntry()->GetFavicon().url);
 
   // Reset the history_handler to verify whether new icon is requested from
   // history.
@@ -469,7 +477,7 @@ TEST_F(FaviconHandlerTest, UpdateAndDownloadFavicon) {
   ASSERT_EQ(new_icon_url, helper.current_candidate()->icon_url);
   ASSERT_EQ(FaviconURL::FAVICON, helper.current_candidate()->icon_type);
   // The favicon status's url should be updated.
-  ASSERT_EQ(new_icon_url, helper.GetEntry()->favicon().url());
+  ASSERT_EQ(new_icon_url, helper.GetEntry()->GetFavicon().url);
 
   // Favicon should be requested from history.
   history_handler = helper.history_handler();
@@ -504,9 +512,9 @@ TEST_F(FaviconHandlerTest, UpdateAndDownloadFavicon) {
   EXPECT_EQ(page_url, history_handler->page_url_);
 
   // Verify NavigationEntry.
-  EXPECT_EQ(new_icon_url, helper.GetEntry()->favicon().url());
-  EXPECT_TRUE(helper.GetEntry()->favicon().is_valid());
-  EXPECT_FALSE(helper.GetEntry()->favicon().bitmap().empty());
+  EXPECT_EQ(new_icon_url, helper.GetEntry()->GetFavicon().url);
+  EXPECT_TRUE(helper.GetEntry()->GetFavicon().valid);
+  EXPECT_FALSE(helper.GetEntry()->GetFavicon().bitmap.empty());
 }
 
 TEST_F(FaviconHandlerTest, UpdateFavicon) {
@@ -515,7 +523,8 @@ TEST_F(FaviconHandlerTest, UpdateFavicon) {
   const GURL new_icon_url("http://www.google.com/new_favicon");
 
   TestFaviconHandlerDelegate delegate(contents());
-  Profile* profile = Profile::FromBrowserContext(contents()->browser_context());
+  Profile* profile = Profile::FromBrowserContext(
+      contents()->GetBrowserContext());
   TestFaviconHandler helper(page_url, profile,
                             &delegate, FaviconHandler::FAVICON);
 
@@ -539,8 +548,8 @@ TEST_F(FaviconHandlerTest, UpdateFavicon) {
   // Send history response.
   history_handler->InvokeCallback();
   // Verify FaviconHandler status.
-  EXPECT_TRUE(helper.GetEntry()->favicon().is_valid());
-  EXPECT_EQ(icon_url, helper.GetEntry()->favicon().url());
+  EXPECT_TRUE(helper.GetEntry()->GetFavicon().valid);
+  EXPECT_EQ(icon_url, helper.GetEntry()->GetFavicon().url);
 
   // Reset the history_handler to verify whether new icon is requested from
   // history.
@@ -557,7 +566,7 @@ TEST_F(FaviconHandlerTest, UpdateFavicon) {
   ASSERT_EQ(new_icon_url, helper.current_candidate()->icon_url);
   ASSERT_EQ(FaviconURL::FAVICON, helper.current_candidate()->icon_type);
   // The favicon status's url should be updated.
-  ASSERT_EQ(new_icon_url, helper.GetEntry()->favicon().url());
+  ASSERT_EQ(new_icon_url, helper.GetEntry()->GetFavicon().url);
 
   // Favicon should be requested from history.
   history_handler = helper.history_handler();
@@ -578,9 +587,9 @@ TEST_F(FaviconHandlerTest, UpdateFavicon) {
   EXPECT_FALSE(helper.download_handler());
 
   // Verify the favicon status.
-  EXPECT_EQ(new_icon_url, helper.GetEntry()->favicon().url());
-  EXPECT_TRUE(helper.GetEntry()->favicon().is_valid());
-  EXPECT_FALSE(helper.GetEntry()->favicon().bitmap().empty());
+  EXPECT_EQ(new_icon_url, helper.GetEntry()->GetFavicon().url);
+  EXPECT_TRUE(helper.GetEntry()->GetFavicon().valid);
+  EXPECT_FALSE(helper.GetEntry()->GetFavicon().bitmap.empty());
 }
 
 TEST_F(FaviconHandlerTest, Download2ndFaviconURLCandidate) {
@@ -589,7 +598,8 @@ TEST_F(FaviconHandlerTest, Download2ndFaviconURLCandidate) {
   const GURL new_icon_url("http://www.google.com/new_favicon");
 
   TestFaviconHandlerDelegate delegate(contents());
-  Profile* profile = Profile::FromBrowserContext(contents()->browser_context());
+  Profile* profile = Profile::FromBrowserContext(
+      contents()->GetBrowserContext());
   TestFaviconHandler helper(page_url, profile,
                             &delegate, FaviconHandler::TOUCH);
 
@@ -607,8 +617,8 @@ TEST_F(FaviconHandlerTest, Download2ndFaviconURLCandidate) {
   // Send history response.
   history_handler->InvokeCallback();
   // Verify FaviconHandler status.
-  EXPECT_FALSE(helper.GetEntry()->favicon().is_valid());
-  EXPECT_EQ(GURL(), helper.GetEntry()->favicon().url());
+  EXPECT_FALSE(helper.GetEntry()->GetFavicon().valid);
+  EXPECT_EQ(GURL(), helper.GetEntry()->GetFavicon().url);
 
   // Reset the history_handler to verify whether new icon is requested from
   // history.
@@ -706,7 +716,8 @@ TEST_F(FaviconHandlerTest, UpdateDuringDownloading) {
   const GURL new_icon_url("http://www.google.com/new_favicon");
 
   TestFaviconHandlerDelegate delegate(contents());
-  Profile* profile = Profile::FromBrowserContext(contents()->browser_context());
+  Profile* profile = Profile::FromBrowserContext(
+      contents()->GetBrowserContext());
   TestFaviconHandler helper(page_url, profile,
                             &delegate, FaviconHandler::TOUCH);
 
@@ -724,8 +735,8 @@ TEST_F(FaviconHandlerTest, UpdateDuringDownloading) {
   // Send history response.
   history_handler->InvokeCallback();
   // Verify FaviconHandler status.
-  EXPECT_FALSE(helper.GetEntry()->favicon().is_valid());
-  EXPECT_EQ(GURL(), helper.GetEntry()->favicon().url());
+  EXPECT_FALSE(helper.GetEntry()->GetFavicon().valid);
+  EXPECT_EQ(GURL(), helper.GetEntry()->GetFavicon().url);
 
   // Reset the history_handler to verify whether new icon is requested from
   // history.

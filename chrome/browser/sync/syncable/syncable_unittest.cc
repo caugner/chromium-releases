@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/values.h"
 #include "chrome/browser/sync/engine/syncproto.h"
+#include "chrome/browser/sync/internal_api/includes/unrecoverable_error_handler_mock.h"
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
 #include "chrome/browser/sync/syncable/directory_backing_store.h"
 #include "chrome/browser/sync/syncable/directory_change_delegate.h"
@@ -98,8 +99,10 @@ class SyncableGeneralTest : public testing::Test {
 };
 
 TEST_F(SyncableGeneralTest, General) {
-  Directory dir;
-  dir.Open(db_path_, "SimpleTest", &delegate_, NullTransactionObserver());
+  browser_sync::MockUnrecoverableErrorHandler mock_handler;
+  Directory dir(&mock_handler);
+  ASSERT_EQ(OPENED, dir.Open(db_path_, "SimpleTest", &delegate_,
+                             NullTransactionObserver()));
 
   int64 root_metahandle;
   {
@@ -197,8 +200,10 @@ TEST_F(SyncableGeneralTest, General) {
 }
 
 TEST_F(SyncableGeneralTest, ChildrenOps) {
-  Directory dir;
-  dir.Open(db_path_, "SimpleTest", &delegate_, NullTransactionObserver());
+  browser_sync::MockUnrecoverableErrorHandler mock_handler;
+  Directory dir(&mock_handler);
+  ASSERT_EQ(OPENED, dir.Open(db_path_, "SimpleTest", &delegate_,
+                             NullTransactionObserver()));
 
   int64 root_metahandle;
   {
@@ -277,8 +282,10 @@ TEST_F(SyncableGeneralTest, ClientIndexRebuildsProperly) {
 
   // Test creating a new meta entry.
   {
-    Directory dir;
-    dir.Open(db_path_, "IndexTest", &delegate_, NullTransactionObserver());
+    browser_sync::MockUnrecoverableErrorHandler mock_handler;
+    Directory dir(&mock_handler);
+    ASSERT_EQ(OPENED, dir.Open(db_path_, "IndexTest", &delegate_,
+                               NullTransactionObserver()));
     {
       WriteTransaction wtrans(FROM_HERE, UNITTEST, &dir);
       MutableEntry me(&wtrans, CREATE, wtrans.root_id(), name);
@@ -293,8 +300,10 @@ TEST_F(SyncableGeneralTest, ClientIndexRebuildsProperly) {
 
   // The DB was closed. Now reopen it. This will cause index regeneration.
   {
-    Directory dir;
-    dir.Open(db_path_, "IndexTest", &delegate_, NullTransactionObserver());
+    browser_sync::MockUnrecoverableErrorHandler mock_handler;
+    Directory dir(&mock_handler);
+    ASSERT_EQ(OPENED, dir.Open(db_path_, "IndexTest",
+                               &delegate_, NullTransactionObserver()));
 
     ReadTransaction trans(FROM_HERE, &dir);
     Entry me(&trans, GET_BY_CLIENT_TAG, tag);
@@ -313,8 +322,10 @@ TEST_F(SyncableGeneralTest, ClientIndexRebuildsDeletedProperly) {
 
   // Test creating a deleted, unsynced, server meta entry.
   {
-    Directory dir;
-    dir.Open(db_path_, "IndexTest", &delegate_, NullTransactionObserver());
+    browser_sync::MockUnrecoverableErrorHandler mock_handler;
+    Directory dir(&mock_handler);
+    ASSERT_EQ(OPENED, dir.Open(db_path_, "IndexTest", &delegate_,
+                                NullTransactionObserver()));
     {
       WriteTransaction wtrans(FROM_HERE, UNITTEST, &dir);
       MutableEntry me(&wtrans, CREATE, wtrans.root_id(), "deleted");
@@ -331,8 +342,10 @@ TEST_F(SyncableGeneralTest, ClientIndexRebuildsDeletedProperly) {
   // The DB was closed. Now reopen it. This will cause index regeneration.
   // Should still be present and valid in the client tag index.
   {
-    Directory dir;
-    dir.Open(db_path_, "IndexTest", &delegate_, NullTransactionObserver());
+    browser_sync::MockUnrecoverableErrorHandler mock_handler;
+    Directory dir(&mock_handler);
+    ASSERT_EQ(OPENED, dir.Open(db_path_, "IndexTest", &delegate_,
+                               NullTransactionObserver()));
 
     ReadTransaction trans(FROM_HERE, &dir);
     Entry me(&trans, GET_BY_CLIENT_TAG, tag);
@@ -345,8 +358,10 @@ TEST_F(SyncableGeneralTest, ClientIndexRebuildsDeletedProperly) {
 }
 
 TEST_F(SyncableGeneralTest, ToValue) {
-  Directory dir;
-  dir.Open(db_path_, "SimpleTest", &delegate_, NullTransactionObserver());
+  browser_sync::MockUnrecoverableErrorHandler mock_handler;
+  Directory dir(&mock_handler);
+  ASSERT_EQ(OPENED, dir.Open(db_path_, "SimpleTest", &delegate_,
+                             NullTransactionObserver()));
 
   const Id id = TestIdFactory::FromNumber(99);
   {
@@ -381,6 +396,7 @@ TEST_F(SyncableGeneralTest, ToValue) {
 // A Directory whose backing store always fails SaveChanges by returning false.
 class TestUnsaveableDirectory : public Directory {
  public:
+  TestUnsaveableDirectory() : Directory(&mock_handler_) {}
   class UnsaveableBackingStore : public DirectoryBackingStore {
    public:
      UnsaveableBackingStore(const std::string& dir_name,
@@ -395,6 +411,8 @@ class TestUnsaveableDirectory : public Directory {
       const FilePath& backing_filepath) {
     return new UnsaveableBackingStore(dir_name, backing_filepath);
   }
+ private:
+  browser_sync::MockUnrecoverableErrorHandler mock_handler_;
 };
 
 // Test suite for syncable::Directory.
@@ -408,11 +426,12 @@ class SyncableDirectoryTest : public testing::Test {
   // SetUp() is called before each test case is run.
   // The sqlite3 DB is deleted before each test is run.
   virtual void SetUp() {
+    browser_sync::MockUnrecoverableErrorHandler mock_handler;
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     file_path_ = temp_dir_.path().Append(
         FILE_PATH_LITERAL("Test.sqlite3"));
     file_util::Delete(file_path_, true);
-    dir_.reset(new Directory());
+    dir_.reset(new Directory(&mock_handler));
     ASSERT_TRUE(dir_.get());
     ASSERT_EQ(OPENED, dir_->Open(file_path_, kName,
                                  &delegate_, NullTransactionObserver()));
@@ -427,7 +446,8 @@ class SyncableDirectoryTest : public testing::Test {
   }
 
   void ReloadDir() {
-    dir_.reset(new Directory());
+    browser_sync::MockUnrecoverableErrorHandler mock_handler;
+    dir_.reset(new Directory(&mock_handler));
     ASSERT_TRUE(dir_.get());
     ASSERT_EQ(OPENED, dir_->Open(file_path_, kName,
                                  &delegate_, NullTransactionObserver()));
@@ -446,7 +466,7 @@ class SyncableDirectoryTest : public testing::Test {
     return 1 == dir_->kernel_->metahandles_to_purge->count(metahandle);
   }
 
-  void CheckPurgeEntriesWithTypeInSucceeded(const ModelTypeSet& types_to_purge,
+  void CheckPurgeEntriesWithTypeInSucceeded(ModelTypeSet types_to_purge,
                                             bool before_reload) {
     SCOPED_TRACE(testing::Message("Before reload: ") << before_reload);
     {
@@ -459,15 +479,24 @@ class SyncableDirectoryTest : public testing::Test {
       for (MetahandleSet::iterator iter = all_set.begin();
            iter != all_set.end(); ++iter) {
         Entry e(&trans, GET_BY_HANDLE, *iter);
-        if ((types_to_purge.count(e.GetModelType()) ||
-             types_to_purge.count(e.GetServerModelType()))) {
+        const ModelType local_type = e.GetModelType();
+        const ModelType server_type = e.GetServerModelType();
+
+        // Note the dance around incrementing |it|, since we sometimes erase().
+        if ((IsRealDataType(local_type) &&
+             types_to_purge.Has(local_type)) ||
+            (IsRealDataType(server_type) &&
+             types_to_purge.Has(server_type))) {
           FAIL() << "Illegal type should have been deleted.";
         }
       }
     }
 
-    EXPECT_FALSE(dir_->initial_sync_ended_for_type(PREFERENCES));
-    EXPECT_FALSE(dir_->initial_sync_ended_for_type(AUTOFILL));
+    for (ModelTypeSet::Iterator it = types_to_purge.First();
+         it.Good(); it.Inc()) {
+      EXPECT_FALSE(dir_->initial_sync_ended_for_type(it.Get()));
+    }
+    EXPECT_FALSE(types_to_purge.Has(BOOKMARKS));
     EXPECT_TRUE(dir_->initial_sync_ended_for_type(BOOKMARKS));
   }
 
@@ -524,8 +553,7 @@ TEST_F(SyncableDirectoryTest, TakeSnapshotGetsMetahandlesToPurge) {
     }
   }
 
-  ModelTypeSet to_purge;
-  to_purge.insert(BOOKMARKS);
+  syncable::ModelTypeSet to_purge(BOOKMARKS);
   dir_->PurgeEntriesWithTypeIn(to_purge);
 
   Directory::SaveChangesSnapshot snapshot1;
@@ -533,8 +561,8 @@ TEST_F(SyncableDirectoryTest, TakeSnapshotGetsMetahandlesToPurge) {
   dir_->TakeSnapshotForSaveChanges(&snapshot1);
   EXPECT_TRUE(expected_purges == snapshot1.metahandles_to_purge);
 
-  to_purge.clear();
-  to_purge.insert(PREFERENCES);
+  to_purge.Clear();
+  to_purge.Put(PREFERENCES);
   dir_->PurgeEntriesWithTypeIn(to_purge);
 
   dir_->HandleSaveChangesFailure(snapshot1);
@@ -615,9 +643,7 @@ TEST_F(SyncableDirectoryTest, TestPurgeEntriesWithTypeIn) {
   dir_->set_initial_sync_ended_for_type(PREFERENCES, true);
   dir_->set_initial_sync_ended_for_type(AUTOFILL, true);
 
-  std::set<ModelType> types_to_purge;
-  types_to_purge.insert(PREFERENCES);
-  types_to_purge.insert(AUTOFILL);
+  syncable::ModelTypeSet types_to_purge(PREFERENCES, AUTOFILL);
 
   TestIdFactory id_factory;
   // Create some items for each type.
@@ -879,8 +905,8 @@ TEST_F(SyncableDirectoryTest, TestGetUnsynced) {
 TEST_F(SyncableDirectoryTest, TestGetUnappliedUpdates) {
   Directory::UnappliedUpdateMetaHandles handles;
   int64 handle1, handle2;
-  syncable::ModelTypeBitSet all_types;
-  all_types.set();
+  const syncable::FullModelTypeSet all_types =
+      syncable::FullModelTypeSet::All();
   {
     WriteTransaction trans(FROM_HERE, UNITTEST, dir_.get());
 
@@ -1193,7 +1219,8 @@ TEST_F(SyncableDirectoryTest, TestSimpleFieldsPreservedDuringSaveChanges) {
   }
 
   dir_->SaveChanges();
-  dir_.reset(new Directory());
+  browser_sync::MockUnrecoverableErrorHandler mock_handler;
+  dir_.reset(new Directory(&mock_handler));
   ASSERT_TRUE(dir_.get());
   ASSERT_EQ(OPENED, dir_->Open(file_path_, kName,
                                &delegate_, NullTransactionObserver()));
@@ -1373,8 +1400,7 @@ TEST_F(SyncableDirectoryTest, TestSaveChangesFailureWithPurge) {
                                &delegate_, NullTransactionObserver()));
   ASSERT_TRUE(dir_->good());
 
-  ModelTypeSet set;
-  set.insert(BOOKMARKS);
+  syncable::ModelTypeSet set(BOOKMARKS);
   dir_->PurgeEntriesWithTypeIn(set);
   EXPECT_TRUE(IsInMetahandlesToPurge(handle1));
   ASSERT_FALSE(dir_->SaveChanges());
@@ -1499,44 +1525,14 @@ class SyncableDirectoryManager : public testing::Test {
 
 TEST_F(SyncableDirectoryManager, TestFileRelease) {
   DirectoryManager dm(FilePath(temp_dir_.path()));
-  ASSERT_TRUE(dm.Open("ScopeTest", &delegate_, NullTransactionObserver()));
+  browser_sync::MockUnrecoverableErrorHandler mock_handler;
+  ASSERT_TRUE(dm.Open("ScopeTest", &delegate_, &mock_handler,
+              NullTransactionObserver()));
   {
     ScopedDirLookup(&dm, "ScopeTest");
   }
   dm.Close("ScopeTest");
   ASSERT_TRUE(file_util::Delete(dm.GetSyncDataDatabasePath(), true));
-}
-
-class ThreadOpenTestDelegate : public base::PlatformThread::Delegate {
- public:
-  explicit ThreadOpenTestDelegate(DirectoryManager* dm)
-      : directory_manager_(dm) {}
-  DirectoryManager* const directory_manager_;
-  NullDirectoryChangeDelegate delegate_;
-
- private:
-  // PlatformThread::Delegate methods:
-  virtual void ThreadMain() {
-    CHECK(directory_manager_->Open(
-        "Open", &delegate_, NullTransactionObserver()));
-  }
-
-  DISALLOW_COPY_AND_ASSIGN(ThreadOpenTestDelegate);
-};
-
-TEST_F(SyncableDirectoryManager, ThreadOpenTest) {
-  DirectoryManager dm(FilePath(temp_dir_.path()));
-  base::PlatformThreadHandle thread_handle;
-  ThreadOpenTestDelegate test_delegate(&dm);
-  ASSERT_TRUE(base::PlatformThread::Create(0, &test_delegate, &thread_handle));
-  base::PlatformThread::Join(thread_handle);
-  {
-    ScopedDirLookup dir(&dm, "Open");
-    ASSERT_TRUE(dir.good());
-  }
-  dm.Close("Open");
-  ScopedDirLookup dir(&dm, "Open");
-  ASSERT_FALSE(dir.good());
 }
 
 struct Step {
@@ -1565,7 +1561,7 @@ class ThreadBugDelegate : public base::PlatformThread::Delegate {
     MessageLoop message_loop;
     const std::string dirname = "ThreadBug1";
     base::AutoLock scoped_lock(step_->mutex);
-
+    browser_sync::MockUnrecoverableErrorHandler mock_handler;
     while (step_->number < 3) {
       while (step_->number % 2 != role_) {
         step_->condvar.Wait();
@@ -1573,13 +1569,13 @@ class ThreadBugDelegate : public base::PlatformThread::Delegate {
       switch (step_->number) {
       case 0:
         directory_manager_->Open(
-            dirname, &delegate_, NullTransactionObserver());
+            dirname, &delegate_, &mock_handler, NullTransactionObserver());
         break;
       case 1:
         {
           directory_manager_->Close(dirname);
           directory_manager_->Open(
-              dirname, &delegate_, NullTransactionObserver());
+              dirname, &delegate_, &mock_handler, NullTransactionObserver());
           ScopedDirLookup dir(directory_manager_, dirname);
           CHECK(dir.good());
           WriteTransaction trans(FROM_HERE, UNITTEST, dir);
@@ -1607,26 +1603,6 @@ class ThreadBugDelegate : public base::PlatformThread::Delegate {
   DISALLOW_COPY_AND_ASSIGN(ThreadBugDelegate);
 };
 
-TEST_F(SyncableDirectoryManager, ThreadBug1) {
-  Step step;
-  step.number = 0;
-  DirectoryManager dirman(FilePath(temp_dir_.path()));
-  ThreadBugDelegate thread_delegate_1(0, &step, &dirman);
-  ThreadBugDelegate thread_delegate_2(1, &step, &dirman);
-
-  base::PlatformThreadHandle thread_handle_1;
-  base::PlatformThreadHandle thread_handle_2;
-
-  ASSERT_TRUE(
-      base::PlatformThread::Create(0, &thread_delegate_1, &thread_handle_1));
-  ASSERT_TRUE(
-      base::PlatformThread::Create(0, &thread_delegate_2, &thread_handle_2));
-
-  base::PlatformThread::Join(thread_handle_1);
-  base::PlatformThread::Join(thread_handle_2);
-}
-
-
 // The in-memory information would get out of sync because a
 // directory would be closed and re-opened, and then an old
 // Directory::Kernel with stale information would get saved to the db.
@@ -1650,12 +1626,13 @@ class DirectoryKernelStalenessBugDelegate : public ThreadBugDelegate {
       switch (step_->number) {
       case 0:
         {
+          browser_sync::MockUnrecoverableErrorHandler mock_handler;
           // Clean up remnants of earlier test runs.
           file_util::Delete(directory_manager_->GetSyncDataDatabasePath(),
                             true);
           // Test.
           directory_manager_->Open(
-              dirname, &delegate_, NullTransactionObserver());
+              dirname, &delegate_, &mock_handler, NullTransactionObserver());
           ScopedDirLookup dir(directory_manager_, dirname);
           CHECK(dir.good());
           WriteTransaction trans(FROM_HERE, UNITTEST, dir);
@@ -1674,8 +1651,9 @@ class DirectoryKernelStalenessBugDelegate : public ThreadBugDelegate {
         break;
       case 1:
         {
+          browser_sync::MockUnrecoverableErrorHandler mock_handler;
           directory_manager_->Open(
-              dirname, &delegate_, NullTransactionObserver());
+              dirname, &delegate_, &mock_handler, NullTransactionObserver());
           ScopedDirLookup dir(directory_manager_, dirname);
           CHECK(dir.good());
         }
@@ -1781,7 +1759,8 @@ TEST(SyncableDirectory, StressTransactions) {
   std::string dirname = "stress";
   file_util::Delete(dirman.GetSyncDataDatabasePath(), true);
   NullDirectoryChangeDelegate delegate;
-  dirman.Open(dirname, &delegate, NullTransactionObserver());
+  browser_sync::MockUnrecoverableErrorHandler mock_handler;
+  dirman.Open(dirname, &delegate, &mock_handler, NullTransactionObserver());
 
   const int kThreadCount = 7;
   base::PlatformThreadHandle threads[kThreadCount];

@@ -8,13 +8,16 @@
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/site_instance.h"
-#include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/site_instance.h"
 #include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
+using content::NavigationController;
+using content::SiteInstance;
+using content::WebContents;
 
 class WebUITest : public TabContentsWrapperTestHarness {
  public:
@@ -25,8 +28,8 @@ class WebUITest : public TabContentsWrapperTestHarness {
   // ID that we should use is passed as a parameter. We'll use the next two
   // values. This must be increasing for the life of the tests.
   static void DoNavigationTest(TabContentsWrapper* wrapper, int page_id) {
-    TabContents* contents = wrapper->tab_contents();
-    NavigationController* controller = &contents->controller();
+    WebContents* contents = wrapper->web_contents();
+    NavigationController* controller = &contents->GetController();
 
     // Start a pending load.
     GURL new_tab_url(chrome::kChromeUINewTabURL);
@@ -35,7 +38,7 @@ class WebUITest : public TabContentsWrapperTestHarness {
                         std::string());
 
     // The navigation entry should be pending with no committed entry.
-    ASSERT_TRUE(controller->pending_entry());
+    ASSERT_TRUE(controller->GetPendingEntry());
     ASSERT_FALSE(controller->GetLastCommittedEntry());
 
     // Check the things the pending Web UI should have set.
@@ -44,7 +47,7 @@ class WebUITest : public TabContentsWrapperTestHarness {
 
     // Now commit the load.
     static_cast<TestRenderViewHost*>(
-        contents->render_view_host())->SendNavigate(page_id, new_tab_url);
+        contents->GetRenderViewHost())->SendNavigate(page_id, new_tab_url);
 
     // The same flags should be set as before now that the load has committed.
     EXPECT_FALSE(wrapper->favicon_tab_helper()->ShouldDisplayFavicon());
@@ -66,13 +69,13 @@ class WebUITest : public TabContentsWrapperTestHarness {
     // process transition, and our RVH pointer will be the "committed" one.
     // In the second call to this function from WebUIToStandard, it won't
     // actually be pending, which is the point of this test.
-    if (contents->render_manager_for_testing()->pending_render_view_host()) {
-      static_cast<TestRenderViewHost*>(
-          contents->render_manager_for_testing()->
-          pending_render_view_host())->SendNavigate(page_id + 1, next_url);
+    TestRenderViewHost* pending_rvh =
+        TestRenderViewHost::GetPendingForController(controller);
+    if (pending_rvh) {
+      pending_rvh->SendNavigate(page_id + 1, next_url);
     } else {
       static_cast<TestRenderViewHost*>(
-          contents->render_view_host())->SendNavigate(page_id + 1, next_url);
+          contents->GetRenderViewHost())->SendNavigate(page_id + 1, next_url);
     }
 
     // The state should now reflect a regular page.
@@ -167,9 +170,9 @@ class TabContentsForFocusTest : public TestTabContents {
 TEST_F(WebUITest, FocusOnNavigate) {
   // Setup.  |tc| will be used to track when we try to focus the location bar.
   TabContentsForFocusTest* tc = new TabContentsForFocusTest(
-      contents()->browser_context(),
-      SiteInstance::CreateSiteInstance(contents()->browser_context()));
-  tc->controller().CopyStateFrom(controller());
+      contents()->GetBrowserContext(),
+      SiteInstance::Create(contents()->GetBrowserContext()));
+  tc->GetController().CopyStateFrom(controller());
   SetContents(tc);
   int page_id = 200;
 

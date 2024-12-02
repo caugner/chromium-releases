@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,9 @@
 
 #include "base/basictypes.h"
 #include "base/environment.h"
+#include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/path_service.h"
 #include "base/test/test_timeouts.h"
 #include "base/win/scoped_com_initializer.h"
 #include "media/audio/audio_io.h"
@@ -42,8 +44,14 @@ class WriteToFileAudioSink : public AudioInputStream::AudioInputCallback {
 
   explicit WriteToFileAudioSink(const char* file_name)
       : buffer_(0, kMaxBufferSize),
-    file_(fopen(file_name, "wb")),
-    bytes_to_write_(0) {
+        bytes_to_write_(0) {
+    FilePath file_path;
+    EXPECT_TRUE(PathService::Get(base::DIR_EXE, &file_path));
+    file_path = file_path.AppendASCII(file_name);
+    binary_file_ = file_util::OpenFile(file_path, "wb");
+    DLOG_IF(ERROR, !binary_file_) << "Failed to open binary PCM data file.";
+    LOG(INFO) << ">> Output file: " << file_path.value()
+              << " has been created.";
   }
 
   virtual ~WriteToFileAudioSink() {
@@ -57,11 +65,11 @@ class WriteToFileAudioSink : public AudioInputStream::AudioInputCallback {
         break;
 
       // Write recorded data chunk to the file and prepare for next chunk.
-      fwrite(chunk, 1, chunk_size, file_);
+      fwrite(chunk, 1, chunk_size, binary_file_);
       buffer_.Seek(chunk_size);
       bytes_written += chunk_size;
     }
-    fclose(file_);
+    file_util::CloseFile(binary_file_);
   }
 
   // AudioInputStream::AudioInputCallback implementation.
@@ -82,31 +90,27 @@ class WriteToFileAudioSink : public AudioInputStream::AudioInputCallback {
 
  private:
   media::SeekableBuffer buffer_;
-  FILE* file_;
+  FILE* binary_file_;
   size_t bytes_to_write_;
 };
 
 // Convenience method which ensures that we are not running on the build
 // bots and that at least one valid input device can be found.
-static bool CanRunAudioTests() {
-  scoped_ptr<base::Environment> env(base::Environment::Create());
-  if (env->HasVar("CHROME_HEADLESS"))
-    return false;
-  AudioManager* audio_man = AudioManager::GetAudioManager();
-  if (NULL == audio_man)
-    return false;
+static bool CanRunAudioTests(AudioManager* audio_man) {
   // TODO(henrika): note that we use Wave today to query the number of
   // existing input devices.
-  return audio_man->HasAudioInputDevices();
+  bool input = audio_man->HasAudioInputDevices();
+  LOG_IF(WARNING, !input) << "No input device detected.";
+  return input;
 }
 
 // Convenience method which creates a default AudioInputStream object but
 // also allows the user to modify the default settings.
 class AudioInputStreamWrapper {
  public:
-  AudioInputStreamWrapper()
+  explicit AudioInputStreamWrapper(AudioManager* audio_manager)
       : com_init_(ScopedCOMInitializer::kMTA),
-        audio_man_(AudioManager::GetAudioManager()),
+        audio_man_(audio_manager),
         format_(AudioParameters::AUDIO_PCM_LOW_LATENCY),
         channel_layout_(CHANNEL_LAYOUT_STEREO),
         bits_per_sample_(16) {
@@ -149,7 +153,7 @@ class AudioInputStreamWrapper {
   }
 
   ScopedCOMInitializer com_init_;
-  AudioManager* audio_man_;
+  scoped_refptr<AudioManager> audio_man_;
   AudioParameters::Format format_;
   ChannelLayout channel_layout_;
   int bits_per_sample_;
@@ -158,8 +162,9 @@ class AudioInputStreamWrapper {
 };
 
 // Convenience method which creates a default AudioInputStream object.
-static AudioInputStream* CreateDefaultAudioInputStream() {
-  AudioInputStreamWrapper aisw;
+static AudioInputStream* CreateDefaultAudioInputStream(
+    AudioManager* audio_manager) {
+  AudioInputStreamWrapper aisw(audio_manager);
   AudioInputStream* ais = aisw.Create();
   return ais;
 }
@@ -168,9 +173,10 @@ static AudioInputStream* CreateDefaultAudioInputStream() {
 // for all supported device roles. The ERole enumeration defines constants
 // that indicate the role that the system/user has assigned to an audio
 // endpoint device.
-// TODO(henrika): modify this test when we suport full device enumeration.
+// TODO(henrika): modify this test when we support full device enumeration.
 TEST(WinAudioInputTest, WASAPIAudioInputStreamHardwareSampleRate) {
-  if (!CanRunAudioTests())
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!CanRunAudioTests(audio_manager))
     return;
 
   ScopedCOMInitializer com_init(ScopedCOMInitializer::kMTA);
@@ -194,26 +200,29 @@ TEST(WinAudioInputTest, WASAPIAudioInputStreamHardwareSampleRate) {
 
 // Test Create(), Close() calling sequence.
 TEST(WinAudioInputTest, WASAPIAudioInputStreamCreateAndClose) {
-  if (!CanRunAudioTests())
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!CanRunAudioTests(audio_manager))
     return;
-  AudioInputStream* ais = CreateDefaultAudioInputStream();
+  AudioInputStream* ais = CreateDefaultAudioInputStream(audio_manager);
   ais->Close();
 }
 
 // Test Open(), Close() calling sequence.
 TEST(WinAudioInputTest, WASAPIAudioInputStreamOpenAndClose) {
-  if (!CanRunAudioTests())
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!CanRunAudioTests(audio_manager))
     return;
-  AudioInputStream* ais = CreateDefaultAudioInputStream();
+  AudioInputStream* ais = CreateDefaultAudioInputStream(audio_manager);
   EXPECT_TRUE(ais->Open());
   ais->Close();
 }
 
 // Test Open(), Start(), Close() calling sequence.
 TEST(WinAudioInputTest, WASAPIAudioInputStreamOpenStartAndClose) {
-  if (!CanRunAudioTests())
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!CanRunAudioTests(audio_manager))
     return;
-  AudioInputStream* ais = CreateDefaultAudioInputStream();
+  AudioInputStream* ais = CreateDefaultAudioInputStream(audio_manager);
   EXPECT_TRUE(ais->Open());
   MockAudioInputCallback sink;
   ais->Start(&sink);
@@ -224,9 +233,10 @@ TEST(WinAudioInputTest, WASAPIAudioInputStreamOpenStartAndClose) {
 
 // Test Open(), Start(), Stop(), Close() calling sequence.
 TEST(WinAudioInputTest, WASAPIAudioInputStreamOpenStartStopAndClose) {
-  if (!CanRunAudioTests())
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!CanRunAudioTests(audio_manager))
     return;
-  AudioInputStream* ais = CreateDefaultAudioInputStream();
+  AudioInputStream* ais = CreateDefaultAudioInputStream(audio_manager);
   EXPECT_TRUE(ais->Open());
   MockAudioInputCallback sink;
   ais->Start(&sink);
@@ -238,9 +248,10 @@ TEST(WinAudioInputTest, WASAPIAudioInputStreamOpenStartStopAndClose) {
 
 // Test some additional calling sequences.
 TEST(MacAudioInputTest, WASAPIAudioInputStreamMiscCallingSequences) {
-  if (!CanRunAudioTests())
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!CanRunAudioTests(audio_manager))
     return;
-  AudioInputStream* ais = CreateDefaultAudioInputStream();
+  AudioInputStream* ais = CreateDefaultAudioInputStream(audio_manager);
   WASAPIAudioInputStream* wais = static_cast<WASAPIAudioInputStream*>(ais);
 
   // Open(), Open() should fail the second time.
@@ -267,14 +278,15 @@ TEST(MacAudioInputTest, WASAPIAudioInputStreamMiscCallingSequences) {
 }
 
 TEST(WinAudioInputTest, WASAPIAudioInputStreamTestPacketSizes) {
-  if (!CanRunAudioTests())
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!CanRunAudioTests(audio_manager))
     return;
 
   // 10 ms packet size.
 
   // Create default WASAPI input stream which records in stereo using
   // the shared mixing rate. The default buffer size is 10ms.
-  AudioInputStreamWrapper aisw;
+  AudioInputStreamWrapper aisw(audio_manager);
   AudioInputStream* ais = aisw.Create();
   EXPECT_TRUE(ais->Open());
 
@@ -293,7 +305,7 @@ TEST(WinAudioInputTest, WASAPIAudioInputStreamTestPacketSizes) {
       .Times(Between(5, 10));
 
   ais->Start(&sink);
-  base::PlatformThread::Sleep(TestTimeouts::tiny_timeout_ms());
+  base::PlatformThread::Sleep(TestTimeouts::tiny_timeout());
   ais->Stop();
 
   // Store current packet size (to be used in the subsequent tests).
@@ -314,7 +326,7 @@ TEST(WinAudioInputTest, WASAPIAudioInputStreamTestPacketSizes) {
       ais, NotNull(), bytes_per_packet, Gt(bytes_per_packet)))
       .Times(Between(5, 10));
   ais->Start(&sink);
-  base::PlatformThread::Sleep(2 * TestTimeouts::tiny_timeout_ms());
+  base::PlatformThread::Sleep(2 * TestTimeouts::tiny_timeout());
   ais->Stop();
 
   EXPECT_CALL(sink, OnClose(ais))
@@ -332,7 +344,7 @@ TEST(WinAudioInputTest, WASAPIAudioInputStreamTestPacketSizes) {
       ais, NotNull(), bytes_per_packet, Gt(bytes_per_packet)))
       .Times(Between(2 * 5, 2 * 10));
   ais->Start(&sink);
-  base::PlatformThread::Sleep(TestTimeouts::tiny_timeout_ms());
+  base::PlatformThread::Sleep(TestTimeouts::tiny_timeout());
   ais->Stop();
 
   EXPECT_CALL(sink, OnClose(ais))
@@ -347,22 +359,25 @@ TEST(WinAudioInputTest, WASAPIAudioInputStreamTestPacketSizes) {
 // with --gtest_also_run_disabled_tests or set the GTEST_ALSO_RUN_DISABLED_TESTS
 // environment variable to a value greater than 0.
 TEST(WinAudioInputTest, DISABLED_WASAPIAudioInputStreamRecordToFile) {
-  if (!CanRunAudioTests())
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!CanRunAudioTests(audio_manager))
     return;
 
+  // Name of the output PCM file containing captured data. The output file
+  // will be stored in the directory containing 'media_unittests.exe'.
+  // Example of full name: \src\build\Debug\out_stereo_10sec.pcm.
   const char* file_name = "out_stereo_10sec.pcm";
 
-  AudioInputStreamWrapper aisw;
+  AudioInputStreamWrapper aisw(audio_manager);
   AudioInputStream* ais = aisw.Create();
   EXPECT_TRUE(ais->Open());
 
-  fprintf(stderr, "               File name  : %s\n", file_name);
-  fprintf(stderr, "               Sample rate: %d\n", aisw.sample_rate());
+  LOG(INFO) << ">> Sample rate: " << aisw.sample_rate() << " [Hz]";
   WriteToFileAudioSink file_sink(file_name);
-  fprintf(stderr, "               >> Speak into the mic while recording...\n");
+  LOG(INFO) << ">> Speak into the microphone while recording.";
   ais->Start(&file_sink);
   base::PlatformThread::Sleep(TestTimeouts::action_timeout_ms());
   ais->Stop();
-  fprintf(stderr, "               >> Recording has stopped.\n");
+  LOG(INFO) << ">> Recording has stopped.";
   ais->Close();
 }

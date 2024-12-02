@@ -1,9 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/browser_main_loop.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
@@ -12,7 +13,11 @@
 #include "base/metrics/histogram.h"
 #include "base/threading/thread_restrictions.h"
 #include "content/browser/browser_thread_impl.h"
+#include "content/browser/download/download_file_manager.h"
+#include "content/browser/download/save_file_manager.h"
 #include "content/browser/in_process_webkit/webkit_thread.h"
+#include "content/browser/plugin_service_impl.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/trace_controller.h"
 #include "content/common/hi_res_timer_manager.h"
 #include "content/common/sandbox_policy.h"
@@ -55,6 +60,10 @@
 #include <sys/stat.h>
 #include "content/browser/renderer_host/render_sandbox_host_linux.h"
 #include "content/browser/zygote_host_linux.h"
+#endif
+
+#if defined(USE_X11)
+#include <X11/Xlib.h>
 #endif
 
 namespace {
@@ -114,7 +123,8 @@ static void GLibLogHandler(const gchar* log_domain,
     LOG(ERROR) << "GTK File code error: " << message;
   } else if (strstr(message, "Theme file for default has no") ||
              strstr(message, "Theme directory") ||
-             strstr(message, "theme pixmap")) {
+             strstr(message, "theme pixmap") ||
+             strstr(message, "locate theme engine")) {
     LOG(ERROR) << "GTK theme error: " << message;
   } else if (strstr(message, "gtk_drag_dest_leave: assertion")) {
     LOG(ERROR) << "Drag destination deleted: http://crbug.com/18557";
@@ -206,6 +216,15 @@ void BrowserMainLoop::Init() {
 // BrowserMainLoop stages ==================================================
 
 void BrowserMainLoop::EarlyInitialization() {
+#if defined(USE_X11)
+  if (parsed_command_line_.HasSwitch(switches::kSingleProcess) ||
+      parsed_command_line_.HasSwitch(switches::kInProcessGPU)) {
+    if (!XInitThreads()) {
+      LOG(ERROR) << "Failed to put Xlib into threaded mode.";
+    }
+  }
+#endif
+
   if (parts_.get())
     parts_->PreEarlyInitialization();
 
@@ -237,8 +256,6 @@ void BrowserMainLoop::EarlyInitialization() {
   SetupSandbox(parsed_command_line_);
 #endif
 
-  if (parsed_command_line_.HasSwitch(switches::kDisableSSLFalseStart))
-    net::SSLConfigService::DisableFalseStart();
   if (parsed_command_line_.HasSwitch(switches::kEnableSSLCachedInfo))
     net::SSLConfigService::EnableCachedInfo();
   if (parsed_command_line_.HasSwitch(
@@ -288,6 +305,12 @@ void BrowserMainLoop::MainMessageLoopStart() {
   system_message_window_.reset(new SystemMessageWindowWin);
 #endif
 
+  // Prior to any processing happening on the io thread, we create the
+  // plugin service as it is predominantly used from the io thread,
+  // but must be created on the main thread. The service ctor is
+  // inexpensive and does not invoke the io_thread() accessor.
+  PluginService::GetInstance()->Init();
+
   if (parts_.get())
     parts_->PostMainMessageLoopStart();
 }
@@ -295,7 +318,10 @@ void BrowserMainLoop::MainMessageLoopStart() {
 void BrowserMainLoop::RunMainMessageLoopParts(
     bool* completed_main_message_loop) {
   if (parts_.get())
-    parts_->PreCreateThreads();
+    result_code_ = parts_->PreCreateThreads();
+
+  if (result_code_ > 0)
+    return;
 
   base::Thread::Options default_options;
   base::Thread::Options io_message_loop_options;
@@ -318,7 +344,7 @@ void BrowserMainLoop::RunMainMessageLoopParts(
       case BrowserThread::DB:
         thread_to_start = &db_thread_;
         break;
-      case BrowserThread::WEBKIT:
+      case BrowserThread::WEBKIT_DEPRECATED:
         // Special case as WebKitThread is a separate
         // type.  |thread_to_start| is not used in this case.
         break;
@@ -347,12 +373,6 @@ void BrowserMainLoop::RunMainMessageLoopParts(
         thread_to_start = &io_thread_;
         options = &io_message_loop_options;
         break;
-#if defined(OS_CHROMEOS)
-      case BrowserThread::WEB_SOCKET_PROXY:
-        thread_to_start = &web_socket_proxy_thread_;
-        options = &io_message_loop_options;
-        break;
-#endif
       case BrowserThread::UI:
       case BrowserThread::ID_COUNT:
       default:
@@ -362,10 +382,7 @@ void BrowserMainLoop::RunMainMessageLoopParts(
 
     BrowserThread::ID id = static_cast<BrowserThread::ID>(thread_id);
 
-    if (parts_.get())
-      parts_->PreStartThread(id);
-
-    if (thread_id == BrowserThread::WEBKIT) {
+    if (thread_id == BrowserThread::WEBKIT_DEPRECATED) {
       webkit_thread_.reset(new WebKitThread);
       webkit_thread_->Initialize();
     } else if (thread_to_start) {
@@ -374,10 +391,9 @@ void BrowserMainLoop::RunMainMessageLoopParts(
     } else {
       NOTREACHED();
     }
-
-    if (parts_.get())
-      parts_->PostStartThread(id);
   }
+
+  BrowserThreadsStarted();
 
   if (parts_.get())
     parts_->PreMainMessageLoopRun();
@@ -407,12 +423,16 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
   // need to be able to perform IO.
   base::ThreadRestrictions::SetIOAllowed(true);
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      NewRunnableFunction(&base::ThreadRestrictions::SetIOAllowed, true));
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(base::IgnoreResult(&base::ThreadRestrictions::SetIOAllowed),
+                 true));
 
   if (parts_.get())
     parts_->PostMainMessageLoopRun();
+
+  // Cancel pending requests and prevent new requests.
+  if (resource_dispatcher_host_.get())
+    resource_dispatcher_host_.get()->Shutdown();
 
   // Must be size_t so we can subtract from it.
   for (size_t thread_id = BrowserThread::ID_COUNT - 1;
@@ -427,7 +447,6 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
     // BrowserThread::ID list. The rationale for the order is as
     // follows (need to be filled in a bit):
     //
-    // - (Not sure why the WEB_SOCKET_PROXY thread is stopped first.)
     //
     // - The IO thread is the only user of the CACHE thread.
     //
@@ -447,15 +466,26 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
       case BrowserThread::DB:
         thread_to_stop = &db_thread_;
         break;
-      case BrowserThread::WEBKIT:
+      case BrowserThread::WEBKIT_DEPRECATED:
         // Special case as WebKitThread is a separate
         // type.  |thread_to_stop| is not used in this case.
+
+        // Need to destroy ResourceDispatcherHost before PluginService
+        // and since it caches a pointer to it.
+        resource_dispatcher_host_.reset();
         break;
       case BrowserThread::FILE_USER_BLOCKING:
         thread_to_stop = &file_user_blocking_thread_;
         break;
       case BrowserThread::FILE:
         thread_to_stop = &file_thread_;
+
+        // Clean up state that lives on or uses the file_thread_ before
+        // it goes away.
+        if (resource_dispatcher_host_.get()) {
+          resource_dispatcher_host_.get()->download_file_manager()->Shutdown();
+          resource_dispatcher_host_.get()->save_file_manager()->Shutdown();
+        }
         break;
       case BrowserThread::PROCESS_LAUNCHER:
         thread_to_stop = &process_launcher_thread_;
@@ -466,11 +496,6 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
       case BrowserThread::IO:
         thread_to_stop = &io_thread_;
         break;
-#if defined(OS_CHROMEOS)
-      case BrowserThread::WEB_SOCKET_PROXY:
-        thread_to_stop = &web_socket_proxy_thread_;
-        break;
-#endif
       case BrowserThread::UI:
       case BrowserThread::ID_COUNT:
       default:
@@ -480,20 +505,22 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
 
     BrowserThread::ID id = static_cast<BrowserThread::ID>(thread_id);
 
-    if (parts_.get())
-      parts_->PreStopThread(id);
-
-    if (id == BrowserThread::WEBKIT) {
+    if (id == BrowserThread::WEBKIT_DEPRECATED) {
       webkit_thread_.reset();
     } else if (thread_to_stop) {
       thread_to_stop->reset();
     } else {
       NOTREACHED();
     }
-
-    if (parts_.get())
-      parts_->PostStopThread(id);
   }
+
+  // Close the blocking I/O pool after the other threads. Other threads such
+  // as the I/O thread may need to schedule work like closing files or flushing
+  // data during shutdown, so the blocking pool needs to be available. There
+  // may also be slow operations pending that will blcok shutdown, so closing
+  // it here (which will block until required operations are complete) gives
+  // more head start for those operations to finish.
+  BrowserThreadImpl::ShutdownThreadPool();
 
   if (parts_.get())
     parts_->PostDestroyThreads();
@@ -507,6 +534,12 @@ void BrowserMainLoop::InitializeMainThread() {
   // Register the main thread by instantiating it, but don't call any methods.
   main_thread_.reset(new BrowserThreadImpl(BrowserThread::UI,
                                            MessageLoop::current()));
+}
+
+
+void BrowserMainLoop::BrowserThreadsStarted() {
+  // RDH needs the IO thread to be created.
+  resource_dispatcher_host_.reset(new ResourceDispatcherHost());
 }
 
 void BrowserMainLoop::InitializeToolkit() {
@@ -523,8 +556,12 @@ void BrowserMainLoop::InitializeToolkit() {
   // requirement for gconf.
   g_type_init();
 
+#if defined(USE_AURA)
+  setlocale(LC_ALL, "");
+#endif
+
 #if !defined(USE_AURA)
-  gfx::GtkInitFromCommandLine(parameters_.command_line);
+  gfx::GtkInitFromCommandLine(parsed_command_line_);
 #endif
 
   SetUpGLibLogHandler();
@@ -551,7 +588,7 @@ void BrowserMainLoop::InitializeToolkit() {
 
 void BrowserMainLoop::MainMessageLoopRun() {
   if (parameters_.ui_task)
-    MessageLoopForUI::current()->PostTask(FROM_HERE, parameters_.ui_task);
+    MessageLoopForUI::current()->PostTask(FROM_HERE, *parameters_.ui_task);
 
 #if defined(OS_MACOSX)
   MessageLoopForUI::current()->Run();

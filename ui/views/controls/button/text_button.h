@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -111,8 +111,8 @@ class VIEWS_EXPORT TextButtonNativeThemeBorder : public Border {
 //
 // TextButtonBase
 //
-//  A base ckass for different types of buttons, like push buttons, radio
-//  buttons, and checkboxes, that do not depende on native components for
+//  A base class for different types of buttons, like push buttons, radio
+//  buttons, and checkboxes, that do not depend on native components for
 //  look and feel. TextButton reserves space for the largest string
 //  passed to SetText. To reset the cached max size invoke ClearMaxTextSize.
 //
@@ -206,12 +206,6 @@ class VIEWS_EXPORT TextButtonBase : public CustomButton,
   virtual int GetHeightForWidth(int w) OVERRIDE;
   virtual void OnEnabledChanged() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-
-  // Text colors.
-  static const SkColor kEnabledColor;
-  static const SkColor kHighlightColor;
-  static const SkColor kDisabledColor;
-  static const SkColor kHoverColor;
 
   // Returns views/TextButton.
   virtual std::string GetClassName() const OVERRIDE;

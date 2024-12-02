@@ -8,9 +8,9 @@
 
 #include "base/bind.h"
 #include "base/file_path.h"
+#include "base/pickle.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
-#include "base/task.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
@@ -23,6 +23,7 @@
 #include "content/public/common/url_constants.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_util.h"
+#include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/gfx/mac/nsimage_cache.h"
 #include "webkit/glue/webdropdata.h"
 
@@ -202,6 +203,13 @@ void PromiseWriterHelper(const WebDropData& drop_data,
     [pboard setString:SysUTF16ToNSString(dropData_->plain_text)
               forType:NSStringPboardType];
 
+  // Custom MIME data.
+  } else if ([type isEqualToString:ui::kWebCustomDataPboardType]) {
+    Pickle pickle;
+    ui::WriteCustomDataToPickle(dropData_->custom_data, &pickle);
+    [pboard setData:[NSData dataWithBytes:pickle.data() length:pickle.size()]
+            forType:ui::kWebCustomDataPboardType];
+
   // Oops!
   } else {
     NOTREACHED() << "Asked for a drag pasteboard type we didn't offer.";
@@ -252,7 +260,7 @@ void PromiseWriterHelper(const WebDropData& drop_data,
         operation:(NSDragOperation)operation {
   contents_->SystemDragEnded();
 
-  RenderViewHost* rvh = contents_->render_view_host();
+  RenderViewHost* rvh = contents_->GetRenderViewHost();
   if (rvh) {
     // Convert |screenPoint| to view coordinates and flip it.
     NSPoint localPoint = NSMakePoint(0, 0);
@@ -280,7 +288,7 @@ void PromiseWriterHelper(const WebDropData& drop_data,
 }
 
 - (void)moveDragTo:(NSPoint)screenPoint {
-  RenderViewHost* rvh = contents_->render_view_host();
+  RenderViewHost* rvh = contents_->GetRenderViewHost();
   if (rvh) {
     // Convert |screenPoint| to view coordinates and flip it.
     NSPoint localPoint = NSMakePoint(0, 0);
@@ -324,7 +332,7 @@ void PromiseWriterHelper(const WebDropData& drop_data,
         linked_ptr<net::FileStream>(fileStream),
         downloadURL_,
         contents_->GetURL(),
-        contents_->encoding(),
+        contents_->GetEncoding(),
         contents_));
 
     // The finalizer will take care of closing and deletion.
@@ -418,6 +426,12 @@ void PromiseWriterHelper(const WebDropData& drop_data,
   if (!dropData_->plain_text.empty())
     [pasteboard_ addTypes:[NSArray arrayWithObject:NSStringPboardType]
                     owner:contentsView_];
+
+  if (!dropData_->custom_data.empty()) {
+    [pasteboard_
+        addTypes:[NSArray arrayWithObject:ui::kWebCustomDataPboardType]
+           owner:contentsView_];
+  }
 }
 
 - (NSImage*)dragImage {

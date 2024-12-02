@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,8 +25,6 @@ namespace net {
 class CertVerifier;
 class ClientSocketFactory;
 class ConnectJobFactory;
-class DnsCertProvenanceChecker;
-class DnsRRResolver;
 class HostPortPair;
 class HttpProxyClientSocketPool;
 class HttpProxySocketParams;
@@ -34,8 +32,9 @@ class SOCKSClientSocketPool;
 class SOCKSSocketParams;
 class SSLClientSocket;
 class SSLHostInfoFactory;
-class TransportSocketParams;
 class TransportClientSocketPool;
+class TransportSecurityState;
+class TransportSocketParams;
 
 // SSLSocketParams only needs the socket params for the transport socket
 // that will be used (denoted by |proxy|).
@@ -152,7 +151,7 @@ class SSLConnectJob : public ConnectJob {
   const SSLClientSocketContext context_;
 
   State next_state_;
-  OldCompletionCallbackImpl<SSLConnectJob> callback_;
+  CompletionCallback callback_;
   scoped_ptr<ClientSocketHandle> transport_socket_handle_;
   scoped_ptr<SSLClientSocket> ssl_socket_;
   scoped_ptr<SSLHostInfo> ssl_host_info_;
@@ -178,9 +177,9 @@ class NET_EXPORT_PRIVATE SSLClientSocketPool
       HostResolver* host_resolver,
       CertVerifier* cert_verifier,
       OriginBoundCertService* origin_bound_cert_service,
-      DnsRRResolver* dnsrr_resolver,
-      DnsCertProvenanceChecker* dns_cert_checker,
+      TransportSecurityState* transport_security_state,
       SSLHostInfoFactory* ssl_host_info_factory,
+      const std::string& ssl_session_cache_shard,
       ClientSocketFactory* client_socket_factory,
       TransportClientSocketPool* transport_pool,
       SOCKSClientSocketPool* socks_pool,
@@ -190,12 +189,12 @@ class NET_EXPORT_PRIVATE SSLClientSocketPool
 
   virtual ~SSLClientSocketPool();
 
-  // ClientSocketPool methods:
+  // ClientSocketPool implementation.
   virtual int RequestSocket(const std::string& group_name,
                             const void* connect_params,
                             RequestPriority priority,
                             ClientSocketHandle* handle,
-                            OldCompletionCallback* callback,
+                            const CompletionCallback& callback,
                             const BoundNetLog& net_log) OVERRIDE;
 
   virtual void RequestSockets(const std::string& group_name,
@@ -235,7 +234,7 @@ class NET_EXPORT_PRIVATE SSLClientSocketPool
  private:
   typedef ClientSocketPoolBase<SSLSocketParams> PoolBase;
 
-  // SSLConfigService::Observer methods:
+  // SSLConfigService::Observer implementation.
 
   // When the user changes the SSL config, we flush all idle sockets so they
   // won't get re-used.

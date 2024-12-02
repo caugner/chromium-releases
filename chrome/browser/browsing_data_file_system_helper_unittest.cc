@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,14 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/file_util.h"
+#include "base/platform_file.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browsing_data_file_system_helper.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/test/test_browser_thread.h"
 #include "webkit/fileapi/file_system_context.h"
-#include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_usage_cache.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
@@ -77,11 +78,9 @@ class BrowsingDataFileSystemHelperTest : public testing::Test {
   }
 
   // Callback that should be executed in response to
-  // fileapi::SandboxMountPointProvider::ValidateFileSystemRootAndGetURL
-  void CallbackFindFileSystemPath(bool success,
-                                  const FilePath& path,
-                                  const std::string& name) {
-    found_file_system_ = success;
+  // fileapi::SandboxMountPointProvider::ValidateFileSystemRoot
+  void ValidateFileSystemCallback(base::PlatformFileError error) {
+    validate_file_system_result_ = error;
     Notify();
   }
 
@@ -91,13 +90,13 @@ class BrowsingDataFileSystemHelperTest : public testing::Test {
   // synchronously to it's caller.
   bool FileSystemContainsOriginAndType(const GURL& origin,
                                        fileapi::FileSystemType type) {
-    sandbox_->ValidateFileSystemRootAndGetURL(
+    sandbox_->ValidateFileSystemRoot(
         origin, type, false,
         base::Bind(
-            &BrowsingDataFileSystemHelperTest::CallbackFindFileSystemPath,
+            &BrowsingDataFileSystemHelperTest::ValidateFileSystemCallback,
             base::Unretained(this)));
     BlockUntilNotified();
-    return found_file_system_;
+    return validate_file_system_result_ == base::PLATFORM_FILE_OK;
   }
 
   // Callback that should be executed in response to StartFetching(), and stores
@@ -132,8 +131,7 @@ class BrowsingDataFileSystemHelperTest : public testing::Test {
   // Sets up kOrigin1 with a temporary file system, kOrigin2 with a persistent
   // file system, and kOrigin3 with both.
   virtual void PopulateTestFileSystemData() {
-    sandbox_ = profile_.GetFileSystemContext()->path_manager()->
-        sandbox_provider();
+    sandbox_ = profile_.GetFileSystemContext()->sandbox_provider();
 
     CreateDirectoryForOriginAndType(kOrigin1, kTemporary);
     CreateDirectoryForOriginAndType(kOrigin2, kPersistent);
@@ -152,7 +150,7 @@ class BrowsingDataFileSystemHelperTest : public testing::Test {
   // specified origin.
   void CreateDirectoryForOriginAndType(const GURL& origin,
                                        fileapi::FileSystemType type) {
-    FilePath target = sandbox_->ValidateFileSystemRootAndGetPathOnFileThread(
+    FilePath target = sandbox_->GetFileSystemRootPathOnFileThread(
         origin, type, FilePath(), true);
     EXPECT_TRUE(file_util::DirectoryExists(target));
   }
@@ -165,7 +163,7 @@ class BrowsingDataFileSystemHelperTest : public testing::Test {
 
 
   // Temporary storage to pass information back from callbacks.
-  bool found_file_system_;
+  base::PlatformFileError validate_file_system_result_;
   ScopedFileSystemInfoList file_system_info_list_;
 
   scoped_refptr<BrowsingDataFileSystemHelper> helper_;
@@ -287,4 +285,3 @@ TEST_F(BrowsingDataFileSystemHelperTest, CannedAddFileSystem) {
 }
 
 }  // namespace
-

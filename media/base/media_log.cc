@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,18 @@
 
 #include "base/atomic_sequence_num.h"
 #include "base/bind.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "base/values.h"
 
 namespace media {
 
 // A count of all MediaLogs created on this render process.
 // Used to generate unique ids.
-static base::AtomicSequenceNumber media_log_count(base::LINKER_INITIALIZED);
+static base::LazyInstance<base::AtomicSequenceNumber>::Leaky media_log_count =
+    LAZY_INSTANCE_INITIALIZER;
 
 const char* MediaLog::EventTypeToString(MediaLogEvent::Type type) {
   switch (type) {
@@ -61,37 +64,37 @@ const char* MediaLog::EventTypeToString(MediaLogEvent::Type type) {
   return NULL;
 }
 
-const char* MediaLog::PipelineStateToString(PipelineImpl::State state) {
+const char* MediaLog::PipelineStateToString(Pipeline::State state) {
   switch (state) {
-    case PipelineImpl::kCreated:
+    case Pipeline::kCreated:
       return "created";
-    case PipelineImpl::kInitDemuxer:
+    case Pipeline::kInitDemuxer:
       return "initDemuxer";
-    case PipelineImpl::kInitAudioDecoder:
+    case Pipeline::kInitAudioDecoder:
       return "initAudioDecoder";
-    case PipelineImpl::kInitAudioRenderer:
+    case Pipeline::kInitAudioRenderer:
       return "initAudioRenderer";
-    case PipelineImpl::kInitVideoDecoder:
+    case Pipeline::kInitVideoDecoder:
       return "initVideoDecoder";
-    case PipelineImpl::kInitVideoRenderer:
+    case Pipeline::kInitVideoRenderer:
       return "initVideoRenderer";
-    case PipelineImpl::kPausing:
+    case Pipeline::kPausing:
       return "pausing";
-    case PipelineImpl::kSeeking:
+    case Pipeline::kSeeking:
       return "seeking";
-    case PipelineImpl::kFlushing:
+    case Pipeline::kFlushing:
       return "flushing";
-    case PipelineImpl::kStarting:
+    case Pipeline::kStarting:
       return "starting";
-    case PipelineImpl::kStarted:
+    case Pipeline::kStarted:
       return "started";
-    case PipelineImpl::kEnded:
+    case Pipeline::kEnded:
       return "ended";
-    case PipelineImpl::kStopping:
+    case Pipeline::kStopping:
       return "stopping";
-    case PipelineImpl::kStopped:
+    case Pipeline::kStopped:
       return "stopped";
-    case PipelineImpl::kError:
+    case Pipeline::kError:
       return "error";
   }
   NOTREACHED();
@@ -144,87 +147,87 @@ const char* MediaLog::PipelineStatusToString(PipelineStatus status) {
 }
 
 MediaLog::MediaLog() {
-  id_ = media_log_count.GetNext();
+  id_ = media_log_count.Get().GetNext();
   stats_update_pending_ = false;
 }
 
 MediaLog::~MediaLog() {}
 
-void MediaLog::AddEvent(MediaLogEvent* event) {
-  scoped_ptr<MediaLogEvent> e(event);
+void MediaLog::AddEvent(scoped_ptr<MediaLogEvent> event) {
 }
 
-MediaLogEvent* MediaLog::CreateEvent(MediaLogEvent::Type type) {
+scoped_ptr<MediaLogEvent> MediaLog::CreateEvent(MediaLogEvent::Type type) {
   scoped_ptr<MediaLogEvent> event(new MediaLogEvent);
   event->id = id_;
   event->type = type;
   event->time = base::Time::Now();
-  return event.release();
+  return event.Pass();
 }
 
-MediaLogEvent* MediaLog::CreateBooleanEvent(MediaLogEvent::Type type,
-                                            const char* property, bool value) {
+scoped_ptr<MediaLogEvent> MediaLog::CreateBooleanEvent(
+    MediaLogEvent::Type type, const char* property, bool value) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(type));
   event->params.SetBoolean(property, value);
-  return event.release();
+  return event.Pass();
 }
 
-MediaLogEvent* MediaLog::CreateIntegerEvent(MediaLogEvent::Type type,
-                                            const char* property, int64 value) {
+scoped_ptr<MediaLogEvent> MediaLog::CreateIntegerEvent(
+    MediaLogEvent::Type type, const char* property, int64 value) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(type));
   event->params.SetInteger(property, value);
-  return event.release();
+  return event.Pass();
 }
 
-MediaLogEvent* MediaLog::CreateTimeEvent(MediaLogEvent::Type type,
-                                         const char* property,
-                                         base::TimeDelta value) {
+scoped_ptr<MediaLogEvent> MediaLog::CreateTimeEvent(
+    MediaLogEvent::Type type, const char* property, base::TimeDelta value) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(type));
   event->params.SetDouble(property, value.InSecondsF());
-  return event.release();
+  return event.Pass();
 }
 
-MediaLogEvent* MediaLog::CreateLoadEvent(const std::string& url) {
+scoped_ptr<MediaLogEvent> MediaLog::CreateLoadEvent(const std::string& url) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::LOAD));
   event->params.SetString("url", url);
-  return event.release();
+  return event.Pass();
 }
 
-MediaLogEvent* MediaLog::CreateSeekEvent(float seconds) {
+scoped_ptr<MediaLogEvent> MediaLog::CreateSeekEvent(float seconds) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::SEEK));
   event->params.SetDouble("seek_target", seconds);
-  return event.release();
+  return event.Pass();
 }
 
-MediaLogEvent* MediaLog::CreatePipelineStateChangedEvent(
-    PipelineImpl::State state) {
+scoped_ptr<MediaLogEvent> MediaLog::CreatePipelineStateChangedEvent(
+    Pipeline::State state) {
   scoped_ptr<MediaLogEvent> event(
       CreateEvent(MediaLogEvent::PIPELINE_STATE_CHANGED));
   event->params.SetString("pipeline_state", PipelineStateToString(state));
-  return event.release();
+  return event.Pass();
 }
 
-MediaLogEvent* MediaLog::CreatePipelineErrorEvent(PipelineStatus error) {
+scoped_ptr<MediaLogEvent> MediaLog::CreatePipelineErrorEvent(
+    PipelineStatus error) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::PIPELINE_ERROR));
   event->params.SetString("pipeline_error", PipelineStatusToString(error));
-  return event.release();
+  return event.Pass();
 }
 
-MediaLogEvent* MediaLog::CreateVideoSizeSetEvent(size_t width, size_t height) {
+scoped_ptr<MediaLogEvent> MediaLog::CreateVideoSizeSetEvent(
+    size_t width, size_t height) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::VIDEO_SIZE_SET));
   event->params.SetInteger("width", width);
   event->params.SetInteger("height", height);
-  return event.release();
+  return event.Pass();
 }
 
-MediaLogEvent* MediaLog::CreateBufferedExtentsChangedEvent(
+scoped_ptr<MediaLogEvent> MediaLog::CreateBufferedExtentsChangedEvent(
     size_t start, size_t current, size_t end) {
   scoped_ptr<MediaLogEvent> event(
       CreateEvent(MediaLogEvent::BUFFERED_EXTENTS_CHANGED));
   event->params.SetInteger("buffer_start", start);
   event->params.SetInteger("buffer_current", current);
   event->params.SetInteger("buffer_end", end);
-  return event.release();
+  return event.Pass();
 }
 
 void MediaLog::QueueStatisticsUpdatedEvent(PipelineStatistics stats) {
@@ -239,7 +242,7 @@ void MediaLog::QueueStatisticsUpdatedEvent(PipelineStatistics stats) {
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&media::MediaLog::AddStatisticsUpdatedEvent, this),
-        500);
+        base::TimeDelta::FromMilliseconds(500));
   }
 }
 
@@ -255,7 +258,7 @@ void MediaLog::AddStatisticsUpdatedEvent() {
                            last_statistics_.video_frames_decoded);
   event->params.SetInteger("video_frames_dropped",
                            last_statistics_.video_frames_dropped);
-  AddEvent(event.release());
+  AddEvent(event.Pass());
   stats_update_pending_ = false;
 }
 

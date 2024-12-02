@@ -1,9 +1,11 @@
 {
-  "name": "Split-mode incognito settings test",
+  "name": "Split-mode incognito storage test",
   "version": "1.0",
   "manifest_version": 2,
-  "description": "Tests the API in split incognito mode",
+  "description": "Tests the Storage API in split incognito mode",
   "permissions": ["experimental"],
-  "background_page": "background.html",
+  "background": {
+    "scripts": ["background.js"]
+  },
   "incognito": "split"
 }

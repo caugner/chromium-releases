@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/file_util.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/extension_install_dialog.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -17,10 +18,15 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/browser/gpu/gpu_blacklist.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "net/base/mock_host_resolver.h"
+#include "ui/gfx/gl/gl_switches.h"
+
+using namespace extension_function_test_utils;
 
 namespace {
 
@@ -84,8 +90,10 @@ class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
  public:
   void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII(switches::kAppsGalleryURL,
-        "http://www.example.com");
+    command_line->AppendSwitchASCII(
+        switches::kAppsGalleryURL, "http://www.example.com");
+    command_line->AppendSwitchASCII(
+        switches::kAppsGalleryInstallAutoConfirmForTests, "accept");
   }
 
   void SetUpInProcessBrowserTestFixture() OVERRIDE {
@@ -93,7 +101,6 @@ class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
     // API functions.
     host_resolver()->AddRule("www.example.com", "127.0.0.1");
     ASSERT_TRUE(test_server()->Start());
-    SetExtensionInstallDialogAutoConfirmForTests(true);
     ExtensionInstallUI::DisableFailureUIForTests();
   }
 
@@ -170,9 +177,54 @@ class ExtensionWebstorePrivateBundleTest
   std::vector<FilePath> test_crx_;
 };
 
+class ExtensionWebstoreGetWebGLStatusTest : public InProcessBrowserTest {
+ public:
+  void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    // In linux, we need to launch GPU process to decide if WebGL is allowed.
+    // Run it on top of osmesa to avoid bot driver issues.
+#if defined(OS_LINUX)
+    CHECK(test_launcher_utils::OverrideGLImplementation(
+        command_line, gfx::kGLImplementationOSMesaName)) <<
+        "kUseGL must not be set multiple times!";
+#endif
+  }
+
+ protected:
+  void RunTest(bool webgl_allowed) {
+    static const char kEmptyArgs[] = "[]";
+    static const char kWebGLStatusAllowed[] = "webgl_allowed";
+    static const char kWebGLStatusBlocked[] = "webgl_blocked";
+    scoped_ptr<base::Value> result(RunFunctionAndReturnResult(
+            new GetWebGLStatusFunction(), kEmptyArgs, browser()));
+    EXPECT_EQ(base::Value::TYPE_STRING, result->GetType());
+    StringValue* value = static_cast<StringValue*>(result.get());
+    std::string webgl_status = "";
+    EXPECT_TRUE(value && value->GetAsString(&webgl_status));
+    EXPECT_STREQ(webgl_allowed ? kWebGLStatusAllowed : kWebGLStatusBlocked,
+                 webgl_status.c_str());
+  }
+};
+
 // Test cases where the user accepts the install confirmation dialog.
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, InstallAccepted) {
   ASSERT_TRUE(RunInstallTest("accepted.html", "extension.crx"));
+}
+
+// Test having the default download directory missing.
+IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, MissingDownloadDir) {
+  // Set a non-existent directory as the download path.
+  ScopedTempDir temp_dir;
+  EXPECT_TRUE(temp_dir.CreateUniqueTempDir());
+  FilePath missing_directory = temp_dir.Take();
+  EXPECT_TRUE(file_util::Delete(missing_directory, true));
+  WebstoreInstaller::SetDownloadDirectoryForTests(&missing_directory);
+
+  // Now run the install test, which should succeed.
+  ASSERT_TRUE(RunInstallTest("accepted.html", "extension.crx"));
+
+  // Cleanup.
+  if (file_util::DirectoryExists(missing_directory))
+    EXPECT_TRUE(file_util::Delete(missing_directory, true));
 }
 
 // Tests passing a localized name.
@@ -182,7 +234,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, InstallLocalized) {
 
 // Now test the case where the user cancels the confirmation dialog.
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, InstallCancelled) {
-  SetExtensionInstallDialogAutoConfirmForTests(false);
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAppsGalleryInstallAutoConfirmForTests, "cancel");
   ASSERT_TRUE(RunInstallTest("cancelled.html", "extension.crx"));
 }
 
@@ -208,8 +261,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
 
 // Tests that we can request an app installed bubble (instead of the default
 // UI when an app is installed).
-IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
-                       AppInstallBubble) {
+IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, AppInstallBubble) {
   WebstoreInstallListener listener;
   WebstorePrivateApi::SetWebstoreInstallerDelegateForTesting(&listener);
   ASSERT_TRUE(RunInstallTest("app_install_bubble.html", "app.crx"));
@@ -228,4 +280,39 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateBundleTest, SilentlyInstall) {
   WebstorePrivateApi::SetTrustTestIDsForTesting(true);
   ASSERT_TRUE(RunPageTest(GetTestServerURL("silently_install.html").spec()));
+}
+
+// Tests getWebGLStatus function when WebGL is allowed.
+IN_PROC_BROWSER_TEST_F(ExtensionWebstoreGetWebGLStatusTest, Allowed) {
+  bool webgl_allowed = true;
+  RunTest(webgl_allowed);
+}
+
+// Tests getWebGLStatus function when WebGL is blacklisted.
+IN_PROC_BROWSER_TEST_F(ExtensionWebstoreGetWebGLStatusTest, Blocked) {
+  static const std::string json_blacklist =
+      "{\n"
+      "  \"name\": \"gpu blacklist\",\n"
+      "  \"version\": \"1.0\",\n"
+      "  \"entries\": [\n"
+      "    {\n"
+      "      \"id\": 1,\n"
+      "      \"blacklist\": [\n"
+      "        \"webgl\"\n"
+      "      ]\n"
+      "    }\n"
+      "  ]\n"
+      "}";
+  scoped_ptr<Version> os_version(Version::GetVersionFromString("1.0"));
+  GpuBlacklist* blacklist = new GpuBlacklist("1.0");
+
+  ASSERT_TRUE(blacklist->LoadGpuBlacklist(
+      json_blacklist, GpuBlacklist::kAllOs));
+  GpuDataManager::GetInstance()->SetGpuBlacklist(blacklist);
+  GpuFeatureFlags flags = GpuDataManager::GetInstance()->GetGpuFeatureFlags();
+  EXPECT_EQ(
+      flags.flags(), static_cast<uint32>(GpuFeatureFlags::kGpuFeatureWebgl));
+
+  bool webgl_allowed = false;
+  RunTest(webgl_allowed);
 }

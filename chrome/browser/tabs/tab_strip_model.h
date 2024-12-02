@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,12 +15,16 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/common/page_transition_types.h"
 
-class NavigationController;
 class Profile;
 class TabContents;
 class TabContentsWrapper;
 class TabStripModelDelegate;
 class TabStripModelOrderController;
+
+namespace content {
+class NavigationController;
+class WebContents;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -74,7 +78,7 @@ class TabStripModel : public content::NotificationObserver {
     CLOSE_NONE                     = 0,
 
     // Indicates the tab was closed by the user. If true,
-    // TabContents::set_closed_by_user_gesture(true) is invoked.
+    // TabContents::SetClosedByUserGesture(true) is invoked.
     CLOSE_USER_GESTURE             = 1 << 0,
 
     // If true the history is recorded so that the tab can be reopened later.
@@ -262,17 +266,18 @@ class TabStripModel : public content::NotificationObserver {
   // TabStripModel::kNoTab if the TabContents is not in this TabStripModel.
   int GetIndexOfTabContents(const TabContentsWrapper* contents) const;
 
-  // Returns the index of the specified TabContents wrapper given its raw
-  // TabContents, or TabStripModel::kNoTab if the TabContents is not in this
+  // Returns the index of the specified WebContents wrapper given its raw
+  // WebContents, or TabStripModel::kNoTab if the TabContents is not in this
   // TabStripModel.  Note: This is only needed in rare cases where the wrapper
-  // is not already present (such as implementing TabContentsDelegate methods,
+  // is not already present (such as implementing WebContentsDelegate methods,
   // which don't know about the wrapper.  Returns NULL if |contents| is not
   // associated with any wrapper in the model.
-  int GetWrapperIndex(const TabContents* contents) const;
+  int GetWrapperIndex(const content::WebContents* contents) const;
 
   // Returns the index of the specified NavigationController, or kNoTab if it is
   // not in this TabStripModel.
-  int GetIndexOfController(const NavigationController* controller) const;
+  int GetIndexOfController(
+      const content::NavigationController* controller) const;
 
   // Notify any observers that the TabContents at the specified index has
   // changed in some way. See TabChangeType for details of |change_type|.
@@ -294,26 +299,35 @@ class TabStripModel : public content::NotificationObserver {
   bool TabsAreLoading() const;
 
   // Returns the controller controller that opened the TabContents at |index|.
-  NavigationController* GetOpenerOfTabContentsAt(int index);
+  content::NavigationController* GetOpenerOfTabContentsAt(int index);
+
+  // Changes the |opener| of the TabContents at |index|.
+  // Note: |opener| must be in this tab strip.
+  void SetOpenerOfTabContentsAt(
+      int index,
+      content::NavigationController* opener);
 
   // Returns the index of the next TabContents in the sequence of TabContentses
   // spawned by the specified NavigationController after |start_index|.
   // If |use_group| is true, the group property of the tab is used instead of
   // the opener to find the next tab. Under some circumstances the group
   // relationship may exist but the opener may not.
-  int GetIndexOfNextTabContentsOpenedBy(const NavigationController* opener,
-                                        int start_index,
-                                        bool use_group) const;
+  int GetIndexOfNextTabContentsOpenedBy(
+      const content::NavigationController* opener,
+      int start_index,
+      bool use_group) const;
 
   // Returns the index of the first TabContents in the model opened by the
   // specified opener.
-  int GetIndexOfFirstTabContentsOpenedBy(const NavigationController* opener,
-                                         int start_index) const;
+  int GetIndexOfFirstTabContentsOpenedBy(
+      const content::NavigationController* opener,
+      int start_index) const;
 
   // Returns the index of the last TabContents in the model opened by the
   // specified opener, starting at |start_index|.
-  int GetIndexOfLastTabContentsOpenedBy(const NavigationController* opener,
-                                        int start_index) const;
+  int GetIndexOfLastTabContentsOpenedBy(
+      const content::NavigationController* opener,
+      int start_index) const;
 
   // Called by the Browser when a navigation is about to occur in the specified
   // TabContents. Depending on the tab, and the transition type of the
@@ -562,11 +576,12 @@ class TabStripModel : public content::NotificationObserver {
   // fall back to check the group relationship as well.
   struct TabContentsData;
   static bool OpenerMatches(const TabContentsData* data,
-                            const NavigationController* opener,
+                            const content::NavigationController* opener,
                             bool use_group);
 
   // Sets the group/opener of any tabs that reference |tab| to NULL.
-  void ForgetOpenersAndGroupsReferencing(const NavigationController* tab);
+  void ForgetOpenersAndGroupsReferencing(
+      const content::NavigationController* tab);
 
   // Our delegate.
   TabStripModelDelegate* delegate_;
@@ -587,7 +602,7 @@ class TabStripModel : public content::NotificationObserver {
 
     // Create a relationship between this TabContents and other TabContentses.
     // Used to identify which TabContents to select next after one is closed.
-    void SetGroup(NavigationController* a_group) {
+    void SetGroup(content::NavigationController* a_group) {
       group = a_group;
       opener = a_group;
     }
@@ -609,12 +624,12 @@ class TabStripModel : public content::NotificationObserver {
     // navigation within that tab, the group relationship is lost). This
     // property can safely be used to implement features that depend on a
     // logical group of related tabs.
-    NavigationController* group;
+    content::NavigationController* group;
     // The owner models the same relationship as group, except it is more
     // easily discarded, e.g. when the user switches to a tab not part of the
     // same group. This property is used to determine what tab to select next
     // when one is closed.
-    NavigationController* opener;
+    content::NavigationController* opener;
     // True if our group should be reset the moment selection moves away from
     // this Tab. This is the case for tabs opened in the foreground at the end
     // of the TabStrip while viewing another Tab. If these tabs are closed

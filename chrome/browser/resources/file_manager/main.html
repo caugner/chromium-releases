@@ -1,6 +1,6 @@
 <!DOCTYPE HTML>
 <!--
-  -- Copyright (c) 2011 The Chromium Authors. All rights reserved.
+  -- Copyright (c) 2012 The Chromium Authors. All rights reserved.
   -- Use of this source code is governed by a BSD-style license that can be
   -- found in the LICENSE file.
   -->
@@ -84,12 +84,17 @@
     <script src="../shared/js/cr/ui/menu.js"></script>
     <script src="../shared/js/cr/ui/context_menu_handler.js"></script>
 
+    <script src="js/combobutton.js"></script>
+    <link rel="stylesheet" href="css/combobutton.css"></link>
+
     <link rel="stylesheet" href="css/file_manager.css"></link>
 
     <script src="js/util.js"></script>
+    <script src="js/directory_model.js"></script>
     <script src="js/file_copy_manager.js"></script>
     <script src="js/file_manager.js"></script>
     <script src="js/file_manager_pyauto.js"></script>
+    <script src="js/file_type.js"></script>
     <script src="js/main.js"></script>
     <script src="js/metadata_provider.js"></script>
 
@@ -109,59 +114,84 @@
   <body i18n-values=".style.fontFamily:WEB_FONT_FAMILY;
                      .style.fontSize:WEB_FONT_SIZE">
     <commands>
-      <command id="cut"></command>
-      <command id="copy"></command>
-      <command id="paste"></command>
-      <command id="rename"></command>
-      <command id="delete"></command>
+      <command id="cut" i18n-values="label:CUT_BUTTON_LABEL"></command>
+      <command id="copy" i18n-values="label:COPY_BUTTON_LABEL"></command>
+      <command id="paste" i18n-values="label:PASTE_BUTTON_LABEL"></command>
+      <command id="rename" i18n-values="label:RENAME_BUTTON_LABEL"></command>
+      <command id="delete" i18n-values="label:DELETE_BUTTON_LABEL"></command>
+      <command id="newfolder" i18n-values="label:NEW_FOLDER_BUTTON_LABEL"></command>
     </commands>
 
     <menu class=file-context-menu>
-      <menuitem i18n-content=CUT_BUTTON_LABEL command='#cut'></menuitem>
-      <menuitem i18n-content=COPY_BUTTON_LABEL command='#copy'></menuitem>
-      <menuitem i18n-content=PASTE_BUTTON_LABEL command='#paste'></menuitem>
+      <menuitem command='#cut'></menuitem>
+      <menuitem command='#copy'></menuitem>
+      <menuitem command='#paste'></menuitem>
       <hr>
-      <menuitem i18n-content=RENAME_BUTTON_LABEL command='#rename'></menuitem>
-      <menuitem i18n-content=DELETE_BUTTON_LABEL command='#delete'></menuitem>
+      <menuitem command='#rename'></menuitem>
+      <menuitem command='#delete'></menuitem>
+      <hr visibleif='this.dialogType_ == "saveas-file" ||
+                     this.dialogType_ == "full-page"'>
+      <menuitem command='#newfolder'
+          visibleif='this.dialogType_ == "saveas-file" ||
+                     this.dialogType_ == "full-page"'></menuitem>
     </menu>
 
-    <div class=dialog-title visibleif='this.dialogType_ != "full-page"'
-         >[TITLE]</div>
-    <div class=dialog-header>
-      <div class=breadcrumbs></div>
-      <button class=detail-view tabindex=4
-              ><img src='images/icon-detail-view.png'></button
-      ><button class=thumbnail-view tabindex=5
-              ><img src='images/icon-thumb-view.png'></button>
-      <button i18n-content=NEW_FOLDER_BUTTON_LABEL class='new-folder'
-              tabindex=6
-              visibleif='this.dialogType_ == "saveas-file" ||
-                         this.dialogType_ == "full-page"'
-              ></button>
-    </div>
-    <div class=dialog-body>
-      <div class=filelist-panel>
-        <div class=list-container>
-          <div class=detail-table tabindex=0></div>
-          <grid class=thumbnail-grid tabindex=0></grid>
-        </div>
-        <div class=downloads-warning hidden>
-          <img src=images/warning_icon_square_26x26.png>
-          <div></div>
-        </div>
+    <!-- TODO(bshe): Remove isAura flag after all chromeos use aura. -->
+    <if expr="pp_ifdef('use_aura')">
+      <script>FileManager.prototype.isAura_ = true;</script>
+    </if>
+    <if expr="not pp_ifdef('use_aura')">
+      <!-- When loading directly from disk, isAura flag also sets to false
+        -- because the preprocessor is ignored. It should be fine for now. The
+        -- div title still shows in this case. It resembles the look of file
+        -- dialog in chromeos non aura builds. After all chromeos switches to
+        -- aura, we should use !cr.isChromeOS in the visibleif condition. Since
+        -- aura has its own window frame, we do not want to have this title div
+        -- visiable in aura.
+        -->
+      <script>FileManager.prototype.isAura_ = false;</script>
+    </if>
+    <div class=dialog-title visibleif='this.dialogType_ != "full-page" &&
+        !this.isAura_'>[TITLE]</div>
+    <div class=dialog-container>
+      <div class=dialog-sidebar>
+        <div class=close-sidebar><img src='images/close_sidebar.png'></div>
+        <list class=roots-list></list>
       </div>
-      <div class=preview-panel visibility=hidden>
-        <div><div class=preview-thumbnails></div></div>
-        <div><div class=preview-summary></div></div>
-        <div class=task-buttons></div>
-        <div>
-          <button class='delete-button task-button' command='#delete'
-                  onclick='fileManager.deleteEntries(
-                           fileManager.selection.entries, false)'
-                  visibleif='this.dialogType_ == "full-page"'
-             ><img src='images/button-icon-delete.png'
-              ><div i18n-content=DELETE_BUTTON_LABEL></div
-          ></button>
+      <div class=dialog-main>
+        <div class=dialog-header>
+          <div class=open-sidebar><img src='images/open_sidebar.png'></div>
+          <div class=breadcrumbs></div>
+          <!-- The outter div is a hack to remove margin between buttons. -->
+          <div><button class="detail-view" tabindex="4" disabled></button></div>
+          <div><button class="thumbnail-view" tabindex="5"></button></div>
+        </div>
+        <div class=dialog-body>
+          <div class=filelist-panel>
+            <div class=list-container>
+              <div class=detail-table tabindex=0></div>
+              <grid class=thumbnail-grid tabindex=0></grid>
+            </div>
+            <div class=downloads-warning hidden>
+              <img src=images/warning_icon_square_26x26.png>
+              <div></div>
+            </div>
+          </div>
+          <div class=preview-panel visibility=hidden>
+            <div><div class=preview-thumbnails></div></div>
+            <div><div class=preview-summary></div></div>
+            <div class=spacer></div>
+            <div class=tasks></div>
+            <div>
+              <div class='delete-button cr-button task-item' command='#delete'
+                      onclick='fileManager.deleteEntries(
+                               fileManager.selection.entries, false)'
+                      visibleif='this.dialogType_ == "full-page"'
+                  ><img src='images/button-icon-delete.png'
+                  ><div i18n-content=DELETE_BUTTON_LABEL></div
+              ></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

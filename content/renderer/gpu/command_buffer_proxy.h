@@ -15,13 +15,13 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task.h"
 #include "content/renderer/gpu/gpu_video_decode_accelerator_host.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
 
 class GpuChannelHost;
+struct GPUCommandBufferConsoleMessage;
 
 namespace base {
 class SharedMemory;
@@ -43,13 +43,12 @@ class CommandBufferProxy : public gpu::CommandBuffer,
   int route_id() const { return route_id_; }
 
   // CommandBuffer implementation:
-  virtual bool Initialize(int32 size) OVERRIDE;
-  virtual bool Initialize(base::SharedMemory* buffer, int32 size) OVERRIDE;
-  virtual gpu::Buffer GetRingBuffer() OVERRIDE;
+  virtual bool Initialize() OVERRIDE;
   virtual State GetState() OVERRIDE;
   virtual State GetLastState() OVERRIDE;
   virtual void Flush(int32 put_offset) OVERRIDE;
   virtual State FlushSync(int32 put_offset, int32 last_known_get) OVERRIDE;
+  virtual void SetGetBuffer(int32 shm_id) OVERRIDE;
   virtual void SetGetOffset(int32 get_offset) OVERRIDE;
   virtual int32 CreateTransferBuffer(size_t size, int32 id_request) OVERRIDE;
   virtual int32 RegisterTransferBuffer(base::SharedMemory* shared_memory,
@@ -103,10 +102,7 @@ class CommandBufferProxy : public gpu::CommandBuffer,
   void OnNotifyRepaint();
   void OnDestroyed(gpu::error::ContextLostReason reason);
   void OnEchoAck();
-
-  // As with the service, the client takes ownership of the ring buffer.
-  int32 num_entries_;
-  scoped_ptr<base::SharedMemory> ring_buffer_;
+  void OnConsoleMessage(const GPUCommandBufferConsoleMessage& message);
 
   // Local cache of id to transfer buffer mapping.
   typedef std::map<int32, gpu::Buffer> TransferBufferMap;

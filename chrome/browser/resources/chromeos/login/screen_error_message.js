@@ -1,4 +1,4 @@
- // Copyright (c) 2011 The Chromium Authors. All rights reserved.
+ // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,9 @@ cr.define('login', function() {
   // Error reasons which are passed to updateState_() method.
   const ERROR_REASONS = {
     PROXY_AUTH_CANCELLED: 'frame error:111',
-    PROXY_CONNECTION_FAILED: 'frame error:130'
+    PROXY_CONNECTION_FAILED: 'frame error:130',
+    PROXY_CONFIG_CHANGED: 'proxy changed',
+    LOADING_TIMEOUT: 'loading timeout'
   };
 
   // Frame loading errors.
@@ -90,7 +92,6 @@ cr.define('login', function() {
         currentScreen.doReload();
       };
 
-      // TODO(altimofeev): Support offline sign-in as well.
       $('error-guest-signin').innerHTML = localStrings.getStringF(
           'guestSignin',
           '<a id="error-guest-signin-link" class="signin-link" href="#">',
@@ -98,13 +99,25 @@ cr.define('login', function() {
       $('error-guest-signin-link').onclick = function() {
         chrome.send('launchIncognito');
       };
+
+      $('error-offline-login').innerHTML = localStrings.getStringF(
+          'offlineLogin',
+          '<a id="error-offline-login-link" class="signin-link" href="#">',
+          '</a>');
+      $('error-offline-login-link').onclick = function() {
+        chrome.send('offlineLogin', []);
+      };
     },
 
     onBeforeShow: function(lastNetworkType) {
+      var currentScreen = Oobe.getInstance().currentScreen;
+
       cr.ui.DropDown.show('offline-networks-list', false, lastNetworkType);
 
       $('error-guest-signin').hidden = $('guestSignin').hidden ||
           !$('add-user-header-bar-item').hidden;
+
+      $('error-offline-login').hidden = !currentScreen.isOfflineAllowed;
     },
 
     onBeforeHide: function() {
@@ -131,9 +144,10 @@ cr.define('login', function() {
       var isUnderCaptivePortal = (state == NET_STATE.PORTAL);
       var isProxyError = reason == ERROR_REASONS.PROXY_AUTH_CANCELLED ||
           reason == ERROR_REASONS.PROXY_CONNECTION_FAILED;
-      var shouldOverlay = MANAGED_SCREENS.indexOf(currentScreen.id) != -1;
+      var shouldOverlay = MANAGED_SCREENS.indexOf(currentScreen.id) != -1 &&
+          !currentScreen.isLocal;
 
-      if (reason == 'proxy changed' && shouldOverlay &&
+      if (reason == ERROR_REASONS.PROXY_CONFIG_CHANGED && shouldOverlay &&
           !offlineMessage.classList.contains('hidden') &&
           offlineMessage.classList.contains('show-captive-portal')) {
         // Schedules a immediate retry.
@@ -141,8 +155,14 @@ cr.define('login', function() {
         console.log('Retry page load since proxy settings has been changed');
       }
 
+      // Fake portal state for loading timeout.
+      if (reason == ERROR_REASONS.LOADING_TIMEOUT) {
+        isOnline = false;
+        isUnderCaptivePortal = true;
+      }
+
       if (!isOnline && shouldOverlay) {
-        console.log('Show offline message, state=' + state +
+        console.log('Show offline message: state=' + state +
                     ', network=' + network +
                     ', isUnderCaptivePortal=' + isUnderCaptivePortal);
         offlineMessage.onBeforeShow(lastNetworkType);
@@ -191,9 +211,23 @@ cr.define('login', function() {
 
           currentScreen.classList.remove('hidden');
           currentScreen.classList.remove('faded');
+
+          // Ensures 'loading' state really means loading for Gaia screen.
+          if (currentScreen.id == 'gaia-signin' && currentScreen.loading)
+            currentScreen.doReload();
         }
       }
     },
+
+    // Request network state update with loading timeout as reason.
+    showLoadingTimeoutError: function() {
+      // Shows error message if it is not shown already.
+      if (this.classList.contains('hidden')) {
+        chrome.send('loginRequestNetworkState',
+                    ['login.ErrorMessageScreen.updateState',
+                     ERROR_REASONS.LOADING_TIMEOUT]);
+      }
+    }
   };
 
   /**
@@ -237,7 +271,8 @@ cr.define('login', function() {
   /**
    * Network state callback where we decide whether to schdule a retry.
    */
-  ErrorMessageScreen.maybeRetry = function(state, network, reason) {
+  ErrorMessageScreen.maybeRetry =
+      function(state, network, reason, lastNetworkType) {
     console.log('ErrorMessageScreen.maybeRetry, state=' + state +
                 ', network=' + network);
 
@@ -247,7 +282,7 @@ cr.define('login', function() {
 
     var currentScreen = Oobe.getInstance().currentScreen;
     if (MANAGED_SCREENS.indexOf(currentScreen.id) != -1) {
-      this.updateState(NET_STATE.PORTAL, network, reason);
+      this.updateState(NET_STATE.PORTAL, network, reason, lastNetworkType);
       // Schedules a retry.
       currentScreen.scheduleRetry();
     }

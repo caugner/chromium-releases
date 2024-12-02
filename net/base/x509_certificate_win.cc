@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,11 +15,14 @@
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "crypto/capi_util.h"
 #include "crypto/rsa_private_key.h"
 #include "crypto/scoped_capi_types.h"
+#include "crypto/sha2.h"
 #include "net/base/asn1_util.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/cert_verify_result.h"
+#include "net/base/crl_set.h"
 #include "net/base/ev_root_ca_metadata.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_root_certs.h"
@@ -186,16 +189,6 @@ void ExplodedTimeToSystemTime(const base::Time::Exploded& exploded,
 
 //-----------------------------------------------------------------------------
 
-// Wrappers of malloc and free for CRYPT_DECODE_PARA, which requires the
-// WINAPI calling convention.
-void* WINAPI MyCryptAlloc(size_t size) {
-  return malloc(size);
-}
-
-void WINAPI MyCryptFree(void* p) {
-  free(p);
-}
-
 // Decodes the cert's subjectAltName extension into a CERT_ALT_NAME_INFO
 // structure and stores it in *output.
 void GetCertSubjectAltName(PCCERT_CONTEXT cert,
@@ -208,8 +201,8 @@ void GetCertSubjectAltName(PCCERT_CONTEXT cert,
 
   CRYPT_DECODE_PARA decode_para;
   decode_para.cbSize = sizeof(decode_para);
-  decode_para.pfnAlloc = MyCryptAlloc;
-  decode_para.pfnFree = MyCryptFree;
+  decode_para.pfnAlloc = crypto::CryptAlloc;
+  decode_para.pfnFree = crypto::CryptFree;
   CERT_ALT_NAME_INFO* alt_name_info = NULL;
   DWORD alt_name_info_size = 0;
   BOOL rv;
@@ -230,8 +223,8 @@ void GetCertSubjectAltName(PCCERT_CONTEXT cert,
 bool CertSubjectCommonNameHasNull(PCCERT_CONTEXT cert) {
   CRYPT_DECODE_PARA decode_para;
   decode_para.cbSize = sizeof(decode_para);
-  decode_para.pfnAlloc = MyCryptAlloc;
-  decode_para.pfnFree = MyCryptFree;
+  decode_para.pfnAlloc = crypto::CryptAlloc;
+  decode_para.pfnFree = crypto::CryptFree;
   CERT_NAME_INFO* name_info = NULL;
   DWORD name_info_size = 0;
   BOOL rv;
@@ -391,8 +384,8 @@ void GetCertPoliciesInfo(PCCERT_CONTEXT cert,
 
   CRYPT_DECODE_PARA decode_para;
   decode_para.cbSize = sizeof(decode_para);
-  decode_para.pfnAlloc = MyCryptAlloc;
-  decode_para.pfnFree = MyCryptFree;
+  decode_para.pfnAlloc = crypto::CryptAlloc;
+  decode_para.pfnFree = crypto::CryptFree;
   CERT_POLICIES_INFO* policies_info = NULL;
   DWORD policies_info_size = 0;
   BOOL rv;
@@ -456,6 +449,66 @@ X509Certificate::OSCertHandles ParsePKCS7(const char* data, size_t length) {
   return results;
 }
 
+bool CheckRevocationWithCRLSet(PCCERT_CHAIN_CONTEXT chain,
+                               CRLSet* crl_set) {
+  if (chain->cChain == 0)
+    return true;
+
+  const PCERT_SIMPLE_CHAIN first_chain = chain->rgpChain[0];
+  const PCERT_CHAIN_ELEMENT* element = first_chain->rgpElement;
+
+  const int num_elements = first_chain->cElement;
+  if (num_elements == 0)
+    return true;
+
+  // We iterate from the root certificate down to the leaf, keeping track of
+  // the issuer's SPKI at each step.
+  std::string issuer_spki_hash;
+  for (int i = num_elements - 1; i >= 0; i--) {
+    PCCERT_CONTEXT cert = element[i]->pCertContext;
+
+    base::StringPiece der_bytes(
+        reinterpret_cast<const char*>(cert->pbCertEncoded),
+        cert->cbCertEncoded);
+
+    base::StringPiece spki;
+    if (!asn1::ExtractSPKIFromDERCert(der_bytes, &spki)) {
+      NOTREACHED();
+      continue;
+    }
+
+    const std::string spki_hash = crypto::SHA256HashString(spki);
+
+    const CRYPT_INTEGER_BLOB* serial_blob = &cert->pCertInfo->SerialNumber;
+    scoped_array<uint8> serial_bytes(new uint8[serial_blob->cbData]);
+    // The bytes of the serial number are stored little-endian.
+    for (unsigned j = 0; j < serial_blob->cbData; j++)
+      serial_bytes[j] = serial_blob->pbData[serial_blob->cbData - j - 1];
+    base::StringPiece serial(reinterpret_cast<const char*>(serial_bytes.get()),
+                             serial_blob->cbData);
+
+    CRLSet::Result result = crl_set->CheckSPKI(spki_hash);
+
+    if (result != CRLSet::REVOKED && !issuer_spki_hash.empty())
+      result = crl_set->CheckSerial(serial, issuer_spki_hash);
+
+    issuer_spki_hash = spki_hash;
+
+    switch (result) {
+      case CRLSet::REVOKED:
+        return false;
+      case CRLSet::UNKNOWN:
+      case CRLSet::GOOD:
+        continue;
+      default:
+        NOTREACHED();
+        continue;
+    }
+  }
+
+  return true;
+}
+
 void AppendPublicKeyHashes(PCCERT_CHAIN_CONTEXT chain,
                            std::vector<SHA1Fingerprint>* hashes) {
   if (chain->cChain == 0)
@@ -482,119 +535,15 @@ void AppendPublicKeyHashes(PCCERT_CHAIN_CONTEXT chain,
   }
 }
 
-// A list of OIDs to decode. Any OID not on this list will be ignored for
-// purposes of parsing.
-const char* kOIDs[] = {
-  szOID_COMMON_NAME,
-  szOID_LOCALITY_NAME,
-  szOID_STATE_OR_PROVINCE_NAME,
-  szOID_COUNTRY_NAME,
-  szOID_STREET_ADDRESS,
-  szOID_ORGANIZATION_NAME,
-  szOID_ORGANIZATIONAL_UNIT_NAME,
-  szOID_DOMAIN_COMPONENT
-};
-
-// Converts the value for |attribute| to an ASCII string, storing the result
-// in |value|. Returns false if the string cannot be converted.
-bool GetAttributeValue(PCERT_RDN_ATTR attribute,
-                       std::string* value) {
-  DWORD bytes_needed = CertRDNValueToStrA(attribute->dwValueType,
-                                          &attribute->Value, NULL, 0);
-  if (bytes_needed == 0)
-    return false;
-  if (bytes_needed == 1) {
-    // The value is actually an empty string (bytes_needed includes a single
-    // byte for a NULL value). Don't bother converting - just clear the
-    // string.
-    value->clear();
-    return true;
-  }
-  DWORD bytes_written = CertRDNValueToStrA(
-      attribute->dwValueType, &attribute->Value,
-      WriteInto(value, bytes_needed), bytes_needed);
-  if (bytes_written <= 1)
-    return false;
-  return true;
-}
-
-// Adds a type+value pair to the appropriate vector from a C array.
-// The array is keyed by the matching OIDs from kOIDS[].
-bool AddTypeValuePair(PCERT_RDN_ATTR attribute,
-                      std::vector<std::string>* values[]) {
-  for (size_t oid = 0; oid < arraysize(kOIDs); ++oid) {
-    if (strcmp(attribute->pszObjId, kOIDs[oid]) == 0) {
-      std::string value;
-      if (!GetAttributeValue(attribute, &value))
-        return false;
-      values[oid]->push_back(value);
-      break;
-    }
-  }
-  return true;
-}
-
-// Stores the first string of the vector, if any, to *single_value.
-void SetSingle(const std::vector<std::string>& values,
-               std::string* single_value) {
-  // We don't expect to have more than one CN, L, S, and C.
-  LOG_IF(WARNING, values.size() > 1) << "Didn't expect multiple values";
-  if (!values.empty())
-    *single_value = values[0];
-}
-
-bool ParsePrincipal(CERT_NAME_BLOB* name, CertPrincipal* principal) {
-  CRYPT_DECODE_PARA decode_para;
-  decode_para.cbSize = sizeof(decode_para);
-  decode_para.pfnAlloc = MyCryptAlloc;
-  decode_para.pfnFree = MyCryptFree;
-  CERT_NAME_INFO* name_info = NULL;
-  DWORD name_info_size = 0;
-  BOOL rv;
-  rv = CryptDecodeObjectEx(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
-                           X509_NAME, name->pbData, name->cbData,
-                           CRYPT_DECODE_ALLOC_FLAG | CRYPT_DECODE_NOCOPY_FLAG,
-                           &decode_para,
-                           &name_info, &name_info_size);
-  if (!rv)
-    return false;
-  scoped_ptr_malloc<CERT_NAME_INFO> scoped_name_info(name_info);
-
-  std::vector<std::string> common_names, locality_names, state_names,
-      country_names;
-
-  std::vector<std::string>* values[] = {
-      &common_names, &locality_names,
-      &state_names, &country_names,
-      &(principal->street_addresses),
-      &(principal->organization_names),
-      &(principal->organization_unit_names),
-      &(principal->domain_components)
-  };
-  DCHECK(arraysize(kOIDs) == arraysize(values));
-
-  for (DWORD cur_rdn = 0; cur_rdn < name_info->cRDN; ++cur_rdn) {
-    PCERT_RDN rdn = &name_info->rgRDN[cur_rdn];
-    for (DWORD cur_ava = 0; cur_ava < rdn->cRDNAttr; ++cur_ava) {
-      PCERT_RDN_ATTR ava = &rdn->rgRDNAttr[cur_ava];
-      if (!AddTypeValuePair(ava, values))
-        return false;
-    }
-  }
-
-  SetSingle(common_names, &principal->common_name);
-  SetSingle(locality_names, &principal->locality_name);
-  SetSingle(state_names, &principal->state_or_province_name);
-  SetSingle(country_names, &principal->country_name);
-  return true;
-}
 
 }  // namespace
 
 void X509Certificate::Initialize() {
   DCHECK(cert_handle_);
-  ParsePrincipal(&cert_handle_->pCertInfo->Subject, &subject_);
-  ParsePrincipal(&cert_handle_->pCertInfo->Issuer, &issuer_);
+  subject_.ParseDistinguishedName(cert_handle_->pCertInfo->Subject.pbData,
+                                  cert_handle_->pCertInfo->Subject.cbData);
+  issuer_.ParseDistinguishedName(cert_handle_->pCertInfo->Issuer.pbData,
+                                 cert_handle_->pCertInfo->Issuer.cbData);
 
   valid_start_ = Time::FromFileTime(cert_handle_->pCertInfo->NotBefore);
   valid_expiry_ = Time::FromFileTime(cert_handle_->pCertInfo->NotAfter);
@@ -742,8 +691,7 @@ class GlobalCertStore {
   DISALLOW_COPY_AND_ASSIGN(GlobalCertStore);
 };
 
-static base::LazyInstance<GlobalCertStore,
-                          base::LeakyLazyInstanceTraits<GlobalCertStore> >
+static base::LazyInstance<GlobalCertStore>::Leaky
     g_cert_store = LAZY_INSTANCE_INITIALIZER;
 
 // static
@@ -866,6 +814,7 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
            chain_flags,
            NULL,  // reserved
            &chain_context)) {
+    verify_result->cert_status |= CERT_STATUS_INVALID;
     return MapSecurityError(GetLastError());
   }
 
@@ -884,6 +833,7 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
              chain_flags,
              NULL,  // reserved
              &chain_context)) {
+      verify_result->cert_status |= CERT_STATUS_INVALID;
       return MapSecurityError(GetLastError());
     }
   }
@@ -894,17 +844,12 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
   verify_result->cert_status |= MapCertChainErrorStatusToCertStatus(
       chain_context->TrustStatus.dwErrorStatus);
 
-  // Treat certificates signed using broken signature algorithms as invalid.
-  if (verify_result->has_md4)
-    verify_result->cert_status |= CERT_STATUS_INVALID;
-
-  // Flag certificates signed using weak signature algorithms.
-  if (verify_result->has_md2)
-    verify_result->cert_status |= CERT_STATUS_WEAK_SIGNATURE_ALGORITHM;
-
   // Flag certificates that have a Subject common name with a NULL character.
   if (CertSubjectCommonNameHasNull(cert_handle_))
     verify_result->cert_status |= CERT_STATUS_INVALID;
+
+  if (crl_set && !CheckRevocationWithCRLSet(chain_context, crl_set))
+    verify_result->cert_status |= CERT_STATUS_REVOKED;
 
   std::wstring wstr_hostname = ASCIIToWide(hostname);
 
@@ -1175,6 +1120,42 @@ bool X509Certificate::WriteOSCertHandleToPickle(OSCertHandle cert_handle,
 
   return pickle->WriteData(reinterpret_cast<const char*>(&buffer[0]),
                            length);
+}
+
+// static
+void X509Certificate::GetPublicKeyInfo(OSCertHandle cert_handle,
+                                       size_t* size_bits,
+                                       PublicKeyType* type) {
+  PCCRYPT_OID_INFO oid_info = CryptFindOIDInfo(
+      CRYPT_OID_INFO_OID_KEY,
+      cert_handle->pCertInfo->SubjectPublicKeyInfo.Algorithm.pszObjId,
+      CRYPT_PUBKEY_ALG_OID_GROUP_ID);
+  PCHECK(oid_info);
+  CHECK(oid_info->dwGroupId == CRYPT_PUBKEY_ALG_OID_GROUP_ID);
+
+  *size_bits = CertGetPublicKeyLength(
+      X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
+      &cert_handle->pCertInfo->SubjectPublicKeyInfo);
+
+  switch (oid_info->Algid) {
+    case CALG_RSA_SIGN:
+    case CALG_RSA_KEYX:
+      *type = kPublicKeyTypeRSA;
+      break;
+    case CALG_DSS_SIGN:
+      *type = kPublicKeyTypeDSA;
+      break;
+    case CALG_ECDSA:
+      *type = kPublicKeyTypeECDSA;
+      break;
+    case CALG_ECDH:
+      *type = kPublicKeyTypeECDH;
+      break;
+    default:
+      *type = kPublicKeyTypeUnknown;
+      *size_bits = 0;
+      break;
+  }
 }
 
 }  // namespace net

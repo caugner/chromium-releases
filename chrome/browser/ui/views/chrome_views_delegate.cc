@@ -13,15 +13,19 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/accessibility_event_router_views.h"
 #include "chrome/browser/ui/views/event_utils.h"
-#include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/pref_names.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/screen.h"
 #include "ui/views/widget/native_widget.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/app_icon_win.h"
+#endif
+
+#if defined(USE_AURA)
+#include "ash/shell.h"
 #endif
 
 namespace {
@@ -69,10 +73,7 @@ void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,
   window_preferences->SetBoolean("maximized",
                                  show_state == ui::SHOW_STATE_MAXIMIZED);
 
-  scoped_ptr<WindowSizer::MonitorInfoProvider> monitor_info_provider(
-      WindowSizer::CreateDefaultMonitorInfoProvider());
-  gfx::Rect work_area(
-      monitor_info_provider->GetMonitorWorkAreaMatching(bounds));
+  gfx::Rect work_area(gfx::Screen::GetMonitorWorkAreaMatching(bounds));
   window_preferences->SetInteger("work_area_left", work_area.x());
   window_preferences->SetInteger("work_area_top", work_area.y());
   window_preferences->SetInteger("work_area_right", work_area.right());
@@ -126,6 +127,15 @@ HICON ChromeViewsDelegate::GetDefaultWindowIcon() const {
   return GetAppIcon();
 }
 #endif
+
+views::NonClientFrameView* ChromeViewsDelegate::CreateDefaultNonClientFrameView(
+    views::Widget* widget) {
+#if defined(USE_AURA)
+  return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(widget);
+#else
+  return NULL;
+#endif
+}
 
 void ChromeViewsDelegate::AddRef() {
   g_browser_process->AddRefModule();

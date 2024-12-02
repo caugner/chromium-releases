@@ -1,9 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/net/crl_set_fetcher.h"
 
+#include "base/bind.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/rand_util.h"
@@ -19,7 +20,7 @@
 
 using content::BrowserThread;
 
-CRLSetFetcher::CRLSetFetcher() {
+CRLSetFetcher::CRLSetFetcher() : cus_(NULL) {
 }
 
 CRLSetFetcher::~CRLSetFetcher() {
@@ -42,9 +43,7 @@ void CRLSetFetcher::StartInitialLoad(ComponentUpdateService* cus) {
 
   if (!BrowserThread::PostTask(
           BrowserThread::FILE, FROM_HERE,
-          NewRunnableMethod(
-              this,
-              &CRLSetFetcher::DoInitialLoadFromDisk))) {
+          base::Bind(&CRLSetFetcher::DoInitialLoadFromDisk, this))) {
     NOTREACHED();
   }
 }
@@ -56,29 +55,25 @@ void CRLSetFetcher::DoInitialLoadFromDisk() {
   if (!GetCRLSetFilePath(&crl_set_file_path))
     return;
 
-  scoped_refptr<net::CRLSet> crl_set;
-  LoadFromDisk(crl_set_file_path,
-               FilePath() /* don't copy the data anywhere */,
-               &crl_set);
+  LoadFromDisk(crl_set_file_path, &crl_set_);
 
   uint32 sequence_of_loaded_crl = 0;
-  if (crl_set.get())
-    sequence_of_loaded_crl = crl_set->sequence();
+  if (crl_set_.get())
+    sequence_of_loaded_crl = crl_set_->sequence();
 
   // Get updates, advertising the sequence number of the CRL set that we just
   // loaded, if any.
   if (!BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(
-              this,
+          base::Bind(
               &CRLSetFetcher::RegisterComponent,
+              this,
               sequence_of_loaded_crl))) {
     NOTREACHED();
   }
 }
 
 void CRLSetFetcher::LoadFromDisk(FilePath path,
-                                 FilePath save_to,
                                  scoped_refptr<net::CRLSet>* out_crl_set) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
@@ -86,24 +81,17 @@ void CRLSetFetcher::LoadFromDisk(FilePath path,
   if (!file_util::ReadFileToString(path, &crl_set_bytes))
     return;
 
-  scoped_refptr<net::CRLSet> crl_set;
-  if (!net::CRLSet::Parse(crl_set_bytes, &crl_set)) {
+  if (!net::CRLSet::Parse(crl_set_bytes, out_crl_set)) {
     LOG(WARNING) << "Failed to parse CRL set from " << path.MaybeAsASCII();
     return;
   }
-
-  if (out_crl_set)
-    *out_crl_set = crl_set;
-
-  if (!save_to.empty())
-    file_util::WriteFile(save_to, crl_set_bytes.data(), crl_set_bytes.size());
 
   VLOG(1) << "Loaded " << crl_set_bytes.size() << " bytes of CRL set from disk";
 
   if (!BrowserThread::PostTask(
           BrowserThread::IO, FROM_HERE,
-          NewRunnableMethod(
-              this, &CRLSetFetcher::SetCRLSetIfNewer, crl_set))) {
+          base::Bind(
+              &CRLSetFetcher::SetCRLSetIfNewer, this, *out_crl_set))) {
     NOTREACHED();
   }
 }
@@ -166,6 +154,56 @@ bool CRLSetFetcher::Install(base::DictionaryValue* manifest,
   FilePath save_to;
   if (!GetCRLSetFilePath(&save_to))
     return true;
-  LoadFromDisk(crl_set_file_path, save_to, NULL);
+
+  std::string crl_set_bytes;
+  if (!file_util::ReadFileToString(crl_set_file_path, &crl_set_bytes)) {
+    LOG(WARNING) << "Failed to find crl-set file inside CRX";
+    return false;
+  }
+
+  bool is_delta;
+  if (!net::CRLSet::GetIsDeltaUpdate(crl_set_bytes, &is_delta)) {
+    LOG(WARNING) << "GetIsDeltaUpdate failed on CRL set from update CRX";
+    return false;
+  }
+
+  if (!is_delta) {
+    if (!net::CRLSet::Parse(crl_set_bytes, &crl_set_)) {
+      LOG(WARNING) << "Failed to parse CRL set from update CRX";
+      return false;
+    }
+    if (!file_util::WriteFile(save_to, crl_set_bytes.data(),
+                              crl_set_bytes.size())) {
+      LOG(WARNING) << "Failed to save new CRL set to disk";
+      // We don't return false here because we can still use this CRL set. When
+      // we restart we might revert to an older version, then we'll
+      // advertise the older version to Omaha and everything will still work.
+    }
+  } else {
+    scoped_refptr<net::CRLSet> new_crl_set;
+    if (!crl_set_->ApplyDelta(crl_set_bytes, &new_crl_set)) {
+      LOG(WARNING) << "Failed to parse delta CRL set";
+      return false;
+    }
+    VLOG(1) << "Applied CRL set delta #" << crl_set_->sequence()
+            << "->#" << new_crl_set->sequence();
+    const std::string new_crl_set_bytes = new_crl_set->Serialize();
+    if (!file_util::WriteFile(save_to, new_crl_set_bytes.data(),
+                              new_crl_set_bytes.size())) {
+      LOG(WARNING) << "Failed to save new CRL set to disk";
+      // We don't return false here because we can still use this CRL set. When
+      // we restart we might revert to an older version, then we'll
+      // advertise the older version to Omaha and everything will still work.
+    }
+    crl_set_ = new_crl_set;
+  }
+
+  if (!BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          base::Bind(
+              &CRLSetFetcher::SetCRLSetIfNewer, this, crl_set_))) {
+    NOTREACHED();
+  }
+
   return true;
 }

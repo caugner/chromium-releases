@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_url_tracker.h"
+#include "chrome/browser/net/browser_url_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "googleurl/src/gurl.h"
@@ -24,19 +25,6 @@
 namespace {
 
 const char* brand_for_testing = NULL;
-
-// A helper method for adding a query param to |url|.
-GURL AppendParam(const GURL& url,
-                 const std::string& param_name,
-                 const std::string& param_value) {
-  std::string query(url.query());
-  if (!query.empty())
-    query += "&";
-  query += param_name + "=" + param_value;
-  GURL::Replacements repl;
-  repl.SetQueryStr(query);
-  return url.ReplaceComponents(repl);
-}
 
 }  // anonymous namespace
 
@@ -60,7 +48,7 @@ GURL AppendGoogleLocaleParam(const GURL& url) {
   std::string locale = g_browser_process->GetApplicationLocale();
   if (locale == "nb")
     locale = "no";
-  return AppendParam(url, "hl", locale);
+  return chrome_browser_net::AppendQueryParameter(url, "hl", locale);
 }
 
 std::string StringAppendGoogleLocaleParam(const std::string& url) {
@@ -79,7 +67,8 @@ GURL AppendGoogleTLDParam(const GURL& url) {
     NOTREACHED();
     return url;
   }
-  return AppendParam(url, "sd", google_domain.substr(first_dot + 1));
+  return chrome_browser_net::AppendQueryParameter(
+      url, "sd", google_domain.substr(first_dot + 1));
 }
 
 #if defined(OS_WIN)
@@ -179,11 +168,14 @@ bool IsOrganic(const std::string& brand) {
 #endif
 
   const char* const kBrands[] = {
+      "CHCA", "CHCB", "CHCG", "CHCH", "CHCI", "CHCJ", "CHCK", "CHCL",
       "CHFO", "CHFT", "CHHS", "CHHM", "CHMA", "CHMB", "CHME", "CHMF",
       "CHMG", "CHMH", "CHMI", "CHMQ", "CHMV", "CHNB", "CHNC", "CHNG",
       "CHNH", "CHNI", "CHOA", "CHOB", "CHOC", "CHON", "CHOO", "CHOP",
       "CHOQ", "CHOR", "CHOS", "CHOT", "CHOU", "CHOX", "CHOY", "CHOZ",
-      "CHPD", "CHPE", "CHPF", "CHPG", "EUBB", "EUBC", "GGLA", "GGLS"
+      "CHPD", "CHPE", "CHPF", "CHPG", "ECBA", "ECBB", "ECDA", "ECDB",
+      "ECSA", "ECSB", "ECVA", "ECVB", "ECWA", "ECWB", "ECWC", "ECWD",
+      "ECWE", "ECWF", "EUBB", "EUBC", "GGLA", "GGLS"
   };
   const char* const* end = &kBrands[arraysize(kBrands)];
   const char* const* found = std::find(&kBrands[0], end, brand);

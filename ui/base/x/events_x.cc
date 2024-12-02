@@ -1,21 +1,31 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/base/events.h"
 
 #include <X11/Xlib.h>
+#include <X11/extensions/XInput.h>
 #include <X11/extensions/XInput2.h>
 #include <string.h>
 
 #include "base/logging.h"
 #include "ui/base/keycodes/keyboard_code_conversion_x.h"
 #include "ui/base/touch/touch_factory.h"
+#include "ui/base/x/x11_util.h"
 #include "ui/gfx/point.h"
 
 #if !defined(TOOLKIT_USES_GTK)
 #include "base/message_pump_x.h"
 #endif
+
+// Copied from xserver-properties.h
+#define AXIS_LABEL_PROP_REL_HWHEEL "Rel Horiz Wheel"
+#define AXIS_LABEL_PROP_REL_WHEEL "Rel Vert Wheel"
+
+// CMT specific timings
+#define AXIS_LABEL_PROP_ABS_START_TIME "Abs Start Timestamp"
+#define AXIS_LABEL_PROP_ABS_END_TIME "Abs End Timestamp"
 
 namespace {
 
@@ -34,6 +44,236 @@ static const int kMaxWheelButton = 9;
 static const int kMaxWheelButton = 7;
 #endif
 
+// A class to support the detection of scroll events, using X11 valuators.
+class UI_EXPORT CMTEventData {
+ public:
+  // Returns the ScrollEventData singleton.
+  static CMTEventData* GetInstance() {
+    return Singleton<CMTEventData>::get();
+  }
+
+  // Updates the list of devices.
+  void UpdateDeviceList(Display* display) {
+    cmt_devices_.reset();
+    device_to_valuators_.clear();
+
+    int count = 0;
+    XDeviceInfo* dev_list = XListInputDevices(display, &count);
+    Atom xi_touchpad = XInternAtom(display, XI_TOUCHPAD, false);
+    for (int i = 0; i < count; ++i) {
+      XDeviceInfo* dev = dev_list + i;
+      if (dev->type == xi_touchpad)
+        cmt_devices_[dev_list[i].id] = true;
+    }
+    if (dev_list)
+      XFreeDeviceList(dev_list);
+
+    XIDeviceInfo* info_list = XIQueryDevice(display, XIAllDevices, &count);
+    Atom x_axis = XInternAtom(display, AXIS_LABEL_PROP_REL_HWHEEL, false);
+    Atom y_axis = XInternAtom(display, AXIS_LABEL_PROP_REL_WHEEL, false);
+    Atom start_time =
+        XInternAtom(display, AXIS_LABEL_PROP_ABS_START_TIME, false);
+    Atom end_time = XInternAtom(display, AXIS_LABEL_PROP_ABS_END_TIME, false);
+    for (int i = 0; i < count; ++i) {
+      XIDeviceInfo* info = info_list + i;
+
+      if (!cmt_devices_[info->deviceid])
+        continue;
+
+      if (info->use != XISlavePointer && info->use != XIFloatingSlave) {
+        cmt_devices_[info->deviceid] = false;
+        continue;
+      }
+
+      Valuators valuators;
+      for (int j = 0; j < info->num_classes; ++j) {
+        if (info->classes[j]->type != XIValuatorClass)
+          continue;
+
+        XIValuatorClassInfo* v =
+            reinterpret_cast<XIValuatorClassInfo*>(info->classes[j]);
+        int number = v->number;
+        if (number > valuators.max)
+          valuators.max = number;
+        if (v->label == x_axis)
+          valuators.x_scroll = number;
+        else if (v->label == y_axis)
+          valuators.y_scroll = number;
+        else if (v->label == start_time)
+          valuators.start_time = number;
+        else if (v->label == end_time)
+          valuators.end_time = number;
+      }
+      if (valuators.x_scroll >= 0 && valuators.y_scroll >= 0)
+        device_to_valuators_[info->deviceid] = valuators;
+      else
+        cmt_devices_[info->deviceid] = false;
+    }
+    XIFreeDeviceInfo(info_list);
+  }
+
+  // Returns true if this is a scroll event (a motion event with the necessary
+  // valuators. Also returns the offsets. |x_offset| and |y_offset| can be
+  // NULL.
+  bool GetScrollOffsets(const XEvent& xev, float* x_offset, float* y_offset) {
+    XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(xev.xcookie.data);
+
+    if (x_offset)
+      *x_offset = 0;
+    if (y_offset)
+      *y_offset = 0;
+
+    if (!cmt_devices_[xiev->deviceid])
+      return false;
+
+    const Valuators v = device_to_valuators_[xiev->deviceid];
+    bool has_x_offset = XIMaskIsSet(xiev->valuators.mask, v.x_scroll);
+    bool has_y_offset = XIMaskIsSet(xiev->valuators.mask, v.y_scroll);
+    bool is_scroll = has_x_offset || has_y_offset;
+
+    if (!x_offset && !y_offset)
+      return is_scroll;
+
+    double* valuators = xiev->valuators.values;
+    for (int i = 0; i <= v.max; ++i) {
+      if (XIMaskIsSet(xiev->valuators.mask, i)) {
+        if (x_offset && v.x_scroll == i)
+          *x_offset = -(*valuators);
+        else if (y_offset && v.y_scroll == i)
+          *y_offset = -(*valuators);
+        valuators++;
+      }
+    }
+
+    return is_scroll;
+  }
+
+  bool GetGestureTimes(const XEvent& xev,
+                       double* start_time,
+                       double* end_time) {
+    *start_time = 0;
+    *end_time = 0;
+
+    XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(xev.xcookie.data);
+    if (!cmt_devices_[xiev->deviceid])
+      return false;
+
+    Valuators v = device_to_valuators_[xiev->deviceid];
+    if (!XIMaskIsSet(xiev->valuators.mask, v.start_time) ||
+        !XIMaskIsSet(xiev->valuators.mask, v.end_time))
+      return false;
+
+    double* valuators = xiev->valuators.values;
+    for (int i = 0; i <= v.max; ++i) {
+      if (XIMaskIsSet(xiev->valuators.mask, i)) {
+        // Convert values to unsigned ints represending ms before storing them,
+        // as that is how they were encoded before conversion to doubles.
+        if (v.start_time == i)
+          *start_time =
+              static_cast<double>(static_cast<unsigned int>(*valuators)) / 1000;
+        else if (v.end_time == i)
+          *end_time =
+              static_cast<double>(static_cast<unsigned int>(*valuators)) / 1000;
+        valuators++;
+      }
+    }
+
+    return true;
+  }
+
+ private:
+  // Requirement for Singleton
+  friend struct DefaultSingletonTraits<CMTEventData>;
+
+  struct Valuators {
+    int max;
+    int x_scroll;
+    int y_scroll;
+    int start_time;
+    int end_time;
+
+    Valuators()
+        : max(-1), x_scroll(-1), y_scroll(-1), start_time(-1), end_time(-1) {}
+
+  };
+
+  CMTEventData() {
+    UpdateDeviceList(ui::GetXDisplay());
+  }
+
+  ~CMTEventData() {}
+
+  // A quick lookup table for determining if events from the pointer device
+  // should be processed.
+  static const int kMaxDeviceNum = 128;
+  std::bitset<kMaxDeviceNum> cmt_devices_;
+  std::map<int, Valuators> device_to_valuators_;
+
+  DISALLOW_COPY_AND_ASSIGN(CMTEventData);
+};
+
+// A class to track current modifier state on master device. Only track ctrl,
+// alt, shift and caps lock keys currently. The tracked state can then be used
+// by floating device.
+class UI_EXPORT XModifierStateWatcher{
+ public:
+  static XModifierStateWatcher* GetInstance() {
+    return Singleton<XModifierStateWatcher>::get();
+  }
+
+  void UpdateStateFromEvent(const base::NativeEvent& native_event) {
+    // Floating device can't access the modifer state from master device.
+    // We need to track the states of modifier keys in a singleton for
+    // floating devices such as touch screen. Issue 106426 is one example
+    // of why we need the modifier states for floating device.
+    state_ = native_event->xkey.state;
+    // master_state is the state before key press. We need to track the
+    // state after key press for floating device. Currently only ctrl,
+    // shift, alt and caps lock keys are tracked.
+    ui::KeyboardCode keyboard_code = ui::KeyboardCodeFromNative(native_event);
+    unsigned int mask = 0;
+
+    switch (keyboard_code) {
+      case ui::VKEY_CONTROL: {
+        mask = ControlMask;
+        break;
+      }
+      case ui::VKEY_SHIFT: {
+        mask = ShiftMask;
+        break;
+      }
+      case ui::VKEY_MENU: {
+        mask = Mod1Mask;
+        break;
+      }
+      case ui::VKEY_CAPITAL: {
+        mask = LockMask;
+        break;
+      }
+      default:
+        break;
+    }
+
+    if (native_event->type == KeyPress)
+      state_ |= mask;
+    else
+      state_ &= ~mask;
+  }
+
+  // Returns the current modifer state in master device. It only contains the
+  // state of ctrl, shift, alt and caps lock keys.
+  unsigned int state() { return state_; }
+
+ private:
+  friend struct DefaultSingletonTraits<XModifierStateWatcher>;
+
+  XModifierStateWatcher() : state_(0) { }
+
+  unsigned int state_;
+
+  DISALLOW_COPY_AND_ASSIGN(XModifierStateWatcher);
+};
+
 int GetEventFlagsFromXState(unsigned int state) {
   int flags = 0;
   if (state & ControlMask)
@@ -45,11 +285,11 @@ int GetEventFlagsFromXState(unsigned int state) {
   if (state & LockMask)
     flags |= ui::EF_CAPS_LOCK_DOWN;
   if (state & Button1Mask)
-    flags |= ui::EF_LEFT_BUTTON_DOWN;
+    flags |= ui::EF_LEFT_MOUSE_BUTTON;
   if (state & Button2Mask)
-    flags |= ui::EF_MIDDLE_BUTTON_DOWN;
+    flags |= ui::EF_MIDDLE_MOUSE_BUTTON;
   if (state & Button3Mask)
-    flags |= ui::EF_RIGHT_BUTTON_DOWN;
+    flags |= ui::EF_RIGHT_MOUSE_BUTTON;
   return flags;
 }
 
@@ -64,11 +304,11 @@ int GetEventFlagsFromXState(unsigned int state) {
 int GetEventFlagsForButton(int button) {
   switch (button) {
     case 1:
-      return ui::EF_LEFT_BUTTON_DOWN;
+      return ui::EF_LEFT_MOUSE_BUTTON;
     case 2:
-      return ui::EF_MIDDLE_BUTTON_DOWN;
+      return ui::EF_MIDDLE_MOUSE_BUTTON;
     case 3:
-      return ui::EF_RIGHT_BUTTON_DOWN;
+      return ui::EF_RIGHT_MOUSE_BUTTON;
     default:
       return 0;
   }
@@ -78,7 +318,9 @@ int GetButtonMaskForX2Event(XIDeviceEvent* xievent) {
   int buttonflags = 0;
   for (int i = 0; i < 8 * xievent->buttons.mask_len; i++) {
     if (XIMaskIsSet(xievent->buttons.mask, i)) {
-      buttonflags |= GetEventFlagsForButton(i);
+      int button = (xievent->sourceid == xievent->deviceid) ?
+                   ui::GetMappedButton(i) : i;
+      buttonflags |= GetEventFlagsForButton(button);
     }
   }
   return buttonflags;
@@ -191,18 +433,20 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
         return GetTouchEventType(native_event);
       switch (xievent->evtype) {
         case XI_ButtonPress:
-          if (xievent->detail >= kMinWheelButton &&
-              xievent->detail <= kMaxWheelButton)
+        case XI_ButtonRelease: {
+          int button = EventButtonFromNative(native_event);
+          if (button >= kMinWheelButton && button <= kMaxWheelButton)
             return ET_MOUSEWHEEL;
-          return ET_MOUSE_PRESSED;
-        case XI_ButtonRelease:
-          if (xievent->detail >= kMinWheelButton &&
-              xievent->detail <= kMaxWheelButton)
-            return ET_MOUSEWHEEL;
-          return ET_MOUSE_RELEASED;
+          return xievent->evtype == XI_ButtonPress ?
+              ET_MOUSE_PRESSED : ET_MOUSE_RELEASED;
+        }
         case XI_Motion:
-          return GetButtonMaskForX2Event(xievent) ?
-              ET_MOUSE_DRAGGED : ET_MOUSE_MOVED;
+          if (GetScrollOffsets(native_event, NULL, NULL))
+            return ET_SCROLL;
+          else if (GetButtonMaskForX2Event(xievent)) {
+            return ET_MOUSE_DRAGGED;
+          } else
+            return ET_MOUSE_MOVED;
       }
     }
     default:
@@ -214,8 +458,10 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
 int EventFlagsFromNative(const base::NativeEvent& native_event) {
   switch (native_event->type) {
     case KeyPress:
-    case KeyRelease:
-      return GetEventFlagsFromXState(native_event->xbutton.state);
+    case KeyRelease: {
+      XModifierStateWatcher::GetInstance()->UpdateStateFromEvent(native_event);
+      return GetEventFlagsFromXState(native_event->xkey.state);
+    }
     case ButtonPress:
     case ButtonRelease: {
       int flags = GetEventFlagsFromXState(native_event->xbutton.state);
@@ -236,9 +482,15 @@ int EventFlagsFromNative(const base::NativeEvent& native_event) {
         case XI_ButtonRelease: {
           int flags = GetButtonMaskForX2Event(xievent) |
               GetEventFlagsFromXState(xievent->mods.effective);
+          if (touch) {
+            flags |= GetEventFlagsFromXState(
+                XModifierStateWatcher::GetInstance()->state());
+          }
+
           const EventType type = EventTypeFromNative(native_event);
+          int button = EventButtonFromNative(native_event);
           if ((type == ET_MOUSE_PRESSED || type == ET_MOUSE_RELEASED) && !touch)
-            flags |= GetEventFlagsForButton(xievent->detail);
+            flags |= GetEventFlagsForButton(button);
           return flags;
         }
         case XI_Motion:
@@ -248,6 +500,35 @@ int EventFlagsFromNative(const base::NativeEvent& native_event) {
     }
   }
   return 0;
+}
+
+base::TimeDelta EventTimeFromNative(const base::NativeEvent& native_event) {
+  switch(native_event->type) {
+    case KeyPress:
+    case KeyRelease:
+      return base::TimeDelta::FromMilliseconds(native_event->xkey.time);
+    case ButtonPress:
+    case ButtonRelease:
+      return base::TimeDelta::FromMilliseconds(native_event->xbutton.time);
+      break;
+    case MotionNotify:
+      return base::TimeDelta::FromMilliseconds(native_event->xmotion.time);
+      break;
+    case GenericEvent: {
+      double start, end;
+      if (GetGestureTimes(native_event, &start, &end)) {
+        // If the driver supports gesture times, use them.
+        return base::TimeDelta::FromMicroseconds(start * 1000000);
+      } else {
+        XIDeviceEvent* xide =
+            static_cast<XIDeviceEvent*>(native_event->xcookie.data);
+        return base::TimeDelta::FromMilliseconds(xide->time);
+      }
+      break;
+    }
+  }
+  NOTREACHED();
+  return base::TimeDelta();
 }
 
 gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
@@ -261,6 +542,15 @@ gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
       XIDeviceEvent* xievent =
           static_cast<XIDeviceEvent*>(native_event->xcookie.data);
 
+#if defined(USE_XI2_MT)
+      // Touch event valuators aren't coordinates.
+      // Return the |event_x|/|event_y| directly as event's position.
+      if (xievent->evtype == XI_TouchBegin ||
+          xievent->evtype == XI_TouchUpdate ||
+          xievent->evtype == XI_TouchEnd)
+        return gfx::Point(static_cast<int>(xievent->event_x),
+                          static_cast<int>(xievent->event_y));
+#endif
       // Read the position from the valuators, because the location reported in
       // event_x/event_y seems to be different (and doesn't match for events
       // coming from slave device and master device) from the values in the
@@ -285,6 +575,16 @@ gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
   return gfx::Point();
 }
 
+int EventButtonFromNative(const base::NativeEvent& native_event) {
+  CHECK_EQ(GenericEvent, native_event->type);
+  XIDeviceEvent* xievent =
+      static_cast<XIDeviceEvent*>(native_event->xcookie.data);
+  int button = xievent->detail;
+
+  return (xievent->sourceid == xievent->deviceid) ?
+         ui::GetMappedButton(button) : button;
+}
+
 KeyboardCode KeyboardCodeFromNative(const base::NativeEvent& native_event) {
   return KeyboardCodeFromXKeyEvent(native_event);
 }
@@ -306,13 +606,10 @@ bool IsMouseEvent(const base::NativeEvent& native_event) {
 
 int GetMouseWheelOffset(const base::NativeEvent& native_event) {
   int button;
-  if (native_event->type == GenericEvent) {
-    XIDeviceEvent* xiev =
-        static_cast<XIDeviceEvent*>(native_event->xcookie.data);
-    button = xiev->detail;
-  } else {
+  if (native_event->type == GenericEvent)
+    button = EventButtonFromNative(native_event);
+  else
     button = native_event->xbutton.button;
-  }
   switch (button) {
     case 4:
 #if defined(OS_CHROMEOS)
@@ -347,10 +644,16 @@ int GetTouchId(const base::NativeEvent& xev) {
 #if defined(USE_XI2_MT)
   float tracking_id;
   if (!factory->ExtractTouchParam(
-         *xev, ui::TouchFactory::TP_TRACKING_ID, &tracking_id))
+         *xev, ui::TouchFactory::TP_TRACKING_ID, &tracking_id)) {
     LOG(ERROR) << "Could not get the slot ID for the event. Using 0.";
-  else
+  } else {
     slot = factory->GetSlotForTrackingID(tracking_id);
+    ui::EventType type = ui::EventTypeFromNative(xev);
+    if (type == ui::ET_TOUCH_CANCELLED ||
+        type == ui::ET_TOUCH_RELEASED) {
+      factory->ReleaseSlotForTrackingID(tracking_id);
+    }
+  }
 #else
   if (!factory->ExtractTouchParam(
          *xev, ui::TouchFactory::TP_SLOT_ID, &slot))
@@ -385,6 +688,26 @@ float GetTouchForce(const base::NativeEvent& native_event) {
       deviceid, ui::TouchFactory::TP_PRESSURE, &force))
     force = 0.0;
   return force;
+}
+
+bool GetScrollOffsets(const base::NativeEvent& native_event,
+                      float* x_offset,
+                      float* y_offset) {
+  return CMTEventData::GetInstance()->GetScrollOffsets(
+      *native_event, x_offset, y_offset);
+}
+
+bool GetGestureTimes(const base::NativeEvent& native_event,
+                     double* start_time,
+                     double* end_time) {
+  return CMTEventData::GetInstance()->GetGestureTimes(
+      *native_event, start_time, end_time);
+}
+
+void UpdateDeviceList() {
+  Display* display = GetXDisplay();
+  CMTEventData::GetInstance()->UpdateDeviceList(display);
+  TouchFactory::GetInstance()->UpdateDeviceList(display);
 }
 
 base::NativeEvent CreateNoopEvent() {

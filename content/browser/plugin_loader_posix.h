@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/time.h"
-#include "content/browser/plugin_service.h"
+#include "content/browser/plugin_service_impl.h"
 #include "content/browser/utility_process_host.h"
 #include "ipc/ipc_message.h"
 #include "webkit/plugins/webplugininfo.h"
@@ -49,8 +49,9 @@ class CONTENT_EXPORT PluginLoaderPosix : public UtilityProcessHost::Client,
   PluginLoaderPosix();
 
   // Must be called from the IO thread.
-  void LoadPlugins(scoped_refptr<base::MessageLoopProxy> target_loop,
-                   const PluginService::GetPluginsCallback& callback);
+  void LoadPlugins(
+      scoped_refptr<base::MessageLoopProxy> target_loop,
+      const content::PluginService::GetPluginsCallback& callback);
 
   // UtilityProcessHost::Client:
   virtual void OnProcessCrashed(int exit_code) OVERRIDE;
@@ -62,11 +63,11 @@ class CONTENT_EXPORT PluginLoaderPosix : public UtilityProcessHost::Client,
  private:
   struct PendingCallback {
     PendingCallback(scoped_refptr<base::MessageLoopProxy> target_loop,
-                    const PluginService::GetPluginsCallback& callback);
+                    const content::PluginService::GetPluginsCallback& callback);
     ~PendingCallback();
 
     scoped_refptr<base::MessageLoopProxy> target_loop;
-    PluginService::GetPluginsCallback callback;
+    content::PluginService::GetPluginsCallback callback;
   };
 
   virtual ~PluginLoaderPosix();
@@ -87,11 +88,11 @@ class CONTENT_EXPORT PluginLoaderPosix : public UtilityProcessHost::Client,
 
   // Runs all the registered callbacks on each's target loop if the condition
   // for ending the load process is done (i.e. the |next_load_index_| is outside
-  // the ranage of the |canonical_list_|).
+  // the range of the |canonical_list_|).
   bool MaybeRunPendingCallbacks();
 
   // The process host for which this is a client.
-  UtilityProcessHost* process_host_;
+  base::WeakPtr<UtilityProcessHost> process_host_;
 
   // A list of paths to plugins which will be loaded by the utility process, in
   // the order specified by this vector.

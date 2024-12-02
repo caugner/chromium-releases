@@ -13,7 +13,6 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_callback_factory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
@@ -83,7 +82,7 @@ class ChromeInvalidationClient
 
   // Register the sync types that we're interested in getting
   // notifications for.  May be called at any time.
-  void RegisterTypes(const syncable::ModelTypeSet& types);
+  void RegisterTypes(syncable::ModelTypeSet types);
 
   virtual void WriteState(const std::string& state) OVERRIDE;
 
@@ -122,12 +121,10 @@ class ChromeInvalidationClient
   friend class ChromeInvalidationClientTest;
 
   void EmitInvalidation(
-      const syncable::ModelTypeSet& types, const std::string& payload);
+      syncable::ModelTypeSet types, const std::string& payload);
 
   base::NonThreadSafe non_thread_safe_;
   ChromeSystemResources chrome_system_resources_;
-  base::ScopedCallbackFactory<ChromeInvalidationClient>
-      scoped_callback_factory_;
   InvalidationVersionMap max_invalidation_versions_;
   browser_sync::WeakHandle<InvalidationVersionTracker>
       invalidation_version_tracker_;

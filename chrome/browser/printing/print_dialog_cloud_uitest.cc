@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,9 +23,9 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
 #include "content/test/test_browser_thread.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_test_job.h"
@@ -154,7 +154,7 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
 
     virtual void OnResponseCompleted(net::URLRequest* request) {
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                              new MessageLoop::QuitTask());
+                              MessageLoop::QuitClosure());
     }
   };
 
@@ -204,9 +204,9 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
         test_data_directory_.AppendASCII("printing/cloud_print_uitest.pdf");
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(&internal_cloud_print_helpers::CreateDialogImpl, path_to_pdf,
-                   string16(), string16(), std::string("application/pdf"), true,
-                   false));
+        base::Bind(&internal_cloud_print_helpers::CreateDialogFullImpl,
+                   path_to_pdf, string16(), string16(),
+                   std::string("application/pdf"), true, false));
   }
 
   bool handler_added_;
@@ -254,26 +254,3 @@ IN_PROC_BROWSER_TEST_F(PrintDialogCloudTest, MAYBE_HandlersRegistered) {
   signal.Wait();
 }
 
-#if defined(OS_CHROMEOS)
-// Disabled until the extern URL is live so that the Print menu item
-// can be enabled for Chromium OS.
-IN_PROC_BROWSER_TEST_F(PrintDialogCloudTest, DISABLED_DialogGrabbed) {
-  BrowserList::SetLastActive(browser());
-  ASSERT_TRUE(BrowserList::GetLastActive());
-
-  AddTestHandlers();
-
-  // This goes back one step further for the Chrome OS case, to making
-  // sure 'window.print()' gets to the right place.
-  ASSERT_TRUE(browser()->GetSelectedTabContents());
-  ASSERT_TRUE(browser()->GetSelectedTabContents()->render_view_host());
-
-  string16 window_print = ASCIIToUTF16("window.print()");
-  browser()->GetSelectedTabContents()->render_view_host()->
-      ExecuteJavascriptInWebFrame(string16(), window_print);
-
-  ui_test_utils::RunMessageLoop();
-
-  ASSERT_TRUE(TestController::GetInstance()->result());
-}
-#endif

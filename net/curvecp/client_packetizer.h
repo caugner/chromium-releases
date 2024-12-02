@@ -9,7 +9,6 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
 #include "net/curvecp/packetizer.h"
@@ -29,13 +28,13 @@ class ClientPacketizer : public Packetizer {
 
   int Connect(const AddressList& server,
               Packetizer::Listener* listener,
-              OldCompletionCallback* callback);
+              const CompletionCallback& callback);
 
-  // Packetizer methods
+  // Packetizer implementation.
   virtual int SendMessage(ConnectionKey key,
                           const char* data,
                           size_t length,
-                          OldCompletionCallback* callback) OVERRIDE;
+                          const CompletionCallback& callback) OVERRIDE;
   virtual void Close(ConnectionKey key) OVERRIDE;
   virtual int GetPeerAddress(IPEndPoint* endpoint) const OVERRIDE;
   virtual int max_message_payload() const OVERRIDE;
@@ -83,17 +82,17 @@ class ClientPacketizer : public Packetizer {
   StateType next_state_;
   scoped_ptr<UDPClientSocket> socket_;
   Packetizer::Listener* listener_;
-  OldCompletionCallback* user_callback_;
+  CompletionCallback user_callback_;
   AddressList addresses_;
   const struct addrinfo* current_address_;
   int hello_attempts_;  // Number of attempts to send a Hello Packet.
-  bool initiate_sent_;  // Indicates whether the Initialte Packet was sent.
+  bool initiate_sent_;  // Indicates whether the Initiate Packet was sent.
 
-  scoped_refptr<IOBuffer> read_buffer_;  // Buffer for interal reads.
+  scoped_refptr<IOBuffer> read_buffer_;  // Buffer for internal reads.
 
   uchar shortterm_public_key_[32];
 
-  OldCompletionCallbackImpl<ClientPacketizer> io_callback_;
+  CompletionCallback io_callback_;
   base::WeakPtrFactory<ClientPacketizer> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientPacketizer);

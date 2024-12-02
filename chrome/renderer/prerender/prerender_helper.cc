@@ -18,7 +18,7 @@ using content::DocumentState;
 #define RECORD_PLT(tag, perceived_page_load_time) { \
     UMA_HISTOGRAM_CUSTOM_TIMES( \
         base::FieldTrial::MakeName(std::string("Prerender.") + tag, \
-                                   "Prefetch"), \
+                                   "Prerender"), \
         perceived_page_load_time, \
         base::TimeDelta::FromMilliseconds(10), \
         base::TimeDelta::FromSeconds(60), \
@@ -50,7 +50,7 @@ void PrerenderHelper::RecordHistograms(
     const base::Time& finish_all_loads,
     const base::TimeDelta& begin_to_finish_all_loads) {
   static bool use_prerender_histogram =
-      base::FieldTrialList::TrialExists("Prefetch");
+      base::FieldTrialList::TrialExists("Prerender");
   if (!use_prerender_histogram)
     return;
 
@@ -108,17 +108,6 @@ void PrerenderHelper::RecordHistograms(
   // Once a prerendered page is displayed and its histograms recorded, it no
   // longer needs a PrerenderHelper.
   delete prerender_helper;
-}
-
-void PrerenderHelper::WillCreateMediaPlayer(
-    WebKit::WebFrame* frame,
-    WebKit::WebMediaPlayerClient* client) {
-  if (is_prerendering_) {
-    // Cancel prerendering in the case of HTML5 media, to avoid playing sounds
-    // in the background.
-    Send(new ChromeViewHostMsg_MaybeCancelPrerenderForHTML5Media(
-        render_view()->GetRoutingId()));
-  }
 }
 
 void PrerenderHelper::DidStartProvisionalLoad(WebKit::WebFrame* frame) {

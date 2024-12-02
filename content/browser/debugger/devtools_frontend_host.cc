@@ -15,9 +15,10 @@ namespace content {
 
 // static
 DevToolsClientHost* DevToolsClientHost::CreateDevToolsFrontendHost(
-    TabContents* client_tab_contents,
+    WebContents* client_web_contents,
     DevToolsFrontendHostDelegate* delegate) {
-  return new DevToolsFrontendHost(client_tab_contents, delegate);
+  return new DevToolsFrontendHost(
+      static_cast<TabContents*>(client_web_contents), delegate);
 }
 
 // static
@@ -30,7 +31,7 @@ void DevToolsClientHost::SetupDevToolsFrontendClient(
 DevToolsFrontendHost::DevToolsFrontendHost(
     TabContents* tab_contents,
     DevToolsFrontendHostDelegate* delegate)
-    : RenderViewHostObserver(tab_contents->render_view_host()),
+    : RenderViewHostObserver(tab_contents->GetRenderViewHost()),
       tab_contents_(tab_contents),
       delegate_(delegate) {
 }
@@ -40,7 +41,7 @@ DevToolsFrontendHost::~DevToolsFrontendHost() {
 
 void DevToolsFrontendHost::DispatchOnInspectorFrontend(
     const std::string& message) {
-  RenderViewHost* target_host = tab_contents_->render_view_host();
+  RenderViewHost* target_host = tab_contents_->GetRenderViewHost();
   target_host->Send(new DevToolsClientMsg_DispatchOnInspectorFrontend(
       target_host->routing_id(),
       message));
@@ -54,7 +55,7 @@ void DevToolsFrontendHost::FrameNavigating(const std::string& url) {
   delegate_->FrameNavigating(url);
 }
 
-void DevToolsFrontendHost::TabReplaced(TabContents* new_tab) {
+void DevToolsFrontendHost::TabReplaced(WebContents* new_tab) {
   delegate_->TabReplaced(new_tab);
 }
 
@@ -70,6 +71,10 @@ bool DevToolsFrontendHost::OnMessageReceived(
     IPC_MESSAGE_HANDLER(DevToolsHostMsg_RequestDockWindow, OnRequestDockWindow)
     IPC_MESSAGE_HANDLER(DevToolsHostMsg_RequestUndockWindow,
                         OnRequestUndockWindow)
+    IPC_MESSAGE_HANDLER(DevToolsHostMsg_RequestSetDockSide,
+                        OnRequestSetDockSide)
+    IPC_MESSAGE_HANDLER(DevToolsHostMsg_OpenInNewTab,
+                        OnOpenInNewTab)
     IPC_MESSAGE_HANDLER(DevToolsHostMsg_SaveAs,
                         OnSaveAs)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -95,6 +100,10 @@ void DevToolsFrontendHost::OnMoveWindow(int x, int y) {
   delegate_->MoveWindow(x, y);
 }
 
+void DevToolsFrontendHost::OnOpenInNewTab(const std::string& url) {
+  delegate_->OpenInNewTab(url);
+}
+
 void DevToolsFrontendHost::OnSaveAs(
     const std::string& suggested_file_name,
     const std::string& content) {
@@ -107,6 +116,10 @@ void DevToolsFrontendHost::OnRequestDockWindow() {
 
 void DevToolsFrontendHost::OnRequestUndockWindow() {
   delegate_->UndockWindow();
+}
+
+void DevToolsFrontendHost::OnRequestSetDockSide(const std::string& side) {
+  delegate_->SetDockSide(side);
 }
 
 }  // namespace content

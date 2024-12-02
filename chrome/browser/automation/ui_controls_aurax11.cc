@@ -7,15 +7,23 @@
 #include <X11/keysym.h>
 #include <X11/Xlib.h>
 
+// X macro fail.
+#if defined(RootWindow)
+#undef RootWindow
+#endif
+
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/message_pump_x.h"
 #include "chrome/browser/automation/ui_controls_internal.h"
-#include "ui/aura/desktop.h"
+#include "ui/aura/root_window.h"
 #include "ui/base/keycodes/keyboard_code_conversion_x.h"
 #include "ui/views/view.h"
 
 namespace {
+
+// Mask of the buttons currently down.
+unsigned button_down_mask = 0;
 
 // Event waiter executes the specified closure|when a matching event
 // is found.
@@ -70,22 +78,6 @@ bool Matcher(const base::NativeEvent& event) {
       event->xclient.message_type == MarkerEventAtom();
 }
 
-void RunClosureAfterEvents(const base::Closure closure) {
-  if (closure.is_null())
-    return;
-  static XEvent* marker_event = NULL;
-  if (!marker_event) {
-    marker_event = new XEvent();
-    marker_event->xclient.type = ClientMessage;
-    marker_event->xclient.display = NULL;
-    marker_event->xclient.window = None;
-    marker_event->xclient.format = 8;
-  }
-  marker_event->xclient.message_type = MarkerEventAtom();
-  aura::Desktop::GetInstance()->PostNativeEvent(marker_event);
-  new EventWaiter(closure, &Matcher);
-}
-
 }  // namespace
 
 namespace ui_controls {
@@ -101,20 +93,24 @@ bool SendKeyPress(gfx::NativeWindow window,
       window, key, control, shift, alt, command, base::Closure());
 }
 
-void SetMaskAndKeycodeThenSend(XEvent* xevent,
-                               unsigned int mask,
-                               unsigned int keycode) {
+void SetKeycodeAndSendThenMask(XEvent* xevent,
+                               KeySym keysym,
+                               unsigned int mask) {
+  xevent->xkey.keycode =
+      XKeysymToKeycode(base::MessagePumpX::GetDefaultXDisplay(),
+                       keysym);
+  aura::RootWindow::GetInstance()->PostNativeEvent(xevent);
   xevent->xkey.state |= mask;
-  xevent->xkey.keycode = keycode;
-  aura::Desktop::GetInstance()->PostNativeEvent(xevent);
 }
 
-void SetKeycodeAndSendThenUnmask(XEvent* xevent,
+void UnmaskAndSetKeycodeThenSend(XEvent* xevent,
                                  unsigned int mask,
-                                 unsigned int keycode) {
-  xevent->xkey.keycode = keycode;
-  aura::Desktop::GetInstance()->PostNativeEvent(xevent);
+                                 KeySym keysym) {
   xevent->xkey.state ^= mask;
+  xevent->xkey.keycode =
+      XKeysymToKeycode(base::MessagePumpX::GetDefaultXDisplay(),
+                       keysym);
+  aura::RootWindow::GetInstance()->PostNativeEvent(xevent);
 }
 
 bool SendKeyPressNotifyWhenDone(gfx::NativeWindow window,
@@ -128,27 +124,27 @@ bool SendKeyPressNotifyWhenDone(gfx::NativeWindow window,
   XEvent xevent = {0};
   xevent.xkey.type = KeyPress;
   if (control)
-    SetMaskAndKeycodeThenSend(&xevent, ControlMask, XK_Control_L);
+    SetKeycodeAndSendThenMask(&xevent, XK_Control_L, ControlMask);
   if (shift)
-    SetMaskAndKeycodeThenSend(&xevent, ShiftMask, XK_Shift_L);
+    SetKeycodeAndSendThenMask(&xevent, XK_Shift_L, ShiftMask);
   if (alt)
-    SetMaskAndKeycodeThenSend(&xevent, Mod1Mask, XK_Alt_L);
+    SetKeycodeAndSendThenMask(&xevent, XK_Alt_L, Mod1Mask);
   xevent.xkey.keycode =
       XKeysymToKeycode(base::MessagePumpX::GetDefaultXDisplay(),
                        ui::XKeysymForWindowsKeyCode(key, shift));
-  aura::Desktop::GetInstance()->PostNativeEvent(&xevent);
+  aura::RootWindow::GetInstance()->PostNativeEvent(&xevent);
 
   // Send key release events.
   xevent.xkey.type = KeyRelease;
-  aura::Desktop::GetInstance()->PostNativeEvent(&xevent);
+  aura::RootWindow::GetInstance()->PostNativeEvent(&xevent);
   if (alt)
-    SetKeycodeAndSendThenUnmask(&xevent, Mod1Mask, XK_Alt_L);
+    UnmaskAndSetKeycodeThenSend(&xevent, Mod1Mask, XK_Alt_L);
   if (shift)
-    SetKeycodeAndSendThenUnmask(&xevent, ShiftMask, XK_Shift_L);
+    UnmaskAndSetKeycodeThenSend(&xevent, ShiftMask, XK_Shift_L);
   if (control)
-    SetKeycodeAndSendThenUnmask(&xevent, ControlMask, XK_Control_L);
+    UnmaskAndSetKeycodeThenSend(&xevent, ControlMask, XK_Control_L);
   DCHECK(!xevent.xkey.state);
-  RunClosureAfterEvents(closure);
+  RunClosureAfterAllPendingUIEvents(closure);
   return true;
 }
 
@@ -162,11 +158,12 @@ bool SendMouseMoveNotifyWhenDone(long x, long y, const base::Closure& closure) {
   xmotion->type = MotionNotify;
   g_current_x = xmotion->x = x;
   g_current_y = xmotion->y = y;
+  xmotion->state = button_down_mask;
   xmotion->same_screen = True;
-  // Desktop will take care of other necessary fields.
-  aura::Desktop::GetInstance()->PostNativeEvent(&xevent);
-  RunClosureAfterEvents(closure);
-  return false;
+  // RootWindow will take care of other necessary fields.
+  aura::RootWindow::GetInstance()->PostNativeEvent(&xevent);
+  RunClosureAfterAllPendingUIEvents(closure);
+  return true;
 }
 
 bool SendMouseEvents(MouseButton type, int state) {
@@ -197,19 +194,21 @@ bool SendMouseEventsNotifyWhenDone(MouseButton type,
       xbutton->state = Button3Mask;
       break;
   }
-  // Desktop will take care of other necessary fields.
+  // RootWindow will take care of other necessary fields.
 
-  aura::Desktop* desktop = aura::Desktop::GetInstance();
+  aura::RootWindow* root_window = aura::RootWindow::GetInstance();
   if (state & DOWN) {
     xevent.xbutton.type = ButtonPress;
-    desktop->PostNativeEvent(&xevent);
+    root_window->PostNativeEvent(&xevent);
+    button_down_mask |= xbutton->state;
   }
   if (state & UP) {
     xevent.xbutton.type = ButtonRelease;
-    desktop->PostNativeEvent(&xevent);
+    root_window->PostNativeEvent(&xevent);
+    button_down_mask = (button_down_mask | xbutton->state) ^ xbutton->state;
   }
-  RunClosureAfterEvents(closure);
-  return false;
+  RunClosureAfterAllPendingUIEvents(closure);
+  return true;
 }
 
 bool SendMouseClick(MouseButton type) {
@@ -224,6 +223,22 @@ void MoveMouseToCenterAndPress(views::View* view, MouseButton button,
   views::View::ConvertPointToScreen(view, &view_center);
   SendMouseMove(view_center.x(), view_center.y());
   SendMouseEventsNotifyWhenDone(button, state, closure);
+}
+
+void RunClosureAfterAllPendingUIEvents(const base::Closure& closure) {
+  if (closure.is_null())
+    return;
+  static XEvent* marker_event = NULL;
+  if (!marker_event) {
+    marker_event = new XEvent();
+    marker_event->xclient.type = ClientMessage;
+    marker_event->xclient.display = NULL;
+    marker_event->xclient.window = None;
+    marker_event->xclient.format = 8;
+  }
+  marker_event->xclient.message_type = MarkerEventAtom();
+  aura::RootWindow::GetInstance()->PostNativeEvent(marker_event);
+  new EventWaiter(closure, &Matcher);
 }
 
 }  // namespace ui_controls

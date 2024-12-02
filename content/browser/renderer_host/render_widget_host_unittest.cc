@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include "content/browser/renderer_host/backing_store.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/common/view_messages.h"
-#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -96,6 +95,7 @@ void RenderWidgetHostProcess::InitUpdateRectParams(
   params->copy_rects.push_back(params->bitmap_rect);
   params->view_size = gfx::Size(w, h);
   params->flags = update_msg_reply_flags_;
+  params->needs_ack = true;
 }
 
 bool RenderWidgetHostProcess::WaitForUpdateMsg(int render_widget_id,
@@ -181,6 +181,10 @@ class MockRenderWidgetHost : public RenderWidgetHost {
     return unresponsive_timer_fired_;
   }
 
+  void set_hung_renderer_delay_ms(int delay_ms) {
+    hung_renderer_delay_ms_ = delay_ms;
+  }
+
  protected:
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut) {
@@ -261,7 +265,7 @@ class RenderWidgetHostTest : public testing::Test {
   void SetUp() {
     browser_context_.reset(new TestBrowserContext());
     process_ = new RenderWidgetHostProcess(browser_context_.get());
-    host_.reset(new MockRenderWidgetHost(process_, 1));
+    host_.reset(new MockRenderWidgetHost(process_, MSG_ROUTING_NONE));
     view_.reset(new TestView(host_.get()));
     host_->SetView(view_.get());
     host_->Init();
@@ -373,33 +377,28 @@ TEST_F(RenderWidgetHostTest, Resize) {
   host_->WasResized();
   EXPECT_FALSE(host_->resize_ack_pending_);
   EXPECT_EQ(gfx::Size(), host_->in_flight_size_);
-  EXPECT_EQ(gfx::Size(), host_->current_size_);
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(ViewMsg_Resize::ID));
 
   // Send a rect that has no area but has either width or height set.
-  // since we do not expect ACK, current_size_ should be updated right away.
   process_->sink().ClearMessages();
   view_->set_bounds(gfx::Rect(0, 0, 0, 30));
   host_->WasResized();
   EXPECT_FALSE(host_->resize_ack_pending_);
-  EXPECT_EQ(gfx::Size(), host_->in_flight_size_);
-  EXPECT_EQ(gfx::Size(0, 30), host_->current_size_);
+  EXPECT_EQ(gfx::Size(0, 30), host_->in_flight_size_);
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(ViewMsg_Resize::ID));
 
   // Set the same size again. It should not be sent again.
   process_->sink().ClearMessages();
   host_->WasResized();
   EXPECT_FALSE(host_->resize_ack_pending_);
-  EXPECT_EQ(gfx::Size(), host_->in_flight_size_);
-  EXPECT_EQ(gfx::Size(0, 30), host_->current_size_);
+  EXPECT_EQ(gfx::Size(0, 30), host_->in_flight_size_);
   EXPECT_FALSE(process_->sink().GetFirstMessageMatching(ViewMsg_Resize::ID));
 
   // A different size should be sent again, however.
   view_->set_bounds(gfx::Rect(0, 0, 0, 31));
   host_->WasResized();
   EXPECT_FALSE(host_->resize_ack_pending_);
-  EXPECT_EQ(gfx::Size(), host_->in_flight_size_);
-  EXPECT_EQ(gfx::Size(0, 31), host_->current_size_);
+  EXPECT_EQ(gfx::Size(0, 31), host_->in_flight_size_);
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(ViewMsg_Resize::ID));
 }
 
@@ -430,15 +429,15 @@ TEST_F(RenderWidgetHostTest, ResizeThenCrash) {
 TEST_F(RenderWidgetHostTest, Background) {
 #if !defined(OS_MACOSX)
   scoped_ptr<RenderWidgetHostView> view(
-      content::GetContentClient()->browser()->CreateViewForWidget(host_.get()));
+      RenderWidgetHostView::CreateViewForWidget(host_.get()));
 #if defined(USE_AURA)
   // TODO(derat): Call this on all platforms: http://crbug.com/102450.
-  static_cast<RenderWidgetHostViewAura*>(view.get())->InitAsChild();
+  static_cast<RenderWidgetHostViewAura*>(view.get())->InitAsChild(NULL);
 #endif
   host_->SetView(view.get());
 
   // Create a checkerboard background to test with.
-  gfx::CanvasSkia canvas(4, 4, true);
+  gfx::CanvasSkia canvas(gfx::Size(4, 4), true);
   canvas.FillRect(SK_ColorBLACK, gfx::Rect(0, 0, 2, 2));
   canvas.FillRect(SK_ColorWHITE, gfx::Rect(2, 0, 2, 2));
   canvas.FillRect(SK_ColorWHITE, gfx::Rect(0, 2, 2, 2));
@@ -725,7 +724,7 @@ TEST_F(RenderWidgetHostTest, DontPostponeHangMonitorTimeout) {
 
   // Wait long enough for first timeout and see if it fired.
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                          new MessageLoop::QuitTask(), 10);
+                                          MessageLoop::QuitClosure(), 10);
   MessageLoop::current()->Run();
   EXPECT_TRUE(host_->unresponsive_timer_fired());
 }
@@ -743,7 +742,28 @@ TEST_F(RenderWidgetHostTest, StopAndStartHangMonitorTimeout) {
 
   // Wait long enough for first timeout and see if it fired.
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                          new MessageLoop::QuitTask(), 40);
+                                          MessageLoop::QuitClosure(), 40);
+  MessageLoop::current()->Run();
+  EXPECT_TRUE(host_->unresponsive_timer_fired());
+}
+
+// Test that the hang monitor catches two input events but only one ack.
+// This can happen if the second input event causes the renderer to hang.
+// This test will catch a regression of crbug.com/111185 and will only
+// pass when the compositor thread is being used.
+TEST_F(RenderWidgetHostTest, FAILS_MultipleInputEvents) {
+  // Configure the host to wait 10ms before considering
+  // the renderer hung.
+  host_->set_hung_renderer_delay_ms(10);
+
+  // Send two events but only one ack.
+  SimulateKeyboardEvent(WebInputEvent::RawKeyDown);
+  SimulateKeyboardEvent(WebInputEvent::RawKeyDown);
+  SendInputEventACK(WebInputEvent::RawKeyDown, true);
+
+  // Wait long enough for first timeout and see if it fired.
+  MessageLoop::current()->PostDelayedTask(FROM_HERE,
+                                          MessageLoop::QuitClosure(), 40);
   MessageLoop::current()->Run();
   EXPECT_TRUE(host_->unresponsive_timer_fired());
 }

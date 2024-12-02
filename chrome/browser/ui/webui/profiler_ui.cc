@@ -19,8 +19,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/trace_controller.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 
@@ -31,8 +34,10 @@
 #include "base/path_service.h"
 #endif  //  USE_SOURCE_FILES_DIRECTLY
 
-using content::BrowserThread;
 using chrome_browser_metrics::TrackingSynchronizer;
+using content::BrowserThread;
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 namespace {
 
@@ -60,6 +65,7 @@ class ProfilerWebUIDataSource : public ChromeURLDataManager::DataSource {
     base_path = base_path.AppendASCII("chrome");
     base_path = base_path.AppendASCII("browser");
     base_path = base_path.AppendASCII("resources");
+    base_path = base_path.AppendASCII("profiler");
 
     // If no resource was specified, default to profiler.html.
     std::string filename = path.empty() ? "profiler.html" : path;
@@ -108,7 +114,6 @@ class ProfilerMessageHandler : public WebUIMessageHandler {
   ProfilerMessageHandler() {}
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
   virtual void RegisterMessages() OVERRIDE;
 
   // Messages.
@@ -119,24 +124,18 @@ class ProfilerMessageHandler : public WebUIMessageHandler {
   DISALLOW_COPY_AND_ASSIGN(ProfilerMessageHandler);
 };
 
-WebUIMessageHandler* ProfilerMessageHandler::Attach(WebUI* web_ui) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  WebUIMessageHandler* result = WebUIMessageHandler::Attach(web_ui);
-  return result;
-}
-
 void ProfilerMessageHandler::RegisterMessages() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  web_ui_->RegisterMessageCallback("getData",
+  web_ui()->RegisterMessageCallback("getData",
       base::Bind(&ProfilerMessageHandler::OnGetData,base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("resetData",
+  web_ui()->RegisterMessageCallback("resetData",
       base::Bind(&ProfilerMessageHandler::OnResetData,
                  base::Unretained(this)));
 }
 
 void ProfilerMessageHandler::OnGetData(const ListValue* list) {
-  ProfilerUI* profiler_ui = reinterpret_cast<ProfilerUI*>(web_ui_);
+  ProfilerUI* profiler_ui = static_cast<ProfilerUI*>(web_ui()->GetController());
   profiler_ui->GetData();
 }
 
@@ -146,14 +145,14 @@ void ProfilerMessageHandler::OnResetData(const ListValue* list) {
 
 }  // namespace
 
-ProfilerUI::ProfilerUI(TabContents* contents) : ChromeWebUI(contents) {
+ProfilerUI::ProfilerUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   ui_weak_ptr_factory_.reset(new base::WeakPtrFactory<ProfilerUI>(this));
   ui_weak_ptr_ = ui_weak_ptr_factory_->GetWeakPtr();
 
-  AddMessageHandler((new ProfilerMessageHandler())->Attach(this));
+  web_ui->AddMessageHandler(new ProfilerMessageHandler());
 
   // Set up the chrome://profiler/ source.
-  Profile::FromBrowserContext(contents->browser_context())->
+  Profile::FromWebUI(web_ui)->
       GetChromeURLDataManager()->AddDataSource(CreateProfilerHTMLSource());
 }
 
@@ -167,6 +166,7 @@ void ProfilerUI::GetData() {
 void ProfilerUI::ReceivedData(base::Value* value) {
   // Send the data to the renderer.
   scoped_ptr<Value> data_values(value);
-  CallJavascriptFunction("g_browserBridge.receivedData", *data_values.get());
+  web_ui()->CallJavascriptFunction(
+      "g_browserBridge.receivedData", *data_values.get());
 }
 

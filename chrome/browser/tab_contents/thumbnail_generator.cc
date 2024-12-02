@@ -17,10 +17,11 @@
 #include "chrome/common/thumbnail_score.h"
 #include "content/browser/renderer_host/backing_store.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
 #include "skia/ext/image_operations.h"
 #include "skia/ext/platform_canvas.h"
@@ -49,6 +50,8 @@
 //
 // We'll likely revise the algorithm to improve quality of thumbnails this
 // service generates.
+
+using content::WebContents;
 
 namespace {
 
@@ -144,8 +147,8 @@ ThumbnailGenerator::ThumbnailGenerator()
 ThumbnailGenerator::~ThumbnailGenerator() {
 }
 
-void ThumbnailGenerator::StartThumbnailing(TabContents* tab_contents) {
-  TabContentsObserver::Observe(tab_contents);
+void ThumbnailGenerator::StartThumbnailing(WebContents* web_contents) {
+  content::WebContentsObserver::Observe(web_contents);
 
   if (registrar_.IsEmpty()) {
     // Even though we deal in RenderWidgetHosts, we only care about its
@@ -153,9 +156,9 @@ void ThumbnailGenerator::StartThumbnailing(TabContents* tab_contents) {
     // for RenderViewHosts that aren't in tabs, or RenderWidgetHosts that
     // aren't views like select popups.
     registrar_.Add(this, content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
-                   content::Source<TabContents>(tab_contents));
-    registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED,
-                   content::Source<TabContents>(tab_contents));
+                   content::Source<WebContents>(web_contents));
+    registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED,
+                   content::Source<WebContents>(web_contents));
   }
 }
 
@@ -350,8 +353,8 @@ void ThumbnailGenerator::Observe(int type,
       break;
     }
 
-    case content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED:
-      TabContentsDisconnected(content::Source<TabContents>(source).ptr());
+    case content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED:
+      WebContentsDisconnected(content::Source<WebContents>(source).ptr());
       break;
 
     default:
@@ -360,20 +363,20 @@ void ThumbnailGenerator::Observe(int type,
 }
 
 void ThumbnailGenerator::WidgetHidden(RenderWidgetHost* widget) {
-  // tab_contents_ can be NULL, if StartThumbnailing() is not called, but
+  // web_contents() can be NULL, if StartThumbnailing() is not called, but
   // MonitorRenderer() is called. The use case is found in
   // chrome/test/base/ui_test_utils.cc.
-  if (!tab_contents())
+  if (!web_contents())
     return;
-  UpdateThumbnailIfNecessary(tab_contents());
+  UpdateThumbnailIfNecessary(web_contents());
 }
 
-void ThumbnailGenerator::TabContentsDisconnected(TabContents* contents) {
+void ThumbnailGenerator::WebContentsDisconnected(WebContents* contents) {
   // Go through the existing callbacks, and find any that have the
   // same renderer as this TabContents and remove them so they don't
   // hang around.
   ThumbnailCallbackMap::iterator iterator = callback_map_.begin();
-  RenderWidgetHost* renderer = contents->render_view_host();
+  RenderWidgetHost* renderer = contents->GetRenderViewHost();
   while (iterator != callback_map_.end()) {
     if (iterator->second->renderer == renderer) {
       ThumbnailCallbackMap::iterator nuked = iterator;
@@ -446,10 +449,10 @@ SkBitmap ThumbnailGenerator::GetClippedBitmap(const SkBitmap& bitmap,
 }
 
 void ThumbnailGenerator::UpdateThumbnailIfNecessary(
-    TabContents* tab_contents) {
-  const GURL& url = tab_contents->GetURL();
+    WebContents* web_contents) {
+  const GURL& url = web_contents->GetURL();
   Profile* profile =
-      Profile::FromBrowserContext(tab_contents->browser_context());
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
   history::TopSites* top_sites = profile->GetTopSites();
   // Skip if we don't need to update the thumbnail.
   if (!ShouldUpdateThumbnail(profile, top_sites, url))
@@ -458,7 +461,7 @@ void ThumbnailGenerator::UpdateThumbnailIfNecessary(
   const int options = ThumbnailGenerator::kClippedThumbnail;
   ThumbnailGenerator::ClipResult clip_result = ThumbnailGenerator::kNotClipped;
   SkBitmap thumbnail = GetThumbnailForRendererWithOptions(
-      tab_contents->render_view_host(), options, &clip_result);
+      web_contents->GetRenderViewHost(), options, &clip_result);
   // Failed to generate a thumbnail. Maybe the tab is in the background?
   if (thumbnail.isNull())
     return;
@@ -466,12 +469,12 @@ void ThumbnailGenerator::UpdateThumbnailIfNecessary(
   // Compute the thumbnail score.
   ThumbnailScore score;
   score.at_top =
-      (tab_contents->render_view_host()->last_scroll_offset().y() == 0);
+      (web_contents->GetRenderViewHost()->last_scroll_offset().y() == 0);
   score.boring_score = ThumbnailGenerator::CalculateBoringScore(&thumbnail);
   score.good_clipping =
       (clip_result == ThumbnailGenerator::kTallerThanWide ||
        clip_result == ThumbnailGenerator::kNotClipped);
-  score.load_completed = (!load_interrupted_ && !tab_contents->IsLoading());
+  score.load_completed = (!load_interrupted_ && !web_contents->IsLoading());
 
   gfx::Image image(new SkBitmap(thumbnail));
   top_sites->SetPageThumbnail(url, &image, score);

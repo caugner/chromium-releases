@@ -5,15 +5,17 @@
 #include "chrome/test/base/test_html_dialog_observer.h"
 
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/test/base/js_injection_ready_observer.h"
+#include "content/test/js_injection_ready_observer.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/webui/web_ui.h"
+#include "content/browser/webui/web_ui_impl.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
+
+using content::NavigationController;
 
 TestHtmlDialogObserver::TestHtmlDialogObserver(
     JsInjectionReadyObserver* js_injection_ready_observer)
@@ -36,7 +38,7 @@ void TestHtmlDialogObserver::Observe(
         js_injection_ready_observer_->OnJsInjectionReady(
             content::Details<RenderViewHost>(details).ptr());
       }
-      web_ui_ = content::Source<WebUI>(source).ptr();
+      web_ui_ = content::Source<content::WebUI>(source).ptr();
       registrar_.Remove(this, chrome::NOTIFICATION_HTML_DIALOG_SHOWN,
                         content::NotificationService::AllSources());
       // Wait for navigation on the new WebUI instance to complete. This depends
@@ -48,13 +50,13 @@ void TestHtmlDialogObserver::Observe(
       // navigate in this method, ensuring that this is not a race condition.
       registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
                      content::Source<NavigationController>(
-                         &web_ui_->tab_contents()->controller()));
+                         &web_ui_->GetWebContents()->GetController()));
       break;
     case content::NOTIFICATION_LOAD_STOP:
       DCHECK(web_ui_);
       registrar_.Remove(this, content::NOTIFICATION_LOAD_STOP,
                         content::Source<NavigationController>(
-                            &web_ui_->tab_contents()->controller()));
+                            &web_ui_->GetWebContents()->GetController()));
       done_ = true;
       // If the message loop is running stop it.
       if (running_) {
@@ -67,7 +69,7 @@ void TestHtmlDialogObserver::Observe(
   };
 }
 
-WebUI* TestHtmlDialogObserver::GetWebUI() {
+content::WebUI* TestHtmlDialogObserver::GetWebUI() {
   if (!done_) {
     EXPECT_FALSE(running_);
     running_ = true;

@@ -1,35 +1,40 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/tab_contents/render_view_host_manager.h"
 
+#include <utility>
+
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "content/browser/debugger/devtools_manager_impl.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/site_instance.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/navigation_entry.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/browser/webui/web_ui.h"
-#include "content/browser/webui/web_ui_factory.h"
-#include "content/public/browser/notification_service.h"
+#include "content/browser/site_instance_impl.h"
+#include "content/browser/tab_contents/navigation_controller_impl.h"
+#include "content/browser/tab_contents/navigation_entry_impl.h"
+#include "content/browser/webui/web_ui_impl.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/web_contents_view.h"
+#include "content/public/browser/web_ui_controller.h"
+#include "content/public/browser/web_ui_controller_factory.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 
-namespace base {
-class WaitableEvent;
-}
+using content::NavigationController;
+using content::NavigationEntry;
+using content::NavigationEntryImpl;
+using content::SiteInstance;
+using content::WebUIControllerFactory;
 
 RenderViewHostManager::RenderViewHostManager(
-    RenderViewHostDelegate* render_view_delegate,
+    content::RenderViewHostDelegate* render_view_delegate,
     Delegate* delegate)
     : delegate_(delegate),
       cross_navigation_pending_(false),
@@ -63,10 +68,10 @@ void RenderViewHostManager::Init(content::BrowserContext* browser_context,
   // immediately give this SiteInstance to a RenderViewHost so that it is
   // ref counted.
   if (!site_instance)
-    site_instance = SiteInstance::CreateSiteInstance(browser_context);
+    site_instance = SiteInstance::Create(browser_context);
   render_view_host_ = RenderViewHostFactory::Create(
       site_instance, render_view_delegate_, routing_id, delegate_->
-      GetControllerForRenderManager().session_storage_namespace());
+      GetControllerForRenderManager().GetSessionStorageNamespace());
 
   // Keep track of renderer processes as they start to shut down.
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSING,
@@ -79,7 +84,8 @@ RenderWidgetHostView* RenderViewHostManager::GetRenderWidgetHostView() const {
   return render_view_host_->view();
 }
 
-RenderViewHost* RenderViewHostManager::Navigate(const NavigationEntry& entry) {
+RenderViewHost* RenderViewHostManager::Navigate(
+    const NavigationEntryImpl& entry) {
   // Create a pending RenderViewHost. It will give us the one we should use
   RenderViewHost* dest_render_view_host = UpdateRendererStateForNavigate(entry);
   if (!dest_render_view_host)
@@ -110,14 +116,15 @@ RenderViewHost* RenderViewHostManager::Navigate(const NavigationEntry& entry) {
     } else {
       // This is our primary renderer, notify here as we won't be calling
       // CommitPending (which does the notify).
-      RenderViewHostSwitchedDetails details;
-      details.new_host = render_view_host_;
-      details.old_host = NULL;
+      RenderViewHost* null_rvh = NULL;
+      std::pair<RenderViewHost*, RenderViewHost*> details =
+          std::make_pair(null_rvh, render_view_host_);
       content::NotificationService::current()->Notify(
           content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
           content::Source<NavigationController>(
               &delegate_->GetControllerForRenderManager()),
-          content::Details<RenderViewHostSwitchedDetails>(&details));
+          content::Details<std::pair<RenderViewHost*, RenderViewHost*> >(
+              &details));
     }
   }
 
@@ -211,7 +218,7 @@ void RenderViewHostManager::DidNavigateMainFrame(
   }
 }
 
-void RenderViewHostManager::SetWebUIPostCommit(WebUI* web_ui) {
+void RenderViewHostManager::SetWebUIPostCommit(WebUIImpl* web_ui) {
   DCHECK(!web_ui_.get());
   web_ui_.reset(web_ui);
 }
@@ -330,7 +337,7 @@ bool RenderViewHostManager::ShouldTransitionCrossSite() {
 
 bool RenderViewHostManager::ShouldSwapProcessesForNavigation(
     const NavigationEntry* cur_entry,
-    const NavigationEntry* new_entry) const {
+    const NavigationEntryImpl* new_entry) const {
   DCHECK(new_entry);
 
   // Check for reasons to swap processes even if we are in a process model that
@@ -339,24 +346,27 @@ bool RenderViewHostManager::ShouldSwapProcessesForNavigation(
   // For security, we should transition between processes when one is a Web UI
   // page and one isn't.  If there's no cur_entry, check the current RVH's
   // site, which might already be committed to a Web UI URL (such as the NTP).
-  const GURL& current_url = (cur_entry) ? cur_entry->url() :
-      render_view_host_->site_instance()->site();
+  const GURL& current_url = (cur_entry) ? cur_entry->GetURL() :
+      render_view_host_->site_instance()->GetSite();
   content::BrowserContext* browser_context =
-      delegate_->GetControllerForRenderManager().browser_context();
-  const content::WebUIFactory* web_ui_factory = content::WebUIFactory::Get();
-  if (web_ui_factory->UseWebUIForURL(browser_context, current_url)) {
-    // Force swap if it's not an acceptable URL for Web UI.
-    if (!web_ui_factory->IsURLAcceptableForWebUI(browser_context,
-                                                 new_entry->url()))
-      return true;
-  } else {
-    // Force swap if it's a Web UI URL.
-    if (web_ui_factory->UseWebUIForURL(browser_context, new_entry->url()))
-      return true;
+      delegate_->GetControllerForRenderManager().GetBrowserContext();
+  const WebUIControllerFactory* web_ui_factory =
+      content::GetContentClient()->browser()->GetWebUIControllerFactory();
+  if (web_ui_factory) {
+    if (web_ui_factory->UseWebUIForURL(browser_context, current_url)) {
+      // Force swap if it's not an acceptable URL for Web UI.
+      if (!web_ui_factory->IsURLAcceptableForWebUI(browser_context,
+                                                   new_entry->GetURL()))
+        return true;
+    } else {
+      // Force swap if it's a Web UI URL.
+      if (web_ui_factory->UseWebUIForURL(browser_context, new_entry->GetURL()))
+        return true;
+    }
   }
 
   if (content::GetContentClient()->browser()->ShouldSwapProcessesForNavigation(
-          cur_entry ? cur_entry->url() : GURL(), new_entry->url())) {
+          cur_entry ? cur_entry->GetURL() : GURL(), new_entry->GetURL())) {
     return true;
   }
 
@@ -374,13 +384,14 @@ bool RenderViewHostManager::ShouldSwapProcessesForNavigation(
 }
 
 SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
-    const NavigationEntry& entry,
+    const NavigationEntryImpl& entry,
     SiteInstance* curr_instance) {
   // NOTE: This is only called when ShouldTransitionCrossSite is true.
 
-  const GURL& dest_url = entry.url();
-  NavigationController& controller = delegate_->GetControllerForRenderManager();
-  content::BrowserContext* browser_context = controller.browser_context();
+  const GURL& dest_url = entry.GetURL();
+  NavigationControllerImpl& controller =
+      delegate_->GetControllerForRenderManager();
+  content::BrowserContext* browser_context = controller.GetBrowserContext();
 
   // If the entry has an instance already we should use it.
   if (entry.site_instance())
@@ -397,31 +408,32 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
   //       RenderViews in response to a link click.
   //
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kProcessPerSite) &&
-      entry.transition_type() == content::PAGE_TRANSITION_GENERATED)
+      entry.GetTransitionType() == content::PAGE_TRANSITION_GENERATED)
     return curr_instance;
+
+  SiteInstanceImpl* curr_site_instance =
+      static_cast<SiteInstanceImpl*>(curr_instance);
 
   // If we haven't used our SiteInstance (and thus RVH) yet, then we can use it
   // for this entry.  We won't commit the SiteInstance to this site until the
   // navigation commits (in DidNavigate), unless the navigation entry was
   // restored or it's a Web UI as described below.
-  if (!curr_instance->has_site()) {
+  if (!curr_site_instance->HasSite()) {
     // If we've already created a SiteInstance for our destination, we don't
     // want to use this unused SiteInstance; use the existing one.  (We don't
     // do this check if the curr_instance has a site, because for now, we want
     // to compare against the current URL and not the SiteInstance's site.  In
     // this case, there is no current URL, so comparing against the site is ok.
     // See additional comments below.)
-    if (curr_instance->HasRelatedSiteInstance(dest_url))
-      return curr_instance->GetRelatedSiteInstance(dest_url);
+    if (curr_site_instance->HasRelatedSiteInstance(dest_url))
+      return curr_site_instance->GetRelatedSiteInstance(dest_url);
 
-    // For extensions and Web UI URLs (such as the new tab page), we do not
-    // want to use the curr_instance if it has no site, since it will have a
-    // RenderProcessHost of TYPE_NORMAL.  Create a new SiteInstance for this
+    // For extensions, Web UI URLs (such as the new tab page), and apps we do
+    // not want to use the curr_instance if it has no site, since it will have a
+    // RenderProcessHost of PRIV_NORMAL.  Create a new SiteInstance for this
     // URL instead (with the correct process type).
-    if (content::WebUIFactory::Get()->UseWebUIForURL(browser_context,
-                                                     dest_url)) {
-      return SiteInstance::CreateSiteInstanceForURL(browser_context, dest_url);
-    }
+    if (curr_site_instance->HasWrongProcessForURL(dest_url))
+      return curr_site_instance->GetRelatedSiteInstance(dest_url);
 
     // Normally the "site" on the SiteInstance is set lazily when the load
     // actually commits. This is to support better process sharing in case
@@ -431,10 +443,10 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
     // In the case of session restore, as it loads all the pages immediately
     // we need to set the site first, otherwise after a restore none of the
     // pages would share renderers in process-per-site.
-    if (entry.restore_type() != NavigationEntry::RESTORE_NONE)
-      curr_instance->SetSite(dest_url);
+    if (entry.restore_type() != NavigationEntryImpl::RESTORE_NONE)
+      curr_site_instance->SetSite(dest_url);
 
-    return curr_instance;
+    return curr_site_instance;
   }
 
   // Otherwise, only create a new SiteInstance for cross-site navigation.
@@ -463,14 +475,15 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
   // to open a new tab to an interstitial-inducing URL, and then navigates
   // the page to a different same-site URL.  (This seems very unlikely in
   // practice.)
-  const GURL& current_url = (curr_entry) ? curr_entry->url() :
-      curr_instance->site();
+  const GURL& current_url = (curr_entry) ? curr_entry->GetURL() :
+      curr_instance->GetSite();
 
   // Use the current SiteInstance for same site navigations, as long as the
   // process type is correct.  (The URL may have been installed as an app since
   // the last time we visited it.)
   if (SiteInstance::IsSameWebSite(browser_context, current_url, dest_url) &&
-      !curr_instance->HasWrongProcessForURL(dest_url)) {
+      !static_cast<SiteInstanceImpl*>(curr_instance)->HasWrongProcessForURL(
+          dest_url)) {
     return curr_instance;
   } else if (ShouldSwapProcessesForNavigation(curr_entry, &entry)) {
     // When we're swapping, we need to force the site instance AND browsing
@@ -479,7 +492,7 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
     // Pages), keeping them in the same process. When you navigate away from
     // that page, we want to explicity ignore that BrowsingInstance and group
     // this page into the appropriate SiteInstance for its URL.
-    return SiteInstance::CreateSiteInstanceForURL(browser_context, dest_url);
+    return SiteInstance::CreateForURL(browser_context, dest_url);
   } else {
     // Start the new renderer in a new SiteInstance, but in the current
     // BrowsingInstance.  It is important to immediately give this new
@@ -491,11 +504,11 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
 }
 
 bool RenderViewHostManager::CreatePendingRenderView(
-    const NavigationEntry& entry, SiteInstance* instance) {
+  const NavigationEntryImpl& entry, SiteInstance* instance) {
   NavigationEntry* curr_entry =
       delegate_->GetControllerForRenderManager().GetLastCommittedEntry();
   if (curr_entry) {
-    DCHECK(!curr_entry->content_state().empty());
+    DCHECK(!curr_entry->GetContentState().empty());
     // TODO(creis): Should send a message to the RenderView to let it know
     // we're about to switch away, so that it sends an UpdateState message.
   }
@@ -503,7 +516,7 @@ bool RenderViewHostManager::CreatePendingRenderView(
   // Check if we've already created an RVH for this SiteInstance.
   CHECK(instance);
   RenderViewHostMap::iterator iter =
-      swapped_out_hosts_.find(instance->id());
+      swapped_out_hosts_.find(instance->GetId());
   if (iter != swapped_out_hosts_.end()) {
     // Re-use the existing RenderViewHost, which has already been initialized.
     // We'll remove it from the list of swapped out hosts if it commits.
@@ -517,7 +530,7 @@ bool RenderViewHostManager::CreatePendingRenderView(
 
   pending_render_view_host_ = RenderViewHostFactory::Create(
       instance, render_view_delegate_, MSG_ROUTING_NONE, delegate_->
-      GetControllerForRenderManager().session_storage_namespace());
+      GetControllerForRenderManager().GetSessionStorageNamespace());
 
   // Prevent the process from exiting while we're trying to use it.
   pending_render_view_host_->process()->AddPendingView();
@@ -533,11 +546,11 @@ bool RenderViewHostManager::CreatePendingRenderView(
 }
 
 bool RenderViewHostManager::InitRenderView(RenderViewHost* render_view_host,
-                                           const NavigationEntry& entry) {
+                                           const NavigationEntryImpl& entry) {
   // If the pending navigation is to a WebUI, tell the RenderView about any
   // bindings it will need enabled.
   if (pending_web_ui_.get())
-    render_view_host->AllowBindings(pending_web_ui_->bindings());
+    render_view_host->AllowBindings(pending_web_ui_->GetBindings());
 
   return delegate_->CreateRenderViewForRenderManager(render_view_host);
 }
@@ -552,7 +565,7 @@ void RenderViewHostManager::CommitPending() {
   // Next commit the Web UI, if any.
   web_ui_.swap(pending_web_ui_);
   if (web_ui_.get() && pending_web_ui_.get() && !pending_render_view_host_)
-    web_ui_->DidBecomeActiveForReusedRenderView();
+    web_ui_->GetController()->DidBecomeActiveForReusedRenderView();
   pending_web_ui_.reset();
 
   // It's possible for the pending_render_view_host_ to be NULL when we aren't
@@ -599,17 +612,16 @@ void RenderViewHostManager::CommitPending() {
   else if (focus_render_view && render_view_host_->view())
     render_view_host_->view()->Focus();
 
-  RenderViewHostSwitchedDetails details;
-  details.new_host = render_view_host_;
-  details.old_host = old_render_view_host;
+  std::pair<RenderViewHost*, RenderViewHost*> details =
+      std::make_pair(old_render_view_host, render_view_host_);
   content::NotificationService::current()->Notify(
       content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
       content::Source<NavigationController>(
           &delegate_->GetControllerForRenderManager()),
-      content::Details<RenderViewHostSwitchedDetails>(&details));
+      content::Details<std::pair<RenderViewHost*, RenderViewHost*> >(&details));
 
   // If the pending view was on the swapped out list, we can remove it.
-  swapped_out_hosts_.erase(render_view_host_->site_instance()->id());
+  swapped_out_hosts_.erase(render_view_host_->site_instance()->GetId());
 
   // If the old RVH is live, we are swapping it out and should keep track of it
   // in case we navigate back to it.
@@ -619,7 +631,7 @@ void RenderViewHostManager::CommitPending() {
     // sure we don't get different rvh instances for the same site instance
     // in the same rvhmgr.
     // TODO(creis): Clean this up.
-    int32 old_site_instance_id = old_render_view_host->site_instance()->id();
+    int32 old_site_instance_id = old_render_view_host->site_instance()->GetId();
     RenderViewHostMap::iterator iter =
         swapped_out_hosts_.find(old_site_instance_id);
     if (iter != swapped_out_hosts_.end() &&
@@ -638,7 +650,7 @@ void RenderViewHostManager::CommitPending() {
 }
 
 RenderViewHost* RenderViewHostManager::UpdateRendererStateForNavigate(
-    const NavigationEntry& entry) {
+    const NavigationEntryImpl& entry) {
   // If we are cross-navigating, then we want to get back to normal and navigate
   // as usual.
   if (cross_navigation_pending_) {
@@ -653,7 +665,7 @@ RenderViewHost* RenderViewHostManager::UpdateRendererStateForNavigate(
   // It must also happen after the above conditional call to CancelPending(),
   // otherwise CancelPending may clear the pending_web_ui_ and the page will
   // not have it's bindings set appropriately.
-  pending_web_ui_.reset(delegate_->CreateWebUIForRenderManager(entry.url()));
+  pending_web_ui_.reset(delegate_->CreateWebUIForRenderManager(entry.GetURL()));
 
   // render_view_host_ will not be deleted before the end of this method, so we
   // don't have to worry about this SiteInstance's ref count dropping to zero.
@@ -694,46 +706,34 @@ RenderViewHost* RenderViewHostManager::UpdateRendererStateForNavigate(
     }
     // Otherwise, it's safe to treat this as a pending cross-site transition.
 
-    // It is possible that a previous cross-site navigation caused
-    // render_view_host_ to be swapped out and we are still waiting for
-    // the old pending_render_view_host_ to inform us about the committed
-    // navigation.
-    if (!render_view_host_->is_swapped_out()) {
-      // Make sure the old render view stops, in case a load is in progress.
-      render_view_host_->Send(
-          new ViewMsg_Stop(render_view_host_->routing_id()));
+    // Make sure the old render view stops, in case a load is in progress.
+    render_view_host_->Send(new ViewMsg_Stop(render_view_host_->routing_id()));
 
-      // Suspend the new render view (i.e., don't let it send the cross-site
-      // Navigate message) until we hear back from the old renderer's
-      // onbeforeunload handler.  If the handler returns false, we'll have to
-      // cancel the request.
-      DCHECK(!pending_render_view_host_->are_navigations_suspended());
-      pending_render_view_host_->SetNavigationsSuspended(true);
+    // Suspend the new render view (i.e., don't let it send the cross-site
+    // Navigate message) until we hear back from the old renderer's
+    // onbeforeunload handler.  If the handler returns false, we'll have to
+    // cancel the request.
+    DCHECK(!pending_render_view_host_->are_navigations_suspended());
+    pending_render_view_host_->SetNavigationsSuspended(true);
 
-      // Tell the CrossSiteRequestManager that this RVH has a pending cross-site
-      // request, so that ResourceDispatcherHost will know to tell us to run the
-      // old page's onunload handler before it sends the response.
-      pending_render_view_host_->SetHasPendingCrossSiteRequest(true, -1);
-
-      // Tell the old render view to run its onbeforeunload handler, since it
-      // doesn't otherwise know that the cross-site request is happening.  This
-      // will trigger a call to ShouldClosePage with the reply.
-      render_view_host_->FirePageBeforeUnload(true);
-    } else {
-      // As the render_view_host_ is already swapped out, we do not need
-      // to instruct it to run its beforeunload or unload handlers.  Therefore,
-      // we also do not need to suspend outgoing navigation messages and can
-      // just let the new pending_render_view_host_ immediately navigate.
-    }
+    // Tell the CrossSiteRequestManager that this RVH has a pending cross-site
+    // request, so that ResourceDispatcherHost will know to tell us to run the
+    // old page's onunload handler before it sends the response.
+    pending_render_view_host_->SetHasPendingCrossSiteRequest(true, -1);
 
     // We now have a pending RVH.
     DCHECK(!cross_navigation_pending_);
     cross_navigation_pending_ = true;
 
+    // Tell the old render view to run its onbeforeunload handler, since it
+    // doesn't otherwise know that the cross-site request is happening.  This
+    // will trigger a call to ShouldClosePage with the reply.
+    render_view_host_->FirePageBeforeUnload(true);
+
     return pending_render_view_host_;
   } else {
     if (pending_web_ui_.get() && render_view_host_->IsRenderViewLive())
-      pending_web_ui_->RenderViewReused(render_view_host_);
+      pending_web_ui_->GetController()->RenderViewReused(render_view_host_);
 
     // The renderer can exit view source mode when any error or cancellation
     // happen. We must overwrite to recover the mode.
@@ -811,6 +811,6 @@ bool RenderViewHostManager::IsSwappedOut(RenderViewHost* rvh) {
   if (!rvh->site_instance())
     return false;
 
-  return swapped_out_hosts_.find(rvh->site_instance()->id()) !=
+  return swapped_out_hosts_.find(rvh->site_instance()->GetId()) !=
       swapped_out_hosts_.end();
 }

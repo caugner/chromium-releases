@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,7 +59,7 @@ gboolean MainWindowDestroyed(GtkWindow* window, TestShell* shell) {
 
   if (TestShell::windowList()->empty() || shell->is_modal()) {
     MessageLoop::current()->PostTask(FROM_HERE,
-                                     new MessageLoop::QuitTask());
+                                     MessageLoop::QuitClosure());
   }
 
   delete shell;
@@ -161,7 +161,7 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
   FilePath data_path;
   PathService::Get(base::DIR_EXE, &data_path);
   data_path = data_path.Append("test_shell.pak");
-  ResourceBundle::InitSharedInstanceForTest(data_path);
+  ResourceBundle::InitSharedInstanceWithPakFile(data_path);
 
   FilePath resources_dir;
   PathService::Get(base::DIR_SOURCE_ROOT, &resources_dir);
@@ -376,15 +376,16 @@ void TestShell::TestFinished() {
 
 void TestShell::SizeTo(int width, int height) {
   GtkWidget* widget = m_webViewHost->view_handle();
-  if (widget->allocation.width == width &&
-      widget->allocation.height == height) {
+
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget, &allocation);
+  if (allocation.width == width && allocation.height == height) {
     // Nothing to do.
     return;
   }
 
   gtk_widget_set_size_request(widget, width, height);
-  if (widget->allocation.width > width ||
-      widget->allocation.height > height) {
+  if (allocation.width > width || allocation.height > height) {
     // We've been sized smaller.  Shrink the window so it snaps back to the
     // appropriate size.
     gtk_window_resize(GTK_WINDOW(m_mainWnd), 1, 1);
@@ -489,7 +490,7 @@ void TestShell::ResizeSubViews() {
 }
 
 void TestShell::LoadURLForFrame(const GURL& url,
-                                const std::wstring& frame_name) {
+                                const string16& frame_name) {
   if (!url.is_valid())
     return;
 
@@ -502,7 +503,7 @@ void TestShell::LoadURLForFrame(const GURL& url,
   }
 
   navigation_controller_->LoadEntry(
-      new TestNavigationEntry(-1, url, std::wstring(), frame_name));
+      new TestNavigationEntry(-1, url, frame_name));
 }
 
 bool TestShell::PromptForSaveFile(const wchar_t* prompt_title,

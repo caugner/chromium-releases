@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,7 @@
 
 class ProfileSyncServiceMock : public ProfileSyncService {
  public:
+  // no-arg constructor provided so TestingProfile can use NiceMock.
   ProfileSyncServiceMock();
   explicit ProfileSyncServiceMock(Profile* profile);
   virtual ~ProfileSyncServiceMock();
@@ -57,11 +58,9 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   MOCK_CONST_METHOD0(HasSyncSetupCompleted, bool());
 
   MOCK_METHOD1(ChangePreferredDataTypes,
-               void(const syncable::ModelTypeSet& preferred_types));
-  MOCK_CONST_METHOD1(GetPreferredDataTypes,
-                     void(syncable::ModelTypeSet* preferred_types));
-  MOCK_CONST_METHOD1(GetRegisteredDataTypes,
-                     void(syncable::ModelTypeSet* registered_types));
+               void(syncable::ModelTypeSet preferred_types));
+  MOCK_CONST_METHOD0(GetPreferredDataTypes, syncable::ModelTypeSet());
+  MOCK_CONST_METHOD0(GetRegisteredDataTypes, syncable::ModelTypeSet());
   MOCK_CONST_METHOD0(GetLastSessionSnapshot,
                      const browser_sync::sessions::SyncSessionSnapshot*());
 

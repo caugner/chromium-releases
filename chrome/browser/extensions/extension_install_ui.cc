@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,8 +41,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
+using content::WebContents;
+
 static const int kTitleIds[ExtensionInstallUI::NUM_PROMPT_TYPES] = {
-  IDS_EXTENSION_INSTALL_PROMPT_TITLE,
+  0,
   IDS_EXTENSION_INLINE_INSTALL_PROMPT_TITLE,
   IDS_EXTENSION_RE_ENABLE_PROMPT_TITLE,
   IDS_EXTENSION_PERMISSIONS_PROMPT_TITLE
@@ -55,7 +57,7 @@ static const int kHeadingIds[ExtensionInstallUI::NUM_PROMPT_TYPES] = {
 };
 static const int kAcceptButtonIds[ExtensionInstallUI::NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_PROMPT_INSTALL_BUTTON,
-  IDS_EXTENSION_PROMPT_INLINE_INSTALL_BUTTON,
+  IDS_EXTENSION_PROMPT_INSTALL_BUTTON,
   IDS_EXTENSION_PROMPT_RE_ENABLE_BUTTON,
   IDS_EXTENSION_PROMPT_PERMISSIONS_BUTTON
 };
@@ -94,7 +96,7 @@ void ExtensionInstallUI::Prompt::SetPermissions(
 }
 
 void ExtensionInstallUI::Prompt::SetInlineInstallWebstoreData(
-    std::string localized_user_count,
+    const std::string& localized_user_count,
     double average_rating,
     int rating_count) {
   CHECK_EQ(INLINE_INSTALL_PROMPT, type_);
@@ -103,17 +105,19 @@ void ExtensionInstallUI::Prompt::SetInlineInstallWebstoreData(
   rating_count_ = rating_count;
 }
 
-string16 ExtensionInstallUI::Prompt::GetDialogTitle() const {
-  if (type_ == INLINE_INSTALL_PROMPT) {
-    return l10n_util::GetStringFUTF16(
-      kTitleIds[type_], l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
+string16 ExtensionInstallUI::Prompt::GetDialogTitle(
+    const Extension* extension) const {
+  if (type_ == INSTALL_PROMPT) {
+    return l10n_util::GetStringUTF16(extension->is_app() ?
+        IDS_EXTENSION_INSTALL_APP_PROMPT_TITLE :
+        IDS_EXTENSION_INSTALL_EXTENSION_PROMPT_TITLE);
   } else {
     return l10n_util::GetStringUTF16(kTitleIds[type_]);
   }
 }
 
-string16 ExtensionInstallUI::Prompt::GetHeading(std::string extension_name)
-    const {
+string16 ExtensionInstallUI::Prompt::GetHeading(
+    const std::string& extension_name) const {
   if (type_ == INLINE_INSTALL_PROMPT) {
     return UTF8ToUTF16(extension_name);
   } else {
@@ -299,7 +303,7 @@ bool disable_failure_ui_for_tests = false;
 
 }  // namespace
 
-void ExtensionInstallUI::OnInstallFailure(const std::string& error) {
+void ExtensionInstallUI::OnInstallFailure(const string16& error) {
   DCHECK(ui_loop_ == MessageLoop::current());
 
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
@@ -308,7 +312,7 @@ void ExtensionInstallUI::OnInstallFailure(const std::string& error) {
   browser::ShowErrorBox(
       browser ? browser->window()->GetNativeHandle() : NULL,
       l10n_util::GetStringUTF16(IDS_EXTENSION_INSTALL_FAILURE_TITLE),
-      UTF8ToUTF16(error));
+      error);
 }
 
 void ExtensionInstallUI::SetIcon(SkBitmap* image) {
@@ -355,7 +359,7 @@ void ExtensionInstallUI::OpenAppInstalledNTP(Browser* browser,
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_APP_INSTALLED_TO_NTP,
-      content::Source<TabContents>(params.target_contents->tab_contents()),
+      content::Source<WebContents>(params.target_contents->web_contents()),
       content::Details<const std::string>(&app_id));
 }
 

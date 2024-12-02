@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,14 @@
 
 #include <algorithm>
 
+#include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/id_map.h"
 #include "base/lazy_instance.h"
 #include "base/process_util.h"
 #include "content/browser/gpu/gpu_data_manager.h"
 #include "content/browser/gpu/gpu_process_host.h"
+#include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
@@ -38,23 +40,13 @@ namespace {
 base::LazyInstance<IDMap<GpuProcessHostUIShim> > g_hosts_by_id =
     LAZY_INSTANCE_INITIALIZER;
 
-class SendOnIOThreadTask : public Task {
- public:
-  SendOnIOThreadTask(int host_id, IPC::Message* msg)
-      : host_id_(host_id),
-        msg_(msg) {
-  }
-
- private:
-  void Run() {
-    GpuProcessHost* host = GpuProcessHost::FromID(host_id_);
-    if (host)
-      host->Send(msg_.release());
-  }
-
-  int host_id_;
-  scoped_ptr<IPC::Message> msg_;
-};
+void SendOnIOThreadTask(int host_id, IPC::Message* msg) {
+  GpuProcessHost* host = GpuProcessHost::FromID(host_id);
+  if (host)
+    host->Send(msg);
+  else
+    delete msg;
+}
 
 class ScopedSendOnIOThread {
  public:
@@ -68,8 +60,9 @@ class ScopedSendOnIOThread {
     if (!cancelled_) {
       BrowserThread::PostTask(BrowserThread::IO,
                               FROM_HERE,
-                              new SendOnIOThreadTask(host_id_,
-                                                     msg_.release()));
+                              base::Bind(&SendOnIOThreadTask,
+                                         host_id_,
+                                         msg_.release()));
     }
   }
 
@@ -81,8 +74,13 @@ class ScopedSendOnIOThread {
   bool cancelled_;
 };
 
-RenderWidgetHostView* GetRenderWidgetHostViewFromID(int render_process_id,
-                                                    int render_widget_id) {
+RenderWidgetHostView* GetRenderWidgetHostViewFromSurfaceID(int surface_id) {
+  int render_process_id = 0;
+  int render_widget_id = 0;
+  if (!GpuSurfaceTracker::Get()->GetRenderWidgetIDForSurface(
+        surface_id, &render_process_id, &render_widget_id))
+    return NULL;
+
   content::RenderProcessHost* process =
       content::RenderProcessHost::FromID(render_process_id);
   if (!process)
@@ -95,20 +93,10 @@ RenderWidgetHostView* GetRenderWidgetHostViewFromID(int render_process_id,
 
 }  // namespace
 
-RouteToGpuProcessHostUIShimTask::RouteToGpuProcessHostUIShimTask(
-    int host_id,
-    const IPC::Message& msg)
-  : host_id_(host_id),
-    msg_(msg) {
-}
-
-RouteToGpuProcessHostUIShimTask::~RouteToGpuProcessHostUIShimTask() {
-}
-
-void RouteToGpuProcessHostUIShimTask::Run() {
-  GpuProcessHostUIShim* ui_shim = GpuProcessHostUIShim::FromID(host_id_);
+void RouteToGpuProcessHostUIShimTask(int host_id, const IPC::Message& msg) {
+  GpuProcessHostUIShim* ui_shim = GpuProcessHostUIShim::FromID(host_id);
   if (ui_shim)
-    ui_shim->OnMessageReceived(msg_);
+    ui_shim->OnMessageReceived(msg);
 }
 
 GpuProcessHostUIShim::GpuProcessHostUIShim(int host_id)
@@ -156,7 +144,9 @@ bool GpuProcessHostUIShim::Send(IPC::Message* msg) {
   DCHECK(CalledOnValidThread());
   return BrowserThread::PostTask(BrowserThread::IO,
                                  FROM_HERE,
-                                 new SendOnIOThreadTask(host_id_, msg));
+                                 base::Bind(&SendOnIOThreadTask,
+                                            host_id_,
+                                            msg));
 }
 
 bool GpuProcessHostUIShim::OnMessageReceived(const IPC::Message& message) {
@@ -197,6 +187,8 @@ bool GpuProcessHostUIShim::OnControlMessageReceived(
                         OnAcceleratedSurfaceBuffersSwapped)
     IPC_MESSAGE_HANDLER(GpuHostMsg_AcceleratedSurfacePostSubBuffer,
                         OnAcceleratedSurfacePostSubBuffer)
+    IPC_MESSAGE_HANDLER(GpuHostMsg_GraphicsInfoCollected,
+                        OnGraphicsInfoCollected)
 
 #if defined(TOOLKIT_USES_GTK) || defined(OS_WIN)
     IPC_MESSAGE_HANDLER(GpuHostMsg_ResizeView, OnResizeView)
@@ -229,10 +221,18 @@ void GpuProcessHostUIShim::OnLogMessage(
   GpuDataManager::GetInstance()->AddLogMessage(dict);
 }
 
+void GpuProcessHostUIShim::OnGraphicsInfoCollected(
+    const content::GPUInfo& gpu_info) {
+  // OnGraphicsInfoCollected is sent back after the GPU process successfully
+  // initializes GL.
+  TRACE_EVENT0("test_gpu", "OnGraphicsInfoCollected");
+
+  GpuDataManager::GetInstance()->UpdateGpuInfo(gpu_info);
+}
+
 #if defined(TOOLKIT_USES_GTK) || defined(OS_WIN)
 
-void GpuProcessHostUIShim::OnResizeView(int32 renderer_id,
-                                        int32 render_view_id,
+void GpuProcessHostUIShim::OnResizeView(int32 surface_id,
                                         int32 route_id,
                                         gfx::Size size) {
   // Always respond even if the window no longer exists. The GPU process cannot
@@ -242,8 +242,7 @@ void GpuProcessHostUIShim::OnResizeView(int32 renderer_id,
       host_id_,
       new AcceleratedSurfaceMsg_ResizeViewACK(route_id));
 
-  RenderWidgetHostView* view = GetRenderWidgetHostViewFromID(renderer_id,
-                                                             render_view_id);
+  RenderWidgetHostView* view = GetRenderWidgetHostViewFromSurfaceID(surface_id);
   if (!view)
     return;
 
@@ -283,16 +282,16 @@ void GpuProcessHostUIShim::OnAcceleratedSurfaceNew(
       host_id_,
       new AcceleratedSurfaceMsg_NewACK(
           params.route_id,
-          params.surface_id,
+          params.surface_handle,
           TransportDIB::DefaultHandleValue()));
 
-  RenderWidgetHostView* view = GetRenderWidgetHostViewFromID(
-      params.renderer_id, params.render_view_id);
+  RenderWidgetHostView* view = GetRenderWidgetHostViewFromSurfaceID(
+      params.surface_id);
   if (!view)
     return;
 
-  uint64 surface_id = params.surface_id;
-  TransportDIB::Handle surface_handle = TransportDIB::DefaultHandleValue();
+  uint64 surface_handle = params.surface_handle;
+  TransportDIB::Handle shm_handle = TransportDIB::DefaultHandleValue();
 
 #if defined(OS_MACOSX)
   if (params.create_transport_dib) {
@@ -310,7 +309,7 @@ void GpuProcessHostUIShim::OnAcceleratedSurfaceNew(
                                                 local_handle);
         // Create a remote handle for the GPU process to map the SHM.
         if (!shared_memory->ShareToProcess(0 /* pid, not needed */,
-                                           &surface_handle)) {
+                                           &shm_handle)) {
           return;
         }
       }
@@ -319,15 +318,15 @@ void GpuProcessHostUIShim::OnAcceleratedSurfaceNew(
     view->AcceleratedSurfaceSetIOSurface(params.window,
                                          params.width,
                                          params.height,
-                                         surface_id);
+                                         surface_handle);
   }
 #else  // defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
   view->AcceleratedSurfaceNew(
-      params.width, params.height, &surface_id, &surface_handle);
+      params.width, params.height, &surface_handle, &shm_handle);
 #endif
   delayed_send.Cancel();
   Send(new AcceleratedSurfaceMsg_NewACK(
-      params.route_id, surface_id, surface_handle));
+      params.route_id, surface_handle, shm_handle));
 }
 
 #endif
@@ -341,8 +340,8 @@ void GpuProcessHostUIShim::OnAcceleratedSurfaceBuffersSwapped(
       host_id_,
       new AcceleratedSurfaceMsg_BuffersSwappedACK(params.route_id));
 
-  RenderWidgetHostView* view = GetRenderWidgetHostViewFromID(
-      params.renderer_id, params.render_view_id);
+  RenderWidgetHostView* view = GetRenderWidgetHostViewFromSurfaceID(
+      params.surface_id);
   if (!view)
     return;
 
@@ -361,8 +360,8 @@ void GpuProcessHostUIShim::OnAcceleratedSurfacePostSubBuffer(
       host_id_,
       new AcceleratedSurfaceMsg_PostSubBufferACK(params.route_id));
 
-  RenderWidgetHostView* view = GetRenderWidgetHostViewFromID(
-      params.renderer_id, params.render_view_id);
+  RenderWidgetHostView* view = GetRenderWidgetHostViewFromSurfaceID(
+      params.surface_id);
   if (!view)
     return;
 
@@ -376,8 +375,8 @@ void GpuProcessHostUIShim::OnAcceleratedSurfacePostSubBuffer(
 
 void GpuProcessHostUIShim::OnAcceleratedSurfaceRelease(
     const GpuHostMsg_AcceleratedSurfaceRelease_Params& params) {
-  RenderWidgetHostView* view = GetRenderWidgetHostViewFromID(
-      params.renderer_id, params.render_view_id);
+  RenderWidgetHostView* view = GetRenderWidgetHostViewFromSurfaceID(
+      params.surface_id);
   if (!view)
     return;
   view->AcceleratedSurfaceRelease(params.identifier);

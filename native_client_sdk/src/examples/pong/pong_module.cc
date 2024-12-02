@@ -1,10 +1,10 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <ppapi/cpp/module.h>
 
-#include "examples/pong/pong.h"
+#include "pong.h"
 
 namespace pong {
 // The Module class.  The browser calls the CreateInstance() method to create

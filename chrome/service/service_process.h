@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -99,12 +99,20 @@ class ServiceProcess : public CloudPrintProxy::Client {
   ServiceURLRequestContextGetter* GetServiceURLRequestContextGetter();
 
  private:
+  friend class TestServiceProcess;
+
   // Schedule a call to ShutdownIfNeeded.
   void ScheduleShutdownCheck();
 
   // Shuts down the process if no services are enabled and no clients are
   // connected.
   void ShutdownIfNeeded();
+
+  // Schedule a call to CloudPrintPolicyCheckIfNeeded.
+  void ScheduleCloudPrintPolicyCheck();
+
+  // Launch the browser for a policy check if we're not connected.
+  void CloudPrintPolicyCheckIfNeeded();
 
   // Called exactly ONCE per process instance for each service that gets
   // enabled in this process.
@@ -141,10 +149,6 @@ class ServiceProcess : public CloudPrintProxy::Client {
 
   DISALLOW_COPY_AND_ASSIGN(ServiceProcess);
 };
-
-// Disable refcounting for runnable method because it is really not needed
-// when we post tasks on the main message loop.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(ServiceProcess);
 
 extern ServiceProcess* g_service_process;
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -14,6 +14,7 @@
       'dependencies': [
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        '<(DEPTH)/gpu/command_buffer/command_buffer.gyp:gles2_utils',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/ui/ui.gyp:ui',
       ],
@@ -49,6 +50,8 @@
         'gl_context_stub.h',
         'gl_context_win.cc',
         'gl_export.h',
+        'gl_fence.cc',
+        'gl_fence.h',
         'gl_implementation.cc',
         'gl_implementation.h',
         'gl_implementation_android.cc',
@@ -61,6 +64,8 @@
         'gl_share_group.h',
         'gl_surface.cc',
         'gl_surface.h',
+        'gl_surface_android.cc',
+        'gl_surface_android.h',
         'gl_surface_linux.cc',
         'gl_surface_mac.cc',
         'gl_surface_stub.cc',
@@ -70,6 +75,7 @@
         'gl_surface_osmesa.h',
         'gl_switches.cc',
         'gl_switches.h',
+        'native_window_interface_android.h',
         'scoped_make_current.cc',
         'scoped_make_current.h',
         '<(gl_binding_output_dir)/gl_bindings_autogen_gl.cc',

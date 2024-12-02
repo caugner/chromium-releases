@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,23 +18,24 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
+#include "chrome/browser/extensions/api/webrequest/webrequest_api.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
-#include "chrome/browser/extensions/extension_webrequest_api.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/off_the_record_profile_io_data.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/extension_icon_source.h"
+#include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -45,25 +46,19 @@
 #include "chrome/common/render_messages.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/chrome_blob_storage_context.h"
-#include "content/browser/download/download_manager.h"
 #include "content/browser/file_system/browser_file_system_helper.h"
-#include "content/browser/host_zoom_map.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/browser/ssl/ssl_host_state.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/webui/web_ui.h"
 #include "content/public/browser/browser_thread.h"
-#include "grit/locale_settings.h"
+#include "content/public/browser/download_manager.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/database/database_tracker.h"
 #include "webkit/quota/quota_manager.h"
 
 #if defined(TOOLKIT_USES_GTK)
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
-#endif
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/preferences.h"
 #endif
 
 using base::Time;
@@ -89,13 +84,13 @@ Profile* Profile::FromBrowserContext(content::BrowserContext* browser_context) {
 }
 
 // static
-Profile* Profile::FromWebUI(WebUI* web_ui) {
+Profile* Profile::FromWebUI(content::WebUI* web_ui) {
   // TODO(dhollowa): Crash diagnosis http://crbug.com/97802
   CHECK(web_ui);
-  CHECK(web_ui->tab_contents());
-  CHECK(web_ui->tab_contents()->browser_context());
+  CHECK(web_ui->GetWebContents());
+  CHECK(web_ui->GetWebContents()->GetBrowserContext());
 
-  return FromBrowserContext(web_ui->tab_contents()->browser_context());
+  return FromBrowserContext(web_ui->GetWebContents()->GetBrowserContext());
 }
 
 TestingProfile* Profile::AsTestingProfile() {
@@ -124,19 +119,6 @@ void Profile::RegisterUserPrefs(PrefService* prefs) {
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kSafeBrowsingReportingEnabled,
                              false,
-                             PrefService::UNSYNCABLE_PREF);
-  // TODO(estade): IDS_SPELLCHECK_DICTIONARY should be an ASCII string.
-  prefs->RegisterLocalizedStringPref(prefs::kSpellCheckDictionary,
-                                     IDS_SPELLCHECK_DICTIONARY,
-                                     PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kSpellCheckUseSpellingService,
-                             false,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kEnableSpellCheck,
-                             true,
-                             PrefService::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kEnableAutoSpellCorrect,
-                             true,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kSpeechInputFilterProfanities,
                              true,
@@ -222,6 +204,6 @@ bool Profile::IsGuestSession() {
 }
 
 bool Profile::IsSyncAccessible() {
-  ProfileSyncService* syncService = GetProfileSyncService();
-  return syncService && !syncService->IsManaged();
+  browser_sync::SyncPrefs prefs(GetPrefs());
+  return ProfileSyncService::IsSyncEnabled() && !prefs.IsManaged();
 }

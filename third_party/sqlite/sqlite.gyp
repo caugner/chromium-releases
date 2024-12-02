@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -42,7 +42,7 @@
           },
         }],
         ['os_posix == 1 and OS != "mac" and use_system_sqlite', {
-          'type': 'settings',
+          'type': 'none',
           'direct_dependent_settings': {
             'cflags': [
               # This next command produces no output but it it will fail (and
@@ -116,6 +116,20 @@
                 #   http://www.sqlite.org/faq.html#q17
                 '-Wno-int-to-pointer-cast',
                 '-Wno-pointer-to-int-cast',
+              ],
+            }],
+            ['clang==1', {
+              'xcode_settings': {
+                'WARNING_CFLAGS': [
+                  # sqlite does `if (*a++ && *b++);` in a non-buggy way.
+                  '-Wno-empty-body',
+                  # sqlite has some `unsigned < 0` checks.
+                  '-Wno-tautological-compare',
+                ],
+              },
+              'cflags': [
+                '-Wno-empty-body',
+                '-Wno-tautological-compare',
               ],
             }],
           ],

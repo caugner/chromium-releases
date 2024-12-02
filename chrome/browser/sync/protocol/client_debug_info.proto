@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -14,7 +14,7 @@ package sync_pb;
 // The additional info here is from SyncerStatus. They get sent when the event
 // SYNC_CYCLE_COMPLETED  is sent.
 message SyncCycleCompletedEventInfo {
-  optional bool syncer_stuck = 1;
+  // optional bool syncer_stuck = 1; // Was always false, now obsolete.
   optional int32 num_blocking_conflicts = 2;
   optional int32 num_non_blocking_conflicts = 3;
 }
@@ -38,6 +38,8 @@ message DebugEventInfo {
     ENCRYPTED_TYPES_CHANGED = 9; // Set of encrypted types has changed.
     ENCRYPTION_COMPLETE = 7; // Client has finished encrypting all data.
     ACTIONABLE_ERROR = 8; // Client received an actionable error.
+    BOOTSTRAP_TOKEN_UPDATED = 9;  // A new cryptographer bootstrap token was
+                                  // generated.
   }
   optional EventType type = 1;
   optional SyncCycleCompletedEventInfo sync_cycle_completed_event_info = 2;

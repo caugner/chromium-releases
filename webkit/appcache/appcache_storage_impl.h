@@ -15,7 +15,6 @@
 #include "base/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
-#include "base/task.h"
 #include "webkit/appcache/appcache_database.h"
 #include "webkit/appcache/appcache_disk_cache.h"
 #include "webkit/appcache/appcache_export.h"
@@ -125,7 +124,7 @@ class AppCacheStorageImpl : public AppCacheStorage {
   void CallOnMainResponseFound(
       DelegateReferenceVector* delegates,
       const GURL& url, const AppCacheEntry& entry,
-      const GURL& fallback_url, const AppCacheEntry& fallback_entry,
+      const GURL& namespace_entry_url, const AppCacheEntry& fallback_entry,
       int64 cache_id, int64 group_id, const GURL& manifest_url);
 
   APPCACHE_EXPORT AppCacheDiskCache* disk_cache();
@@ -153,10 +152,6 @@ class AppCacheStorageImpl : public AppCacheStorage {
   bool is_response_deletion_scheduled_;
   bool did_start_deleting_responses_;
   int64 last_deletable_response_rowid_;
-
-  // AppCacheDiskCache async callbacks
-  net::OldCompletionCallbackImpl<AppCacheStorageImpl> doom_callback_;
-  net::OldCompletionCallbackImpl<AppCacheStorageImpl> init_callback_;
 
   // Created on the IO thread, but only used on the DB thread.
   AppCacheDatabase* database_;

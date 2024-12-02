@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
+
+using content::OpenURLParams;
 
 class ViewIDTest : public InProcessBrowserTest {
  public:
@@ -36,12 +38,12 @@ IN_PROC_BROWSER_TEST_F(ViewIDTest, Basic) {
     // The following ids are used only in views implementation.
     if (i == VIEW_ID_CONTENTS_SPLIT ||
         i == VIEW_ID_INFO_BAR_CONTAINER ||
+        i == VIEW_ID_DEV_TOOLS_DOCKED ||
         i == VIEW_ID_DOWNLOAD_SHELF ||
         i == VIEW_ID_BOOKMARK_BAR_ELEMENT ||
         i == VIEW_ID_TAB ||
-        i == VIEW_ID_SIDE_BAR_CONTAINER ||
-        i == VIEW_ID_SIDE_BAR_SPLIT ||
-        i == VIEW_ID_FEEDBACK_BUTTON) {
+        i == VIEW_ID_FEEDBACK_BUTTON ||
+        i == VIEW_ID_OMNIBOX) {
       continue;
     }
 

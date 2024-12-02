@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,14 @@
 #include "base/bind.h"
 #include "base/file_path.h"
 #include "base/location.h"
+#include "base/metrics/histogram.h"
+#include "base/perftimer.h"
 #include "base/stl_util.h"
+#include "base/time.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/protocol/app_notification_specifics.pb.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 
 using content::BrowserThread;
@@ -32,11 +34,6 @@ class GuidComparator
     return notif->guid() == guid;
   }
 };
-
-void DeleteStorageOnFileThread(AppNotificationStorage* storage) {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  delete storage;
-}
 
 const AppNotification* FindByGuid(const AppNotificationList& list,
                                   const std::string& guid) {
@@ -78,15 +75,16 @@ AppNotificationManager::AppNotificationManager(Profile* profile)
 }
 
 AppNotificationManager::~AppNotificationManager() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Post a task to delete our storage on the file thread.
-  BrowserThread::PostTask(
-      BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(&DeleteStorageOnFileThread, storage_.release()));
+  BrowserThread::DeleteSoon(BrowserThread::FILE,
+                            FROM_HERE,
+                            storage_.release());
 }
 
 void AppNotificationManager::Init() {
   FilePath storage_path = profile_->GetPath().AppendASCII("App Notifications");
+  load_timer_.reset(new PerfTimer());
   BrowserThread::PostTask(
       BrowserThread::FILE,
       FROM_HERE,
@@ -200,8 +198,10 @@ void AppNotificationManager::Observe(
 }
 
 void AppNotificationManager::LoadOnFileThread(const FilePath& storage_path) {
+  PerfTimer timer;
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   DCHECK(!loaded());
+
   storage_.reset(AppNotificationStorage::Create(storage_path));
   if (!storage_.get())
     return;
@@ -222,6 +222,9 @@ void AppNotificationManager::LoadOnFileThread(const FilePath& storage_path) {
       FROM_HERE,
       base::Bind(&AppNotificationManager::HandleLoadResults,
           this, result.release()));
+
+  UMA_HISTOGRAM_LONG_TIMES("AppNotification.MgrFileThreadLoadTime",
+                           timer.Elapsed());
 }
 
 void AppNotificationManager::HandleLoadResults(NotificationMap* map) {
@@ -229,19 +232,29 @@ void AppNotificationManager::HandleLoadResults(NotificationMap* map) {
   DCHECK(map);
   DCHECK(!loaded());
   notifications_.reset(map);
+  UMA_HISTOGRAM_LONG_TIMES("AppNotification.MgrLoadDelay",
+                           load_timer_->Elapsed());
+  load_timer_.reset();
 
-  // Generate STATE_CHAGNED notifications for extensions that have at
+  // Generate STATE_CHANGED notifications for extensions that have at
   // least one notification loaded.
+  int app_count = 0;
+  int notification_count = 0;
   NotificationMap::const_iterator i;
   for (i = map->begin(); i != map->end(); ++i) {
     const std::string& id = i->first;
     if (i->second.empty())
       continue;
+    app_count++;
+    notification_count += i->second.size();
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_APP_NOTIFICATION_STATE_CHANGED,
         content::Source<Profile>(profile_),
         content::Details<const std::string>(&id));
   }
+  UMA_HISTOGRAM_COUNTS("AppNotification.MgrLoadAppCount", app_count);
+  UMA_HISTOGRAM_COUNTS("AppNotification.MgrLoadTotalCount",
+                       notification_count);
 
   // Generate MANAGER_LOADED notification.
   content::NotificationService::current()->Notify(
@@ -327,6 +340,13 @@ SyncError AppNotificationManager::ProcessSyncChanges(
       Add(new_notif.release());
     } else if (change_type == SyncChange::ACTION_DELETE && existing_notif) {
       Remove(new_notif->extension_id(), new_notif->guid());
+    } else if (change_type == SyncChange::ACTION_DELETE && !existing_notif) {
+      // This should never happen. But we are seeting this sometimes, and it
+      // stops all of sync. See bug http://crbug.com/108088
+      // So until we figure out the root cause, just log an error and ignore.
+      NOTREACHED() << "ERROR: Got delete change for non-existing item.";
+      LOG(ERROR) << "ERROR: Got delete change for non-existing item.";
+      continue;
     } else {
       // Something really unexpected happened. Either we received an
       // ACTION_INVALID, or Sync is in a crazy state:
@@ -494,7 +514,7 @@ SyncData AppNotificationManager::CreateSyncDataFromNotification(
     const AppNotification& notification) {
   DCHECK(!notification.is_local());
   sync_pb::EntitySpecifics specifics;
-  sync_pb::AppNotificationSpecifics* notif_specifics =
+  sync_pb::AppNotification* notif_specifics =
       specifics.MutableExtension(sync_pb::app_notification);
   notif_specifics->set_app_id(notification.extension_id());
   notif_specifics->set_creation_timestamp_ms(
@@ -511,7 +531,7 @@ SyncData AppNotificationManager::CreateSyncDataFromNotification(
 // static
 AppNotification* AppNotificationManager::CreateNotificationFromSyncData(
     const SyncData& sync_data) {
-  sync_pb::AppNotificationSpecifics specifics =
+  sync_pb::AppNotification specifics =
       sync_data.GetSpecifics().GetExtension(sync_pb::app_notification);
 
   // Check for mandatory fields.

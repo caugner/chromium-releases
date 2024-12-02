@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -106,10 +106,11 @@
     },
     {
       'target_name': 'glue',
-      'type': 'static_library',
+      'type': '<(component)',
       'variables': { 'enable_wexit_time_destructors': 1, },
       'defines': [
         'WEBKIT_EXTENSIONS_IMPLEMENTATION',
+        'WEBKIT_FORMS_IMPLEMENTATION',
         'WEBKIT_GLUE_IMPLEMENTATION',
         'WEBKIT_PLUGINS_IMPLEMENTATION',
       ],
@@ -147,10 +148,22 @@
         # This list contains all .h, .cc, and .mm files in glue except for
         # those in the test subdirectory and those with unittest in in their
         # names.
+        '../forms/form_data.cc',
+        '../forms/form_data.h',
+        '../forms/form_data_predictions.cc',
+        '../forms/form_data_predictions.h',
+        '../forms/form_field.cc',
+        '../forms/form_field.h',
+        '../forms/form_field_predictions.cc',
+        '../forms/form_field_predictions.h',
+        '../forms/password_form.cc',
+        '../forms/password_form.h',
+        '../forms/password_form_dom_manager.cc',
+        '../forms/password_form_dom_manager.h',
+        '../forms/webkit_forms_export.h',
         '../plugins/npapi/carbon_plugin_window_tracker_mac.cc',
         '../plugins/npapi/carbon_plugin_window_tracker_mac.h',
         '../plugins/npapi/coregraphics_private_symbols_mac.h',
-        '../plugins/npapi/default_plugin_shared.h',
         '../plugins/npapi/gtk_plugin_container.cc',
         '../plugins/npapi/gtk_plugin_container.h',
         '../plugins/npapi/gtk_plugin_container_manager.cc',
@@ -192,6 +205,7 @@
         '../plugins/npapi/webplugin_delegate.h',
         '../plugins/npapi/webplugin_delegate_impl.cc',
         '../plugins/npapi/webplugin_delegate_impl.h',
+        '../plugins/npapi/webplugin_delegate_impl_android.cc',
         '../plugins/npapi/webplugin_delegate_impl_aura.cc',
         '../plugins/npapi/webplugin_delegate_impl_gtk.cc',
         '../plugins/npapi/webplugin_delegate_impl_mac.mm',
@@ -206,8 +220,6 @@
         '../plugins/plugin_switches.h',
         '../plugins/ppapi/audio_helper.cc',
         '../plugins/ppapi/audio_helper.h',
-        '../plugins/ppapi/callbacks.cc',
-        '../plugins/ppapi/callbacks.h',
         '../plugins/ppapi/common.h',
         '../plugins/ppapi/dir_contents.h',
         '../plugins/ppapi/event_conversion.cc',
@@ -216,13 +228,12 @@
         '../plugins/ppapi/file_callbacks.h',
         '../plugins/ppapi/file_path.cc',
         '../plugins/ppapi/file_path.h',
-        '../plugins/ppapi/file_type_conversions.cc',
-        '../plugins/ppapi/file_type_conversions.h',
         '../plugins/ppapi/fullscreen_container.h',
+        '../plugins/ppapi/gfx_conversion.h',
+        '../plugins/ppapi/host_array_buffer_var.cc',
+        '../plugins/ppapi/host_array_buffer_var.h',
         '../plugins/ppapi/host_globals.cc',
         '../plugins/ppapi/host_globals.h',
-        '../plugins/ppapi/host_resource_tracker.cc',
-        '../plugins/ppapi/host_resource_tracker.h',
         '../plugins/ppapi/host_var_tracker.cc',
         '../plugins/ppapi/host_var_tracker.h',
         '../plugins/ppapi/message_channel.cc',
@@ -268,7 +279,6 @@
         '../plugins/ppapi/ppb_flash_file_impl.h',
         '../plugins/ppapi/ppb_flash_impl.cc',
         '../plugins/ppapi/ppb_flash_impl.h',
-        '../plugins/ppapi/ppb_flash_impl_linux.cc',
         '../plugins/ppapi/ppb_flash_menu_impl.cc',
         '../plugins/ppapi/ppb_flash_menu_impl.h',
         '../plugins/ppapi/ppb_flash_net_connector_impl.cc',
@@ -285,8 +295,6 @@
         '../plugins/ppapi/ppb_image_data_impl.h',
         '../plugins/ppapi/ppb_layer_compositor_impl.cc',
         '../plugins/ppapi/ppb_layer_compositor_impl.h',
-        '../plugins/ppapi/ppb_opengles_impl.cc',
-        '../plugins/ppapi/ppb_opengles_impl.h',
         '../plugins/ppapi/ppb_proxy_impl.cc',
         '../plugins/ppapi/ppb_proxy_impl.h',
         '../plugins/ppapi/ppb_scrollbar_impl.cc',
@@ -305,8 +313,8 @@
         '../plugins/ppapi/ppb_url_request_info_impl.h',
         '../plugins/ppapi/ppb_url_response_info_impl.cc',
         '../plugins/ppapi/ppb_url_response_info_impl.h',
-        '../plugins/ppapi/ppb_var_impl.cc',
-        '../plugins/ppapi/ppb_var_impl.h',
+        '../plugins/ppapi/ppb_var_deprecated_impl.cc',
+        '../plugins/ppapi/ppb_var_deprecated_impl.h',
         '../plugins/ppapi/ppb_video_capture_impl.cc',
         '../plugins/ppapi/ppb_video_capture_impl.h',
         '../plugins/ppapi/ppb_video_decoder_impl.cc',
@@ -327,8 +335,6 @@
         '../plugins/ppapi/resource_helper.h',
         '../plugins/ppapi/string.cc',
         '../plugins/ppapi/string.h',
-        '../plugins/ppapi/webkit_forwarding_impl.cc',
-        '../plugins/ppapi/webkit_forwarding_impl.h',
         '../plugins/sad_plugin.cc',
         '../plugins/sad_plugin.h',
         '../plugins/webkit_plugins_export.h',
@@ -348,14 +354,6 @@
         'cpp_variant.h',
         'dom_operations.cc',
         'dom_operations.h',
-        'form_data.cc',
-        'form_data.h',
-        'form_data_predictions.cc',
-        'form_data_predictions.h',
-        'form_field.cc',
-        'form_field.h',
-        'form_field_predictions.cc',
-        'form_field_predictions.h',
         'ftp_directory_listing_response_delegate.cc',
         'ftp_directory_listing_response_delegate.h',
         'gl_bindings_skia_cmd_buffer.cc',
@@ -374,10 +372,6 @@
         'npruntime_util.h',
         'p2p_transport.cc',
         'p2p_transport.h',
-        'password_form.cc',
-        'password_form.h',
-        'password_form_dom_manager.cc',
-        'password_form_dom_manager.h',
         'resource_fetcher.cc',
         'resource_fetcher.h',
         'resource_loader_bridge.cc',
@@ -396,6 +390,7 @@
         'webcookie.h',
         'webcursor.cc',
         'webcursor.h',
+        'webcursor_android.cc',
         'webcursor_aura.cc',
         'webcursor_gtk.cc',
         'webcursor_gtk_data.h',
@@ -422,9 +417,14 @@
         'websocketstreamhandle_delegate.h',
         'websocketstreamhandle_impl.cc',
         'websocketstreamhandle_impl.h',
+        'webthemeengine_impl_android.cc',
+        'webthemeengine_impl_android.h',
         'webthemeengine_impl_linux.cc',
+        'webthemeengine_impl_linux.h',
         'webthemeengine_impl_mac.cc',
+        'webthemeengine_impl_mac.h',
         'webthemeengine_impl_win.cc',
+        'webthemeengine_impl_win.h',
         'webthread_impl.h',
         'webthread_impl.cc',
         'weburlloader_impl.cc',
@@ -440,6 +440,8 @@
         'web_io_operators.h',
         'window_open_disposition.h',
         'window_open_disposition.cc',
+        'worker_task_runner.cc',
+        'worker_task_runner.h',
 
         # These files used to be built in the webcore target, but moved here
         # since part of glue.
@@ -466,6 +468,14 @@
           'sources/': [['exclude', '_x11\\.cc$']],
           'sources!': [
             'plugins/plugin_stubs.cc',
+          ],
+          'conditions': [
+            ['linux_use_tcmalloc == 1', {
+              'dependencies': [
+                # This is needed by ../extensions/v8/heap_profiler_extension.cc
+                '<(DEPTH)/base/allocator/allocator.gyp:allocator',
+              ],
+            }],
           ],
         }],
         ['use_aura==1', {
@@ -507,9 +517,6 @@
           'sources/': [['exclude', '_posix\\.cc$']],
           'include_dirs': [
             '<(DEPTH)/third_party/wtl/include',
-          ],
-          'dependencies': [
-            '<(DEPTH)/build/win/system.gyp:cygwin',
           ],
           'sources!': [
             'plugins/plugin_stubs.cc',

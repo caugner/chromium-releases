@@ -11,11 +11,11 @@
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "ppapi/c/pp_graphics_3d.h"
 #include "ppapi/c/pp_instance.h"
-#include "ppapi/cpp/completion_callback.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
-#include "ppapi/shared_impl/graphics_3d_impl.h"
+#include "ppapi/shared_impl/ppb_graphics_3d_shared.h"
 #include "ppapi/shared_impl/resource.h"
+#include "ppapi/utility/completion_callback_factory.h"
 
 namespace ppapi {
 
@@ -23,21 +23,16 @@ class HostResource;
 
 namespace proxy {
 
-class Graphics3D : public Resource, public Graphics3DImpl {
+class Graphics3D : public PPB_Graphics3D_Shared {
  public:
   explicit Graphics3D(const HostResource& resource);
   virtual ~Graphics3D();
 
   bool Init();
 
-  // Resource overrides.
-  virtual thunk::PPB_Graphics3D_API* AsPPB_Graphics3D_API() OVERRIDE {
-    return this;
-  }
-
   // Graphics3DTrusted API. These are not implemented in the proxy.
-  virtual PP_Bool InitCommandBuffer(int32_t size) OVERRIDE;
-  virtual PP_Bool GetRingBuffer(int* shm_handle, uint32_t* shm_size) OVERRIDE;
+  virtual PP_Bool InitCommandBuffer() OVERRIDE;
+  virtual PP_Bool SetGetBuffer(int32_t shm_id) OVERRIDE;
   virtual PP_Graphics3DTrustedState GetState() OVERRIDE;
   virtual PP_Bool Flush(int32_t put_offset) OVERRIDE;
   virtual PP_Graphics3DTrustedState FlushSync(int32_t put_offset) OVERRIDE;
@@ -79,9 +74,9 @@ class PPB_Graphics3D_Proxy : public InterfaceProxy {
   void OnMsgCreate(PP_Instance instance,
                    const std::vector<int32_t>& attribs,
                    HostResource* result);
-  void OnMsgInitCommandBuffer(const HostResource& context,
-                              int32 size,
-                              base::SharedMemoryHandle* ring_buffer);
+  void OnMsgInitCommandBuffer(const HostResource& context);
+  void OnMsgSetGetBuffer(const HostResource& context,
+                         int32 id);
   void OnMsgGetState(const HostResource& context,
                      gpu::CommandBuffer::State* state);
   void OnMsgFlush(const HostResource& context,

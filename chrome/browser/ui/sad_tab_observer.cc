@@ -1,14 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/sad_tab_observer.h"
 
 #include "chrome/browser/browser_shutdown.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/ui/cocoa/tab_contents/sad_tab_controller.h"
@@ -19,10 +19,12 @@
 #include "chrome/browser/ui/gtk/sad_tab_gtk.h"
 #endif
 
-SadTabObserver::SadTabObserver(TabContents* tab_contents)
-    : TabContentsObserver(tab_contents) {
-  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_CONNECTED,
-                 content::Source<TabContents>(tab_contents));
+using content::WebContents;
+
+SadTabObserver::SadTabObserver(WebContents* web_contents)
+    : content::WebContentsObserver(web_contents) {
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_CONNECTED,
+                 content::Source<WebContents>(web_contents));
 }
 
 SadTabObserver::~SadTabObserver() {
@@ -39,16 +41,16 @@ void SadTabObserver::RenderViewGone(base::TerminationStatus status) {
     return;
 
   gfx::NativeView view = AcquireSadTab(status);
-  tab_contents()->view()->InstallOverlayView(view);
+  web_contents()->GetView()->InstallOverlayView(view);
 }
 
 void SadTabObserver::Observe(int type,
                              const content::NotificationSource& source,
                              const content::NotificationDetails& details) {
   switch (type) {
-    case content::NOTIFICATION_TAB_CONTENTS_CONNECTED:
+    case content::NOTIFICATION_WEB_CONTENTS_CONNECTED:
       if (HasSadTab()) {
-        tab_contents()->view()->RemoveOverlayView();
+        web_contents()->GetView()->RemoveOverlayView();
         ReleaseSadTab();
       }
       break;
@@ -61,7 +63,7 @@ void SadTabObserver::Observe(int type,
 gfx::NativeView SadTabObserver::AcquireSadTab(base::TerminationStatus status) {
 #if defined(OS_MACOSX)
   sad_tab_.reset(
-      sad_tab_controller_mac::CreateSadTabController(tab_contents()));
+      sad_tab_controller_mac::CreateSadTabController(web_contents()));
   return sad_tab_controller_mac::GetViewOfSadTabController(sad_tab_.get());
 #elif defined(TOOLKIT_VIEWS)
   SadTabView::Kind kind =
@@ -73,16 +75,16 @@ gfx::NativeView SadTabObserver::AcquireSadTab(base::TerminationStatus status) {
   // and later re-parent it.
   // TODO(avi): This is a cheat. Can this be made cleaner?
   sad_tab_params.parent_widget =
-      static_cast<TabContentsViewViews*>(tab_contents()->view());
+      static_cast<TabContentsViewViews*>(web_contents()->GetView());
   sad_tab_params.ownership =
       views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   sad_tab_.reset(new views::Widget);
   sad_tab_->Init(sad_tab_params);
-  sad_tab_->SetContentsView(new SadTabView(tab_contents(), kind));
+  sad_tab_->SetContentsView(new SadTabView(web_contents(), kind));
   return sad_tab_->GetNativeView();
 #elif defined(TOOLKIT_GTK)
   sad_tab_.reset(new SadTabGtk(
-      tab_contents(),
+      web_contents(),
       status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED
           ? SadTabGtk::KILLED
           : SadTabGtk::CRASHED));

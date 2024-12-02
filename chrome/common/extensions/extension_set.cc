@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,10 @@ size_t ExtensionSet::size() const {
   return extensions_.size();
 }
 
+bool ExtensionSet::is_empty() const {
+  return extensions_.empty();
+}
+
 bool ExtensionSet::Contains(const std::string& extension_id) const {
   return extensions_.find(extension_id) != extensions_.end();
 }
@@ -37,24 +41,39 @@ void ExtensionSet::Insert(const scoped_refptr<const Extension>& extension) {
   extensions_[extension->id()] = extension;
 }
 
+bool ExtensionSet::InsertAll(const ExtensionSet& extensions) {
+  size_t before = size();
+  for (ExtensionSet::const_iterator iter = extensions.begin();
+       iter != extensions.end(); ++iter) {
+    Insert(*iter);
+  }
+  return size() != before;
+}
+
 void ExtensionSet::Remove(const std::string& id) {
   extensions_.erase(id);
 }
 
-std::string ExtensionSet::GetIdByURL(const ExtensionURLInfo& info) const {
+void ExtensionSet::Clear() {
+  extensions_.clear();
+}
+
+std::string ExtensionSet::GetExtensionOrAppIDByURL(
+    const ExtensionURLInfo& info) const {
   DCHECK(!info.origin().isNull());
 
   if (info.url().SchemeIs(chrome::kExtensionScheme))
     return info.origin().isUnique() ? "" : info.url().host();
 
-  const Extension* extension = GetByURL(info);
+  const Extension* extension = GetExtensionOrAppByURL(info);
   if (!extension)
     return "";
 
   return extension->id();
 }
 
-const Extension* ExtensionSet::GetByURL(const ExtensionURLInfo& info) const {
+const Extension* ExtensionSet::GetExtensionOrAppByURL(
+    const ExtensionURLInfo& info) const {
   // In the common case, the document's origin will correspond to its URL,
   // but in some rare cases involving sandboxing, the two will be different.
   // We catch those cases by checking whether the document's origin is unique.
@@ -66,10 +85,26 @@ const Extension* ExtensionSet::GetByURL(const ExtensionURLInfo& info) const {
   if (info.url().SchemeIs(chrome::kExtensionScheme))
     return GetByID(info.url().host());
 
-  ExtensionMap::const_iterator i = extensions_.begin();
-  for (; i != extensions_.end(); ++i) {
-    if (i->second->web_extent().MatchesURL(info.url()))
-      return i->second.get();
+  return GetHostedAppByURL(info);
+}
+
+const Extension* ExtensionSet::GetHostedAppByURL(
+    const ExtensionURLInfo& info) const {
+  for (ExtensionMap::const_iterator iter = extensions_.begin();
+       iter != extensions_.end(); ++iter) {
+    if (iter->second->web_extent().MatchesURL(info.url()))
+      return iter->second.get();
+  }
+
+  return NULL;
+}
+
+const Extension* ExtensionSet::GetHostedAppByOverlappingWebExtent(
+    const URLPatternSet& extent) const {
+  for (ExtensionMap::const_iterator iter = extensions_.begin();
+       iter != extensions_.end(); ++iter) {
+    if (iter->second->web_extent().OverlapsWith(extent))
+      return iter->second.get();
   }
 
   return NULL;
@@ -77,8 +112,8 @@ const Extension* ExtensionSet::GetByURL(const ExtensionURLInfo& info) const {
 
 bool ExtensionSet::InSameExtent(const GURL& old_url,
                                 const GURL& new_url) const {
-  return GetByURL(ExtensionURLInfo(old_url)) ==
-      GetByURL(ExtensionURLInfo(new_url));
+  return GetExtensionOrAppByURL(ExtensionURLInfo(old_url)) ==
+      GetExtensionOrAppByURL(ExtensionURLInfo(new_url));
 }
 
 const Extension* ExtensionSet::GetByID(const std::string& id) const {

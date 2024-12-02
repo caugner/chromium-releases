@@ -102,7 +102,6 @@
 #include <string>
 #include <vector>
 
-#include "base/task.h"
 #include "base/memory/weak_ptr.h"
 #include "ppapi/cpp/dev/scriptable_object_deprecated.h"
 #include "ppapi/cpp/var.h"
@@ -216,8 +215,8 @@ class ChromotingScriptableObject
   pp::Var DoConnect(const std::vector<pp::Var>& args, pp::Var* exception);
   pp::Var DoDisconnect(const std::vector<pp::Var>& args, pp::Var* exception);
 
-  // This method is called by JS to set scale-to-fit.
-  pp::Var DoSetScaleToFit(const std::vector<pp::Var>& args, pp::Var* exception);
+  // This method is used for legacy script APIs such as setScaleToFit.
+  pp::Var DoNothing(const std::vector<pp::Var>& args, pp::Var* exception);
 
   // This method is called by Javascript to provide responses to sendIq()
   // requests.
@@ -235,7 +234,6 @@ class ChromotingScriptableObject
   ChromotingInstance* instance_;
 
   scoped_refptr<base::MessageLoopProxy> plugin_message_loop_;
-  ScopedRunnableMethodFactory<ChromotingScriptableObject> task_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingScriptableObject);
 };

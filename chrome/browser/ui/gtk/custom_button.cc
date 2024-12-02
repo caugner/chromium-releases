@@ -1,17 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/gtk/custom_button.h"
 
 #include "base/basictypes.h"
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/ui_resources_standard.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
@@ -45,7 +46,7 @@ CustomDrawButtonBase::CustomDrawButtonBase(GtkThemeService* theme_provider,
                    content::Source<ThemeService>(theme_provider));
   } else {
     // Load the button images from the resource bundle.
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     surfaces_[GTK_STATE_NORMAL]->UsePixbuf(
         normal_id_ ? rb.GetRTLEnabledPixbufNamed(normal_id_) : NULL);
     surfaces_[GTK_STATE_ACTIVE]->UsePixbuf(
@@ -72,6 +73,7 @@ int CustomDrawButtonBase::Height() const {
 gboolean CustomDrawButtonBase::OnExpose(GtkWidget* widget,
                                         GdkEventExpose* e,
                                         gdouble hover_state) {
+  TRACE_EVENT0("ui::gtk", "CustomDrawButtonBase::OnExpose");
   int paint_state = paint_override_ >= 0 ?
                     paint_override_ : gtk_widget_get_state(widget);
 
@@ -89,7 +91,8 @@ gboolean CustomDrawButtonBase::OnExpose(GtkWidget* widget,
   if (animating_hover && (!hover_pixbuf || !hover_pixbuf->valid()))
     return FALSE;
 
-  cairo_t* cairo_context = gdk_cairo_create(GDK_DRAWABLE(widget->window));
+  cairo_t* cairo_context = gdk_cairo_create(GDK_DRAWABLE(
+      gtk_widget_get_window(widget)));
   GtkAllocation allocation;
   gtk_widget_get_allocation(widget, &allocation);
   cairo_translate(cairo_context, allocation.x, allocation.y);
@@ -299,10 +302,10 @@ void CustomDrawButton::Observe(int type,
   SetBrowserTheme();
 }
 
-int CustomDrawButton::WidgetWidth() const {
+GtkAllocation CustomDrawButton::WidgetAllocation() const {
   GtkAllocation allocation;
   gtk_widget_get_allocation(widget_.get(), &allocation);
-  return allocation.width;
+  return allocation;
 }
 
 int CustomDrawButton::SurfaceWidth() const {
@@ -332,6 +335,7 @@ void CustomDrawButton::SetBackground(SkColor color,
 
 gboolean CustomDrawButton::OnCustomExpose(GtkWidget* sender,
                                           GdkEventExpose* e) {
+  UNSHIPPED_TRACE_EVENT0("ui::gtk", "CustomDrawButtonBase::OnCustomExpose");
   if (UseGtkTheme()) {
     // Continue processing this expose event.
     return FALSE;

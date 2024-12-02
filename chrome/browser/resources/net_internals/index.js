@@ -18,6 +18,7 @@
 <include src="main.js"/>
 <include src="time_util.js"/>
 <include src="log_util.js"/>
+<include src="status_view.js"/>
 <include src="dns_view.js"/>
 <include src="source_row.js"/>
 <include src="events_view.js"/>
@@ -39,6 +40,7 @@
 <include src="logs_view.js"/>
 <include src="prerender_view.js"/>
 <include src="chromeos_view.js"/>
+<include src="http_pipeline_view.js"/>
 
 document.addEventListener('DOMContentLoaded', function() {
   MainView.getInstance();  // from main.js

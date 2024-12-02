@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,13 @@
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/browser_context.h"
 
 class GURL;
-class SiteInstance;
+class SiteInstanceImpl;
 
 namespace content {
-class BrowserContext;
+class SiteInstance;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -50,16 +51,17 @@ class BrowserContext;
 // have references to it.  Because both classes are RefCounted, they do not
 // need to be manually deleted.
 //
-// Currently, the BrowsingInstance class is not visible outside of the
-// SiteInstance class.  To get a new SiteInstance that is part of the same
-// BrowsingInstance, use SiteInstance::GetRelatedSiteInstance.  Because of
-// this, BrowsingInstances and SiteInstances are tested together in
+// BrowsingInstance has no public members, as it is designed to be
+// visible only from the SiteInstance class.  To get a new
+// SiteInstance that is part of the same BrowsingInstance, use
+// SiteInstance::GetRelatedSiteInstance.  Because of this,
+// BrowsingInstances and SiteInstances are tested together in
 // site_instance_unittest.cc.
 //
 ///////////////////////////////////////////////////////////////////////////////
 class CONTENT_EXPORT BrowsingInstance
     : public base::RefCounted<BrowsingInstance> {
- public:
+ protected:
   // Create a new BrowsingInstance.
   explicit BrowsingInstance(content::BrowserContext* context);
 
@@ -70,7 +72,7 @@ class CONTENT_EXPORT BrowsingInstance
   virtual bool ShouldUseProcessPerSite(const GURL& url);
 
   // Get the browser context to which this BrowsingInstance belongs.
-  content::BrowserContext* browser_context() { return browser_context_; }
+  content::BrowserContext* browser_context() const { return browser_context_; }
 
   // Returns whether this BrowsingInstance has registered a SiteInstance for
   // the site of the given URL.
@@ -79,19 +81,21 @@ class CONTENT_EXPORT BrowsingInstance
   // Get the SiteInstance responsible for rendering the given URL.  Should
   // create a new one if necessary, but should not create more than one
   // SiteInstance per site.
-  SiteInstance* GetSiteInstanceForURL(const GURL& url);
+  content::SiteInstance* GetSiteInstanceForURL(const GURL& url);
 
   // Adds the given SiteInstance to our map, to ensure that we do not create
   // another SiteInstance for the same site.
-  void RegisterSiteInstance(SiteInstance* site_instance);
+  void RegisterSiteInstance(content::SiteInstance* site_instance);
 
   // Removes the given SiteInstance from our map, after all references to it
   // have been deleted.  This means it is safe to create a new SiteInstance
   // if the user later visits a page from this site, within this
   // BrowsingInstance.
-  void UnregisterSiteInstance(SiteInstance* site_instance);
+  void UnregisterSiteInstance(content::SiteInstance* site_instance);
 
- protected:
+  friend class SiteInstanceImpl;
+  friend class content::SiteInstance;
+
   friend class base::RefCounted<BrowsingInstance>;
 
   // Virtual to allow tests to extend it.
@@ -99,7 +103,7 @@ class CONTENT_EXPORT BrowsingInstance
 
  private:
   // Map of site to SiteInstance, to ensure we only have one SiteInstance per
-  typedef base::hash_map<std::string, SiteInstance*> SiteInstanceMap;
+  typedef base::hash_map<std::string, content::SiteInstance*> SiteInstanceMap;
 
   // Map of BrowserContext to SiteInstanceMap, for use in the process-per-site
   // model.
@@ -118,7 +122,7 @@ class CONTENT_EXPORT BrowsingInstance
   // Utility routine which removes the passed SiteInstance from the passed
   // SiteInstanceMap.
   bool RemoveSiteInstanceFromMap(SiteInstanceMap* map, const std::string& site,
-                                 SiteInstance* site_instance);
+                                 content::SiteInstance* site_instance);
 
   // Common browser context to which all SiteInstances in this BrowsingInstance
   // must belong.
@@ -126,17 +130,15 @@ class CONTENT_EXPORT BrowsingInstance
 
   // Map of site to SiteInstance, to ensure we only have one SiteInstance per
   // site.  The site string should be the possibly_invalid_spec() of a GURL
-  // obtained with SiteInstance::GetSiteForURL.  Note that this map may not
+  // obtained with SiteInstanceImpl::GetSiteForURL.  Note that this map may not
   // contain every active SiteInstance, because a race exists where two
   // SiteInstances can be assigned to the same site.  This is ok in rare cases.
   // This field is only used if we are not using process-per-site.
   SiteInstanceMap site_instance_map_;
 
   // Global map of BrowserContext to SiteInstanceMap, for process-per-site.
-  static base::LazyInstance<
-      ContextSiteInstanceMap,
-      base::LeakyLazyInstanceTraits<ContextSiteInstanceMap> >
-          context_site_instance_map_;
+  static base::LazyInstance<ContextSiteInstanceMap>::Leaky
+      context_site_instance_map_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingInstance);
 };

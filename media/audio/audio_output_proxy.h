@@ -1,12 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef MEDIA_AUDIO_AUDIO_OUTPUT_STREAM_PROXY_H_
-#define MEDIA_AUDIO_AUDIO_OUTPUT_STREAM_PROXY_H_
+#ifndef MEDIA_AUDIO_AUDIO_OUTPUT_PROXY_H_
+#define MEDIA_AUDIO_AUDIO_OUTPUT_PROXY_H_
 
 #include "base/basictypes.h"
-#include "base/task.h"
+#include "base/compiler_specific.h"
+#include "base/memory/ref_counted.h"
+#include "base/threading/non_thread_safe.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_parameters.h"
 
@@ -20,10 +22,12 @@ class AudioOutputDispatcher;
 //
 // AudioOutputProxy uses AudioOutputDispatcher to open and close
 // physical output streams.
-class MEDIA_EXPORT AudioOutputProxy : public AudioOutputStream {
+class MEDIA_EXPORT AudioOutputProxy
+  : public AudioOutputStream,
+    public NON_EXPORTED_BASE(base::NonThreadSafe) {
  public:
   // Caller keeps ownership of |dispatcher|.
-  AudioOutputProxy(AudioOutputDispatcher* dispatcher);
+  explicit AudioOutputProxy(AudioOutputDispatcher* dispatcher);
 
   // AudioOutputStream interface.
   virtual bool Open() OVERRIDE;
@@ -34,9 +38,6 @@ class MEDIA_EXPORT AudioOutputProxy : public AudioOutputStream {
   virtual void Close() OVERRIDE;
 
  private:
-  // Needs to access destructor.
-  friend class DeleteTask<AudioOutputProxy>;
-
   enum State {
     kCreated,
     kOpened,
@@ -61,4 +62,4 @@ class MEDIA_EXPORT AudioOutputProxy : public AudioOutputStream {
   DISALLOW_COPY_AND_ASSIGN(AudioOutputProxy);
 };
 
-#endif  // MEDIA_AUDIO_AUDIO_OUTPUT_STREAM_PROXY_H_
+#endif  // MEDIA_AUDIO_AUDIO_OUTPUT_PROXY_H_

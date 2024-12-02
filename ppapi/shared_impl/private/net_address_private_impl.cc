@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,12 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/stringprintf.h"
+#include "base/sys_byteorder.h"
 #include "build/build_config.h"
 #include "net/base/address_list.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_util.h"
 #include "net/base/sys_addrinfo.h"
-#include "net/base/sys_byteorder.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/private/ppb_net_address_private.h"
 #include "ppapi/shared_impl/var.h"
@@ -195,7 +195,7 @@ std::string ConvertIPv6AddressToString(const sockaddr_in6* a,
 }
 #endif  // OS_WIN || OS_MAC
 
-PP_Var Describe(PP_Module module,
+PP_Var Describe(PP_Module /*module*/,
                 const struct PP_NetAddress_Private* addr,
                 PP_Bool include_port) {
   if (!NetAddressPrivateImpl::ValidateNetAddress(*addr))
@@ -211,12 +211,12 @@ PP_Var Describe(PP_Module module,
     case AF_INET: {
       const sockaddr_in* a = reinterpret_cast<const sockaddr_in*>(addr->data);
       return StringVar::StringToPPVar(
-          module, ConvertIPv4AddressToString(a, !!include_port));
+          ConvertIPv4AddressToString(a, !!include_port));
     }
     case AF_INET6: {
       const sockaddr_in6* a = reinterpret_cast<const sockaddr_in6*>(addr->data);
       return StringVar::StringToPPVar(
-          module, ConvertIPv6AddressToString(a, !!include_port));
+          ConvertIPv6AddressToString(a, !!include_port));
     }
     default:
       NOTREACHED();
@@ -229,7 +229,7 @@ PP_Var Describe(PP_Module module,
   std::string description =
       include_port ? net::NetAddressToStringWithPort(a, l) :
                      net::NetAddressToString(a, l);
-  return StringVar::StringToPPVar(module, description);
+  return StringVar::StringToPPVar(description);
 #endif
 }
 
@@ -281,8 +281,8 @@ const PPB_NetAddress_Private net_address_private_interface = {
 
 namespace thunk {
 
-PPAPI_THUNK_EXPORT const PPB_NetAddress_Private*
-GetPPB_NetAddress_Private_Thunk() {
+PPAPI_THUNK_EXPORT const PPB_NetAddress_Private_0_1*
+GetPPB_NetAddress_Private_0_1_Thunk() {
   return &net_address_private_interface;
 }
 

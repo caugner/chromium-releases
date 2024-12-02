@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/platform_file.h"
 #include "content/common/content_export.h"
 #include "content/common/webkitplatformsupport_impl.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
 
 class RendererClipboardClient;
 class WebSharedWorkerRepositoryImpl;
@@ -82,6 +83,8 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
   virtual WebKit::WebFileSystem* fileSystem() OVERRIDE;
   virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository() OVERRIDE;
   virtual WebKit::WebGraphicsContext3D* createGraphicsContext3D() OVERRIDE;
+  virtual WebKit::WebGraphicsContext3D* createOffscreenGraphicsContext3D(
+      const WebKit::WebGraphicsContext3D::Attributes& attributes);
   virtual double audioHardwareSampleRate() OVERRIDE;
   virtual size_t audioHardwareBufferSize() OVERRIDE;
   virtual WebKit::WebAudioDevice* createAudioDevice(
@@ -92,6 +95,8 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
   virtual WebKit::WebString userAgent(const WebKit::WebURL& url) OVERRIDE;
   virtual void GetPlugins(bool refresh,
                           std::vector<webkit::WebPluginInfo>* plugins) OVERRIDE;
+  virtual WebKit::WebPeerConnectionHandler* createPeerConnectionHandler(
+      WebKit::WebPeerConnectionHandlerClient* client) OVERRIDE;
 
  private:
   bool CheckPreparsedJsCachingEnabled() const;

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -41,6 +41,7 @@ class BrowserDistribution {
                           // also known as the 'TV' part in 'TV80'.
     int flavor;           // The flavor index for this experiment.
     int heading;          // The heading resource ID to use for this experiment.
+    bool compact_bubble;  // Whether to show the compact heading or not.
     int control_group;    // Size of the control group (in percentages). Control
                           // group is the group that qualifies for the
                           // experiment but does not participate.
@@ -106,6 +107,8 @@ class BrowserDistribution {
   virtual std::wstring GetVersionKey();
 
   virtual bool CanSetAsDefault();
+
+  virtual bool CanCreateDesktopShortcuts();
 
   virtual int GetIconIndex();
 

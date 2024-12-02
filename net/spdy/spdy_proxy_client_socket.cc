@@ -6,6 +6,8 @@
 
 #include <algorithm>  // min
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "googleurl/src/gurl.h"
@@ -29,12 +31,8 @@ SpdyProxyClientSocket::SpdyProxyClientSocket(
     const HostPortPair& proxy_server,
     HttpAuthCache* auth_cache,
     HttpAuthHandlerFactory* auth_handler_factory)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(
-          io_callback_(this, &SpdyProxyClientSocket::OnIOComplete)),
-      next_state_(STATE_DISCONNECTED),
+    : next_state_(STATE_DISCONNECTED),
       spdy_stream_(spdy_stream),
-      read_callback_(NULL),
-      write_callback_(NULL),
       endpoint_(endpoint),
       auth_(
           new HttpAuthController(HttpAuth::AUTH_PROXY,
@@ -78,8 +76,8 @@ HttpStream* SpdyProxyClientSocket::CreateConnectResponseStream() {
 // by creating a new stream for the subsequent request.
 // TODO(rch): create a more appropriate error code to disambiguate
 // the HTTPS Proxy tunnel failure from an HTTP Proxy tunnel failure.
-int SpdyProxyClientSocket::Connect(OldCompletionCallback* callback) {
-  DCHECK(!read_callback_);
+int SpdyProxyClientSocket::Connect(const CompletionCallback& callback) {
+  DCHECK(read_callback_.is_null());
   if (next_state_ == STATE_OPEN)
     return OK;
 
@@ -95,11 +93,11 @@ int SpdyProxyClientSocket::Connect(OldCompletionCallback* callback) {
 void SpdyProxyClientSocket::Disconnect() {
   read_buffer_.clear();
   user_buffer_ = NULL;
-  read_callback_ = NULL;
+  read_callback_.Reset();
 
   write_buffer_len_ = 0;
   write_bytes_outstanding_ = 0;
-  write_callback_ = NULL;
+  write_callback_.Reset();
 
   next_state_ = STATE_DISCONNECTED;
 
@@ -146,8 +144,8 @@ base::TimeDelta SpdyProxyClientSocket::GetConnectTimeMicros() const {
 }
 
 int SpdyProxyClientSocket::Read(IOBuffer* buf, int buf_len,
-                                OldCompletionCallback* callback) {
-  DCHECK(!read_callback_);
+                                const CompletionCallback& callback) {
+  DCHECK(read_callback_.is_null());
   DCHECK(!user_buffer_);
 
   if (next_state_ == STATE_DISCONNECTED)
@@ -162,7 +160,7 @@ int SpdyProxyClientSocket::Read(IOBuffer* buf, int buf_len,
   user_buffer_ = new DrainableIOBuffer(buf, buf_len);
   int result = PopulateUserReadBuffer();
   if (result == 0) {
-    DCHECK(callback);
+    DCHECK(!callback.is_null());
     read_callback_ = callback;
     return ERR_IO_PENDING;
   }
@@ -192,8 +190,8 @@ int SpdyProxyClientSocket::PopulateUserReadBuffer() {
 }
 
 int SpdyProxyClientSocket::Write(IOBuffer* buf, int buf_len,
-                                 OldCompletionCallback* callback) {
-  DCHECK(!write_callback_);
+                                 const CompletionCallback& callback) {
+  DCHECK(write_callback_.is_null());
   if (next_state_ != STATE_OPEN)
     return ERR_SOCKET_NOT_CONNECTED;
 
@@ -258,9 +256,9 @@ void SpdyProxyClientSocket::OnIOComplete(int result) {
   DCHECK_NE(STATE_DISCONNECTED, next_state_);
   int rv = DoLoop(result);
   if (rv != ERR_IO_PENDING) {
-    OldCompletionCallback* c = read_callback_;
-    read_callback_ = NULL;
-    c->Run(rv);
+    CompletionCallback c = read_callback_;
+    read_callback_.Reset();
+    c.Run(rv);
   }
 }
 
@@ -306,7 +304,10 @@ int SpdyProxyClientSocket::DoLoop(int last_io_result) {
 
 int SpdyProxyClientSocket::DoGenerateAuthToken() {
   next_state_ = STATE_GENERATE_AUTH_TOKEN_COMPLETE;
-  return auth_->MaybeGenerateAuthToken(&request_, &io_callback_, net_log_);
+  return auth_->MaybeGenerateAuthToken(
+      &request_,
+      base::Bind(&SpdyProxyClientSocket::OnIOComplete, base::Unretained(this)),
+      net_log_);
 }
 
 int SpdyProxyClientSocket::DoGenerateAuthTokenComplete(int result) {
@@ -449,17 +450,17 @@ void SpdyProxyClientSocket::OnDataReceived(const char* data, int length) {
         make_scoped_refptr(new DrainableIOBuffer(io_buffer, length)));
   }
 
-  if (read_callback_) {
+  if (!read_callback_.is_null()) {
     int rv = PopulateUserReadBuffer();
-    OldCompletionCallback* c = read_callback_;
-    read_callback_ = NULL;
+    CompletionCallback c = read_callback_;
+    read_callback_.Reset();
     user_buffer_ = NULL;
-    c->Run(rv);
+    c.Run(rv);
   }
 }
 
 void SpdyProxyClientSocket::OnDataSent(int length)  {
-  DCHECK(write_callback_);
+  DCHECK(!write_callback_.is_null());
 
   write_bytes_outstanding_ -= length;
 
@@ -469,9 +470,9 @@ void SpdyProxyClientSocket::OnDataSent(int length)  {
     int rv = write_buffer_len_;
     write_buffer_len_ = 0;
     write_bytes_outstanding_ = 0;
-    OldCompletionCallback* c = write_callback_;
-    write_callback_ = NULL;
-    c->Run(rv);
+    CompletionCallback c = write_callback_;
+    write_callback_.Reset();
+    c.Run(rv);
   }
 }
 
@@ -488,25 +489,25 @@ void SpdyProxyClientSocket::OnClose(int status)  {
     next_state_ = STATE_DISCONNECTED;
 
   base::WeakPtr<SpdyProxyClientSocket> weak_ptr = weak_factory_.GetWeakPtr();
-  OldCompletionCallback* write_callback = write_callback_;
-  write_callback_ = NULL;
+  CompletionCallback write_callback = write_callback_;
+  write_callback_.Reset();
   write_buffer_len_ = 0;
   write_bytes_outstanding_ = 0;
 
   // If we're in the middle of connecting, we need to make sure
   // we invoke the connect callback.
   if (connecting) {
-    DCHECK(read_callback_);
-    OldCompletionCallback* read_callback = read_callback_;
-    read_callback_ = NULL;
-    read_callback->Run(status);
-  } else if (read_callback_) {
+    DCHECK(!read_callback_.is_null());
+    CompletionCallback read_callback = read_callback_;
+    read_callback_.Reset();
+    read_callback.Run(status);
+  } else if (!read_callback_.is_null()) {
     // If we have a read_callback_, the we need to make sure we call it back.
     OnDataReceived(NULL, 0);
   }
   // This may have been deleted by read_callback_, so check first.
-  if (weak_ptr && write_callback)
-    write_callback->Run(ERR_CONNECTION_CLOSED);
+  if (weak_ptr && !write_callback.is_null())
+    write_callback.Run(ERR_CONNECTION_CLOSED);
 }
 
 void SpdyProxyClientSocket::set_chunk_callback(ChunkCallback* /*callback*/) {

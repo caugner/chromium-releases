@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,14 +15,13 @@
 #include "native_client/src/trusted/desc/nacl_desc_invalid.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/ppp.h"
+#include "ppapi/c/ppp_input_event.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/c/ppp_messaging.h"
 
 namespace plugin {
 class Plugin;
 }
-
-struct PPP_InputEvent;
 
 namespace ppapi_proxy {
 
@@ -31,12 +30,12 @@ class BrowserPpp {
   BrowserPpp(NaClSrpcChannel* main_channel, plugin::Plugin* plugin)
       : main_channel_(main_channel),
         is_nexe_alive_(true),
-        plugin_pid_(0),
         plugin_(plugin),
         ppp_instance_interface_(NULL),
         ppp_messaging_interface_(NULL),
         ppp_input_event_interface_(NULL) {
     CHECK(main_channel_ != NULL);
+    upcall_thread_.tid = 0;
   }
 
   ~BrowserPpp() {}
@@ -72,7 +71,6 @@ class BrowserPpp {
   }
 
   NaClSrpcChannel* main_channel() const { return main_channel_; }
-  int plugin_pid() const { return plugin_pid_; }
   plugin::Plugin* plugin() { return plugin_; }
 
   void ReportDeadNexe() { is_nexe_alive_ = false; }
@@ -82,8 +80,6 @@ class BrowserPpp {
   // NULL if proxy has been shut down.
   NaClSrpcChannel* main_channel_;
   bool is_nexe_alive_;
-  // The PID of the plugin.
-  int plugin_pid_;
   // Plugin that owns this proxy.
   plugin::Plugin* plugin_;
 

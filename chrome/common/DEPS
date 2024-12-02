@@ -1,6 +1,5 @@
 include_rules = [
   "+chrome/plugin",  # For checking whether we're a plugin process.
-  "+chrome/default_plugin",
   "+grit",  # For generated headers
   "+libxml",
   "+ppapi/c",  # For various types.
@@ -8,6 +7,7 @@ include_rules = [
   "+remoting/client/plugin",
   "+sandbox/src",
   "+skia",
+  "+webkit/forms",  # Defines some types that are marshalled over IPC.
   "+webkit/glue",
   "+webkit/plugins",
 

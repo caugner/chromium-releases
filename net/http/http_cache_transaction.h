@@ -12,6 +12,7 @@
 #include <string>
 
 #include "base/time.h"
+#include "net/base/completion_callback.h"
 #include "net/base/net_log.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_response_info.h"
@@ -68,7 +69,7 @@ class HttpCache::Transaction : public HttpTransaction {
   // Returns the number of bytes actually written, or a net error code. If the
   // operation cannot complete immediately, returns ERR_IO_PENDING, grabs a
   // reference to the buffer (until completion), and notifies the caller using
-  // the provided |callback| when the operatiopn finishes.
+  // the provided |callback| when the operation finishes.
   //
   // The first time this method is called for a given transaction, previous
   // meta-data will be overwritten with the provided data, and subsequent
@@ -80,7 +81,7 @@ class HttpCache::Transaction : public HttpTransaction {
   // method.
   int WriteMetadata(IOBuffer* buf,
                     int buf_len,
-                    OldCompletionCallback* callback);
+                    const CompletionCallback& callback);
 
   // This transaction is being deleted and we are not done writing to the cache.
   // We need to indicate that the response data was truncated.  Returns true on
@@ -93,23 +94,24 @@ class HttpCache::Transaction : public HttpTransaction {
   // to the cache entry.
   LoadState GetWriterLoadState() const;
 
-  OldCompletionCallback* io_callback() { return &io_callback_; }
+  const CompletionCallback& io_callback() { return io_callback_; }
 
   const BoundNetLog& net_log() const;
 
   // HttpTransaction methods:
-  virtual int Start(const HttpRequestInfo*, OldCompletionCallback*,
+  virtual int Start(const HttpRequestInfo*, const CompletionCallback&,
                     const BoundNetLog&) OVERRIDE;
   virtual int RestartIgnoringLastError(
-      OldCompletionCallback* callback) OVERRIDE;
-  virtual int RestartWithCertificate(X509Certificate* client_cert,
-                                     OldCompletionCallback* callback) OVERRIDE;
+      const CompletionCallback& callback) OVERRIDE;
+  virtual int RestartWithCertificate(
+      X509Certificate* client_cert,
+      const CompletionCallback& callback) OVERRIDE;
   virtual int RestartWithAuth(const AuthCredentials& credentials,
-                              OldCompletionCallback* callback) OVERRIDE;
+                              const CompletionCallback& callback) OVERRIDE;
   virtual bool IsReadyToRestartForAuth() OVERRIDE;
   virtual int Read(IOBuffer* buf,
                    int buf_len,
-                   OldCompletionCallback* callback) OVERRIDE;
+                   const CompletionCallback& callback) OVERRIDE;
   virtual void StopCaching() OVERRIDE;
   virtual void DoneReading() OVERRIDE;
   virtual const HttpResponseInfo* GetResponseInfo() const OVERRIDE;
@@ -291,7 +293,7 @@ class HttpCache::Transaction : public HttpTransaction {
   // cache entry is destroyed.  Future calls to this function will just do
   // nothing without side-effect.  Returns a network error code.
   int WriteToEntry(int index, int offset, IOBuffer* data, int data_len,
-                   OldCompletionCallback* callback);
+                   const CompletionCallback& callback);
 
   // Called to write response_ to the cache entry. |truncated| indicates if the
   // entry should be marked as incomplete.
@@ -300,7 +302,7 @@ class HttpCache::Transaction : public HttpTransaction {
   // Called to append response data to the cache entry.  Returns a network error
   // code.
   int AppendResponseDataToEntry(IOBuffer* data, int data_len,
-                                OldCompletionCallback* callback);
+                                const CompletionCallback& callback);
 
   // Called when we are done writing to the cache entry.
   void DoneWritingToEntry(bool success);
@@ -338,7 +340,7 @@ class HttpCache::Transaction : public HttpTransaction {
   base::TimeTicks entry_lock_waiting_since_;
   HttpCache::ActiveEntry* new_entry_;
   scoped_ptr<HttpTransaction> network_trans_;
-  OldCompletionCallback* callback_;  // Consumer's callback.
+  CompletionCallback callback_;  // Consumer's callback.
   HttpResponseInfo response_;
   HttpResponseInfo auth_response_;
   const HttpResponseInfo* new_response_;
@@ -360,10 +362,8 @@ class HttpCache::Transaction : public HttpTransaction {
   int write_len_;
   scoped_ptr<PartialData> partial_;  // We are dealing with range requests.
   uint64 final_upload_progress_;
-  OldCompletionCallbackImpl<Transaction> io_callback_;
-  scoped_refptr<CancelableOldCompletionCallback<Transaction> > cache_callback_;
-  scoped_refptr<CancelableOldCompletionCallback<Transaction> >
-      write_headers_callback_;
+  base::WeakPtrFactory<Transaction> weak_factory_;
+  CompletionCallback io_callback_;
 };
 
 }  // namespace net

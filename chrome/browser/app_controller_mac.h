@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,6 +63,9 @@ class Profile;
 
   // Outlet for the tabpose menu item so we can hide it.
   IBOutlet NSMenuItem* tabposeMenuItem_;
+
+  // Indicates wheter an NSPopover is currently being shown.
+  BOOL hasPopover_;
 }
 
 @property(readonly, nonatomic) BOOL startupComplete;

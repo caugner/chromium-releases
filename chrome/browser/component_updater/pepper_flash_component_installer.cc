@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,14 +21,16 @@
 #include "chrome/browser/component_updater/component_updater_service.h"
 #include "chrome/browser/plugin_prefs.h"
 #include "chrome/common/chrome_paths.h"
-#include "content/browser/plugin_service.h"
+#include "chrome/installer/util/browser_distribution.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/plugin_service.h"
 #include "content/public/common/pepper_plugin_info.h"
 #include "ppapi/c/private/ppb_pdf.h"
 #include "webkit/plugins/plugin_constants.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 
 using content::BrowserThread;
+using content::PluginService;
 
 namespace {
 
@@ -78,12 +80,15 @@ const FilePath::CharType kPepperFlashBaseDirectory[] =
 // If we don't have a Pepper Flash component, this is the version we claim.
 const char kNullVersion[] = "0.0.0.0";
 
-// True if Pepper Flash should be enabled by default.
+// True if Pepper Flash should be enabled by default. Aura builds for any OS
+// and Windows canary have it enabled by default.
+bool IsPepperFlashEnabledByDefault() {
 #if defined(USE_AURA)
-const bool kEnablePepperFlash = true;
+  return true;
 #else
-const bool kEnablePepperFlash = false;
+  return false;
 #endif
+}
 
 // The base directory on Windows looks like:
 // <profile>\AppData\Local\Google\Chrome\User Data\PepperFlash\.
@@ -160,16 +165,19 @@ bool MakePepperFlashPluginInfo(const FilePath& flash_path,
   return true;
 }
 
+// If it is a |fresh_install| we enable or disable it by default in some
+// configurations. See IsPepperFlashEnabledByDefault() for more information.
 void RegisterPepperFlashWithChrome(const FilePath& path,
-                                   const Version& version) {
+                                   const Version& version,
+                                   bool fresh_install) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   content::PepperPluginInfo plugin_info;
-  // Register it as out-of-process and disabled.
   if (!MakePepperFlashPluginInfo(path, version, true, &plugin_info))
     return;
-  PluginPrefs::EnablePluginGlobally(kEnablePepperFlash, plugin_info.path);
+  PluginPrefs::EnablePluginGlobally(IsPepperFlashEnabledByDefault(),
+                                    plugin_info.path);
   PluginService::GetInstance()->RegisterInternalPlugin(
-      plugin_info.ToWebPluginInfo());
+      plugin_info.ToWebPluginInfo(), false);
   PluginService::GetInstance()->RefreshPlugins();
 }
 
@@ -222,7 +230,7 @@ bool PepperFlashComponentInstaller::Install(base::DictionaryValue* manifest,
   PathService::Override(chrome::FILE_PEPPER_FLASH_PLUGIN, path);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&RegisterPepperFlashWithChrome, path, version));
+      base::Bind(&RegisterPepperFlashWithChrome, path, version, true));
   return true;
 }
 
@@ -311,7 +319,7 @@ void StartPepperFlashUpdateRegistration(ComponentUpdateService* cus) {
     if (file_util::PathExists(path)) {
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          base::Bind(&RegisterPepperFlashWithChrome, path, version));
+          base::Bind(&RegisterPepperFlashWithChrome, path, version, false));
     } else {
       version = Version(kNullVersion);
     }
@@ -325,8 +333,8 @@ void StartPepperFlashUpdateRegistration(ComponentUpdateService* cus) {
 }  // namespace
 
 void RegisterPepperFlashComponent(ComponentUpdateService* cus) {
-// #if defined(GOOGLE_CHROME_BUILD)
+#if defined(GOOGLE_CHROME_BUILD)
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
                           base::Bind(&StartPepperFlashUpdateRegistration, cus));
-// #endif
+#endif
 }

@@ -14,6 +14,7 @@
 #include "base/string_util.h"
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/search_engines/search_engine_type.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
@@ -1193,7 +1194,7 @@ const PrepopulatedEngine google = {
       L"client=chrome&hl={language}&q={searchTerms}",
   L"{google:baseURL}webhp?{google:RLZ}sourceid=chrome-instant&"
       L"{google:instantFieldTrialGroupParameter}"
-      L"ie={inputEncoding}&ion=1{searchTerms}",
+      L"ie={inputEncoding}{google:instantEnabledParameter}{searchTerms}",
   SEARCH_ENGINE_GOOGLE,
   IDR_SEARCH_ENGINE_LOGO_GOOGLE,
   1,
@@ -3329,7 +3330,7 @@ void RegisterUserPrefs(PrefService* prefs) {
 int GetDataVersion(PrefService* prefs) {
   // Increment this if you change the above data in ways that mean users with
   // existing data should get a new version.
-  const int kCurrentDataVersion = 37;
+  const int kCurrentDataVersion = 38;
   if (!prefs)
     return kCurrentDataVersion;
   // If a version number exist in the preferences file, it overrides the
@@ -3551,11 +3552,12 @@ int GetSearchEngineLogo(const GURL& url_to_find) {
 }
 
 TemplateURL* FindPrepopulatedEngine(const std::string& search_url) {
-  for (size_t i = 0; i < arraysize(kAllEngines); ++i) {
-    if (search_url == ToUTF8(kAllEngines[i]->search_url))
-      return MakePrepopulateTemplateURLFromPrepopulateEngine(*kAllEngines[i]);
-  }
-  return NULL;
+  GURL search_origin(GetOriginForSearchURL(search_url));
+  // First check if it is a Google URL. User may have a custom search provider
+  // with a hard-coded Google domain instead of {google:baseURL}.
+  if (google_util::IsGoogleHomePageUrl((search_origin.spec())))
+    return MakePrepopulateTemplateURLFromPrepopulateEngine(google);
+  return GetEngineForOrigin(NULL, search_origin);
 }
 
 }  // namespace TemplateURLPrepopulateData

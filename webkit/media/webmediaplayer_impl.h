@@ -1,20 +1,20 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Delegate calls from WebCore::MediaPlayerPrivate to Chrome's video player.
-// It contains PipelineImpl which is the actual media player pipeline, it glues
+// It contains Pipeline which is the actual media player pipeline, it glues
 // the media player pipeline, data source, audio renderer and renderer.
-// PipelineImpl would creates multiple threads and access some public methods
+// Pipeline would creates multiple threads and access some public methods
 // of this class, so we need to be extra careful about concurrent access of
 // methods and members.
 //
 // WebMediaPlayerImpl works with multiple objects, the most important ones are:
 //
-// media::PipelineImpl
+// media::Pipeline
 //   The media playback pipeline.
 //
-// VideoRendererImpl
+// VideoRendererBase
 //   Video renderer object.
 //
 // WebKit::WebMediaPlayerClient
@@ -26,15 +26,15 @@
 // WebMediaPlayerClient (WebKit object)
 //    ^
 //    |
-// WebMediaPlayerImpl ---> PipelineImpl
+// WebMediaPlayerImpl ---> Pipeline
 //    |        ^                  |
 //    |        |                  v r
-//    |        |        VideoRendererImpl
+//    |        |        VideoRendererBase
 //    |        |          |       ^ r
 //    |   r    |          v r     |
 //    '---> WebMediaPlayerProxy --'
 //
-// Notice that WebMediaPlayerProxy and VideoRendererImpl are referencing each
+// Notice that WebMediaPlayerProxy and VideoRendererBase are referencing each
 // other. This interdependency has to be treated carefully.
 //
 // Other issues:
@@ -52,14 +52,20 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
+#include "googleurl/src/gurl.h"
+#include "media/base/audio_renderer_sink.h"
 #include "media/base/filters.h"
 #include "media/base/message_loop_factory.h"
 #include "media/base/pipeline.h"
 #include "skia/ext/platform_canvas.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebAudioSourceProvider.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerClient.h"
 
+class RenderAudioSourceProvider;
+
 namespace WebKit {
+class WebAudioSourceProvider;
 class WebFrame;
 }
 
@@ -81,35 +87,27 @@ class WebMediaPlayerImpl
   // Construct a WebMediaPlayerImpl with reference to the client, and media
   // filter collection. By providing the filter collection the implementor can
   // provide more specific media filters that does resource loading and
-  // rendering. |collection| should contain filter factories for:
-  // 1. Data source
-  // 2. Audio renderer
-  // 3. Video renderer (optional)
+  // rendering.
   //
-  // There are some default filters provided by this method:
-  // 1. FFmpeg demuxer
-  // 2. FFmpeg audio decoder
-  // 3. FFmpeg video decoder
-  // 4. Video renderer
-  // 5. Null audio renderer
-  // The video renderer provided by this class is using the graphics context
-  // provided by WebKit to perform renderering. The simple data source does
-  // resource loading by loading the whole resource object into memory. Null
-  // audio renderer is a fake audio device that plays silence. Provider of the
-  // |collection| can override the default filters by adding extra filters to
-  // |collection| before calling this method.
+  // WebMediaPlayerImpl comes packaged with the following media filters:
+  //   - URL fetching
+  //   - Demuxing
+  //   - Software audio/video decoding
+  //   - Video rendering
   //
-  // Callers must call |Initialize()| before they can use the object.
-  WebMediaPlayerImpl(WebKit::WebMediaPlayerClient* client,
+  // Clients are expected to add their platform-specific audio rendering media
+  // filter if they wish to hear any sound coming out the speakers, otherwise
+  // audio data is discarded and media plays back based on wall clock time.
+  //
+  WebMediaPlayerImpl(WebKit::WebFrame* frame,
+                     WebKit::WebMediaPlayerClient* client,
                      base::WeakPtr<WebMediaPlayerDelegate> delegate,
                      media::FilterCollection* collection,
+                     WebKit::WebAudioSourceProvider* audio_source_provider,
                      media::MessageLoopFactory* message_loop_factory,
                      MediaStreamClient* media_stream_client,
                      media::MediaLog* media_log);
   virtual ~WebMediaPlayerImpl();
-
-  // Finalizes initialization of the object.
-  bool Initialize(WebKit::WebFrame* frame, bool use_simple_data_source);
 
   virtual void load(const WebKit::WebURL& url);
   virtual void cancelLoad();
@@ -172,6 +170,8 @@ class WebMediaPlayerImpl
   virtual WebKit::WebVideoFrame* getCurrentFrame();
   virtual void putCurrentFrame(WebKit::WebVideoFrame* web_video_frame);
 
+  virtual WebKit::WebAudioSourceProvider* audioSourceProvider();
+
   virtual bool sourceAppend(const unsigned char* data, unsigned length);
   virtual void sourceEndOfStream(EndOfStreamStatus status);
 
@@ -189,8 +189,15 @@ class WebMediaPlayerImpl
   void OnPipelineError(media::PipelineStatus error);
   void OnNetworkEvent(media::NetworkEvent type);
   void OnDemuxerOpened();
+  void SetOpaque(bool);
 
  private:
+  // Called after asynchronous initialization of a data source completed.
+  void DataSourceInitialized(const GURL& gurl, media::PipelineStatus status);
+
+  // Finishes starting the pipeline due to a call to load().
+  void StartPipeline(const GURL& gurl);
+
   // Helpers that set the network/ready state and notifies the client if
   // they've changed.
   void SetNetworkState(WebKit::WebMediaPlayer::NetworkState state);
@@ -204,6 +211,8 @@ class WebMediaPlayerImpl
 
   // Lets V8 know that player uses extra resources not managed by V8.
   void IncrementExternallyAllocatedMemory();
+
+  WebKit::WebFrame* frame_;
 
   // TODO(hclam): get rid of these members and read from the pipeline directly.
   WebKit::WebMediaPlayer::NetworkState network_state_;
@@ -219,8 +228,13 @@ class WebMediaPlayerImpl
   // A collection of filters.
   scoped_ptr<media::FilterCollection> filter_collection_;
 
-  // The actual pipeline and the thread it runs on.
+  // The media pipeline and a bool tracking whether we have started it yet.
+  //
+  // TODO(scherkus): replace |started_| with a pointer check for |pipeline_| and
+  // have WebMediaPlayerImpl return the default values to WebKit instead of
+  // relying on Pipeline to take care of default values.
   scoped_refptr<media::Pipeline> pipeline_;
+  bool started_;
 
   scoped_ptr<media::MessageLoopFactory> message_loop_factory_;
 
@@ -263,6 +277,8 @@ class WebMediaPlayerImpl
   bool is_accelerated_compositing_active_;
 
   bool incremented_externally_allocated_memory_;
+
+  WebKit::WebAudioSourceProvider* audio_source_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerImpl);
 };

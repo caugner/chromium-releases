@@ -55,12 +55,12 @@ class UDPSocketWin : public base::NonThreadSafe {
   // Read from the socket.
   // Only usable from the client-side of a UDP socket, after the socket
   // has been connected.
-  int Read(IOBuffer* buf, int buf_len, OldCompletionCallback* callback);
+  int Read(IOBuffer* buf, int buf_len, const CompletionCallback& callback);
 
   // Write to the socket.
   // Only usable from the client-side of a UDP socket, after the socket
   // has been connected.
-  int Write(IOBuffer* buf, int buf_len, OldCompletionCallback* callback);
+  int Write(IOBuffer* buf, int buf_len, const CompletionCallback& callback);
 
   // Read from a socket and receive sender address information.
   // |buf| is the buffer to read data into.
@@ -78,7 +78,7 @@ class UDPSocketWin : public base::NonThreadSafe {
   int RecvFrom(IOBuffer* buf,
                int buf_len,
                IPEndPoint* address,
-               OldCompletionCallback* callback);
+               const CompletionCallback& callback);
 
   // Send to a socket with a particular destination.
   // |buf| is the buffer to send
@@ -92,7 +92,7 @@ class UDPSocketWin : public base::NonThreadSafe {
   int SendTo(IOBuffer* buf,
              int buf_len,
              const IPEndPoint& address,
-             OldCompletionCallback* callback);
+             const CompletionCallback& callback);
 
   // Set the receive buffer size (in bytes) for the socket.
   bool SetReceiveBufferSize(int32 size);
@@ -150,7 +150,7 @@ class UDPSocketWin : public base::NonThreadSafe {
   int SendToOrWrite(IOBuffer* buf,
                     int buf_len,
                     const IPEndPoint* address,
-                    OldCompletionCallback* callback);
+                    const CompletionCallback& callback);
 
   int InternalConnect(const IPEndPoint& address);
   int InternalRecvFrom(IOBuffer* buf, int buf_len, IPEndPoint* address);
@@ -203,10 +203,10 @@ class UDPSocketWin : public base::NonThreadSafe {
   scoped_refptr<IOBuffer> write_iobuffer_;
 
   // External callback; called when read is complete.
-  OldCompletionCallback* read_callback_;
+  CompletionCallback read_callback_;
 
   // External callback; called when write is complete.
-  OldCompletionCallback* write_callback_;
+  CompletionCallback write_callback_;
 
   BoundNetLog net_log_;
 

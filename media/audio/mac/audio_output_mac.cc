@@ -1,8 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/audio/mac/audio_output_mac.h"
+
+#include <CoreServices/CoreServices.h>
 
 #include "base/basictypes.h"
 #include "base/debug/trace_event.h"
@@ -94,7 +96,8 @@ void PCMQueueOutAudioOutputStream::HandleError(OSStatus err) {
   AudioSourceCallback* source = GetSource();
   if (source)
     source->OnError(this, static_cast<int>(err));
-  NOTREACHED() << "error code " << err;
+  NOTREACHED() << "error " << GetMacOSStatusErrorString(err)
+               << " (" << err << ")";
 }
 
 bool PCMQueueOutAudioOutputStream::Open() {
@@ -479,6 +482,10 @@ void PCMQueueOutAudioOutputStream::RenderCallback(void* p_this,
 
 void PCMQueueOutAudioOutputStream::Start(AudioSourceCallback* callback) {
   DCHECK(callback);
+  DLOG_IF(ERROR, !audio_queue_) << "Open() has not been called successfully";
+  if (!audio_queue_)
+    return;
+
   OSStatus err = noErr;
   SetSource(callback);
   pending_bytes_ = 0;

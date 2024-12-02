@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,9 @@ class StatusAreaView : public views::AccessiblePaneView,
   void MakeButtonsActive(bool active);
   void UpdateButtonVisibility();
 
+  // Refresh the style used to paint all buttons' text.  Schedules repaint.
+  void UpdateButtonTextStyle();
+
   // Takes focus and transfers it to the first (last if |reverse| is true).
   // After focus has traversed through all elements, clears focus and calls
   // |return_focus_cb(reverse)| from the message loop.
@@ -42,6 +45,7 @@ class StatusAreaView : public views::AccessiblePaneView,
   // views::View* overrides.
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
+  virtual void PreferredSizeChanged() OVERRIDE;
   virtual void ChildPreferredSizeChanged(views::View* child) OVERRIDE;
 
  private:

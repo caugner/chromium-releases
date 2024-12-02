@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/test_html_dialog_observer.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/webui/web_ui.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 
 namespace {
 
@@ -42,7 +42,7 @@ EditSearchEngineDialogUITest::~EditSearchEngineDialogUITest() {}
 
 void EditSearchEngineDialogUITest::ShowSearchEngineDialog() {
   // Force the flag so that we will use the WebUI version of the Dialog.
-  ChromeWebUI::OverrideMoreWebUI(true);
+  chrome_web_ui::OverrideMoreWebUI(true);
 
   // The TestHtmlDialogObserver will catch our dialog when it gets created.
   TestHtmlDialogObserver dialog_observer(this);
@@ -54,12 +54,11 @@ void EditSearchEngineDialogUITest::ShowSearchEngineDialog() {
 
   // Now we can get the WebUI object from the observer, and make some details
   // about our test available to the JavaScript.
-  WebUI* webui = dialog_observer.GetWebUI();
-  webui->tab_contents()->render_view_host()->SetWebUIProperty(
+  content::WebUI* webui = dialog_observer.GetWebUI();
+  webui->GetWebContents()->GetRenderViewHost()->SetWebUIProperty(
       "expectedUrl", chrome::kChromeUIEditSearchEngineDialogURL);
 
   // Tell the test which WebUI instance we are dealing with and complete
   // initialization of this test.
   SetWebUIInstance(webui);
-  WebUIBrowserTest::SetUpOnMainThread();
 }

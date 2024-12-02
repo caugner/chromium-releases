@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,9 @@
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/ppb_graphics_2d.h"
 #include "ppapi/shared_impl/resource.h"
+#include "ppapi/shared_impl/tracked_callback.h"
 #include "ppapi/thunk/ppb_graphics_2d_api.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCanvas.h"
-
-struct PPB_Graphics2D;
 
 namespace gfx {
 class Rect;
@@ -38,19 +37,19 @@ class PPB_Graphics2D_Impl : public ::ppapi::Resource,
 
   bool is_always_opaque() const { return is_always_opaque_; }
 
+  // Resource overrides.
   virtual ::ppapi::thunk::PPB_Graphics2D_API* AsPPB_Graphics2D_API();
-
-  // Resource override.
-  virtual PPB_Graphics2D_Impl* AsPPB_Graphics2D_Impl();
+  virtual void LastPluginRefWasDeleted() OVERRIDE;
 
   // PPB_Graphics2D functions.
-  virtual PP_Bool Describe(PP_Size* size, PP_Bool* is_always_opaque);
+  virtual PP_Bool Describe(PP_Size* size, PP_Bool* is_always_opaque) OVERRIDE;
   virtual void PaintImageData(PP_Resource image_data,
                               const PP_Point* top_left,
-                              const PP_Rect* src_rect);
-  virtual void Scroll(const PP_Rect* clip_rect, const PP_Point* amount);
-  virtual void ReplaceContents(PP_Resource image_data);
-  virtual int32_t Flush(PP_CompletionCallback callback);
+                              const PP_Rect* src_rect) OVERRIDE;
+  virtual void Scroll(const PP_Rect* clip_rect,
+                      const PP_Point* amount) OVERRIDE;
+  virtual void ReplaceContents(PP_Resource image_data) OVERRIDE;
+  virtual int32_t Flush(PP_CompletionCallback callback) OVERRIDE;
 
   bool ReadImageData(PP_Resource image, const PP_Point* top_left);
 
@@ -65,9 +64,9 @@ class PPB_Graphics2D_Impl : public ::ppapi::Resource,
              const gfx::Rect& plugin_rect,
              const gfx::Rect& paint_rect);
 
-  // Notifications that the view has rendered the page and that it has been
-  // flushed to the screen. These messages are used to send Flush callbacks to
-  // the plugin. See
+  // Notifications about the view's progress painting.  See PluginInstance.
+  // These messages are used to send Flush callbacks to the plugin.
+  void ViewWillInitiatePaint();
   void ViewInitiatedPaint();
   void ViewFlushedPaint();
 
@@ -85,26 +84,36 @@ class PPB_Graphics2D_Impl : public ::ppapi::Resource,
       Clear();
     }
 
-    explicit FlushCallbackData(const PP_CompletionCallback& callback) {
+    explicit FlushCallbackData(
+        scoped_refptr< ::ppapi::TrackedCallback> callback) {
       Set(callback);
     }
 
-    bool is_null() const { return !callback_.func; }
+    bool is_null() const {
+      return !::ppapi::TrackedCallback::IsPending(callback_);
+    }
 
-    void Set(const PP_CompletionCallback& callback) {
+    void Set(scoped_refptr< ::ppapi::TrackedCallback> callback) {
       callback_ = callback;
     }
 
     void Clear() {
-      callback_ = PP_MakeCompletionCallback(NULL, 0);
+      callback_ = NULL;
     }
 
     void Execute(int32_t result) {
-      PP_RunCompletionCallback(&callback_, result);
+      ::ppapi::TrackedCallback::ClearAndRun(&callback_, result);
+    }
+
+    void PostAbort() {
+      if (!is_null()) {
+        callback_->PostAbort();
+        Clear();
+      }
     }
 
    private:
-    PP_CompletionCallback callback_;
+    scoped_refptr< ::ppapi::TrackedCallback> callback_;
   };
 
   // Called internally to execute the different queued commands. The
@@ -159,9 +168,10 @@ class PPB_Graphics2D_Impl : public ::ppapi::Resource,
   // for which the ACK from the browser has not yet been received.
   //
   // When we get updates from a plugin with a callback, it is first added to
-  // the unpainted callbacks. When the renderer has initiated a paint, we'll
-  // move it to the painted callbacks list. When the renderer receives a flush,
-  // we'll execute the callback and remove it from the list.
+  // the unpainted callbacks. When the renderer has initiated the paint, we move
+  // it to the painted callback. When the renderer receives a flush, we execute
+  // and clear the painted callback. This helps avoid the callback being called
+  // prematurely in response to flush notifications for a previous update.
   FlushCallbackData unpainted_flush_callback_;
   FlushCallbackData painted_flush_callback_;
 

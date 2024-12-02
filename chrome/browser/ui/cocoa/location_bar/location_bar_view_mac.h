@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
-#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
@@ -53,7 +52,7 @@ class LocationBarViewMac : public AutocompleteEditController,
   virtual ~LocationBarViewMac();
 
   // Overridden from LocationBar:
-  virtual void ShowFirstRunBubble(FirstRun::BubbleType bubble_type) OVERRIDE;
+  virtual void ShowFirstRunBubble() OVERRIDE;
   virtual void SetSuggestedText(const string16& text,
                                 InstantCompleteBehavior behavior) OVERRIDE;
   virtual string16 GetInputString() const OVERRIDE;
@@ -65,7 +64,7 @@ class LocationBarViewMac : public AutocompleteEditController,
   virtual void UpdateContentSettingsIcons() OVERRIDE;
   virtual void UpdatePageActions() OVERRIDE;
   virtual void InvalidatePageActions() OVERRIDE;
-  virtual void SaveStateToContents(TabContents* contents) OVERRIDE;
+  virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE;
   virtual void Revert() OVERRIDE;
   virtual const OmniboxView* location_entry() const OVERRIDE;
   virtual OmniboxView* location_entry() OVERRIDE;
@@ -97,13 +96,13 @@ class LocationBarViewMac : public AutocompleteEditController,
   // Updates the location bar.  Resets the bar's permanent text and
   // security style, and if |should_restore_state| is true, restores
   // saved state from the tab (for tab switching).
-  void Update(const TabContents* tab, bool should_restore_state);
+  void Update(const content::WebContents* tab, bool should_restore_state);
 
   // Layout the various decorations which live in the field.
   void Layout();
 
-  // Returns the current TabContents.
-  TabContents* GetTabContents() const;
+  // Returns the current WebContents.
+  content::WebContents* GetWebContents() const;
 
   // Sets preview_enabled_ for the PageActionImageView associated with this
   // |page_action|. If |preview_enabled|, the location bar will display the
@@ -169,7 +168,7 @@ class LocationBarViewMac : public AutocompleteEditController,
   // tab contents state.
   bool RefreshContentSettingsDecorations();
 
-  void ShowFirstRunBubbleInternal(FirstRun::BubbleType bubble_type);
+  void ShowFirstRunBubbleInternal();
 
   // Checks if the bookmark star should be enabled or not.
   bool IsStarEnabled();

@@ -6,19 +6,23 @@
 #define CONTENT_BROWSER_SPEECH_SPEECH_INPUT_DISPATCHER_HOST_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "content/browser/browser_message_filter.h"
 #include "content/browser/speech/speech_input_manager.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/browser_message_filter.h"
 #include "net/url_request/url_request_context_getter.h"
 
 struct SpeechInputHostMsg_StartRecognition_Params;
+
+namespace content {
+class ResourceContext;
+}
 
 namespace speech_input {
 
 // SpeechInputDispatcherHost is a delegate for Speech API messages used by
 // RenderMessageFilter.
 // It's the complement of SpeechInputDispatcher (owned by RenderView).
-class SpeechInputDispatcherHost : public BrowserMessageFilter,
+class SpeechInputDispatcherHost : public content::BrowserMessageFilter,
                                   public SpeechInputManager::Delegate {
  public:
   class SpeechInputCallers;
@@ -26,7 +30,8 @@ class SpeechInputDispatcherHost : public BrowserMessageFilter,
   SpeechInputDispatcherHost(
       int render_process_id,
       net::URLRequestContextGetter* context_getter,
-      SpeechInputPreferences* speech_input_preferences);
+      SpeechInputPreferences* speech_input_preferences,
+      const content::ResourceContext* resource_context);
 
   // SpeechInputManager::Delegate methods.
   virtual void SetRecognitionResult(
@@ -35,7 +40,7 @@ class SpeechInputDispatcherHost : public BrowserMessageFilter,
   virtual void DidCompleteRecording(int caller_id) OVERRIDE;
   virtual void DidCompleteRecognition(int caller_id) OVERRIDE;
 
-  // BrowserMessageFilter implementation.
+  // content::BrowserMessageFilter implementation.
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
 
@@ -59,6 +64,7 @@ class SpeechInputDispatcherHost : public BrowserMessageFilter,
 
   scoped_refptr<net::URLRequestContextGetter> context_getter_;
   scoped_refptr<SpeechInputPreferences> speech_input_preferences_;
+  const content::ResourceContext* resource_context_;
 
   static SpeechInputManager* manager_;
 

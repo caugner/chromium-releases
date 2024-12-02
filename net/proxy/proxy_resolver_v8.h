@@ -26,7 +26,7 @@ class ProxyResolverJSBindings;
 // since only one will be running inside V8 at a time.
 //
 // It is important that *ALL* instances of V8 in the process be using
-// v8::Locker. If not there can be race conditions beween the non-locked V8
+// v8::Locker. If not there can be race conditions between the non-locked V8
 // instances and the locked V8 instances used by ProxyResolverV8 (assuming they
 // run on different threads).
 //
@@ -47,7 +47,7 @@ class NET_EXPORT_PRIVATE ProxyResolverV8 : public ProxyResolver {
   // ProxyResolver implementation:
   virtual int GetProxyForURL(const GURL& url,
                              ProxyInfo* results,
-                             OldCompletionCallback* /*callback*/,
+                             const net::CompletionCallback& /*callback*/,
                              RequestHandle* /*request*/,
                              const BoundNetLog& net_log) OVERRIDE;
   virtual void CancelRequest(RequestHandle request) OVERRIDE;
@@ -59,7 +59,7 @@ class NET_EXPORT_PRIVATE ProxyResolverV8 : public ProxyResolver {
   virtual void Shutdown() OVERRIDE;
   virtual int SetPacScript(
       const scoped_refptr<ProxyResolverScriptData>& script_data,
-      OldCompletionCallback* /*callback*/) OVERRIDE;
+      const net::CompletionCallback& /*callback*/) OVERRIDE;
 
  private:
   // Context holds the Javascript state for the most recently loaded PAC

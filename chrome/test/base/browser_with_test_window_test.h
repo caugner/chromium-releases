@@ -14,8 +14,24 @@
 #include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(USE_AURA)
+#include "ui/aura/test/test_activation_client.h"
+#endif
+
 class GURL;
+
+#if defined(USE_AURA)
+namespace aura {
+namespace test {
+class TestActivationClient;
+}
+}
+#endif
+
+namespace content {
 class NavigationController;
+class WebContents;
+}
 
 // Base class for browser based unit tests. BrowserWithTestWindowTest creates a
 // Browser with a TestingProfile and TestBrowserWindow. To add a tab use
@@ -25,16 +41,16 @@ class NavigationController;
 //   // Add a new tab and navigate it. This will be at index 0.
 //   AddTab(browser(), GURL("http://foo/1"));
 //   NavigationController* controller =
-//       &browser()->GetTabContentsAt(0)->controller();
+//       &browser()->GetTabContentsAt(0)->GetController();
 //
 //   // Navigate somewhere else.
 //   GURL url2("http://foo/2");
 //   NavigateAndCommit(controller, url2);
 //
 //   // This is equivalent to the above, and lets you test pending navigations.
-//   browser()->OpenURL(GURL("http://foo/2"), GURL(), CURRENT_TAB,
-//                      content::PAGE_TRANSITION_TYPED);
-//                      PageTransition::TYPED);
+//   browser()->OpenURL(OpenURLParams(
+//       GURL("http://foo/2"), GURL(), CURRENT_TAB,
+//       content::PAGE_TRANSITION_TYPED, false));
 //   CommitPendingLoad(controller);
 //
 // Subclasses must invoke BrowserWithTestWindowTest::SetUp as it is responsible
@@ -48,7 +64,8 @@ class BrowserWithTestWindowTest : public testing::Test {
 
   // Returns the current RenderViewHost for the current tab as a
   // TestRenderViewHost.
-  TestRenderViewHost* TestRenderViewHostForTab(TabContents* tab_contents);
+  TestRenderViewHost* TestRenderViewHostForTab(
+      content::WebContents* web_contents);
 
  protected:
   TestBrowserWindow* window() const { return window_.get(); }
@@ -74,13 +91,13 @@ class BrowserWithTestWindowTest : public testing::Test {
 
   // Commits the pending load on the given controller. It will keep the
   // URL of the pending load. If there is no pending load, this does nothing.
-  void CommitPendingLoad(NavigationController* controller);
+  void CommitPendingLoad(content::NavigationController* controller);
 
   // Creates a pending navigation on the given navigation controller to the
   // given URL with the default parameters and the commits the load with a page
   // ID one larger than any seen. This emulates what happens on a new
   // navigation.
-  void NavigateAndCommit(NavigationController* controller,
+  void NavigateAndCommit(content::NavigationController* controller,
                          const GURL& url);
 
   // Navigates the current tab. This is a wrapper around NavigateAndCommit.
@@ -106,6 +123,10 @@ class BrowserWithTestWindowTest : public testing::Test {
 
   MockRenderProcessHostFactory rph_factory_;
   TestRenderViewHostFactory rvh_factory_;
+
+#if defined(USE_AURA)
+  scoped_ptr<aura::test::TestActivationClient> test_activation_client_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(BrowserWithTestWindowTest);
 };

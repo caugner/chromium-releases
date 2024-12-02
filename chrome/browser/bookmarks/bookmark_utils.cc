@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,8 +25,8 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/page_navigator.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/page_navigator.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/ui_strings.h"
@@ -52,6 +52,9 @@
 #endif
 
 using base::Time;
+using content::OpenURLParams;
+using content::PageNavigator;
+using content::WebContents;
 
 namespace {
 
@@ -71,18 +74,7 @@ class NewBrowserPageNavigator : public PageNavigator {
 
   Browser* browser() const { return browser_; }
 
-  // Deprecated. Please use one-argument variant.
-  // TODO(adriansc): Remove this method once refactoring changed all call sites.
-  virtual TabContents* OpenURL(const GURL& url,
-                               const GURL& referrer,
-                               WindowOpenDisposition disposition,
-                               content::PageTransition transition) OVERRIDE {
-    DCHECK(referrer.is_empty());
-    return OpenURL(OpenURLParams(url, content::Referrer(), disposition,
-                                 transition, false));
-  }
-
-  virtual TabContents* OpenURL(const OpenURLParams& params) OVERRIDE {
+  virtual WebContents* OpenURL(const OpenURLParams& params) OVERRIDE {
     if (!browser_) {
       Profile* profile = (params.disposition == OFF_THE_RECORD) ?
           profile_->GetOffTheRecordProfile() : profile_;
@@ -165,7 +157,7 @@ void OpenAllImpl(const BookmarkNode* node,
       // the current page, reset the navigator just to be sure.
       Browser* new_browser = BrowserList::GetLastActiveWithProfile(profile);
       if (new_browser) {
-        TabContents* current_tab = new_browser->GetSelectedTabContents();
+        WebContents* current_tab = new_browser->GetSelectedWebContents();
         DCHECK(new_browser && current_tab);
         if (new_browser && current_tab)
           *navigator = current_tab;
@@ -393,14 +385,14 @@ void OpenAll(gfx::NativeWindow parent,
   NewBrowserPageNavigator navigator_impl(profile);
   if (!navigator) {
     Browser* browser = BrowserList::FindTabbedBrowser(profile, false);
-    if (!browser || !browser->GetSelectedTabContents()) {
+    if (!browser || !browser->GetSelectedWebContents()) {
       navigator = &navigator_impl;
     } else {
       if (initial_disposition != NEW_WINDOW &&
           initial_disposition != OFF_THE_RECORD) {
         browser->window()->Activate();
       }
-      navigator = browser->GetSelectedTabContents();
+      navigator = browser->GetSelectedWebContents();
     }
   }
 
@@ -509,7 +501,7 @@ std::vector<const BookmarkNode*> GetMostRecentlyModifiedFolders(
     for (int i = 0; i < root_node->child_count(); ++i) {
       const BookmarkNode* node = root_node->GetChild(i);
       if (node->IsVisible() &&
-          find(nodes.begin(), nodes.end(), node) == nodes.end()) {
+          std::find(nodes.begin(), nodes.end(), node) == nodes.end()) {
         nodes.push_back(node);
 
         if (nodes.size() == max_count)
@@ -649,7 +641,6 @@ void ToggleWhenVisible(Profile* profile) {
 
   // The user changed when the bookmark bar is shown, update the preferences.
   prefs->SetBoolean(prefs::kShowBookmarkBar, always_show);
-  prefs->ScheduleSavePersistentPrefs();
 }
 
 void RegisterUserPrefs(PrefService* prefs) {
@@ -661,21 +652,21 @@ void RegisterUserPrefs(PrefService* prefs) {
                              PrefService::UNSYNCABLE_PREF);
 }
 
-void GetURLAndTitleToBookmark(TabContents* tab_contents,
+void GetURLAndTitleToBookmark(WebContents* web_contents,
                               GURL* url,
                               string16* title) {
-  *url = tab_contents->GetURL();
-  *title = tab_contents->GetTitle();
+  *url = web_contents->GetURL();
+  *title = web_contents->GetTitle();
 }
 
 void GetURLAndTitleToBookmarkFromCurrentTab(Profile* profile,
                                             GURL* url,
                                             string16* title) {
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
-  TabContents* tab_contents = browser ? browser->GetSelectedTabContents()
+  WebContents* web_contents = browser ? browser->GetSelectedWebContents()
                                         : NULL;
-  if (tab_contents)
-    GetURLAndTitleToBookmark(tab_contents, url, title);
+  if (web_contents)
+    GetURLAndTitleToBookmark(web_contents, url, title);
 }
 
 void GetURLsForOpenTabs(
@@ -683,7 +674,7 @@ void GetURLsForOpenTabs(
     std::vector<std::pair<GURL, string16> >* urls) {
   for (int i = 0; i < browser->tab_count(); ++i) {
     std::pair<GURL, string16> entry;
-    GetURLAndTitleToBookmark(browser->GetTabContentsAt(i), &(entry.first),
+    GetURLAndTitleToBookmark(browser->GetWebContentsAt(i), &(entry.first),
                              &(entry.second));
     urls->push_back(entry);
   }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,12 +15,12 @@
 
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
-#include "base/task.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/non_thread_safe.h"
 #include "content/common/content_export.h"
 #include "content/common/message_router.h"
+#include "content/public/common/gpu_info.h"
 
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
@@ -35,18 +35,7 @@ namespace IPC {
 class Message;
 }
 
-// A task that will forward an IPC message to the UI shim.
-class RouteToGpuProcessHostUIShimTask : public Task {
- public:
-  RouteToGpuProcessHostUIShimTask(int host_id, const IPC::Message& msg);
-  virtual ~RouteToGpuProcessHostUIShimTask();
-
- private:
-  virtual void Run() OVERRIDE;
-
-  int host_id_;
-  IPC::Message msg_;
-};
+void RouteToGpuProcessHostUIShimTask(int host_id, const IPC::Message& msg);
 
 class GpuProcessHostUIShim
     : public IPC::Channel::Listener,
@@ -94,11 +83,12 @@ class GpuProcessHostUIShim
   void OnLogMessage(int level, const std::string& header,
       const std::string& message);
 #if defined(TOOLKIT_USES_GTK) || defined(OS_WIN)
-  void OnResizeView(int32 renderer_id,
-                    int32 render_view_id,
+  void OnResizeView(int32 surface_id,
                     int32 route_id,
                     gfx::Size size);
 #endif
+
+  void OnGraphicsInfoCollected(const content::GPUInfo& gpu_info);
 
   void OnAcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params);

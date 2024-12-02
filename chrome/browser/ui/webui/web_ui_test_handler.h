@@ -6,18 +6,19 @@
 #define CHROME_BROWSER_UI_WEBUI_WEB_UI_TEST_HANDLER_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "base/string16.h"
-#include "content/browser/webui/web_ui.h"
 #include "content/public/browser/notification_observer.h"
+#include "content/public/browser/web_ui_message_handler.h"
+
+class RenderViewHost;
 
 namespace base {
-
 class ListValue;
-
 }  // namespace base
 
 // This class registers test framework specific handlers on WebUI objects.
-class WebUITestHandler : public WebUIMessageHandler,
+class WebUITestHandler : public content::WebUIMessageHandler,
                          public content::NotificationObserver {
  public:
   WebUITestHandler();
@@ -34,11 +35,11 @@ class WebUITestHandler : public WebUIMessageHandler,
   // error message on failure. Returns test pass/fail.
   bool RunJavaScriptTestWithResult(const string16& js_text);
 
- private:
   // WebUIMessageHandler overrides.
   // Add test handlers to the current WebUI object.
   virtual void RegisterMessages() OVERRIDE;
 
+ private:
   // Receives testResult messages.
   void HandleTestResult(const base::ListValue* test_result);
 

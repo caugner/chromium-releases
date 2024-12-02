@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include "chrome/browser/webdata/token_service_table.h"
 #include "chrome/browser/webdata/web_apps_table.h"
 #include "chrome/browser/webdata/web_intents_table.h"
-#include "content/browser/notification_service_impl.h"
+#include "content/public/browser/notification_service.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
@@ -22,8 +22,8 @@ namespace {
 // Current version number.  Note: when changing the current version number,
 // corresponding changes must happen in the unit tests, and new migration test
 // added.  See |WebDatabaseMigrationTest::kCurrentTestedVersionNumber|.
-const int kCurrentVersionNumber = 42;
-const int kCompatibleVersionNumber = 42;
+const int kCurrentVersionNumber = 44;
+const int kCompatibleVersionNumber = 44;
 
 // Change the version number and possibly the compatibility version of
 // |meta_table_|.
@@ -92,7 +92,7 @@ sql::InitStatus WebDatabase::Init(const FilePath& db_name) {
   // When running in unit tests, there is already a NotificationService object.
   // Since only one can exist at a time per thread, check first.
   if (!content::NotificationService::current())
-    notification_service_.reset(new NotificationServiceImpl);
+    notification_service_.reset(content::NotificationService::Create());
 
   // Set the exceptional sqlite error handler.
   db_.set_error_delegate(GetErrorHandlerForWebDb());
@@ -320,10 +320,25 @@ sql::InitStatus WebDatabase::MigrateOldVersionsAsNeeded() {
       // FALL THROUGH
 
     case 41:
-      if (!keyword_table_->MigrateToVersion42AddKeywordsBackupTable())
+      if (!keyword_table_->
+              MigrateToVersion42AddFullDefaultSearchProviderBackup())
         return FailedMigrationTo(42);
 
       ChangeVersion(&meta_table_, 42, true);
+      // FALL THROUGH
+
+    case 42:
+      if (!keyword_table_->MigrateToVersion43AddKeywordsBackupTable())
+        return FailedMigrationTo(43);
+
+      ChangeVersion(&meta_table_, 43, true);
+      // FALL THROUGH
+
+    case 43:
+      if (!keyword_table_->MigrateToVersion44UpdateKeywordsBackup())
+        return FailedMigrationTo(44);
+
+      ChangeVersion(&meta_table_, 44, true);
       // FALL THROUGH
 
     // Add successive versions here.  Each should set the version number and

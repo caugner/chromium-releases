@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "content/browser/debugger/render_view_devtools_agent_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/site_instance.h"
+#include "content/browser/site_instance_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/devtools_messages.h"
 #include "content/public/browser/content_browser_client.h"
@@ -23,11 +23,8 @@ namespace content {
 typedef std::map<RenderViewHost*, RenderViewDevToolsAgentHost*> Instances;
 
 namespace {
-base::LazyInstance<Instances,
-                   base::LeakyLazyInstanceTraits<Instances> >
-    g_instances = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<Instances>::Leaky g_instances = LAZY_INSTANCE_INITIALIZER;
 }  // namespace
-
 
 // static
 DevToolsAgentHost* DevToolsAgentHostRegistry::GetDevToolsAgentHost(
@@ -39,6 +36,17 @@ DevToolsAgentHost* DevToolsAgentHostRegistry::GetDevToolsAgentHost(
 }
 
 // static
+RenderViewHost* DevToolsAgentHostRegistry::GetRenderViewHost(
+     DevToolsAgentHost* agent_host) {
+  for (Instances::iterator it = g_instances.Get().begin();
+       it != g_instances.Get().end(); ++it) {
+    if (agent_host == it->second)
+      return it->first;
+  }
+  return NULL;
+}
+
+// static
 bool DevToolsAgentHostRegistry::HasDevToolsAgentHost(RenderViewHost* rvh) {
   if (g_instances == NULL)
     return false;
@@ -46,13 +54,13 @@ bool DevToolsAgentHostRegistry::HasDevToolsAgentHost(RenderViewHost* rvh) {
   return it != g_instances.Get().end();
 }
 
-bool DevToolsAgentHostRegistry::IsDebuggerAttached(TabContents* tab_contents) {
+bool DevToolsAgentHostRegistry::IsDebuggerAttached(WebContents* web_contents) {
   if (g_instances == NULL)
     return false;
   DevToolsManager* devtools_manager = DevToolsManager::GetInstance();
   if (!devtools_manager)
     return false;
-  RenderViewHostDelegate* delegate = tab_contents;
+  RenderViewHostDelegate* delegate = static_cast<TabContents*>(web_contents);
   for (Instances::iterator it = g_instances.Get().begin();
        it != g_instances.Get().end(); ++it) {
     if (it->first->delegate() != delegate)
@@ -132,4 +140,3 @@ void RenderViewDevToolsAgentHost::OnClearBrowserCookies() {
 }
 
 }  // namespace content
-

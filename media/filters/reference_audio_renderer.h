@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,13 +17,15 @@
 #include "media/audio/audio_output_controller.h"
 #include "media/filters/audio_renderer_base.h"
 
+class AudioManager;
+
 namespace media {
 
 class MEDIA_EXPORT ReferenceAudioRenderer
     : public AudioRendererBase,
       public AudioOutputController::EventHandler {
  public:
-  ReferenceAudioRenderer();
+  explicit ReferenceAudioRenderer(AudioManager* audio_manager);
   virtual ~ReferenceAudioRenderer();
 
   // Filter implementation.
@@ -47,12 +49,12 @@ class MEDIA_EXPORT ReferenceAudioRenderer
                             ChannelLayout channel_layout,
                             int sample_rate) OVERRIDE;
   virtual void OnStop() OVERRIDE;
+  virtual void OnRenderEndOfStream() OVERRIDE;
 
  private:
+  scoped_refptr<AudioManager> audio_manager_;
   int bytes_per_second_;
-
-  // AudioOutputController::Close callback.
-  virtual void OnClose();
+  bool has_buffered_data_;
 
   // Audio output controller.
   scoped_refptr<media::AudioOutputController> controller_;

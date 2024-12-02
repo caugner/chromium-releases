@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "media/audio/audio_util.h"
 
 static const int64 kMillisecondsBetweenProcessCalls = 5000;
-static const char kVersion[] = "WebRTC AudioDevice 1.0.0.Chrome";
 
 WebRtcAudioDeviceImpl::WebRtcAudioDeviceImpl()
     : ref_count_(0),
@@ -29,6 +28,7 @@ WebRtcAudioDeviceImpl::WebRtcAudioDeviceImpl()
       last_error_(AudioDeviceModule::kAdmErrNone),
       last_process_time_(base::TimeTicks::Now()),
       session_id_(0),
+      bytes_per_sample_(0),
       initialized_(false),
       playing_(false),
       recording_(false) {
@@ -59,14 +59,17 @@ int32_t WebRtcAudioDeviceImpl::Release() {
   return ret;
 }
 
-void WebRtcAudioDeviceImpl::Render(
+size_t WebRtcAudioDeviceImpl::Render(
     const std::vector<float*>& audio_data,
     size_t number_of_frames,
     size_t audio_delay_milliseconds) {
   DCHECK_LE(number_of_frames, output_buffer_size_);
 
-  // Store the reported audio delay locally.
-  output_delay_ms_ = audio_delay_milliseconds;
+  {
+    base::AutoLock auto_lock(lock_);
+    // Store the reported audio delay locally.
+    output_delay_ms_ = audio_delay_milliseconds;
+  }
 
   const int channels = audio_data.size();
   DCHECK_LE(channels, output_channels_);
@@ -111,6 +114,11 @@ void WebRtcAudioDeviceImpl::Render(
         bytes_per_sample_,
         number_of_frames);
   }
+  return number_of_frames;
+}
+
+void WebRtcAudioDeviceImpl::OnError() {
+  // TODO(henrika): Implement error handling.
 }
 
 void WebRtcAudioDeviceImpl::Capture(
@@ -119,8 +127,13 @@ void WebRtcAudioDeviceImpl::Capture(
     size_t audio_delay_milliseconds) {
   DCHECK_LE(number_of_frames, input_buffer_size_);
 
-  // Store the reported audio delay locally.
-  input_delay_ms_ = audio_delay_milliseconds;
+  int output_delay_ms = 0;
+  {
+    base::AutoLock auto_lock(lock_);
+    // Store the reported audio delay locally.
+    input_delay_ms_ = audio_delay_milliseconds;
+    output_delay_ms = output_delay_ms_;
+  }
 
   const int channels = audio_data.size();
   DCHECK_LE(channels, input_channels_);
@@ -156,7 +169,7 @@ void WebRtcAudioDeviceImpl::Capture(
         bytes_per_sample_,
         channels,
         samples_per_sec,
-        input_delay_ms_ + output_delay_ms_,
+        input_delay_ms_ + output_delay_ms,
         0,  // clock_drift
         0,  // current_mic_level
         new_mic_level);  // not used
@@ -182,25 +195,6 @@ void WebRtcAudioDeviceImpl::OnDeviceStopped() {
   base::AutoLock auto_lock(lock_);
   if (recording_)
     recording_ = false;
-}
-
-int32_t WebRtcAudioDeviceImpl::Version(char* version,
-                                       uint32_t& remaining_buffer_in_bytes,
-                                       uint32_t& position) const {
-  DVLOG(1) << "Version()";
-  DCHECK(version);
-  if (version == NULL)
-    return -1;
-  size_t arr_size = arraysize(kVersion);
-  if (remaining_buffer_in_bytes < arr_size) {
-    DLOG(WARNING) << "version string requires " << arr_size << " bytes";
-    return -1;
-  }
-  base::strlcpy(&version[position], kVersion, arr_size - 1);
-  remaining_buffer_in_bytes -= arr_size;
-  position += arr_size;
-  DVLOG(1) << "version: " << version;
-  return 0;
 }
 
 int32_t WebRtcAudioDeviceImpl::ChangeUniqueId(const int32_t id) {
@@ -290,7 +284,11 @@ int32_t WebRtcAudioDeviceImpl::Init() {
       static_cast<int>(audio_hardware::GetInputSampleRate());
   DVLOG(1) << "Audio input hardware sample rate: " << input_sample_rate;
 
-  int input_channels = 0;
+  // Ask the browser for the default number of audio input channels.
+  // This request is based on a synchronous IPC message.
+  int input_channels = audio_hardware::GetInputChannelCount();
+  DVLOG(1) << "Audio input hardware channels: " << input_channels;
+
   int output_channels = 0;
 
   size_t input_buffer_size = 0;
@@ -298,21 +296,17 @@ int32_t WebRtcAudioDeviceImpl::Init() {
 
 // Windows
 #if defined(OS_WIN)
-  if (input_sample_rate != 48000 && input_sample_rate != 44100) {
-    DLOG(ERROR) << "Only 48 and 44.1kHz input rates are supported on Windows.";
+  if (input_sample_rate != 48000 && input_sample_rate != 44100 &&
+      input_sample_rate != 32000 && input_sample_rate != 16000) {
+    DLOG(ERROR) << "Only 48, 44.1, 32 and 16kHz input rates are supported.";
     return -1;
   }
   if (output_sample_rate != 48000 && output_sample_rate != 44100) {
-    DLOG(ERROR) << "Only 48 and 44.1kHz output rates are supported on Windows.";
+    DLOG(ERROR) << "Only 48 and 44.1kHz output rates are supported.";
     return -1;
   }
 
-  // Use stereo recording on Windows since low-latency Core Audio (WASAPI)
-  // does not support mono.
-  input_channels = 2;
-
-  // Use stereo rendering on Windows to make input and output sides
-  // symmetric. WASAPI supports both stereo and mono.
+  // Always use stereo rendering on Windows.
   output_channels = 2;
 
   // Capture side: AUDIO_PCM_LOW_LATENCY is based on the Core Audio (WASAPI)
@@ -321,12 +315,12 @@ int32_t WebRtcAudioDeviceImpl::Init() {
   // size of 10ms works well for both these implementations.
 
   // Use different buffer sizes depending on the current hardware sample rate.
-  if (input_sample_rate == 48000) {
-    input_buffer_size = 480;
-  } else {
+  if (input_sample_rate == 44100) {
     // We do run at 44.1kHz at the actual audio layer, but ask for frames
     // at 44.0kHz to ensure that we can feed them to the webrtc::VoiceEngine.
     input_buffer_size = 440;
+  } else {
+    input_buffer_size = (input_sample_rate / 100);
   }
 
   // Render side: AUDIO_PCM_LOW_LATENCY is based on the Core Audio (WASAPI)
@@ -347,7 +341,7 @@ int32_t WebRtcAudioDeviceImpl::Init() {
 
   // Windows XP and lower can't cope with 10 ms output buffer size.
   // It must be extended to 30 ms (60 ms will be used internally by WaveOut).
-  if (base::win::GetVersion() <= base::win::VERSION_XP) {
+  if (!media::IsWASAPISupported()) {
     output_buffer_size = 3 * output_buffer_size;
     DLOG(WARNING) << "Extending the output buffer size by a factor of three "
                   << "since Windows XP has been detected.";
@@ -355,8 +349,9 @@ int32_t WebRtcAudioDeviceImpl::Init() {
 
 // Mac OS X
 #elif defined(OS_MACOSX)
-  if (input_sample_rate != 48000 && input_sample_rate != 44100) {
-    DLOG(ERROR) << "Only 48 and 44.1kHz input rates are supported on Mac OSX.";
+  if (input_sample_rate != 48000 && input_sample_rate != 44100 &&
+      input_sample_rate != 32000 && input_sample_rate != 16000) {
+    DLOG(ERROR) << "Only 48, 44.1, 32 and 16kHz input rates are supported.";
     return -1;
   }
   if (output_sample_rate != 48000 && output_sample_rate != 44100) {
@@ -364,7 +359,6 @@ int32_t WebRtcAudioDeviceImpl::Init() {
     return -1;
   }
 
-  input_channels = 1;
   output_channels = 1;
 
   // Capture side: AUDIO_PCM_LOW_LATENCY on Mac OS X is based on a callback-
@@ -372,12 +366,12 @@ int32_t WebRtcAudioDeviceImpl::Init() {
   // frame size to use, both for 48kHz and 44.1kHz.
 
   // Use different buffer sizes depending on the current hardware sample rate.
-  if (input_sample_rate == 48000) {
-    input_buffer_size = 480;
-  } else {
+  if (input_sample_rate == 44100) {
     // We do run at 44.1kHz at the actual audio layer, but ask for frames
     // at 44.0kHz to ensure that we can feed them to the webrtc::VoiceEngine.
     input_buffer_size = 440;
+  } else {
+    input_buffer_size = (input_sample_rate / 100);
   }
 
   // Render side: AUDIO_PCM_LOW_LATENCY on Mac OS X is based on a callback-
@@ -592,13 +586,13 @@ int32_t WebRtcAudioDeviceImpl::StartPlayout() {
 
 int32_t WebRtcAudioDeviceImpl::StopPlayout() {
   DVLOG(1) << "StopPlayout()";
-  DCHECK(audio_output_device_);
   if (!playing_) {
     // webrtc::VoiceEngine assumes that it is OK to call Stop() just in case.
     return 0;
   }
-  playing_ = !audio_output_device_->Stop();
-  return (!playing_ ? 0 : -1);
+  audio_output_device_->Stop();
+  playing_ = false;
+  return 0;
 }
 
 bool WebRtcAudioDeviceImpl::Playing() const {
@@ -607,9 +601,6 @@ bool WebRtcAudioDeviceImpl::Playing() const {
 
 int32_t WebRtcAudioDeviceImpl::StartRecording() {
   DVLOG(1) << "StartRecording()";
-#if defined(OS_MACOSX)
-  DLOG(WARNING) << "Real-time recording is not yet fully supported on Mac OS X";
-#endif
   LOG_IF(ERROR, !audio_transport_callback_) << "Audio transport is missing";
   if (!audio_transport_callback_) {
     LOG(ERROR) << "Audio transport is missing";
@@ -620,7 +611,7 @@ int32_t WebRtcAudioDeviceImpl::StartRecording() {
     LOG(WARNING) << session_id_ << " is an invalid session id.";
     // TODO(xians): enable the return -1 when MediaStreamManager can handle
     // AudioInputDeviceManager.
-//    return -1;
+    // return -1;
   }
 
   base::AutoLock auto_lock(lock_);
@@ -639,15 +630,20 @@ int32_t WebRtcAudioDeviceImpl::StartRecording() {
 
 int32_t WebRtcAudioDeviceImpl::StopRecording() {
   DVLOG(1) << "StopRecording()";
-  DCHECK(audio_input_device_);
+  {
+    base::AutoLock auto_lock(lock_);
+    if (!recording_) {
+      // webrtc::VoiceEngine assumes that it is OK to call Stop()
+      // more than once.
+      return 0;
+    }
+  }
+
+  audio_input_device_->Stop();
 
   base::AutoLock auto_lock(lock_);
-  if (!recording_) {
-    // webrtc::VoiceEngine assumes that it is OK to call Stop() just in case.
-    return 0;
-  }
-  recording_ = !audio_input_device_->Stop();
-  return (!recording_ ? 0 : -1);
+  recording_ = false;
+  return 0;
 }
 
 bool WebRtcAudioDeviceImpl::Recording() const {
@@ -888,12 +884,14 @@ int32_t WebRtcAudioDeviceImpl::PlayoutBuffer(BufferType* type,
 
 int32_t WebRtcAudioDeviceImpl::PlayoutDelay(uint16_t* delay_ms) const {
   // Report the cached output delay value.
+  base::AutoLock auto_lock(lock_);
   *delay_ms = static_cast<uint16_t>(output_delay_ms_);
   return 0;
 }
 
 int32_t WebRtcAudioDeviceImpl::RecordingDelay(uint16_t* delay_ms) const {
   // Report the cached output delay value.
+  base::AutoLock auto_lock(lock_);
   *delay_ms = static_cast<uint16_t>(input_delay_ms_);
   return 0;
 }

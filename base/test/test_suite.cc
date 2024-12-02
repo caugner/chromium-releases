@@ -72,22 +72,40 @@ class TestClientInitializer : public testing::EmptyTestEventListener {
 const char TestSuite::kStrictFailureHandling[] = "strict_failure_handling";
 
 TestSuite::TestSuite(int argc, char** argv) {
+  PreInitialize(argc, argv, true);
+}
+
+TestSuite::TestSuite(int argc, char** argv, bool create_at_exit_manager) {
+  PreInitialize(argc, argv, create_at_exit_manager);
+}
+
+TestSuite::~TestSuite() {
+  CommandLine::Reset();
+}
+
+void TestSuite::PreInitialize(int argc, char** argv,
+                              bool create_at_exit_manager) {
 #if defined(OS_WIN)
   testing::GTEST_FLAG(catch_exceptions) = false;
 #endif
   base::EnableTerminationOnHeapCorruption();
   CommandLine::Init(argc, argv);
   testing::InitGoogleTest(&argc, argv);
-#if defined(TOOLKIT_USES_GTK)
+#if defined(OS_LINUX) && defined(USE_AURA)
+  // When calling native char conversion functions (e.g wrctomb) we need to
+  // have the locale set. In the absence of such a call the "C" locale is the
+  // default. In the gtk code (below) gtk_init() implicitly sets a locale.
+  setlocale(LC_ALL, "");
+#elif defined(TOOLKIT_USES_GTK)
   gtk_init_check(&argc, &argv);
 #endif  // defined(TOOLKIT_USES_GTK)
-  // Don't add additional code to this constructor.  Instead add it to
+  if (create_at_exit_manager)
+    at_exit_manager_.reset(new base::AtExitManager);
+
+  // Don't add additional code to this function.  Instead add it to
   // Initialize().  See bug 6436.
 }
 
-TestSuite::~TestSuite() {
-  CommandLine::Reset();
-}
 
 // static
 bool TestSuite::IsMarkedFlaky(const testing::TestInfo& test) {

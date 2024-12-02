@@ -19,6 +19,9 @@
 #include "content/public/common/speech_input_result.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 
+using content::NavigationController;
+using content::WebContents;
+
 namespace speech_input {
 class FakeSpeechInputManager;
 }
@@ -49,16 +52,13 @@ class FakeSpeechInputManager : public SpeechInputManager {
   }
 
   // SpeechInputManager methods.
-  virtual void StartRecognition(Delegate* delegate,
-                                int caller_id,
-                                int render_process_id,
-                                int render_view_id,
-                                const gfx::Rect& element_rect,
-                                const std::string& language,
-                                const std::string& grammar,
-                                const std::string& origin_url,
-                                net::URLRequestContextGetter* context_getter,
-                                SpeechInputPreferences* speech_input_prefs) {
+  virtual void StartRecognition(Delegate* delegate, int caller_id,
+      int render_process_id, int render_view_id, const gfx::Rect& element_rect,
+      const std::string& language, const std::string& grammar,
+      const std::string& origin_url,
+      net::URLRequestContextGetter* context_getter,
+      SpeechInputPreferences* speech_input_prefs,
+      AudioManager* audio_manager) OVERRIDE {
     VLOG(1) << "StartRecognition invoked.";
     EXPECT_EQ(0, caller_id_);
     EXPECT_EQ(NULL, delegate_);
@@ -77,18 +77,18 @@ class FakeSpeechInputManager : public SpeechInputManager {
           base::Unretained(this)));
     }
   }
-  virtual void CancelRecognition(int caller_id) {
+  virtual void CancelRecognition(int caller_id) OVERRIDE {
     VLOG(1) << "CancelRecognition invoked.";
     EXPECT_EQ(caller_id_, caller_id);
     caller_id_ = 0;
     delegate_ = NULL;
   }
-  virtual void StopRecording(int caller_id) {
+  virtual void StopRecording(int caller_id) OVERRIDE {
     VLOG(1) << "StopRecording invoked.";
     EXPECT_EQ(caller_id_, caller_id);
     // Nothing to do here since we aren't really recording.
   }
-  virtual void CancelAllRequestsWithDelegate(Delegate* delegate) {
+  virtual void CancelAllRequestsWithDelegate(Delegate* delegate) OVERRIDE {
     VLOG(1) << "CancelAllRequestsWithDelegate invoked.";
     // delegate_ is set to NULL if a fake result was received (see below), so
     // check that delegate_ matches the incoming parameter only when there is
@@ -98,23 +98,21 @@ class FakeSpeechInputManager : public SpeechInputManager {
   }
 
  protected:
-  virtual void GetRequestInfo(bool* can_report_metrics,
-                              std::string* request_info) {}
-  virtual void ShowRecognitionRequested(int caller_id,
-                                        int render_process_id,
-                                        int render_view_id,
-                                        const gfx::Rect& element_rect) {}
-  virtual void ShowWarmUp(int caller_id) {}
-  virtual void ShowRecognizing(int caller_id) {}
-  virtual void ShowRecording(int caller_id)  {}
-  virtual void ShowInputVolume(int caller_id,
-                               float volume,
-                               float noise_volume) {}
+  virtual void GetRequestInfo(AudioManager* audio_manager,
+      bool* can_report_metrics,
+      std::string* request_info) OVERRIDE {}
+  virtual void ShowRecognitionRequested(int caller_id, int render_process_id,
+      int render_view_id, const gfx::Rect& element_rect) OVERRIDE {}
+  virtual void ShowWarmUp(int caller_id) OVERRIDE {}
+  virtual void ShowRecognizing(int caller_id) OVERRIDE {}
+  virtual void ShowRecording(int caller_id) OVERRIDE {}
+  virtual void ShowInputVolume(int caller_id, float volume,
+      float noise_volume) OVERRIDE {}
   virtual void ShowMicError(int caller_id,
-                            SpeechInputManager::MicError error) {}
+      SpeechInputManager::MicError error) OVERRIDE {}
   virtual void ShowRecognizerError(int caller_id,
-                                   content::SpeechInputError error) {}
-  virtual void DoClose(int caller_id) {}
+      content::SpeechInputError error) OVERRIDE {}
+  virtual void DoClose(int caller_id) OVERRIDE {}
 
  private:
   void SetFakeRecognitionResult() {
@@ -165,13 +163,13 @@ class SpeechInputBrowserTest : public InProcessBrowserTest {
     mouse_event.x = 0;
     mouse_event.y = 0;
     mouse_event.clickCount = 1;
-    TabContents* tab_contents = browser()->GetSelectedTabContents();
+    WebContents* web_contents = browser()->GetSelectedWebContents();
     ui_test_utils::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP,
-        content::Source<NavigationController>(&tab_contents->controller()));
-    tab_contents->render_view_host()->ForwardMouseEvent(mouse_event);
+        content::Source<NavigationController>(&web_contents->GetController()));
+    web_contents->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
     mouse_event.type = WebKit::WebInputEvent::MouseUp;
-    tab_contents->render_view_host()->ForwardMouseEvent(mouse_event);
+    web_contents->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
     observer.Wait();
   }
 
@@ -181,7 +179,7 @@ class SpeechInputBrowserTest : public InProcessBrowserTest {
     // then sets the URL fragment as 'pass' if it received the expected string.
     LoadAndStartSpeechInputTest(filename);
 
-    EXPECT_EQ("pass", browser()->GetSelectedTabContents()->GetURL().ref());
+    EXPECT_EQ("pass", browser()->GetSelectedWebContents()->GetURL().ref());
   }
 
   // InProcessBrowserTest methods.

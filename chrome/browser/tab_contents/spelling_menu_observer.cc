@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,10 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_host.h"
 #include "chrome/browser/spellchecker/spellcheck_host_metrics.h"
-#include "chrome/browser/spellchecker/spellchecker_platform_engine.h"
+#include "chrome/browser/spellchecker/spellcheck_platform_mac.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -31,12 +32,16 @@
 
 #if defined(GOOGLE_CHROME_BUILD)
 #include "chrome/browser/spellchecker/internal/spellcheck_internal.h"
-#else
-// Use a dummy URL and a key on Chromium to avoid build breaks until the
-// Spelling API is released. These dummy parameters just cause a timeout and
-// show 'no suggestions found'.
+#endif
+
+// Use the public URL to the Spelling service on Chromium. Unfortunately, this
+// service is an experimental service and returns an error without a key.
+#ifndef SPELLING_SERVICE_KEY
 #define SPELLING_SERVICE_KEY
-#define SPELLING_SERVICE_URL "http://127.0.0.1/rpc"
+#endif
+
+#ifndef SPELLING_SERVICE_URL
+#define SPELLING_SERVICE_URL "https://www.googleapis.com/rpc"
 #endif
 
 using content::BrowserThread;
@@ -109,7 +114,8 @@ void SpellingMenuObserver::InitMenu(const ContextMenuParams& params) {
 
     // |spellcheck_host| can be null when the suggested word is
     // provided by Web SpellCheck API.
-    SpellCheckHost* spellcheck_host = profile->GetSpellCheckHost();
+    SpellCheckHost* spellcheck_host =
+        SpellCheckFactory::GetHostForProfile(profile);
     if (spellcheck_host && spellcheck_host->GetMetrics())
       spellcheck_host->GetMetrics()->RecordSuggestionStats(1);
   }
@@ -197,7 +203,8 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
     // provided by Web SpellCheck API.
     Profile* profile = proxy_->GetProfile();
     if (profile) {
-      SpellCheckHost* spellcheck_host = profile->GetSpellCheckHost();
+      SpellCheckHost* spellcheck_host =
+          SpellCheckFactory::GetHostForProfile(profile);
       if (spellcheck_host && spellcheck_host->GetMetrics())
         spellcheck_host->GetMetrics()->RecordReplacedWordStats(1);
     }
@@ -214,12 +221,17 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
 
   if (command_id == IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION ||
       command_id == IDC_SPELLCHECK_ADD_TO_DICTIONARY) {
-    // GetSpellCheckHost() can return null when the suggested word is
+    // GetHostForProfile() can return null when the suggested word is
     // provided by Web SpellCheck API.
     Profile* profile = proxy_->GetProfile();
-    if (profile && profile->GetSpellCheckHost())
-      profile->GetSpellCheckHost()->AddWord(UTF16ToUTF8(misspelled_word_));
-    SpellCheckerPlatform::AddWord(misspelled_word_);
+    if (profile) {
+      SpellCheckHost* host = SpellCheckFactory::GetHostForProfile(profile);
+      if (host)
+        host->AddWord(UTF16ToUTF8(misspelled_word_));
+    }
+#if defined(OS_MACOSX)
+    spellcheck_mac::AddWord(misspelled_word_);
+#endif
   }
 }
 

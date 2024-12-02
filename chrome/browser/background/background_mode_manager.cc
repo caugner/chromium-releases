@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/status_icons/status_icon.h"
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -26,14 +27,16 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::UserMetricsAction;
 
 BackgroundModeManager::BackgroundModeData::BackgroundModeData(
     int command_id,
@@ -384,10 +387,11 @@ void BackgroundModeManager::OnApplicationListChanged(Profile* profile) {
 
 ///////////////////////////////////////////////////////////////////////////////
 //  BackgroundModeManager, ProfileInfoCacheObserver overrides
-void BackgroundModeManager::OnProfileAdded(const string16& profile_name,
-                                           const string16& profile_base_dir,
-                                           const FilePath& profile_path,
-                                           const gfx::Image* avatar_image) {
+void BackgroundModeManager::OnProfileAdded(const FilePath& profile_path) {
+  ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+  string16 profile_name = cache.GetNameOfProfileAtIndex(
+      cache.GetIndexOfProfileWithPath(profile_path));
   // At this point, the profile should be registered with the background mode
   // manager, but when it's actually added to the cache is when its name is
   // set so we need up to update that with the background_mode_data.
@@ -403,7 +407,12 @@ void BackgroundModeManager::OnProfileAdded(const string16& profile_name,
   }
 }
 
-void BackgroundModeManager::OnProfileRemoved(const string16& profile_name) {
+void BackgroundModeManager::OnProfileWillBeRemoved(
+    const FilePath& profile_path) {
+  ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+  string16 profile_name = cache.GetNameOfProfileAtIndex(
+      cache.GetIndexOfProfileWithPath(profile_path));
   // Remove the profile from our map of profiles.
   BackgroundModeInfoMap::iterator it =
       GetBackgroundModeIterator(profile_name);
@@ -414,9 +423,18 @@ void BackgroundModeManager::OnProfileRemoved(const string16& profile_name) {
   }
 }
 
+void BackgroundModeManager::OnProfileWasRemoved(
+    const FilePath& profile_path,
+    const string16& profile_name) {
+}
+
 void BackgroundModeManager::OnProfileNameChanged(
-    const string16& old_profile_name,
-    const string16& new_profile_name) {
+    const FilePath& profile_path,
+    const string16& old_profile_name) {
+  ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+  string16 new_profile_name = cache.GetNameOfProfileAtIndex(
+      cache.GetIndexOfProfileWithPath(profile_path));
   BackgroundModeInfoMap::const_iterator it =
       GetBackgroundModeIterator(old_profile_name);
   // We check that the returned iterator is valid due to unittests, but really
@@ -429,10 +447,7 @@ void BackgroundModeManager::OnProfileNameChanged(
 }
 
 void BackgroundModeManager::OnProfileAvatarChanged(
-    const string16& profile_name,
-    const string16& profile_base_dir,
-    const FilePath& profile_path,
-    const gfx::Image* avatar_image) {
+    const FilePath& profile_path) {
 
 }
 ///////////////////////////////////////////////////////////////////////////////
@@ -467,7 +482,7 @@ void BackgroundModeManager::ExecuteCommand(int command_id) {
       bmd->GetBrowserWindow()->OpenTaskManager(true);
       break;
     case IDC_EXIT:
-      UserMetrics::RecordAction(UserMetricsAction("Exit"));
+      content::RecordAction(UserMetricsAction("Exit"));
       BrowserList::AttemptExit();
       break;
     case IDC_STATUS_TRAY_KEEP_CHROME_RUNNING_IN_BACKGROUND: {
@@ -653,12 +668,11 @@ void BackgroundModeManager::UpdateStatusTrayIconContextMenu() {
   // Create a context menu item for Chrome.
   ui::SimpleMenuModel* menu = new ui::SimpleMenuModel(this);
   // Add About item
-  menu->AddItem(IDC_ABOUT, l10n_util::GetStringFUTF16(IDS_ABOUT,
-      l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+  menu->AddItem(IDC_ABOUT, l10n_util::GetStringUTF16(IDS_ABOUT));
   menu->AddItemWithStringId(IDC_TASK_MANAGER, IDS_TASK_MANAGER);
   menu->AddSeparator();
 
-  if (background_mode_data_.size() > 1) {
+  if (profile_cache_->GetNumberOfProfiles() > 1) {
     std::vector<BackgroundModeData*> bmd_vector;
     for (BackgroundModeInfoMap::iterator it =
          background_mode_data_.begin();
@@ -668,18 +682,29 @@ void BackgroundModeManager::UpdateStatusTrayIconContextMenu() {
     }
     std::sort(bmd_vector.begin(), bmd_vector.end(),
               &BackgroundModeData::BackgroundModeDataCompare);
+    int profiles_with_apps = 0;
     for (std::vector<BackgroundModeData*>::const_iterator bmd_it =
          bmd_vector.begin();
          bmd_it != bmd_vector.end();
          ++bmd_it) {
       BackgroundModeData* bmd = *bmd_it;
-      ui::SimpleMenuModel* submenu = new ui::SimpleMenuModel(bmd);
-      bmd->BuildProfileMenu(submenu, menu);
+      // We should only display the profile in the status icon if it has at
+      // least one background app.
+      if (bmd->GetBackgroundAppCount() > 0) {
+        ui::SimpleMenuModel* submenu = new ui::SimpleMenuModel(bmd);
+        bmd->BuildProfileMenu(submenu, menu);
+        profiles_with_apps++;
+      }
     }
+    // We should only be displaying the status tray icon if there is at least
+    // one profile with a background app.
+    DCHECK_GT(profiles_with_apps, 0);
   } else {
-    // We should only have one profile in the list if we are not
-    // using multi-profiles.
-    DCHECK_EQ(background_mode_data_.size(), size_t(1));
+    // We should only have one profile in the cache if we are not
+    // using multi-profiles. If keep_alive_for_test_ is set, then we may not
+    // have any profiles in the cache.
+    DCHECK(profile_cache_->GetNumberOfProfiles() == size_t(1) ||
+           keep_alive_for_test_);
     background_mode_data_.begin()->second->BuildProfileMenu(menu, NULL);
     menu->AddSeparator();
   }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -82,11 +82,11 @@ class BufferedResourceLoaderTest : public testing::Test {
     last_position_ = last_position;
 
     url_loader_ = new NiceMock<MockWebURLLoader>();
-    loader_ = new BufferedResourceLoader(
+    loader_.reset(new BufferedResourceLoader(
         gurl_, first_position_, last_position_,
         BufferedResourceLoader::kThresholdDefer, 0, 0,
-        new media::MediaLog());
-    loader_->SetURLLoaderForTest(url_loader_);
+        new media::MediaLog()));
+    loader_->SetURLLoaderForTest(scoped_ptr<WebKit::WebURLLoader>(url_loader_));
   }
 
   void SetLoaderBuffer(size_t forward_capacity, size_t backward_capacity) {
@@ -191,7 +191,7 @@ class BufferedResourceLoaderTest : public testing::Test {
     InSequence s;
     EXPECT_CALL(*url_loader_, cancel());
     loader_->Stop();
-    loader_ = NULL;
+    loader_.reset();
   }
 
   // Helper method to write to |loader_| from |data_|.
@@ -291,7 +291,7 @@ class BufferedResourceLoaderTest : public testing::Test {
   int64 first_position_;
   int64 last_position_;
 
-  scoped_refptr<BufferedResourceLoader> loader_;
+  scoped_ptr<BufferedResourceLoader> loader_;
   NiceMock<MockWebURLLoader>* url_loader_;
 
   MockWebFrameClient client_;
@@ -527,11 +527,31 @@ TEST_F(BufferedResourceLoaderTest, RequestFailedWhenRead) {
   uint8 buffer[10];
   InSequence s;
 
+  // We should convert any error we receive to net::ERR_FAILED.
   ReadLoader(10, 10, buffer);
   EXPECT_CALL(*this, NetworkCallback());
   EXPECT_CALL(*this, ReadCallback(net::ERR_FAILED));
   WebURLError error;
-  error.reason = net::ERR_FAILED;
+  error.reason = net::ERR_TIMED_OUT;
+  error.isCancellation = false;
+  loader_->didFail(url_loader_, error);
+}
+
+TEST_F(BufferedResourceLoaderTest, RequestCancelledWhenRead) {
+  Initialize(kHttpUrl, 10, 29);
+  Start();
+  PartialResponse(10, 29, 30);
+
+  uint8 buffer[10];
+  InSequence s;
+
+  // We should convert any error we receive to net::ERR_FAILED.
+  ReadLoader(10, 10, buffer);
+  EXPECT_CALL(*this, NetworkCallback());
+  EXPECT_CALL(*this, ReadCallback(net::ERR_FAILED));
+  WebURLError error;
+  error.reason = 0;
+  error.isCancellation = true;
   loader_->didFail(url_loader_, error);
 }
 

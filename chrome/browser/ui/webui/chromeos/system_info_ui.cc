@@ -22,8 +22,10 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -32,6 +34,9 @@
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 class SystemInfoUIHTMLSource : public ChromeURLDataManager::DataSource {
  public:
@@ -69,7 +74,6 @@ class SystemInfoHandler : public WebUIMessageHandler,
   virtual ~SystemInfoHandler();
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
   virtual void RegisterMessages() OVERRIDE;
 
  private:
@@ -159,11 +163,6 @@ SystemInfoHandler::SystemInfoHandler() {
 SystemInfoHandler::~SystemInfoHandler() {
 }
 
-WebUIMessageHandler* SystemInfoHandler::Attach(WebUI* web_ui) {
-  // TODO(stevenjb): customize handler attach if needed...
-  return WebUIMessageHandler::Attach(web_ui);
-}
-
 void SystemInfoHandler::RegisterMessages() {
   // TODO(stevenjb): add message registration, callbacks...
 }
@@ -174,12 +173,12 @@ void SystemInfoHandler::RegisterMessages() {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-SystemInfoUI::SystemInfoUI(TabContents* contents) : ChromeWebUI(contents) {
+SystemInfoUI::SystemInfoUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   SystemInfoHandler* handler = new SystemInfoHandler();
-  AddMessageHandler((handler)->Attach(this));
+  web_ui->AddMessageHandler(handler);
   SystemInfoUIHTMLSource* html_source = new SystemInfoUIHTMLSource();
 
   // Set up the chrome://system/ source.
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  Profile* profile = Profile::FromWebUI(web_ui);
   profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }

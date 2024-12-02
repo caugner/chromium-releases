@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "base/stl_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_unittest.h"
+#include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_registrar.h"
@@ -60,8 +61,11 @@ static scoped_refptr<Extension> CreateExtension(const std::string& name,
   }
   std::string error;
   scoped_refptr<Extension> extension = Extension::Create(
-      bogus_file_path().AppendASCII(name), Extension::INVALID, manifest,
-      Extension::STRICT_ERROR_CHECKS, &error);
+      bogus_file_path().AppendASCII(name),
+      Extension::INVALID,
+      manifest,
+      Extension::STRICT_ERROR_CHECKS,
+      &error);
   // Cannot ASSERT_* here because that attempts an illegitimate return.
   // Cannot EXPECT_NE here because that assumes non-pointers unlike EXPECT_EQ
   EXPECT_TRUE(extension.get() != NULL) << error;
@@ -85,14 +89,14 @@ void AddBackgroundPermission(ExtensionService* service,
       CreateExtension(GenerateUniqueExtensionName(), true);
   scoped_refptr<const ExtensionPermissionSet> permissions =
       temporary->GetActivePermissions();
-  ExtensionPermissionsManager(service).AddPermissions(
+  extensions::PermissionsUpdater(service->profile()).AddPermissions(
       extension, permissions.get());
 }
 
 void RemoveBackgroundPermission(ExtensionService* service,
                                 Extension* extension) {
   if (!BackgroundApplicationListModel::IsBackgroundApp(*extension)) return;
-  ExtensionPermissionsManager(service).RemovePermissions(
+  extensions::PermissionsUpdater(service->profile()).RemovePermissions(
       extension, extension->GetActivePermissions());
 }
 }  // namespace
@@ -105,7 +109,7 @@ TEST_F(BackgroundApplicationListModelTest, ExplicitTest) {
   ASSERT_TRUE(service);
   ASSERT_TRUE(service->is_ready());
   ASSERT_TRUE(service->extensions());
-  ASSERT_TRUE(service->extensions()->empty());
+  ASSERT_TRUE(service->extensions()->is_empty());
   scoped_ptr<BackgroundApplicationListModel> model(
       new BackgroundApplicationListModel(profile_.get()));
   ASSERT_EQ(0U, model->size());
@@ -171,7 +175,7 @@ TEST_F(BackgroundApplicationListModelTest, AddRemovePermissionsTest) {
   ASSERT_TRUE(service);
   ASSERT_TRUE(service->is_ready());
   ASSERT_TRUE(service->extensions());
-  ASSERT_TRUE(service->extensions()->empty());
+  ASSERT_TRUE(service->extensions()->is_empty());
   scoped_ptr<BackgroundApplicationListModel> model(
       new BackgroundApplicationListModel(profile_.get()));
   ASSERT_EQ(0U, model->size());
@@ -265,10 +269,10 @@ void RemoveExtension(ExtensionService* service,
 }
 
 void TogglePermission(ExtensionService* service,
-                                ExtensionCollection* extensions,
-                                BackgroundApplicationListModel* model,
-                                size_t* expected,
-                                size_t* count) {
+                      ExtensionCollection* extensions,
+                      BackgroundApplicationListModel* model,
+                      size_t* expected,
+                      size_t* count) {
   ExtensionCollection::iterator cursor = extensions->begin();
   if (cursor == extensions->end()) {
     // Nothing to toggle.  Just verify accounting.
@@ -310,7 +314,7 @@ TEST_F(BackgroundApplicationListModelTest, RandomTest) {
   ASSERT_TRUE(service);
   ASSERT_TRUE(service->is_ready());
   ASSERT_TRUE(service->extensions());
-  ASSERT_TRUE(service->extensions()->empty());
+  ASSERT_TRUE(service->extensions()->is_empty());
   scoped_ptr<BackgroundApplicationListModel> model(
       new BackgroundApplicationListModel(profile_.get()));
   ASSERT_EQ(0U, model->size());

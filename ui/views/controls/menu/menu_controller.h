@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -104,6 +104,8 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
 #if defined(OS_LINUX)
   bool OnMouseWheel(SubmenuView* source, const MouseWheelEvent& event);
 #endif
+  ui::GestureStatus OnGestureEvent(SubmenuView* source,
+                                   const GestureEvent& event);
 
   bool GetDropFormats(
       SubmenuView* source,
@@ -123,6 +125,9 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
   // Invoked once for any Widget activation change.  This allows the menu
   // to be canceled if the window manager changes the active window.
   void OnWidgetActivationChanged();
+
+  // Update the submenu's selection based on the current mouse location
+  void UpdateSubmenuSelection(SubmenuView* source);
 
  private:
   friend class internal::MenuRunnerImpl;
@@ -253,7 +258,7 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
   // when blocking. This schedules the loop to quit.
   void Accept(MenuItemView* item, int mouse_event_flags);
 
-  bool ShowSiblingMenu(SubmenuView* source, const MouseEvent& event);
+  bool ShowSiblingMenu(SubmenuView* source, const gfx::Point& mouse_location);
 
   // Closes all menus, including any menus of nested invocations of Run.
   void CloseAllNestedMenus();
@@ -415,8 +420,12 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
   // sets it to null.
   void SendMouseCaptureLostToActiveView();
 
-  // Set exit type.
+  // Sets exit type.
   void SetExitType(ExitType type);
+
+  // Handles the mouse location event on the submenu |source|.
+  void HandleMouseLocation(SubmenuView* source,
+                           const gfx::Point& mouse_location);
 
   // The active instance.
   static MenuController* active_instance_;
@@ -429,6 +438,10 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
 
   // If true, we're showing.
   bool showing_;
+
+  // Is true for some menu types and only until the first mouse press or mouse
+  // release event occurs.
+  bool drop_first_release_event_;
 
   // Indicates what to exit.
   ExitType exit_type_;

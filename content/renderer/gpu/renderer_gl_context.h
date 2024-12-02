@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,9 +23,9 @@
 class GpuChannelHost;
 class CommandBufferProxy;
 class GURL;
-class TransportTextureHost;
 
 namespace gpu {
+class TransferBuffer;
 namespace gles2 {
 class GLES2CmdHelper;
 class GLES2Implementation;
@@ -104,7 +104,7 @@ class RendererGLContext : public base::SupportsWeakPtr<RendererGLContext>,
   // more cross-platform.
   static RendererGLContext* CreateViewContext(
       GpuChannelHost* channel,
-      int render_view_id,
+      int32 surface_id,
       RendererGLContext* share_group,
       const char* allowed_extensions,
       const int32* attrib_list,
@@ -163,9 +163,6 @@ class RendererGLContext : public base::SupportsWeakPtr<RendererGLContext>,
   // Sends an IPC message with the new state of surface visibility
   bool SetSurfaceVisible(bool visibility);
 
-  // Create a TransportTextureHost object associated with the context.
-  scoped_refptr<TransportTextureHost> CreateTransportTextureHost();
-
   // TODO(gman): Remove this
   void DisableShaderTranslation();
 
@@ -186,7 +183,7 @@ class RendererGLContext : public base::SupportsWeakPtr<RendererGLContext>,
   explicit RendererGLContext(GpuChannelHost* channel);
 
   bool Initialize(bool onscreen,
-                  int render_view_id,
+                  int32 surface_id,
                   const gfx::Size& size,
                   RendererGLContext* share_group,
                   const char* allowed_extensions,
@@ -203,7 +200,7 @@ class RendererGLContext : public base::SupportsWeakPtr<RendererGLContext>,
   uint32 parent_texture_id_;
   CommandBufferProxy* command_buffer_;
   gpu::gles2::GLES2CmdHelper* gles2_helper_;
-  int32 transfer_buffer_id_;
+  gpu::TransferBuffer* transfer_buffer_;
   gpu::gles2::GLES2Implementation* gles2_implementation_;
   Error last_error_;
   int frame_number_;

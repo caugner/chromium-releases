@@ -49,7 +49,7 @@ ButtonDropDown::~ButtonDropDown() {
 ////////////////////////////////////////////////////////////////////////////////
 
 bool ButtonDropDown::OnMousePressed(const MouseEvent& event) {
-  if (IsEnabled() && IsTriggerableEvent(event) && HitTest(event.location())) {
+  if (enabled() && IsTriggerableEvent(event) && HitTest(event.location())) {
     // Store the y pos of the mouse coordinates so we can use them later to
     // determine if the user dragged the mouse down (which should pop up the
     // drag down menu immediately, instead of waiting for the timer)
@@ -91,7 +91,7 @@ void ButtonDropDown::OnMouseReleased(const MouseEvent& event) {
   if (IsTriggerableEvent(event))
     show_menu_factory_.InvalidateWeakPtrs();
 
-  if (IsEnabled() && event.IsRightMouseButton() && HitTest(event.location())) {
+  if (enabled() && event.IsRightMouseButton() && HitTest(event.location())) {
     show_menu_factory_.InvalidateWeakPtrs();
     ShowDropDownMenu(GetWidget()->GetNativeView());
   }
@@ -126,8 +126,8 @@ void ButtonDropDown::GetAccessibleState(ui::AccessibleViewState* state) {
 bool ButtonDropDown::ShouldEnterPushedState(const MouseEvent& event) {
   // Enter PUSHED state on press with Left or Right mouse button. Remain
   // in this state while the context menu is open.
-  return ((ui::EF_LEFT_BUTTON_DOWN |
-      ui::EF_RIGHT_BUTTON_DOWN) & event.flags()) != 0;
+  return ((ui::EF_LEFT_MOUSE_BUTTON |
+      ui::EF_RIGHT_MOUSE_BUTTON) & event.flags()) != 0;
 }
 
 void ButtonDropDown::ShowDropDownMenu(gfx::NativeView window) {

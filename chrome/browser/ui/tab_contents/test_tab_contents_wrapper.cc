@@ -17,7 +17,7 @@ TabContentsWrapperTestHarness::~TabContentsWrapperTestHarness() {
 
 TestTabContents* TabContentsWrapperTestHarness::contents() {
   return contents_wrapper_.get() ?
-      static_cast<TestTabContents*>(contents_wrapper_->tab_contents()) : NULL;
+      static_cast<TestTabContents*>(contents_wrapper_->web_contents()) : NULL;
 }
 
 TabContentsWrapper* TabContentsWrapperTestHarness::contents_wrapper() {
@@ -44,4 +44,6 @@ void TabContentsWrapperTestHarness::TearDown() {
   // Release the browser context on the UI thread.
   message_loop_.DeleteSoon(FROM_HERE, browser_context_.release());
   message_loop_.RunAllPending();
+
+  ChromeRenderViewHostTestHarness::TearDown();
 }

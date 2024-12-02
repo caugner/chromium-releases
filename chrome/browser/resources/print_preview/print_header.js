@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,13 +43,15 @@ cr.define('print_preview', function() {
         this.disableCancelButton();
         closePrintPreviewTab();
       }.bind(this);
-      this.printButton_.onclick = this.onPrintButtonClicked_.bind(this);
+      this.printButton_.onclick = this.onPrintRequested.bind(this);
       document.addEventListener(customEvents.UPDATE_SUMMARY,
                                 this.updateSummary_.bind(this));
       document.addEventListener(customEvents.UPDATE_PRINT_BUTTON,
                                 this.updatePrintButton_.bind(this));
       document.addEventListener(customEvents.PDF_GENERATION_ERROR,
                                 this.onPDFGenerationError_.bind(this));
+      document.addEventListener(customEvents.PRINTER_CAPABILITIES_UPDATED,
+                                this.onPrinterCapabilitiesUpdated_.bind(this));
     },
 
     /**
@@ -69,6 +71,16 @@ cr.define('print_preview', function() {
     },
 
     /**
+     * Executes when a |customEvents.PRINTER_CAPABILITIES_UPDATED| event occurs.
+     * @private
+     */
+    onPrinterCapabilitiesUpdated_: function() {
+      getSelectedPrinterName() == PRINT_TO_PDF ?
+          this.printButton.textContent = localStrings.getString('saveButton') :
+          this.printButton.textContent = localStrings.getString('printButton');
+    },
+
+    /**
      * Disables the cancel button and removes its keydown event listener.
      */
     disableCancelButton: function() {
@@ -77,10 +89,10 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * Listener executing whenever |this.printButton_| is clicked.
-     * @private
+     * Listener executing whenever the print button is clicked or user presses
+     * the enter button while focus is in the pages field.
      */
-    onPrintButtonClicked_: function() {
+    onPrintRequested: function() {
       var printToPDF = getSelectedPrinterName() == PRINT_TO_PDF;
       if (!printToPDF) {
         this.printButton_.classList.add('loading');
@@ -161,10 +173,10 @@ cr.define('print_preview', function() {
       // Removing extra spaces from within the string.
       html = html.replace(/\s{2,}/g, ' ');
       this.summary_.innerHTML = html;
-    },
+    }
   };
 
   return {
-    PrintHeader: PrintHeader,
+    PrintHeader: PrintHeader
   };
 });

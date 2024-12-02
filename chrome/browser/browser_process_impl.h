@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,6 @@ class BrowserOnlineStateObserver;
 class ChromeNetLog;
 class ChromeResourceDispatcherHostDelegate;
 class CommandLine;
-class ChromeFrameFriendOfBrowserProcessImpl;  // TODO(joi): Remove
 class RemoteDebuggingServer;
 class TabCloseableStateWatcher;
 
@@ -46,10 +45,8 @@ class BrowserProcessImpl : public BrowserProcess,
   explicit BrowserProcessImpl(const CommandLine& command_line);
   virtual ~BrowserProcessImpl();
 
-  // Some of our startup is interleaved with thread creation, driven
-  // by these functions.
-  void PreStartThread(content::BrowserThread::ID identifier);
-  void PostStartThread(content::BrowserThread::ID identifier);
+  // Called before the browser threads are created.
+  void PreCreateThreads();
 
   // Called after the threads have been created but before the message loops
   // starts running. Allows the browser process to do any initialization that
@@ -61,23 +58,16 @@ class BrowserProcessImpl : public BrowserProcess,
   // framework, rather than in the destructor, so that we can
   // interleave cleanup with threads being stopped.
   void StartTearDown();
-  void PreStopThread(content::BrowserThread::ID identifier);
-  void PostStopThread(content::BrowserThread::ID identifier);
+  void PostDestroyThreads();
 
   // BrowserProcess methods
+  virtual void ResourceDispatcherHostCreated() OVERRIDE;
   virtual void EndSession() OVERRIDE;
-  virtual ResourceDispatcherHost* resource_dispatcher_host() OVERRIDE;
   virtual MetricsService* metrics_service() OVERRIDE;
   virtual IOThread* io_thread() OVERRIDE;
-  virtual base::Thread* file_thread() OVERRIDE;
-  virtual base::Thread* db_thread() OVERRIDE;
   virtual WatchDogThread* watchdog_thread() OVERRIDE;
-#if defined(OS_CHROMEOS)
-  virtual base::Thread* web_socket_proxy_thread() OVERRIDE;
-#endif
   virtual ProfileManager* profile_manager() OVERRIDE;
   virtual PrefService* local_state() OVERRIDE;
-  virtual SidebarManager* sidebar_manager() OVERRIDE;
   virtual ui::Clipboard* clipboard() OVERRIDE;
   virtual net::URLRequestContextGetter* system_request_context() OVERRIDE;
 #if defined(OS_CHROMEOS)
@@ -131,17 +121,10 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual MHTMLGenerationManager* mhtml_generation_manager() OVERRIDE;
   virtual ComponentUpdateService* component_updater() OVERRIDE;
   virtual CRLSetFetcher* crl_set_fetcher() OVERRIDE;
+  virtual AudioManager* audio_manager() OVERRIDE;
 
  private:
-  // TODO(joi): Remove. Temporary hack to get at CreateIOThreadState.
-  friend class ChromeFrameFriendOfBrowserProcessImpl;
-
-  // Must be called right before the IO thread is started.
-  void CreateIOThreadState();
-
-  void CreateResourceDispatcherHost();
   void CreateMetricsService();
-
   void CreateWatchdogThread();
 #if defined(OS_CHROMEOS)
   void InitializeWebSocketProxyThread();
@@ -152,7 +135,6 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreateLocalState();
   void CreateViewedPageTracker();
   void CreateIconManager();
-  void CreateSidebarManager();
   void CreateGoogleURLTracker();
   void CreateIntranetRedirectDetector();
   void CreateNotificationUIManager();
@@ -168,9 +150,6 @@ class BrowserProcessImpl : public BrowserProcess,
   void ApplyDisabledSchemesPolicy();
   void ApplyAllowCrossOriginAuthPromptPolicy();
   void ApplyDefaultBrowserPolicy();
-
-  bool created_resource_dispatcher_host_;
-  scoped_ptr<ResourceDispatcherHost> resource_dispatcher_host_;
 
   bool created_metrics_service_;
   scoped_ptr<MetricsService> metrics_service_;
@@ -193,9 +172,6 @@ class BrowserProcessImpl : public BrowserProcess,
       extension_event_router_forwarder_;
 
   scoped_ptr<RemoteDebuggingServer> remote_debugging_server_;
-
-  bool created_sidebar_manager_;
-  scoped_refptr<SidebarManager> sidebar_manager_;
 
   bool created_browser_policy_connector_;
   scoped_ptr<policy::BrowserPolicyConnector> browser_policy_connector_;
@@ -290,6 +266,8 @@ class BrowserProcessImpl : public BrowserProcess,
 
   scoped_refptr<CRLSetFetcher> crl_set_fetcher_;
 #endif
+
+  scoped_refptr<AudioManager> audio_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserProcessImpl);
 };

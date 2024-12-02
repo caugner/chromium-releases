@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,10 +35,8 @@ namespace {
 // single-process mode. TODO(avi): This Apple bug appears fixed in 10.7; when
 // 10.7 is the minimum required version for Chromium, remove this hack.
 
-base::LazyInstance<
-    base::ThreadLocalPointer<struct __CFSet>,
-    base::LeakyLazyInstanceTraits<base::ThreadLocalPointer<struct __CFSet> > >
-        thread_pdf_docs = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::ThreadLocalPointer<struct __CFSet> >::Leaky
+    thread_pdf_docs = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -202,20 +200,16 @@ bool PdfMetafileCg::RenderPage(unsigned int page_number,
     }
   }
   // Some PDFs have a non-zero origin. Need to take that into account.
-  float x_offset = rect.origin.x - (source_rect.origin.x * scaling_factor);
-  float y_offset = rect.origin.y - (source_rect.origin.y * scaling_factor);
+  float x_offset = -1 * source_rect.origin.x * scaling_factor;
+  float y_offset = -1 * source_rect.origin.y * scaling_factor;
 
-  if (center_vertically) {
+  if (center_horizontally) {
     x_offset += (rect.size.width -
                      (source_rect.size.width * scaling_factor))/2;
   }
-  if (center_horizontally) {
+  if (center_vertically) {
     y_offset += (rect.size.height -
                      (source_rect.size.height * scaling_factor))/2;
-  } else {
-    // Since 0 y begins at the bottom, we need to adjust so the output appears
-    // nearer the top if we are not centering horizontally.
-    y_offset += rect.size.height - (source_rect.size.height * scaling_factor);
   }
   CGContextSaveGState(context);
   CGContextTranslateCTM(context, x_offset, y_offset);

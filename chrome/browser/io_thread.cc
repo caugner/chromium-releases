@@ -11,7 +11,6 @@
 #include "base/bind_helpers.h"
 #include "base/debug/leak_tracker.h"
 #include "base/logging.h"
-#include "base/metrics/field_trial.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
@@ -33,15 +32,12 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/gpu/gpu_process_host.h"
-#include "content/browser/in_process_webkit/indexed_db_key_utility_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_fetcher.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/default_origin_bound_cert_store.h"
-#include "net/base/dnsrr_resolver.h"
 #include "net/base/host_cache.h"
 #include "net/base/host_resolver.h"
 #include "net/base/host_resolver_impl.h"
@@ -59,7 +55,6 @@
 #include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
-#include "net/socket/dns_cert_provenance_checker.h"
 
 #if defined(USE_NSS)
 #include "net/ocsp/nss_ocsp.h"
@@ -123,43 +118,6 @@ net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
     } else {
       LOG(ERROR) << "Invalid switch for host resolver parallelism: " << s;
     }
-  } else {
-    // Set up a field trial to see what impact the total number of concurrent
-    // resolutions have on DNS resolutions.
-    base::FieldTrial::Probability kDivisor = 1000;
-    // For each option (i.e., non-default), we have a fixed probability.
-    base::FieldTrial::Probability kProbabilityPerGroup = 100;  // 10%.
-
-    // After June 30, 2011 builds, it will always be in default group
-    // (parallel_default).
-    scoped_refptr<base::FieldTrial> trial(
-        new base::FieldTrial(
-            "DnsParallelism", kDivisor, "parallel_default", 2011, 6, 30));
-
-    // List options with different counts.
-    // Firefox limits total to 8 in parallel, and default is currently 50.
-    int parallel_6 = trial->AppendGroup("parallel_6", kProbabilityPerGroup);
-    int parallel_7 = trial->AppendGroup("parallel_7", kProbabilityPerGroup);
-    int parallel_8 = trial->AppendGroup("parallel_8", kProbabilityPerGroup);
-    int parallel_9 = trial->AppendGroup("parallel_9", kProbabilityPerGroup);
-    int parallel_10 = trial->AppendGroup("parallel_10", kProbabilityPerGroup);
-    int parallel_14 = trial->AppendGroup("parallel_14", kProbabilityPerGroup);
-    int parallel_20 = trial->AppendGroup("parallel_20", kProbabilityPerGroup);
-
-    if (trial->group() == parallel_6)
-      parallelism = 6;
-    else if (trial->group() == parallel_7)
-      parallelism = 7;
-    else if (trial->group() == parallel_8)
-      parallelism = 8;
-    else if (trial->group() == parallel_9)
-      parallelism = 9;
-    else if (trial->group() == parallel_10)
-      parallelism = 10;
-    else if (trial->group() == parallel_14)
-      parallelism = 14;
-    else if (trial->group() == parallel_20)
-      parallelism = 20;
   }
 
   size_t retry_attempts = net::HostResolver::kDefaultRetryAttempts;
@@ -256,7 +214,8 @@ ConstructProxyScriptFetcherContext(IOThread::Globals* globals,
   context->set_net_log(net_log);
   context->set_host_resolver(globals->host_resolver.get());
   context->set_cert_verifier(globals->cert_verifier.get());
-  context->set_dnsrr_resolver(globals->dnsrr_resolver.get());
+  context->set_transport_security_state(
+      globals->transport_security_state.get());
   context->set_http_auth_handler_factory(
       globals->http_auth_handler_factory.get());
   context->set_proxy_service(globals->proxy_script_fetcher_proxy_service.get());
@@ -282,7 +241,8 @@ ConstructSystemRequestContext(IOThread::Globals* globals,
   context->set_net_log(net_log);
   context->set_host_resolver(globals->host_resolver.get());
   context->set_cert_verifier(globals->cert_verifier.get());
-  context->set_dnsrr_resolver(globals->dnsrr_resolver.get());
+  context->set_transport_security_state(
+      globals->transport_security_state.get());
   context->set_http_auth_handler_factory(
       globals->http_auth_handler_factory.get());
   context->set_proxy_service(globals->system_proxy_service.get());
@@ -395,6 +355,15 @@ ChromeNetLog* IOThread::net_log() {
   return net_log_;
 }
 
+void IOThread::ChangedToOnTheRecord() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&IOThread::ChangedToOnTheRecordOnIOThread,
+                 base::Unretained(this)));
+}
+
 net::URLRequestContextGetter* IOThread::system_url_request_context_getter() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!system_url_request_context_getter_) {
@@ -436,7 +405,7 @@ void IOThread::Init() {
   globals_->host_resolver.reset(
       CreateGlobalHostResolver(net_log_));
   globals_->cert_verifier.reset(new net::CertVerifier);
-  globals_->dnsrr_resolver.reset(new net::DnsRRResolver);
+  globals_->transport_security_state.reset(new net::TransportSecurityState(""));
   globals_->ssl_config_service = GetSSLConfigService();
   globals_->http_auth_handler_factory.reset(CreateDefaultAuthHandlerFactory(
       globals_->host_resolver.get()));
@@ -455,6 +424,8 @@ void IOThread::Init() {
   session_params.cert_verifier = globals_->cert_verifier.get();
   session_params.origin_bound_cert_service =
       globals_->system_origin_bound_cert_service.get();
+  session_params.transport_security_state =
+      globals_->transport_security_state.get();
   session_params.proxy_service =
       globals_->proxy_script_fetcher_proxy_service.get();
   session_params.http_auth_handler_factory =
@@ -505,27 +476,14 @@ void IOThread::CleanUp() {
   delete sdch_manager_;
   sdch_manager_ = NULL;
 
-  // Step 1: Kill all things that might be holding onto
-  // net::URLRequest/net::URLRequestContexts.
-
 #if defined(USE_NSS)
   net::ShutdownOCSP();
 #endif  // defined(USE_NSS)
 
-  // Destroy all URLRequests started by URLFetchers.
-  content::URLFetcher::CancelAll();
-
-  IndexedDBKeyUtilityClient::Shutdown();
-
-  // If any child processes are still running, terminate them and
-  // and delete the BrowserChildProcessHost instances to release whatever
-  // IO thread only resources they are referencing.
-  BrowserChildProcessHost::TerminateAll();
-
   system_url_request_context_getter_ = NULL;
 
-  // Step 2: Release objects that the net::URLRequestContext could have been
-  // pointing to.
+  // Release objects that the net::URLRequestContext could have been pointing
+  // to.
 
   // This must be reset before the ChromeNetLog is destroyed.
   network_change_observer_.reset();
@@ -534,9 +492,6 @@ void IOThread::CleanUp() {
 
   delete globals_;
   globals_ = NULL;
-
-  // net::URLRequest instances must NOT outlive the IO thread.
-  base::debug::LeakTracker<net::URLRequest>::CheckForLeaks();
 
   base::debug::LeakTracker<SystemURLRequestContextGetter>::CheckForLeaks();
 }
@@ -593,14 +548,28 @@ net::SSLConfigService* IOThread::GetSSLConfigService() {
   return ssl_config_service_manager_->Get();
 }
 
+void IOThread::ChangedToOnTheRecordOnIOThread() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  // Clear the host cache to avoid showing entries from the OTR session
+  // in about:net-internals.
+  ClearHostCache();
+
+  // Clear all of the passively logged data.
+  // TODO(eroman): this is a bit heavy handed, really all we need to do is
+  //               clear the data pertaining to incognito context.
+  net_log_->ClearAllPassivelyCapturedEvents();
+}
+
 void IOThread::InitSystemRequestContext() {
   if (system_url_request_context_getter_)
     return;
   // If we're in unit_tests, IOThread may not be run.
   if (!BrowserThread::IsMessageLoopValid(BrowserThread::IO))
     return;
+  bool wait_for_first_update = (pref_proxy_config_tracker_.get() != NULL);
   ChromeProxyConfigService* proxy_config_service =
-      ProxyServiceFactory::CreateProxyConfigService();
+      ProxyServiceFactory::CreateProxyConfigService(wait_for_first_update);
   system_proxy_config_service_.reset(proxy_config_service);
   if (pref_proxy_config_tracker_.get()) {
     pref_proxy_config_tracker_->SetChromeProxyConfigService(
@@ -634,8 +603,8 @@ void IOThread::InitSystemRequestContextOnIOThread() {
   system_params.cert_verifier = globals_->cert_verifier.get();
   system_params.origin_bound_cert_service =
       globals_->system_origin_bound_cert_service.get();
-  system_params.dnsrr_resolver = globals_->dnsrr_resolver.get();
-  system_params.dns_cert_checker = NULL;
+  system_params.transport_security_state =
+      globals_->transport_security_state.get();
   system_params.ssl_host_info_factory = NULL;
   system_params.proxy_service = globals_->system_proxy_service.get();
   system_params.ssl_config_service = globals_->ssl_config_service.get();

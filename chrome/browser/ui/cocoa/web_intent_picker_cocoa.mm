@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,9 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/bind.h"
+#include "base/message_loop.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -13,21 +16,62 @@
 #import "chrome/browser/ui/cocoa/web_intent_bubble_controller.h"
 #include "chrome/browser/ui/intents/web_intent_picker.h"
 #include "chrome/browser/ui/intents/web_intent_picker_delegate.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "content/public/browser/web_contents.h"
 #include "skia/ext/skia_utils_mac.h"
+#include "ui/gfx/image/image.h"
+
+using content::WebContents;
+
+class InlineHtmlContentDelegate: public content::WebContentsDelegate {
+ public:
+  InlineHtmlContentDelegate() {}
+  virtual ~InlineHtmlContentDelegate() {}
+
+  virtual bool IsPopupOrPanel(
+      const content::WebContents* source) const OVERRIDE {
+    return true;
+  }
+  virtual bool ShouldAddNavigationToHistory(
+      const history::HistoryAddPageArgs& add_page_args,
+      content::NavigationType navigation_type) OVERRIDE {
+    return false;
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(InlineHtmlContentDelegate);
+};
 
 // static
 WebIntentPicker* WebIntentPicker::Create(Browser* browser,
                                          TabContentsWrapper* wrapper,
-                                         WebIntentPickerDelegate* delegate) {
-  return new WebIntentPickerCocoa(browser, wrapper, delegate);
+                                         WebIntentPickerDelegate* delegate,
+                                         WebIntentPickerModel* model) {
+  return new WebIntentPickerCocoa(browser, wrapper, delegate, model);
 }
+
+WebIntentPickerCocoa::WebIntentPickerCocoa()
+    : delegate_(NULL),
+      model_(NULL),
+      browser_(NULL),
+      controller_(nil),
+      weak_ptr_factory_(this),
+      service_invoked(false) {
+}
+
 
 WebIntentPickerCocoa::WebIntentPickerCocoa(Browser* browser,
                                            TabContentsWrapper* wrapper,
-                                           WebIntentPickerDelegate* delegate)
+                                           WebIntentPickerDelegate* delegate,
+                                           WebIntentPickerModel* model)
    : delegate_(delegate),
-     controller_(NULL) {
+     model_(model),
+     browser_(browser),
+     controller_(nil),
+     weak_ptr_factory_(this),
+     service_invoked(false) {
+  model_->set_observer(this);
+
   DCHECK(browser);
   DCHECK(delegate);
   NSWindow* parentWindow = browser->window()->GetNativeHandle();
@@ -45,51 +89,93 @@ WebIntentPickerCocoa::WebIntentPickerCocoa(Browser* browser,
                                          anchoredAt:anchor];
 }
 
-void WebIntentPickerCocoa::SetServiceURLs(const std::vector<GURL>& urls) {
-  DCHECK(controller_);
-  scoped_nsobject<NSMutableArray> urlArray(
-      [[NSMutableArray alloc] initWithCapacity:urls.size()]);
-
-  for (std::vector<GURL>::const_iterator iter(urls.begin());
-       iter != urls.end(); ++iter) {
-    [urlArray addObject:
-        [NSString stringWithUTF8String:iter->spec().c_str()]];
-  }
-
-  [controller_ setServiceURLs:urlArray];
-}
-
-void WebIntentPickerCocoa::SetServiceIcon(size_t index, const SkBitmap& icon) {
-  DCHECK(controller_);
-  if (icon.empty())
-    return;
-
-  NSImage* image = gfx::SkBitmapToNSImage(icon);
-  [controller_ replaceImageAtIndex:index withImage:image];
-}
-
-void WebIntentPickerCocoa::SetDefaultServiceIcon(size_t index) {
+WebIntentPickerCocoa::~WebIntentPickerCocoa() {
+  if (model_ != NULL)
+    model_->set_observer(NULL);
 }
 
 void WebIntentPickerCocoa::Close() {
+  DCHECK(controller_);
+  [controller_ close];
+  if (inline_disposition_tab_contents_.get())
+    inline_disposition_tab_contents_->web_contents()->OnCloseStarted();
 }
 
-TabContents* WebIntentPickerCocoa::SetInlineDisposition(const GURL& url) {
-  return NULL;
+void WebIntentPickerCocoa::PerformDelayedLayout() {
+  // Check to see if a layout has already been scheduled.
+  if (weak_ptr_factory_.HasWeakPtrs())
+    return;
+
+  // Delay performing layout by a second so that all the animations from
+  // InfoBubbleWindow and origin updates from BaseBubbleController finish, so
+  // that we don't all race trying to change the frame's origin.
+  //
+  // Using MessageLoop is superior here to |-performSelector:| because it will
+  // not retain its target; if the child outlives its parent, zombies get left
+  // behind (http://crbug.com/59619). This will cancel the scheduled task if
+  // the controller get destroyed before the message
+  // can be delivered.
+  MessageLoop::current()->PostDelayedTask(FROM_HERE,
+      base::Bind(&WebIntentPickerCocoa::PerformLayout,
+                 weak_ptr_factory_.GetWeakPtr()),
+      100 /* milliseconds */);
 }
 
-WebIntentPickerCocoa::~WebIntentPickerCocoa() {
+void WebIntentPickerCocoa::PerformLayout() {
+  DCHECK(controller_);
+  // If the window is animating closed when this is called, the
+  // animation could be holding the last reference to |controller_|
+  // (and thus |this|).  Pin it until the task is completed.
+  scoped_nsobject<WebIntentBubbleController> keep_alive([controller_ retain]);
+  [controller_ performLayoutWithModel:model_];
+}
+
+void WebIntentPickerCocoa::OnModelChanged(WebIntentPickerModel* model) {
+  PerformDelayedLayout();
+}
+
+void WebIntentPickerCocoa::OnFaviconChanged(WebIntentPickerModel* model,
+                                            size_t index) {
+  // We don't handle individual icon changes - just redo the whole model.
+  PerformDelayedLayout();
+}
+
+void WebIntentPickerCocoa::OnInlineDisposition(WebIntentPickerModel* model) {
+  const WebIntentPickerModel::Item& item = model->GetItemAt(
+      model->inline_disposition_index());
+
+  content::WebContents* web_contents = content::WebContents::Create(
+      browser_->profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
+  inline_disposition_tab_contents_.reset(new TabContentsWrapper(web_contents));
+  inline_disposition_delegate_.reset(new InlineHtmlContentDelegate);
+  web_contents->SetDelegate(inline_disposition_delegate_.get());
+
+  inline_disposition_tab_contents_->web_contents()->GetController().LoadURL(
+      item.url,
+      content::Referrer(),
+      content::PAGE_TRANSITION_START_PAGE,
+      std::string());
+
+  [controller_ setInlineDispositionTabContents:
+      inline_disposition_tab_contents_.get()];
+  PerformDelayedLayout();
+
+  delegate_->OnInlineDispositionWebContentsCreated(web_contents);
 }
 
 void WebIntentPickerCocoa::OnCancelled() {
   DCHECK(delegate_);
-  delegate_->OnCancelled();
-  controller_ = NULL;  // Controller will be unusable soon, abandon.
+  if (!service_invoked)
+    delegate_->OnCancelled();
+  delegate_->OnClosing();
+  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
 void WebIntentPickerCocoa::OnServiceChosen(size_t index) {
   DCHECK(delegate_);
-  delegate_->OnServiceChosen(index);
+  const WebIntentPickerModel::Item& item = model_->GetItemAt(index);
+  service_invoked = true;
+  delegate_->OnServiceChosen(index, item.disposition);
 }
 
 void WebIntentPickerCocoa::set_controller(

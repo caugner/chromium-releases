@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "net/base/auth.h"
 #include "net/base/net_log_unittest.h"
 #include "net/http/http_network_session_peer.h"
@@ -56,9 +58,6 @@ class SpdyNetworkTransactionTest
   void EnableCompression(bool enabled) {
     spdy::SpdyFramer::set_enable_compression_default(enabled);
   }
-
-  class StartTransactionCallback;
-  class DeleteSessionCallback;
 
   // A helper class that handles all the initial npn/ssl setup.
   class NormalSpdyTransactionHelper {
@@ -122,12 +121,13 @@ class SpdyNetworkTransactionTest
       std::vector<std::string> next_protos;
       next_protos.push_back("http/1.1");
       next_protos.push_back("spdy/2");
+      next_protos.push_back("spdy/2.1");
 
       switch (test_type_) {
         case SPDYNPN:
           session_->http_server_properties()->SetAlternateProtocol(
               HostPortPair("www.google.com", 80), 443,
-              NPN_SPDY_2);
+              NPN_SPDY_21);
           HttpStreamFactory::set_use_alternate_protocols(true);
           HttpStreamFactory::set_next_protos(next_protos);
           break;
@@ -149,7 +149,7 @@ class SpdyNetworkTransactionTest
 
     // Start the transaction, read some data, finish.
     void RunDefaultTest() {
-      output_.rv = trans_->Start(&request_, &callback, log_);
+      output_.rv = trans_->Start(&request_, callback.callback(), log_);
 
       // We expect an IO Pending or some sort of error.
       EXPECT_LT(output_.rv, 0);
@@ -234,8 +234,9 @@ class SpdyNetworkTransactionTest
           new SSLSocketDataProvider(true, OK));
       if (test_type_ == SPDYNPN) {
         ssl_->next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-        ssl_->next_proto = "spdy/2";
+        ssl_->next_proto = "spdy/2.1";
         ssl_->was_npn_negotiated = true;
+        ssl_->protocol_negotiated = SSLClientSocket::kProtoSPDY21;
       }
       ssl_vector_.push_back(ssl_);
       if (test_type_ == SPDYNPN || test_type_ == SPDYSSL)
@@ -261,8 +262,9 @@ class SpdyNetworkTransactionTest
           new SSLSocketDataProvider(true, OK));
       if (test_type_ == SPDYNPN) {
         ssl_->next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-        ssl_->next_proto = "spdy/2";
+        ssl_->next_proto = "spdy/2.1";
         ssl_->was_npn_negotiated = true;
+        ssl_->protocol_negotiated = SSLClientSocket::kProtoSPDY21;
       }
       ssl_vector_.push_back(ssl_);
       if (test_type_ == SPDYNPN || test_type_ == SPDYSSL) {
@@ -323,7 +325,7 @@ class SpdyNetworkTransactionTest
     TransactionHelperResult output_;
     scoped_ptr<StaticSocketDataProvider> first_transaction_;
     SSLVector ssl_vector_;
-    TestOldCompletionCallback callback;
+    TestCompletionCallback callback;
     scoped_ptr<HttpNetworkTransaction> trans_;
     scoped_ptr<HttpNetworkTransaction> trans_http_;
     DataVector data_vector_;
@@ -407,9 +409,9 @@ class SpdyNetworkTransactionTest
 
     int bytes_read = 0;
     scoped_refptr<net::IOBufferWithSize> buf(new net::IOBufferWithSize(kSize));
-    TestOldCompletionCallback callback;
+    TestCompletionCallback callback;
     while (true) {
-      int rv = trans->Read(buf, kSize, &callback);
+      int rv = trans->Read(buf, kSize, callback.callback());
       if (rv == ERR_IO_PENDING) {
         // Multiple transactions may be in the data set.  Keep pulling off
         // reads until we complete our callback.
@@ -457,15 +459,17 @@ class SpdyNetworkTransactionTest
     HttpNetworkTransaction* trans = helper.trans();
 
     // Start the transaction with basic parameters.
-    TestOldCompletionCallback callback;
-    int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+    TestCompletionCallback callback;
+    int rv = trans->Start(
+        &CreateGetRequest(), callback.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
     rv = callback.WaitForResult();
 
     // Request the pushed path.
     scoped_ptr<HttpNetworkTransaction> trans2(
         new HttpNetworkTransaction(helper.session()));
-    rv = trans2->Start(&CreateGetPushRequest(), &callback, BoundNetLog());
+    rv = trans2->Start(
+        &CreateGetPushRequest(), callback.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
     MessageLoop::current()->RunAllPending();
 
@@ -495,6 +499,26 @@ class SpdyNetworkTransactionTest
     *push_response = *trans2->GetResponseInfo();
 
     VerifyStreamsClosed(helper);
+  }
+
+  static void DeleteSessionCallback(NormalSpdyTransactionHelper* helper,
+                                    int result) {
+    helper->ResetTrans();
+  }
+
+  static void StartTransactionCallback(
+      const scoped_refptr<HttpNetworkSession>& session,
+      int result) {
+    scoped_ptr<HttpNetworkTransaction> trans(
+        new HttpNetworkTransaction(session));
+    TestCompletionCallback callback;
+    HttpRequestInfo request;
+    request.method = "GET";
+    request.url = GURL("http://www.google.com/");
+    request.load_flags = 0;
+    int rv = trans->Start(&request, callback.callback(), BoundNetLog());
+    EXPECT_EQ(ERR_IO_PENDING, rv);
+    callback.WaitForResult();
   }
 
  private:
@@ -536,7 +560,7 @@ TEST_P(SpdyNetworkTransactionTest, Get) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -586,7 +610,7 @@ TEST_P(SpdyNetworkTransactionTest, GetAtEachPriority) {
       MockRead(true, 0, 0)  // EOF
     };
 
-    scoped_refptr<DelayedSocketData> data(
+    scoped_ptr<DelayedSocketData> data(
         new DelayedSocketData(1, reads, arraysize(reads),
                               writes, arraysize(writes)));
     HttpRequestInfo http_req = CreateGetRequest();
@@ -646,10 +670,10 @@ TEST_P(SpdyNetworkTransactionTest, ThreeGets) {
 
     MockRead(true, 0, 0),  // EOF
   };
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
-  scoped_refptr<OrderedSocketData> data_placeholder(
+  scoped_ptr<OrderedSocketData> data_placeholder(
       new OrderedSocketData(NULL, 0, NULL, 0));
 
   BoundNetLog log;
@@ -669,19 +693,19 @@ TEST_P(SpdyNetworkTransactionTest, ThreeGets) {
   scoped_ptr<HttpNetworkTransaction> trans3(
       new HttpNetworkTransaction(helper.session()));
 
-  TestOldCompletionCallback callback1;
-  TestOldCompletionCallback callback2;
-  TestOldCompletionCallback callback3;
+  TestCompletionCallback callback1;
+  TestCompletionCallback callback2;
+  TestCompletionCallback callback3;
 
   HttpRequestInfo httpreq1 = CreateGetRequest();
   HttpRequestInfo httpreq2 = CreateGetRequest();
   HttpRequestInfo httpreq3 = CreateGetRequest();
 
-  out.rv = trans1->Start(&httpreq1, &callback1, log);
+  out.rv = trans1->Start(&httpreq1, callback1.callback(), log);
   ASSERT_EQ(ERR_IO_PENDING, out.rv);
-  out.rv = trans2->Start(&httpreq2, &callback2, log);
+  out.rv = trans2->Start(&httpreq2, callback2.callback(), log);
   ASSERT_EQ(ERR_IO_PENDING, out.rv);
-  out.rv = trans3->Start(&httpreq3, &callback3, log);
+  out.rv = trans3->Start(&httpreq3, callback3.callback(), log);
   ASSERT_EQ(ERR_IO_PENDING, out.rv);
 
   out.rv = callback1.WaitForResult();
@@ -730,13 +754,13 @@ TEST_P(SpdyNetworkTransactionTest, TwoGetsLateBinding) {
     CreateMockRead(*fbody2),
     MockRead(true, 0, 0),  // EOF
   };
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
 
   MockConnect never_finishing_connect(false, ERR_IO_PENDING);
 
-  scoped_refptr<OrderedSocketData> data_placeholder(
+  scoped_ptr<OrderedSocketData> data_placeholder(
       new OrderedSocketData(NULL, 0, NULL, 0));
   data_placeholder->set_connect_data(never_finishing_connect);
 
@@ -754,15 +778,15 @@ TEST_P(SpdyNetworkTransactionTest, TwoGetsLateBinding) {
   scoped_ptr<HttpNetworkTransaction> trans2(
       new HttpNetworkTransaction(helper.session()));
 
-  TestOldCompletionCallback callback1;
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback1;
+  TestCompletionCallback callback2;
 
   HttpRequestInfo httpreq1 = CreateGetRequest();
   HttpRequestInfo httpreq2 = CreateGetRequest();
 
-  out.rv = trans1->Start(&httpreq1, &callback1, log);
+  out.rv = trans1->Start(&httpreq1, callback1.callback(), log);
   ASSERT_EQ(ERR_IO_PENDING, out.rv);
-  out.rv = trans2->Start(&httpreq2, &callback2, log);
+  out.rv = trans2->Start(&httpreq2, callback2.callback(), log);
   ASSERT_EQ(ERR_IO_PENDING, out.rv);
 
   out.rv = callback1.WaitForResult();
@@ -817,13 +841,13 @@ TEST_P(SpdyNetworkTransactionTest, TwoGetsLateBindingFromPreconnect) {
     CreateMockRead(*fbody2),
     MockRead(true, 0, 0),  // EOF
   };
-  scoped_refptr<OrderedSocketData> preconnect_data(
+  scoped_ptr<OrderedSocketData> preconnect_data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
 
   MockConnect never_finishing_connect(true, ERR_IO_PENDING);
 
-  scoped_refptr<OrderedSocketData> data_placeholder(
+  scoped_ptr<OrderedSocketData> data_placeholder(
       new OrderedSocketData(NULL, 0, NULL, 0));
   data_placeholder->set_connect_data(never_finishing_connect);
 
@@ -843,8 +867,8 @@ TEST_P(SpdyNetworkTransactionTest, TwoGetsLateBindingFromPreconnect) {
   scoped_ptr<HttpNetworkTransaction> trans2(
       new HttpNetworkTransaction(helper.session()));
 
-  TestOldCompletionCallback callback1;
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback1;
+  TestCompletionCallback callback2;
 
   HttpRequestInfo httpreq = CreateGetRequest();
 
@@ -858,11 +882,11 @@ TEST_P(SpdyNetworkTransactionTest, TwoGetsLateBindingFromPreconnect) {
   }
 
   http_stream_factory->PreconnectStreams(
-      1, httpreq, preconnect_ssl_config, preconnect_ssl_config, log);
+      1, httpreq, preconnect_ssl_config, preconnect_ssl_config);
 
-  out.rv = trans1->Start(&httpreq, &callback1, log);
+  out.rv = trans1->Start(&httpreq, callback1.callback(), log);
   ASSERT_EQ(ERR_IO_PENDING, out.rv);
-  out.rv = trans2->Start(&httpreq, &callback2, log);
+  out.rv = trans2->Start(&httpreq, callback2.callback(), log);
   ASSERT_EQ(ERR_IO_PENDING, out.rv);
 
   out.rv = callback1.WaitForResult();
@@ -944,10 +968,10 @@ TEST_P(SpdyNetworkTransactionTest, ThreeGetsWithMaxConcurrent) {
     MockRead(true, 0, 0),  // EOF
   };
 
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
-  scoped_refptr<OrderedSocketData> data_placeholder(
+  scoped_ptr<OrderedSocketData> data_placeholder(
       new OrderedSocketData(NULL, 0, NULL, 0));
 
   BoundNetLog log;
@@ -968,24 +992,24 @@ TEST_P(SpdyNetworkTransactionTest, ThreeGetsWithMaxConcurrent) {
     scoped_ptr<HttpNetworkTransaction> trans3(
         new HttpNetworkTransaction(helper.session()));
 
-    TestOldCompletionCallback callback1;
-    TestOldCompletionCallback callback2;
-    TestOldCompletionCallback callback3;
+    TestCompletionCallback callback1;
+    TestCompletionCallback callback2;
+    TestCompletionCallback callback3;
 
     HttpRequestInfo httpreq1 = CreateGetRequest();
     HttpRequestInfo httpreq2 = CreateGetRequest();
     HttpRequestInfo httpreq3 = CreateGetRequest();
 
-    out.rv = trans1->Start(&httpreq1, &callback1, log);
+    out.rv = trans1->Start(&httpreq1, callback1.callback(), log);
     ASSERT_EQ(out.rv, ERR_IO_PENDING);
     // run transaction 1 through quickly to force a read of our SETTINGS
     // frame
     out.rv = callback1.WaitForResult();
     ASSERT_EQ(OK, out.rv);
 
-    out.rv = trans2->Start(&httpreq2, &callback2, log);
+    out.rv = trans2->Start(&httpreq2, callback2.callback(), log);
     ASSERT_EQ(out.rv, ERR_IO_PENDING);
-    out.rv = trans3->Start(&httpreq3, &callback3, log);
+    out.rv = trans3->Start(&httpreq3, callback3.callback(), log);
     ASSERT_EQ(out.rv, ERR_IO_PENDING);
     out.rv = callback2.WaitForResult();
     ASSERT_EQ(OK, out.rv);
@@ -1084,10 +1108,10 @@ TEST_P(SpdyNetworkTransactionTest, FourGetsWithMaxConcurrentPriority) {
     MockRead(true, 0, 0),  // EOF
   };
 
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
         writes, arraysize(writes)));
-  scoped_refptr<OrderedSocketData> data_placeholder(
+  scoped_ptr<OrderedSocketData> data_placeholder(
       new OrderedSocketData(NULL, 0, NULL, 0));
 
   BoundNetLog log;
@@ -1110,10 +1134,10 @@ TEST_P(SpdyNetworkTransactionTest, FourGetsWithMaxConcurrentPriority) {
   scoped_ptr<HttpNetworkTransaction> trans4(
       new HttpNetworkTransaction(helper.session()));
 
-  TestOldCompletionCallback callback1;
-  TestOldCompletionCallback callback2;
-  TestOldCompletionCallback callback3;
-  TestOldCompletionCallback callback4;
+  TestCompletionCallback callback1;
+  TestCompletionCallback callback2;
+  TestCompletionCallback callback3;
+  TestCompletionCallback callback4;
 
   HttpRequestInfo httpreq1 = CreateGetRequest();
   HttpRequestInfo httpreq2 = CreateGetRequest();
@@ -1121,18 +1145,18 @@ TEST_P(SpdyNetworkTransactionTest, FourGetsWithMaxConcurrentPriority) {
   HttpRequestInfo httpreq4 = CreateGetRequest();
   httpreq4.priority = HIGHEST;
 
-  out.rv = trans1->Start(&httpreq1, &callback1, log);
+  out.rv = trans1->Start(&httpreq1, callback1.callback(), log);
   ASSERT_EQ(ERR_IO_PENDING, out.rv);
   // run transaction 1 through quickly to force a read of our SETTINGS
   // frame
   out.rv = callback1.WaitForResult();
   ASSERT_EQ(OK, out.rv);
 
-  out.rv = trans2->Start(&httpreq2, &callback2, log);
+  out.rv = trans2->Start(&httpreq2, callback2.callback(), log);
   ASSERT_EQ(ERR_IO_PENDING, out.rv);
-  out.rv = trans3->Start(&httpreq3, &callback3, log);
+  out.rv = trans3->Start(&httpreq3, callback3.callback(), log);
   ASSERT_EQ(ERR_IO_PENDING, out.rv);
-  out.rv = trans4->Start(&httpreq4, &callback4, log);
+  out.rv = trans4->Start(&httpreq4, callback4.callback(), log);
   ASSERT_EQ(ERR_IO_PENDING, out.rv);
 
   out.rv = callback2.WaitForResult();
@@ -1221,10 +1245,10 @@ TEST_P(SpdyNetworkTransactionTest, ThreeGetsWithMaxConcurrentDelete) {
     MockRead(true, 0, 0),  // EOF
   };
 
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
         writes, arraysize(writes)));
-  scoped_refptr<OrderedSocketData> data_placeholder(
+  scoped_ptr<OrderedSocketData> data_placeholder(
       new OrderedSocketData(NULL, 0, NULL, 0));
 
   BoundNetLog log;
@@ -1244,24 +1268,24 @@ TEST_P(SpdyNetworkTransactionTest, ThreeGetsWithMaxConcurrentDelete) {
   scoped_ptr<HttpNetworkTransaction> trans3(
       new HttpNetworkTransaction(helper.session()));
 
-  TestOldCompletionCallback callback1;
-  TestOldCompletionCallback callback2;
-  TestOldCompletionCallback callback3;
+  TestCompletionCallback callback1;
+  TestCompletionCallback callback2;
+  TestCompletionCallback callback3;
 
   HttpRequestInfo httpreq1 = CreateGetRequest();
   HttpRequestInfo httpreq2 = CreateGetRequest();
   HttpRequestInfo httpreq3 = CreateGetRequest();
 
-  out.rv = trans1->Start(&httpreq1, &callback1, log);
+  out.rv = trans1->Start(&httpreq1, callback1.callback(), log);
   ASSERT_EQ(out.rv, ERR_IO_PENDING);
   // run transaction 1 through quickly to force a read of our SETTINGS
   // frame
   out.rv = callback1.WaitForResult();
   ASSERT_EQ(OK, out.rv);
 
-  out.rv = trans2->Start(&httpreq2, &callback2, log);
+  out.rv = trans2->Start(&httpreq2, callback2.callback(), log);
   ASSERT_EQ(out.rv, ERR_IO_PENDING);
-  out.rv = trans3->Start(&httpreq3, &callback3, log);
+  out.rv = trans3->Start(&httpreq3, callback3.callback(), log);
   delete trans3.release();
   ASSERT_EQ(out.rv, ERR_IO_PENDING);
   out.rv = callback2.WaitForResult();
@@ -1294,19 +1318,28 @@ TEST_P(SpdyNetworkTransactionTest, ThreeGetsWithMaxConcurrentDelete) {
 
 // The KillerCallback will delete the transaction on error as part of the
 // callback.
-class KillerCallback : public TestOldCompletionCallback {
+class KillerCallback : public TestCompletionCallbackBase {
  public:
   explicit KillerCallback(HttpNetworkTransaction* transaction)
-      : transaction_(transaction) {}
-
-  virtual void RunWithParams(const Tuple1<int>& params) {
-    if (params.a < 0)
-      delete transaction_;
-    TestOldCompletionCallback::RunWithParams(params);
+      : transaction_(transaction),
+        ALLOW_THIS_IN_INITIALIZER_LIST(callback_(
+            base::Bind(&KillerCallback::OnComplete, base::Unretained(this)))) {
   }
 
+  virtual ~KillerCallback() {}
+
+  const CompletionCallback& callback() const { return callback_; }
+
  private:
+  void OnComplete(int result) {
+    if (result < 0)
+      delete transaction_;
+
+    SetResult(result);
+  }
+
   HttpNetworkTransaction* transaction_;
+  CompletionCallback callback_;
 };
 
 // Similar to ThreeGetsMaxConcurrrentDelete above, however, this test
@@ -1342,10 +1375,10 @@ TEST_P(SpdyNetworkTransactionTest, ThreeGetsWithMaxConcurrentSocketClose) {
     MockRead(true, ERR_CONNECTION_RESET, 0),  // Abort!
   };
 
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
         writes, arraysize(writes)));
-  scoped_refptr<OrderedSocketData> data_placeholder(
+  scoped_ptr<OrderedSocketData> data_placeholder(
       new OrderedSocketData(NULL, 0, NULL, 0));
 
   BoundNetLog log;
@@ -1362,24 +1395,24 @@ TEST_P(SpdyNetworkTransactionTest, ThreeGetsWithMaxConcurrentSocketClose) {
   HttpNetworkTransaction trans2(helper.session());
   HttpNetworkTransaction* trans3(new HttpNetworkTransaction(helper.session()));
 
-  TestOldCompletionCallback callback1;
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback1;
+  TestCompletionCallback callback2;
   KillerCallback callback3(trans3);
 
   HttpRequestInfo httpreq1 = CreateGetRequest();
   HttpRequestInfo httpreq2 = CreateGetRequest();
   HttpRequestInfo httpreq3 = CreateGetRequest();
 
-  out.rv = trans1.Start(&httpreq1, &callback1, log);
+  out.rv = trans1.Start(&httpreq1, callback1.callback(), log);
   ASSERT_EQ(out.rv, ERR_IO_PENDING);
   // run transaction 1 through quickly to force a read of our SETTINGS
   // frame
   out.rv = callback1.WaitForResult();
   ASSERT_EQ(OK, out.rv);
 
-  out.rv = trans2.Start(&httpreq2, &callback2, log);
+  out.rv = trans2.Start(&httpreq2, callback2.callback(), log);
   ASSERT_EQ(out.rv, ERR_IO_PENDING);
-  out.rv = trans3->Start(&httpreq3, &callback3, log);
+  out.rv = trans3->Start(&httpreq3, callback3.callback(), log);
   ASSERT_EQ(out.rv, ERR_IO_PENDING);
   out.rv = callback3.WaitForResult();
   ASSERT_EQ(ERR_ABORTED, out.rv);
@@ -1464,7 +1497,7 @@ TEST_P(SpdyNetworkTransactionTest, Put) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(request,
@@ -1535,7 +1568,7 @@ TEST_P(SpdyNetworkTransactionTest, Head) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(request,
@@ -1563,7 +1596,7 @@ TEST_P(SpdyNetworkTransactionTest, Post) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(2, reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreatePostRequest(),
@@ -1595,7 +1628,7 @@ TEST_P(SpdyNetworkTransactionTest, ChunkedPost) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(2, reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateChunkedPostRequest(),
@@ -1633,7 +1666,7 @@ TEST_P(SpdyNetworkTransactionTest, NullPost) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
 
@@ -1677,7 +1710,7 @@ TEST_P(SpdyNetworkTransactionTest, EmptyPost) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
 
@@ -1714,7 +1747,7 @@ TEST_P(SpdyNetworkTransactionTest, PostWithEarlySynReply) {
     MockRead(false, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(0, reads, arraysize(reads), NULL, 0));
   NormalSpdyTransactionHelper helper(request,
                                      BoundNetLog(), GetParam());
@@ -1756,8 +1789,9 @@ TEST_P(SpdyNetworkTransactionTest, SocketWriteReturnsZero) {
   helper.AddDeterministicData(data.get());
   HttpNetworkTransaction* trans = helper.trans();
 
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   data->SetStop(2);
@@ -1777,7 +1811,7 @@ TEST_P(SpdyNetworkTransactionTest, ResponseWithoutSynReply) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads), NULL, 0));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
                                      BoundNetLog(), GetParam());
@@ -1801,7 +1835,7 @@ TEST_P(SpdyNetworkTransactionTest, ResponseWithTwoSynReplies) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
 
@@ -1812,8 +1846,8 @@ TEST_P(SpdyNetworkTransactionTest, ResponseWithTwoSynReplies) {
 
   HttpNetworkTransaction* trans = helper.trans();
 
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&helper.request(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(&helper.request(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -1851,7 +1885,7 @@ TEST_P(SpdyNetworkTransactionTest, ResponseWithTwoSynReplies) {
 // limitations as described above and it's not deterministic, tests may
 // fail under specific circumstances.
 TEST_P(SpdyNetworkTransactionTest, WindowUpdateReceived) {
-  SpdySession::set_flow_control(true);
+  SpdySession::set_use_flow_control(SpdySession::kEnableFlowControl);
 
   static int kFrameCount = 2;
   scoped_ptr<std::string> content(
@@ -1889,7 +1923,7 @@ TEST_P(SpdyNetworkTransactionTest, WindowUpdateReceived) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(0, reads, arraysize(reads),
                             writes, arraysize(writes)));
 
@@ -1907,8 +1941,8 @@ TEST_P(SpdyNetworkTransactionTest, WindowUpdateReceived) {
 
   HttpNetworkTransaction* trans = helper.trans();
 
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&helper.request(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(&helper.request(), callback.callback(), BoundNetLog());
 
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
@@ -1922,13 +1956,14 @@ TEST_P(SpdyNetworkTransactionTest, WindowUpdateReceived) {
             kMaxSpdyFrameChunkSize * kFrameCount,
             stream->stream()->send_window_size());
   helper.VerifyDataConsumed();
-  SpdySession::set_flow_control(false);
+
+  SpdySession::set_use_flow_control(SpdySession::kFlowControlBasedOnNPN);
 }
 
 // Test that received data frames and sent WINDOW_UPDATE frames change
 // the recv_window_size_ correctly.
 TEST_P(SpdyNetworkTransactionTest, WindowUpdateSent) {
-  SpdySession::set_flow_control(true);
+  SpdySession::set_use_flow_control(SpdySession::kEnableFlowControl);
 
   scoped_ptr<spdy::SpdyFrame> req(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
   scoped_ptr<spdy::SpdyFrame> window_update(
@@ -1954,7 +1989,7 @@ TEST_P(SpdyNetworkTransactionTest, WindowUpdateSent) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
 
@@ -1964,8 +1999,8 @@ TEST_P(SpdyNetworkTransactionTest, WindowUpdateSent) {
   helper.RunPreTestSetup();
   HttpNetworkTransaction* trans = helper.trans();
 
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&helper.request(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(&helper.request(), callback.callback(), BoundNetLog());
 
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
@@ -1989,7 +2024,7 @@ TEST_P(SpdyNetworkTransactionTest, WindowUpdateSent) {
   // Issue a read which will cause a WINDOW_UPDATE to be sent and window
   // size increased to default.
   scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(kUploadDataSize));
-  rv = trans->Read(buf, kUploadDataSize, NULL);
+  rv = trans->Read(buf, kUploadDataSize, CompletionCallback());
   EXPECT_EQ(kUploadDataSize, rv);
   std::string content(buf->data(), buf->data()+kUploadDataSize);
   EXPECT_STREQ(kUploadData, content.c_str());
@@ -2005,13 +2040,14 @@ TEST_P(SpdyNetworkTransactionTest, WindowUpdateSent) {
   data->CompleteRead();
 
   helper.VerifyDataConsumed();
-  SpdySession::set_flow_control(false);
+
+  SpdySession::set_use_flow_control(SpdySession::kFlowControlBasedOnNPN);
 }
 
 // Test that WINDOW_UPDATE frame causing overflow is handled correctly.  We
 // use the same trick as in the above test to enforce our scenario.
 TEST_P(SpdyNetworkTransactionTest, WindowUpdateOverflow) {
-  SpdySession::set_flow_control(true);
+  SpdySession::set_use_flow_control(SpdySession::kEnableFlowControl);
 
   // number of full frames we hope to write (but will not, used to
   // set content-length header correctly)
@@ -2051,7 +2087,7 @@ TEST_P(SpdyNetworkTransactionTest, WindowUpdateOverflow) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(0, reads, arraysize(reads),
                             writes, arraysize(writes)));
 
@@ -2070,8 +2106,8 @@ TEST_P(SpdyNetworkTransactionTest, WindowUpdateOverflow) {
 
   HttpNetworkTransaction* trans = helper.trans();
 
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&helper.request(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(&helper.request(), callback.callback(), BoundNetLog());
 
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
@@ -2084,7 +2120,7 @@ TEST_P(SpdyNetworkTransactionTest, WindowUpdateOverflow) {
   helper.session()->spdy_session_pool()->CloseAllSessions();
   helper.VerifyDataConsumed();
 
-  SpdySession::set_flow_control(false);
+  SpdySession::set_use_flow_control(SpdySession::kFlowControlBasedOnNPN);
 }
 
 // Test that after hitting a send window size of 0, the write process
@@ -2103,7 +2139,7 @@ TEST_P(SpdyNetworkTransactionTest, WindowUpdateOverflow) {
 // After that, next read is artifically enforced, which causes a
 // WINDOW_UPDATE to be read and I/O process resumes.
 TEST_P(SpdyNetworkTransactionTest, FlowControlStallResume) {
-  SpdySession::set_flow_control(true);
+  SpdySession::set_use_flow_control(SpdySession::kEnableFlowControl);
 
   // Number of frames we need to send to zero out the window size: data
   // frames plus SYN_STREAM plus the last data frame; also we need another
@@ -2159,7 +2195,7 @@ TEST_P(SpdyNetworkTransactionTest, FlowControlStallResume) {
 
   // Force all writes to happen before any read, last write will not
   // actually queue a frame, due to window size being 0.
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(nwrites, reads, arraysize(reads),
                             writes.get(), nwrites));
 
@@ -2178,8 +2214,8 @@ TEST_P(SpdyNetworkTransactionTest, FlowControlStallResume) {
 
   HttpNetworkTransaction* trans = helper.trans();
 
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&helper.request(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(&helper.request(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   MessageLoop::current()->RunAllPending(); // Write as much as we can.
@@ -2194,7 +2230,7 @@ TEST_P(SpdyNetworkTransactionTest, FlowControlStallResume) {
   rv = callback.WaitForResult();
   helper.VerifyDataConsumed();
 
-  SpdySession::set_flow_control(false);
+  SpdySession::set_use_flow_control(SpdySession::kFlowControlBasedOnNPN);
 }
 
 TEST_P(SpdyNetworkTransactionTest, CancelledTransaction) {
@@ -2223,8 +2259,9 @@ TEST_P(SpdyNetworkTransactionTest, CancelledTransaction) {
   helper.AddData(&data);
   HttpNetworkTransaction* trans = helper.trans();
 
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   helper.ResetTrans();  // Cancel the transaction.
 
@@ -2262,9 +2299,10 @@ TEST_P(SpdyNetworkTransactionTest, CancelledTransactionSendRst) {
   helper.AddDeterministicData(data.get());
   HttpNetworkTransaction* trans = helper.trans();
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   data->SetStop(2);
@@ -2275,33 +2313,6 @@ TEST_P(SpdyNetworkTransactionTest, CancelledTransactionSendRst) {
 
   helper.VerifyDataConsumed();
 }
-
-class SpdyNetworkTransactionTest::StartTransactionCallback
-    : public CallbackRunner< Tuple1<int> > {
- public:
-  explicit StartTransactionCallback(
-      const scoped_refptr<HttpNetworkSession>& session,
-      NormalSpdyTransactionHelper& helper)
-      : session_(session), helper_(helper) {}
-
-  // We try to start another transaction, which should succeed.
-  virtual void RunWithParams(const Tuple1<int>& params) {
-    scoped_ptr<HttpNetworkTransaction> trans(
-        new HttpNetworkTransaction(session_));
-    TestOldCompletionCallback callback;
-    HttpRequestInfo request;
-    request.method = "GET";
-    request.url = GURL("http://www.google.com/");
-    request.load_flags = 0;
-    int rv = trans->Start(&request, &callback, BoundNetLog());
-    EXPECT_EQ(ERR_IO_PENDING, rv);
-    rv = callback.WaitForResult();
-  }
-
- private:
-  const scoped_refptr<HttpNetworkSession>& session_;
-  NormalSpdyTransactionHelper& helper_;
-};
 
 // Verify that the client can correctly deal with the user callback attempting
 // to start another transaction on a session that is closing down. See
@@ -2334,10 +2345,10 @@ TEST_P(SpdyNetworkTransactionTest, StartTransactionOnReadCallback) {
     MockRead(true, 0, 0, 3),  // EOF
   };
 
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
-  scoped_refptr<DelayedSocketData> data2(
+  scoped_ptr<DelayedSocketData> data2(
       new DelayedSocketData(1, reads2, arraysize(reads2),
                             writes2, arraysize(writes2)));
 
@@ -2349,36 +2360,23 @@ TEST_P(SpdyNetworkTransactionTest, StartTransactionOnReadCallback) {
   HttpNetworkTransaction* trans = helper.trans();
 
   // Start the transaction with basic parameters.
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&helper.request(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(&helper.request(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
 
-  StartTransactionCallback callback2(helper.session(), helper);
   const int kSize = 3000;
   scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(kSize));
-  rv = trans->Read(buf, kSize, &callback2);
+  rv = trans->Read(
+      buf, kSize,
+      base::Bind(&SpdyNetworkTransactionTest::StartTransactionCallback,
+                 helper.session()));
   // This forces an err_IO_pending, which sets the callback.
   data->CompleteRead();
   // This finishes the read.
   data->CompleteRead();
   helper.VerifyDataConsumed();
 }
-
-class SpdyNetworkTransactionTest::DeleteSessionCallback
-    : public CallbackRunner< Tuple1<int> > {
- public:
-  explicit DeleteSessionCallback(NormalSpdyTransactionHelper& helper) :
-      helper_(helper) {}
-
-  // We kill the transaction, which deletes the session and stream.
-  virtual void RunWithParams(const Tuple1<int>& params) {
-    helper_.ResetTrans();
-  }
-
- private:
-  NormalSpdyTransactionHelper& helper_;
-};
 
 // Verify that the client can correctly deal with the user callback deleting the
 // transaction. Failures will usually be valgrind errors. See
@@ -2396,7 +2394,7 @@ TEST_P(SpdyNetworkTransactionTest, DeleteSessionOnReadCallback) {
     MockRead(true, 0, 0, 5),  // EOF
   };
 
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
 
@@ -2407,17 +2405,19 @@ TEST_P(SpdyNetworkTransactionTest, DeleteSessionOnReadCallback) {
   HttpNetworkTransaction* trans = helper.trans();
 
   // Start the transaction with basic parameters.
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&helper.request(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(&helper.request(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
 
   // Setup a user callback which will delete the session, and clear out the
   // memory holding the stream object. Note that the callback deletes trans.
-  DeleteSessionCallback callback2(helper);
   const int kSize = 3000;
   scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(kSize));
-  rv = trans->Read(buf, kSize, &callback2);
+  rv = trans->Read(
+      buf, kSize,
+      base::Bind(&SpdyNetworkTransactionTest::DeleteSessionCallback,
+                 base::Unretained(&helper)));
   ASSERT_EQ(ERR_IO_PENDING, rv);
   data->CompleteRead();
 
@@ -2490,10 +2490,10 @@ TEST_P(SpdyNetworkTransactionTest, RedirectGetRequest) {
     CreateMockRead(*body2, 3),
     MockRead(true, 0, 0, 4)  // EOF
   };
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
-  scoped_refptr<OrderedSocketData> data2(
+  scoped_ptr<OrderedSocketData> data2(
       new OrderedSocketData(reads2, arraysize(reads2),
                             writes2, arraysize(writes2)));
 
@@ -2616,10 +2616,10 @@ TEST_P(SpdyNetworkTransactionTest, RedirectServerPush) {
     CreateMockRead(*body2, 3),
     MockRead(true, 0, 0, 5)  // EOF
   };
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
-  scoped_refptr<OrderedSocketData> data2(
+  scoped_ptr<OrderedSocketData> data2(
       new OrderedSocketData(reads2, arraysize(reads2),
                             writes2, arraysize(writes2)));
 
@@ -2703,7 +2703,7 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushSingleDataFrame) {
   HttpResponseInfo response;
   HttpResponseInfo response2;
   std::string expected_push_result("pushed");
-  scoped_refptr<OrderedSocketData> data(new OrderedSocketData(
+  scoped_ptr<OrderedSocketData> data(new OrderedSocketData(
       reads,
       arraysize(reads),
       writes,
@@ -2756,7 +2756,7 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushSingleDataFrame2) {
   HttpResponseInfo response;
   HttpResponseInfo response2;
   std::string expected_push_result("pushed");
-  scoped_refptr<OrderedSocketData> data(new OrderedSocketData(
+  scoped_ptr<OrderedSocketData> data(new OrderedSocketData(
       reads,
       arraysize(reads),
       writes,
@@ -2802,7 +2802,7 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushServerAborted) {
     MockRead(true, ERR_IO_PENDING, 6),  // Force a pause
   };
 
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -2814,8 +2814,9 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushServerAborted) {
   HttpNetworkTransaction* trans = helper.trans();
 
   // Start the transaction with basic parameters.
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -2883,7 +2884,7 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushDuplicate) {
   HttpResponseInfo response;
   HttpResponseInfo response2;
   std::string expected_push_result("pushed");
-  scoped_refptr<OrderedSocketData> data(new OrderedSocketData(
+  scoped_ptr<OrderedSocketData> data(new OrderedSocketData(
       reads,
       arraysize(reads),
       writes,
@@ -2946,7 +2947,7 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushMultipleDataFrame) {
   HttpResponseInfo response;
   HttpResponseInfo response2;
   std::string expected_push_result("pushed my darling hello my baby");
-  scoped_refptr<OrderedSocketData> data(new OrderedSocketData(
+  scoped_ptr<OrderedSocketData> data(new OrderedSocketData(
       reads,
       arraysize(reads),
       writes,
@@ -2966,6 +2967,8 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushMultipleDataFrame) {
 }
 
 TEST_P(SpdyNetworkTransactionTest, ServerPushMultipleDataFrameInterrupted) {
+  SpdySession::set_use_flow_control(SpdySession::kDisableFlowControl);
+
   static const unsigned char kPushBodyFrame1[] = {
     0x00, 0x00, 0x00, 0x02,                                      // header, ID
     0x01, 0x00, 0x00, 0x1F,                                      // FIN, length
@@ -3010,7 +3013,7 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushMultipleDataFrameInterrupted) {
   HttpResponseInfo response;
   HttpResponseInfo response2;
   std::string expected_push_result("pushed my darling hello my baby");
-  scoped_refptr<OrderedSocketData> data(new OrderedSocketData(
+  scoped_ptr<OrderedSocketData> data(new OrderedSocketData(
       reads,
       arraysize(reads),
       writes,
@@ -3027,6 +3030,8 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushMultipleDataFrameInterrupted) {
   // Verify the pushed stream.
   EXPECT_TRUE(response2.headers != NULL);
   EXPECT_EQ("HTTP/1.1 200 OK", response2.headers->GetStatusLine());
+
+  SpdySession::set_use_flow_control(SpdySession::kFlowControlBasedOnNPN);
 }
 
 TEST_P(SpdyNetworkTransactionTest, ServerPushInvalidAssociatedStreamID0) {
@@ -3056,7 +3061,7 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushInvalidAssociatedStreamID0) {
     MockRead(true, ERR_IO_PENDING, 5)  // Force a pause
   };
 
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -3068,8 +3073,9 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushInvalidAssociatedStreamID0) {
   HttpNetworkTransaction* trans = helper.trans();
 
   // Start the transaction with basic parameters.
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -3117,7 +3123,7 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushInvalidAssociatedStreamID9) {
     MockRead(true, ERR_IO_PENDING, 5),  // Force a pause
   };
 
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -3129,8 +3135,9 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushInvalidAssociatedStreamID9) {
   HttpNetworkTransaction* trans = helper.trans();
 
   // Start the transaction with basic parameters.
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -3174,7 +3181,7 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushNoURL) {
     MockRead(true, ERR_IO_PENDING, 5)  // Force a pause
   };
 
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -3186,8 +3193,9 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushNoURL) {
   HttpNetworkTransaction* trans = helper.trans();
 
   // Start the transaction with basic parameters.
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -3262,7 +3270,7 @@ TEST_P(SpdyNetworkTransactionTest, SynReplyHeaders) {
       MockRead(true, 0, 0)  // EOF
     };
 
-    scoped_refptr<DelayedSocketData> data(
+    scoped_ptr<DelayedSocketData> data(
         new DelayedSocketData(1, reads, arraysize(reads),
                               writes, arraysize(writes)));
     NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -3411,7 +3419,7 @@ TEST_P(SpdyNetworkTransactionTest, SynReplyHeadersVary) {
       request.extra_headers.SetHeader(header_key, header_value);
     }
 
-    scoped_refptr<DelayedSocketData> data(
+    scoped_ptr<DelayedSocketData> data(
         new DelayedSocketData(1, reads, arraysize(reads),
                               writes, arraysize(writes)));
     NormalSpdyTransactionHelper helper(request,
@@ -3517,7 +3525,7 @@ TEST_P(SpdyNetworkTransactionTest, InvalidSynReply) {
       MockRead(true, 0, 0)  // EOF
     };
 
-    scoped_refptr<DelayedSocketData> data(
+    scoped_ptr<DelayedSocketData> data(
         new DelayedSocketData(1, reads, arraysize(reads),
                               writes, arraysize(writes)));
     NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -3556,7 +3564,7 @@ TEST_P(SpdyNetworkTransactionTest, CorruptFrameSessionError) {
       MockRead(true, 0, 0)  // EOF
     };
 
-    scoped_refptr<DelayedSocketData> data(
+    scoped_ptr<DelayedSocketData> data(
         new DelayedSocketData(1, reads, arraysize(reads),
                               writes, arraysize(writes)));
     NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -3577,7 +3585,7 @@ TEST_P(SpdyNetworkTransactionTest, WriteError) {
     MockWrite(true, ERR_FAILED),
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(2, NULL, 0,
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -3603,7 +3611,7 @@ TEST_P(SpdyNetworkTransactionTest, PartialWrite) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(kChunks, reads, arraysize(reads),
                             writes.get(), kChunks));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -3627,18 +3635,15 @@ TEST_P(SpdyNetworkTransactionTest, DecompressFailureOnSynReply) {
       ConstructSpdyRstStream(1, spdy::PROTOCOL_ERROR));
   MockWrite writes[] = {
     CreateMockWrite(*compressed),
-    CreateMockWrite(*rst),
   };
 
   scoped_ptr<spdy::SpdyFrame> resp(ConstructSpdyGetSynReply(NULL, 0, 1));
   scoped_ptr<spdy::SpdyFrame> body(ConstructSpdyBodyFrame(1, true));
   MockRead reads[] = {
     CreateMockRead(*resp),
-    CreateMockRead(*body),
-    MockRead(true, 0, 0)
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -3670,7 +3675,7 @@ TEST_P(SpdyNetworkTransactionTest, NetLog) {
 
   net::CapturingBoundNetLog log(net::CapturingNetLog::kUnbounded);
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateGetRequestWithUserAgent(),
@@ -3741,6 +3746,8 @@ TEST_P(SpdyNetworkTransactionTest, NetLog) {
 // on the network, but issued a Read for only 5 of those bytes) that the data
 // flow still works correctly.
 TEST_P(SpdyNetworkTransactionTest, BufferFull) {
+  SpdySession::set_use_flow_control(SpdySession::kDisableFlowControl);
+
   spdy::SpdyFramer framer;
 
   scoped_ptr<spdy::SpdyFrame> req(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
@@ -3772,19 +3779,20 @@ TEST_P(SpdyNetworkTransactionTest, BufferFull) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
 
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
                                      BoundNetLog(), GetParam());
   helper.RunPreTestSetup();
   helper.AddData(data.get());
   HttpNetworkTransaction* trans = helper.trans();
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   TransactionHelperResult out = helper.output();
@@ -3798,14 +3806,14 @@ TEST_P(SpdyNetworkTransactionTest, BufferFull) {
   out.response_info = *response;  // Make a copy so we can verify.
 
   // Read Data
-  TestOldCompletionCallback read_callback;
+  TestCompletionCallback read_callback;
 
   std::string content;
   do {
     // Read small chunks at a time.
     const int kSmallReadSize = 3;
     scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(kSmallReadSize));
-    rv = trans->Read(buf, kSmallReadSize, &read_callback);
+    rv = trans->Read(buf, kSmallReadSize, read_callback.callback());
     if (rv == net::ERR_IO_PENDING) {
       data->CompleteRead();
       rv = read_callback.WaitForResult();
@@ -3829,12 +3837,16 @@ TEST_P(SpdyNetworkTransactionTest, BufferFull) {
   EXPECT_EQ(OK, out.rv);
   EXPECT_EQ("HTTP/1.1 200 OK", out.status_line);
   EXPECT_EQ("goodbye world", out.response_data);
+
+  SpdySession::set_use_flow_control(SpdySession::kFlowControlBasedOnNPN);
 }
 
 // Verify that basic buffering works; when multiple data frames arrive
 // at the same time, ensure that we don't notify a read completion for
 // each data frame individually.
 TEST_P(SpdyNetworkTransactionTest, Buffering) {
+  SpdySession::set_use_flow_control(SpdySession::kDisableFlowControl);
+
   spdy::SpdyFramer framer;
 
   scoped_ptr<spdy::SpdyFrame> req(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
@@ -3864,7 +3876,7 @@ TEST_P(SpdyNetworkTransactionTest, Buffering) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
 
@@ -3874,8 +3886,9 @@ TEST_P(SpdyNetworkTransactionTest, Buffering) {
   helper.AddData(data.get());
   HttpNetworkTransaction* trans = helper.trans();
 
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   TransactionHelperResult out = helper.output();
@@ -3889,7 +3902,7 @@ TEST_P(SpdyNetworkTransactionTest, Buffering) {
   out.response_info = *response;  // Make a copy so we can verify.
 
   // Read Data
-  TestOldCompletionCallback read_callback;
+  TestCompletionCallback read_callback;
 
   std::string content;
   int reads_completed = 0;
@@ -3897,7 +3910,7 @@ TEST_P(SpdyNetworkTransactionTest, Buffering) {
     // Read small chunks at a time.
     const int kSmallReadSize = 14;
     scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(kSmallReadSize));
-    rv = trans->Read(buf, kSmallReadSize, &read_callback);
+    rv = trans->Read(buf, kSmallReadSize, read_callback.callback());
     if (rv == net::ERR_IO_PENDING) {
       data->CompleteRead();
       rv = read_callback.WaitForResult();
@@ -3925,6 +3938,8 @@ TEST_P(SpdyNetworkTransactionTest, Buffering) {
   EXPECT_EQ(OK, out.rv);
   EXPECT_EQ("HTTP/1.1 200 OK", out.status_line);
   EXPECT_EQ("messagemessagemessagemessage", out.response_data);
+
+  SpdySession::set_use_flow_control(SpdySession::kFlowControlBasedOnNPN);
 }
 
 // Verify the case where we buffer data but read it after it has been buffered.
@@ -3959,7 +3974,7 @@ TEST_P(SpdyNetworkTransactionTest, BufferedAll) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
 
@@ -3969,8 +3984,9 @@ TEST_P(SpdyNetworkTransactionTest, BufferedAll) {
   helper.AddData(data.get());
   HttpNetworkTransaction* trans = helper.trans();
 
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   TransactionHelperResult out = helper.output();
@@ -3984,7 +4000,7 @@ TEST_P(SpdyNetworkTransactionTest, BufferedAll) {
   out.response_info = *response;  // Make a copy so we can verify.
 
   // Read Data
-  TestOldCompletionCallback read_callback;
+  TestCompletionCallback read_callback;
 
   std::string content;
   int reads_completed = 0;
@@ -3992,7 +4008,7 @@ TEST_P(SpdyNetworkTransactionTest, BufferedAll) {
     // Read small chunks at a time.
     const int kSmallReadSize = 14;
     scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(kSmallReadSize));
-    rv = trans->Read(buf, kSmallReadSize, &read_callback);
+    rv = trans->Read(buf, kSmallReadSize, read_callback.callback());
     if (rv > 0) {
       EXPECT_EQ(kSmallReadSize, rv);
       content.append(buf->data(), rv);
@@ -4047,7 +4063,7 @@ TEST_P(SpdyNetworkTransactionTest, BufferedClosed) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
 
@@ -4057,9 +4073,10 @@ TEST_P(SpdyNetworkTransactionTest, BufferedClosed) {
   helper.AddData(data.get());
   HttpNetworkTransaction* trans = helper.trans();
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   TransactionHelperResult out = helper.output();
@@ -4073,7 +4090,7 @@ TEST_P(SpdyNetworkTransactionTest, BufferedClosed) {
   out.response_info = *response;  // Make a copy so we can verify.
 
   // Read Data
-  TestOldCompletionCallback read_callback;
+  TestCompletionCallback read_callback;
 
   std::string content;
   int reads_completed = 0;
@@ -4081,7 +4098,7 @@ TEST_P(SpdyNetworkTransactionTest, BufferedClosed) {
     // Read small chunks at a time.
     const int kSmallReadSize = 14;
     scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(kSmallReadSize));
-    rv = trans->Read(buf, kSmallReadSize, &read_callback);
+    rv = trans->Read(buf, kSmallReadSize, read_callback.callback());
     if (rv == net::ERR_IO_PENDING) {
       data->CompleteRead();
       rv = read_callback.WaitForResult();
@@ -4127,7 +4144,7 @@ TEST_P(SpdyNetworkTransactionTest, BufferedCancelled) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
 
@@ -4136,9 +4153,10 @@ TEST_P(SpdyNetworkTransactionTest, BufferedCancelled) {
   helper.RunPreTestSetup();
   helper.AddData(data.get());
   HttpNetworkTransaction* trans = helper.trans();
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   TransactionHelperResult out = helper.output();
@@ -4152,12 +4170,12 @@ TEST_P(SpdyNetworkTransactionTest, BufferedCancelled) {
   out.response_info = *response;  // Make a copy so we can verify.
 
   // Read Data
-  TestOldCompletionCallback read_callback;
+  TestCompletionCallback read_callback;
 
   do {
     const int kReadSize = 256;
     scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(kReadSize));
-    rv = trans->Read(buf, kReadSize, &read_callback);
+    rv = trans->Read(buf, kReadSize, read_callback.callback());
     if (rv == net::ERR_IO_PENDING) {
       // Complete the read now, which causes buffering to start.
       data->CompleteRead();
@@ -4199,8 +4217,8 @@ TEST_P(SpdyNetworkTransactionTest, SettingsSaved) {
     "version",  "HTTP/1.1"
   };
 
-  NormalSpdyTransactionHelper helper(CreateGetRequest(),
-                                     BoundNetLog(), GetParam());
+  BoundNetLog net_log;
+  NormalSpdyTransactionHelper helper(CreateGetRequest(), net_log, GetParam());
   helper.RunPreTestSetup();
 
   // Verify that no settings exist initially.
@@ -4255,7 +4273,7 @@ TEST_P(SpdyNetworkTransactionTest, SettingsSaved) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
   helper.AddData(data.get());
@@ -4310,8 +4328,8 @@ TEST_P(SpdyNetworkTransactionTest, SettingsPlayback) {
     "version",  "HTTP/1.1"
   };
 
-  NormalSpdyTransactionHelper helper(CreateGetRequest(),
-                                     BoundNetLog(), GetParam());
+  BoundNetLog net_log;
+  NormalSpdyTransactionHelper helper(CreateGetRequest(), net_log, GetParam());
   helper.RunPreTestSetup();
 
   // Verify that no settings exist initially.
@@ -4373,7 +4391,7 @@ TEST_P(SpdyNetworkTransactionTest, SettingsPlayback) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(2, reads, arraysize(reads),
                             writes, arraysize(writes)));
   helper.AddData(data.get());
@@ -4417,12 +4435,12 @@ TEST_P(SpdyNetworkTransactionTest, GoAwayWithActiveStream) {
     MockRead(true, 0, 0),  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
                                      BoundNetLog(), GetParam());
-  helper.AddData(data);
+  helper.AddData(data.get());
   helper.RunToCompletion(data.get());
   TransactionHelperResult out = helper.output();
   EXPECT_EQ(ERR_ABORTED, out.rv);
@@ -4438,7 +4456,7 @@ TEST_P(SpdyNetworkTransactionTest, CloseWithActiveStream) {
     MockRead(false, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
   BoundNetLog log;
@@ -4448,9 +4466,9 @@ TEST_P(SpdyNetworkTransactionTest, CloseWithActiveStream) {
   helper.AddData(data.get());
   HttpNetworkTransaction* trans = helper.trans();
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
   TransactionHelperResult out;
-  out.rv = trans->Start(&CreateGetRequest(), &callback, log);
+  out.rv = trans->Start(&CreateGetRequest(), callback.callback(), log);
 
   EXPECT_EQ(out.rv, ERR_IO_PENDING);
   out.rv = callback.WaitForResult();
@@ -4520,30 +4538,35 @@ TEST_P(SpdyNetworkTransactionTest, ProxyConnect) {
     MockRead(true, 0, 0, 3),
   };
 
-  scoped_refptr<OrderedSocketData> data;
+  scoped_ptr<OrderedSocketData> data;
   switch(GetParam()) {
     case SPDYNOSSL:
-      data = new OrderedSocketData(reads_SPDYNOSSL,
-                                   arraysize(reads_SPDYNOSSL),
-                                   writes_SPDYNOSSL,
-                                   arraysize(writes_SPDYNOSSL));
+      data.reset(new OrderedSocketData(reads_SPDYNOSSL,
+                                       arraysize(reads_SPDYNOSSL),
+                                       writes_SPDYNOSSL,
+                                       arraysize(writes_SPDYNOSSL)));
       break;
     case SPDYSSL:
-      data = new OrderedSocketData(reads_SPDYSSL, arraysize(reads_SPDYSSL),
-                                   writes_SPDYSSL, arraysize(writes_SPDYSSL));
+      data.reset(new OrderedSocketData(reads_SPDYSSL,
+                                       arraysize(reads_SPDYSSL),
+                                       writes_SPDYSSL,
+                                       arraysize(writes_SPDYSSL)));
       break;
     case SPDYNPN:
-      data = new OrderedSocketData(reads_SPDYNPN, arraysize(reads_SPDYNPN),
-                                   writes_SPDYNPN, arraysize(writes_SPDYNPN));
+      data.reset(new OrderedSocketData(reads_SPDYNPN,
+                                       arraysize(reads_SPDYNPN),
+                                       writes_SPDYNPN,
+                                       arraysize(writes_SPDYNPN)));
       break;
     default:
       NOTREACHED();
   }
 
   helper.AddData(data.get());
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -4595,15 +4618,16 @@ TEST_P(SpdyNetworkTransactionTest, DirectConnectProxyReconnect) {
     MockRead(true, ERR_IO_PENDING, 4),  // Force a pause
     MockRead(true, 0, 5)  // EOF
   };
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
   helper.AddData(data.get());
   HttpNetworkTransaction* trans = helper.trans();
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
   TransactionHelperResult out;
-  out.rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  out.rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
 
   EXPECT_EQ(out.rv, ERR_IO_PENDING);
   out.rv = callback.WaitForResult();
@@ -4672,25 +4696,25 @@ TEST_P(SpdyNetworkTransactionTest, DirectConnectProxyReconnect) {
     MockRead(true, 0, 0, 5),
   };
 
-  scoped_refptr<OrderedSocketData> data_proxy;
+  scoped_ptr<OrderedSocketData> data_proxy;
   switch(GetParam()) {
     case SPDYNPN:
-      data_proxy = new OrderedSocketData(reads_SPDYNPN,
-                                         arraysize(reads_SPDYNPN),
-                                         writes_SPDYNPN,
-                                         arraysize(writes_SPDYNPN));
+      data_proxy.reset(new OrderedSocketData(reads_SPDYNPN,
+                                             arraysize(reads_SPDYNPN),
+                                             writes_SPDYNPN,
+                                             arraysize(writes_SPDYNPN)));
       break;
     case SPDYNOSSL:
-      data_proxy = new OrderedSocketData(reads_SPDYNOSSL,
-                                         arraysize(reads_SPDYNOSSL),
-                                         writes_SPDYNOSSL,
-                                         arraysize(writes_SPDYNOSSL));
+      data_proxy.reset(new OrderedSocketData(reads_SPDYNOSSL,
+                                             arraysize(reads_SPDYNOSSL),
+                                             writes_SPDYNOSSL,
+                                             arraysize(writes_SPDYNOSSL)));
       break;
     case SPDYSSL:
-      data_proxy = new OrderedSocketData(reads_SPDYSSL,
-                                         arraysize(reads_SPDYSSL),
-                                         writes_SPDYSSL,
-                                         arraysize(writes_SPDYSSL));
+      data_proxy.reset(new OrderedSocketData(reads_SPDYSSL,
+                                             arraysize(reads_SPDYSSL),
+                                             writes_SPDYSSL,
+                                             arraysize(writes_SPDYSSL)));
       break;
     default:
       NOTREACHED();
@@ -4717,8 +4741,9 @@ TEST_P(SpdyNetworkTransactionTest, DirectConnectProxyReconnect) {
   helper_proxy.AddData(data_proxy.get());
 
   HttpNetworkTransaction* trans_proxy = helper_proxy.trans();
-  TestOldCompletionCallback callback_proxy;
-  int rv = trans_proxy->Start(&request_proxy, &callback_proxy, BoundNetLog());
+  TestCompletionCallback callback_proxy;
+  int rv = trans_proxy->Start(
+      &request_proxy, callback_proxy.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback_proxy.WaitForResult();
   EXPECT_EQ(0, rv);
@@ -4767,11 +4792,11 @@ TEST_P(SpdyNetworkTransactionTest, VerifyRetryOnConnectionReset) {
   for (int variant = VARIANT_RST_DURING_SEND_COMPLETION;
        variant <= VARIANT_RST_DURING_READ_COMPLETION;
        ++variant) {
-    scoped_refptr<DelayedSocketData> data1(
+    scoped_ptr<DelayedSocketData> data1(
         new DelayedSocketData(1, reads, arraysize(reads),
                               NULL, 0));
 
-    scoped_refptr<DelayedSocketData> data2(
+    scoped_ptr<DelayedSocketData> data2(
         new DelayedSocketData(1, reads2, arraysize(reads2),
                                NULL, 0));
 
@@ -4785,8 +4810,9 @@ TEST_P(SpdyNetworkTransactionTest, VerifyRetryOnConnectionReset) {
       scoped_ptr<HttpNetworkTransaction> trans(
           new HttpNetworkTransaction(helper.session()));
 
-      TestOldCompletionCallback callback;
-      int rv = trans->Start(&helper.request(), &callback, BoundNetLog());
+      TestCompletionCallback callback;
+      int rv = trans->Start(
+          &helper.request(), callback.callback(), BoundNetLog());
       EXPECT_EQ(ERR_IO_PENDING, rv);
       // On the second transaction, we trigger the RST.
       if (i == 1) {
@@ -4833,7 +4859,7 @@ TEST_P(SpdyNetworkTransactionTest, SpdyOnOffToggle) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1,
                             spdy_reads, arraysize(spdy_reads),
                             spdy_writes, arraysize(spdy_writes)));
@@ -4851,7 +4877,7 @@ TEST_P(SpdyNetworkTransactionTest, SpdyOnOffToggle) {
     MockRead("hello from http"),
     MockRead(false, OK),
   };
-  scoped_refptr<DelayedSocketData> data2(
+  scoped_ptr<DelayedSocketData> data2(
       new DelayedSocketData(1, http_reads, arraysize(http_reads),
                             NULL, 0));
   NormalSpdyTransactionHelper helper2(CreateGetRequest(),
@@ -4913,7 +4939,7 @@ TEST_P(SpdyNetworkTransactionTest, SpdyBasicAuth) {
     MockRead(true, 0, 7),
   };
 
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(spdy_reads, arraysize(spdy_reads),
                             spdy_writes, arraysize(spdy_writes)));
   HttpRequestInfo request(CreateGetRequest());
@@ -4923,10 +4949,10 @@ TEST_P(SpdyNetworkTransactionTest, SpdyBasicAuth) {
   helper.RunPreTestSetup();
   helper.AddData(data.get());
   HttpNetworkTransaction* trans = helper.trans();
-  TestOldCompletionCallback callback_start;
-  const int rv_start = trans->Start(&request, &callback_start, net_log);
+  TestCompletionCallback callback;
+  const int rv_start = trans->Start(&request, callback.callback(), net_log);
   EXPECT_EQ(ERR_IO_PENDING, rv_start);
-  const int rv_start_complete = callback_start.WaitForResult();
+  const int rv_start_complete = callback.WaitForResult();
   EXPECT_EQ(OK, rv_start_complete);
 
   // Make sure the response has an auth challenge.
@@ -4943,8 +4969,9 @@ TEST_P(SpdyNetworkTransactionTest, SpdyBasicAuth) {
 
   // Restart with a username/password.
   AuthCredentials credentials(ASCIIToUTF16("foo"), ASCIIToUTF16("bar"));
-  TestOldCompletionCallback callback_restart;
-  const int rv_restart = trans->RestartWithAuth(credentials, &callback_restart);
+  TestCompletionCallback callback_restart;
+  const int rv_restart = trans->RestartWithAuth(
+      credentials, callback_restart.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv_restart);
   const int rv_restart_complete = callback_restart.WaitForResult();
   EXPECT_EQ(OK, rv_restart_complete);
@@ -5021,7 +5048,7 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushWithHeaders) {
   HttpResponseInfo response;
   HttpResponseInfo response2;
   std::string expected_push_result("pushed");
-  scoped_refptr<OrderedSocketData> data(new OrderedSocketData(
+  scoped_ptr<OrderedSocketData> data(new OrderedSocketData(
       reads,
       arraysize(reads),
       writes,
@@ -5125,8 +5152,9 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushClaimBeforeHeaders) {
   data->SetStop(3);
 
   // Start the transaction.
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   data->Run();
   rv = callback.WaitForResult();
@@ -5136,7 +5164,8 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushClaimBeforeHeaders) {
   // headers are not yet complete.
   scoped_ptr<HttpNetworkTransaction> trans2(
       new HttpNetworkTransaction(helper.session()));
-  rv = trans2->Start(&CreateGetPushRequest(), &callback, BoundNetLog());
+  rv = trans2->Start(
+      &CreateGetPushRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   data->RunFor(3);
   MessageLoop::current()->RunAllPending();
@@ -5274,8 +5303,9 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushWithTwoHeaderFrames) {
   data->SetStop(4);
 
   // Start the transaction.
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   data->Run();
   rv = callback.WaitForResult();
@@ -5285,7 +5315,8 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushWithTwoHeaderFrames) {
   // headers are not yet complete.
   scoped_ptr<HttpNetworkTransaction> trans2(
       new HttpNetworkTransaction(helper.session()));
-  rv = trans2->Start(&CreateGetPushRequest(), &callback, BoundNetLog());
+  rv = trans2->Start(
+      &CreateGetPushRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   data->RunFor(3);
   MessageLoop::current()->RunAllPending();
@@ -5376,7 +5407,7 @@ TEST_P(SpdyNetworkTransactionTest, SynReplyWithHeaders) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -5434,7 +5465,7 @@ TEST_P(SpdyNetworkTransactionTest, SynReplyWithLateHeaders) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -5492,7 +5523,7 @@ TEST_P(SpdyNetworkTransactionTest, SynReplyWithDuplicateLateHeaders) {
     MockRead(true, 0, 0)  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -5570,7 +5601,7 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushCrossOriginCorrectness) {
     };
 
     HttpResponseInfo response;
-    scoped_refptr<OrderedSocketData> data(new OrderedSocketData(
+    scoped_ptr<OrderedSocketData> data(new OrderedSocketData(
         reads,
         arraysize(reads),
         writes,
@@ -5583,20 +5614,20 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushCrossOriginCorrectness) {
     NormalSpdyTransactionHelper helper(request,
                                        BoundNetLog(), GetParam());
     helper.RunPreTestSetup();
-    helper.AddData(data);
+    helper.AddData(data.get());
 
     HttpNetworkTransaction* trans = helper.trans();
 
     // Start the transaction with basic parameters.
-    TestOldCompletionCallback callback;
+    TestCompletionCallback callback;
 
-    int rv = trans->Start(&request, &callback, BoundNetLog());
+    int rv = trans->Start(&request, callback.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
     rv = callback.WaitForResult();
 
     // Read the response body.
     std::string result;
-    ReadResult(trans, data, &result);
+    ReadResult(trans, data.get(), &result);
 
     // Verify that we consumed all test data.
     EXPECT_TRUE(data->at_read_eof());
@@ -5634,7 +5665,7 @@ TEST_P(SpdyNetworkTransactionTest, RetryAfterRefused) {
     MockRead(true, 0, 6)  // EOF
   };
 
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
   NormalSpdyTransactionHelper helper(CreateGetRequest(),
@@ -5646,8 +5677,9 @@ TEST_P(SpdyNetworkTransactionTest, RetryAfterRefused) {
   HttpNetworkTransaction* trans = helper.trans();
 
   // Start the transaction with basic parameters.
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&CreateGetRequest(), &callback, BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(
+      &CreateGetRequest(), callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);

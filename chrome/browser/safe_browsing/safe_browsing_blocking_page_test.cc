@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -21,11 +21,14 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/test/test_browser_thread.h"
 
 using content::BrowserThread;
+using content::NavigationController;
+using content::WebContents;
 
 // A SafeBrowingService class that allows us to inject the malicious URLs.
 class FakeSafeBrowsingService :  public SafeBrowsingService {
@@ -102,9 +105,9 @@ class TestSafeBrowsingServiceFactory : public SafeBrowsingServiceFactory {
 class FakeMalwareDetails : public MalwareDetails {
  public:
   FakeMalwareDetails(SafeBrowsingService* sb_service,
-                     TabContents* tab_contents,
+                     WebContents* web_contents,
                      const SafeBrowsingService::UnsafeResource& unsafe_resource)
-      : MalwareDetails(sb_service, tab_contents, unsafe_resource) { }
+      : MalwareDetails(sb_service, web_contents, unsafe_resource) { }
 
   virtual ~FakeMalwareDetails() {}
 
@@ -161,9 +164,9 @@ class TestMalwareDetailsFactory : public MalwareDetailsFactory {
 
   virtual MalwareDetails* CreateMalwareDetails(
       SafeBrowsingService* sb_service,
-      TabContents* tab_contents,
+      WebContents* web_contents,
       const SafeBrowsingService::UnsafeResource& unsafe_resource) {
-    details_ = new FakeMalwareDetails(sb_service, tab_contents,
+    details_ = new FakeMalwareDetails(sb_service, web_contents,
                                       unsafe_resource);
     return details_;
   }
@@ -180,9 +183,9 @@ class TestMalwareDetailsFactory : public MalwareDetailsFactory {
 class TestSafeBrowsingBlockingPage :  public SafeBrowsingBlockingPage {
  public:
   TestSafeBrowsingBlockingPage(SafeBrowsingService* service,
-                               TabContents* tab_contents,
+                               WebContents* web_contents,
                                const UnsafeResourceList& unsafe_resources)
-      : SafeBrowsingBlockingPage(service, tab_contents, unsafe_resources) {
+      : SafeBrowsingBlockingPage(service, web_contents, unsafe_resources) {
     // Don't wait the whole 3 seconds for the browser test.
     malware_details_proceed_delay_ms_ = 100;
     wait_for_delete_ = false;
@@ -211,9 +214,9 @@ class TestSafeBrowsingBlockingPageFactory
 
   virtual SafeBrowsingBlockingPage* CreateSafeBrowsingPage(
       SafeBrowsingService* service,
-      TabContents* tab_contents,
+      WebContents* web_contents,
       const SafeBrowsingBlockingPage::UnsafeResourceList& unsafe_resources) {
-    return new TestSafeBrowsingBlockingPage(service, tab_contents,
+    return new TestSafeBrowsingBlockingPage(service, web_contents,
                                             unsafe_resources);
   }
 };
@@ -262,9 +265,10 @@ class SafeBrowsingBlockingPageTest : public InProcessBrowserTest,
   }
 
   void SendCommand(const std::string& command) {
-    TabContents* contents = browser()->GetSelectedTabContents();
+    WebContents* contents =
+        browser()->GetSelectedTabContentsWrapper()->web_contents();
     // We use InterstitialPage::GetInterstitialPage(tab) instead of
-    // tab->interstitial_page() because the tab doesn't have a pointer
+    // tab->GetInterstitialPage() because the tab doesn't have a pointer
     // to its interstital page until it gets a command from the renderer
     // that it has indeed displayed it -- and this sometimes happens after
     // NavigateToURL returns.
@@ -276,7 +280,8 @@ class SafeBrowsingBlockingPageTest : public InProcessBrowserTest,
   }
 
   void DontProceedThroughInterstitial() {
-    TabContents* contents = browser()->GetSelectedTabContents();
+    WebContents* contents =
+        browser()->GetSelectedTabContentsWrapper()->web_contents();
     InterstitialPage* interstitial_page = InterstitialPage::GetInterstitialPage(
         contents);
     ASSERT_TRUE(interstitial_page);
@@ -284,7 +289,8 @@ class SafeBrowsingBlockingPageTest : public InProcessBrowserTest,
   }
 
   void ProceedThroughInterstitial() {
-    TabContents* contents = browser()->GetSelectedTabContents();
+    WebContents* contents =
+        browser()->GetSelectedTabContentsWrapper()->web_contents();
     InterstitialPage* interstitial_page = InterstitialPage::GetInterstitialPage(
         contents);
     ASSERT_TRUE(interstitial_page);
@@ -292,32 +298,35 @@ class SafeBrowsingBlockingPageTest : public InProcessBrowserTest,
   }
 
   void AssertNoInterstitial(bool wait_for_delete) {
-    TabContents* contents = browser()->GetSelectedTabContents();
+    WebContents* contents =
+        browser()->GetSelectedTabContentsWrapper()->web_contents();
 
-    if (contents->showing_interstitial_page() && wait_for_delete) {
+    if (contents->ShowingInterstitialPage() && wait_for_delete) {
       // We'll get notified when the interstitial is deleted.
       static_cast<TestSafeBrowsingBlockingPage*>(
-          contents->interstitial_page())->set_wait_for_delete();
+          contents->GetInterstitialPage())->set_wait_for_delete();
       ui_test_utils::RunMessageLoop();
     }
 
     // Can't use InterstitialPage::GetInterstitialPage() because that
     // gets updated after the TestSafeBrowsingBlockingPage destructor
-    ASSERT_FALSE(contents->showing_interstitial_page());
+    ASSERT_FALSE(contents->ShowingInterstitialPage());
   }
 
   bool YesInterstitial() {
-    TabContents* contents = browser()->GetSelectedTabContents();
+    WebContents* contents =
+        browser()->GetSelectedTabContentsWrapper()->web_contents();
     InterstitialPage* interstitial_page = InterstitialPage::GetInterstitialPage(
         contents);
     return interstitial_page != NULL;
   }
 
   void WaitForInterstitial() {
-    TabContents* contents = browser()->GetSelectedTabContents();
+    WebContents* contents =
+        browser()->GetSelectedTabContentsWrapper()->web_contents();
     ui_test_utils::WindowedNotificationObserver interstitial_observer(
           content::NOTIFICATION_INTERSTITIAL_ATTACHED,
-          content::Source<TabContents>(contents));
+          content::Source<WebContents>(contents));
     if (!InterstitialPage::GetInterstitialPage(contents))
       interstitial_observer.Wait();
   }
@@ -410,8 +419,9 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, MalwareDontProceed) {
 
   SendCommand("\"takeMeBack\"");   // Simulate the user clicking "back"
   AssertNoInterstitial(false);   // Assert the interstitial is gone
-  EXPECT_EQ(GURL(chrome::kAboutBlankURL),   // Back to "about:blank"
-            browser()->GetSelectedTabContents()->GetURL());
+  EXPECT_EQ(
+      GURL(chrome::kAboutBlankURL),   // Back to "about:blank"
+      browser()->GetSelectedTabContentsWrapper()->web_contents()->GetURL());
 }
 
 IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, MalwareProceed) {
@@ -422,11 +432,14 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, MalwareProceed) {
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<NavigationController>(
-          &browser()->GetSelectedTabContentsWrapper()->controller()));
+          &browser()->GetSelectedTabContentsWrapper()->web_contents()->
+              GetController()));
   SendCommand("\"proceed\"");    // Simulate the user clicking "proceed"
   observer.Wait();
   AssertNoInterstitial(true);    // Assert the interstitial is gone.
-  EXPECT_EQ(url, browser()->GetSelectedTabContents()->GetURL());
+  EXPECT_EQ(
+      url,
+      browser()->GetSelectedTabContentsWrapper()->web_contents()->GetURL());
 }
 
 IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingDontProceed) {
@@ -437,8 +450,9 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingDontProceed) {
 
   SendCommand("\"takeMeBack\"");   // Simulate the user clicking "proceed"
   AssertNoInterstitial(false);    // Assert the interstitial is gone
-  EXPECT_EQ(GURL(chrome::kAboutBlankURL),  // We are back to "about:blank".
-            browser()->GetSelectedTabContents()->GetURL());
+  EXPECT_EQ(
+      GURL(chrome::kAboutBlankURL),  // We are back to "about:blank".
+      browser()->GetSelectedTabContentsWrapper()->web_contents()->GetURL());
 }
 
 IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingProceed) {
@@ -450,11 +464,14 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingProceed) {
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<NavigationController>(
-          &browser()->GetSelectedTabContentsWrapper()->controller()));
+          &browser()->GetSelectedTabContentsWrapper()->web_contents()->
+              GetController()));
   SendCommand("\"proceed\"");   // Simulate the user clicking "proceed".
   observer.Wait();
   AssertNoInterstitial(true);    // Assert the interstitial is gone
-  EXPECT_EQ(url, browser()->GetSelectedTabContents()->GetURL());
+  EXPECT_EQ(
+      url,
+      browser()->GetSelectedTabContentsWrapper()->web_contents()->GetURL());
 }
 
 IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingReportError) {
@@ -466,14 +483,17 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingReportError) {
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<NavigationController>(
-          &browser()->GetSelectedTabContentsWrapper()->controller()));
+          &browser()->GetSelectedTabContentsWrapper()->web_contents()->
+              GetController()));
   SendCommand("\"reportError\"");   // Simulate the user clicking "report error"
   observer.Wait();
   AssertNoInterstitial(false);    // Assert the interstitial is gone
 
   // We are in the error reporting page.
-  EXPECT_EQ("/safebrowsing/report_error/",
-            browser()->GetSelectedTabContents()->GetURL().path());
+  EXPECT_EQ(
+      "/safebrowsing/report_error/",
+      browser()->GetSelectedTabContentsWrapper()->web_contents()->GetURL().
+        path());
 }
 
 IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest,
@@ -486,14 +506,17 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest,
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<NavigationController>(
-          &browser()->GetSelectedTabContentsWrapper()->controller()));
+          &browser()->GetSelectedTabContentsWrapper()->web_contents()->
+              GetController()));
   SendCommand("\"learnMore\"");   // Simulate the user clicking "learn more"
   observer.Wait();
   AssertNoInterstitial(false);    // Assert the interstitial is gone
 
   // We are in the help page.
-  EXPECT_EQ("/support/bin/answer.py",
-            browser()->GetSelectedTabContents()->GetURL().path());
+  EXPECT_EQ(
+      "/support/bin/answer.py",
+       browser()->GetSelectedTabContentsWrapper()->web_contents()->GetURL().
+           path());
 }
 
 IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, MalwareIframeDontProceed) {
@@ -503,11 +526,18 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, MalwareIframeDontProceed) {
 
   ui_test_utils::NavigateToURL(browser(), url);
 
+  ui_test_utils::WindowedNotificationObserver observer(
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
+      content::Source<NavigationController>(
+          &browser()->GetSelectedTabContentsWrapper()->web_contents()->
+              GetController()));
   SendCommand("\"takeMeBack\"");    // Simulate the user clicking "back"
+  observer.Wait();
   AssertNoInterstitial(false);  // Assert the interstitial is gone
 
-  EXPECT_EQ(GURL(chrome::kAboutBlankURL),    // Back to "about:blank"
-            browser()->GetSelectedTabContents()->GetURL());
+  EXPECT_EQ(
+      GURL(chrome::kAboutBlankURL),    // Back to "about:blank"
+      browser()->GetSelectedTabContentsWrapper()->web_contents()->GetURL());
 }
 
 // Crashy, http://crbug.com/68834.
@@ -522,7 +552,9 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest,
   SendCommand("\"proceed\"");   // Simulate the user clicking "proceed"
   AssertNoInterstitial(true);    // Assert the interstitial is gone
 
-  EXPECT_EQ(url, browser()->GetSelectedTabContents()->GetURL());
+  EXPECT_EQ(
+      url,
+      browser()->GetSelectedTabContentsWrapper()->web_contents()->GetURL());
 }
 
 IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest,
@@ -551,7 +583,9 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest,
   SendCommand("\"proceed\"");  // Simulate the user clicking "back"
   AssertNoInterstitial(true);  // Assert the interstitial is gone
 
-  EXPECT_EQ(url, browser()->GetSelectedTabContents()->GetURL());
+  EXPECT_EQ(
+      url,
+      browser()->GetSelectedTabContentsWrapper()->web_contents()->GetURL());
   AssertReportSent();
 }
 

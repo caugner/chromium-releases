@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,13 @@
 #define CHROME_BROWSER_UI_WEBUI_CERTIFICATE_VIEWER_WEBUI_H_
 #pragma once
 
+#include <string>
+#include <vector>
+
 #include "base/compiler_specific.h"
 #include "base/values.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
+#include "content/public/browser/web_ui_message_handler.h"
 #include "net/base/x509_certificate.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -38,18 +42,17 @@ class CertificateViewerDialog : private HtmlDialogUIDelegate {
   void Show(gfx::NativeWindow parent);
 
   // Overridden from HtmlDialogUI::Delegate:
-  virtual bool IsDialogModal() const OVERRIDE;
+  virtual ui::ModalType GetDialogModalType() const OVERRIDE;
   virtual string16 GetDialogTitle() const OVERRIDE;
   virtual GURL GetDialogContentURL() const OVERRIDE;
   virtual void GetWebUIMessageHandlers(
-      std::vector<WebUIMessageHandler*>* handlers) const OVERRIDE;
+      std::vector<content::WebUIMessageHandler*>* handlers) const OVERRIDE;
   virtual void GetDialogSize(gfx::Size* size) const OVERRIDE;
   virtual std::string GetDialogArgs() const OVERRIDE;
   virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE;
   virtual void OnCloseContents(
-      TabContents* source, bool* out_close_dialog) OVERRIDE;
+      content::WebContents* source, bool* out_close_dialog) OVERRIDE;
   virtual bool ShouldShowDialogTitle() const OVERRIDE;
-  virtual bool HandleContextMenu(const ContextMenuParams& params) OVERRIDE;
 
   // The certificate being viewed.
   scoped_refptr<net::X509Certificate> cert_;
@@ -65,7 +68,7 @@ class CertificateViewerDialog : private HtmlDialogUIDelegate {
 
 // Dialog handler which handles calls from the JS WebUI code to view certificate
 // details and export the certificate.
-class CertificateViewerDialogHandler : public WebUIMessageHandler {
+class CertificateViewerDialogHandler : public content::WebUIMessageHandler {
  public:
   CertificateViewerDialogHandler(gfx::NativeWindow window,
                                  net::X509Certificate* cert);
@@ -91,6 +94,10 @@ class CertificateViewerDialogHandler : public WebUIMessageHandler {
   // Extracts the certificate details and returns them to the javascript
   // function cert_viewer.getCertificateInfo in a dictionary structure.
   void RequestCertificateInfo(const base::ListValue* args);
+
+  // Helper function to get the certificate index from |args|. Returns -1 if
+  // the index is out of range.
+  int GetCertificateIndex(const base::ListValue* args) const;
 
   // The certificate being viewed.
   scoped_refptr<net::X509Certificate> cert_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,7 +42,7 @@ class TraceEventTestFixture : public testing::Test {
   // up multiple times when testing AtExit. Use ManualTestSetUp for this.
   void ManualTestSetUp();
   void OnTraceDataCollected(
-      scoped_refptr<TraceLog::RefCountedString> events_str);
+      const scoped_refptr<TraceLog::RefCountedString>& events_str);
   DictionaryValue* FindMatchingTraceEntry(const JsonKeyValue* key_values);
   DictionaryValue* FindNamePhase(const char* name, const char* phase);
   DictionaryValue* FindNamePhaseKeyValue(const char* name,
@@ -89,7 +89,7 @@ void TraceEventTestFixture::ManualTestSetUp() {
 }
 
 void TraceEventTestFixture::OnTraceDataCollected(
-    scoped_refptr<TraceLog::RefCountedString> events_str) {
+    const scoped_refptr<TraceLog::RefCountedString>& events_str) {
   AutoLock lock(lock_);
   json_output_.json_output.clear();
   trace_buffer_.Start();
@@ -98,6 +98,10 @@ void TraceEventTestFixture::OnTraceDataCollected(
 
   scoped_ptr<Value> root;
   root.reset(base::JSONReader::Read(json_output_.json_output, false));
+
+  if (!root.get()) {
+    LOG(ERROR) << json_output_.json_output;
+  }
 
   ListValue* root_list = NULL;
   ASSERT_TRUE(root.get());
@@ -310,10 +314,42 @@ void TraceWithAllMacroVariants(WaitableEvent* task_complete_event) {
                      "name1", "value1",
                      "name2", "value2");
 
+    TRACE_EVENT_IF_LONGER_THAN0(0, "all", "TRACE_EVENT_IF_LONGER_THAN0 call");
+    TRACE_EVENT_IF_LONGER_THAN1(0, "all", "TRACE_EVENT_IF_LONGER_THAN1 call",
+                                "name1", "value1");
+    TRACE_EVENT_IF_LONGER_THAN2(0, "all", "TRACE_EVENT_IF_LONGER_THAN2 call",
+                                "name1", "value1",
+                                "name2", "value2");
+
+    TRACE_EVENT_START0("all", "TRACE_EVENT_START0 call", 5);
+    TRACE_EVENT_START1("all", "TRACE_EVENT_START1 call", 5,
+                       "name1", "value1");
+    TRACE_EVENT_START2("all", "TRACE_EVENT_START2 call", 5,
+                       "name1", "value1",
+                       "name2", "value2");
+
+    TRACE_EVENT_FINISH0("all", "TRACE_EVENT_FINISH0 call", 5);
+    TRACE_EVENT_FINISH1("all", "TRACE_EVENT_FINISH1 call", 5,
+                        "name1", "value1");
+    TRACE_EVENT_FINISH2("all", "TRACE_EVENT_FINISH2 call", 5,
+                        "name1", "value1",
+                        "name2", "value2");
+
+    TRACE_EVENT_BEGIN_ETW("TRACE_EVENT_BEGIN_ETW0 call", 5, NULL);
+    TRACE_EVENT_BEGIN_ETW("TRACE_EVENT_BEGIN_ETW1 call", 5, "value");
+    TRACE_EVENT_END_ETW("TRACE_EVENT_END_ETW0 call", 5, NULL);
+    TRACE_EVENT_END_ETW("TRACE_EVENT_END_ETW1 call", 5, "value");
+    TRACE_EVENT_INSTANT_ETW("TRACE_EVENT_INSTANT_ETW0 call", 5, NULL);
+    TRACE_EVENT_INSTANT_ETW("TRACE_EVENT_INSTANT_ETW1 call", 5, "value");
+
     TRACE_COUNTER1("all", "TRACE_COUNTER1 call", 31415);
     TRACE_COUNTER2("all", "TRACE_COUNTER2 call",
                    "a", 30000,
                    "b", 1415);
+
+    TRACE_COUNTER_ID1("all", "TRACE_COUNTER_ID1 call", 0x319009, 31415);
+    TRACE_COUNTER_ID2("all", "TRACE_COUNTER_ID2 call", 0x319009,
+                      "a", 30000, "b", 1415);
   } // Scope close causes TRACE_EVENT0 etc to send their END events.
 
   if (task_complete_event)
@@ -354,32 +390,116 @@ void ValidateAllTraceMacrosCreatedData(const ListValue& trace_parsed) {
     EXPECT_EQ("E", ph_end);
   }
   EXPECT_FIND_("TRACE_EVENT1 call");
+  EXPECT_SUB_FIND_("name1");
+  EXPECT_SUB_FIND_("value1");
   EXPECT_FIND_("TRACE_EVENT2 call");
   EXPECT_SUB_FIND_("name1");
   EXPECT_SUB_FIND_("\"value1\"");
   EXPECT_SUB_FIND_("name2");
   EXPECT_SUB_FIND_("value\\2");
+
   EXPECT_FIND_("TRACE_EVENT_INSTANT0 call");
   EXPECT_FIND_("TRACE_EVENT_INSTANT1 call");
+  EXPECT_SUB_FIND_("name1");
+  EXPECT_SUB_FIND_("value1");
   EXPECT_FIND_("TRACE_EVENT_INSTANT2 call");
   EXPECT_SUB_FIND_("name1");
   EXPECT_SUB_FIND_("value1");
   EXPECT_SUB_FIND_("name2");
   EXPECT_SUB_FIND_("value2");
+
   EXPECT_FIND_("TRACE_EVENT_BEGIN0 call");
   EXPECT_FIND_("TRACE_EVENT_BEGIN1 call");
+  EXPECT_SUB_FIND_("name1");
+  EXPECT_SUB_FIND_("value1");
   EXPECT_FIND_("TRACE_EVENT_BEGIN2 call");
   EXPECT_SUB_FIND_("name1");
   EXPECT_SUB_FIND_("value1");
   EXPECT_SUB_FIND_("name2");
   EXPECT_SUB_FIND_("value2");
+
   EXPECT_FIND_("TRACE_EVENT_END0 call");
   EXPECT_FIND_("TRACE_EVENT_END1 call");
+  EXPECT_SUB_FIND_("name1");
+  EXPECT_SUB_FIND_("value1");
   EXPECT_FIND_("TRACE_EVENT_END2 call");
   EXPECT_SUB_FIND_("name1");
   EXPECT_SUB_FIND_("value1");
   EXPECT_SUB_FIND_("name2");
   EXPECT_SUB_FIND_("value2");
+
+  EXPECT_FIND_("TRACE_EVENT_IF_LONGER_THAN0 call");
+  EXPECT_FIND_("TRACE_EVENT_IF_LONGER_THAN1 call");
+  EXPECT_SUB_FIND_("name1");
+  EXPECT_SUB_FIND_("value1");
+  EXPECT_FIND_("TRACE_EVENT_IF_LONGER_THAN2 call");
+  EXPECT_SUB_FIND_("name1");
+  EXPECT_SUB_FIND_("value1");
+  EXPECT_SUB_FIND_("name2");
+  EXPECT_SUB_FIND_("value2");
+
+  EXPECT_FIND_("TRACE_EVENT_START0 call");
+  EXPECT_SUB_FIND_("id");
+  EXPECT_SUB_FIND_("5");
+  EXPECT_FIND_("TRACE_EVENT_START1 call");
+  EXPECT_SUB_FIND_("id");
+  EXPECT_SUB_FIND_("5");
+  EXPECT_SUB_FIND_("name1");
+  EXPECT_SUB_FIND_("value1");
+  EXPECT_FIND_("TRACE_EVENT_START2 call");
+  EXPECT_SUB_FIND_("id");
+  EXPECT_SUB_FIND_("5");
+  EXPECT_SUB_FIND_("name1");
+  EXPECT_SUB_FIND_("value1");
+  EXPECT_SUB_FIND_("name2");
+  EXPECT_SUB_FIND_("value2");
+
+  EXPECT_FIND_("TRACE_EVENT_FINISH0 call");
+  EXPECT_SUB_FIND_("id");
+  EXPECT_SUB_FIND_("5");
+  EXPECT_FIND_("TRACE_EVENT_FINISH1 call");
+  EXPECT_SUB_FIND_("id");
+  EXPECT_SUB_FIND_("5");
+  EXPECT_SUB_FIND_("name1");
+  EXPECT_SUB_FIND_("value1");
+  EXPECT_FIND_("TRACE_EVENT_FINISH2 call");
+  EXPECT_SUB_FIND_("id");
+  EXPECT_SUB_FIND_("5");
+  EXPECT_SUB_FIND_("name1");
+  EXPECT_SUB_FIND_("value1");
+  EXPECT_SUB_FIND_("name2");
+  EXPECT_SUB_FIND_("value2");
+
+  EXPECT_FIND_("TRACE_EVENT_BEGIN_ETW0 call");
+  EXPECT_SUB_FIND_("id");
+  EXPECT_SUB_FIND_("5");
+  EXPECT_SUB_FIND_("extra");
+  EXPECT_SUB_FIND_("NULL");
+  EXPECT_FIND_("TRACE_EVENT_BEGIN_ETW1 call");
+  EXPECT_SUB_FIND_("id");
+  EXPECT_SUB_FIND_("5");
+  EXPECT_SUB_FIND_("extra");
+  EXPECT_SUB_FIND_("value");
+  EXPECT_FIND_("TRACE_EVENT_END_ETW0 call");
+  EXPECT_SUB_FIND_("id");
+  EXPECT_SUB_FIND_("5");
+  EXPECT_SUB_FIND_("extra");
+  EXPECT_SUB_FIND_("NULL");
+  EXPECT_FIND_("TRACE_EVENT_END_ETW1 call");
+  EXPECT_SUB_FIND_("id");
+  EXPECT_SUB_FIND_("5");
+  EXPECT_SUB_FIND_("extra");
+  EXPECT_SUB_FIND_("value");
+  EXPECT_FIND_("TRACE_EVENT_INSTANT_ETW0 call");
+  EXPECT_SUB_FIND_("id");
+  EXPECT_SUB_FIND_("5");
+  EXPECT_SUB_FIND_("extra");
+  EXPECT_SUB_FIND_("NULL");
+  EXPECT_FIND_("TRACE_EVENT_INSTANT_ETW1 call");
+  EXPECT_SUB_FIND_("id");
+  EXPECT_SUB_FIND_("5");
+  EXPECT_SUB_FIND_("extra");
+  EXPECT_SUB_FIND_("value");
 
   EXPECT_FIND_("TRACE_COUNTER1 call");
   {
@@ -406,6 +526,38 @@ void ValidateAllTraceMacrosCreatedData(const ListValue& trace_parsed) {
     EXPECT_EQ(1415, value);
   }
 
+  EXPECT_FIND_("TRACE_COUNTER_ID1 call");
+  {
+    std::string id;
+    EXPECT_TRUE((item && item->GetString("id", &id)));
+    EXPECT_EQ("319009", id);
+
+    std::string ph;
+    EXPECT_TRUE((item && item->GetString("ph", &ph)));
+    EXPECT_EQ("C", ph);
+
+    int value;
+    EXPECT_TRUE((item && item->GetInteger("args.value", &value)));
+    EXPECT_EQ(31415, value);
+  }
+
+  EXPECT_FIND_("TRACE_COUNTER_ID2 call");
+  {
+    std::string id;
+    EXPECT_TRUE((item && item->GetString("id", &id)));
+    EXPECT_EQ("319009", id);
+
+    std::string ph;
+    EXPECT_TRUE((item && item->GetString("ph", &ph)));
+    EXPECT_EQ("C", ph);
+
+    int value;
+    EXPECT_TRUE((item && item->GetInteger("args.a", &value)));
+    EXPECT_EQ(30000, value);
+
+    EXPECT_TRUE((item && item->GetInteger("args.b", &value)));
+    EXPECT_EQ(1415, value);
+  }
 }
 
 void TraceManyInstantEvents(int thread_id, int num_events,
@@ -593,7 +745,7 @@ TEST_F(TraceEventTestFixture, DataCapturedThreshold) {
     // 100+ seconds to avoid flakiness.
     TRACE_EVENT_IF_LONGER_THAN0(100000000, "time", "threshold long1");
     TRACE_EVENT_IF_LONGER_THAN0(200000000, "time", "threshold long2");
-    base::PlatformThread::Sleep(20); // 20000 us
+    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(20));
   }
 
   // Test that a normal nested event remains after it's parent event is dropped.
@@ -618,7 +770,8 @@ TEST_F(TraceEventTestFixture, DataCapturedThreshold) {
             TRACE_EVENT_IF_LONGER_THAN0(1000, "time", "3threshold1000");
             {
               TRACE_EVENT_IF_LONGER_THAN0(100, "time", "3threshold100");
-              base::PlatformThread::Sleep(20);
+              base::PlatformThread::Sleep(
+                  base::TimeDelta::FromMilliseconds(20));
             }
           }
         }
@@ -642,7 +795,8 @@ TEST_F(TraceEventTestFixture, DataCapturedThreshold) {
             {
               TRACE_EVENT_IF_LONGER_THAN0(200000000, "time",
                                           "4thresholdlong2");
-              base::PlatformThread::Sleep(20);
+              base::PlatformThread::Sleep(
+                  base::TimeDelta::FromMilliseconds(20));
             }
           }
         }

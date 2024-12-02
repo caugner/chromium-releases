@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,9 +56,15 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   bool IsExtensionActive(const std::string& extension_id) const;
 
   // See WebKit::WebPermissionClient::allowScriptExtension
+  // TODO(koz): Remove once WebKit no longer calls this.
   bool AllowScriptExtension(WebKit::WebFrame* frame,
                             const std::string& v8_extension_name,
                             int extension_group);
+
+  bool AllowScriptExtension(WebKit::WebFrame* frame,
+                            const std::string& v8_extension_name,
+                            int extension_group,
+                            int world_id);
 
   void DidCreateScriptContext(WebKit::WebFrame* frame,
                               v8::Handle<v8::Context> context,
@@ -131,6 +137,10 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
                                const Extension* extension,
                                const URLPatternSet& origins);
 
+  // Finds the extension ID for the current context. This is determined from
+  // |world_id| if it's non-zero, or the URL in |frame| if it is.
+  std::string GetExtensionID(WebKit::WebFrame* frame, int world_id);
+
   // True if this renderer is running extensions.
   bool is_extension_process_;
 
@@ -152,7 +162,7 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   // The v8 extensions which are restricted to extension-related contexts.
   std::set<std::string> restricted_v8_extensions_;
 
-  // All declared function names from extension_api.json.
+  // All declared function names.
   std::set<std::string> function_names_;
 
   // The extensions that are active in this process.

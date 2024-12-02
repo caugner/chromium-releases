@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -29,7 +29,7 @@
     },
     'aura': {
       'filepath': 'ui/aura/.*|'\
-                  'ui/aura_shell/.*',
+                  'ash/.*',
     },
     'views_core': {
       'filepath': 'ui/views/view.h|'\
@@ -63,6 +63,9 @@
     },
     'history': {
       'filepath': 'chrome/browser/history/.*',
+    },
+    'history_ui': {
+      'filepath': 'chrome/browser/resources/history.*',
     },
     'renderer': {
       'filepath': 'chrome/browser/renderer_host/.*|chrome/renderer/.*|'\
@@ -99,7 +102,7 @@
         'chrome/browser/net/.*net_log.*|' \
         'chrome/browser/net/passive_log_collector.*|' \
         'chrome/browser/resources/net_internals/.*|' \
-        'chrome/browser/ui/webui/net_internals_ui.*'
+        'chrome/browser/ui/webui/net_internals/.*'
     },
     'ftp': {
       'filepath': 'ftp',
@@ -195,7 +198,8 @@
         'chrome/test/data/autofill/heuristics/input/.*|'\
         'chrome/test/data/autofill/heuristics/output/.*|'\
         'chrome/test/data/autofill/merge/input/.*|'\
-        'chrome/test/data/autofill/merge/output/.*',
+        'chrome/test/data/autofill/merge/output/.*|'\
+        'webkit/forms/.*',
     },
     'webdata': {
       'filepath': 'chrome/browser/webdata/.*',
@@ -246,8 +250,8 @@
     'panels': {
       'filepath': 'chrome/browser/ui/panels/.*',
     },
-    'accelerator_table_linux': {
-      'filepath': 'chrome/browser/ui/views/accelerator_table_linux.cc',
+    'accelerator_table': {
+      'filepath': 'chrome/browser/ui/views/accelerator_table.cc',
     },
     'downloads_ui': {
       'filepath': 'chrome/browser/resources/.*downloads\..*' \
@@ -315,6 +319,18 @@
     'clipboard': {
       'filepath': 'clipboard|dnd|drag|drop',
     },
+    'metrics': {
+      'filepath': 'base/metrics/.*'\
+                  '|chrome/browser/metrics/.*'\
+                  '|chrome/common/metrics/.*'\
+                  '|chrome_frame/metrics.*'\
+                  '|chrome/browser/chromeos/external_metrics.*'\
+                  '|chrome/browser/extensions/extension_metrics_module.*'\
+                  '|chrome/browser/ui/webui/metrics_handler.*'\
+                  '|content/browser/user_metrics.cc'\
+                  '|content/public/browser/user_metrics.h'\
+                  '|chrome/tools/extract_actions.py'
+    },
   },
 
   'WATCHLISTS': {
@@ -327,10 +343,10 @@
     'browser_resources': ['arv@chromium.org'],
     'bubble': ['alicet@chromium.org', 'msw+watch@chromium.org'],
     'content': ['jam@chromium.org', 'joi+watch-content@chromium.org',
-                'darin-cc@chromium.org',
-                'dpranke-watch+content@chromium.org'],
-    'download': ['phajdan.jr@chromium.org','rdsmith+dwatch@chromium.org'],
+                'darin-cc@chromium.org'],
+    'download': ['rdsmith+dwatch@chromium.org'],
     'history': ['brettw-cc@chromium.org'],
+    'history_ui': ['dubroy@chromium.org'],
     'renderer': ['darin-cc@chromium.org',
                  'brettw-cc@chromium.org'],
     'tab_contents': ['brettw-cc@chromium.org', 'avi@chromium.org',
@@ -341,8 +357,7 @@
                'stuartmorgan+watch@chromium.org'],
     'worker': ['jam@chromium.org'],
     'extension': ['aa@chromium.org',
-                  'mihaip+watch@chromium.org',
-                  'jstritar+watch@chromium.org'],
+                  'mihaip+watch@chromium.org'],
     'net': ['darin-cc@chromium.org', 'cbentzel+watch@chromium.org'],
     'net_error_list': ['mmenke@chromium.org'],
     'net_log': ['mmenke@chromium.org', 'eroman@chromium.org'],
@@ -358,8 +373,8 @@
     'sync': ['tim@chromium.org', 'nick@chromium.org',
              'akalin@chromium.org', 'rsimha@chromium.org'],
     'tools': ['pam+watch@chromium.org'],
-    'tests': ['phajdan.jr@chromium.org'],
-    'automation': ['phajdan.jr@chromium.org', 'kkania@chromium.org',
+    'tests': [],
+    'automation': ['kkania@chromium.org',
                    'robertshield@chromium.org'],
     'chrome_frame': ['amit@chromium.org', 'robertshield@chromium.org'],
     'nacl': ['native-client-reviews@googlegroups.com'],
@@ -370,14 +385,18 @@
                  'nkostylev+watch@chromium.org'],
     'chromeos_webui': ['nkostylev+watch@chromium.org'],
     'npapi_headers': ['stuartmorgan@chromium.org'],
-    'remoting': ['garykac+watch@chromium.org',
+    'remoting': ['alexeypa+watch@chromium.org',
+                 'dcaiafa+watch@chromium.org',
+                 'garykac+watch@chromium.org',
                  'hclam+watch@chromium.org',
                  'jamiewalch+watch@chromium.org',
                  'lambroslambrou+watch@chromium.org',
                  'sergeyu+watch@chromium.org',
                  'simonmorris+watch@chromium.org',
-                 'wez+watch@chromium.org'],
-    'ntp': ['estade+watch@chromium.org'],
+                 'wez+watch@chromium.org',
+                 'amit@chromium.org',
+                 'sanjeevr@chromium.org'],
+    'ntp': ['estade+watch@chromium.org', 'dbeam+watch-ntp@chromium.org'],
     'cookie_monster': ['erikwright@chromium.org', 'rdsmith@chromium.org',
                        'rkn@chromium.org', 'wtc@chromium.org'],
     'autofill': ['dhollowa+watch@chromium.org', 'georgey@chromium.org',
@@ -404,8 +423,8 @@
                'jianli@chromium.org'],
     'importer': ['tfarina@chromium.org'],
     'views': ['tfarina@chromium.org'],
-    'accelerator_table_linux': ['mazda@chromium.org',
-                                'derat+watch@chromium.org'],
+    'accelerator_table': ['mazda@chromium.org',
+                          'derat+watch@chromium.org'],
     'downloads_ui': ['asanka@chromium.org', 'rdsmith@chromium.org'],
     'x11': ['derat+watch@chromium.org',
             'sadrul@chromium.org',
@@ -435,5 +454,8 @@
     'omnibox': ['suzhe@chromium.org'],
     'message_loop': ['sadrul@chromium.org'],
     'clipboard': ['dcheng@chromium.org'],
+    'metrics': ['jar@chromium.org',
+                'isherman@chromium.org',
+                'mad@chromium.org'],
   },
 }

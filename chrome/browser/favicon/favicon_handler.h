@@ -9,23 +9,25 @@
 #include <map>
 
 #include "base/basictypes.h"
-#include "base/bind.h"
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/common/favicon_url.h"
 #include "chrome/common/ref_counted_util.h"
-#include "content/browser/cancelable_request.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/favicon_size.h"
 
 class FaviconHandlerDelegate;
-class NavigationEntry;
 class Profile;
 class RefCountedMemory;
 class SkBitmap;
 class TabContents;
+
+namespace content {
+class NavigationEntry;
+}
 
 namespace gfx {
 class Image;
@@ -117,7 +119,7 @@ class FaviconHandler {
 
   // Return the NavigationEntry for the active entry, or NULL if the active
   // entries URL does not match that of the URL last passed to FetchFavicon.
-  virtual NavigationEntry* GetEntry();
+  virtual content::NavigationEntry* GetEntry();
 
   // Asks the render to download favicon, returns the request id.
   virtual int DownloadFavicon(const GURL& image_url, int image_size);
@@ -204,9 +206,9 @@ class FaviconHandler {
   // NavigationEntry.
   // If the TabContents has a delegate, it is notified of the new favicon
   // (INVALIDATE_FAVICON).
-  void UpdateFavicon(NavigationEntry* entry,
+  void UpdateFavicon(content::NavigationEntry* entry,
                      scoped_refptr<RefCountedMemory> data);
-  void UpdateFavicon(NavigationEntry* entry, const gfx::Image* image);
+  void UpdateFavicon(content::NavigationEntry* entry, const gfx::Image* image);
 
   // If the image is not already at its preferred size, scales the image such
   // that either the width and/or height is 16 pixels wide. Does nothing if the

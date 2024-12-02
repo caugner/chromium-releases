@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,22 @@ SyncableSettingsStorage::SyncableSettingsStorage(
 
 SyncableSettingsStorage::~SyncableSettingsStorage() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+}
+
+size_t SyncableSettingsStorage::GetBytesInUse(const std::string& key) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  return delegate_->GetBytesInUse(key);
+}
+
+size_t SyncableSettingsStorage::GetBytesInUse(
+    const std::vector<std::string>& keys) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  return delegate_->GetBytesInUse(keys);
+}
+
+size_t SyncableSettingsStorage::GetBytesInUse() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  return delegate_->GetBytesInUse();
 }
 
 SettingsStorage::ReadResult SyncableSettingsStorage::Get(
@@ -392,7 +408,7 @@ SyncError SyncableSettingsStorage::OnSyncAdd(
     SettingChangeList* changes) {
   DCHECK(new_value);
   synced_keys_.insert(key);
-  WriteResult result = delegate_->Set(FORCE, key, *new_value);
+  WriteResult result = delegate_->Set(IGNORE_QUOTA, key, *new_value);
   if (result.HasError()) {
     return SyncError(
         FROM_HERE,
@@ -411,7 +427,7 @@ SyncError SyncableSettingsStorage::OnSyncUpdate(
     SettingChangeList* changes) {
   DCHECK(old_value);
   DCHECK(new_value);
-  WriteResult result = delegate_->Set(FORCE, key, *new_value);
+  WriteResult result = delegate_->Set(IGNORE_QUOTA, key, *new_value);
   if (result.HasError()) {
     return SyncError(
         FROM_HERE,

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,7 +45,7 @@ void NativeViewHostAura::AddedToWidget() {
   aura::Window* widget_window = host_->GetWidget()->GetNativeView();
   if (host_->native_view()->parent() != widget_window)
     widget_window->AddChild(host_->native_view());
-  if (host_->IsVisibleInRootView())
+  if (host_->IsDrawn())
     host_->native_view()->Show();
   else
     host_->native_view()->Hide();
@@ -53,8 +53,11 @@ void NativeViewHostAura::AddedToWidget() {
 }
 
 void NativeViewHostAura::RemovedFromWidget() {
-  if (host_->native_view() && host_->native_view()->parent())
-    host_->native_view()->parent()->RemoveChild(host_->native_view());
+  if (host_->native_view()) {
+    host_->native_view()->Hide();
+    if (host_->native_view()->parent())
+      host_->native_view()->parent()->RemoveChild(host_->native_view());
+  }
 }
 
 void NativeViewHostAura::InstallClip(int x, int y, int w, int h) {

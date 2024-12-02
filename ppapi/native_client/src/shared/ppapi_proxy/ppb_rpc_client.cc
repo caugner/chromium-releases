@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -27,7 +27,7 @@
 NaClSrpcError NaClFileRpcClient::StreamAsFile(
     NaClSrpcChannel* channel,
     PP_Instance instance,
-    char* url,
+    const char* url,
     int32_t callback_id)  {
   VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
          ("%s: PPAPI calls are not supported off the main thread\n",
@@ -46,7 +46,7 @@ NaClSrpcError NaClFileRpcClient::StreamAsFile(
 NaClSrpcError NaClFileRpcClient::GetFileDesc(
     NaClSrpcChannel* channel,
     PP_Instance instance,
-    char* url,
+    const char* url,
     NaClSrpcImcDescType* file_desc)  {
   VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
          ("%s: PPAPI calls are not supported off the main thread\n",
@@ -64,7 +64,7 @@ NaClSrpcError NaClFileRpcClient::GetFileDesc(
 
 NaClSrpcError PpbRpcClient::PPB_GetInterface(
     NaClSrpcChannel* channel,
-    char* interface_name,
+    const char* interface_name,
     int32_t* exports_interface_name)  {
   NaClSrpcError retval;
   retval = NaClSrpcInvokeBySignature(
@@ -1158,6 +1158,23 @@ NaClSrpcError PpbFullscreenRpcClient::PPB_Fullscreen_GetScreenSize(
   return retval;
 }
 
+NaClSrpcError PpbGamepadRpcClient::PPB_Gamepad_SampleGamepads(
+    NaClSrpcChannel* channel,
+    PP_Instance instance,
+    nacl_abi_size_t* data_bytes, char* data)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_Gamepad_SampleGamepads:i:C",
+      instance,
+      data_bytes, data
+  );
+  return retval;
+}
+
 NaClSrpcError PpbGraphics2DRpcClient::PPB_Graphics2D_Create(
     NaClSrpcChannel* channel,
     PP_Instance instance,
@@ -1435,7 +1452,6 @@ NaClSrpcError PpbGraphics3DRpcClient::PPB_Graphics3DTrusted_CreateRaw(
 NaClSrpcError PpbGraphics3DRpcClient::PPB_Graphics3DTrusted_InitCommandBuffer(
     NaClSrpcChannel* channel,
     PP_Resource resource_id,
-    int32_t size,
     int32_t* success)  {
   VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
          ("%s: PPAPI calls are not supported off the main thread\n",
@@ -1443,29 +1459,26 @@ NaClSrpcError PpbGraphics3DRpcClient::PPB_Graphics3DTrusted_InitCommandBuffer(
   NaClSrpcError retval;
   retval = NaClSrpcInvokeBySignature(
       channel,
-      "PPB_Graphics3DTrusted_InitCommandBuffer:ii:i",
+      "PPB_Graphics3DTrusted_InitCommandBuffer:i:i",
       resource_id,
-      size,
       success
   );
   return retval;
 }
 
-NaClSrpcError PpbGraphics3DRpcClient::PPB_Graphics3DTrusted_GetRingBuffer(
+NaClSrpcError PpbGraphics3DRpcClient::PPB_Graphics3DTrusted_SetGetBuffer(
     NaClSrpcChannel* channel,
     PP_Resource resource_id,
-    NaClSrpcImcDescType* shm_desc,
-    int32_t* shm_size)  {
+    int32_t shm_id)  {
   VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
          ("%s: PPAPI calls are not supported off the main thread\n",
           __FUNCTION__));
   NaClSrpcError retval;
   retval = NaClSrpcInvokeBySignature(
       channel,
-      "PPB_Graphics3DTrusted_GetRingBuffer:i:hi",
+      "PPB_Graphics3DTrusted_SetGetBuffer:ii:",
       resource_id,
-      shm_desc,
-      shm_size
+      shm_id
   );
   return retval;
 }
@@ -1916,6 +1929,103 @@ NaClSrpcError PpbMouseLockRpcClient::PPB_MouseLock_UnlockMouse(
   return retval;
 }
 
+NaClSrpcError PpbNetAddressPrivateRpcClient::PPB_NetAddress_Private_AreEqual(
+    NaClSrpcChannel* channel,
+    nacl_abi_size_t addr1_bytes, char* addr1,
+    nacl_abi_size_t addr2_bytes, char* addr2,
+    int32_t* equals)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_NetAddress_Private_AreEqual:CC:i",
+      addr1_bytes, addr1,
+      addr2_bytes, addr2,
+      equals
+  );
+  return retval;
+}
+
+NaClSrpcError PpbNetAddressPrivateRpcClient::PPB_NetAddress_Private_AreHostsEqual(
+    NaClSrpcChannel* channel,
+    nacl_abi_size_t addr1_bytes, char* addr1,
+    nacl_abi_size_t addr2_bytes, char* addr2,
+    int32_t* equals)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_NetAddress_Private_AreHostsEqual:CC:i",
+      addr1_bytes, addr1,
+      addr2_bytes, addr2,
+      equals
+  );
+  return retval;
+}
+
+NaClSrpcError PpbNetAddressPrivateRpcClient::PPB_NetAddress_Private_Describe(
+    NaClSrpcChannel* channel,
+    int32_t module,
+    nacl_abi_size_t addr_bytes, char* addr,
+    int32_t include_port,
+    nacl_abi_size_t* description_bytes, char* description)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_NetAddress_Private_Describe:iCi:C",
+      module,
+      addr_bytes, addr,
+      include_port,
+      description_bytes, description
+  );
+  return retval;
+}
+
+NaClSrpcError PpbNetAddressPrivateRpcClient::PPB_NetAddress_Private_ReplacePort(
+    NaClSrpcChannel* channel,
+    nacl_abi_size_t src_addr_bytes, char* src_addr,
+    int32_t port,
+    nacl_abi_size_t* dst_addr_bytes, char* dst_addr,
+    int32_t* success)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_NetAddress_Private_ReplacePort:Ci:Ci",
+      src_addr_bytes, src_addr,
+      port,
+      dst_addr_bytes, dst_addr,
+      success
+  );
+  return retval;
+}
+
+NaClSrpcError PpbNetAddressPrivateRpcClient::PPB_NetAddress_Private_GetAnyAddress(
+    NaClSrpcChannel* channel,
+    int32_t is_ipv6,
+    nacl_abi_size_t* addr_bytes, char* addr)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_NetAddress_Private_GetAnyAddress:i:C",
+      is_ipv6,
+      addr_bytes, addr
+  );
+  return retval;
+}
+
 NaClSrpcError PpbPdfRpcClient::PPB_PDF_GetLocalizedString(
     NaClSrpcChannel* channel,
     PP_Instance instance,
@@ -2326,7 +2436,7 @@ NaClSrpcError PpbTCPSocketPrivateRpcClient::PPB_TCPSocket_Private_IsTCPSocket(
 NaClSrpcError PpbTCPSocketPrivateRpcClient::PPB_TCPSocket_Private_Connect(
     NaClSrpcChannel* channel,
     PP_Resource tcp_socket,
-    char* host,
+    const char* host,
     int32_t port,
     int32_t callback_id,
     int32_t* pp_error)  {
@@ -2408,7 +2518,7 @@ NaClSrpcError PpbTCPSocketPrivateRpcClient::PPB_TCPSocket_Private_GetRemoteAddre
 NaClSrpcError PpbTCPSocketPrivateRpcClient::PPB_TCPSocket_Private_SSLHandshake(
     NaClSrpcChannel* channel,
     PP_Resource tcp_socket,
-    char* server_name,
+    const char* server_name,
     int32_t server_port,
     int32_t callback_id,
     int32_t* pp_error)  {
@@ -2553,6 +2663,42 @@ NaClSrpcError PpbTestingRpcClient::PPB_Testing_GetLiveObjectsForInstance(
       "PPB_Testing_GetLiveObjectsForInstance:i:i",
       instance,
       live_object_count
+  );
+  return retval;
+}
+
+NaClSrpcError PpbTestingRpcClient::PPB_Testing_SimulateInputEvent(
+    NaClSrpcChannel* channel,
+    PP_Instance instance,
+    PP_Resource input_event)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_Testing_SimulateInputEvent:ii:",
+      instance,
+      input_event
+  );
+  return retval;
+}
+
+NaClSrpcError PpbTestingRpcClient::PPB_Testing_GetDocumentURL(
+    NaClSrpcChannel* channel,
+    PP_Instance instance,
+    nacl_abi_size_t* components_bytes, char* components,
+    nacl_abi_size_t* url_bytes, char* url)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_Testing_GetDocumentURL:i:CC",
+      instance,
+      components_bytes, components,
+      url_bytes, url
   );
   return retval;
 }
@@ -3032,6 +3178,262 @@ NaClSrpcError PpbURLResponseInfoRpcClient::PPB_URLResponseInfo_GetBodyAsFileRef(
       "PPB_URLResponseInfo_GetBodyAsFileRef:i:i",
       response,
       file_ref
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_Create(
+    NaClSrpcChannel* channel,
+    PP_Instance instance,
+    PP_Resource* resource)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_Create:i:i",
+      instance,
+      resource
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_IsWebSocket(
+    NaClSrpcChannel* channel,
+    PP_Resource instance,
+    int32_t* is_websocket)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_IsWebSocket:i:i",
+      instance,
+      is_websocket
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_Connect(
+    NaClSrpcChannel* channel,
+    PP_Resource ws,
+    nacl_abi_size_t url_bytes, char* url,
+    nacl_abi_size_t protocols_bytes, char* protocols,
+    int32_t protocol_count,
+    int32_t callback_id,
+    int32_t* pp_error)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_Connect:iCCii:i",
+      ws,
+      url_bytes, url,
+      protocols_bytes, protocols,
+      protocol_count,
+      callback_id,
+      pp_error
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_Close(
+    NaClSrpcChannel* channel,
+    PP_Resource ws,
+    int32_t code,
+    nacl_abi_size_t reason_bytes, char* reason,
+    int32_t callback_id,
+    int32_t* pp_error)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_Close:iiCi:i",
+      ws,
+      code,
+      reason_bytes, reason,
+      callback_id,
+      pp_error
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_ReceiveMessage(
+    NaClSrpcChannel* channel,
+    PP_Resource ws,
+    int32_t callback_id,
+    int32_t* pp_error)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_ReceiveMessage:ii:i",
+      ws,
+      callback_id,
+      pp_error
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_SendMessage(
+    NaClSrpcChannel* channel,
+    PP_Resource ws,
+    nacl_abi_size_t message_bytes, char* message,
+    int32_t* pp_error)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_SendMessage:iC:i",
+      ws,
+      message_bytes, message,
+      pp_error
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_GetBufferedAmount(
+    NaClSrpcChannel* channel,
+    PP_Resource ws,
+    int64_t* buffered_amount)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_GetBufferedAmount:i:l",
+      ws,
+      buffered_amount
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_GetCloseCode(
+    NaClSrpcChannel* channel,
+    PP_Resource ws,
+    int32_t* close_code)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_GetCloseCode:i:i",
+      ws,
+      close_code
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_GetCloseReason(
+    NaClSrpcChannel* channel,
+    PP_Resource ws,
+    nacl_abi_size_t* reason_bytes, char* reason)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_GetCloseReason:i:C",
+      ws,
+      reason_bytes, reason
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_GetCloseWasClean(
+    NaClSrpcChannel* channel,
+    PP_Resource ws,
+    int32_t* was_clean)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_GetCloseWasClean:i:i",
+      ws,
+      was_clean
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_GetExtensions(
+    NaClSrpcChannel* channel,
+    PP_Resource ws,
+    nacl_abi_size_t* extensions_bytes, char* extensions)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_GetExtensions:i:C",
+      ws,
+      extensions_bytes, extensions
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_GetProtocol(
+    NaClSrpcChannel* channel,
+    PP_Resource ws,
+    nacl_abi_size_t* protocol_bytes, char* protocol)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_GetProtocol:i:C",
+      ws,
+      protocol_bytes, protocol
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_GetReadyState(
+    NaClSrpcChannel* channel,
+    PP_Resource ws,
+    int32_t* ready_state)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_GetReadyState:i:i",
+      ws,
+      ready_state
+  );
+  return retval;
+}
+
+NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_GetURL(
+    NaClSrpcChannel* channel,
+    PP_Resource ws,
+    nacl_abi_size_t* url_bytes, char* url)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_WebSocket_GetURL:i:C",
+      ws,
+      url_bytes, url
   );
   return retval;
 }

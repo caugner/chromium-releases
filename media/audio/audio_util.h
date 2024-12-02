@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 
 #include "base/basictypes.h"
 #include "media/base/media_export.h"
+
+struct AudioParameters;
 
 namespace base {
 class SharedMemory;
@@ -90,6 +92,9 @@ MEDIA_EXPORT double GetAudioInputHardwareSampleRate();
 // at without glitches.  The buffer size is in sample-frames.
 MEDIA_EXPORT size_t GetAudioHardwareBufferSize();
 
+// Returns the default number of channels for the audio input hardware.
+MEDIA_EXPORT uint32 GetAudioInputHardwareChannelCount();
+
 // Functions that handle data buffer passed between processes in the shared
 // memory. Called on both IPC sides.
 
@@ -112,6 +117,16 @@ MEDIA_EXPORT bool IsUnknownDataSize(base::SharedMemory* shared_memory,
 MEDIA_EXPORT bool IsWASAPISupported();
 
 #endif  // defined(OS_WIN)
+
+// Crossfades |bytes_to_crossfade| bytes of data in |dest| with the
+// data in |src|. Assumes there is room in |dest| and enough data in |src|.
+MEDIA_EXPORT void Crossfade(int bytes_to_crossfade, int number_of_channels,
+                            int bytes_per_channel, const uint8* src,
+                            uint8* dest);
+
+// Calculates a safe hardware buffer size (in number of samples) given a set
+// of audio parameters.
+MEDIA_EXPORT uint32 SelectSamplesPerPacket(int sample_rate);
 
 }  // namespace media
 

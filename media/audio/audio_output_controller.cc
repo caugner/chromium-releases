@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,12 @@
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/message_loop.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 
 using base::Time;
+using base::WaitableEvent;
 
 namespace media {
 
@@ -21,10 +23,12 @@ const int AudioOutputController::kPauseMark = -1;
 const int AudioOutputController::kPollNumAttempts = 3;
 const int AudioOutputController::kPollPauseInMilliseconds = 3;
 
-AudioOutputController::AudioOutputController(EventHandler* handler,
+AudioOutputController::AudioOutputController(AudioManager* audio_manager,
+                                             EventHandler* handler,
                                              uint32 capacity,
                                              SyncReader* sync_reader)
-    : handler_(handler),
+    : audio_manager_(audio_manager),
+      handler_(handler),
       stream_(NULL),
       volume_(1.0),
       state_(kEmpty),
@@ -32,91 +36,100 @@ AudioOutputController::AudioOutputController(EventHandler* handler,
       pending_request_(false),
       sync_reader_(sync_reader),
       message_loop_(NULL),
-      number_polling_attempts_left_(0) {
+      number_polling_attempts_left_(0),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_this_(this)) {
 }
 
 AudioOutputController::~AudioOutputController() {
   DCHECK_EQ(kClosed, state_);
-  StopCloseAndClearStream();
+  DCHECK(message_loop_);
+
+  if (!message_loop_.get() || message_loop_->BelongsToCurrentThread()) {
+    DoStopCloseAndClearStream(NULL);
+  } else {
+    WaitableEvent completion(true /* manual reset */,
+                             false /* initial state */);
+    message_loop_->PostTask(FROM_HERE,
+        base::Bind(&AudioOutputController::DoStopCloseAndClearStream,
+                   base::Unretained(this),
+                   &completion));
+    completion.Wait();
+  }
 }
 
 // static
 scoped_refptr<AudioOutputController> AudioOutputController::Create(
+    AudioManager* audio_manager,
     EventHandler* event_handler,
     const AudioParameters& params,
     uint32 buffer_capacity) {
-
-  if (!params.IsValid())
-    return NULL;
-
-  if (!AudioManager::GetAudioManager())
+  DCHECK(audio_manager);
+  if (!params.IsValid() ||  !audio_manager)
     return NULL;
 
   // Starts the audio controller thread.
   scoped_refptr<AudioOutputController> controller(new AudioOutputController(
-      event_handler, buffer_capacity, NULL));
+      audio_manager, event_handler, buffer_capacity, NULL));
 
-  controller->message_loop_ =
-      AudioManager::GetAudioManager()->GetMessageLoop();
+  controller->message_loop_ = audio_manager->GetMessageLoop();
   controller->message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoCreate, controller.get(), params));
+      &AudioOutputController::DoCreate, base::Unretained(controller.get()),
+      params));
   return controller;
 }
 
 // static
 scoped_refptr<AudioOutputController> AudioOutputController::CreateLowLatency(
+    AudioManager* audio_manager,
     EventHandler* event_handler,
     const AudioParameters& params,
     SyncReader* sync_reader) {
-
+  DCHECK(audio_manager);
   DCHECK(sync_reader);
 
-  if (!params.IsValid())
-    return NULL;
-
-  if (!AudioManager::GetAudioManager())
+  if (!params.IsValid() || !audio_manager)
     return NULL;
 
   // Starts the audio controller thread.
   scoped_refptr<AudioOutputController> controller(new AudioOutputController(
-      event_handler, 0, sync_reader));
+      audio_manager, event_handler, 0, sync_reader));
 
-  controller->message_loop_ =
-      AudioManager::GetAudioManager()->GetMessageLoop();
+  controller->message_loop_ = audio_manager->GetMessageLoop();
   controller->message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoCreate, controller.get(), params));
+      &AudioOutputController::DoCreate, base::Unretained(controller.get()),
+      params));
   return controller;
 }
 
 void AudioOutputController::Play() {
   DCHECK(message_loop_);
   message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoPlay, this));
+      &AudioOutputController::DoPlay, base::Unretained(this)));
 }
 
 void AudioOutputController::Pause() {
   DCHECK(message_loop_);
   message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoPause, this));
+      &AudioOutputController::DoPause, base::Unretained(this)));
 }
 
 void AudioOutputController::Flush() {
   DCHECK(message_loop_);
   message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoFlush, this));
+      &AudioOutputController::DoFlush, base::Unretained(this)));
 }
 
 void AudioOutputController::Close(const base::Closure& closed_task) {
   DCHECK(!closed_task.is_null());
   DCHECK(message_loop_);
   message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoClose, this, closed_task));
+      &AudioOutputController::DoClose, base::Unretained(this), closed_task));
 }
 
 void AudioOutputController::SetVolume(double volume) {
   DCHECK(message_loop_);
   message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoSetVolume, this, volume));
+      &AudioOutputController::DoSetVolume, base::Unretained(this), volume));
 }
 
 void AudioOutputController::EnqueueData(const uint8* data, uint32 size) {
@@ -133,18 +146,15 @@ void AudioOutputController::EnqueueData(const uint8* data, uint32 size) {
 }
 
 void AudioOutputController::DoCreate(const AudioParameters& params) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   // Close() can be called before DoCreate() is executed.
   if (state_ == kClosed)
     return;
   DCHECK_EQ(kEmpty, state_);
 
-  if (!AudioManager::GetAudioManager())
-    return;
-
-  StopCloseAndClearStream();
-  stream_ = AudioManager::GetAudioManager()->MakeAudioOutputStreamProxy(params);
+  DoStopCloseAndClearStream(NULL);
+  stream_ = audio_manager_->MakeAudioOutputStreamProxy(params);
   if (!stream_) {
     // TODO(hclam): Define error types.
     handler_->OnError(this, 0);
@@ -152,7 +162,7 @@ void AudioOutputController::DoCreate(const AudioParameters& params) {
   }
 
   if (!stream_->Open()) {
-    StopCloseAndClearStream();
+    DoStopCloseAndClearStream(NULL);
 
     // TODO(hclam): Define error types.
     handler_->OnError(this, 0);
@@ -176,7 +186,7 @@ void AudioOutputController::DoCreate(const AudioParameters& params) {
 }
 
 void AudioOutputController::DoPlay() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   // We can start from created or paused state.
   if (state_ != kCreated && state_ != kPaused)
@@ -193,7 +203,8 @@ void AudioOutputController::DoPlay() {
     number_polling_attempts_left_ = kPollNumAttempts;
     message_loop_->PostDelayedTask(
         FROM_HERE,
-        base::Bind(&AudioOutputController::PollAndStartIfDataReady, this),
+        base::Bind(&AudioOutputController::PollAndStartIfDataReady,
+        weak_this_.GetWeakPtr()),
         kPollPauseInMilliseconds);
   } else {
     StartStream();
@@ -201,9 +212,9 @@ void AudioOutputController::DoPlay() {
 }
 
 void AudioOutputController::PollAndStartIfDataReady() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
-  // Being paranoic: do nothing if state unexpectedly changed.
+  // Being paranoid: do nothing if state unexpectedly changed.
   if ((state_ != kStarting) && (state_ != kPausedWhenStarting))
     return;
 
@@ -220,13 +231,14 @@ void AudioOutputController::PollAndStartIfDataReady() {
   } else {
     message_loop_->PostDelayedTask(
         FROM_HERE,
-        base::Bind(&AudioOutputController::PollAndStartIfDataReady, this),
+        base::Bind(&AudioOutputController::PollAndStartIfDataReady,
+        weak_this_.GetWeakPtr()),
         kPollPauseInMilliseconds);
   }
 }
 
 void AudioOutputController::StartStream() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK(message_loop_->BelongsToCurrentThread());
   state_ = kPlaying;
 
   // We start the AudioOutputStream lazily.
@@ -237,7 +249,7 @@ void AudioOutputController::StartStream() {
 }
 
 void AudioOutputController::DoPause() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   if (stream_)
     stream_->Stop();
@@ -271,7 +283,7 @@ void AudioOutputController::DoPause() {
 }
 
 void AudioOutputController::DoFlush() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   // TODO(hclam): Actually flush the audio device.
 
@@ -285,10 +297,10 @@ void AudioOutputController::DoFlush() {
 }
 
 void AudioOutputController::DoClose(const base::Closure& closed_task) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   if (state_ != kClosed) {
-    StopCloseAndClearStream();
+    DoStopCloseAndClearStream(NULL);
 
     if (LowLatencyMode()) {
       sync_reader_->Close();
@@ -301,7 +313,7 @@ void AudioOutputController::DoClose(const base::Closure& closed_task) {
 }
 
 void AudioOutputController::DoSetVolume(double volume) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   // Saves the volume to a member first. We may not be able to set the volume
   // right away but when the stream is created we'll set the volume.
@@ -321,7 +333,7 @@ void AudioOutputController::DoSetVolume(double volume) {
 }
 
 void AudioOutputController::DoReportError(int code) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK(message_loop_->BelongsToCurrentThread());
   if (state_ != kClosed)
     handler_->OnError(this, code);
 }
@@ -367,19 +379,20 @@ void AudioOutputController::WaitTillDataReady() {
   if (LowLatencyMode() && !sync_reader_->DataReady()) {
     // In the different place we use different mechanism to poll, get max
     // polling delay from constants used there.
-    const int kMaxPollingDelayMs = kPollNumAttempts * kPollPauseInMilliseconds;
+    const base::TimeDelta kMaxPollingDelay = base::TimeDelta::FromMilliseconds(
+        kPollNumAttempts * kPollPauseInMilliseconds);
     Time start_time = Time::Now();
     do {
-      base::PlatformThread::Sleep(1);
+      base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(1));
     } while (!sync_reader_->DataReady() &&
-             (Time::Now() - start_time).InMilliseconds() < kMaxPollingDelayMs);
+             Time::Now() - start_time < kMaxPollingDelay);
   }
 }
 
 void AudioOutputController::OnError(AudioOutputStream* stream, int code) {
   // Handle error on the audio controller thread.
   message_loop_->PostTask(FROM_HERE, base::Bind(
-      &AudioOutputController::DoReportError, this, code));
+      &AudioOutputController::DoReportError, base::Unretained(this), code));
 }
 
 void AudioOutputController::SubmitOnMoreData_Locked() {
@@ -402,13 +415,20 @@ void AudioOutputController::SubmitOnMoreData_Locked() {
   handler_->OnMoreData(this, buffers_state);
 }
 
-void AudioOutputController::StopCloseAndClearStream() {
+void AudioOutputController::DoStopCloseAndClearStream(WaitableEvent *done) {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+
   // Allow calling unconditionally and bail if we don't have a stream_ to close.
-  if (!stream_)
-    return;
-  stream_->Stop();
-  stream_->Close();
-  stream_ = NULL;
+  if (stream_ != NULL) {
+    stream_->Stop();
+    stream_->Close();
+    stream_ = NULL;
+    weak_this_.InvalidateWeakPtrs();
+  }
+
+  // Should be last in the method, do not touch "this" from here on.
+  if (done != NULL)
+    done->Signal();
 }
 
 }  // namespace media

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,11 +24,13 @@ using sessions::SyncSession;
 using std::string;
 using syncable::FIRST_REAL_MODEL_TYPE;
 using syncable::MODEL_TYPE_COUNT;
+using syncable::ModelTypeSet;
+using syncable::ModelTypeSetToString;
 
 DownloadUpdatesCommand::DownloadUpdatesCommand() {}
 DownloadUpdatesCommand::~DownloadUpdatesCommand() {}
 
-void DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
+SyncerError DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
   ClientToServerMessage client_to_server_message;
   ClientToServerResponse update_response;
 
@@ -46,31 +48,31 @@ void DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
                       session->context()->account_name());
   if (!dir.good()) {
     LOG(ERROR) << "Scoped dir lookup failed!";
-    return;
+    return DIRECTORY_LOOKUP_FAILED;
   }
 
   // Request updates for all enabled types.
-  syncable::ModelTypeBitSet enabled_types;
+  const ModelTypeSet enabled_types =
+      GetRoutingInfoTypes(session->routing_info());
+  DVLOG(1) << "Getting updates for types "
+           << ModelTypeSetToString(enabled_types);
+  DCHECK(!enabled_types.Empty());
+
   const syncable::ModelTypePayloadMap& type_payload_map =
       session->source().types;
-  for (ModelSafeRoutingInfo::const_iterator i = session->routing_info().begin();
-       i != session->routing_info().end(); ++i) {
-    syncable::ModelType model_type = syncable::ModelTypeFromInt(i->first);
-    enabled_types[i->first] = true;
+  for (ModelTypeSet::Iterator it = enabled_types.First();
+       it.Good(); it.Inc()) {
     sync_pb::DataTypeProgressMarker* progress_marker =
         get_updates->add_from_progress_marker();
-    dir->GetDownloadProgress(model_type, progress_marker);
+    dir->GetDownloadProgress(it.Get(), progress_marker);
 
     // Set notification hint if present.
     syncable::ModelTypePayloadMap::const_iterator type_payload =
-        type_payload_map.find(i->first);
+        type_payload_map.find(it.Get());
     if (type_payload != type_payload_map.end()) {
       progress_marker->set_notification_hint(type_payload->second);
     }
   }
-
-  DVLOG(1) << "Getting updates for types " << enabled_types.to_string();
-  DCHECK(enabled_types.any());
 
   // We want folders for our associated types, always.  If we were to set
   // this to false, the server would send just the non-container items
@@ -89,7 +91,7 @@ void DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
 
   AppendClientDebugInfoIfNeeded(session, debug_info);
 
-  bool ok = SyncerProtoUtil::PostClientToServerMessage(
+  SyncerError result = SyncerProtoUtil::PostClientToServerMessage(
       client_to_server_message,
       &update_response,
       session);
@@ -99,11 +101,11 @@ void DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
 
   StatusController* status = session->mutable_status_controller();
   status->set_updates_request_types(enabled_types);
-  if (!ok) {
+  if (result != SYNCER_OK) {
     status->increment_num_consecutive_errors();
     status->mutable_updates_response()->Clear();
     LOG(ERROR) << "PostClientToServerMessage() failed during GetUpdates";
-    return;
+    return result;
   }
 
   status->mutable_updates_response()->CopyFrom(update_response);
@@ -113,6 +115,7 @@ void DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
            << " updates and indicated "
            << update_response.get_updates().changes_remaining()
            << " updates left on server.";
+  return result;
 }
 
 void DownloadUpdatesCommand::AppendClientDebugInfoIfNeeded(

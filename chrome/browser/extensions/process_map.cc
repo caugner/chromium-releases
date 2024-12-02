@@ -8,10 +8,12 @@ namespace extensions {
 
 // Item
 struct ProcessMap::Item {
-  Item() {
+  Item() : process_id(0), site_instance_id(0) {
   }
 
-  explicit Item(const ProcessMap::Item& other)
+  // Purposely implicit constructor needed on older gcc's. See:
+  // http://codereview.chromium.org/8769022/
+  Item(const ProcessMap::Item& other)
       : extension_id(other.extension_id),
         process_id(other.process_id),
         site_instance_id(other.site_instance_id) {

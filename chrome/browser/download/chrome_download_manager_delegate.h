@@ -10,7 +10,7 @@
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/safe_browsing/download_protection_service.h"
 #include "content/public/browser/download_manager_delegate.h"
 #include "content/public/browser/notification_observer.h"
@@ -18,11 +18,14 @@
 
 class CrxInstaller;
 class DownloadHistory;
-class DownloadItem;
-class DownloadManager;
 class DownloadPrefs;
 class Profile;
 struct DownloadStateInfo;
+
+namespace content {
+class DownloadItem;
+class DownloadManager;
+}
 
 #if defined(COMPILER_GCC)
 namespace __gnu_cxx {
@@ -45,39 +48,44 @@ class ChromeDownloadManagerDelegate
  public:
   explicit ChromeDownloadManagerDelegate(Profile* profile);
 
-  void SetDownloadManager(DownloadManager* dm);
+  void SetDownloadManager(content::DownloadManager* dm);
 
   // Returns true if the given item is for an extension download.
-  static bool IsExtensionDownload(const DownloadItem* item);
+  static bool IsExtensionDownload(const content::DownloadItem* item);
 
   virtual void Shutdown() OVERRIDE;
+  virtual content::DownloadId GetNextId() OVERRIDE;
   virtual bool ShouldStartDownload(int32 download_id) OVERRIDE;
-  virtual void ChooseDownloadPath(TabContents* tab_contents,
+  virtual void ChooseDownloadPath(content::WebContents* web_contents,
                                   const FilePath& suggested_path,
                                   void* data) OVERRIDE;
-  virtual bool OverrideIntermediatePath(DownloadItem* item,
-                                        FilePath* intermediate_path) OVERRIDE;
-  virtual TabContents* GetAlternativeTabContentsToNotifyForDownload() OVERRIDE;
+  virtual FilePath GetIntermediatePath(const FilePath& suggested_path) OVERRIDE;
+  virtual content::WebContents*
+      GetAlternativeWebContentsToNotifyForDownload() OVERRIDE;
   virtual bool ShouldOpenFileBasedOnExtension(const FilePath& path) OVERRIDE;
-  virtual bool ShouldCompleteDownload(DownloadItem* item) OVERRIDE;
-  virtual bool ShouldOpenDownload(DownloadItem* item) OVERRIDE;
+  virtual bool ShouldCompleteDownload(content::DownloadItem* item) OVERRIDE;
+  virtual bool ShouldOpenDownload(content::DownloadItem* item) OVERRIDE;
   virtual bool GenerateFileHash() OVERRIDE;
-  virtual void OnResponseCompleted(DownloadItem* item) OVERRIDE;
-  virtual void AddItemToPersistentStore(DownloadItem* item) OVERRIDE;
-  virtual void UpdateItemInPersistentStore(DownloadItem* item) OVERRIDE;
+  virtual void AddItemToPersistentStore(content::DownloadItem* item) OVERRIDE;
+  virtual void UpdateItemInPersistentStore(
+      content::DownloadItem* item) OVERRIDE;
   virtual void UpdatePathForItemInPersistentStore(
-      DownloadItem* item,
+      content::DownloadItem* item,
       const FilePath& new_path) OVERRIDE;
-  virtual void RemoveItemFromPersistentStore(DownloadItem* item) OVERRIDE;
+  virtual void RemoveItemFromPersistentStore(
+      content::DownloadItem* item) OVERRIDE;
   virtual void RemoveItemsFromPersistentStoreBetween(
-      const base::Time remove_begin,
-      const base::Time remove_end) OVERRIDE;
-  virtual void GetSaveDir(TabContents* tab_contents,
+      base::Time remove_begin,
+      base::Time remove_end) OVERRIDE;
+  virtual void GetSaveDir(content::WebContents* web_contents,
                           FilePath* website_save_dir,
                           FilePath* download_save_dir) OVERRIDE;
-  virtual void ChooseSavePath(const base::WeakPtr<SavePackage>& save_package,
-                              const FilePath& suggested_path,
-                              bool can_save_as_complete) OVERRIDE;
+  virtual void ChooseSavePath(
+      content::WebContents* web_contents,
+      const FilePath& suggested_path,
+      const FilePath::StringType& default_extension,
+      bool can_save_as_complete,
+      content::SaveFilePathPickedCallback callback) OVERRIDE;
   virtual void DownloadProgressUpdated() OVERRIDE;
 
   DownloadPrefs* download_prefs() { return download_prefs_.get(); }
@@ -89,7 +97,7 @@ class ChromeDownloadManagerDelegate
 
   // So that test classes that inherit from this for override purposes
   // can call back into the DownloadManager.
-  scoped_refptr<DownloadManager> download_manager_;
+  scoped_refptr<content::DownloadManager> download_manager_;
 
  private:
   friend class base::RefCountedThreadSafe<ChromeDownloadManagerDelegate>;
@@ -134,7 +142,7 @@ class ChromeDownloadManagerDelegate
   // Various factors are considered, such as the type of the file, whether a
   // user action initiated the download, and whether the user has explicitly
   // marked the file type as "auto open".
-  bool IsDangerousFile(const DownloadItem& download,
+  bool IsDangerousFile(const content::DownloadItem& download,
                        const DownloadStateInfo& state,
                        bool visited_referrer_before);
 
@@ -142,22 +150,13 @@ class ChromeDownloadManagerDelegate
   void OnItemAddedToPersistentStore(int32 download_id, int64 db_handle);
 
   Profile* profile_;
+  int next_download_id_;
   scoped_ptr<DownloadPrefs> download_prefs_;
   scoped_ptr<DownloadHistory> download_history_;
 
   // Maps from pending extension installations to DownloadItem IDs.
   typedef base::hash_map<CrxInstaller*, int> CrxInstallerMap;
   CrxInstallerMap crx_installers_;
-
-  // Maps the SafeBrowsing download check state to a DownloadItem ID.
-  struct SafeBrowsingState {
-    // If true the SafeBrowsing check is not done yet.
-    bool pending;
-    // The verdict that we got from calling CheckClientDownload.
-    safe_browsing::DownloadProtectionService::DownloadCheckResult verdict;
-  };
-  typedef base::hash_map<int, SafeBrowsingState> SafeBrowsingStateMap;
-  SafeBrowsingStateMap safe_browsing_state_;
 
   content::NotificationRegistrar registrar_;
 

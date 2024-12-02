@@ -1,9 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/gtk/infobars/infobar_gtk.h"
 
+#include "base/debug/trace_event.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -15,8 +16,8 @@
 #include "chrome/browser/ui/gtk/infobars/infobar_container_gtk.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/base/gtk/gtk_expanded_container.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
@@ -52,7 +53,7 @@ const int InfoBarGtk::kEndOfLabelSpacing = 6;
 InfoBarGtk::InfoBarGtk(InfoBarTabHelper* owner, InfoBarDelegate* delegate)
     : InfoBar(owner, delegate),
       theme_service_(GtkThemeService::GetFrom(Profile::FromBrowserContext(
-          owner->tab_contents()->browser_context()))),
+          owner->web_contents()->GetBrowserContext()))),
       signals_(new ui::GtkSignalRegistrar) {
   DCHECK(delegate);
   // Create |hbox_| and pad the sides.
@@ -212,7 +213,11 @@ void InfoBarGtk::OnCloseButton(GtkWidget* button) {
 
 gboolean InfoBarGtk::OnBackgroundExpose(GtkWidget* sender,
                                         GdkEventExpose* event) {
-  const int height = sender->allocation.height;
+  TRACE_EVENT0("ui::gtk", "InfoBarGtk::OnBackgroundExpose");
+
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(sender, &allocation);
+  const int height = allocation.height;
 
   cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(sender->window));
   gdk_cairo_rectangle(cr, &event->area);
@@ -238,9 +243,8 @@ gboolean InfoBarGtk::OnBackgroundExpose(GtkWidget* sender,
                        border_color.green / 65535.0,
                        border_color.blue / 65535.0);
   cairo_set_line_width(cr, 1.0);
-  int y = sender->allocation.height;
-  cairo_move_to(cr, 0, y - 0.5);
-  cairo_rel_line_to(cr, sender->allocation.width, 0);
+  cairo_move_to(cr, 0, allocation.height - 0.5);
+  cairo_rel_line_to(cr, allocation.width, 0);
   cairo_stroke(cr);
 
   cairo_destroy(cr);
@@ -257,8 +261,9 @@ void InfoBarGtk::PlatformSpecificShow(bool animate) {
   gtk_widget_show_all(widget_.get());
   gtk_widget_set_size_request(widget_.get(), -1, bar_height());
 
-  if (bg_box_->window)
-    gdk_window_lower(bg_box_->window);
+  GdkWindow* gdk_window = gtk_widget_get_window(bg_box_);
+  if (gdk_window)
+    gdk_window_lower(gdk_window);
 }
 
 void InfoBarGtk::PlatformSpecificOnCloseSoon() {

@@ -17,9 +17,9 @@
 #include "base/timer.h"
 #include "chrome/browser/ui/gtk/tabs/drag_data.h"
 #include "chrome/browser/ui/tabs/dock_info.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "ui/base/x/x11_util.h"
 
 class DraggedViewGtk;
@@ -29,7 +29,7 @@ class TabStripModel;
 class TabContentsWrapper;
 
 class DraggedTabControllerGtk : public content::NotificationObserver,
-                                public TabContentsDelegate {
+                                public content::WebContentsDelegate {
  public:
   // |source_tabstrip| is the tabstrip where the tabs reside before any
   // dragging occurs. |source_tab| is the tab that is under the mouse pointer
@@ -58,7 +58,7 @@ class DraggedTabControllerGtk : public content::NotificationObserver,
   // Retrieve the tab that corresponds to |contents| if it is being dragged by
   // this controller, or NULL if |contents| does not correspond to any tab
   // being dragged.
-  TabGtk* GetDraggedTabForContents(TabContents* contents);
+  TabGtk* GetDraggedTabForContents(content::WebContents* contents);
 
   // Returns true if |tab| matches any tab being dragged.
   bool IsDraggingTab(const TabGtk* tab);
@@ -84,17 +84,18 @@ class DraggedTabControllerGtk : public content::NotificationObserver,
 
   DraggedTabData InitDraggedTabData(TabGtk* tab);
 
-  // Overridden from TabContentsDelegate:
-  virtual TabContents* OpenURLFromTab(TabContents* source,
-                                      const OpenURLParams& params) OVERRIDE;
-  virtual void NavigationStateChanged(const TabContents* source,
+  // Overridden from content::WebContentsDelegate:
+  virtual content::WebContents* OpenURLFromTab(
+    content::WebContents* source,
+    const content::OpenURLParams& params) OVERRIDE;
+  virtual void NavigationStateChanged(const content::WebContents* source,
                                       unsigned changed_flags) OVERRIDE;
-  virtual void AddNewContents(TabContents* source,
-                              TabContents* new_contents,
+  virtual void AddNewContents(content::WebContents* source,
+                              content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
                               bool user_gesture) OVERRIDE;
-  virtual void LoadingStateChanged(TabContents* source) OVERRIDE;
+  virtual void LoadingStateChanged(content::WebContents* source) OVERRIDE;
   virtual content::JavaScriptDialogCreator*
       GetJavaScriptDialogCreator() OVERRIDE;
 

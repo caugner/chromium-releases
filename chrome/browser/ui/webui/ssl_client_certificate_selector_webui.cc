@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,14 +18,19 @@
 #include "chrome/browser/ssl_client_certificate_selector.h"
 #include "chrome/browser/ui/crypto_module_password_dialog.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/constrained_html_ui.h"
 #include "chrome/common/net/x509_certificate_model.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/size.h"
+
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 namespace {
 
@@ -102,7 +107,8 @@ std::string FormatComboBoxText(
   rv += ']';
   return rv;
 }
-}
+
+}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // SSLClientCertificateSelectorWebUI
@@ -116,7 +122,7 @@ void SSLClientCertificateSelectorWebUI::ShowDialog(
                                             cert_request_info,
                                             delegate);
   Profile* profile = wrapper->profile();
-  ConstrainedHtmlUI::CreateConstrainedHtmlDialog(profile, ui, wrapper);
+  ConstrainedHtmlUI::CreateConstrainedHtmlDialog(profile, ui, NULL, wrapper);
 }
 
 SSLClientCertificateSelectorWebUI::SSLClientCertificateSelectorWebUI(
@@ -159,8 +165,8 @@ SSLClientCertificateSelectorWebUI::~SSLClientCertificateSelectorWebUI() {
 }
 
 // HtmlDialogUIDelegate methods
-bool SSLClientCertificateSelectorWebUI::IsDialogModal() const {
-  return true;
+ui::ModalType SSLClientCertificateSelectorWebUI::GetDialogModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 
 string16 SSLClientCertificateSelectorWebUI::GetDialogTitle() const {
@@ -219,7 +225,7 @@ void SSLClientCertificateSelectorWebUI::Unlocked(SSLClientAuthHandler* delegate,
 }
 
 
-void SSLClientCertificateSelectorWebUI::OnCloseContents(TabContents* source,
+void SSLClientCertificateSelectorWebUI::OnCloseContents(WebContents* source,
     bool* out_close_dialog) {
   NOTIMPLEMENTED();
 }
@@ -231,10 +237,10 @@ bool SSLClientCertificateSelectorWebUI::ShouldShowDialogTitle() const {
 // WebUIMessageHandler methods
 
 void SSLClientCertificateSelectorWebUI::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("requestDetails",
+  web_ui()->RegisterMessageCallback("requestDetails",
       base::Bind(&SSLClientCertificateSelectorWebUI::RequestDetails,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("viewCertificate",
+  web_ui()->RegisterMessageCallback("viewCertificate",
       base::Bind(&SSLClientCertificateSelectorWebUI::ViewCertificate,
                  base::Unretained(this)));
 }
@@ -249,7 +255,6 @@ void SSLClientCertificateSelectorWebUI::RequestDetails(
       &nicknames);
 
   DCHECK_EQ(nicknames.size(), cert_request_info_->client_certs.size());
-
 
   DictionaryValue dict;
   dict.SetString("site", cert_request_info_->host_and_port.c_str());
@@ -267,7 +272,7 @@ void SSLClientCertificateSelectorWebUI::RequestDetails(
   dict.Set("certificates", certificates);
   dict.Set("details", details);
   // Send list of tab contents details to javascript.
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "sslClientCertificateSelector.setDetails",
       dict);
 }
@@ -291,7 +296,12 @@ void ShowSSLClientCertificateSelector(
     TabContentsWrapper* wrapper,
     net::SSLCertRequestInfo* cert_request_info,
     SSLClientAuthHandler* delegate) {
-#if defined(USE_AURA) || defined(OS_CHROMEOS)
+  // TODO(jhawkins): move this into a non-webui location.
+#if defined(USE_AURA)
+  ShowNativeSSLClientCertificateSelector(wrapper,
+                                         cert_request_info,
+                                         delegate);
+#elif defined(OS_CHROMEOS)
   SSLClientCertificateSelectorWebUI::ShowDialog(wrapper,
                                                 cert_request_info,
                                                 delegate);
@@ -299,7 +309,7 @@ void ShowSSLClientCertificateSelector(
   // TODO(rbyers): Remove the IsMoreWebUI check and (ideally) all #ifdefs onnce
   // we can select exactly one version of this dialog to use for each platform
   // at build time.  http://crbug.com/102775
-  if (ChromeWebUI::IsMoreWebUI())
+  if (chrome_web_ui::IsMoreWebUI())
     SSLClientCertificateSelectorWebUI::ShowDialog(wrapper,
                                                   cert_request_info,
                                                   delegate);

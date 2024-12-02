@@ -3,7 +3,9 @@
    "description": "permissions/optional_deny",
    "version": "0.1",
    "manifest_version": 2,
-   "background_page": "background.html",
-   "permissions": ["http://a.com/*"],
+   "background": {
+     "scripts": ["background.js"]
+   },
+   "permissions": ["http://a.com/*", "management"],
    "optional_permissions": ["tabs", "management", "http://*.c.com/*"]
 }

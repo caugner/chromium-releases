@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,20 +14,23 @@
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
+#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/referrer.h"
 
 class Profile;
 class RenderViewHost;
-class RenderViewHostDelegate;
 class SessionStorageNamespace;
-class TabContents;
 class TabContentsWrapper;
 struct FaviconURL;
 
 namespace base {
 class ProcessMetrics;
+}
+
+namespace content {
+class RenderViewHostDelegate;
 }
 
 namespace prerender {
@@ -42,7 +45,7 @@ class PrerenderTracker;
 // programatically view window.location.href) or RenderViewHostManager because
 // it is never allowed to navigate across a SiteInstance boundary.
 class PrerenderContents : public content::NotificationObserver,
-                          public TabContentsObserver {
+                          public content::WebContentsObserver {
  public:
   // PrerenderContents::Create uses the currently registered Factory to create
   // the PrerenderContents. Factory is intended for testing.
@@ -78,6 +81,23 @@ class PrerenderContents : public content::NotificationObserver,
   };
   typedef std::list<PendingPrerenderData> PendingPrerenderList;
 
+  // Indicates how this PrerenderContents relates to MatchComplete.
+  // This is important to figure out in what histograms to record the
+  // FinalStatus in, as described below.
+  enum MatchCompleteStatus {
+    // A regular prerender which will be recorded both in Match and
+    // MatchComplete.
+    MATCH_COMPLETE_DEFAULT,
+    // A prerender that used to be a regular prerender, but has since
+    // been replaced by a MatchComplete dummy.  Therefore, we will record
+    // this only for Match, but not for MatchComplete.
+    MATCH_COMPLETE_REPLACED,
+    // A prerender that is a MatchComplete dummy replacing a regular
+    // prerender.  Therefore, we will record this only for MatchComplete,
+    // but not Match.
+    MATCH_COMPLETE_REPLACEMENT
+  };
+
   virtual ~PrerenderContents();
 
   bool Init();
@@ -103,6 +123,12 @@ class PrerenderContents : public content::NotificationObserver,
   const content::Referrer& referrer() const { return referrer_; }
   bool has_stopped_loading() const { return has_stopped_loading_; }
   bool prerendering_has_started() const { return prerendering_has_started_; }
+  MatchCompleteStatus match_complete_status() const {
+    return match_complete_status_;
+  }
+  void set_match_complete_status(MatchCompleteStatus status) {
+    match_complete_status_ = status;
+  }
 
   // Sets the parameter to the value of the associated RenderViewHost's child id
   // and returns a boolean indicating the validity of that id.
@@ -131,7 +157,7 @@ class PrerenderContents : public content::NotificationObserver,
   void OnJSOutOfMemory();
   bool ShouldSuppressDialogs();
 
-  // TabContentsObserver implementation.
+  // content::WebContentsObserver implementation.
   virtual void DidStopLoading() OVERRIDE;
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
@@ -169,8 +195,6 @@ class PrerenderContents : public content::NotificationObserver,
   // Applies all the URL history encountered during prerendering to the
   // new tab.
   void CommitHistory(TabContentsWrapper* tab);
-
-  int32 starting_page_id() { return starting_page_id_; }
 
   base::Value* GetAsValue() const;
 
@@ -224,7 +248,7 @@ class PrerenderContents : public content::NotificationObserver,
   void OnUpdateFaviconURL(int32 page_id, const std::vector<FaviconURL>& urls);
 
   // Returns the RenderViewHost Delegate for this prerender.
-  RenderViewHostDelegate* GetRenderViewHostDelegate();
+  content::WebContents* GetWebContents();
 
   // Returns the ProcessMetrics for the render process, if it exists.
   base::ProcessMetrics* MaybeGetProcessMetrics();
@@ -268,6 +292,11 @@ class PrerenderContents : public content::NotificationObserver,
 
   bool prerendering_has_started_;
 
+  // The MatchComplete status of the prerender, indicating how it relates
+  // to being a MatchComplete dummy (see definition of MatchCompleteStatus
+  // above).
+  MatchCompleteStatus match_complete_status_;
+
   // Tracks whether or not prerendering has been cancelled by calling Destroy.
   // Used solely to prevent double deletion.
   bool prerendering_has_been_cancelled_;
@@ -292,9 +321,6 @@ class PrerenderContents : public content::NotificationObserver,
   int child_id_;
   int route_id_;
 
-  // Page ID at which prerendering started.
-  int32 starting_page_id_;
-
   // Origin for this prerender.
   Origin origin_;
 
@@ -303,9 +329,6 @@ class PrerenderContents : public content::NotificationObserver,
 
   // List of all pages the prerendered page has tried to prerender.
   PendingPrerenderList pending_prerender_list_;
-
-  // Offset by which to offset prerendered pages
-  static const int32 kPrerenderPageIdOffset = 10;
 
   DISALLOW_COPY_AND_ASSIGN(PrerenderContents);
 };

@@ -37,11 +37,16 @@ class WebSharedWorkerProxy : public WebKit::WebSharedWorker,
   virtual bool isStarted();
   virtual void connect(WebKit::WebMessagePortChannel* channel,
                        ConnectListener* listener);
-  virtual void startWorkerContext(const WebKit::WebURL& script_url,
-                                  const WebKit::WebString& name,
-                                  const WebKit::WebString& user_agent,
-                                  const WebKit::WebString& source_code,
-                                  long long script_resource_appcache_id);
+
+  virtual void startWorkerContext(
+      const WebKit::WebURL& script_url,
+      const WebKit::WebString& name,
+      const WebKit::WebString& user_agent,
+      const WebKit::WebString& source_code,
+      const WebKit::WebString& content_security_policy,
+      WebKit::WebContentSecurityPolicyType policy_type,
+      long long script_resource_appcache_id);
+
   virtual void terminateWorkerContext();
   virtual void clientDestroyed();
 
@@ -70,6 +75,8 @@ class WebSharedWorkerProxy : public WebKit::WebSharedWorker,
                            const string16& name,
                            const string16& user_agent,
                            const string16& source_code,
+                           const string16& content_security_policy,
+                           WebKit::WebContentSecurityPolicyType policy_type,
                            int pending_route_id,
                            int64 script_resource_appcache_id);
   void OnWorkerCreated();
@@ -89,9 +96,6 @@ class WebSharedWorkerProxy : public WebKit::WebSharedWorker,
   // ID of our parent document (used to shutdown workers when the parent
   // document is detached).
   unsigned long long document_id_;
-
-  // ID of our parent's appcache host, only valid for dedicated workers.
-  int parent_appcache_host_id_;
 
   // Stores messages that were sent before the StartWorkerContext message.
   std::vector<IPC::Message*> queued_messages_;

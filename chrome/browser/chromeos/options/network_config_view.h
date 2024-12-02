@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,7 +59,7 @@ class NetworkConfigView : public views::DialogDelegateView,
   virtual views::View* GetExtraView() OVERRIDE;
 
   // views::WidgetDelegate methods.
-  virtual bool IsModal() const OVERRIDE;
+  virtual ui::ModalType GetModalType() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
 
@@ -155,7 +155,6 @@ class ControlledSettingIndicatorView : public views::View {
  protected:
   // views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual bool IsVisible() const OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;

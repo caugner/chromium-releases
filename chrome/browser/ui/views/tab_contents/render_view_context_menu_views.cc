@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -18,13 +18,15 @@
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
 
+using content::WebContents;
+
 ////////////////////////////////////////////////////////////////////////////////
 // RenderViewContextMenuViews, public:
 
 RenderViewContextMenuViews::RenderViewContextMenuViews(
-    TabContents* tab_contents,
+    WebContents* web_contents,
     const ContextMenuParams& params)
-    : RenderViewContextMenu(tab_contents, params),
+    : RenderViewContextMenu(web_contents, params),
       menu_(NULL) {
 }
 
@@ -33,7 +35,7 @@ RenderViewContextMenuViews::~RenderViewContextMenuViews() {
 
 void RenderViewContextMenuViews::RunMenuAt(int x, int y) {
   TabContentsViewViews* tab =
-      static_cast<TabContentsViewViews*>(source_tab_contents_->view());
+      static_cast<TabContentsViewViews*>(source_web_contents_->GetView());
   views::Widget* parent = tab->GetTopLevelWidget();
   if (menu_runner_->RunMenuAt(parent, NULL,
           gfx::Rect(gfx::Point(x, y), gfx::Size()),

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
@@ -50,7 +51,6 @@
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/net/net_pref_observer.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/proxy_service_factory.h"
@@ -70,18 +70,15 @@
 #include "chrome/browser/search_engines/template_url_fetcher.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
+#include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/speech/chrome_speech_input_manager.h"
 #include "chrome/browser/speech/chrome_speech_input_preferences.h"
-#include "chrome/browser/spellchecker/spellcheck_profile.h"
-#include "chrome/browser/sync/profile_sync_components_factory_impl.h"
-#include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/tabs/pinned_tab_service_factory.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/transport_security_persister.h"
 #include "chrome/browser/ui/browser_init.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/extension_icon_source.h"
+#include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/browser/user_style_sheet_watcher.h"
 #include "chrome/browser/visitedlink/visitedlink_event_listener.h"
 #include "chrome/browser/visitedlink/visitedlink_master.h"
@@ -94,20 +91,17 @@
 #include "chrome/common/extensions/extension_permission_set.h"
 #include "chrome/common/json_pref_store.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/render_messages.h"
-#include "chrome/common/spellcheck_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/chrome_blob_storage_context.h"
 #include "content/browser/file_system/browser_file_system_helper.h"
-#include "content/browser/host_zoom_map.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/browser/speech/speech_input_manager.h"
 #include "content/browser/ssl/ssl_host_state.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/locale_settings.h"
 #include "net/base/transport_security_state.h"
 #include "net/http/http_server_properties.h"
@@ -143,20 +137,34 @@
 using base::Time;
 using base::TimeDelta;
 using content::BrowserThread;
+using content::DownloadManager;
+using content::HostZoomMap;
+using content::UserMetricsAction;
 
 namespace {
+
+// Constrict us to a very specific platform and architecture to make sure
+// ifdefs don't cause problems with the check.
+#if defined(OS_LINUX) && defined(TOOLKIT_GTK) && defined(ARCH_CPU_X86_64)
+// Make sure that the ProfileImpl doesn't grow. We're currently trying to drive
+// the number of services that are included in ProfileImpl (instead of using
+// ProfileKeyedServiceFactory) to zero.
+//
+// If you don't know about this effort, please read:
+//   https://sites.google.com/a/chromium.org/dev/developers/design-documents/profile-architecture
+//
+// REVIEWERS: Do not let anyone increment this. We need to drive the number of
+// raw accessed services down to zero. DO NOT LET PEOPLE REGRESS THIS UNLESS
+// THE PATCH ITSELF IS MAKING PROGRESS ON PKSF REFACTORING.
+COMPILE_ASSERT(sizeof(ProfileImpl) <= 712u, profile_impl_size_unexpected);
+#endif
 
 // Delay, in milliseconds, before we explicitly create the SessionService.
 static const int kCreateSessionServiceDelayMS = 500;
 
-#if defined(OS_MACOSX)
-// Capacity for mock keychain used for testing.
-static const int kMockKeychainSize = 1000;
-#endif
-
 // Helper method needed because PostTask cannot currently take a Callback
 // function with non-void return type.
-// TODO(jhawkins): Remove once IgnoreReturn is fixed.
+// TODO(jhawkins): Remove once IgnoreResult is fixed.
 void CreateDirectoryNoResult(const FilePath& path) {
   file_util::CreateDirectory(path);
 }
@@ -170,10 +178,13 @@ FilePath GetMediaCachePath(const FilePath& base) {
 }
 
 void SaveSessionStateOnIOThread(
-    net::URLRequestContextGetter* url_request_context_getter) {
+    net::URLRequestContextGetter* url_request_context_getter,
+    ChromeAppCacheService* appcache_service) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   url_request_context_getter->GetURLRequestContext()->cookie_store()->
       GetCookieMonster()->SaveSessionCookies();
+  if (appcache_service)
+    appcache_service->set_save_session_state(true);
 }
 
 }  // namespace
@@ -210,6 +221,15 @@ void ProfileImpl::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kClearSiteDataOnExit,
                              false,
                              PrefService::SYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kProfileShortcutCreated,
+                             false,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterIntegerPref(prefs::kProfileAvatarIndex,
+                             -1,
+                             PrefService::SYNCABLE_PREF);
+  prefs->RegisterStringPref(prefs::kProfileName,
+                            "",
+                            PrefService::SYNCABLE_PREF);
 #if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
   prefs->RegisterIntegerPref(prefs::kLocalProfileId,
                              kInvalidLocalProfileId,
@@ -229,7 +249,6 @@ ProfileImpl::ProfileImpl(const FilePath& path,
       extension_devtools_manager_(NULL),
       host_content_settings_map_(NULL),
       host_zoom_map_(NULL),
-      profile_sync_service_created_(false),
       history_service_created_(false),
       favicon_service_created_(false),
       created_web_data_service_(false),
@@ -279,13 +298,12 @@ ProfileImpl::ProfileImpl(const FilePath& path,
 void ProfileImpl::DoFinalInit() {
   PrefService* prefs = GetPrefs();
   pref_change_registrar_.Init(prefs);
-  pref_change_registrar_.Add(prefs::kSpellCheckDictionary, this);
-  pref_change_registrar_.Add(prefs::kEnableSpellCheck, this);
-  pref_change_registrar_.Add(prefs::kEnableAutoSpellCorrect, this);
   pref_change_registrar_.Add(prefs::kSpeechInputFilterProfanities, this);
   pref_change_registrar_.Add(prefs::kClearSiteDataOnExit, this);
   pref_change_registrar_.Add(prefs::kGoogleServicesUsername, this);
   pref_change_registrar_.Add(prefs::kDefaultZoomLevel, this);
+  pref_change_registrar_.Add(prefs::kProfileAvatarIndex, this);
+  pref_change_registrar_.Add(prefs::kProfileName, this);
 
   // It would be nice to use PathService for fetching this directory, but
   // the cache directory depends on the profile directory, which isn't available
@@ -302,6 +320,12 @@ void ProfileImpl::DoFinalInit() {
         base::Bind(&CreateDirectoryNoResult, base_cache_path_));
   }
 
+  // Now that the profile is hooked up to receive pref change notifications to
+  // kGoogleServicesUsername, initialize components that depend on it to reflect
+  // the current value.
+  UpdateProfileUserNameCache();
+  GetGAIAInfoUpdateService();
+
 #if !defined(OS_CHROMEOS)
   // Listen for bookmark model load, to bootstrap the sync service.
   // On CrOS sync service will be initialized after sign in.
@@ -312,8 +336,6 @@ void ProfileImpl::DoFinalInit() {
   PrefService* local_state = g_browser_process->local_state();
   ssl_config_service_manager_.reset(
       SSLConfigServiceManager::CreateDefaultManager(local_state));
-
-  PinnedTabServiceFactory::InitForProfile(this);
 
   // Initialize the BackgroundModeManager - this has to be done here before
   // InitExtensions() is called because it relies on receiving notifications
@@ -334,20 +356,14 @@ void ProfileImpl::DoFinalInit() {
 
   clear_local_state_on_exit_ = prefs->GetBoolean(prefs::kClearSiteDataOnExit);
   if (clear_local_state_on_exit_) {
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("ClearSiteDataOnExitEnabled"));
   } else {
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("ClearSiteDataOnExitDisabled"));
   }
 
   InstantController::RecordMetrics(this);
-
-  // Instantiates Metrics object for spellchecking for use.
-  if (g_browser_process->metrics_service() &&
-      g_browser_process->metrics_service()->recording_active())
-    GetSpellCheckProfile()->StartRecordingMetrics(
-        GetPrefs()->GetBoolean(prefs::kEnableSpellCheck));
 
   FilePath cookie_path = GetPath();
   cookie_path = cookie_path.Append(chrome::kCookieFilename);
@@ -370,12 +386,13 @@ void ProfileImpl::DoFinalInit() {
 
   FilePath app_path = GetPath().Append(chrome::kIsolatedAppStateDirname);
 
+  SessionStartupPref startup_pref =
+      BrowserInit::GetSessionStartupPref(*CommandLine::ForCurrentProcess(),
+                                         this);
   bool restore_old_session_cookies =
       session_restore_enabled_ &&
       (!DidLastSessionExitCleanly() ||
-       CommandLine::ForCurrentProcess()->HasSwitch(
-           switches::kRestoreLastSession) ||
-       BrowserInit::WasRestarted());
+       startup_pref.type == SessionStartupPref::LAST);
 
   // Make sure we initialize the ProfileIOData after everything else has been
   // initialized that we might be reading from the IO thread.
@@ -388,7 +405,8 @@ void ProfileImpl::DoFinalInit() {
                 restore_old_session_cookies);
 
   ChromePluginServiceFilter::GetInstance()->RegisterResourceContext(
-      PluginPrefs::GetForProfile(this), &GetResourceContext());
+      PluginPrefs::GetForProfile(this),
+      &io_data_.GetResourceContextNoInit());
 
   // Creation has been finished.
   if (delegate_)
@@ -438,16 +456,37 @@ void ProfileImpl::InitExtensions(bool extensions_enabled) {
       extensions_enabled));
 
   extension_service_->component_loader()->AddDefaultComponentExtensions();
+  if (command_line->HasSwitch(switches::kLoadComponentExtension)) {
+    CommandLine::StringType path_list = command_line->GetSwitchValueNative(
+        switches::kLoadComponentExtension);
+    StringTokenizerT<CommandLine::StringType,
+        CommandLine::StringType::const_iterator> t(path_list,
+                                                   FILE_PATH_LITERAL(","));
+    while (t.GetNext()) {
+      // Load the component extension manifest synchronously.
+      // Blocking the UI thread is acceptable here since
+      // this flag designated for developers.
+      base::ThreadRestrictions::ScopedAllowIO allow_io;
+      extension_service_->component_loader()->AddOrReplace(
+          FilePath(t.token()));
+    }
+  }
   extension_service_->Init();
 
   if (extensions_enabled) {
     // Load any extensions specified with --load-extension.
     // TODO(yoz): Seems like this should move into ExtensionService::Init.
     if (command_line->HasSwitch(switches::kLoadExtension)) {
-      FilePath path = command_line->GetSwitchValuePath(
+      CommandLine::StringType path_list = command_line->GetSwitchValueNative(
           switches::kLoadExtension);
-      extensions::UnpackedInstaller::Create(extension_service_.get())->
-        LoadFromCommandLine(path);
+      StringTokenizerT<CommandLine::StringType,
+          CommandLine::StringType::const_iterator> t(path_list,
+                                                     FILE_PATH_LITERAL(","));
+      scoped_refptr<extensions::UnpackedInstaller> installer =
+          extensions::UnpackedInstaller::Create(extension_service_.get());
+      while (t.GetNext()) {
+        installer->LoadFromCommandLine(FilePath(t.token()));
+      }
     }
   }
 
@@ -505,29 +544,30 @@ ProfileImpl::~ProfileImpl() {
       chrome::NOTIFICATION_PROFILE_DESTROYED,
       content::Source<Profile>(this),
       content::NotificationService::NoDetails());
-
-  if (appcache_service_ && clear_local_state_on_exit_) {
+  // Save the session state if we're going to restore the session during the
+  // next startup.
+  SessionStartupPref pref = SessionStartupPref::GetStartupPref(this);
+  if (pref.type == SessionStartupPref::LAST)
+    SaveSessionState();
+  else if (appcache_service_ && clear_local_state_on_exit_) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&appcache::AppCacheService::set_clear_local_state_on_exit,
                    appcache_service_.get(), true));
   }
 
-  if (webkit_context_.get())
-    webkit_context_->DeleteSessionOnlyData();
-
   StopCreateSessionServiceTimer();
 
   // Remove pref observers
   pref_change_registrar_.RemoveAll();
 
-  // The sync service needs to be deleted before the services it calls.
-  // TODO(stevet): Make ProfileSyncService into a PKS and let the PDM take care
-  // of the cleanup below.
-  sync_service_.reset();
-
   ChromePluginServiceFilter::GetInstance()->UnregisterResourceContext(
-      &GetResourceContext());
+      &io_data_.GetResourceContextNoInit());
+
+  if (io_data_.HasMainRequestContext() &&
+      default_request_context_ == GetRequestContext()) {
+    default_request_context_ = NULL;
+  }
 
   ProfileDependencyManager::GetInstance()->DestroyProfileServices(this);
 
@@ -568,11 +608,6 @@ ProfileImpl::~ProfileImpl() {
 
   if (history_service_.get())
     history_service_->Cleanup();
-
-  if (io_data_.HasMainRequestContext() &&
-      default_request_context_ == GetRequestContext()) {
-    default_request_context_ = NULL;
-  }
 
   // HistoryService may call into the BookmarkModel, as such we need to
   // delete HistoryService before the BookmarkModel. The destructor for
@@ -726,12 +761,12 @@ void ProfileImpl::OnPrefsLoaded(bool success) {
       prefs_->GetBoolean(prefs::kSessionExitedCleanly);
   // Mark the session as open.
   prefs_->SetBoolean(prefs::kSessionExitedCleanly, false);
-  // Make sure we save to disk that the session has opened.
-  prefs_->ScheduleSavePersistentPrefs();
 
   bool extensions_disabled =
       prefs_->GetBoolean(prefs::kDisableExtensions) ||
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableExtensions);
+
+  ProfileDependencyManager::GetInstance()->CreateProfileServices(this, false);
 
   // Ensure that preferences set by extensions are restored in the profile
   // as early as possible. The constructor takes care of that.
@@ -740,8 +775,6 @@ void ProfileImpl::OnPrefsLoaded(bool success) {
       GetPath().AppendASCII(ExtensionService::kInstallDirectoryName),
       GetExtensionPrefValueMap()));
   extension_prefs_->Init(extensions_disabled);
-
-  ProfileDependencyManager::GetInstance()->CreateProfileServices(this, false);
 
   DCHECK(!net_pref_observer_.get());
   net_pref_observer_.reset(new NetPrefObserver(
@@ -863,8 +896,8 @@ HostContentSettingsMap* ProfileImpl::GetHostContentSettingsMap() {
 
 HostZoomMap* ProfileImpl::GetHostZoomMap() {
   if (!host_zoom_map_) {
-    host_zoom_map_ = new HostZoomMap();
-    host_zoom_map_->set_default_zoom_level(
+    host_zoom_map_ = HostZoomMap::Create();
+    host_zoom_map_->SetDefaultZoomLevel(
         GetPrefs()->GetDouble(prefs::kDefaultZoomLevel));
 
     const DictionaryValue* host_zoom_dictionary =
@@ -889,7 +922,8 @@ HostZoomMap* ProfileImpl::GetHostZoomMap() {
   return host_zoom_map_.get();
 }
 
-GeolocationPermissionContext* ProfileImpl::GetGeolocationPermissionContext() {
+content::GeolocationPermissionContext*
+    ProfileImpl::GetGeolocationPermissionContext() {
   if (!geolocation_permission_context_.get()) {
     geolocation_permission_context_ =
         new ChromeGeolocationPermissionContext(this);
@@ -910,13 +944,6 @@ UserStyleSheetWatcher* ProfileImpl::GetUserStyleSheetWatcher() {
     user_style_sheet_watcher_->Init();
   }
   return user_style_sheet_watcher_.get();
-}
-
-FindBarState* ProfileImpl::GetFindBarState() {
-  if (!find_bar_state_.get()) {
-    find_bar_state_.reset(new FindBarState());
-  }
-  return find_bar_state_.get();
 }
 
 GAIAInfoUpdateService* ProfileImpl::GetGAIAInfoUpdateService() {
@@ -1033,7 +1060,7 @@ void ProfileImpl::CreatePasswordStore() {
                             GetWebDataService(Profile::IMPLICIT_ACCESS));
 #elif defined(OS_MACOSX)
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseMockKeychain)) {
-    ps = new PasswordStoreMac(new MockKeychain(kMockKeychainSize), login_db);
+    ps = new PasswordStoreMac(new MockKeychain(), login_db);
   } else {
     ps = new PasswordStoreMac(new MacKeychain(), login_db);
   }
@@ -1122,8 +1149,8 @@ quota::QuotaManager* ProfileImpl::GetQuotaManager() {
   return quota_manager_.get();
 }
 
-bool ProfileImpl::HasProfileSyncService() const {
-  return (sync_service_.get() != NULL);
+bool ProfileImpl::HasProfileSyncService() {
+  return ProfileSyncServiceFactory::GetInstance()->HasProfileSyncService(this);
 }
 
 bool ProfileImpl::DidLastSessionExitCleanly() {
@@ -1168,33 +1195,6 @@ history::TopSites* ProfileImpl::GetTopSitesWithoutCreating() {
   return top_sites_;
 }
 
-SpellCheckHost* ProfileImpl::GetSpellCheckHost() {
-  return GetSpellCheckProfile()->GetHost();
-}
-
-
-void ProfileImpl::ReinitializeSpellCheckHost(bool force) {
-  PrefService* pref = GetPrefs();
-  SpellCheckProfile::ReinitializeResult result =
-      GetSpellCheckProfile()->ReinitializeHost(
-          force,
-          pref->GetBoolean(prefs::kEnableSpellCheck),
-          pref->GetString(prefs::kSpellCheckDictionary),
-          GetRequestContext());
-  if (result == SpellCheckProfile::REINITIALIZE_REMOVED_HOST) {
-    // The spellchecker has been disabled.
-    for (content::RenderProcessHost::iterator i(
-            content::RenderProcessHost::AllHostsIterator());
-         !i.IsAtEnd(); i.Advance()) {
-      content::RenderProcessHost* process = i.GetCurrentValue();
-      process->Send(new SpellCheckMsg_Init(IPC::InvalidPlatformFileForTransit(),
-                                           std::vector<std::string>(),
-                                           std::string(),
-                                           false));
-    }
-  }
-}
-
 ExtensionPrefValueMap* ProfileImpl::GetExtensionPrefValueMap() {
   if (!extension_pref_value_map_.get())
     extension_pref_value_map_.reset(new ExtensionPrefValueMap);
@@ -1234,7 +1234,8 @@ void ProfileImpl::CreateQuotaManagerAndClients() {
   webkit_context_ = new WebKitContext(
         IsOffTheRecord(), GetPath(), GetExtensionSpecialStoragePolicy(),
         clear_local_state_on_exit_, quota_manager_->proxy(),
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::WEBKIT));
+        BrowserThread::GetMessageLoopProxyForThread(
+            BrowserThread::WEBKIT_DEPRECATED));
   appcache_service_ = new ChromeAppCacheService(quota_manager_->proxy());
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
@@ -1242,7 +1243,7 @@ void ProfileImpl::CreateQuotaManagerAndClients() {
                  appcache_service_.get(),
                  IsOffTheRecord()
                      ? FilePath() : GetPath().Append(chrome::kAppCacheDirname),
-                 &GetResourceContext(),
+                 &io_data_.GetResourceContextNoInit(),
                  make_scoped_refptr(GetExtensionSpecialStoragePolicy())));
 }
 
@@ -1258,7 +1259,7 @@ void ProfileImpl::MarkAsCleanShutdown() {
 
     // NOTE: If you change what thread this writes on, be sure and update
     // ChromeFrame::EndSession().
-    prefs_->SavePersistentPrefs();
+    prefs_->CommitPendingWrite();
   }
 }
 
@@ -1280,18 +1281,7 @@ void ProfileImpl::Observe(int type,
       std::string* pref_name_in = content::Details<std::string>(details).ptr();
       PrefService* prefs = content::Source<PrefService>(source).ptr();
       DCHECK(pref_name_in && prefs);
-      if (*pref_name_in == prefs::kSpellCheckDictionary ||
-          *pref_name_in == prefs::kEnableSpellCheck) {
-        ReinitializeSpellCheckHost(true);
-      } else if (*pref_name_in == prefs::kEnableAutoSpellCorrect) {
-        bool enabled = prefs->GetBoolean(prefs::kEnableAutoSpellCorrect);
-        for (content::RenderProcessHost::iterator i(
-                content::RenderProcessHost::AllHostsIterator());
-             !i.IsAtEnd(); i.Advance()) {
-          content::RenderProcessHost* process = i.GetCurrentValue();
-          process->Send(new SpellCheckMsg_EnableAutoSpellCorrect(enabled));
-        }
-      } else if (*pref_name_in == prefs::kSpeechInputFilterProfanities) {
+      if (*pref_name_in == prefs::kSpeechInputFilterProfanities) {
         GetSpeechInputPreferences()->set_filter_profanities(prefs->GetBoolean(
             prefs::kSpeechInputFilterProfanities));
       } else if (*pref_name_in == prefs::kClearSiteDataOnExit) {
@@ -1307,8 +1297,12 @@ void ProfileImpl::Observe(int type,
         }
       } else if (*pref_name_in == prefs::kGoogleServicesUsername) {
         UpdateProfileUserNameCache();
+      } else if (*pref_name_in == prefs::kProfileAvatarIndex) {
+        UpdateProfileAvatarCache();
+      } else if (*pref_name_in == prefs::kProfileName) {
+        UpdateProfileNameCache();
       } else if (*pref_name_in == prefs::kDefaultZoomLevel) {
-          GetHostZoomMap()->set_default_zoom_level(
+          GetHostZoomMap()->SetDefaultZoomLevel(
               prefs->GetDouble(prefs::kDefaultZoomLevel));
       }
       break;
@@ -1325,7 +1319,7 @@ void ProfileImpl::Observe(int type,
         double level = host_zoom_map_->GetZoomLevel(host);
         DictionaryPrefUpdate update(prefs_.get(), prefs::kPerHostZoomLevels);
         DictionaryValue* host_zoom_dictionary = update.Get();
-        if (level == host_zoom_map_->default_zoom_level()) {
+        if (level == host_zoom_map_->GetDefaultZoomLevel()) {
           host_zoom_dictionary->RemoveWithoutPathExpansion(host, NULL);
         } else {
           host_zoom_dictionary->SetWithoutPathExpansion(
@@ -1355,44 +1349,7 @@ TokenService* ProfileImpl::GetTokenService() {
 }
 
 ProfileSyncService* ProfileImpl::GetProfileSyncService() {
-#if defined(OS_CHROMEOS)
-  if (!sync_service_.get()) {
-    // In ChromeOS, sync only gets initialized properly from login, when
-    // kLoginManager is specified. If this gets called before login, or
-    // during a debugging session without kLoginManager, this will return
-    // NULL, so ensure that calls either handle a NULL result, or use
-    // HasProfileSyncService() to guard against the call.
-    return NULL;
-  }
-#endif
-  return GetProfileSyncService("");
-}
-
-ProfileSyncService* ProfileImpl::GetProfileSyncService(
-    const std::string& cros_user) {
-
-  if (!ProfileSyncService::IsSyncEnabled())
-    return NULL;
-  if (!profile_sync_service_created_) {
-    profile_sync_service_created_ = true;
-    InitSyncService(cros_user);
-  }
-  return sync_service_.get();
-}
-
-void ProfileImpl::InitSyncService(const std::string& cros_user) {
-  profile_sync_factory_.reset(
-      new ProfileSyncComponentsFactoryImpl(this,
-                                           CommandLine::ForCurrentProcess()));
-  sync_service_.reset(
-      profile_sync_factory_->CreateProfileSyncService(cros_user));
-  profile_sync_factory_->RegisterDataTypes(sync_service_.get());
-  sync_service_->Initialize();
-
-  UpdateProfileUserNameCache();
-  // Force the GAIA info update service to be initialized since it depends on
-  // the sync service.
-  GetGAIAInfoUpdateService();
+  return ProfileSyncServiceFactory::GetInstance()->GetForProfile(this);
 }
 
 ChromeBlobStorageContext* ProfileImpl::GetBlobStorageContext() {
@@ -1513,9 +1470,6 @@ void ProfileImpl::ChangeAppLocale(
 
   if (chromeos::UserManager::Get()->current_user_is_owner())
     local_state->SetString(prefs::kOwnerLocale, new_locale);
-
-  GetPrefs()->ScheduleSavePersistentPrefs();
-  local_state->ScheduleSavePersistentPrefs();
 }
 
 void ProfileImpl::OnLogin() {
@@ -1579,25 +1533,19 @@ GURL ProfileImpl::GetHomePage() {
   return home_page;
 }
 
-NetworkActionPredictor* ProfileImpl::GetNetworkActionPredictor() {
-  if (!network_action_predictor_.get())
-    network_action_predictor_.reset(new NetworkActionPredictor(this));
-  return network_action_predictor_.get();
-}
-
 void ProfileImpl::SaveSessionState() {
   if (!session_restore_enabled_)
     return;
+  if (webkit_context_.get())
+    webkit_context_->SaveSessionState();
+  if (db_tracker_.get())
+    db_tracker_->SaveSessionState();
+
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&SaveSessionStateOnIOThread,
-                 make_scoped_refptr(GetRequestContext())));
-}
-
-SpellCheckProfile* ProfileImpl::GetSpellCheckProfile() {
-  if (!spellcheck_profile_.get())
-    spellcheck_profile_.reset(new SpellCheckProfile(path_));
-  return spellcheck_profile_.get();
+                 make_scoped_refptr(GetRequestContext()),
+                 make_scoped_refptr(appcache_service_.get())));
 }
 
 void ProfileImpl::UpdateProfileUserNameCache() {
@@ -1608,6 +1556,28 @@ void ProfileImpl::UpdateProfileUserNameCache() {
     std::string user_name =
         GetPrefs()->GetString(prefs::kGoogleServicesUsername);
     cache.SetUserNameOfProfileAtIndex(index, UTF8ToUTF16(user_name));
+  }
+}
+
+void ProfileImpl::UpdateProfileNameCache() {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
+  size_t index = cache.GetIndexOfProfileWithPath(GetPath());
+  if (index != std::string::npos) {
+    std::string profile_name =
+        GetPrefs()->GetString(prefs::kProfileName);
+    cache.SetNameOfProfileAtIndex(index, UTF8ToUTF16(profile_name));
+  }
+}
+
+void ProfileImpl::UpdateProfileAvatarCache() {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
+  size_t index = cache.GetIndexOfProfileWithPath(GetPath());
+  if (index != std::string::npos) {
+    size_t avatar_index =
+        GetPrefs()->GetInteger(prefs::kProfileAvatarIndex);
+    cache.SetAvatarIconOfProfileAtIndex(index, avatar_index);
   }
 }
 

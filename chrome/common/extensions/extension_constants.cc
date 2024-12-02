@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,11 @@ namespace extension_manifest_keys {
 const char kAllFrames[] = "all_frames";
 const char kAltKey[] = "altKey";
 const char kApp[] = "app";
-const char kBackground[] = "background_page";
+const char kBackground[] = "background";
+const char kBackgroundPage[] = "background.page";
+const char kBackgroundPageLegacy[] = "background_page";
+const char kBackgroundScripts[] = "background.scripts";
+const char kBackgroundPersistent[] = "background.persistent";
 const char kBrowserAction[] = "browser_action";
 const char kChromeURLOverrides[] = "chrome_url_overrides";
 const char kContentScripts[] = "content_scripts";
@@ -72,7 +76,6 @@ const char kPageActionDefaultTitle[] = "default_title";
 const char kPageActionIcons[] = "icons";
 const char kPageActionId[] = "id";
 const char kPageActionPopup[] = "popup";
-const char kPageActionPopupHeight[] = "height";
 const char kPageActionPopupPath[] = "path";
 const char kPageActions[] = "page_actions";
 const char kPermissions[] = "permissions";
@@ -85,10 +88,6 @@ const char kRequirements[] = "requirements";
 const char kRunAt[] = "run_at";
 const char kShiftKey[] = "shiftKey";
 const char kShortcutKey[] = "shortcutKey";
-const char kSidebar[] = "sidebar";
-const char kSidebarDefaultIcon[] = "default_icon";
-const char kSidebarDefaultPage[] = "default_page";
-const char kSidebarDefaultTitle[] = "default_title";
 const char kSignature[] = "signature";
 const char kTheme[] = "theme";
 const char kThemeColors[] = "colors";
@@ -112,6 +111,7 @@ const char kTtsVoicesVoiceName[] = "voice_name";
 const char kType[] = "type";
 const char kUpdateURL[] = "update_url";
 const char kVersion[] = "version";
+const char kWebAccessibleResources[] = "web_accessible_resources";
 const char kWebURLs[] = "app.urls";
 }  // namespace extension_manifest_keys
 
@@ -159,22 +159,32 @@ const char kChromeVersionTooLow[] =
     "This extension requires * version * or greater.";
 const char kDisabledByPolicy[] =
     "This extension has been disabled by your administrator.";
-const char kDevToolsExperimental[] =
-    "You must request the 'experimental' permission in order to use the"
-    " DevTools API.";
 const char kExpectString[] = "Expect string value.";
 const char kExperimentalFlagRequired[] =
-    "Loading extensions with 'experimental' permission requires"
-    " --enable-experimental-extension-apis command line flag.";
+    "Loading extensions with 'experimental' permission is turned off by"
+    "default. You can enable 'Experimental Extension APIs'"
+    "by visiting chrome://flags.";
 const char kFeatureNotAllowed[] =
     "Feature '*' is not allowed in this type of manifest.";
 const char kInvalidAllFrames[] =
     "Invalid value for 'content_scripts[*].all_frames'.";
 const char kInvalidBackground[] =
     "Invalid value for 'background_page'.";
+const char kInvalidBackgroundCombination[] =
+    "The background.page and background.scripts properties cannot be used at "
+    "the same time.";
+const char kInvalidBackgroundScript[] =
+    "Invalid value for 'background.scripts[*]'.";
+const char kInvalidBackgroundScripts[] =
+    "Invalid value for 'background.scripts'.";
 const char kInvalidBackgroundInHostedApp[] =
     "Invalid value for 'background_page'. Hosted apps must specify an "
     "absolute HTTPS URL for the background page.";
+const char kInvalidBackgroundPersistent[] =
+    "Invalid value for 'background.persistent'.";
+const char kInvalidBackgroundPersistentNoPage[] =
+    "Must specify one of background.page or background.scripts to use"
+    " background.persistent.";
 const char kInvalidBrowserAction[] =
     "Invalid value for 'browser_action'.";
 const char kInvalidChromeURLOverrides[] =
@@ -239,10 +249,15 @@ const char kInvalidIntentDisposition[] =
     "Invalid value for intents[*].disposition";
 const char kInvalidIntentPath[] =
   "Invalid value for intents[*].path";
+const char kInvalidIntentPageInHostedApp[] =
+    "Invalid value for intents[*].path. Hosted apps must specify an "
+    "absolute URL within app.urls[].";
 const char kInvalidIntents[] =
     "Invalid value for intents";
 const char kInvalidIntentType[] =
     "Invalid value for intents[*].type";
+const char kInvalidIntentTypeElement[] =
+    "Invalid value for intents[*].type[*]";
 const char kInvalidIntentTitle[] =
     "Invalid value for intents[*].title";
 const char kInvalidIsolation[] =
@@ -276,7 +291,7 @@ const char kInvalidLaunchWidthContainer[] =
 const char kInvalidManifest[] =
     "Manifest file is invalid.";
 const char kInvalidManifestVersion[] =
-    "Invalid value for 'manifest_version'.";
+    "The 'manifest_version' key must be present and set to 2 (without quotes).";
 const char kInvalidMatch[] =
     "Invalid value for 'content_scripts[*].matches[*]': *";
 const char kInvalidMatchCount[] =
@@ -320,8 +335,6 @@ const char kInvalidPageActionOldAndNewKeys[] =
     "use both.";
 const char kInvalidPageActionPopup[] =
     "Invalid type for page action popup.";
-const char kInvalidPageActionPopupHeight[] =
-    "Invalid value for page action popup height [*].";
 const char kInvalidPageActionPopupPath[] =
     "Invalid value for page action popup path [*].";
 const char kInvalidPageActionsList[] =
@@ -348,14 +361,6 @@ const char kInvalidRequirements[] =
     "Invalid value for 'requirements'";
 const char kInvalidRunAt[] =
     "Invalid value for 'content_scripts[*].run_at'.";
-const char kInvalidSidebar[] =
-    "Invalid value for 'sidebar'.";
-const char kInvalidSidebarDefaultIconPath[] =
-    "Invalid value for 'sidebar.default_icon'.";
-const char kInvalidSidebarDefaultPage[] =
-    "Invalid value for 'sidebar.default_page'.";
-const char kInvalidSidebarDefaultTitle[] =
-    "Invalid value for 'sidebar.default_title'.";
 const char kInvalidSignature[] =
     "Value 'signature' is missing or invalid.";
 const char kInvalidTheme[] =
@@ -387,6 +392,10 @@ const char kInvalidURLPatternError[] =
 const char kInvalidVersion[] =
     "Required value 'version' is missing or invalid. It must be between 1-4 "
     "dot-separated integers each between 0 and 65536.";
+const char kInvalidWebAccessibleResourcesList[] =
+    "Invalid value for 'web_accessible_resources'.";
+const char kInvalidWebAccessibleResource[] =
+    "Invalid value for 'web_accessible_resources[*]'.";
 const char kInvalidWebURL[] =
     "Invalid value for 'app.urls[*]': *";
 const char kInvalidWebURLs[] =
@@ -426,9 +435,6 @@ const char kPermissionNotAllowed[] =
     "Access to permission '*' denied.";
 const char kReservedMessageFound[] =
     "Reserved key * found in message catalog.";
-const char kSidebarExperimental[] =
-    "You must request the 'experimental' permission in order to use the"
-    " Sidebar API.";
 #if defined(OS_CHROMEOS)
 const char kIllegalPlugins[] =
     "Extensions cannot install plugins on Chrome OS";
@@ -458,6 +464,11 @@ const char kGalleryUpdateHttpUrl[] =
     "http://clients2.google.com/service/update2/crx";
 const char kGalleryUpdateHttpsUrl[] =
     "https://clients2.google.com/service/update2/crx";
+// TODO(battre): Delete the HTTP URL once the blacklist is downloaded via HTTPS.
+const char kExtensionBlocklistUrlPrefix[] =
+    "http://www.gstatic.com/chrome/extensions/blacklist";
+const char kExtensionBlocklistHttpsUrlPrefix[] =
+    "https://www.gstatic.com/chrome/extensions/blacklist";
 
 GURL GetWebstoreUpdateUrl(bool secure) {
   CommandLine* cmdline = CommandLine::ForCurrentProcess();
@@ -465,6 +476,22 @@ GURL GetWebstoreUpdateUrl(bool secure) {
     return GURL(cmdline->GetSwitchValueASCII(switches::kAppsGalleryUpdateURL));
   else
     return GURL(secure ? kGalleryUpdateHttpsUrl : kGalleryUpdateHttpUrl);
+}
+
+bool IsWebstoreUpdateUrl(const GURL& update_url) {
+  return update_url == GetWebstoreUpdateUrl(false) ||
+         update_url == GetWebstoreUpdateUrl(true);
+}
+
+bool IsBlacklistUpdateUrl(const GURL& url) {
+  // The extension blacklist URL is returned from the update service and
+  // therefore not determined by Chromium. If the location of the blacklist file
+  // ever changes, we need to update this function. A DCHECK in the
+  // ExtensionUpdater ensures that we notice a change. This is the full URL
+  // of a blacklist:
+  // http://www.gstatic.com/chrome/extensions/blacklist/l_0_0_0_7.txt
+  return StartsWithASCII(url.spec(), kExtensionBlocklistUrlPrefix, true) ||
+      StartsWithASCII(url.spec(), kExtensionBlocklistHttpsUrlPrefix, true);
 }
 
 const char kGalleryBrowsePrefix[] = "https://chrome.google.com/webstore";
@@ -479,6 +506,9 @@ const char kDecodedImagesFilename[] = "DECODED_IMAGES";
 // The file to write our decoded message catalogs to, relative to the
 // extension_path.
 const char kDecodedMessageCatalogsFilename[] = "DECODED_MESSAGE_CATALOGS";
+
+const char kGeneratedBackgroundPageFilename[] =
+    "_generated_background_page.html";
 }
 
 namespace extension_misc {

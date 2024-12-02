@@ -1,20 +1,22 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_aura.h"
 
+// TODO(beng): USE_ASH
+#include "ash/wm/visibility_controller.h"
 #include "base/event_types.h"
 #include "base/message_loop.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_delegate.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view_aura.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
-#include "ui/aura/client/aura_constants.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "ui/aura/client/drag_drop_client.h"
-#include "ui/aura/desktop.h"
+#include "ui/aura/client/drag_drop_delegate.h"
 #include "ui/aura/event.h"
+#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
@@ -22,6 +24,8 @@
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
 #include "webkit/glue/webdropdata.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -48,12 +52,12 @@ class WebDragSourceAura : public MessageLoopForUI::Observer {
     RenderViewHost* rvh = NULL;
     switch (type) {
       case ui::ET_MOUSE_DRAGGED:
-        rvh = view_->GetTabContents()->render_view_host();
+        rvh = view_->GetWebContents()->GetRenderViewHost();
         if (rvh) {
           gfx::Point screen_loc = ui::EventLocationFromNative(event);
           gfx::Point client_loc = screen_loc;
           aura::Window* window = rvh->view()->GetNativeView();
-          aura::Window::ConvertPointToWindow(aura::Desktop::GetInstance(),
+          aura::Window::ConvertPointToWindow(aura::RootWindow::GetInstance(),
               window, &client_loc);
           rvh->DragSourceMovedTo(client_loc.x(), client_loc.y(),
               screen_loc.x(), screen_loc.y());
@@ -135,8 +139,8 @@ NativeTabContentsViewAura::NativeTabContentsViewAura(
 NativeTabContentsViewAura::~NativeTabContentsViewAura() {
 }
 
-TabContents* NativeTabContentsViewAura::GetTabContents() const {
-  return delegate_->GetTabContents();
+WebContents* NativeTabContentsViewAura::GetWebContents() const {
+  return delegate_->GetWebContents();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -149,9 +153,11 @@ void NativeTabContentsViewAura::InitNativeTabContentsView() {
   params.create_texture_for_layer = false;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.parent = NULL;
+  params.can_activate = true;
   GetWidget()->Init(params);
+  ash::SetChildWindowVisibilityChangesAnimated(GetWidget()->GetNativeView());
 
-  // Hide the widget to prevent it from showing up on the desktop. This is
+  // Hide the widget to prevent it from showing up on the root window. This is
   // needed for TabContentses that aren't immediately added to the tabstrip,
   // e.g. the Instant preview contents.
   // TODO(beng): investigate if control-type windows shouldn't be hidden by
@@ -166,17 +172,15 @@ void NativeTabContentsViewAura::Unparent() {
 
 RenderWidgetHostView* NativeTabContentsViewAura::CreateRenderWidgetHostView(
     RenderWidgetHost* render_widget_host) {
-  RenderWidgetHostViewAura* view =
-      new RenderWidgetHostViewAura(render_widget_host);
-  view->InitAsChild();
+  RenderWidgetHostView* view =
+      RenderWidgetHostView::CreateViewForWidget(render_widget_host);
+
+  view->InitAsChild(NULL);
   GetNativeView()->AddChild(view->GetNativeView());
   view->Show();
 
   // We listen to drag drop events in the newly created view's window.
-  aura::Window* window = static_cast<aura::Window*>(view->GetNativeView());
-  DCHECK(window);
-  window->SetProperty(aura::kDragDropDelegateKey,
-      static_cast<aura::WindowDragDropDelegate*>(this));
+  aura::client::SetDragDropDelegate(view->GetNativeView(), this);
   return view;
 }
 
@@ -194,10 +198,7 @@ void NativeTabContentsViewAura::StartDragging(const WebDropData& drop_data,
                                              WebKit::WebDragOperationsMask ops,
                                              const SkBitmap& image,
                                              const gfx::Point& image_offset) {
-  aura::DragDropClient* client = static_cast<aura::DragDropClient*>(
-      aura::Desktop::GetInstance()->GetProperty(
-          aura::kDesktopDragDropClientKey));
-  if (!client)
+  if (!aura::client::GetDragDropClient())
     return;
 
   ui::OSExchangeDataProviderAura* provider = new ui::OSExchangeDataProviderAura;
@@ -212,27 +213,22 @@ void NativeTabContentsViewAura::StartDragging(const WebDropData& drop_data,
   // updates while in the system DoDragDrop loop.
   bool old_state = MessageLoop::current()->NestableTasksAllowed();
   MessageLoop::current()->SetNestableTasksAllowed(true);
-  int result_op = client->StartDragAndDrop(data, ConvertFromWeb(ops));
+  int result_op = aura::client::GetDragDropClient()->StartDragAndDrop(
+      data, ConvertFromWeb(ops));
   MessageLoop::current()->SetNestableTasksAllowed(old_state);
 
   EndDrag(ConvertToWeb(result_op));
-  GetTabContents()->render_view_host()->DragSourceSystemDragEnded();
+  GetWebContents()->GetRenderViewHost()->DragSourceSystemDragEnded();
 }
 
 void NativeTabContentsViewAura::CancelDrag() {
-  aura::DragDropClient* client = static_cast<aura::DragDropClient*>(
-      aura::Desktop::GetInstance()->GetProperty(
-          aura::kDesktopDragDropClientKey));
-  if (client)
-    client->DragCancel();
+  if (aura::client::GetDragDropClient())
+    aura::client::GetDragDropClient()->DragCancel();
 }
 
 bool NativeTabContentsViewAura::IsDoingDrag() const {
-  aura::DragDropClient* client = static_cast<aura::DragDropClient*>(
-      aura::Desktop::GetInstance()->GetProperty(
-          aura::kDesktopDragDropClientKey));
-  if (client)
-    return client->IsDragDropInProgress();
+  if (aura::client::GetDragDropClient())
+    return aura::client::GetDragDropClient()->IsDragDropInProgress();
   return false;
 }
 
@@ -278,28 +274,28 @@ void NativeTabContentsViewAura::OnDragEntered(
   PrepareWebDropData(&drop_data, event.data());
   WebKit::WebDragOperationsMask op = ConvertToWeb(event.source_operations());
 
-  gfx::Point screen_pt = aura::Desktop::GetInstance()->last_mouse_location();
-  GetTabContents()->render_view_host()->DragTargetDragEnter(
+  gfx::Point screen_pt = aura::RootWindow::GetInstance()->last_mouse_location();
+  GetWebContents()->GetRenderViewHost()->DragTargetDragEnter(
       drop_data, event.location(), screen_pt, op);
 }
 
 int NativeTabContentsViewAura::OnDragUpdated(
     const aura::DropTargetEvent& event) {
   WebKit::WebDragOperationsMask op = ConvertToWeb(event.source_operations());
-  gfx::Point screen_pt = aura::Desktop::GetInstance()->last_mouse_location();
-  GetTabContents()->render_view_host()->DragTargetDragOver(
+  gfx::Point screen_pt = aura::RootWindow::GetInstance()->last_mouse_location();
+  GetWebContents()->GetRenderViewHost()->DragTargetDragOver(
       event.location(), screen_pt, op);
   return ConvertFromWeb(current_drag_op_);
 }
 
 void NativeTabContentsViewAura::OnDragExited() {
-  GetTabContents()->render_view_host()->DragTargetDragLeave();
+  GetWebContents()->GetRenderViewHost()->DragTargetDragLeave();
 }
 
 int NativeTabContentsViewAura::OnPerformDrop(
     const aura::DropTargetEvent& event) {
-  GetTabContents()->render_view_host()->DragTargetDrop(
-      event.location(), aura::Desktop::GetInstance()->last_mouse_location());
+  GetWebContents()->GetRenderViewHost()->DragTargetDrop(
+      event.location(), aura::RootWindow::GetInstance()->last_mouse_location());
   return current_drag_op_;
 }
 
@@ -307,11 +303,12 @@ int NativeTabContentsViewAura::OnPerformDrop(
 // NativeTabContentsViewAura, private:
 
 void NativeTabContentsViewAura::EndDrag(WebKit::WebDragOperationsMask ops) {
-  gfx::Point screen_loc = aura::Desktop::GetInstance()->last_mouse_location();
+  gfx::Point screen_loc =
+      aura::RootWindow::GetInstance()->last_mouse_location();
   gfx::Point client_loc = screen_loc;
-  RenderViewHost* rvh = GetTabContents()->render_view_host();
+  RenderViewHost* rvh = GetWebContents()->GetRenderViewHost();
   aura::Window* window = rvh->view()->GetNativeView();
-  aura::Window::ConvertPointToWindow(aura::Desktop::GetInstance(),
+  aura::Window::ConvertPointToWindow(aura::RootWindow::GetInstance(),
       window, &client_loc);
   rvh->DragSourceEndedAt(client_loc.x(), client_loc.y(), screen_loc.x(),
       screen_loc.y(), ops);

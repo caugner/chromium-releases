@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,16 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
-#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::OpenURLParams;
+using content::Referrer;
+using content::UserMetricsAction;
 
 RegisterProtocolHandlerInfoBarDelegate::RegisterProtocolHandlerInfoBarDelegate(
     InfoBarTabHelper* infobar_helper,
@@ -21,14 +24,6 @@ RegisterProtocolHandlerInfoBarDelegate::RegisterProtocolHandlerInfoBarDelegate(
     : ConfirmInfoBarDelegate(infobar_helper),
       registry_(registry),
       handler_(handler) {
-}
-
-bool RegisterProtocolHandlerInfoBarDelegate::ShouldExpire(
-    const content::LoadCommittedDetails& details) const {
-  // The user has submitted a form, causing the page to navigate elsewhere. We
-  // don't want the infobar to be expired at this point, because the user won't
-  // get a chance to answer the question.
-  return false;
 }
 
 InfoBarDelegate::Type
@@ -70,14 +65,14 @@ bool RegisterProtocolHandlerInfoBarDelegate::NeedElevation(
 }
 
 bool RegisterProtocolHandlerInfoBarDelegate::Accept() {
-  UserMetrics::RecordAction(
+  content::RecordAction(
       UserMetricsAction("RegisterProtocolHandler.Infobar_Accept"));
   registry_->OnAcceptRegisterProtocolHandler(handler_);
   return true;
 }
 
 bool RegisterProtocolHandlerInfoBarDelegate::Cancel() {
-  UserMetrics::RecordAction(
+  content::RecordAction(
       UserMetricsAction("RegisterProtocolHandler.InfoBar_Deny"));
   registry_->OnIgnoreRegisterProtocolHandler(handler_);
   return true;
@@ -89,11 +84,25 @@ string16 RegisterProtocolHandlerInfoBarDelegate::GetLinkText() const {
 
 bool RegisterProtocolHandlerInfoBarDelegate::LinkClicked(
     WindowOpenDisposition disposition) {
-  UserMetrics::RecordAction(
+  content::RecordAction(
       UserMetricsAction("RegisterProtocolHandler.InfoBar_LearnMore"));
-  owner()->tab_contents()->OpenURL(google_util::AppendGoogleLocaleParam(GURL(
-      chrome::kLearnMoreRegisterProtocolHandlerURL)), GURL(),
+  OpenURLParams params(
+      GURL(chrome::kLearnMoreRegisterProtocolHandlerURL),
+      Referrer(),
       (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-      content::PAGE_TRANSITION_LINK);
+      content::PAGE_TRANSITION_LINK,
+      false);
+  owner()->web_contents()->OpenURL(params);
   return false;
+}
+
+bool RegisterProtocolHandlerInfoBarDelegate::IsReplacedBy(
+    RegisterProtocolHandlerInfoBarDelegate* delegate) {
+  return handler_.IsEquivalent(delegate->handler_);
+}
+
+RegisterProtocolHandlerInfoBarDelegate*
+    RegisterProtocolHandlerInfoBarDelegate::
+        AsRegisterProtocolHandlerInfoBarDelegate() {
+  return this;
 }

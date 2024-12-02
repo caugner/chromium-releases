@@ -78,7 +78,6 @@ void ExtensionToolbarModel::MoveBrowserAction(const Extension* extension,
 void ExtensionToolbarModel::SetVisibleIconCount(int count) {
   visible_icon_count_ = count == static_cast<int>(size()) ? -1 : count;
   prefs_->SetInteger(prefs::kExtensionToolbarSize, visible_icon_count_);
-  prefs_->ScheduleSavePersistentPrefs();
 }
 
 void ExtensionToolbarModel::Observe(
@@ -181,8 +180,9 @@ void ExtensionToolbarModel::InitializeExtensionList() {
   ExtensionList unsorted;
 
   // Create the lists.
-  for (size_t i = 0; i < service_->extensions()->size(); ++i) {
-    const Extension* extension = service_->extensions()->at(i);
+  for (ExtensionSet::const_iterator it = service_->extensions()->begin();
+       it != service_->extensions()->end(); ++it) {
+    const Extension* extension = *it;
     if (!extension->browser_action())
       continue;
     if (!service_->GetBrowserActionVisibility(extension))

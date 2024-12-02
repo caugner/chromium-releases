@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,7 +51,7 @@ struct PP_Graphics3DTrustedState {
   uint32_t generation;
 };
 
-struct PPB_Graphics3DTrusted {
+struct PPB_Graphics3DTrusted_1_0 {
   // Creates a raw Graphics3D resource. A raw Graphics3D is intended to be used
   // with the trusted interface, through the command buffer (for proxying).
   PP_Resource (*CreateRaw)(PP_Instance instance_id,
@@ -59,12 +59,10 @@ struct PPB_Graphics3DTrusted {
                            const int32_t* attrib_list);
 
   // Initializes the command buffer with the given size.
-  PP_Bool (*InitCommandBuffer)(PP_Resource context_id, int32_t size);
+  PP_Bool (*InitCommandBuffer)(PP_Resource context_id);
 
-  // Gets the ring buffer for the command buffer.
-  PP_Bool (*GetRingBuffer)(PP_Resource context_id,
-                           int* shm_handle,
-                           uint32_t* shm_size);
+  // Sets the buffer used for commands.
+  PP_Bool (*SetGetBuffer)(PP_Resource context, int32_t transfer_buffer_id);
 
   // Returns the current state.
   struct PP_Graphics3DTrustedState (*GetState)(PP_Resource context);
@@ -101,5 +99,6 @@ struct PPB_Graphics3DTrusted {
                                                     int32_t last_known_get);
 };
 
-#endif  // PPAPI_C_TRUSTED_PPB_GRAPHICS_3D_TRUSTED_H_
+typedef struct PPB_Graphics3DTrusted_1_0 PPB_Graphics3DTrusted;
 
+#endif  // PPAPI_C_TRUSTED_PPB_GRAPHICS_3D_TRUSTED_H_

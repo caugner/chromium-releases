@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,9 @@
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/interstitial_page.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/focus/view_storage.h"
@@ -33,9 +33,10 @@ using WebKit::WebDragOperation;
 using WebKit::WebDragOperationNone;
 using WebKit::WebDragOperationsMask;
 using WebKit::WebInputEvent;
+using content::WebContents;
 
-TabContentsViewViews::TabContentsViewViews(TabContents* tab_contents)
-    : tab_contents_(tab_contents),
+TabContentsViewViews::TabContentsViewViews(WebContents* web_contents)
+    : web_contents_(web_contents),
       native_tab_contents_view_(NULL),
       close_tab_after_drag_ends_(false),
       focus_manager_(NULL),
@@ -96,7 +97,7 @@ gfx::NativeView TabContentsViewViews::GetNativeView() const {
 }
 
 gfx::NativeView TabContentsViewViews::GetContentNativeView() const {
-  RenderWidgetHostView* rwhv = tab_contents_->GetRenderWidgetHostView();
+  RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
   return rwhv ? rwhv->GetNativeView() : NULL;
 }
 
@@ -140,8 +141,8 @@ void TabContentsViewViews::RenderViewCreated(RenderViewHost* host) {
 }
 
 void TabContentsViewViews::Focus() {
-  if (tab_contents_->interstitial_page()) {
-    tab_contents_->interstitial_page()->Focus();
+  if (web_contents_->GetInterstitialPage()) {
+    web_contents_->GetInterstitialPage()->Focus();
     return;
   }
 
@@ -151,7 +152,7 @@ void TabContentsViewViews::Focus() {
   }
 
   TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents_);
+      TabContentsWrapper::GetCurrentWrapperForContents(web_contents_);
   if (wrapper) {
     // TODO(erg): TabContents used to own constrained windows, which is why
     // this is here. Eventually this should be ported to a containing view
@@ -167,7 +168,7 @@ void TabContentsViewViews::Focus() {
   }
 
   // Give focus to this tab content view.
-  RenderWidgetHostView* rwhv = tab_contents_->GetRenderWidgetHostView();
+  RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
   if (rwhv) {
     rwhv->Focus();
     // rwhvv may not have a focus manager, so we try with our focus manager
@@ -184,8 +185,8 @@ void TabContentsViewViews::Focus() {
 }
 
 void TabContentsViewViews::SetInitialFocus() {
-  if (tab_contents_->FocusLocationBarByDefault())
-    tab_contents_->SetFocusToLocationBar(false);
+  if (web_contents_->FocusLocationBarByDefault())
+    web_contents_->SetFocusToLocationBar(false);
   else
     Focus();
 }
@@ -218,7 +219,7 @@ void TabContentsViewViews::RestoreFocus() {
     // If you hit this DCHECK, please report it to Jay (jcampan).
     DCHECK(focus_manager != NULL) << "No focus manager when restoring focus.";
 
-    if (last_focused_view->IsFocusableInRootView() && focus_manager &&
+    if (last_focused_view->IsFocusable() && focus_manager &&
         focus_manager->ContainsView(last_focused_view)) {
       last_focused_view->RequestFocus();
     } else {
@@ -261,7 +262,8 @@ void TabContentsViewViews::InstallOverlayView(gfx::NativeView view) {
   DCHECK(!overlaid_view_);
   views::Widget::ReparentNativeView(view, GetNativeView());
   overlaid_view_ = views::Widget::GetWidgetForNativeView(view);
-  overlaid_view_->SetBounds(gfx::Rect(GetClientAreaScreenBounds().size()));
+  if (overlaid_view_)
+    overlaid_view_->SetBounds(gfx::Rect(GetClientAreaScreenBounds().size()));
 }
 
 void TabContentsViewViews::RemoveOverlayView() {
@@ -275,13 +277,13 @@ void TabContentsViewViews::UpdateDragCursor(WebDragOperation operation) {
 }
 
 void TabContentsViewViews::GotFocus() {
-  if (tab_contents_->delegate())
-    tab_contents_->delegate()->TabContentsFocused(tab_contents_);
+  if (web_contents_->GetDelegate())
+    web_contents_->GetDelegate()->WebContentsFocused(web_contents_);
 }
 
 void TabContentsViewViews::TakeFocus(bool reverse) {
-  if (tab_contents_->delegate() &&
-      !tab_contents_->delegate()->TakeFocus(reverse)) {
+  if (web_contents_->GetDelegate() &&
+      !web_contents_->GetDelegate()->TakeFocus(reverse)) {
     views::FocusManager* focus_manager = GetFocusManager();
 
     // We may not have a focus manager if the tab has been switched before this
@@ -292,54 +294,67 @@ void TabContentsViewViews::TakeFocus(bool reverse) {
 }
 
 void TabContentsViewViews::CloseTab() {
-  tab_contents_->Close(tab_contents_->render_view_host());
+  RenderViewHost* rvh = web_contents_->GetRenderViewHost();
+  rvh->delegate()->Close(rvh);
 }
 
 void TabContentsViewViews::CreateNewWindow(
     int route_id,
     const ViewHostMsg_CreateWindow_Params& params) {
-  delegate_view_helper_.CreateNewWindowFromTabContents(
-      tab_contents_, route_id, params);
+  tab_contents_view_helper_.CreateNewWindow(web_contents_, route_id, params);
 }
 
 void TabContentsViewViews::CreateNewWidget(
     int route_id, WebKit::WebPopupType popup_type) {
-  delegate_view_helper_.CreateNewWidget(route_id, popup_type,
-      tab_contents_->render_view_host()->process());
+  tab_contents_view_helper_.CreateNewWidget(web_contents_,
+                                            route_id,
+                                            false,
+                                            popup_type);
 }
 
 void TabContentsViewViews::CreateNewFullscreenWidget(int route_id) {
-  delegate_view_helper_.CreateNewFullscreenWidget(
-      route_id, tab_contents_->render_view_host()->process());
+  tab_contents_view_helper_.CreateNewWidget(web_contents_,
+                                            route_id,
+                                            true,
+                                            WebKit::WebPopupTypeNone);
 }
 
 void TabContentsViewViews::ShowCreatedWindow(int route_id,
                                              WindowOpenDisposition disposition,
                                              const gfx::Rect& initial_pos,
                                              bool user_gesture) {
-  delegate_view_helper_.ShowCreatedWindow(
-      tab_contents_, route_id, disposition, initial_pos, user_gesture);
+  tab_contents_view_helper_.ShowCreatedWindow(
+      web_contents_, route_id, disposition, initial_pos, user_gesture);
 }
 
 void TabContentsViewViews::ShowCreatedWidget(
     int route_id, const gfx::Rect& initial_pos) {
-  delegate_view_helper_.ShowCreatedWidget(
-      tab_contents_, route_id, initial_pos);
+  tab_contents_view_helper_.ShowCreatedWidget(web_contents_,
+                                              route_id,
+                                              false,
+                                              initial_pos);
 }
 
 void TabContentsViewViews::ShowCreatedFullscreenWidget(int route_id) {
-  delegate_view_helper_.ShowCreatedFullscreenWidget(tab_contents_, route_id);
+  tab_contents_view_helper_.ShowCreatedWidget(web_contents_,
+                                              route_id,
+                                              true,
+                                              gfx::Rect());
 }
 
 void TabContentsViewViews::ShowContextMenu(const ContextMenuParams& params) {
   // Allow delegates to handle the context menu operation first.
-  if (tab_contents_->delegate() &&
-      tab_contents_->delegate()->HandleContextMenu(params)) {
+  if (web_contents_->GetDelegate() &&
+      web_contents_->GetDelegate()->HandleContextMenu(params)) {
     return;
   }
 
-  context_menu_.reset(new RenderViewContextMenuViews(tab_contents_, params));
+  context_menu_.reset(new RenderViewContextMenuViews(web_contents_, params));
   context_menu_->Init();
+
+  // Don't show empty menus.
+  if (context_menu_->menu_model().GetItemCount() == 0)
+    return;
 
   gfx::Point screen_point(params.x, params.y);
   views::View::ConvertPointToScreen(GetRootView(), &screen_point);
@@ -365,47 +380,47 @@ void TabContentsViewViews::ShowPopupMenu(const gfx::Rect& bounds,
 ////////////////////////////////////////////////////////////////////////////////
 // TabContentsViewViews, internal::NativeTabContentsViewDelegate implementation:
 
-TabContents* TabContentsViewViews::GetTabContents() {
-  return tab_contents_;
+WebContents* TabContentsViewViews::GetWebContents() {
+  return web_contents_;
 }
 
 bool TabContentsViewViews::IsShowingSadTab() const {
-  return tab_contents_->is_crashed() && overlaid_view_;
+  return web_contents_->IsCrashed() && overlaid_view_;
 }
 
 void TabContentsViewViews::OnNativeTabContentsViewShown() {
-  tab_contents_->ShowContents();
+  web_contents_->ShowContents();
 }
 
 void TabContentsViewViews::OnNativeTabContentsViewHidden() {
-  tab_contents_->HideContents();
+  web_contents_->HideContents();
 }
 
 void TabContentsViewViews::OnNativeTabContentsViewSized(const gfx::Size& size) {
-  if (tab_contents_->interstitial_page())
-    tab_contents_->interstitial_page()->SetSize(size);
-  RenderWidgetHostView* rwhv = tab_contents_->GetRenderWidgetHostView();
+  if (web_contents_->GetInterstitialPage())
+    web_contents_->GetInterstitialPage()->SetSize(size);
+  RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
   if (rwhv)
     rwhv->SetSize(size);
 }
 
 void TabContentsViewViews::OnNativeTabContentsViewWheelZoom(bool zoom_in) {
-  if (tab_contents_->delegate())
-    tab_contents_->delegate()->ContentsZoomChange(zoom_in);
+  if (web_contents_->GetDelegate())
+    web_contents_->GetDelegate()->ContentsZoomChange(zoom_in);
 }
 
 void TabContentsViewViews::OnNativeTabContentsViewMouseDown() {
   // Make sure this TabContents is activated when it is clicked on.
-  if (tab_contents_->delegate())
-    tab_contents_->delegate()->ActivateContents(tab_contents_);
+  if (web_contents_->GetDelegate())
+    web_contents_->GetDelegate()->ActivateContents(web_contents_);
 }
 
 void TabContentsViewViews::OnNativeTabContentsViewMouseMove(bool motion) {
   // Let our delegate know that the mouse moved (useful for resetting status
   // bubble state).
-  if (tab_contents_->delegate()) {
-    tab_contents_->delegate()->ContentsMouseEvent(
-        tab_contents_, gfx::Screen::GetCursorScreenPoint(), motion);
+  if (web_contents_->GetDelegate()) {
+    web_contents_->GetDelegate()->ContentsMouseEvent(
+        web_contents_, gfx::Screen::GetCursorScreenPoint(), motion);
   }
 }
 
@@ -414,7 +429,7 @@ void TabContentsViewViews::OnNativeTabContentsViewDraggingEnded() {
     close_tab_timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(0),
                            this, &TabContentsViewViews::CloseTab);
   }
-  tab_contents_->SystemDragEnded();
+  web_contents_->SystemDragEnded();
 }
 
 views::internal::NativeWidgetDelegate*
@@ -449,9 +464,9 @@ const views::FocusManager* TabContentsViewViews::GetFocusManager() const {
 void TabContentsViewViews::OnNativeWidgetVisibilityChanged(bool visible) {
   views::Widget::OnNativeWidgetVisibilityChanged(visible);
   if (visible) {
-    tab_contents_->ShowContents();
+    web_contents_->ShowContents();
   } else {
-    tab_contents_->HideContents();
+    web_contents_->HideContents();
   }
 }
 

@@ -32,7 +32,7 @@ using content::BrowserThread;
 using testing::_;
 using testing::DoAll;
 using testing::WithArg;
-using webkit_glue::PasswordForm;
+using webkit::forms::PasswordForm;
 
 namespace {
 
@@ -40,7 +40,7 @@ class MockPasswordStoreConsumer : public PasswordStoreConsumer {
  public:
   MOCK_METHOD2(OnPasswordStoreRequestDone,
                void(CancelableRequestProvider::Handle,
-                    const std::vector<webkit_glue::PasswordForm*>&));
+                    const std::vector<webkit::forms::PasswordForm*>&));
 };
 
 class MockWebDataServiceConsumer : public WebDataServiceConsumer {
@@ -120,7 +120,7 @@ class PasswordStoreWinTest : public testing::Test {
   virtual void TearDown() {
     if (wds_.get())
       wds_->Shutdown();
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     MessageLoop::current()->Run();
     db_thread_.Stop();
   }

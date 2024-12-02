@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -99,14 +99,9 @@ TransportConnectJob::TransportConnectJob(
                  BoundNetLog::Make(net_log, NetLog::SOURCE_CONNECT_JOB)),
       params_(params),
       client_socket_factory_(client_socket_factory),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          callback_(this,
-                    &TransportConnectJob::OnIOComplete)),
       resolver_(host_resolver),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          fallback_callback_(
-              this,
-              &TransportConnectJob::DoIPv6FallbackTransportConnectComplete)) {}
+      next_state_(STATE_NONE) {
+}
 
 TransportConnectJob::~TransportConnectJob() {
   // We don't worry about cancelling the host resolution and TCP connect, since
@@ -216,7 +211,8 @@ int TransportConnectJob::DoTransportConnect() {
   transport_socket_.reset(client_socket_factory_->CreateTransportClientSocket(
         addresses_, net_log().net_log(), net_log().source()));
   connect_start_time_ = base::TimeTicks::Now();
-  int rv = transport_socket_->Connect(&callback_);
+  int rv = transport_socket_->Connect(
+      base::Bind(&TransportConnectJob::OnIOComplete, base::Unretained(this)));
   if (rv == ERR_IO_PENDING &&
       AddressListStartsWithIPv6AndHasAnIPv4Addr(addresses_)) {
     fallback_timer_.Start(FROM_HERE,
@@ -296,7 +292,10 @@ void TransportConnectJob::DoIPv6FallbackTransportConnect() {
       client_socket_factory_->CreateTransportClientSocket(
           *fallback_addresses_, net_log().net_log(), net_log().source()));
   fallback_connect_start_time_ = base::TimeTicks::Now();
-  int rv = fallback_transport_socket_->Connect(&fallback_callback_);
+  int rv = fallback_transport_socket_->Connect(
+      base::Bind(
+          &TransportConnectJob::DoIPv6FallbackTransportConnectComplete,
+          base::Unretained(this)));
   if (rv != ERR_IO_PENDING)
     DoIPv6FallbackTransportConnectComplete(rv);
 }
@@ -395,7 +394,7 @@ int TransportClientSocketPool::RequestSocket(
     const void* params,
     RequestPriority priority,
     ClientSocketHandle* handle,
-    OldCompletionCallback* callback,
+    const CompletionCallback& callback,
     const BoundNetLog& net_log) {
   const scoped_refptr<TransportSocketParams>* casted_params =
       static_cast<const scoped_refptr<TransportSocketParams>*>(params);

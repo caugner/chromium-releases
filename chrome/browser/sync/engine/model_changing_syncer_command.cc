@@ -1,27 +1,27 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/engine/model_changing_syncer_command.h"
 
 #include "base/basictypes.h"
-#include "base/callback_old.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "chrome/browser/sync/sessions/status_controller.h"
 #include "chrome/browser/sync/sessions/sync_session.h"
-#include "chrome/browser/sync/util/unrecoverable_error_info.h"
 
 namespace browser_sync {
 
-void ModelChangingSyncerCommand::ExecuteImpl(sessions::SyncSession* session) {
+SyncerError ModelChangingSyncerCommand::ExecuteImpl(
+    sessions::SyncSession* session) {
   work_session_ = session;
-  if (!ModelNeutralExecuteImpl(work_session_)) {
-    return;
-  }
+  SyncerError result = ModelNeutralExecuteImpl(work_session_);
+
+  if (result != SYNCER_OK)
+    return result;
 
   const std::set<ModelSafeGroup>& groups_to_change =
-      HasCustomGroupsToChange() ?
-      GetGroupsToChange(*work_session_) :
-      session->GetEnabledGroups();
+      GetGroupsToChange(*work_session_);
   for (size_t i = 0; i < session->workers().size(); ++i) {
     ModelSafeWorker* worker = work_session_->workers()[i];
     ModelSafeGroup group = worker->GetModelSafeGroup();
@@ -41,15 +41,19 @@ void ModelChangingSyncerCommand::ExecuteImpl(sessions::SyncSession* session) {
         // unretained.
         base::Unretained(this));
 
-    // TODO(lipalani): Check the return value for an unrecoverable error.
-    ignore_result(worker->DoWorkAndWaitUntilDone(c));
-
+    SyncerError this_worker_result = worker->DoWorkAndWaitUntilDone(c);
+    // TODO(rlarocque): Figure out a better way to deal with errors from
+    // multiple models at once.  See also: crbug.com/109422.
+    if (this_worker_result != SYNCER_OK)
+      result = this_worker_result;
   }
+
+  return result;
 }
 
-bool ModelChangingSyncerCommand::ModelNeutralExecuteImpl(
+SyncerError ModelChangingSyncerCommand::ModelNeutralExecuteImpl(
     sessions::SyncSession* session) {
-  return true;
+  return SYNCER_OK;
 }
 
 }  // namespace browser_sync

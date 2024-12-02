@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,15 +16,16 @@
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/user_metrics.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/base/static_cookie_policy.h"
 
 using content::BrowserThread;
+using content::UserMetricsAction;
 
 namespace {
 
@@ -73,7 +74,8 @@ CookieSettingsWrapper* CookieSettings::Factory::GetWrapperForProfile(
 }
 
 CookieSettings::Factory::Factory()
-    : ProfileKeyedServiceFactory(ProfileDependencyManager::GetInstance()) {
+    : ProfileKeyedServiceFactory("CookieSettings",
+                                 ProfileDependencyManager::GetInstance()) {
 }
 
 ProfileKeyedService* CookieSettings::Factory::BuildServiceInstanceFor(
@@ -91,10 +93,10 @@ CookieSettings::CookieSettings(
       block_third_party_cookies_(
           prefs->GetBoolean(prefs::kBlockThirdPartyCookies)) {
   if (block_third_party_cookies_) {
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("ThirdPartyCookieBlockingEnabled"));
   } else {
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("ThirdPartyCookieBlockingDisabled"));
   }
 

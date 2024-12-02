@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,11 @@
 #include "base/compiler_specific.h"
 #include "base/values.h"
 #include "chrome/test/automation/value_conversion_traits.h"
+#include "chrome/test/webdriver/webdriver_error.h"
 
+class AutomationId;
 class FilePath;
+class WebViewId;
 
 namespace webdriver {
 
@@ -30,6 +33,21 @@ std::string JsonStringifyForDisplay(const base::Value* value);
 
 // Returns the string representation of the given type, for display purposes.
 const char* GetJsonTypeName(base::Value::Type type);
+
+// Converts the automation ID to a string.
+std::string AutomationIdToString(const AutomationId& id);
+
+// Converts the string to an automation ID and returns true on success.
+bool StringToAutomationId(const std::string& string_id, AutomationId* id);
+
+// Converts the web view ID to a string.
+std::string WebViewIdToString(const WebViewId& view_id);
+
+// Converts the string to a web view ID and returns true on success.
+bool StringToWebViewId(const std::string& string_id, WebViewId* view_id);
+
+// Flattens the given list of strings into one.
+Error* FlattenStringArray(const ListValue* src, string16* dest);
 
 #if defined(OS_MACOSX)
 // Gets the paths to the user and local application directory.

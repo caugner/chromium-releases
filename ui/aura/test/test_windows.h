@@ -8,9 +8,9 @@
 
 #include "base/compiler_specific.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/aura/client/window_types.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/test/aura_test_base.h"
-#include "ui/aura/window_types.h"
 
 namespace aura {
 namespace test {
@@ -26,10 +26,20 @@ Window* CreateTestWindowWithDelegate(WindowDelegate* delegate,
                                      const gfx::Rect& bounds,
                                      Window* parent);
 Window* CreateTestWindowWithDelegateAndType(WindowDelegate* delegate,
-                                            WindowType type,
+                                            client::WindowType type,
                                             int id,
                                             const gfx::Rect& bounds,
                                             Window* parent);
+
+// Creates a transient child window of |parent|.
+Window* CreateTransientChild(int id, Window* parent);
+
+// Returns true if |upper| is above |lower| in the window stacking order.
+bool WindowIsAbove(Window* upper, Window* lower);
+
+// Returns true if |upper|'s layer is above |lower|'s layer in the layer
+// stacking order.
+bool LayerIsAbove(Window* upper, Window* lower);
 
 }  // namespace test
 }  // namespace aura

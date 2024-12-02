@@ -20,15 +20,18 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/message_loop_helpers.h"
 #include "base/time.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "content/browser/cancelable_request.h"
 #include "googleurl/src/gurl.h"
 
 class HistoryService;
-class TabContents;
+
+namespace content {
+class WebContents;
+}
 
 namespace safe_browsing {
 class ClientPhishingRequest;
@@ -69,7 +72,7 @@ class BrowserFeatureExtractor {
   // The caller keeps ownership of the tab and service objects and is
   // responsible for ensuring that they stay valid for the entire
   // lifetime of this object.
-  BrowserFeatureExtractor(TabContents* tab,
+  BrowserFeatureExtractor(content::WebContents* tab,
                           ClientSideDetectionService* service);
 
   // The destructor will cancel any pending requests.
@@ -86,7 +89,7 @@ class BrowserFeatureExtractor {
                                const DoneCallback& callback);
 
  private:
-  friend class DeleteTask<BrowserFeatureExtractor>;
+  friend class base::DeleteHelper<BrowserFeatureExtractor>;
   typedef std::pair<ClientPhishingRequest*, DoneCallback> ExtractionData;
   typedef std::map<CancelableRequestProvider::Handle,
                    ExtractionData> PendingQueriesMap;
@@ -146,7 +149,7 @@ class BrowserFeatureExtractor {
   // is set it will return true and false otherwise.
   bool GetHistoryService(HistoryService** history);
 
-  TabContents* tab_;
+  content::WebContents* tab_;
   ClientSideDetectionService* service_;
   CancelableRequestConsumer request_consumer_;
   base::WeakPtrFactory<BrowserFeatureExtractor> weak_factory_;

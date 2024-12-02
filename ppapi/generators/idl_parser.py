@@ -1,6 +1,5 @@
-#!/usr/bin/python
-#
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -976,6 +975,7 @@ def TestErrorFiles(filter):
     InfoOut.Log("Passed parsing test.")
   return total_errs
 
+
 def TestNamespaceFiles(filter):
   idldir = os.path.split(sys.argv[0])[0]
   idldir = os.path.join(idldir, 'test_namespace', '*.idl')
@@ -1002,7 +1002,7 @@ def TestNamespaceFiles(filter):
     InfoOut.Log("Passed namespace test.")
   return errs
 
-default_dirs = ['.', 'trusted', 'dev']
+default_dirs = ['.', 'trusted', 'dev', 'private']
 def ParseFiles(filenames):
   parser = IDLParser()
   filenodes = []
@@ -1017,6 +1017,9 @@ def ParseFiles(filenames):
       srcdir = os.path.join(srcroot, dirname, '*.idl')
       srcdir = os.path.normpath(srcdir)
       filenames += sorted(glob.glob(srcdir))
+
+  if not filenames:
+    ErrOut.Log('No sources provided.')
 
   for filename in filenames:
     filenode = parser.ParseFile(filename)
@@ -1048,6 +1051,7 @@ def Main(args):
     ErrOut.Log('Found %d error(s).' % errs);
   InfoOut.Log("%d files processed." % len(filenames))
   return errs
+
 
 if __name__ == '__main__':
   sys.exit(Main(sys.argv[1:]))

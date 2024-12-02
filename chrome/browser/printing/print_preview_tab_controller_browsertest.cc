@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,12 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "googleurl/src/gurl.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -26,14 +27,16 @@ class PrintPreviewTabControllerBrowserTest : public InProcessBrowserTest {
   virtual ~PrintPreviewTabControllerBrowserTest() {}
 
   virtual void SetUpCommandLine(CommandLine* command_line) {
+#if !defined(GOOGLE_CHROME_BUILD)
     command_line->AppendSwitch(switches::kEnablePrintPreview);
+#endif
   }
 };
 
-class TabDestroyedObserver : public TabContentsObserver {
+class TabDestroyedObserver : public content::WebContentsObserver {
  public:
-  explicit TabDestroyedObserver(TabContents* contents)
-      : TabContentsObserver(contents),
+  explicit TabDestroyedObserver(WebContents* contents)
+      : content::WebContentsObserver(contents),
         tab_destroyed_(false) {
   }
   virtual ~TabDestroyedObserver() {}
@@ -41,7 +44,7 @@ class TabDestroyedObserver : public TabContentsObserver {
   bool tab_destroyed() { return tab_destroyed_; }
 
  private:
-  virtual void TabContentsDestroyed(TabContents* tab) {
+  virtual void WebContentsDestroyed(WebContents* tab) OVERRIDE {
     tab_destroyed_ = true;
   }
 
@@ -78,7 +81,7 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewTabControllerBrowserTest,
   EXPECT_EQ(1, browser()->tab_count());
   ASSERT_TRUE(preview_tab);
   ASSERT_NE(initiator_tab, preview_tab);
-  TabDestroyedObserver observer(preview_tab->tab_contents());
+  TabDestroyedObserver observer(preview_tab->web_contents());
 
   // Navigate in the initiator tab.
   GURL url(chrome::kChromeUINewTabURL);
@@ -126,7 +129,7 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewTabControllerBrowserTest,
   EXPECT_EQ(1, browser()->tab_count());
   ASSERT_TRUE(preview_tab);
   ASSERT_NE(initiator_tab, preview_tab);
-  TabDestroyedObserver tab_destroyed_observer(preview_tab->tab_contents());
+  TabDestroyedObserver tab_destroyed_observer(preview_tab->web_contents());
 
   // Reload the initiator tab.
   ui_test_utils::WindowedNotificationObserver notification_observer(

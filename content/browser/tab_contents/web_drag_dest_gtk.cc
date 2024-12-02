@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "content/browser/tab_contents/web_drag_dest_delegate.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/net_util.h"
+#include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/gtk/gtk_screen_utils.h"
 
@@ -24,8 +25,8 @@ using WebKit::WebDragOperationNone;
 
 namespace content {
 
-WebDragDestGtk::WebDragDestGtk(TabContents* tab_contents, GtkWidget* widget)
-    : tab_contents_(tab_contents),
+WebDragDestGtk::WebDragDestGtk(WebContents* web_contents, GtkWidget* widget)
+    : web_contents_(web_contents),
       widget_(widget),
       context_(NULL),
       data_requests_(0),
@@ -67,7 +68,7 @@ void WebDragDestGtk::UpdateDragStatus(WebDragOperation operation) {
 }
 
 void WebDragDestGtk::DragLeave() {
-  tab_contents_->render_view_host()->DragTargetDragLeave();
+  web_contents_->GetRenderViewHost()->DragTargetDragLeave();
 
   if (delegate())
     delegate()->OnDragLeave();
@@ -83,7 +84,7 @@ gboolean WebDragDestGtk::OnDragMotion(GtkWidget* sender,
     is_drop_target_ = false;
 
     if (delegate())
-      delegate()->DragInitialize(tab_contents_);
+      delegate()->DragInitialize(web_contents_);
 
     // text/plain must come before text/uri-list. This is a hack that works in
     // conjunction with OnDragDataReceived. Since some file managers populate
@@ -97,6 +98,7 @@ gboolean WebDragDestGtk::OnDragMotion(GtkWidget* sender,
       ui::NETSCAPE_URL,
       ui::CHROME_NAMED_URL,
       // TODO(estade): support image drags?
+      ui::CUSTOM_DATA,
     };
 
     // Add the delegate's requested target if applicable. Need to do this here
@@ -113,7 +115,7 @@ gboolean WebDragDestGtk::OnDragMotion(GtkWidget* sender,
                         time);
     }
   } else if (data_requests_ == 0) {
-    tab_contents_->render_view_host()->
+    web_contents_->GetRenderViewHost()->
         DragTargetDragOver(
             ui::ClientPoint(widget_),
             ui::ScreenPoint(widget_),
@@ -141,17 +143,20 @@ void WebDragDestGtk::OnDragDataReceived(
   data_requests_--;
 
   // Decode the data.
-  if (data->data && data->length > 0) {
+  gint data_length = gtk_selection_data_get_length(data);
+  const guchar* raw_data = gtk_selection_data_get_data(data);
+  GdkAtom target = gtk_selection_data_get_target(data);
+  if (raw_data && data_length > 0) {
     // If the source can't provide us with valid data for a requested target,
-    // data->data will be NULL.
-    if (data->target == ui::GetAtomForTarget(ui::TEXT_PLAIN)) {
+    // raw_data will be NULL.
+    if (target == ui::GetAtomForTarget(ui::TEXT_PLAIN)) {
       guchar* text = gtk_selection_data_get_text(data);
       if (text) {
         drop_data_->plain_text =
-            UTF8ToUTF16(std::string(reinterpret_cast<char*>(text)));
+            UTF8ToUTF16(std::string(reinterpret_cast<const char*>(text)));
         g_free(text);
       }
-    } else if (data->target == ui::GetAtomForTarget(ui::TEXT_URI_LIST)) {
+    } else if (target == ui::GetAtomForTarget(ui::TEXT_URI_LIST)) {
       gchar** uris = gtk_selection_data_get_uris(data);
       if (uris) {
         drop_data_->url = GURL();
@@ -176,23 +181,26 @@ void WebDragDestGtk::OnDragDataReceived(
         }
         g_strfreev(uris);
       }
-    } else if (data->target == ui::GetAtomForTarget(ui::TEXT_HTML)) {
+    } else if (target == ui::GetAtomForTarget(ui::TEXT_HTML)) {
       // TODO(estade): Can the html have a non-UTF8 encoding?
       drop_data_->text_html =
-          UTF8ToUTF16(std::string(reinterpret_cast<char*>(data->data),
-                                  data->length));
+          UTF8ToUTF16(std::string(reinterpret_cast<const char*>(raw_data),
+                                  data_length));
       // We leave the base URL empty.
-    } else if (data->target == ui::GetAtomForTarget(ui::NETSCAPE_URL)) {
-      std::string netscape_url(reinterpret_cast<char*>(data->data),
-                               data->length);
+    } else if (target == ui::GetAtomForTarget(ui::NETSCAPE_URL)) {
+      std::string netscape_url(reinterpret_cast<const char*>(raw_data),
+                               data_length);
       size_t split = netscape_url.find_first_of('\n');
       if (split != std::string::npos) {
         drop_data_->url = GURL(netscape_url.substr(0, split));
         if (split < netscape_url.size() - 1)
           drop_data_->url_title = UTF8ToUTF16(netscape_url.substr(split + 1));
       }
-    } else if (data->target == ui::GetAtomForTarget(ui::CHROME_NAMED_URL)) {
+    } else if (target == ui::GetAtomForTarget(ui::CHROME_NAMED_URL)) {
       ui::ExtractNamedURL(data, &drop_data_->url, &drop_data_->url_title);
+    } else if (target == ui::GetAtomForTarget(ui::CUSTOM_DATA)) {
+      ui::ReadCustomDataIntoMap(
+          raw_data, data_length, &drop_data_->custom_data);
     }
   }
 
@@ -201,8 +209,8 @@ void WebDragDestGtk::OnDragDataReceived(
   // URL bookmark.
   // Note that bookmark drag data is encoded in the same format for both
   // GTK and Views, hence we can share the same logic here.
-  if (delegate() && data->target == delegate()->GetBookmarkTargetAtom()) {
-    if (data->data && data->length > 0) {
+  if (delegate() && target == delegate()->GetBookmarkTargetAtom()) {
+    if (raw_data && data_length > 0) {
       delegate()->OnReceiveDataFromGtk(data);
     } else {
       delegate()->OnReceiveProcessedData(drop_data_->url,
@@ -213,7 +221,7 @@ void WebDragDestGtk::OnDragDataReceived(
   if (data_requests_ == 0) {
     // Tell the renderer about the drag.
     // |x| and |y| are seemingly arbitrary at this point.
-    tab_contents_->render_view_host()->
+    web_contents_->GetRenderViewHost()->
         DragTargetDragEnter(*drop_data_.get(),
             ui::ClientPoint(widget_),
             ui::ScreenPoint(widget_),
@@ -247,7 +255,7 @@ gboolean WebDragDestGtk::OnDragDrop(GtkWidget* sender, GdkDragContext* context,
   // Cancel that drag leave!
   method_factory_.InvalidateWeakPtrs();
 
-  tab_contents_->render_view_host()->
+  web_contents_->GetRenderViewHost()->
       DragTargetDrop(ui::ClientPoint(widget_), ui::ScreenPoint(widget_));
 
   if (delegate())

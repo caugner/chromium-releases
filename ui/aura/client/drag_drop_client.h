@@ -14,8 +14,12 @@ class OSExchangeData;
 }
 
 namespace aura {
-
 class Window;
+namespace client {
+
+// A property key to store the drag and drop client for the root window. The
+// type of the value is |aura::DragDropClient*|.
+AURA_EXPORT extern const char kRootWindowDragDropClientKey[];
 
 // An interface implemented by an object that controls a drag and drop session.
 class AURA_EXPORT DragDropClient {
@@ -40,6 +44,10 @@ class AURA_EXPORT DragDropClient {
   virtual bool IsDragDropInProgress() = 0;
 };
 
+AURA_EXPORT void SetDragDropClient(DragDropClient* client);
+AURA_EXPORT DragDropClient* GetDragDropClient();
+
+}  // namespace client
 }  // namespace aura
 
 #endif  // UI_AURA_CLIENT_DRAG_DROP_CLIENT_H_

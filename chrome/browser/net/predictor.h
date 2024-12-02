@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/net/url_info.h"
 #include "chrome/browser/net/referrer.h"
 #include "chrome/common/net/predictor_common.h"
@@ -43,6 +44,7 @@ class WaitableEvent;
 
 namespace net {
 class HostResolver;
+class URLRequestContextGetter;
 }  // namespace net
 
 class IOThread;
@@ -106,7 +108,8 @@ class Predictor {
 
   virtual void InitNetworkPredictor(PrefService* user_prefs,
                                     PrefService* local_state,
-                                    IOThread* io_thread);
+                                    IOThread* io_thread,
+                                    net::URLRequestContextGetter* getter);
 
   // The Omnibox has proposed a given url to the user, and if it is a search
   // URL, then it also indicates that this is preconnectable (i.e., we could
@@ -350,9 +353,9 @@ class Predictor {
   // Interval between periodic trimming of our whole referrer list.
   // We only do a major trimming about once an hour, and then only when the user
   // is actively browsing.
-  static const base::TimeDelta kDurationBetweenTrimmings;
+  static const int64 kDurationBetweenTrimmingsHours;
   // Interval between incremental trimmings (to avoid inducing Jank).
-  static const base::TimeDelta kDurationBetweenTrimmingIncrements;
+  static const int64 kDurationBetweenTrimmingIncrementsSeconds;
   // Number of referring URLs processed in an incremental trimming.
   static const size_t kUrlsTrimmedPerIncrement;
 
@@ -431,6 +434,10 @@ class Predictor {
 
   scoped_ptr<InitialObserver> initial_observer_;
 
+  // Reference to URLRequestContextGetter from the Profile which owns the
+  // predictor. Used by Preconnect.
+  scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
+
   // Status of speculative DNS resolution and speculative TCP/IP connection
   // feature.
   bool predictor_enabled_;
@@ -503,9 +510,11 @@ class SimplePredictor : public Predictor {
   explicit SimplePredictor(bool preconnect_enabled)
       : Predictor(preconnect_enabled) {}
   virtual ~SimplePredictor() {}
-  virtual void InitNetworkPredictor(PrefService* user_prefs,
-                                    PrefService* local_state,
-                                    IOThread* io_thread) OVERRIDE;
+  virtual void InitNetworkPredictor(
+      PrefService* user_prefs,
+      PrefService* local_state,
+      IOThread* io_thread,
+      net::URLRequestContextGetter* getter) OVERRIDE;
   virtual void ShutdownOnUIThread(PrefService* user_prefs) OVERRIDE;
 };
 

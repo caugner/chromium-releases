@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/shared_memory.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "content/common/intents_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/renderer/render_view_impl.h"
@@ -15,6 +16,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIntentServiceInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/range/range.h"
@@ -53,6 +55,43 @@ TEST_F(RenderViewImplTest, OnNavStateChanged) {
   ProcessPendingMessages();
   EXPECT_TRUE(render_thread_->sink().GetUniqueMessageMatching(
       ViewHostMsg_UpdateState::ID));
+}
+
+// Ensure the RenderViewImpl sends an ACK to a SwapOut request, even if it is
+// already swapped out.  http://crbug.com/93427.
+TEST_F(RenderViewImplTest, SendSwapOutACK) {
+  int initial_page_id = view()->GetPageId();
+
+  // Respond to a swap out request.
+  ViewMsg_SwapOut_Params params;
+  params.closing_process_id = 10;
+  params.closing_route_id = 11;
+  params.new_render_process_host_id = 12;
+  params.new_request_id = 13;
+  view()->OnSwapOut(params);
+
+  // Ensure the swap out commits synchronously.
+  EXPECT_NE(initial_page_id, view()->GetPageId());
+
+  // Check for a valid OnSwapOutACK with echoed params.
+  const IPC::Message* msg = render_thread_->sink().GetUniqueMessageMatching(
+      ViewHostMsg_SwapOut_ACK::ID);
+  ASSERT_TRUE(msg);
+  ViewHostMsg_SwapOut_ACK::Param reply_params;
+  ViewHostMsg_SwapOut_ACK::Read(msg, &reply_params);
+  EXPECT_EQ(params.closing_process_id, reply_params.a.closing_process_id);
+  EXPECT_EQ(params.closing_route_id, reply_params.a.closing_route_id);
+  EXPECT_EQ(params.new_render_process_host_id,
+            reply_params.a.new_render_process_host_id);
+  EXPECT_EQ(params.new_request_id, reply_params.a.new_request_id);
+
+  // It is possible to get another swap out request.  Ensure that we send
+  // an ACK, even if we don't have to do anything else.
+  render_thread_->sink().ClearMessages();
+  view()->OnSwapOut(params);
+  const IPC::Message* msg2 = render_thread_->sink().GetUniqueMessageMatching(
+      ViewHostMsg_SwapOut_ACK::ID);
+  ASSERT_TRUE(msg2);
 }
 
 // Test that we get the correct UpdateState message when we go back twice
@@ -521,16 +560,9 @@ TEST_F(RenderViewImplTest, OnSetTextDirection) {
   }
 }
 
-#if defined(USE_AURA)
-// crbug.com/103499.
-#define MAYBE_OnHandleKeyboardEvent DISABLED_OnHandleKeyboardEvent
-#else
-#define MAYBE_OnHandleKeyboardEvent OnHandleKeyboardEvent
-#endif
-
 // Test that we can receive correct DOM events when we send input events
 // through the RenderWidget::OnHandleInputEvent() function.
-TEST_F(RenderViewImplTest, MAYBE_OnHandleKeyboardEvent) {
+TEST_F(RenderViewImplTest, OnHandleKeyboardEvent) {
 #if !defined(OS_MACOSX)
   // Load an HTML page consisting of one <input> element and three
   // contentediable <div> elements.
@@ -638,7 +670,7 @@ TEST_F(RenderViewImplTest, MAYBE_OnHandleKeyboardEvent) {
         // driver is installed in a PC and the driver can assign a Unicode
         // charcter for the given tuple (key-code and modifiers).
         int key_code = kKeyCodes[k];
-        std::wstring char_code;
+        string16 char_code;
         if (SendKeyEvent(layout, key_code, modifiers, &char_code) < 0)
           continue;
 
@@ -674,18 +706,11 @@ TEST_F(RenderViewImplTest, MAYBE_OnHandleKeyboardEvent) {
 #endif
 }
 
-#if defined(USE_AURA)
-// crbug.com/103499.
-#define MAYBE_InsertCharacters DISABLED_InsertCharacters
-#else
-#define MAYBE_InsertCharacters InsertCharacters
-#endif
-
 // Test that our EditorClientImpl class can insert characters when we send
 // keyboard events through the RenderWidget::OnHandleInputEvent() function.
 // This test is for preventing regressions caused only when we use non-US
 // keyboards, such as Issue 10846.
-TEST_F(RenderViewImplTest, MAYBE_InsertCharacters) {
+TEST_F(RenderViewImplTest, InsertCharacters) {
 #if !defined(OS_MACOSX)
   static const struct {
     MockKeyboard::Layout layout;
@@ -886,7 +911,7 @@ TEST_F(RenderViewImplTest, MAYBE_InsertCharacters) {
         // driver is installed in a PC and the driver can assign a Unicode
         // charcter for the given tuple (layout, key-code, and modifiers).
         int key_code = kKeyCodes[k];
-        std::wstring char_code;
+        string16 char_code;
         if (SendKeyEvent(layout, key_code, modifiers, &char_code) < 0)
           continue;
       }
@@ -1097,4 +1122,31 @@ TEST_F(RenderViewImplTest, SetHistoryLengthAndPrune) {
   EXPECT_EQ(-1, view()->history_page_ids_[1]);
   EXPECT_EQ(expected_page_id, view()->history_page_ids_[2]);
   EXPECT_EQ(expected_page_id_2, view()->history_page_ids_[3]);
+}
+
+TEST_F(RenderViewImplTest, FindTitleForIntentsPage) {
+  view()->set_send_content_state_immediately(true);
+  LoadHTML("<html><head><title>title</title>"
+           "<intent action=\"a\" type=\"t\"></intent></head></html>");
+  WebKit::WebIntentServiceInfo service;
+  service.setAction(ASCIIToUTF16("a"));
+  service.setType(ASCIIToUTF16("t"));
+  view()->registerIntentService(GetMainFrame(), service);
+  ProcessPendingMessages();
+
+  EXPECT_TRUE(render_thread_->sink().GetUniqueMessageMatching(
+      IntentsHostMsg_RegisterIntentService::ID));
+  const IPC::Message* msg = render_thread_->sink().GetUniqueMessageMatching(
+      IntentsHostMsg_RegisterIntentService::ID);
+  ASSERT_TRUE(msg);
+  string16 action;
+  string16 type;
+  string16 href;
+  string16 title;
+  string16 disposition;
+  IntentsHostMsg_RegisterIntentService::Read(
+      msg, &action, &type, &href, &title, &disposition);
+  EXPECT_EQ(ASCIIToUTF16("a"), action);
+  EXPECT_EQ(ASCIIToUTF16("t"), type);
+  EXPECT_EQ(ASCIIToUTF16("title"), title);
 }

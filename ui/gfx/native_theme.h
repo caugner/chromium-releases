@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -216,7 +216,27 @@ class UI_EXPORT NativeTheme {
 
   // Colors for GetSystemColor().
   enum ColorId {
-    kColorId_DialogBackground
+    // Dialogs
+    kColorId_DialogBackground,
+    // FocusableBorder
+    kColorId_FocusedBorderColor,
+    kColorId_UnfocusedBorderColor,
+    // TextButton
+    kColorId_TextButtonBackgroundColor,
+    kColorId_TextButtonEnabledColor,
+    kColorId_TextButtonDisabledColor,
+    kColorId_TextButtonHighlightColor,
+    kColorId_TextButtonHoverColor,
+    // MenuItem
+    kColorId_EnabledMenuItemForegroundColor,
+    kColorId_DisabledMenuItemForegroundColor,
+    kColorId_FocusedMenuItemBackgroundColor,
+    // Textfield
+    kColorId_TextfieldDefaultColor,
+    kColorId_TextfieldDefaultBackground,
+    kColorId_TextfieldSelectionColor,
+    kColorId_TextfieldSelectionBackgroundFocused,
+    kColorId_TextfieldSelectionBackgroundUnfocused,
     // TODO(benrg): move other hardcoded colors here.
   };
 

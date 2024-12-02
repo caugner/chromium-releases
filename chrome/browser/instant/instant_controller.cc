@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,8 +27,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 
 #if defined(TOOLKIT_VIEWS)
 #include "ui/views/focus/focus_manager.h"
@@ -169,8 +169,10 @@ bool InstantController::Update(TabContentsWrapper* tab_contents,
 
   const TemplateURL* template_url = match.template_url;
   DCHECK(template_url);  // ShouldUseInstant returns false if no turl.
-  if (!loader_.get())
-    loader_.reset(new InstantLoader(this, template_url->id()));
+  if (!loader_.get()) {
+    loader_.reset(new InstantLoader(this, template_url->id(),
+        InstantFieldTrial::GetGroupName(tab_contents->profile())));
+  }
 
   // In some rare cases (involving group policy), Instant can go from the field
   // trial to normal mode, with no intervening call to DestroyPreviewContents().
@@ -215,7 +217,7 @@ void InstantController::DestroyPreviewContents() {
   }
 
   delegate_->HideInstant();
-  delete ReleasePreviewContents(INSTANT_COMMIT_DESTROY);
+  delete ReleasePreviewContents(INSTANT_COMMIT_DESTROY, NULL);
 }
 
 void InstantController::Hide() {
@@ -258,6 +260,13 @@ bool InstantController::PrepareForCommit() {
     return false;
   }
 
+  // In the HIDDEN and SUGGEST experiments (but not SILENT), we must have sent
+  // an Update() by now, so check if the loader failed to process it.
+  if (!InstantFieldTrial::IsSilentExperiment(tab_contents_->profile()) &&
+      (!loader_->ready() || !loader_->http_status_ok())) {
+    return false;
+  }
+
   // Ignore the suggested text, as we are about to commit the verbatim query.
   string16 suggested_text;
   UpdateLoader(template_url, last_url_, last_transition_type_, last_user_text_,
@@ -268,8 +277,9 @@ bool InstantController::PrepareForCommit() {
 TabContentsWrapper* InstantController::CommitCurrentPreview(
     InstantCommitType type) {
   DCHECK(loader_.get());
-  TabContentsWrapper* tab = ReleasePreviewContents(type);
-  tab->controller().CopyStateFromAndPrune(&tab_contents_->controller());
+  TabContentsWrapper* tab = ReleasePreviewContents(type, tab_contents_);
+  tab->web_contents()->GetController().CopyStateFromAndPrune(
+      &tab_contents_->web_contents()->GetController());
   delegate_->CommitInstant(tab);
   CompleteRelease(tab);
   return tab;
@@ -304,7 +314,7 @@ void InstantController::OnAutocompleteLostFocus(
   }
 
   RenderWidgetHostView* rwhv =
-      GetPreviewContents()->tab_contents()->GetRenderWidgetHostView();
+      GetPreviewContents()->web_contents()->GetRenderWidgetHostView();
   if (!view_gaining_focus || !rwhv) {
     DestroyPreviewContents();
     return;
@@ -330,7 +340,7 @@ void InstantController::OnAutocompleteLostFocus(
 #endif
 
   gfx::NativeView tab_view =
-      GetPreviewContents()->tab_contents()->GetNativeView();
+      GetPreviewContents()->web_contents()->GetNativeView();
   // Focus is going to the renderer.
   if (rwhv->GetNativeView() == view_gaining_focus ||
       tab_view == view_gaining_focus) {
@@ -387,17 +397,20 @@ void InstantController::OnAutocompleteGotFocus(
 
   tab_contents_ = tab_contents;
 
-  if (!loader_.get())
-    loader_.reset(new InstantLoader(this, template_url->id()));
+  if (!loader_.get()) {
+    loader_.reset(new InstantLoader(this, template_url->id(),
+        InstantFieldTrial::GetGroupName(tab_contents->profile())));
+  }
   loader_->MaybeLoadInstantURL(tab_contents, template_url);
 }
 
 TabContentsWrapper* InstantController::ReleasePreviewContents(
-    InstantCommitType type) {
+    InstantCommitType type,
+    TabContentsWrapper* current_tab) {
   if (!loader_.get())
     return NULL;
 
-  TabContentsWrapper* tab = loader_->ReleasePreviewContents(type);
+  TabContentsWrapper* tab = loader_->ReleasePreviewContents(type, current_tab);
   ClearBlacklist();
   is_out_of_date_ = true;
   is_displayable_ = false;

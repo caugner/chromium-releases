@@ -70,7 +70,7 @@ void SessionWithID::ExecuteGet(Response* const response) {
       Value::CreateStringValue(chrome::kChromeVersion));
   temp_value->SetWithoutPathExpansion(
       "chrome.nativeEvents",
-      Value::CreateBooleanValue(session_->options().use_native_events));
+      Value::CreateBooleanValue(session_->capabilities().native_events));
 
   response->SetValue(temp_value);
 }
@@ -78,6 +78,10 @@ void SessionWithID::ExecuteGet(Response* const response) {
 void SessionWithID::ExecuteDelete(Response* const response) {
   // Session manages its own lifetime, so do not call delete.
   session_->Terminate();
+}
+
+bool SessionWithID::ShouldRunPreAndPostCommandHandlers() {
+  return false;
 }
 
 }  // namespace webdriver

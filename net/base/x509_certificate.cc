@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,6 +45,7 @@ const char kCertificateHeader[] = "CERTIFICATE";
 // The PEM block header used for PKCS#7 data
 const char kPKCS7Header[] = "PKCS7";
 
+#if !defined(USE_NSS)
 // A thread-safe cache for OS certificate handles.
 //
 // Within each of the supported underlying crypto libraries, a certificate
@@ -110,8 +111,7 @@ class X509CertificateCache {
   DISALLOW_COPY_AND_ASSIGN(X509CertificateCache);
 };
 
-base::LazyInstance<X509CertificateCache,
-                   base::LeakyLazyInstanceTraits<X509CertificateCache> >
+base::LazyInstance<X509CertificateCache>::Leaky
     g_x509_certificate_cache = LAZY_INSTANCE_INITIALIZER;
 
 void X509CertificateCache::InsertOrUpdate(
@@ -184,6 +184,22 @@ void X509CertificateCache::Remove(X509Certificate::OSCertHandle cert_handle) {
     cache_.erase(pos);
   }
 }
+#endif  // !defined(USE_NSS)
+
+// See X509CertificateCache::InsertOrUpdate. NSS has a built-in cache, so there
+// is no point in wrapping another cache around it.
+void InsertOrUpdateCache(X509Certificate::OSCertHandle* cert_handle) {
+#if !defined(USE_NSS)
+  g_x509_certificate_cache.Pointer()->InsertOrUpdate(cert_handle);
+#endif
+}
+
+// See X509CertificateCache::Remove.
+void RemoveFromCache(X509Certificate::OSCertHandle cert_handle) {
+#if !defined(USE_NSS)
+  g_x509_certificate_cache.Pointer()->Remove(cert_handle);
+#endif
+}
 
 // CompareSHA1Hashes is a helper function for using bsearch() with an array of
 // SHA1 hashes.
@@ -223,6 +239,20 @@ X509Certificate::OSCertHandle CreateOSCert(base::StringPiece der_cert) {
       const_cast<char*>(der_cert.data()), der_cert.size());
 }
 #endif
+
+// Returns true if |type| is |kPublicKeyTypeRSA| or |kPublicKeyTypeDSA|, and
+// if |size_bits| is < 1024. Note that this means there may be false
+// negatives: keys for other algorithms and which are weak will pass this
+// test.
+bool IsWeakKey(X509Certificate::PublicKeyType type, size_t size_bits) {
+  switch (type) {
+    case X509Certificate::kPublicKeyTypeRSA:
+    case X509Certificate::kPublicKeyTypeDSA:
+      return size_bits < 1024;
+    default:
+      return false;
+  }
+}
 
 }  // namespace
 
@@ -597,6 +627,51 @@ int X509Certificate::Verify(const std::string& hostname,
     rv = MapCertStatusToNetError(verify_result->cert_status);
   }
 
+  // Check for weak keys in the entire verified chain.
+  size_t size_bits = 0;
+  PublicKeyType type = kPublicKeyTypeUnknown;
+  bool weak_key = false;
+
+  GetPublicKeyInfo(verify_result->verified_cert->os_cert_handle(), &size_bits,
+                   &type);
+  if (IsWeakKey(type, size_bits)) {
+    weak_key = true;
+  } else {
+    const OSCertHandles& intermediates =
+        verify_result->verified_cert->GetIntermediateCertificates();
+    for (OSCertHandles::const_iterator i = intermediates.begin();
+         i != intermediates.end(); ++i) {
+      GetPublicKeyInfo(*i, &size_bits, &type);
+      if (IsWeakKey(type, size_bits))
+        weak_key = true;
+    }
+  }
+
+  if (weak_key) {
+    verify_result->cert_status |= CERT_STATUS_WEAK_KEY;
+    // Avoid replacing a more serious error, such as an OS/library failure,
+    // by ensuring that if verification failed, it failed with a certificate
+    // error.
+    if (rv == OK || IsCertificateError(rv))
+      rv = MapCertStatusToNetError(verify_result->cert_status);
+  }
+
+  // Treat certificates signed using broken signature algorithms as invalid.
+  if (verify_result->has_md2 || verify_result->has_md4) {
+    verify_result->cert_status |= CERT_STATUS_INVALID;
+    rv = MapCertStatusToNetError(verify_result->cert_status);
+  }
+
+  // Flag certificates using weak signature algorithms.
+  if (verify_result->has_md5) {
+    verify_result->cert_status |= CERT_STATUS_WEAK_SIGNATURE_ALGORITHM;
+    // Avoid replacing a more serious error, such as an OS/library failure,
+    // by ensuring that if verification failed, it failed with a certificate
+    // error.
+    if (rv == OK || IsCertificateError(rv))
+      rv = MapCertStatusToNetError(verify_result->cert_status);
+  }
+
   return rv;
 }
 
@@ -651,15 +726,14 @@ bool X509Certificate::GetPEMEncodedChain(
 X509Certificate::X509Certificate(OSCertHandle cert_handle,
                                  const OSCertHandles& intermediates)
     : cert_handle_(DupOSCertHandle(cert_handle)) {
-  X509CertificateCache* cache = g_x509_certificate_cache.Pointer();
-  cache->InsertOrUpdate(&cert_handle_);
+  InsertOrUpdateCache(&cert_handle_);
   for (size_t i = 0; i < intermediates.size(); ++i) {
     // Duplicate the incoming certificate, as the caller retains ownership
     // of |intermediates|.
     OSCertHandle intermediate = DupOSCertHandle(intermediates[i]);
     // Update the cache, which will assume ownership of the duplicated
     // handle and return a suitable equivalent, potentially from the cache.
-    cache->InsertOrUpdate(&intermediate);
+    InsertOrUpdateCache(&intermediate);
     intermediate_ca_certs_.push_back(intermediate);
   }
   // Platform-specific initialization.
@@ -667,14 +741,12 @@ X509Certificate::X509Certificate(OSCertHandle cert_handle,
 }
 
 X509Certificate::~X509Certificate() {
-  // We might not be in the cache, but it is safe to remove ourselves anyway.
-  X509CertificateCache* cache = g_x509_certificate_cache.Pointer();
   if (cert_handle_) {
-    cache->Remove(cert_handle_);
+    RemoveFromCache(cert_handle_);
     FreeOSCertHandle(cert_handle_);
   }
   for (size_t i = 0; i < intermediate_ca_certs_.size(); ++i) {
-    cache->Remove(intermediate_ca_certs_[i]);
+    RemoveFromCache(intermediate_ca_certs_[i]);
     FreeOSCertHandle(intermediate_ca_certs_[i]);
   }
 }
@@ -749,7 +821,7 @@ bool X509Certificate::IsBlacklisted() const {
 // static
 bool X509Certificate::IsPublicKeyBlacklisted(
     const std::vector<SHA1Fingerprint>& public_key_hashes) {
-  static const unsigned kNumHashes = 7;
+  static const unsigned kNumHashes = 8;
   static const uint8 kHashes[kNumHashes][base::kSHA1Length] = {
     // Subject: CN=DigiNotar Root CA
     // Issuer: CN=Entrust.net x2 and self-signed
@@ -781,6 +853,11 @@ bool X509Certificate::IsPublicKeyBlacklisted(
     // Expires: Jul 16 17:53:37 2015 GMT
     {0xd3, 0x3c, 0x5b, 0x41, 0xe4, 0x5c, 0xc4, 0xb3, 0xbe, 0x9a,
      0xd6, 0x95, 0x2c, 0x4e, 0xcc, 0x25, 0x28, 0x03, 0x29, 0x81},
+    // Issuer: CN=Trustwave Organization Issuing CA, Level 2
+    // Coveres two certificates, the latter of which expires Apr 15 21:09:30
+    // 2021 GMT.
+    {0xe1, 0x2d, 0x89, 0xf5, 0x6d, 0x22, 0x76, 0xf8, 0x30, 0xe6,
+     0xce, 0xaf, 0xa6, 0x6c, 0x72, 0x5c, 0x0b, 0x41, 0xa9, 0x32},
   };
 
   for (unsigned i = 0; i < kNumHashes; i++) {

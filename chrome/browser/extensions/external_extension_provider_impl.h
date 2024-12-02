@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,6 +63,7 @@ class ExternalExtensionProviderImpl
                                    scoped_ptr<Version>* version) const OVERRIDE;
 
   virtual bool IsReady() const OVERRIDE;
+  virtual int GetCreationFlags() const OVERRIDE;
 
   static const char kLocation[];
   static const char kState[];
@@ -70,6 +71,10 @@ class ExternalExtensionProviderImpl
   static const char kExternalVersion[];
   static const char kExternalUpdateUrl[];
   static const char kSupportedLocales[];
+
+  void set_auto_acknowledge(bool auto_acknowledge) {
+    auto_acknowledge_ = auto_acknowledge;
+  }
 
  private:
   // Location for external extensions that are provided by this provider from
@@ -98,6 +103,10 @@ class ExternalExtensionProviderImpl
   // Creation flags to use for the extension.  These flags will be used
   // when calling Extenion::Create() by the crx installer.
   int creation_flags_;
+
+  // Whether loaded extensions should be automatically acknowledged, so that
+  // the user doesn't see an alert about them.
+  bool auto_acknowledge_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalExtensionProviderImpl);
 };

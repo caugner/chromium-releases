@@ -42,7 +42,7 @@ class JingleStreamConnector : public JingleChannelConnector {
   virtual ~JingleStreamConnector();
 
   // JingleChannelConnector implementation.
-  virtual void Connect(ChannelAuthenticator* authenticator,
+  virtual void Connect(scoped_ptr<ChannelAuthenticator> authenticator,
                        cricket::TransportChannel* raw_channel) OVERRIDE;
 
  private:
@@ -62,9 +62,6 @@ class JingleStreamConnector : public JingleChannelConnector {
   scoped_ptr<net::SSLSocket> socket_;
 
   scoped_ptr<ChannelAuthenticator> authenticator_;
-
-  // Callback called by the TCP and SSL layers.
-  net::OldCompletionCallbackImpl<JingleStreamConnector> tcp_connect_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(JingleStreamConnector);
 };

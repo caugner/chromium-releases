@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,7 +87,7 @@ cr.define('options', function() {
         chrome.send('coreOptionsUserMetricsAction',
             ['Options_ShowAutofillSettings']);
       };
-      if (cr.isChromeOS && cr.commandLine.options['--bwsi']) {
+      if (cr.isChromeOS && cr.commandLine && cr.commandLine.options['--bwsi']) {
         // Hide Autofill options for the guest user.
         $('autofill-section').hidden = true;
       }
@@ -118,7 +118,7 @@ cr.define('options', function() {
         };
         this.updateAccountPicture_();
 
-        if (cr.commandLine.options['--bwsi']) {
+        if (cr.commandLine && cr.commandLine.options['--bwsi']) {
           // Disable the screen lock checkbox and change-picture-button in
           // guest mode.
           $('enable-screen-lock').disabled = true;
@@ -317,7 +317,7 @@ cr.define('options', function() {
    * @return {boolean} True if password management should be disabled.
    */
   PersonalOptions.disablePasswordManagement = function() {
-    return cr.commandLine.options['--bwsi'];
+    return cr.commandLine && cr.commandLine.options['--bwsi'];
   };
 
   /**
@@ -325,7 +325,7 @@ cr.define('options', function() {
    * @return {boolean} True if password management should be disabled.
    */
   PersonalOptions.disableAutofillManagement = function() {
-    return cr.commandLine.options['--bwsi'];
+    return cr.commandLine && cr.commandLine.options['--bwsi'];
   };
 
   if (cr.isChromeOS) {
@@ -359,8 +359,9 @@ cr.define('options', function() {
     'setThemesResetButtonEnabled',
     'updateAccountPicture',
   ].forEach(function(name) {
-    PersonalOptions[name] = function(value) {
-      return PersonalOptions.getInstance()[name + '_'](value);
+    PersonalOptions[name] = function() {
+      var instance = PersonalOptions.getInstance();
+      return instance[name + '_'].apply(instance, arguments);
     };
   });
 

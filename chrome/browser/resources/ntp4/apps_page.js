@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,8 @@ cr.define('ntp4', function() {
     NTP_APPS_MENU: 2,
     NTP_MOST_VISITED: 3,
     NTP_RECENTLY_CLOSED: 4,
-    NTP_APP_RE_ENABLE: 16
+    NTP_APP_RE_ENABLE: 16,
+    NTP_WEBSTORE_FOOTER: 18,
   };
 
   // Histogram buckets for UMA tracking of where a DnD drop came from.
@@ -35,7 +36,7 @@ cr.define('ntp4', function() {
   function AppContextMenu() {
     this.__proto__ = AppContextMenu.prototype;
     this.initialize();
-  };
+  }
   cr.addSingletonGetter(AppContextMenu);
 
   AppContextMenu.prototype = {
@@ -217,7 +218,6 @@ cr.define('ntp4', function() {
           $('app-small-icon-template').cloneNode(true) :
           $('app-large-icon-template').cloneNode(true);
       this.appContents_.id = '';
-      this.appContents_.hidden = false;
       this.appendChild(this.appContents_);
 
       this.appImgContainer_ = this.querySelector('.app-img-container');
@@ -278,11 +278,11 @@ cr.define('ntp4', function() {
      * Removes the app tile from the page. Should be called after the app has
      * been uninstalled.
      */
-    remove: function() {
+    remove: function(opt_animate) {
       // Unset the ID immediately, because the app is already gone. But leave
       // the tile on the page as it animates out.
       this.id = '';
-      this.tile.doRemove();
+      this.tile.doRemove(opt_animate);
     },
 
     /**
@@ -370,6 +370,7 @@ cr.define('ntp4', function() {
         infoBubble.contentTitle = this.createBubbleNode_(notification, false);
         infoBubble.content = this.createBubbleNode_(notification, true);
         infoBubble.show();
+        infoBubble.resizeAndReposition();
 
         this.currentBubbleShowing_ = infoBubble;
       }
@@ -406,7 +407,6 @@ cr.define('ntp4', function() {
       this.appImgContainer_.appendChild(this.appsPromoLogo_);
 
       this.appendChild(this.appsPromoExtras_);
-      this.appsPromoExtras_.hidden = false;
     },
 
     /**
@@ -457,6 +457,9 @@ cr.define('ntp4', function() {
       this.style.left = x + 'px';
       this.style.right = x + 'px';
       this.style.top = y + 'px';
+
+      if (this.currentBubbleShowing_)
+        this.currentBubbleShowing_.resizeAndReposition();
     },
 
     /**
@@ -589,7 +592,6 @@ cr.define('ntp4', function() {
     removeFromChrome: function() {
       chrome.send('uninstallApp', [this.appData_.id, true]);
       this.tile.tilePage.removeTile(this.tile, true);
-
       if (this.currentBubbleShowing_)
         currentBubbleShowing_.hide();
     },
@@ -645,13 +647,23 @@ cr.define('ntp4', function() {
       this.classList.add('apps-page');
 
       this.addEventListener('cardselected', this.onCardSelected_);
+      // Add event listeners for two events, so we can temporarily suppress
+      // the app notification bubbles when the app card slides in and out of
+      // view.
+      this.addEventListener('carddeselected', this.onCardDeselected_);
+      this.addEventListener('cardSlider:card_change_ended',
+                            this.onCardChangeEnded_);
+
+      this.addEventListener('tilePage:tile_added', this.onTileAdded_);
+
+      this.content_.addEventListener('scroll', this.onScroll_.bind(this));
     },
 
     /**
      * Creates an app DOM element and places it at the last position on the
      * page.
      * @param {Object} appData The data object that describes the app.
-     * @param {?boolean} animate If true, the app tile plays an animation.
+     * @param {boolean=} animate If true, the app tile plays an animation.
      */
     appendApp: function(appData, animate) {
       if (animate) {
@@ -660,10 +672,7 @@ cr.define('ntp4', function() {
         ntp4.getCardSlider().selectCardByValue(this);
         this.content_.scrollTop = this.content_.scrollHeight;
       }
-      var app = new App(appData);
-      if (this.classList.contains('selected-card'))
-        app.loadIcon();
-      this.appendTile(app, animate);
+      this.appendTile(new App(appData), animate);
     },
 
     /**
@@ -675,7 +684,66 @@ cr.define('ntp4', function() {
       var apps = this.querySelectorAll('.app.icon-loading');
       for (var i = 0; i < apps.length; i++) {
         apps[i].loadIcon();
+        if (apps[i].currentBubbleShowing_)
+          apps[i].currentBubbleShowing_.suppressed = false;
       }
+    },
+
+    /**
+     * Handler for tile additions to this page.
+     * @param {Event} e The tilePage:tile_added event.
+     */
+    onTileAdded_: function(e) {
+      assert(e.currentTarget == this);
+      assert(e.addedTile.firstChild instanceof App);
+      if (this.classList.contains('selected-card'))
+        e.addedTile.firstChild.loadIcon();
+    },
+
+    /**
+     * Handler for the when this.cardSlider ends change its card. If animated,
+     * this happens when the -webkit-transition is done, otherwise happens
+     * immediately (but after cardSlider:card_changed).
+     * @private
+     */
+    onCardChangeEnded_: function(e) {
+      for (var i = 0; i < this.tileElements_.length; i++) {
+        var app = this.tileElements_[i].firstChild;
+        assert(app instanceof App);
+        if (app.currentBubbleShowing_)
+          app.currentBubbleShowing_.suppressed = false;
+      }
+    },
+
+    /**
+     * Handler for the 'carddeselected' event, fired when the user switches
+     * to another 'card' than the App 'card' on the NTP (|this| gets
+     * deselected).
+     * @private
+     */
+    onCardDeselected_: function(e) {
+      for (var i = 0; i < this.tileElements_.length; i++) {
+        var app = this.tileElements_[i].firstChild;
+        assert(app instanceof App);
+        if (app.currentBubbleShowing_)
+          app.currentBubbleShowing_.suppressed = true;
+      }
+    },
+
+    /**
+     * A handler for when the apps page is scrolled (then we need to reposition
+     * the bubbles.
+     * @private
+     */
+    onScroll_: function(e) {
+      if (!this.selected)
+        return;
+      for (var i = 0; i < this.tileElements_.length; i++) {
+        var app = this.tileElements_[i].firstChild;
+        assert(app instanceof App);
+        if (app.currentBubbleShowing_)
+          app.currentBubbleShowing_.resizeAndReposition();
+        }
     },
 
     /** @inheritdoc */
@@ -702,18 +770,23 @@ cr.define('ntp4', function() {
       if (currentlyDraggingTile) {
         var tileContents = currentlyDraggingTile.firstChild;
         if (tileContents.classList.contains('app')) {
-          sourceId = currentlyDraggingTile.tilePage == this ?
-              DRAG_SOURCE.SAME_APPS_PANE : DRAG_SOURCE.OTHER_APPS_PANE;
-          this.tileGrid_.insertBefore(
-              currentlyDraggingTile,
-              this.tileElements_[index]);
+          var originalPage = currentlyDraggingTile.tilePage;
+          var samePageDrag = originalPage == this;
+          sourceId = samePageDrag ? DRAG_SOURCE.SAME_APPS_PANE :
+                                    DRAG_SOURCE.OTHER_APPS_PANE;
+          this.tileGrid_.insertBefore(currentlyDraggingTile,
+                                      this.tileElements_[index]);
           this.tileMoved(currentlyDraggingTile);
+          if (!samePageDrag) {
+            originalPage.fireRemovedEvent(currentlyDraggingTile, index, true);
+            this.fireAddedEvent(currentlyDraggingTile, index, true);
+          }
         } else if (currentlyDraggingTile.querySelector('.most-visited')) {
           this.generateAppForLink(tileContents.data);
           sourceId = DRAG_SOURCE.MOST_VISITED_PANE;
         }
       } else {
-        this.addOutsideData_(dataTransfer, index);
+        this.addOutsideData_(dataTransfer);
         sourceId = DRAG_SOURCE.OUTSIDE_NTP;
       }
 
@@ -726,10 +799,9 @@ cr.define('ntp4', function() {
      * Adds drag data that has been dropped from a source that is not a tile.
      * @param {Object} dataTransfer The data transfer object that holds drop
      *     data.
-     * @param {number} index The index for the new data.
      * @private
      */
-    addOutsideData_: function(dataTransfer, index) {
+    addOutsideData_: function(dataTransfer) {
       var url = dataTransfer.getData('url');
       assert(url);
 
@@ -760,7 +832,6 @@ cr.define('ntp4', function() {
      * Creates a new crx-less app manifest and installs it.
      * @param {Object} data The data object describing the link. Must have |url|
      *     and |title| members.
-     * TODO(estade): pass along an index.
      */
     generateAppForLink: function(data) {
       assert(data.url != undefined);
@@ -810,14 +881,14 @@ cr.define('ntp4', function() {
    */
   function launchAppAfterEnable(appId) {
     chrome.send('launchApp', [appId, APP_LAUNCH.NTP_APP_RE_ENABLE]);
-  };
+  }
 
   function appNotificationChanged(id, notification) {
     var app = $(id);
     // The app might have been uninstalled, or notifications might be disabled.
     if (app && !app.appData.notifications_disabled)
       app.setupNotification_(notification);
-  };
+  }
 
   return {
     APP_LAUNCH: APP_LAUNCH,

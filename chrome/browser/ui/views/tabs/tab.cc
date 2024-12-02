@@ -16,7 +16,6 @@
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/animation/multi_animation.h"
-#include "ui/base/animation/slide_animation.h"
 #include "ui/base/animation/throb_animation.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
@@ -288,7 +287,7 @@ void Tab::Layout() {
       title_top -= (text_height - minimum_size.height()) / 2;
 
     int title_width;
-    if (close_button()->IsVisible()) {
+    if (close_button()->visible()) {
       title_width = std::max(close_button()->x() -
                              kTitleCloseButtonSpacing - title_left, 0);
     } else {
@@ -332,10 +331,7 @@ bool Tab::GetTooltipTextOrigin(const gfx::Point& p, gfx::Point* origin) const {
 }
 
 void Tab::OnMouseMoved(const views::MouseEvent& event) {
-  hover_point_ = event.location();
-  // We need to redraw here because otherwise the hover glow does not update
-  // and follow the new mouse position.
-  SchedulePaint();
+  hover_controller().SetLocation(event.location());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -364,13 +360,13 @@ void Tab::PaintTabBackground(gfx::Canvas* canvas) {
 
 void Tab::PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas) {
   // Render the inactive tab background. We'll use this for clipping.
-  gfx::CanvasSkia background_canvas(width(), height(), false);
+  gfx::CanvasSkia background_canvas(size(), false);
   PaintInactiveTabBackground(&background_canvas);
 
   SkBitmap background_image = background_canvas.ExtractBitmap();
 
   // Draw a radial gradient to hover_canvas.
-  gfx::CanvasSkia hover_canvas(width(), height(), false);
+  gfx::CanvasSkia hover_canvas(size(), false);
   int radius = kMiniTitleChangeGradientRadius;
   int x0 = width() + radius - kMiniTitleChangeInitialXOffset;
   int x1 = radius;
@@ -397,7 +393,8 @@ void Tab::PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas) {
       SkShader::kClamp_TileMode);
   paint.setShader(shader);
   shader->unref();
-  hover_canvas.DrawRectInt(x - radius, -radius, radius * 2, radius * 2, paint);
+  hover_canvas.DrawRect(gfx::Rect(x - radius, -radius, radius * 2, radius * 2),
+                        paint);
 
   // Draw the radial gradient clipped to the background into hover_image.
   SkBitmap hover_image = SkBitmapOperations::CreateMaskedBitmap(
@@ -445,7 +442,7 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
   // We need a CanvasSkia object to be able to extract the bitmap from.
   // We draw everything to this canvas and then output it to the canvas
   // parameter in addition to using it to mask the hover glow if needed.
-  gfx::CanvasSkia background_canvas(width(), height(), false);
+  gfx::CanvasSkia background_canvas(size(), false);
 
   // Draw left edge.  Don't draw over the toolbar, as we're not the foreground
   // tab.
@@ -483,13 +480,8 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
   canvas->DrawBitmapInt(background_canvas.ExtractBitmap(), 0, 0);
 
   if (!GetThemeProvider()->HasCustomImage(tab_id) &&
-      hover_animation() &&
-      (hover_animation()->IsShowing() || hover_animation()->is_animating())) {
-    SkBitmap hover_glow = DrawHoverGlowBitmap(width(), height());
-    // Draw the hover glow clipped to the background into hover_image.
-    SkBitmap hover_image = SkBitmapOperations::CreateMaskedBitmap(
-        hover_glow, background_canvas.ExtractBitmap());
-    canvas->DrawBitmapInt(hover_image, 0, 0);
+      hover_controller().ShouldDraw()) {
+    hover_controller().Draw(canvas, background_canvas.ExtractBitmap());
   }
 
   // Now draw the highlights/shadows around the tab edge.
@@ -544,46 +536,6 @@ void Tab::PaintActiveTabBackground(gfx::Canvas* canvas) {
   canvas->DrawBitmapInt(*tab_image->image_r, width() - tab_image->r_width, 0);
 }
 
-SkBitmap Tab::DrawHoverGlowBitmap(int width_input, int height_input) {
-  // Draw a radial gradient to hover_canvas so we can export the bitmap.
-  gfx::CanvasSkia hover_canvas(width_input, height_input, false);
-
-  // Draw a radial gradient to hover_canvas.
-  int radius = width() / 3;
-
-  SkPaint paint;
-  paint.setStyle(SkPaint::kFill_Style);
-  paint.setFlags(SkPaint::kAntiAlias_Flag);
-  SkPoint loc = { SkIntToScalar(hover_point_.x()),
-                  SkIntToScalar(hover_point_.y()) };
-  SkColor colors[2];
-  const ui::SlideAnimation* hover_slide = hover_animation();
-  int hover_alpha = 0;
-  if (hover_slide) {
-    hover_alpha = static_cast<int>(255 * kHoverSlideOpacity *
-                                   hover_slide->GetCurrentValue());
-  }
-  colors[0] = SkColorSetARGB(hover_alpha, 255, 255, 255);
-  colors[1] = SkColorSetARGB(0, 255, 255, 255);
-  SkShader* shader = SkGradientShader::CreateRadial(
-      loc,
-      SkIntToScalar(radius),
-      colors,
-      NULL,
-      2,
-      SkShader::kClamp_TileMode);
-  // Shader can end up null when radius = 0.
-  // If so, this results in default full tab glow behavior.
-  if (shader) {
-    paint.setShader(shader);
-    shader->unref();
-    hover_canvas.DrawRectInt(hover_point_.x() - radius,
-                             hover_point_.y() - radius,
-                             radius * 2, radius * 2, paint);
-  }
-  return hover_canvas.ExtractBitmap();
-}
-
 int Tab::IconCapacity() const {
   if (height() < GetMinimumUnselectedSize().height())
     return 0;
@@ -616,8 +568,10 @@ double Tab::GetThrobValue() {
   if (pulse_animation() && pulse_animation()->is_animating())
     return pulse_animation()->GetCurrentValue() * kHoverOpacity * scale + min;
 
-  if (hover_animation())
-    return kHoverOpacity * hover_animation()->GetCurrentValue() * scale + min;
+  if (hover_controller().ShouldDraw()) {
+    return kHoverOpacity * hover_controller().GetAnimationValue() * scale +
+        min;
+  }
 
   return is_selected ? kSelectedTabOpacity : 0;
 }

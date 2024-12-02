@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,10 +22,12 @@ static const char kDefaultDevice2[] = "plug:default";
 
 const char* AlsaPcmInputStream::kAutoSelectDevice = "";
 
-AlsaPcmInputStream::AlsaPcmInputStream(const std::string& device_name,
+AlsaPcmInputStream::AlsaPcmInputStream(AudioManagerLinux* audio_manager,
+                                       const std::string& device_name,
                                        const AudioParameters& params,
                                        AlsaWrapper* wrapper)
-    : device_name_(device_name),
+    : audio_manager_(audio_manager),
+      device_name_(device_name),
       params_(params),
       bytes_per_packet_(params.samples_per_packet *
                         (params.channels * params.bits_per_sample) / 8),
@@ -102,16 +104,15 @@ void AlsaPcmInputStream::Start(AudioInputCallback* callback) {
     // We start reading data half |packet_duration_ms_| later than when the
     // packet might have got filled, to accommodate some delays in the audio
     // driver. This could also give us a smooth read sequence going forward.
-    int64 delay_ms = packet_duration_ms_ + packet_duration_ms_ / 2;
-    next_read_time_ = base::Time::Now() + base::TimeDelta::FromMilliseconds(
-        delay_ms);
+    base::TimeDelta delay = base::TimeDelta::FromMilliseconds(
+        packet_duration_ms_ + packet_duration_ms_ / 2);
+    next_read_time_ = base::Time::Now() + delay;
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&AlsaPcmInputStream::ReadAudio, weak_factory_.GetWeakPtr()),
-        delay_ms);
+        delay);
 
-    static_cast<AudioManagerLinux*>(AudioManager::GetAudioManager())->
-        IncreaseActiveInputStreamCount();
+    audio_manager_->IncreaseActiveInputStreamCount();
   }
 }
 
@@ -174,7 +175,8 @@ void AlsaPcmInputStream::ReadAudio() {
       read_callback_behind_schedule_ = false;
     }
 
-    uint32 next_check_time = packet_duration_ms_ / 2;
+    base::TimeDelta next_check_time = base::TimeDelta::FromMilliseconds(
+        packet_duration_ms_ / 2);
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&AlsaPcmInputStream::ReadAudio, weak_factory_.GetWeakPtr()),
@@ -202,20 +204,21 @@ void AlsaPcmInputStream::ReadAudio() {
 
   next_read_time_ += base::TimeDelta::FromMilliseconds(
       packet_duration_ms_ * num_packets_read);
-  int64 delay_ms = (next_read_time_ - base::Time::Now()).InMilliseconds();
-  if (delay_ms < 0) {
+  base::TimeDelta delay = next_read_time_ - base::Time::Now();
+  if (delay < base::TimeDelta()) {
     LOG(WARNING) << "Audio read callback behind schedule by "
-                 << (packet_duration_ms_ - delay_ms) << " (ms).";
+                 << (packet_duration_ms_ - delay.InMilliseconds())
+                 << " (ms).";
     // Read callback is behind schedule. Assuming there is data pending in
     // the soundcard, invoke the read callback immediate in order to catch up.
     read_callback_behind_schedule_ = true;
-    delay_ms = 0;
+    delay = base::TimeDelta();
   }
 
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&AlsaPcmInputStream::ReadAudio, weak_factory_.GetWeakPtr()),
-      delay_ms);
+      delay);
 }
 
 void AlsaPcmInputStream::Stop() {
@@ -224,8 +227,7 @@ void AlsaPcmInputStream::Stop() {
 
   // Stop is always called before Close. In case of error, this will be
   // also called when closing the input controller.
-  static_cast<AudioManagerLinux*>(AudioManager::GetAudioManager())->
-      DecreaseActiveInputStreamCount();
+  audio_manager_->DecreaseActiveInputStreamCount();
 
   weak_factory_.InvalidateWeakPtrs();  // Cancel the next scheduled read.
   int error = wrapper_->PcmDrop(device_handle_);

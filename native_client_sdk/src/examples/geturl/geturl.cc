@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,12 @@
 
 #include <cstdio>
 #include <string>
-#include "examples/geturl/geturl_handler.h"
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/url_loader.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/var.h"
+
+#include "geturl_handler.h"
 
 // These are the method names as JavaScript sees them.
 namespace {

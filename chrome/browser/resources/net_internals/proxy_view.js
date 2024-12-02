@@ -7,7 +7,7 @@
  *
  *   - Shows the current proxy settings.
  *   - Has a button to reload these settings.
- *   - Shows the log entries for the most recent INIT_PROXY_RESOLVER source
+ *   - Shows the log entries for the most recent PROXY_SCRIPT_DECIDER source
  *   - Shows the list of proxy hostnames that are cached as "bad".
  *   - Has a button to clear the cached bad proxies.
  */
@@ -50,7 +50,7 @@ var ProxyView = (function() {
   ProxyView.RELOAD_SETTINGS_BUTTON_ID = 'proxy-view-reload-settings';
   ProxyView.BAD_PROXIES_TBODY_ID = 'proxy-view-bad-proxies-tbody';
   ProxyView.CLEAR_BAD_PROXIES_BUTTON_ID = 'proxy-view-clear-bad-proxies';
-  ProxyView.PROXY_RESOLVER_LOG_PRE_ID = 'proxy-view-resolver-log';
+  ProxyView.PROXY_RESOLVER_LOG_DIV_ID = 'proxy-view-resolver-log';
 
   cr.addSingletonGetter(ProxyView);
 
@@ -65,9 +65,9 @@ var ProxyView = (function() {
     },
 
     onLoadLogFinish: function(data, tabData) {
-      // It's possible that the last INIT_PROXY_RESOLVER source was deleted from
-      // the log, but earlier sources remain.  When that happens, clear the list
-      // of entries here, to avoid displaying misleading information.
+      // It's possible that the last PROXY_SCRIPT_DECIDER source was deleted
+      // from the log, but earlier sources remain.  When that happens, clear the
+      // list of entries here, to avoid displaying misleading information.
       if (tabData != this.latestProxySourceId_)
         this.clearLog_();
       return this.onProxySettingsChanged(data.proxySettings) &&
@@ -127,22 +127,22 @@ var ProxyView = (function() {
 
     /**
      * Called whenever SourceEntries are updated with new log entries.  Updates
-     * |proxyResolverLogPre_| with the log entries of the INIT_PROXY_RESOLVER
+     * |proxyResolverLogPre_| with the log entries of the PROXY_SCRIPT_DECIDER
      * SourceEntry with the greatest id.
      */
     onSourceEntriesUpdated: function(sourceEntries) {
       for (var i = sourceEntries.length - 1; i >= 0; --i) {
         var sourceEntry = sourceEntries[i];
 
-        if (sourceEntry.getSourceType() != LogSourceType.INIT_PROXY_RESOLVER ||
+        if (sourceEntry.getSourceType() != LogSourceType.PROXY_SCRIPT_DECIDER ||
             this.latestProxySourceId_ > sourceEntry.getSourceId()) {
           continue;
         }
 
         this.latestProxySourceId_ = sourceEntry.getSourceId();
 
-        $(ProxyView.PROXY_RESOLVER_LOG_PRE_ID).innerText =
-            sourceEntry.printAsText();
+        $(ProxyView.PROXY_RESOLVER_LOG_DIV_ID).innerHTML = '';
+        sourceEntry.printAsText($(ProxyView.PROXY_RESOLVER_LOG_DIV_ID));
       }
     },
 
@@ -153,8 +153,8 @@ var ProxyView = (function() {
       // Prevents display of partial logs.
       ++this.latestProxySourceId_;
 
-      $(ProxyView.PROXY_RESOLVER_LOG_PRE_ID).innerHTML = '';
-      $(ProxyView.PROXY_RESOLVER_LOG_PRE_ID).innerText = 'Deleted.';
+      $(ProxyView.PROXY_RESOLVER_LOG_DIV_ID).innerHTML = '';
+      $(ProxyView.PROXY_RESOLVER_LOG_DIV_ID).innerText = 'Deleted.';
     },
 
     onSourceEntriesDeleted: function(sourceIds) {

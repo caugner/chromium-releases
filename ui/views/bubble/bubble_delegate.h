@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,6 +46,8 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
 
   // Widget::Observer overrides:
+  virtual void OnWidgetClosing(Widget* widget) OVERRIDE;
+  virtual void OnWidgetVisibilityChanged(Widget* widget, bool visible) OVERRIDE;
   virtual void OnWidgetActivationChanged(Widget* widget, bool active) OVERRIDE;
 
   bool close_on_esc() const { return close_on_esc_; }
@@ -56,16 +58,19 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
       close_on_deactivate_ = close_on_deactivate;
   }
 
-  bool allow_bubble_offscreen() const { return allow_bubble_offscreen_; }
-  void set_allow_bubble_offscreen(bool allow_bubble_offscreen) {
-    allow_bubble_offscreen_ = allow_bubble_offscreen;
-  }
-
   View* anchor_view() const { return anchor_view_; }
   void set_anchor_view(View* anchor_view) { anchor_view_ = anchor_view; }
 
+  BubbleBorder::ArrowLocation arrow_location() const { return arrow_location_; }
+  void set_arrow_location(BubbleBorder::ArrowLocation arrow_location) {
+      arrow_location_ = arrow_location;
+  }
+
   SkColor color() const { return color_; }
   void set_color(SkColor color) { color_ = color; }
+
+  int margin() const { return margin_; }
+  void set_margin(int margin) { margin_ = margin; }
 
   bool use_focusless() const { return use_focusless_; }
   void set_use_focusless(bool use_focusless) {
@@ -74,9 +79,6 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
 
   // Get the arrow's anchor rect in screen space.
   virtual gfx::Rect GetAnchorRect();
-
-  // Get the arrow's location on the bubble.
-  virtual BubbleBorder::ArrowLocation GetArrowLocation() const;
 
   // Show the bubble's widget (and |border_widget_| on Windows).
   void Show();
@@ -107,11 +109,11 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   // contents preferred size.
   void SizeToContents();
 
- private:
-  FRIEND_TEST_ALL_PREFIXES(BubbleFrameViewBasicTest, NonClientHitTest);
-  FRIEND_TEST_ALL_PREFIXES(BubbleDelegateTest, CreateDelegate);
-
   BubbleFrameView* GetBubbleFrameView() const;
+
+ private:
+  FRIEND_TEST_ALL_PREFIXES(BubbleFrameViewTest, NonClientHitTest);
+  FRIEND_TEST_ALL_PREFIXES(BubbleDelegateTest, CreateDelegate);
 
   // Get bubble bounds from the anchor point and client view's preferred size.
   gfx::Rect GetBubbleBounds();
@@ -128,10 +130,6 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   bool close_on_esc_;
   bool close_on_deactivate_;
 
-  // Whether the bubble is allowed to be displayed offscreen, or if auto
-  // re-positioning should be performed.
-  bool allow_bubble_offscreen_;
-
   // The view hosting this bubble; the arrow is anchored to this view.
   View* anchor_view_;
 
@@ -140,6 +138,9 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
 
   // The background color of the bubble.
   SkColor color_;
+
+  // The margin between the content and the inside of the border, in pixels.
+  int margin_;
 
   // Original opacity of the bubble.
   int original_opacity_;

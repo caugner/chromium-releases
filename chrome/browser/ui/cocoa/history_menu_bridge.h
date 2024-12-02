@@ -12,13 +12,13 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_nsobject.h"
+#include "chrome/browser/cancelable_request.h"
 #import "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_observer.h"
 #import "chrome/browser/ui/cocoa/main_menu_item.h"
-#include "content/browser/cancelable_request.h"
 #include "content/public/browser/notification_observer.h"
 
 class NotificationRegistrar;
@@ -112,13 +112,13 @@ class HistoryMenuBridge : public content::NotificationObserver,
   // history menu items are hooked directly up to their target, they do not need
   // to have the global IDC view tags.
   enum Tags {
-    kMostVisitedSeparator = 400,  // Separator before most visited section.
-    kMostVisitedTitle = 401,  // Title of the most visited section.
-    kMostVisited = 420,  // Used for all entries in the most visited section.
-    kRecentlyClosedSeparator = 440,  // Item before recently closed section.
-    kRecentlyClosedTitle = 441,  // Title of recently closed section.
-    kRecentlyClosed = 460,  // Used for items in the recently closed section.
-    kShowFullSeparator = 480  // Separator after the recently closed section.
+    kRecentlyClosedSeparator = 400,  // Item before recently closed section.
+    kRecentlyClosedTitle = 401,  // Title of recently closed section.
+    kRecentlyClosed = 420,  // Used for items in the recently closed section.
+    kVisitedSeparator = 440,  // Separator before visited section.
+    kVisitedTitle = 441,  // Title of the visited section.
+    kVisited = 460,  // Used for all entries in the visited section.
+    kShowFullSeparator = 480  // Separator after the visited section.
   };
 
   explicit HistoryMenuBridge(Profile* profile);
@@ -177,7 +177,7 @@ class HistoryMenuBridge : public content::NotificationObserver,
   // Callback method for when HistoryService query results are ready with the
   // most recently-visited sites.
   void OnVisitedHistoryResults(CancelableRequestProvider::Handle handle,
-                               std::vector<PageUsageData*>* results);
+                               history::QueryResults* results);
 
   // Creates a HistoryItem* for the given tab entry. Caller takes ownership of
   // the result and must delete it when finished.

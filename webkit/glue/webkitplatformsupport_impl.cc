@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,6 +41,7 @@
 #include "webkit/glue/websocketstreamhandle_impl.h"
 #include "webkit/glue/webthread_impl.h"
 #include "webkit/glue/weburlloader_impl.h"
+#include "webkit/glue/worker_task_runner.h"
 #include "webkit/media/audio_decoder.h"
 #include "webkit/plugins/npapi/plugin_instance.h"
 #include "webkit/plugins/webplugininfo.h"
@@ -291,7 +292,7 @@ void WebKitPlatformSupportImpl::histogramEnumeration(
 }
 
 bool WebKitPlatformSupportImpl::isTraceEventEnabled() const {
-  return base::debug::TraceLog::GetCategory("webkit")->enabled;
+  return !!*base::debug::TraceLog::GetCategoryEnabled("webkit");
 }
 
 void WebKitPlatformSupportImpl::traceEventBegin(const char* name, void* id,
@@ -302,6 +303,29 @@ void WebKitPlatformSupportImpl::traceEventBegin(const char* name, void* id,
 void WebKitPlatformSupportImpl::traceEventEnd(const char* name, void* id,
                                               const char* extra) {
   TRACE_EVENT_END_ETW(name, id, extra);
+}
+
+const unsigned char* WebKitPlatformSupportImpl::getTraceCategoryEnabledFlag(
+    const char* category_name) {
+  return TRACE_EVENT_API_GET_CATEGORY_ENABLED(category_name);
+}
+
+int WebKitPlatformSupportImpl::addTraceEvent(
+    char phase,
+    const unsigned char* category_enabled,
+    const char* name,
+    unsigned long long id,
+    int num_args,
+    const char** arg_names,
+    const unsigned char* arg_types,
+    const unsigned long long* arg_values,
+    int threshold_begin_id,
+    long long threshold,
+    unsigned char flags) {
+  return TRACE_EVENT_API_ADD_TRACE_EVENT(phase, category_enabled, name, id,
+                                         num_args, arg_names, arg_types,
+                                         arg_values, threshold_begin_id,
+                                         threshold, flags);
 }
 
 namespace {
@@ -401,7 +425,7 @@ const DataResource kDataResources[] = {
     IDR_MEDIAPLAYER_VOLUME_SLIDER_THUMB_HOVER },
   { "mediaplayerVolumeSliderThumbDown",
     IDR_MEDIAPLAYER_VOLUME_SLIDER_THUMB_DOWN },
-#if defined(OS_MACOSX) || defined(TOUCH_UI)
+#if defined(OS_MACOSX)
   { "overhangPattern", IDR_OVERHANG_PATTERN },
 #endif
   { "panIcon", IDR_PAN_SCROLL_ICON },
@@ -626,7 +650,7 @@ static size_t memoryUsageMBMac() {
       ProcessMetrics::CreateProcessMetrics(base::GetCurrentProcessHandle(),
                                            NULL);
   DCHECK(process_metrics);
-  return process_metrics->GetPagefileUsage() >> 20;
+  return process_metrics->GetWorkingSetSize() >> 20;
 }
 #endif
 
@@ -684,6 +708,18 @@ void WebKitPlatformSupportImpl::DestroyCurrentThread(void* thread) {
   WebThreadImplForMessageLoop* impl =
       static_cast<WebThreadImplForMessageLoop*>(thread);
   delete impl;
+}
+
+void WebKitPlatformSupportImpl::didStartWorkerRunLoop(
+    const WebKit::WebWorkerRunLoop& runLoop) {
+  WorkerTaskRunner* worker_task_runner = WorkerTaskRunner::Instance();
+  worker_task_runner->OnWorkerRunLoopStarted(runLoop);
+}
+
+void WebKitPlatformSupportImpl::didStopWorkerRunLoop(
+    const WebKit::WebWorkerRunLoop& runLoop) {
+  WorkerTaskRunner* worker_task_runner = WorkerTaskRunner::Instance();
+  worker_task_runner->OnWorkerRunLoopStopped(runLoop);
 }
 
 }  // namespace webkit_glue

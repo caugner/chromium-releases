@@ -24,6 +24,8 @@
 #include "chrome/common/nacl_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
+#include "content/public/browser/browser_child_process_host.h"
+#include "content/public/browser/child_process_data.h"
 #include "content/public/common/child_process_host.h"
 #include "ipc/ipc_switches.h"
 #include "native_client/src/shared/imc/nacl_imc.h"
@@ -35,6 +37,7 @@
 #endif
 
 using content::BrowserThread;
+using content::ChildProcessData;
 using content::ChildProcessHost;
 
 namespace {
@@ -101,26 +104,25 @@ struct NaClProcessHost::NaClInternal {
   std::vector<nacl::Handle> sockets_for_sel_ldr;
 };
 
-static bool RunningOnWOW64() {
 #if defined(OS_WIN)
+static bool RunningOnWOW64() {
   return (base::win::OSInfo::GetInstance()->wow64_status() ==
           base::win::OSInfo::WOW64_ENABLED);
-#else
-  return false;
-#endif
 }
+#endif
 
 NaClProcessHost::NaClProcessHost(const std::wstring& url)
-    : BrowserChildProcessHost(content::PROCESS_TYPE_NACL_LOADER),
-      reply_msg_(NULL),
+    : reply_msg_(NULL),
       internal_(new NaClInternal()),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
-  set_name(WideToUTF16Hack(url));
+  process_.reset(content::BrowserChildProcessHost::Create(
+      content::PROCESS_TYPE_NACL_LOADER, this));
+  process_->SetName(WideToUTF16Hack(url));
 }
 
 NaClProcessHost::~NaClProcessHost() {
   int exit_code;
-  GetChildTerminationStatus(&exit_code);
+  process_->GetTerminationStatus(&exit_code);
   std::string message =
       base::StringPrintf("NaCl process exited with status %i (0x%x)",
                          exit_code, exit_code);
@@ -227,14 +229,16 @@ bool NaClProcessHost::Launch(
   if (!LaunchSelLdr()) {
     return false;
   }
-  chrome_render_message_filter_ = chrome_render_message_filter;
-  reply_msg_ = reply_msg;
 
+  chrome_render_message_filter_ = chrome_render_message_filter;
+
+  // On success, we take responsibility for sending the reply.
+  reply_msg_ = reply_msg;
   return true;
 }
 
 bool NaClProcessHost::LaunchSelLdr() {
-  std::string channel_id = child_process_host()->CreateChannel();
+  std::string channel_id = process_->GetHost()->CreateChannel();
   if (channel_id.empty())
     return false;
 
@@ -283,19 +287,19 @@ bool NaClProcessHost::LaunchSelLdr() {
     return NaClBrokerService::GetInstance()->LaunchLoader(
         this, ASCIIToWide(channel_id));
   } else {
-    BrowserChildProcessHost::Launch(FilePath(), cmd_line);
+    process_->Launch(FilePath(), cmd_line);
   }
 #elif defined(OS_POSIX)
-  BrowserChildProcessHost::Launch(nacl_loader_prefix.empty(),  // use_zygote
-                                  base::environment_vector(),
-                                  cmd_line);
+  process_->Launch(nacl_loader_prefix.empty(),  // use_zygote
+                   base::environment_vector(),
+                   cmd_line);
 #endif
 
   return true;
 }
 
 void NaClProcessHost::OnProcessLaunchedByBroker(base::ProcessHandle handle) {
-  set_handle(handle);
+  process_->SetHandle(handle);
   OnProcessLaunched();
 }
 
@@ -304,6 +308,37 @@ void NaClProcessHost::OnProcessCrashed(int exit_code) {
       "NaCl process exited with status %i (0x%x)", exit_code, exit_code);
   LOG(ERROR) << message;
 }
+
+namespace {
+
+// Determine the name of the IRT file based on the architecture.
+
+#define NACL_IRT_FILE_NAME(arch_string) \
+  (FILE_PATH_LITERAL("nacl_irt_")       \
+   FILE_PATH_LITERAL(arch_string)       \
+   FILE_PATH_LITERAL(".nexe"))
+
+const FilePath::StringType NaClIrtName() {
+#if defined(ARCH_CPU_X86_FAMILY)
+#if defined(ARCH_CPU_X86_64)
+  bool is64 = true;
+#elif defined(OS_WIN)
+  bool is64 = RunningOnWOW64();
+#else
+  bool is64 = false;
+#endif
+  return is64 ? NACL_IRT_FILE_NAME("x86_64") : NACL_IRT_FILE_NAME("x86_32");
+#elif defined(ARCH_CPU_ARMEL)
+  // TODO(mcgrathr): Eventually we'll need to distinguish arm32 vs thumb2.
+  // That may need to be based on the actual nexe rather than a static
+  // choice, which would require substantial refactoring.
+  return NACL_IRT_FILE_NAME("arm");
+#else
+#error Add support for your architecture to NaCl IRT file selection
+#endif
+}
+
+}  // namespace
 
 // This only ever runs on the BrowserThread::FILE thread.
 // If multiple tasks are posted, the later ones are no-ops.
@@ -331,18 +366,7 @@ void NaClBrowser::OpenIrtLibraryFile() {
       return;
     }
 
-    bool on_x86_64 = RunningOnWOW64();
-#if defined(__x86_64__)
-    on_x86_64 = true;
-#endif
-    FilePath::StringType irt_name;
-    if (on_x86_64) {
-      irt_name = FILE_PATH_LITERAL("nacl_irt_x86_64.nexe");
-    } else {
-      irt_name = FILE_PATH_LITERAL("nacl_irt_x86_32.nexe");
-    }
-
-    irt_filepath = plugin_dir.Append(irt_name);
+    irt_filepath = plugin_dir.Append(NaClIrtName());
   }
 
   base::PlatformFileError error_code;
@@ -366,8 +390,10 @@ void NaClProcessHost::OnProcessLaunched() {
     SendStart(nacl_browser->IrtFile());
   } else {
     // We're waiting for the IRT to be open.
-    nacl_browser->MakeIrtAvailable(base::Bind(&NaClProcessHost::IrtReady,
-                                              weak_factory_.GetWeakPtr()));
+    if (!nacl_browser->MakeIrtAvailable(
+            base::Bind(&NaClProcessHost::IrtReady,
+                       weak_factory_.GetWeakPtr())))
+      delete this;
   }
 }
 
@@ -447,10 +473,11 @@ void NaClProcessHost::SendStart(base::PlatformFile irt_file) {
 #endif
   }
 
+  const ChildProcessData& data = process_->GetData();
 #if defined(OS_WIN)
   // Copy the process handle into the renderer process.
   if (!DuplicateHandle(base::GetCurrentProcessHandle(),
-                       handle(),
+                       data.handle,
                        chrome_render_message_filter_->peer_handle(),
                        &nacl_process_handle,
                        PROCESS_DUP_HANDLE,
@@ -462,11 +489,11 @@ void NaClProcessHost::SendStart(base::PlatformFile irt_file) {
   }
 #else
   // We use pid as process handle on Posix
-  nacl_process_handle = handle();
+  nacl_process_handle = data.handle;
 #endif
 
   // Get the pid of the NaCl process
-  base::ProcessId nacl_process_id = base::GetProcId(handle());
+  base::ProcessId nacl_process_id = base::GetProcId(data.handle);
 
   ChromeViewHostMsg_LaunchNaCl::WriteReplyParams(
       reply_msg_, handles_for_renderer, nacl_process_handle, nacl_process_id);
@@ -477,7 +504,7 @@ void NaClProcessHost::SendStart(base::PlatformFile irt_file) {
 
   std::vector<nacl::FileDescriptor> handles_for_sel_ldr;
   for (size_t i = 0; i < internal_->sockets_for_sel_ldr.size(); i++) {
-    if (!SendHandleToSelLdr(handle(),
+    if (!SendHandleToSelLdr(data.handle,
                             internal_->sockets_for_sel_ldr[i], true,
                             &handles_for_sel_ldr)) {
       delete this;
@@ -486,7 +513,7 @@ void NaClProcessHost::SendStart(base::PlatformFile irt_file) {
   }
 
   // Send over the IRT file handle.  We don't close our own copy!
-  if (!SendHandleToSelLdr(handle(), irt_file, false, &handles_for_sel_ldr)) {
+  if (!SendHandleToSelLdr(data.handle, irt_file, false, &handles_for_sel_ldr)) {
     delete this;
     return;
   }
@@ -516,7 +543,7 @@ void NaClProcessHost::SendStart(base::PlatformFile irt_file) {
   handles_for_sel_ldr.push_back(memory_fd);
 #endif
 
-  Send(new NaClProcessMsg_Start(handles_for_sel_ldr));
+  process_->Send(new NaClProcessMsg_Start(handles_for_sel_ldr));
   internal_->sockets_for_sel_ldr.clear();
 }
 

@@ -63,8 +63,8 @@ class PanelBrowserWindowCocoa;
 - (ThemedWindowStyle)themedWindowStyle;
 - (NSPoint)themePatternPhase;
 
-- (void)tabInserted:(TabContents*)contents;
-- (void)tabDetached:(TabContents*)contents;
+- (void)tabInserted:(content::WebContents*)contents;
+- (void)tabDetached:(content::WebContents*)contents;
 
 // Sometimes (when we animate the size of the window) we want to stop resizing
 // the TabContents' cocoa view to avoid unnecessary rendering and issues
@@ -97,6 +97,7 @@ class PanelBrowserWindowCocoa;
               animate:(BOOL)animate;
 
 // Used by PanelTitlebarViewCocoa when user rearranges the Panels by dragging.
+- (BOOL)isDraggable;
 - (void)startDrag;
 - (void)endDrag:(BOOL)cancelled;
 - (void)dragWithDeltaX:(int)deltaX;

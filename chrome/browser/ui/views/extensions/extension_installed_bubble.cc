@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,8 +26,9 @@
 #include "chrome/common/extensions/extension_action.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/button/image_button.h"
@@ -112,9 +113,8 @@ class InstalledBubbleContent : public views::View,
 
     string16 extension_name = UTF8ToUTF16(extension->name());
     base::i18n::AdjustStringForLocaleDirection(&extension_name);
-    heading_ = new views::Label(
-        l10n_util::GetStringFUTF16(IDS_EXTENSION_INSTALLED_HEADING,
-                                   extension_name));
+    heading_ = new views::Label(l10n_util::GetStringFUTF16(
+        IDS_EXTENSION_INSTALLED_HEADING, extension_name));
     heading_->SetFont(rb.GetFont(ResourceBundle::MediumFont));
     heading_->SetMultiLine(true);
     heading_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
@@ -339,7 +339,7 @@ void ExtensionInstalledBubble::ShowInternal() {
     if (browser_view->IsTabStripVisible()) {
       AbstractTabStripView* tabstrip = browser_view->tabstrip();
       views::View* ntp_button = tabstrip->GetNewTabButton();
-      if (ntp_button && ntp_button->IsVisibleInRootView()) {
+      if (ntp_button && ntp_button->IsDrawn()) {
         reference_view = ntp_button;
       } else {
         // Just have the bubble point at the tab strip.
@@ -365,9 +365,9 @@ void ExtensionInstalledBubble::ShowInternal() {
     // If the view is not visible then it is in the chevron, so point the
     // install bubble to the chevron instead. If this is an incognito window,
     // both could be invisible.
-    if (!reference_view || !reference_view->IsVisible()) {
+    if (!reference_view || !reference_view->visible()) {
       reference_view = container->chevron();
-      if (!reference_view || !reference_view->IsVisible())
+      if (!reference_view || !reference_view->visible())
         reference_view = NULL;  // fall back to app menu below.
     }
   } else if (type_ == PAGE_ACTION) {
@@ -388,6 +388,8 @@ void ExtensionInstalledBubble::ShowInternal() {
     reference_view = browser_view->GetToolbarView()->app_menu();
   set_anchor_view(reference_view);
 
+  set_arrow_location(type_ == OMNIBOX_KEYWORD ? views::BubbleBorder::TOP_LEFT :
+                                                views::BubbleBorder::TOP_RIGHT);
   SetLayoutManager(new views::FillLayout());
   AddChildView(
       new InstalledBubbleContent(browser_, extension_, type_, &icon_, this));
@@ -401,17 +403,10 @@ gfx::Rect ExtensionInstalledBubble::GetAnchorRect() {
   if (type_ == OMNIBOX_KEYWORD) {
     LocationBarView* location_bar_view =
         BrowserView::GetBrowserViewForBrowser(browser_)->GetLocationBarView();
-    return gfx::Rect(location_bar_view->GetLocationEntryOrigin().Add(
-        gfx::Point(0, location_bar_view->location_entry_view()->height())),
-        gfx::Size());
+    return gfx::Rect(location_bar_view->GetLocationEntryOrigin(),
+        gfx::Size(0, location_bar_view->location_entry_view()->height()));
   }
   return views::BubbleDelegateView::GetAnchorRect();
-}
-
-views::BubbleBorder::ArrowLocation
-    ExtensionInstalledBubble::GetArrowLocation() const {
-  return type_ == OMNIBOX_KEYWORD ? views::BubbleBorder::TOP_LEFT :
-                                    views::BubbleBorder::TOP_RIGHT;
 }
 
 void ExtensionInstalledBubble::WindowClosing() {

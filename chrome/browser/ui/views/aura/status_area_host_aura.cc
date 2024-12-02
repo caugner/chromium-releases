@@ -1,37 +1,56 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/aura/status_area_host_aura.h"
 
+#include "ash/shell.h"
+#include "ash/shell_window_ids.h"
 #include "base/command_line.h"
 #include "chrome/browser/chromeos/status/clock_menu_button.h"
 #include "chrome/browser/chromeos/status/memory_menu_button.h"
 #include "chrome/browser/chromeos/status/status_area_view.h"
+#include "chrome/browser/defaults.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/aura/chrome_shell_delegate.h"
+#include "chrome/browser/ui/views/aura/multiple_window_indicator_button.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "content/public/browser/notification_service.h"
 #include "ui/aura/window.h"
-#include "ui/aura_shell/shell.h"
-#include "ui/aura_shell/shell_window_ids.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
+#include "chrome/browser/chromeos/login/screen_locker.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/status/clock_updater.h"
 #include "chrome/browser/chromeos/status/status_area_view_chromeos.h"
-#include "chrome/browser/chromeos/status/timezone_clock_updater.h"
 #include "ui/gfx/native_widget_types.h"
 #endif
 
 StatusAreaHostAura::StatusAreaHostAura()
     : status_area_widget_(NULL),
       status_area_view_(NULL) {
+  BrowserList::AddObserver(this);
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 content::NotificationService::AllSources());
+#if defined(OS_CHROMEOS)
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
+                 content::NotificationService::AllSources());
+#endif
 }
 
 StatusAreaHostAura::~StatusAreaHostAura() {
+  BrowserList::RemoveObserver(this);
 }
 
 StatusAreaView* StatusAreaHostAura::GetStatusArea() {
@@ -39,9 +58,9 @@ StatusAreaView* StatusAreaHostAura::GetStatusArea() {
 }
 
 views::Widget* StatusAreaHostAura::CreateStatusArea() {
-  aura_shell::Shell* aura_shell = aura_shell::Shell::GetInstance();
-  aura::Window* status_window = aura_shell->GetContainer(
-      aura_shell::internal::kShellWindowId_StatusContainer);
+  ash::Shell* shell = ash::Shell::GetInstance();
+  aura::Window* status_window = shell->GetContainer(
+      ash::internal::kShellWindowId_StatusContainer);
 
   // Create status area view.
   status_area_view_ = new StatusAreaView();
@@ -52,8 +71,8 @@ views::Widget* StatusAreaHostAura::CreateStatusArea() {
   chromeos::StatusAreaViewChromeos::AddChromeosButtons(status_area_view_,
                                                        this,
                                                        &clock);
-  DCHECK(clock);
-  timezone_clock_updater_.reset(new TimezoneClockUpdater(clock));
+  if (clock)
+    clock_updater_.reset(new ClockUpdater(clock));
 #else
   const bool border = true;
   const bool no_border = false;
@@ -64,14 +83,25 @@ views::Widget* StatusAreaHostAura::CreateStatusArea() {
   status_area_view_->AddButton(new ClockMenuButton(this), border);
 #endif
 
+  // Add multiple window indicator button for compact mode. Note this should be
+  // the last button added to status area so that it could be right most there.
+  if (ash::Shell::GetInstance()->IsWindowModeCompact()) {
+    status_area_view_->AddButton(new MultipleWindowIndicatorButton(this),
+                                 false);
+  }
+
   // Create widget to hold status area view.
   status_area_widget_ = new views::Widget;
-  views::Widget::InitParams params(views::Widget::InitParams::TYPE_CONTROL);
+  views::Widget::InitParams params(
+      views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   gfx::Size ps = status_area_view_->GetPreferredSize();
   params.bounds = gfx::Rect(0, 0, ps.width(), ps.height());
   params.parent = status_window;
   params.transparent = true;
   status_area_widget_->Init(params);
+  // Turn off focus on creation, otherwise the status area will request focus
+  // every time it is shown.
+  status_area_widget_->set_focus_on_creation(false);
   status_area_widget_->SetContentsView(status_area_view_);
   status_area_widget_->Show();
   status_area_widget_->GetNativeView()->SetName("StatusAreaView");
@@ -103,8 +133,16 @@ void StatusAreaHostAura::ExecuteStatusAreaCommand(
     const views::View* button_view, int command_id) {
 #if defined(OS_CHROMEOS)
   if (chromeos::StatusAreaViewChromeos::IsBrowserMode()) {
-    Browser* browser = BrowserList::FindBrowserWithProfile(
-        ProfileManager::GetDefaultProfile());
+    Profile* profile = ProfileManager::GetDefaultProfile();
+    if (browser_defaults::kAlwaysOpenIncognitoWindow &&
+        IncognitoModePrefs::ShouldLaunchIncognito(
+            *CommandLine::ForCurrentProcess(),
+            profile->GetPrefs())) {
+      profile = profile->GetOffTheRecordProfile();
+    }
+    Browser* browser = BrowserList::FindBrowserWithProfile(profile);
+    if (!browser)
+      browser = Browser::Create(profile);
     switch (command_id) {
       case StatusAreaButton::Delegate::SHOW_NETWORK_OPTIONS:
         browser->OpenInternetOptionsDialog();
@@ -129,6 +167,19 @@ void StatusAreaHostAura::ExecuteStatusAreaCommand(
     } else {
       NOTREACHED();
     }
+  } else if (chromeos::StatusAreaViewChromeos::IsScreenLockMode()) {
+    if (command_id == StatusAreaButton::Delegate::SHOW_NETWORK_OPTIONS &&
+        chromeos::ScreenLocker::default_screen_locker()) {
+      gfx::NativeWindow native_window =
+          chromeos::ScreenLocker::default_screen_locker()->delegate()->
+              GetNativeWindow();
+      proxy_settings_dialog_.reset(new chromeos::ProxySettingsDialog(
+                                   NULL,
+                                   native_window));
+      proxy_settings_dialog_->Show();
+    } else {
+      NOTREACHED();
+    }
   }
 #endif
 }
@@ -138,10 +189,64 @@ gfx::Font StatusAreaHostAura::GetStatusAreaFont(const gfx::Font& font) const {
 }
 
 StatusAreaButton::TextStyle StatusAreaHostAura::GetStatusAreaTextStyle() const {
-  return StatusAreaButton::WHITE_HALOED;
+#if defined(OS_CHROMEOS)
+  if (!chromeos::UserManager::Get()->user_is_logged_in())
+    return StatusAreaButton::GRAY_PLAIN;
+
+  const chromeos::ScreenLocker* locker =
+      chromeos::ScreenLocker::default_screen_locker();
+  if (locker && locker->locked())
+    return StatusAreaButton::GRAY_PLAIN;
+#endif
+
+  if (ash::Shell::GetInstance()->IsWindowModeCompact()) {
+    Browser* browser = BrowserList::GetLastActive();
+    if (!browser)
+      return StatusAreaButton::WHITE_HALOED;
+
+    ThemeService* theme_service =
+        ThemeServiceFactory::GetForProfile(browser->profile());
+    if (!theme_service->UsingDefaultTheme())
+      return StatusAreaButton::WHITE_HALOED;
+
+    return browser->profile()->IsOffTheRecord() ?
+        StatusAreaButton::WHITE_PLAIN :
+        StatusAreaButton::GRAY_EMBOSSED;
+  } else {
+    return StatusAreaButton::WHITE_HALOED;
+  }
 }
 
 void StatusAreaHostAura::ButtonVisibilityChanged(views::View* button_view) {
   if (status_area_view_)
     status_area_view_->UpdateButtonVisibility();
+}
+
+void StatusAreaHostAura::OnBrowserAdded(const Browser* browser) {
+  status_area_view_->UpdateButtonTextStyle();
+}
+
+void StatusAreaHostAura::OnBrowserRemoved(const Browser* browser) {
+  status_area_view_->UpdateButtonTextStyle();
+}
+
+void StatusAreaHostAura::OnBrowserSetLastActive(const Browser* browser) {
+  status_area_view_->UpdateButtonTextStyle();
+}
+
+void StatusAreaHostAura::Observe(int type,
+                                 const content::NotificationSource& source,
+                                 const content::NotificationDetails& details) {
+  switch (type) {
+    case chrome::NOTIFICATION_BROWSER_THEME_CHANGED:
+      status_area_view_->UpdateButtonTextStyle();
+      break;
+#if defined(OS_CHROMEOS)
+    case chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED:
+      status_area_view_->UpdateButtonTextStyle();
+      break;
+#endif
+    default:
+      NOTREACHED() << "Unexpected notification " << type;
+  }
 }

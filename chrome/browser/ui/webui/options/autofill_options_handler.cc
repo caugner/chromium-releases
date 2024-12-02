@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/guid.h"
+#include "chrome/common/url_constants.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "grit/webkit_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -292,13 +294,14 @@ void AutofillOptionsHandler::GetLocalizedValues(
   RegisterTitle(localized_strings, "autofillOptionsPage",
                 IDS_AUTOFILL_OPTIONS_TITLE);
 
+  localized_strings->SetString("helpUrl", chrome::kAutofillHelpURL);
   SetAddressOverlayStrings(localized_strings);
   SetCreditCardOverlayStrings(localized_strings);
 }
 
 void AutofillOptionsHandler::Initialize() {
   personal_data_ = PersonalDataManagerFactory::GetForProfile(
-      Profile::FromWebUI(web_ui_));
+      Profile::FromWebUI(web_ui()));
   // personal_data_ is NULL in guest mode on Chrome OS.
   if (personal_data_) {
     personal_data_->SetObserver(this);
@@ -307,30 +310,30 @@ void AutofillOptionsHandler::Initialize() {
 }
 
 void AutofillOptionsHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "removeAddress",
       base::Bind(&AutofillOptionsHandler::RemoveAddress,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "removeCreditCard",
       base::Bind(&AutofillOptionsHandler::RemoveCreditCard,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "loadAddressEditor",
       base::Bind(&AutofillOptionsHandler::LoadAddressEditor,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "loadCreditCardEditor",
       base::Bind(&AutofillOptionsHandler::LoadCreditCardEditor,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "setAddress",
       base::Bind(&AutofillOptionsHandler::SetAddress, base::Unretained(this)));
-  web_ui_->RegisterMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "setCreditCard",
       base::Bind(&AutofillOptionsHandler::SetCreditCard,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "validatePhoneNumbers",
       base::Bind(&AutofillOptionsHandler::ValidatePhoneNumbers,
                  base::Unretained(this)));
@@ -410,7 +413,8 @@ void AutofillOptionsHandler::LoadAutofillData() {
     addresses.Append(entry);
   }
 
-  web_ui_->CallJavascriptFunction("AutofillOptions.setAddressList", addresses);
+  web_ui()->CallJavascriptFunction("AutofillOptions.setAddressList",
+                                   addresses);
 
   ListValue credit_cards;
   for (std::vector<CreditCard*>::const_iterator i =
@@ -426,8 +430,8 @@ void AutofillOptionsHandler::LoadAutofillData() {
     credit_cards.Append(entry);
   }
 
-  web_ui_->CallJavascriptFunction("AutofillOptions.setCreditCardList",
-                                  credit_cards);
+  web_ui()->CallJavascriptFunction("AutofillOptions.setCreditCardList",
+                                   credit_cards);
 }
 
 void AutofillOptionsHandler::RemoveAddress(const ListValue* args) {
@@ -490,7 +494,7 @@ void AutofillOptionsHandler::LoadAddressEditor(const ListValue* args) {
   GetValueList(*profile, EMAIL_ADDRESS, &list);
   address.Set("email", list.release());
 
-  web_ui_->CallJavascriptFunction("AutofillOptions.editAddress", address);
+  web_ui()->CallJavascriptFunction("AutofillOptions.editAddress", address);
 }
 
 void AutofillOptionsHandler::LoadCreditCardEditor(const ListValue* args) {
@@ -524,8 +528,8 @@ void AutofillOptionsHandler::LoadCreditCardEditor(const ListValue* args) {
       "expirationYear",
       credit_card->GetInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR));
 
-  web_ui_->CallJavascriptFunction("AutofillOptions.editCreditCard",
-                                  credit_card_data);
+  web_ui()->CallJavascriptFunction("AutofillOptions.editCreditCard",
+                                   credit_card_data);
 }
 
 void AutofillOptionsHandler::SetAddress(const ListValue* args) {
@@ -609,6 +613,6 @@ void AutofillOptionsHandler::ValidatePhoneNumbers(const ListValue* args) {
   ListValue* list_value = NULL;
   ValidatePhoneArguments(args, &list_value);
 
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
     "AutofillEditAddressOverlay.setValidatedPhoneNumbers", *list_value);
 }

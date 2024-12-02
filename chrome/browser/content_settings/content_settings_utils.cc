@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,6 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_pattern.h"
-#include "chrome/common/render_messages.h"
 #include "googleurl/src/gurl.h"
 
 namespace {
@@ -47,21 +46,6 @@ namespace content_settings {
 
 std::string GetTypeName(ContentSettingsType type) {
   return std::string(kTypeNames[type]);
-}
-
-bool SupportsResourceIdentifier(ContentSettingsType content_type) {
-  return content_type == CONTENT_SETTINGS_TYPE_PLUGINS;
-}
-
-ContentSetting ClickToPlayFixup(ContentSettingsType content_type,
-                                ContentSetting setting) {
-  if (setting == CONTENT_SETTING_ASK &&
-      content_type == CONTENT_SETTINGS_TYPE_PLUGINS &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableClickToPlay)) {
-    return CONTENT_SETTING_BLOCK;
-  }
-  return setting;
 }
 
 std::string CreatePatternString(

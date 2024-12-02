@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,6 +37,10 @@ chrome.experimental.bookmarkManager.getStrings(function(data) {
 
   recentTreeItem.label = localStrings.getString('recent');
   searchTreeItem.label = localStrings.getString('search');
+  if (!isRTL())
+    searchTreeItem.icon = 'images/bookmark_manager_search.png'
+  else
+    searchTreeItem.icon = 'images/bookmark_manager_search_rtl.png'
 });
 
 /**
@@ -58,7 +62,6 @@ splitter.addEventListener('resize', function(e) {
 BookmarkList.decorate(list);
 
 var searchTreeItem = new TreeItem({
-  icon: 'images/bookmark_manager_search.png',
   bookmarkId: 'q='
 });
 bmm.treeLookup[searchTreeItem.bookmarkId] = searchTreeItem;
@@ -828,6 +831,19 @@ chrome.experimental.bookmarkManager.canEdit(function(result) {
 });
 
 /**
+ * Incognito mode availability can take the following values: ,
+ *   - 'enabled' for when both normal and incognito modes are available;
+ *   - 'disabled' for when incognito mode is disabled;
+ *   - 'forced' for when incognito mode is forced (normal mode is unavailable).
+ */
+var incognitoModeAvailability = 'enabled';
+chrome.systemPrivate.getIncognitoModeAvailability(function(result) {
+  // TODO(rustema): propagate policy value to the bookmark manager when
+  //                it changes.
+  incognitoModeAvailability = result;
+});
+
+/**
  * Helper function that updates the canExecute and labels for the open-like
  * commands.
  * @param {!cr.ui.CanExecuteEvent} e The event fired by the command system.
@@ -856,6 +872,7 @@ function updateOpenCommands(e, command) {
     return false;
   }
 
+  var commandDisabled = false;
   switch (command.id) {
     case 'open-in-new-tab-command':
       command.label = localStrings.getString(multiple ?
@@ -865,13 +882,17 @@ function updateOpenCommands(e, command) {
     case 'open-in-new-window-command':
       command.label = localStrings.getString(multiple ?
           'open_all_new_window' : 'open_in_new_window');
+      // Disabled when incognito is forced.
+      commandDisabled = incognitoModeAvailability == 'forced';
       break;
     case 'open-incognito-window-command':
       command.label = localStrings.getString(multiple ?
           'open_all_incognito' : 'open_incognito');
+      // Not available withn incognito is disabled.
+      commandDisabled = incognitoModeAvailability == 'disabled';
       break;
   }
-  e.canExecute = selectionCount > 0 && !!selectedItem;
+  e.canExecute = selectionCount > 0 && !!selectedItem && !commandDisabled;
   if (isFolder && e.canExecute) {
     // We need to get all the bookmark items in this tree. If the tree does not
     // contain any non-folders, we need to disable the command.

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,14 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/web_contents.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+
+using content::OpenURLParams;
+using content::Referrer;
+using content::WebContents;
 
 enum MenuEntries {
   NAME = 0,
@@ -61,9 +68,9 @@ void ExtensionContextMenuModel::InitCommonCommands() {
 
   AddItem(NAME, UTF8ToUTF16(extension->name()));
   AddSeparator();
-  AddItemWithStringId(CONFIGURE, IDS_EXTENSIONS_OPTIONS);
+  AddItemWithStringId(CONFIGURE, IDS_EXTENSIONS_OPTIONS_MENU_ITEM);
   AddItemWithStringId(DISABLE, IDS_EXTENSIONS_DISABLE);
-  AddItemWithStringId(UNINSTALL, IDS_EXTENSIONS_UNINSTALL);
+  AddItem(UNINSTALL, l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
   if (extension->browser_action())
     AddItemWithStringId(HIDE, IDS_EXTENSIONS_HIDE_BUTTON);
   AddSeparator();
@@ -86,7 +93,7 @@ bool ExtensionContextMenuModel::IsCommandIdEnabled(int command_id) const {
     // homepage, we just disable this menu item.
     return extension->GetHomepageURL().is_valid();
   } else if (command_id == INSPECT_POPUP) {
-    TabContents* contents = browser_->GetSelectedTabContents();
+    WebContents* contents = browser_->GetSelectedWebContents();
     if (!contents)
       return false;
 
@@ -110,8 +117,10 @@ void ExtensionContextMenuModel::ExecuteCommand(int command_id) {
 
   switch (command_id) {
     case NAME: {
-      browser_->OpenURL(extension->GetHomepageURL(), GURL(),
-                        NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
+      OpenURLParams params(extension->GetHomepageURL(), Referrer(),
+                           NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK,
+                           false);
+      browser_->OpenURL(params);
       break;
     }
     case CONFIGURE:

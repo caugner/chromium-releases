@@ -3,8 +3,8 @@
   "version": "1",
   "intents": {
     "http://webintents.org/share" : {
-      "type" : "image/png",
-      "path" : "//services/share",
+      "type" : [ "image/png" ],
+      "path" : "/services/share",
       "title" : "Sample Sharing Intent",
       "disposition" : "inline"
     }

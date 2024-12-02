@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -79,7 +79,7 @@ void WebUIBidiCheckerBrowserTestRTL::SetUpOnMainThread() {
   pak_path = pak_path.AppendASCII("fake-bidi");
   pak_path = pak_path.ReplaceExtension(FILE_PATH_LITERAL("pak"));
   ResourceBundle::GetSharedInstance().OverrideLocalePakForTest(pak_path);
-  ResourceBundle::ReloadSharedInstance("he");
+  ResourceBundle::GetSharedInstance().ReloadLocaleResources("he");
   base::i18n::SetICUDefaultLocale("he");
 #if defined(OS_POSIX) && defined(TOOLKIT_USES_GTK)
   gtk_widget_set_default_direction(GTK_TEXT_DIR_RTL);
@@ -93,7 +93,7 @@ void WebUIBidiCheckerBrowserTestRTL::CleanUpOnMainThread() {
 #endif
   base::i18n::SetICUDefaultLocale(app_locale_);
   ResourceBundle::GetSharedInstance().OverrideLocalePakForTest(FilePath());
-  ResourceBundle::ReloadSharedInstance(app_locale_);
+  ResourceBundle::GetSharedInstance().ReloadLocaleResources(app_locale_);
 }
 
 // Tests
@@ -137,25 +137,24 @@ IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestLTR, TestAboutPage) {
 //==============================
 // chrome://bugreport
 //==============================
-// TestBugReportPage fails on chromeos Debug build. crbug.com/105631
+// TestFeedbackPage fails on chromeos Debug build. crbug.com/105631
 #if defined(OS_CHROMEOS)
-#define MAYBE_TestBugReportPage DISABLED_TestBugReportPage
+#define MAYBE_TestFeedbackPage DISABLED_TestFeedbackPage
 #else
-#define MAYBE_TestBugReportPage TestBugReportPage
+#define MAYBE_TestFeedbackPage TestFeedbackPage
 #endif
 
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestLTR, MAYBE_TestBugReportPage)
-{
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestLTR,
+                       MAYBE_TestFeedbackPage) {
   // The bugreport page receives its contents as GET arguments. Here we provide
   // a custom, Hebrew typed, description message.
   RunBidiCheckerOnPage(
-      "chrome://bugreport#0?description=%D7%91%D7%93%D7%99%D7%A7%D7%94"
-      "&issueType=1");
+      "chrome://feedback#0?description=%D7%91%D7%93%D7%99%D7%A7%D7%94");
 }
 
 IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestRTL,
-                       MAYBE_TestBugReportPage) {
-  RunBidiCheckerOnPage("chrome://bugreport#0?description=test&issueType=1");
+                       MAYBE_TestFeedbackPage) {
+  RunBidiCheckerOnPage("chrome://feedback#0?description=test");
 }
 
 //==============================
@@ -176,13 +175,23 @@ IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestRTL, TestCrashesPage) {
 
 #if defined(OS_WIN) || defined(OS_LINUX)
 // http://crbug.com/104129
-#define TestDownloadsPageLTR FLAKY_TestDownloadsPage
+#define MAYBE_TestDownloadsPageLTR FLAKY_TestDownloadsPageLTR
+#else
+#define MAYBE_TestDownloadsPageLTR TestDownloadsPageLTR
 #endif
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestLTR, TestDownloadsPageLTR) {
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestLTR,
+                       MAYBE_TestDownloadsPageLTR) {
   RunBidiCheckerOnPage(chrome::kChromeUIDownloadsURL);
 }
 
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestRTL, TestDownloadsPage) {
+#if defined(OS_LINUX)
+// http://crbug.com/109262
+#define MAYBE_TestDownloadsPageRTL FLAKY_TestDownloadsPageRTL
+#else
+#define MAYBE_TestDownloadsPageRTL TestDownloadsPageRTL
+#endif
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestRTL,
+                       MAYBE_TestDownloadsPageRTL) {
   RunBidiCheckerOnPage(chrome::kChromeUIDownloadsURL);
 }
 

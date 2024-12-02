@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,7 +69,7 @@ class WEBKIT_PLUGINS_EXPORT WebPluginImpl :
       WebKit::WebPluginContainer* container);
   virtual void destroy();
   virtual NPObject* scriptableObject();
-  virtual bool getFormValue(WebKit::WebString* value);
+  virtual bool getFormValue(WebKit::WebString& value);
   virtual void paint(
       WebKit::WebCanvas* canvas, const WebKit::WebRect& paint_rect);
   virtual void updateGeometry(
@@ -97,6 +97,7 @@ class WEBKIT_PLUGINS_EXPORT WebPluginImpl :
 #if defined(OS_WIN)
   void SetWindowlessPumpEvent(HANDLE pump_messages_event) { }
   void ReparentPluginWindow(HWND window, HWND parent) { }
+  void ReportExecutableMemory(size_t size) { }
 #endif
   virtual void CancelResource(unsigned long id) OVERRIDE;
   virtual void Invalidate() OVERRIDE;

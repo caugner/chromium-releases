@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,11 +19,14 @@
 #include "content/browser/in_process_webkit/session_storage_namespace.h"
 #include "webkit/glue/window_open_disposition.h"
 
-class NavigationController;
 class Profile;
 class TabRestoreServiceDelegate;
 class TabRestoreServiceObserver;
 struct SessionWindow;
+
+namespace content {
+class NavigationController;
+}
 
 // TabRestoreService is responsible for maintaining the most recently closed
 // tabs and windows. When a tab is closed
@@ -130,7 +133,7 @@ class TabRestoreService : public BaseSessionService {
 
   // Creates a Tab to represent |tab| and notifies observers the list of
   // entries has changed.
-  void CreateHistoricalTab(NavigationController* tab, int index);
+  void CreateHistoricalTab(content::NavigationController* tab, int index);
 
   // Invoked when a browser is closing. If |delegate| is a tabbed browser with
   // at least one tab, a Window is created, added to entries and observers are
@@ -174,6 +177,10 @@ class TabRestoreService : public BaseSessionService {
                                 std::vector<Entry*>* entries);
 
  protected:
+  // ProfileKeyedService:
+  virtual void Shutdown() OVERRIDE;
+
+  // BaseSessionService:
   virtual void Save() OVERRIDE;
 
  private:
@@ -204,7 +211,7 @@ class TabRestoreService : public BaseSessionService {
   void PopulateTab(Tab* tab,
                    int index,
                    TabRestoreServiceDelegate* delegate,
-                   NavigationController* controller);
+                   content::NavigationController* controller);
 
   // Notifies observers the tabs have changed.
   void NotifyTabsChanged();

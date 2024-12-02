@@ -5,6 +5,7 @@
 #import "chrome/browser/ui/cocoa/base_bubble_controller.h"
 
 #include "base/logging.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/string_util.h"
@@ -27,7 +28,7 @@ namespace BaseBubbleControllerInternal {
 class Bridge : public content::NotificationObserver {
  public:
   explicit Bridge(BaseBubbleController* controller) : controller_(controller) {
-    registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_HIDDEN,
+    registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_HIDDEN,
         content::NotificationService::AllSources());
   }
 
@@ -54,8 +55,8 @@ class Bridge : public content::NotificationObserver {
 - (id)initWithWindowNibPath:(NSString*)nibPath
                parentWindow:(NSWindow*)parentWindow
                  anchoredAt:(NSPoint)anchoredAt {
-  nibPath = [base::mac::MainAppBundle() pathForResource:nibPath
-                                                ofType:@"nib"];
+  nibPath = [base::mac::FrameworkBundle() pathForResource:nibPath
+                                                   ofType:@"nib"];
   if ((self = [super initWithWindowNibPath:nibPath owner:self])) {
     parentWindow_ = parentWindow;
     anchor_ = anchoredAt;

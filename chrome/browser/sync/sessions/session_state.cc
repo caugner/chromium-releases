@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,8 +46,6 @@ DictionaryValue* SyncSourceInfo::ToValue() const {
 
 SyncerStatus::SyncerStatus()
     : invalid_store(false),
-      syncer_stuck(false),
-      sync_in_progress(false),
       num_successful_commits(0),
       num_successful_bookmark_commits(0),
       num_updates_downloaded_total(0),
@@ -62,8 +60,6 @@ SyncerStatus::~SyncerStatus() {
 DictionaryValue* SyncerStatus::ToValue() const {
   DictionaryValue* value = new DictionaryValue();
   value->SetBoolean("invalidStore", invalid_store);
-  value->SetBoolean("syncerStuck", syncer_stuck);
-  value->SetBoolean("syncInProgress", sync_in_progress);
   value->SetInteger("numSuccessfulCommits", num_successful_commits);
   value->SetInteger("numSuccessfulBookmarkCommits",
                 num_successful_bookmark_commits);
@@ -97,7 +93,10 @@ DictionaryValue* DownloadProgressMarkersToValue(
 ErrorCounters::ErrorCounters()
     : num_conflicting_commits(0),
       consecutive_transient_error_commits(0),
-      consecutive_errors(0) {
+      consecutive_errors(0),
+      last_download_updates_result(UNSET),
+      last_post_commit_result(UNSET),
+      last_process_commit_response_result(UNSET) {
 }
 
 DictionaryValue* ErrorCounters::ToValue() const {
@@ -114,7 +113,7 @@ SyncSessionSnapshot::SyncSessionSnapshot(
     const ErrorCounters& errors,
     int64 num_server_changes_remaining,
     bool is_share_usable,
-    const syncable::ModelTypeBitSet& initial_sync_ended,
+    syncable::ModelTypeSet initial_sync_ended,
     const std::string
         (&download_progress_markers)[syncable::MODEL_TYPE_COUNT],
     bool more_to_sync,
@@ -125,7 +124,8 @@ SyncSessionSnapshot::SyncSessionSnapshot(
     bool did_commit_items,
     const SyncSourceInfo& source,
     size_t num_entries,
-    base::Time sync_start_time)
+    base::Time sync_start_time,
+    bool retry_scheduled)
     : syncer_status(syncer_status),
       errors(errors),
       num_server_changes_remaining(num_server_changes_remaining),
@@ -140,7 +140,8 @@ SyncSessionSnapshot::SyncSessionSnapshot(
       did_commit_items(did_commit_items),
       source(source),
       num_entries(num_entries),
-      sync_start_time(sync_start_time) {
+      sync_start_time(sync_start_time),
+      retry_scheduled(retry_scheduled) {
   for (int i = syncable::FIRST_REAL_MODEL_TYPE;
        i < syncable::MODEL_TYPE_COUNT; ++i) {
     const_cast<std::string&>(this->download_progress_markers[i]).assign(
@@ -159,7 +160,7 @@ DictionaryValue* SyncSessionSnapshot::ToValue() const {
                     static_cast<int>(num_server_changes_remaining));
   value->SetBoolean("isShareUsable", is_share_usable);
   value->Set("initialSyncEnded",
-             syncable::ModelTypeBitSetToValue(initial_sync_ended));
+             syncable::ModelTypeSetToValue(initial_sync_ended));
   value->Set("downloadProgressMarkers",
              DownloadProgressMarkersToValue(download_progress_markers));
   value->SetBoolean("hasMoreToSync", has_more_to_sync);
@@ -187,6 +188,11 @@ ConflictProgress::ConflictProgress(bool* dirty_flag) : dirty_(dirty_flag) {}
 
 ConflictProgress::~ConflictProgress() {
   CleanupSets();
+}
+
+bool ConflictProgress::HasSimpleConflictItem(const syncable::Id& id) const {
+  return conflicting_item_ids_.count(id) > 0 &&
+         (IdToConflictSetFind(id) == IdToConflictSetEnd());
 }
 
 IdToConflictSetMap::const_iterator ConflictProgress::IdToConflictSetFind(

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -39,7 +39,7 @@ const char kDefaultMasterPrefs[] = "master_preferences";
 // {
 //   "distribution": {
 //      "alternate_shortcut_text": false,
-//      "oem_bubble": false,
+//      "auto_launch_chrome": false,
 //      "chrome_shortcut_icon_index": 0,
 //      "create_all_shortcuts": true,
 //      "import_bookmarks": false,
@@ -161,10 +161,6 @@ class MasterPreferences {
     return preferences_read_from_file_;
   }
 
-  bool install_ceee() const {
-    return ceee_;
-  }
-
   bool install_chrome() const {
     return chrome_;
   }
@@ -192,7 +188,6 @@ class MasterPreferences {
   scoped_ptr<base::DictionaryValue> master_dictionary_;
   base::DictionaryValue* distribution_;
   bool preferences_read_from_file_;
-  bool ceee_;
   bool chrome_;
   bool chrome_frame_;
   bool multi_install_;

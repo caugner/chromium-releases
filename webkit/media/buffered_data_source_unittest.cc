@@ -1,11 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
 #include "media/base/media_log.h"
 #include "media/base/mock_callback.h"
-#include "media/base/mock_filter_host.h"
+#include "media/base/mock_data_source_host.h"
 #include "media/base/mock_filters.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
@@ -54,8 +54,8 @@ class MockBufferedDataSource : public BufferedDataSource {
         .WillByDefault(Assign(&loading_, true));
     ON_CALL(*url_loader, cancel())
         .WillByDefault(Assign(&loading_, false));
-
-    loader->SetURLLoaderForTest(url_loader);
+    scoped_ptr<WebURLLoader> wul(url_loader);
+    loader->SetURLLoaderForTest(wul.Pass());
     return loader;
   }
 
@@ -92,7 +92,7 @@ class BufferedDataSourceTest : public testing::Test {
 
   void Initialize(media::PipelineStatus expected) {
     ExpectCreateResourceLoader();
-    data_source_->Initialize(response_generator_.gurl().spec(),
+    data_source_->Initialize(response_generator_.gurl(),
                              media::NewExpectedStatusCB(expected));
     message_loop_->RunAllPending();
   }
@@ -176,7 +176,7 @@ class BufferedDataSourceTest : public testing::Test {
   MockWebFrameClient client_;
   WebView* view_;
 
-  StrictMock<media::MockFilterHost> host_;
+  StrictMock<media::MockDataSourceHost> host_;
   MessageLoop* message_loop_;
 
  private:
@@ -221,7 +221,7 @@ TEST_F(BufferedDataSourceTest, Range_NotSupported) {
 
   // It'll try again.
   //
-  // TODO(scherkus): try to reuse existing connection http://crbug.com/105231
+  // TODO(scherkus): try to reuse existing connection http://crbug.com/104783
   ExpectCreateResourceLoader();
   Respond(response_generator_.Generate200());
 
@@ -401,7 +401,6 @@ TEST_F(BufferedDataSourceTest, SetBitrate) {
   EXPECT_EQ(1234, loader_bitrate());
 
   // During teardown we'll also report our final network status.
-  EXPECT_CALL(host_, SetNetworkActivity(true));
   EXPECT_CALL(host_, SetBufferedBytes(4000000));
 
   EXPECT_TRUE(data_source_->loading());
@@ -427,7 +426,6 @@ TEST_F(BufferedDataSourceTest, SetPlaybackRate) {
   EXPECT_NE(old_loader, loader());
 
   // During teardown we'll also report our final network status.
-  EXPECT_CALL(host_, SetNetworkActivity(true));
   EXPECT_CALL(host_, SetBufferedBytes(4000000));
 
   EXPECT_TRUE(data_source_->loading());
@@ -447,8 +445,8 @@ TEST_F(BufferedDataSourceTest, Read) {
   FinishRead();
 
   // During teardown we'll also report our final network status.
+  EXPECT_CALL(host_, SetNetworkActivity(false));
   EXPECT_CALL(host_, SetBufferedBytes(kDataSize));
-  //EXPECT_CALL(host_, SetNetworkActivity(false));
 
   EXPECT_TRUE(data_source_->loading());
   Stop();

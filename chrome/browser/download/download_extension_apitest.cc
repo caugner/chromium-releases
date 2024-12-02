@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 
 class DownloadsApiTest : public ExtensionApiTest {
  public:
-  void SetUpCommandLine(CommandLine* command_line) {
+  void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
   }
@@ -26,7 +26,13 @@ class DownloadsApiTest : public ExtensionApiTest {
   ScopedTempDir tmpdir;
 };
 
-IN_PROC_BROWSER_TEST_F(DownloadsApiTest, DISABLED_Downloads) {
+// Disabled on Mac. http://crbug.com/101170
+#if defined(OS_MACOSX)
+  #define MAYBE_Downloads DISABLED_Downloads
+#else
+  #define MAYBE_Downloads Downloads
+#endif
+IN_PROC_BROWSER_TEST_F(DownloadsApiTest, MAYBE_Downloads) {
   SetUpTempDownloadsDir();
   ASSERT_TRUE(StartTestServer());
   ASSERT_TRUE(RunExtensionTest("downloads")) << message_;

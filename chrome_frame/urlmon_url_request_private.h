@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,11 @@
 
 #include <string>
 
-#include "base/callback_old.h"
+#include "base/gtest_prod_util.h"
 #include "base/threading/platform_thread.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request_status.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class UrlmonUrlRequest
   : public CComObjectRootEx<CComMultiThreadModel>,

@@ -49,12 +49,11 @@ SyncSessionContext::~SyncSessionContext() {
   }
 }
 
-void SyncSessionContext::SetUnthrottleTime(const syncable::ModelTypeSet& types,
+void SyncSessionContext::SetUnthrottleTime(syncable::ModelTypeSet types,
                                            const base::TimeTicks& time) {
-  for (syncable::ModelTypeSet::const_iterator it = types.begin();
-       it != types.end();
-       ++it) {
-    unthrottle_times_[*it] = time;
+  for (syncable::ModelTypeSet::Iterator it = types.First();
+       it.Good(); it.Inc()) {
+    unthrottle_times_[it.Get()] = time;
   }
 }
 
@@ -80,7 +79,7 @@ syncable::ModelTypeSet SyncSessionContext::GetThrottledTypes() const {
   for (UnthrottleTimes::const_iterator it = unthrottle_times_.begin();
        it != unthrottle_times_.end();
        ++it) {
-    types.insert(it->first);
+    types.Put(it->first);
   }
   return types;
 }

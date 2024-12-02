@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,7 @@
 #include "crypto/rsa_private_key.h"
 #include "remoting/base/constants.h"
 #include "remoting/protocol/auth_util.h"
-#include "remoting/protocol/v1_client_channel_authenticator.h"
-#include "remoting/protocol/v1_host_channel_authenticator.h"
+#include "remoting/protocol/ssl_hmac_channel_authenticator.h"
 #include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
 
 using buzz::QName;
@@ -20,7 +19,6 @@ namespace remoting {
 namespace protocol {
 
 namespace {
-const char kAuthenticationTag[] = "authentication";
 const char kAuthTokenTag[] = "auth-token";
 const char kCertificateTag[] = "certificate";
 }  // namespace
@@ -30,7 +28,8 @@ V1ClientAuthenticator::V1ClientAuthenticator(
     const std::string& shared_secret)
     : local_jid_(local_jid),
       shared_secret_(shared_secret),
-      state_(MESSAGE_READY) {
+      state_(MESSAGE_READY),
+      rejection_reason_(INVALID_CREDENTIALS) {
 }
 
 V1ClientAuthenticator::~V1ClientAuthenticator() {
@@ -38,6 +37,11 @@ V1ClientAuthenticator::~V1ClientAuthenticator() {
 
 Authenticator::State V1ClientAuthenticator::state() const {
   return state_;
+}
+
+Authenticator::RejectionReason V1ClientAuthenticator::rejection_reason() const {
+  DCHECK_EQ(state_, REJECTED);
+  return rejection_reason_;
 }
 
 void V1ClientAuthenticator::ProcessMessage(const XmlElement* message) {
@@ -56,45 +60,48 @@ void V1ClientAuthenticator::ProcessMessage(const XmlElement* message) {
 
   if (remote_cert_.empty()) {
     state_ = REJECTED;
+    rejection_reason_ = PROTOCOL_ERROR;
   } else {
     state_ = ACCEPTED;
   }
 }
 
-XmlElement* V1ClientAuthenticator::GetNextMessage() {
+scoped_ptr<XmlElement> V1ClientAuthenticator::GetNextMessage() {
   DCHECK_EQ(state_, MESSAGE_READY);
 
-  XmlElement* authentication_tag = new XmlElement(
-      QName(kChromotingXmlNamespace, kAuthenticationTag));
-
+  scoped_ptr<XmlElement> message = CreateEmptyAuthenticatorMessage();
   std::string token =
       protocol::GenerateSupportAuthToken(local_jid_, shared_secret_);
-
   XmlElement* auth_token_tag = new XmlElement(
       QName(kChromotingXmlNamespace, kAuthTokenTag));
   auth_token_tag->SetBodyText(token);
-  authentication_tag->AddElement(auth_token_tag);
+  message->AddElement(auth_token_tag);
 
   state_ = WAITING_MESSAGE;
-  return authentication_tag;
+  return message.Pass();
 }
 
-ChannelAuthenticator*
+scoped_ptr<ChannelAuthenticator>
 V1ClientAuthenticator::CreateChannelAuthenticator() const {
   DCHECK_EQ(state_, ACCEPTED);
-  return new V1ClientChannelAuthenticator(remote_cert_, shared_secret_);
+  scoped_ptr<SslHmacChannelAuthenticator> result =
+      SslHmacChannelAuthenticator::CreateForClient(
+          remote_cert_, shared_secret_);
+  result->SetLegacyOneWayMode(SslHmacChannelAuthenticator::SEND_ONLY);
+  return result.PassAs<ChannelAuthenticator>();
 };
 
 V1HostAuthenticator::V1HostAuthenticator(
     const std::string& local_cert,
-    const crypto::RSAPrivateKey* local_private_key,
+    const crypto::RSAPrivateKey& local_private_key,
     const std::string& shared_secret,
     const std::string& remote_jid)
     : local_cert_(local_cert),
-      local_private_key_(local_private_key->Copy()),
+      local_private_key_(local_private_key.Copy()),
       shared_secret_(shared_secret),
       remote_jid_(remote_jid),
-      state_(WAITING_MESSAGE) {
+      state_(WAITING_MESSAGE),
+      rejection_reason_(INVALID_CREDENTIALS) {
 }
 
 V1HostAuthenticator::~V1HostAuthenticator() {
@@ -104,26 +111,36 @@ Authenticator::State V1HostAuthenticator::state() const {
   return state_;
 }
 
+Authenticator::RejectionReason V1HostAuthenticator::rejection_reason() const {
+  DCHECK_EQ(state_, REJECTED);
+  return rejection_reason_;
+}
+
 void V1HostAuthenticator::ProcessMessage(const XmlElement* message) {
   DCHECK_EQ(state_, WAITING_MESSAGE);
 
   std::string auth_token =
       message->TextNamed(buzz::QName(kChromotingXmlNamespace, kAuthTokenTag));
 
+  if (auth_token.empty()) {
+    state_ = REJECTED;
+    rejection_reason_ = PROTOCOL_ERROR;
+    return;
+  }
+
   if (!protocol::VerifySupportAuthToken(
           remote_jid_, shared_secret_, auth_token)) {
     state_ = REJECTED;
+    rejection_reason_ = INVALID_CREDENTIALS;
   } else {
     state_ = MESSAGE_READY;
   }
 }
 
-XmlElement* V1HostAuthenticator::GetNextMessage() {
+scoped_ptr<XmlElement> V1HostAuthenticator::GetNextMessage() {
   DCHECK_EQ(state_, MESSAGE_READY);
 
-  XmlElement* message = new XmlElement(
-      QName(kChromotingXmlNamespace, kAuthenticationTag));
-
+  scoped_ptr<XmlElement> message = CreateEmptyAuthenticatorMessage();
   buzz::XmlElement* certificate_tag = new XmlElement(
       buzz::QName(kChromotingXmlNamespace, kCertificateTag));
   std::string base64_cert;
@@ -134,35 +151,18 @@ XmlElement* V1HostAuthenticator::GetNextMessage() {
   message->AddElement(certificate_tag);
 
   state_ = ACCEPTED;
-  return message;
+  return message.Pass();
 }
 
-ChannelAuthenticator*
+scoped_ptr<ChannelAuthenticator>
 V1HostAuthenticator::CreateChannelAuthenticator() const {
   DCHECK_EQ(state_, ACCEPTED);
-  return new V1HostChannelAuthenticator(
-      local_cert_, local_private_key_.get(), shared_secret_);
+  scoped_ptr<SslHmacChannelAuthenticator> result =
+      SslHmacChannelAuthenticator::CreateForHost(
+          local_cert_, local_private_key_.get(), shared_secret_);
+  result->SetLegacyOneWayMode(SslHmacChannelAuthenticator::RECEIVE_ONLY);
+  return result.PassAs<ChannelAuthenticator>();
 };
-
-V1HostAuthenticatorFactory::V1HostAuthenticatorFactory(
-    const std::string& local_cert,
-    const crypto::RSAPrivateKey* local_private_key,
-    const std::string& shared_secret)
-    : local_cert_(local_cert),
-      local_private_key_(local_private_key->Copy()),
-      shared_secret_(shared_secret) {
-  CHECK(local_private_key_.get());
-}
-
-V1HostAuthenticatorFactory::~V1HostAuthenticatorFactory() {
-}
-
-Authenticator* V1HostAuthenticatorFactory::CreateAuthenticator(
-    const std::string& remote_jid,
-    const buzz::XmlElement* first_message) {
-  return new V1HostAuthenticator(local_cert_, local_private_key_.get(),
-                                 shared_secret_, remote_jid);
-}
 
 }  // namespace remoting
 }  // namespace protocol

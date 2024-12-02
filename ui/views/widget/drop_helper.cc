@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -96,14 +96,14 @@ View* DropHelper::CalculateTargetViewImpl(
   // Walk the tree, stopping at target_view_ as we know it'll accept the
   // drop.
   while (view && view != target_view_ &&
-         (!view->IsEnabled() || !view->CanDrop(data))) {
+         (!view->enabled() || !view->CanDrop(data))) {
     view = view->parent();
   }
-#else
+#elif !defined(OS_MACOSX)
   int formats = 0;
   std::set<OSExchangeData::CustomFormat> custom_formats;
   while (view && view != target_view_) {
-    if (view->IsEnabled() &&
+    if (view->enabled() &&
         view->GetDropFormats(&formats, &custom_formats) &&
         data.HasAnyFormat(formats, custom_formats) &&
         (!check_can_drop || view->CanDrop(data))) {

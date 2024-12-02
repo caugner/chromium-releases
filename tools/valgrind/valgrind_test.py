@@ -861,7 +861,7 @@ class DrMemory(BaseTool):
         except OSError:
           logging.warning("Can't create symcache dir?")
       if os.path.exists(symcache_dir):
-        proc += ["-symcache_dir", symcache_dir]
+        proc += ["-symcache_dir", common.NormalizeWindowsPath(symcache_dir)]
 
     # Use -no_summary to suppress DrMemory's summary and init-time
     # notifications.  We generate our own with drmemory_analyze.py.
@@ -921,28 +921,29 @@ class DrMemory(BaseTool):
     else:
       testcases = glob.glob(self.log_dir + "/testcase.*.logs")
       # If we have browser wrapper, the per-test logdirs are named as
-      # "testcase.wrapper_PID".
-      # Let's extract the list of wrapper_PIDs and name it ppids
-      ppids = set([int(f.split(".")[-2]) for f in testcases])
+      # "testcase.wrapper_PID.name".
+      # Let's extract the list of wrapper_PIDs and name it ppids.
+      # NOTE: ppids may contain '_', i.e. they are not ints!
+      ppids = set([f.split(".")[-2] for f in testcases])
 
       for ppid in ppids:
         testcase_name = None
         try:
-          f = open(self.log_dir + ("/testcase.%d.name" % ppid))
+          f = open("%s/testcase.%s.name" % (self.log_dir, ppid))
           testcase_name = f.read().strip()
           f.close()
         except IOError:
           pass
         print "====================================================="
-        print " Below is the report for drmemory wrapper PID=%d." % ppid
+        print " Below is the report for drmemory wrapper PID=%s." % ppid
         if testcase_name:
           print " It was used while running the `%s` test." % testcase_name
         else:
           # TODO(timurrrr): hm, the PID line is suppressed on Windows...
           print " You can find the corresponding test"
-          print " by searching the above log for 'PID=%d'" % ppid
+          print " by searching the above log for 'PID=%s'" % ppid
         sys.stdout.flush()
-        ppid_filenames = glob.glob("%s/testcase.%d.logs/*/results.txt" %
+        ppid_filenames = glob.glob("%s/testcase.%s.logs/*/results.txt" %
                                    (self.log_dir, ppid))
         ret |= analyzer.Report(ppid_filenames, testcase_name, False)
         print "====================================================="
@@ -965,7 +966,6 @@ class ThreadSanitizerRV1Analyzer(tsan_analyze.TsanAnalyzer):
     self.out = open(self.TMP_FILE, "w")
 
   def Report(self, files, testcase, check_sanity=False):
-    # TODO(timurrrr): handle testcase?
     reports = self.GetReports(files)
     for report in reports:
       print >>self.out, report

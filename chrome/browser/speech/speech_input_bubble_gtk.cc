@@ -14,7 +14,9 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/resource_context.h"
+#include "content/browser/speech/speech_input_manager.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "media/audio/audio_manager.h"
@@ -24,6 +26,8 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/rect.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -40,7 +44,7 @@ const GdkColor& kLabelTextColor = ui::kGdkBlack;
 class SpeechInputBubbleGtk : public SpeechInputBubbleBase,
                              public BubbleDelegateGtk {
  public:
-  SpeechInputBubbleGtk(TabContents* tab_contents,
+  SpeechInputBubbleGtk(WebContents* web_contents,
                        Delegate* delegate,
                        const gfx::Rect& element_rect);
   ~SpeechInputBubbleGtk();
@@ -74,10 +78,10 @@ class SpeechInputBubbleGtk : public SpeechInputBubbleBase,
   DISALLOW_COPY_AND_ASSIGN(SpeechInputBubbleGtk);
 };
 
-SpeechInputBubbleGtk::SpeechInputBubbleGtk(TabContents* tab_contents,
+SpeechInputBubbleGtk::SpeechInputBubbleGtk(WebContents* web_contents,
                                            Delegate* delegate,
                                            const gfx::Rect& element_rect)
-    : SpeechInputBubbleBase(tab_contents),
+    : SpeechInputBubbleBase(web_contents),
       delegate_(delegate),
       bubble_(NULL),
       element_rect_(element_rect),
@@ -107,7 +111,8 @@ void SpeechInputBubbleGtk::OnTryAgainClicked(GtkWidget* widget) {
 }
 
 void SpeechInputBubbleGtk::OnMicSettingsClicked(GtkWidget* widget) {
-  AudioManager::GetAudioManager()->ShowAudioInputSettings();
+  speech_input::SpeechInputManager::ShowAudioInputSettingsFromUI(
+      &web_contents()->GetBrowserContext()->GetResourceContext());
   Hide();
 }
 
@@ -133,7 +138,14 @@ void SpeechInputBubbleGtk::Show() {
   gtk_box_pack_start(GTK_BOX(vbox), label_, FALSE, FALSE,
                      kBubbleControlVerticalSpacing);
 
-  if (AudioManager::GetAudioManager()->CanShowAudioInputSettings()) {
+  Profile* profile = Profile::FromBrowserContext(
+      web_contents()->GetBrowserContext());
+
+  // TODO(tommi): The audio_manager property can only be accessed from the
+  // IO thread, so we can't call CanShowAudioInputSettings directly here if
+  // we can show the input settings.  For now, we always show the link (like
+  // we do on other platforms).
+  if (true) {
     mic_settings_ = gtk_chrome_link_button_new(
         l10n_util::GetStringUTF8(IDS_SPEECH_INPUT_MIC_SETTINGS).c_str());
     gtk_box_pack_start(GTK_BOX(vbox), mic_settings_, FALSE, FALSE,
@@ -164,12 +176,10 @@ void SpeechInputBubbleGtk::Show() {
       kBubbleControlHorizontalSpacing, kBubbleControlHorizontalSpacing);
   gtk_container_add(GTK_CONTAINER(content), vbox);
 
-  Profile* profile =
-      Profile::FromBrowserContext(tab_contents()->browser_context());
   GtkThemeService* theme_provider = GtkThemeService::GetFrom(profile);
-  GtkWidget* reference_widget = tab_contents()->GetNativeView();
+  GtkWidget* reference_widget = web_contents()->GetNativeView();
   gfx::Rect container_rect;
-  tab_contents()->GetContainerBounds(&container_rect);
+  web_contents()->GetContainerBounds(&container_rect);
   gfx::Rect target_rect(element_rect_.right() - kBubbleTargetOffsetX,
       element_rect_.bottom(), 1, 1);
 
@@ -190,8 +200,8 @@ void SpeechInputBubbleGtk::Show() {
                             &target_rect,
                             content,
                             BubbleGtk::ARROW_LOCATION_TOP_LEFT,
-                            false, // match_system_theme
-                            true, // grab_input
+                            false,  // match_system_theme
+                            true,  // grab_input
                             theme_provider,
                             this);
 
@@ -285,8 +295,8 @@ void SpeechInputBubbleGtk::BubbleClosing(BubbleGtk* bubble,
 }  // namespace
 
 SpeechInputBubble* SpeechInputBubble::CreateNativeBubble(
-    TabContents* tab_contents,
+    WebContents* web_contents,
     Delegate* delegate,
     const gfx::Rect& element_rect) {
-  return new SpeechInputBubbleGtk(tab_contents, delegate, element_rect);
+  return new SpeechInputBubbleGtk(web_contents, delegate, element_rect);
 }

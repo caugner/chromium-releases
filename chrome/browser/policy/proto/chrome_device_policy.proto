@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,6 +85,13 @@ message DeviceOpenNetworkConfigurationProto {
   optional string open_network_configuration = 1;
 }
 
+// Policies to turn on portions of the device status reports.
+message DeviceReportingProto {
+  optional bool report_version_info = 1;
+  optional bool report_activity_times = 2;
+  optional bool report_boot_mode = 3;
+}
+
 message ChromeDeviceSettingsProto {
   optional DevicePolicyRefreshRateProto device_policy_refresh_rate = 1;
   optional UserWhitelistProto user_whitelist = 2;
@@ -97,4 +104,5 @@ message ChromeDeviceSettingsProto {
   optional MetricsEnabledProto metrics_enabled = 9;
   optional ReleaseChannelProto release_channel = 10;
   optional DeviceOpenNetworkConfigurationProto open_network_configuration = 11;
+  optional DeviceReportingProto device_reporting = 12;
 }

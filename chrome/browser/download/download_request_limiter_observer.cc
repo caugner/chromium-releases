@@ -7,9 +7,11 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_request_limiter.h"
 
+using content::WebContents;
+
 DownloadRequestLimiterObserver::DownloadRequestLimiterObserver(
-    TabContents* tab_contents)
-    : TabContentsObserver(tab_contents) {
+  WebContents* web_contents)
+    : content::WebContentsObserver(web_contents) {
 }
 
 DownloadRequestLimiterObserver::~DownloadRequestLimiterObserver() {
@@ -18,5 +20,5 @@ DownloadRequestLimiterObserver::~DownloadRequestLimiterObserver() {
 void DownloadRequestLimiterObserver::DidGetUserGesture() {
   if (!g_browser_process->download_request_limiter())
     return;  // NULL in unitests.
-  g_browser_process->download_request_limiter()->OnUserGesture(tab_contents());
+  g_browser_process->download_request_limiter()->OnUserGesture(web_contents());
 }

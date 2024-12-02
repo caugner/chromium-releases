@@ -1,65 +1,64 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/tab_contents/tab_contents_container.h"
 
+#include <utility>
+
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_container.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/interstitial_page.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/base/accessibility/accessible_view_state.h"
+
+using content::NavigationController;
+using content::WebContents;
 
 ////////////////////////////////////////////////////////////////////////////////
 // TabContentsContainer, public:
 
 TabContentsContainer::TabContentsContainer()
     : native_container_(NULL),
-      tab_contents_(NULL) {
+      web_contents_(NULL) {
   set_id(VIEW_ID_TAB_CONTAINER);
 }
 
 TabContentsContainer::~TabContentsContainer() {
-  if (tab_contents_)
+  if (web_contents_)
     RemoveObservers();
 }
 
-void TabContentsContainer::ChangeTabContents(TabContents* contents) {
-  if (tab_contents_) {
-    native_container_->DetachContents(tab_contents_);
-    tab_contents_->WasHidden();
+void TabContentsContainer::ChangeWebContents(WebContents* contents) {
+  if (web_contents_) {
+    native_container_->DetachContents(web_contents_);
+    web_contents_->WasHidden();
     RemoveObservers();
   }
-  tab_contents_ = contents;
-  // When detaching the last tab of the browser ChangeTabContents is invoked
+  web_contents_ = contents;
+  // When detaching the last tab of the browser ChangeWebContents is invoked
   // with NULL. Don't attempt to do anything in that case.
-  if (tab_contents_) {
-    RenderWidgetHostViewChanged(tab_contents_->GetRenderWidgetHostView());
-    native_container_->AttachContents(tab_contents_);
+  if (web_contents_) {
+    native_container_->AttachContents(web_contents_);
     AddObservers();
   }
 }
 
-void TabContentsContainer::TabContentsFocused(TabContents* tab_contents) {
-  native_container_->TabContentsFocused(tab_contents);
+content::WebContents* TabContentsContainer::web_contents() {
+  return web_contents_;
+}
+
+void TabContentsContainer::WebContentsFocused(WebContents* contents) {
+  native_container_->WebContentsFocused(contents);
 }
 
 void TabContentsContainer::SetFastResize(bool fast_resize) {
   native_container_->SetFastResize(fast_resize);
-}
-
-void TabContentsContainer::SetReservedContentsRect(
-    const gfx::Rect& reserved_rect) {
-  cached_reserved_rect_ = reserved_rect;
-  if (tab_contents_ && tab_contents_->GetRenderWidgetHostView()) {
-    tab_contents_->GetRenderWidgetHostView()->set_reserved_contents_rect(
-        reserved_rect);
-  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -70,12 +69,13 @@ void TabContentsContainer::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   if (type == content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED) {
-    RenderViewHostSwitchedDetails* switched_details =
-        content::Details<RenderViewHostSwitchedDetails>(details).ptr();
-    RenderViewHostChanged(switched_details->old_host,
-                          switched_details->new_host);
-  } else if (type == content::NOTIFICATION_TAB_CONTENTS_DESTROYED) {
-    TabContentsDestroyed(content::Source<TabContents>(source).ptr());
+    std::pair<RenderViewHost*, RenderViewHost*>* switched_details =
+        content::Details<std::pair<RenderViewHost*, RenderViewHost*> >(
+            details).ptr();
+    RenderViewHostChanged(switched_details->first,
+                          switched_details->second);
+  } else if (type == content::NOTIFICATION_WEB_CONTENTS_DESTROYED) {
+    TabContentsDestroyed(content::Source<WebContents>(source).ptr());
   } else {
     NOTREACHED();
   }
@@ -104,10 +104,10 @@ void TabContentsContainer::GetAccessibleState(ui::AccessibleViewState* state) {
 
 #if defined(HAVE_XINPUT2)
 bool TabContentsContainer::OnMousePressed(const views::MouseEvent& event) {
-  DCHECK(tab_contents_);
-  if (event.flags() & (ui::EF_LEFT_BUTTON_DOWN |
-                       ui::EF_RIGHT_BUTTON_DOWN |
-                       ui::EF_MIDDLE_BUTTON_DOWN)) {
+  DCHECK(web_contents_);
+  if (event.flags() & (ui::EF_LEFT_MOUSE_BUTTON |
+                       ui::EF_RIGHT_MOUSE_BUTTON |
+                       ui::EF_MIDDLE_MOUSE_BUTTON)) {
     return false;
   }
   // It is necessary to look at the native event to determine what special
@@ -133,10 +133,10 @@ bool TabContentsContainer::OnMousePressed(const views::MouseEvent& event) {
   }
   switch (button) {
     case 8:
-      tab_contents_->controller().GoBack();
+      web_contents_->GetController().GoBack();
       return true;
     case 9:
-      tab_contents_->controller().GoForward();
+      web_contents_->GetController().GoForward();
       return true;
   }
 
@@ -163,12 +163,12 @@ void TabContentsContainer::AddObservers() {
   registrar_.Add(
       this,
       content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
-      content::Source<NavigationController>(&tab_contents_->controller()));
+      content::Source<NavigationController>(&web_contents_->GetController()));
 
   registrar_.Add(
       this,
-      content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-      content::Source<TabContents>(tab_contents_));
+      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+      content::Source<WebContents>(web_contents_));
 }
 
 void TabContentsContainer::RemoveObservers() {
@@ -177,20 +177,12 @@ void TabContentsContainer::RemoveObservers() {
 
 void TabContentsContainer::RenderViewHostChanged(RenderViewHost* old_host,
                                                  RenderViewHost* new_host) {
-  if (new_host)
-    RenderWidgetHostViewChanged(new_host->view());
   native_container_->RenderViewHostChanged(old_host, new_host);
 }
 
-void TabContentsContainer::TabContentsDestroyed(TabContents* contents) {
+void TabContentsContainer::TabContentsDestroyed(WebContents* contents) {
   // Sometimes, a TabContents is destroyed before we know about it. This allows
   // us to clean up our state in case this happens.
-  DCHECK(contents == tab_contents_);
-  ChangeTabContents(NULL);
-}
-
-void TabContentsContainer::RenderWidgetHostViewChanged(
-    RenderWidgetHostView* new_view) {
-  if (new_view)
-    new_view->set_reserved_contents_rect(cached_reserved_rect_);
+  DCHECK(contents == web_contents_);
+  ChangeWebContents(NULL);
 }

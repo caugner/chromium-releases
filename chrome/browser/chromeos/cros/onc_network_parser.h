@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/network_parser.h"
+#include "chrome/browser/chromeos/cros/network_ui_data.h"
 
 namespace base {
 class DictionaryValue;
@@ -21,6 +22,7 @@ class Value;
 }
 
 namespace net {
+class ProxyServer;
 class X509Certificate;
 typedef std::vector<scoped_refptr<X509Certificate> > CertificateList;
 }
@@ -51,15 +53,21 @@ class OncNetworkParser : public NetworkParser {
                                 const base::Value&,
                                 Network*);
 
-  explicit OncNetworkParser(const std::string& onc_blob);
+  OncNetworkParser(const std::string& onc_blob,
+                   const std::string& passphrase,
+                   NetworkUIData::ONCSource onc_source);
   virtual ~OncNetworkParser();
   static const EnumMapper<PropertyIndex>* property_mapper();
 
   // Returns the number of networks in the "NetworkConfigs" list.
   int GetNetworkConfigsSize() const;
 
+  // Returns the network configuration dictionary for the nth network. CHECKs if
+  // |n| is out of range and returns NULL on parse errors.
+  const base::DictionaryValue* GetNetworkConfig(int n);
+
   // Call to create the network by parsing network config in the nth position.
-  // (0-based). Returns NULL if there's a parse error or if n is out of range.
+  // (0-based). CHECKs if |n| is out of range and returns NULL on parse errors.
   Network* ParseNetwork(int n);
 
   // Returns the number of certificates in the "Certificates" list.
@@ -82,7 +90,13 @@ class OncNetworkParser : public NetworkParser {
                          OncValueSignature* signature,
                          ParserPointer parser);
 
+  // Expands |value| with user account specific paramaters.
+  static std::string GetUserExpandedValue(const base::Value& value,
+                                          NetworkUIData::ONCSource source);
+
   const std::string& parse_error() const { return parse_error_; }
+
+  NetworkUIData::ONCSource onc_source() const { return onc_source_; }
 
  protected:
   OncNetworkParser();
@@ -110,10 +124,38 @@ class OncNetworkParser : public NetworkParser {
                                ConnectionType expected,
                                const std::string& onc_type);
 
+
+  // This lists the certificates that have the string |label| as their
+  // certificate nickname (exact match).
+  static void ListCertsWithNickname(const std::string& label,
+                                    net::CertificateList* result);
+  // This deletes any certificate that has the string |label| as its
+  // nickname (exact match).
+  static bool DeleteCertAndKeyByNickname(const std::string& label);
+
+  // Find the PKCS#11 ID of the certificate with the given GUID.  Returns
+  // an empty string on failure.
+  static std::string GetPkcs11IdFromCertGuid(const std::string& guid);
+
+  // Process ProxySettings dictionary into a format which is then updated into
+  // ProxyConfig property in flimflam.
+  static bool ProcessProxySettings(OncNetworkParser* parser,
+                                   const base::Value& value,
+                                   Network* network);
+
  private:
   FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestAddClientCertificate);
+  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestUpdateClientCertificate);
+  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestReimportClientCertificate);
   FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestAddServerCertificate);
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestAddAuthorityCertificate);
+  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestUpdateServerCertificate);
+  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestReimportServerCertificate);
+  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest,
+                           TestAddWebAuthorityCertificate);
+  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest,
+                           TestUpdateWebAuthorityCertificate);
+  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest,
+                           TestReimportWebAuthorityCertificate);
   scoped_refptr<net::X509Certificate> ParseServerOrCaCertificate(
     int cert_index,
     const std::string& cert_type,
@@ -124,22 +166,59 @@ class OncNetworkParser : public NetworkParser {
     const std::string& guid,
     base::DictionaryValue* certificate);
 
-  // This lists the certificates that have the string |label| as their
-  // certificate nickname (exact match).
-  static void ListCertsWithNickname(const std::string& label,
-                                    net::CertificateList* result);
-  // This deletes any certificate that has the string |label| as its
-  // nickname (exact match).
-  static bool DeleteCertAndKeyByNickname(const std::string& label);
+  base::DictionaryValue* Decrypt(const std::string& passphrase,
+                                 base::DictionaryValue* root);
+
+  // Parse the ProxySettings dictionary.
+  static bool ParseProxySettingsValue(OncNetworkParser* parser,
+                                      PropertyIndex index,
+                                      const base::Value& value,
+                                      Network* network);
+
+  // Parse Type key of ProxySettings dictionary.
+  static ProxyOncType ParseProxyType(const std::string& type);
+
+  // Parse Manual dictionary that is child of ProxySettings dictionary.
+  static bool ParseProxyManualValue(OncNetworkParser* parser,
+                                    PropertyIndex index,
+                                    const base::Value& value,
+                                    Network* network);
+
+  // Parse proxy server for different schemes in Manual dictionary.
+  static bool ParseProxyServer(int property_index,
+                               const base::Value& value,
+                               const std::string& scheme,
+                               Network* network);
+
+  // Parse ProxyLocation dictionary that specifies the manual proxy server.
+  static net::ProxyServer ParseProxyLocationValue(int property_index,
+                                                  const base::Value& value);
 
   // Error message from the JSON parser, if applicable.
   std::string parse_error_;
+
+  // Where the ONC blob comes from.
+  NetworkUIData::ONCSource onc_source_;
 
   scoped_ptr<base::DictionaryValue> root_dict_;
   base::ListValue* network_configs_;
   base::ListValue* certificates_;
 
   DISALLOW_COPY_AND_ASSIGN(OncNetworkParser);
+};
+
+// Class for parsing Ethernet networks.
+class OncEthernetNetworkParser : public OncNetworkParser {
+ public:
+  OncEthernetNetworkParser();
+  virtual ~OncEthernetNetworkParser();
+  static bool ParseEthernetValue(OncNetworkParser* parser,
+                                 PropertyIndex index,
+                                 const base::Value& value,
+                                 Network* ethernet_network);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(OncEthernetNetworkParser);
 };
 
 // Base for wireless networks.

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "chrome/browser/net/ssl_config_service_manager.h"
@@ -93,7 +93,6 @@ class SSLConfigServicePref : public net::SSLConfigService {
 
 void SSLConfigServicePref::GetSSLConfig(net::SSLConfig* config) {
   *config = cached_config_;
-  config->crl_set = GetCRLSet();
 }
 
 void SSLConfigServicePref::SetNewSSLConfig(
@@ -141,6 +140,7 @@ class SSLConfigServiceManagerPref
   BooleanPrefMember ssl3_enabled_;
   BooleanPrefMember tls1_enabled_;
   BooleanPrefMember origin_bound_certs_enabled_;
+  BooleanPrefMember ssl_record_splitting_disabled_;
 
   // The cached list of disabled SSL cipher suites.
   std::vector<uint16> disabled_cipher_suites_;
@@ -161,6 +161,8 @@ SSLConfigServiceManagerPref::SSLConfigServiceManagerPref(
   tls1_enabled_.Init(prefs::kTLS1Enabled, local_state, this);
   origin_bound_certs_enabled_.Init(prefs::kEnableOriginBoundCerts,
                                    local_state, this);
+  ssl_record_splitting_disabled_.Init(prefs::kDisableSSLRecordSplitting,
+                                      local_state, this);
   pref_change_registrar_.Init(local_state);
   pref_change_registrar_.Add(prefs::kCipherSuiteBlacklist, this);
 
@@ -181,6 +183,8 @@ void SSLConfigServiceManagerPref::RegisterPrefs(PrefService* prefs) {
                              default_config.tls1_enabled);
   prefs->RegisterBooleanPref(prefs::kEnableOriginBoundCerts,
                              default_config.origin_bound_certs_enabled);
+  prefs->RegisterBooleanPref(prefs::kDisableSSLRecordSplitting,
+                             !default_config.false_start_enabled);
   prefs->RegisterListPref(prefs::kCipherSuiteBlacklist);
   // The Options menu used to allow changing the ssl.ssl3.enabled and
   // ssl.tls1.enabled preferences, so some users' Local State may have
@@ -227,6 +231,8 @@ void SSLConfigServiceManagerPref::GetSSLConfigFromPrefs(
   config->tls1_enabled = tls1_enabled_.GetValue();
   config->disabled_cipher_suites = disabled_cipher_suites_;
   config->origin_bound_certs_enabled = origin_bound_certs_enabled_.GetValue();
+  // disabling False Start also happens to disable record splitting.
+  config->false_start_enabled = !ssl_record_splitting_disabled_.GetValue();
   SSLConfigServicePref::SetSSLConfigFlags(config);
 }
 

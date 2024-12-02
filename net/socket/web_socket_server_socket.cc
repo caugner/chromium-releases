@@ -10,20 +10,17 @@
 #include <map>
 #include <vector>
 
-#if defined(OS_WIN)
-#include <winsock2.h>  // for htonl
-#else
-#include <arpa/inet.h>
-#endif
-
 #include "base/basictypes.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/md5.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
-#include "base/task.h"
+#include "base/sys_byteorder.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
@@ -118,13 +115,9 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
             handshake_buf_, kHandshakeLimitBytes)),
         process_handshake_buf_(new net::DrainableIOBuffer(
             handshake_buf_, kHandshakeLimitBytes)),
-        transport_read_callback_(NewCallback(
-            this, &WebSocketServerSocketImpl::OnRead)),
-        transport_write_callback_(NewCallback(
-            this, &WebSocketServerSocketImpl::OnWrite)),
         is_transport_read_pending_(false),
         is_transport_write_pending_(false),
-        method_factory_(this) {
+        weak_factory_(this) {
     DCHECK(transport_socket);
     DCHECK(delegate);
   }
@@ -135,8 +128,8 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
         it->type == PendingReq::TYPE_READ &&
         it->io_buf != NULL &&
         it->io_buf->data() != NULL &&
-        it->callback != 0) {
-      it->callback->Run(0);  // Report EOF.
+        !it->callback.is_null()) {
+      it->callback.Run(0);  // Report EOF.
     }
   }
 
@@ -172,7 +165,7 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
     };
 
     PendingReq(Type type, net::DrainableIOBuffer* io_buf,
-               net::OldCompletionCallback* callback)
+               const net::CompletionCallback& callback)
         : type(type),
           io_buf(io_buf),
           callback(callback) {
@@ -193,12 +186,12 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
 
     Type type;
     scoped_refptr<net::DrainableIOBuffer> io_buf;
-    net::OldCompletionCallback* callback;
+    net::CompletionCallback callback;
   };
 
   // Socket implementation.
   virtual int Read(net::IOBuffer* buf, int buf_len,
-                   net::OldCompletionCallback* callback) OVERRIDE {
+                   const net::CompletionCallback& callback) OVERRIDE {
     if (buf_len == 0)
       return 0;
     if (buf == NULL || buf_len < 0) {
@@ -263,7 +256,7 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
   }
 
   virtual int Write(net::IOBuffer* buf, int buf_len,
-                    net::OldCompletionCallback* callback) OVERRIDE {
+                    const net::CompletionCallback& callback) OVERRIDE {
     if (buf_len == 0)
       return 0;
     if (buf == NULL || buf_len < 0) {
@@ -294,7 +287,7 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
     frame_start->data()[0] = '\x00';
     pending_reqs_.push_back(PendingReq(PendingReq::TYPE_WRITE_METADATA,
                             new net::DrainableIOBuffer(frame_start, 1),
-                            NULL));
+                            net::CompletionCallback()));
 
     pending_reqs_.push_back(PendingReq(PendingReq::TYPE_WRITE,
                             new net::DrainableIOBuffer(buf, buf_len),
@@ -304,7 +297,7 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
     frame_end->data()[0] = '\xff';
     pending_reqs_.push_back(PendingReq(PendingReq::TYPE_WRITE_METADATA,
                             new net::DrainableIOBuffer(frame_end, 1),
-                            NULL));
+                            net::CompletionCallback()));
 
     ConsiderTransportWrite();
     return net::ERR_IO_PENDING;
@@ -319,7 +312,7 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
   }
 
   // WebSocketServerSocket implementation.
-  virtual int Accept(net::OldCompletionCallback* callback) {
+  virtual int Accept(const net::CompletionCallback& callback) OVERRIDE {
     if (phase_ != PHASE_NYMPH)
       return net::ERR_UNEXPECTED;
     phase_ = PHASE_HANDSHAKE;
@@ -353,14 +346,15 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
     is_transport_read_pending_ = true;
     int rv = transport_socket_->Read(
         it->io_buf.get(), it->io_buf->BytesRemaining(),
-        transport_read_callback_.get());
+        base::Bind(&WebSocketServerSocketImpl::OnRead,
+                   base::Unretained(this)));
     if (rv != net::ERR_IO_PENDING) {
       // PostTask rather than direct call in order to:
       // (1) guarantee calling callback after returning from Read();
       // (2) avoid potential stack overflow;
-      MessageLoop::current()->PostTask(FROM_HERE,
-          method_factory_.NewRunnableMethod(
-              &WebSocketServerSocketImpl::OnRead, rv));
+      MessageLoop::current()->PostTask(
+          FROM_HERE, base::Bind(&WebSocketServerSocketImpl::OnRead,
+                                weak_factory_.GetWeakPtr(), rv));
     }
   }
 
@@ -380,14 +374,15 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
     is_transport_write_pending_ = true;
     int rv = transport_socket_->Write(
         it->io_buf.get(), it->io_buf->BytesRemaining(),
-        transport_write_callback_.get());
+        base::Bind(&WebSocketServerSocketImpl::OnWrite,
+                   base::Unretained(this)));
     if (rv != net::ERR_IO_PENDING) {
       // PostTask rather than direct call in order to:
       // (1) guarantee calling callback after returning from Read();
       // (2) avoid potential stack overflow;
-      MessageLoop::current()->PostTask(FROM_HERE,
-          method_factory_.NewRunnableMethod(
-              &WebSocketServerSocketImpl::OnWrite, rv));
+      MessageLoop::current()->PostTask(
+          FROM_HERE, base::Bind(&WebSocketServerSocketImpl::OnWrite,
+                                weak_factory_.GetWeakPtr(), rv));
     }
   }
 
@@ -397,8 +392,8 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
     if (result != 0) {
       while (!pending_reqs_.empty()) {
         PendingReq& req = pending_reqs_.front();
-        if (req.callback)
-          req.callback->Run(result);
+        if (!req.callback.is_null())
+          req.callback.Run(result);
         pending_reqs_.pop_front();
       }
       transport_socket_.reset();  // terminate underlying connection.
@@ -447,11 +442,11 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
         if (rv > 0) {
           process_handshake_buf_->DidConsume(rv);
           phase_ = PHASE_FRAME_OUTSIDE;
-          net::OldCompletionCallback* cb = pending_reqs_.front().callback;
+          net::CompletionCallback cb = pending_reqs_.front().callback;
           pending_reqs_.pop_front();
           ConsiderTransportWrite();  // Schedule answer handshake.
-          if (cb)
-            cb->Run(0);
+          if (!cb.is_null())
+            cb.Run(0);
         } else if (rv == net::ERR_IO_PENDING) {
           if (fill_handshake_buf_->BytesRemaining() < 1)
             Shut(net::ERR_LIMIT_VIOLATION);
@@ -474,10 +469,10 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
           return;
         }
         if (rv > 0 || phase_ == PHASE_SHUT) {
-          net::OldCompletionCallback* cb = it->callback;
+          net::CompletionCallback cb = it->callback;
           pending_reqs_.erase(it);
-          if (cb)
-            cb->Run(rv);
+          if (!cb.is_null())
+            cb.Run(rv);
         }
         break;
       }
@@ -515,12 +510,12 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
     DCHECK_LE(result, it->io_buf->BytesRemaining());
     it->io_buf->DidConsume(result);
     if (it->io_buf->BytesRemaining() == 0) {
-      net::OldCompletionCallback* cb = it->callback;
+      net::CompletionCallback cb = it->callback;
       int bytes_written = it->io_buf->BytesConsumed();
       DCHECK_GT(bytes_written, 0);
       pending_reqs_.erase(it);
-      if (cb)
-        cb->Run(bytes_written);
+      if (!cb.is_null())
+        cb.Run(bytes_written);
     }
     ConsiderTransportWrite();
   }
@@ -731,13 +726,13 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
       }
 
       operator net::DrainableIOBuffer*() {
-        return new net::DrainableIOBuffer(io_buf_, bytes_written_);
+        return new net::DrainableIOBuffer(io_buf_.release(), bytes_written_);
       }
 
       bool is_ok() { return is_ok_; }
 
      private:
-      net::IOBuffer* io_buf_;
+      scoped_refptr<net::IOBuffer> io_buf_;
       size_t bytes_written_;
       bool is_ok_;
     } buffer;
@@ -785,7 +780,7 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
       return net::ERR_LIMIT_VIOLATION;
 
     pending_reqs_.push_back(PendingReq(
-        PendingReq::TYPE_WRITE_METADATA, buffer, NULL));
+        PendingReq::TYPE_WRITE_METADATA, buffer, net::CompletionCallback()));
     DCHECK_GT(term_pos - buf, 0);
     return term_pos - buf;
   }
@@ -874,18 +869,14 @@ class WebSocketServerSocketImpl : public net::WebSocketServerSocket {
   scoped_refptr<net::DrainableIOBuffer> fill_handshake_buf_;
   scoped_refptr<net::DrainableIOBuffer> process_handshake_buf_;
 
-  // Pending io requests we need to complete.
+  // Pending IO requests we need to complete.
   std::deque<PendingReq> pending_reqs_;
-
-  // Callbacks from transport to us.
-  scoped_ptr<net::OldCompletionCallback> transport_read_callback_;
-  scoped_ptr<net::OldCompletionCallback> transport_write_callback_;
 
   // Whether transport requests are pending.
   bool is_transport_read_pending_;
   bool is_transport_write_pending_;
 
-  ScopedRunnableMethodFactory<WebSocketServerSocketImpl> method_factory_;
+  base::WeakPtrFactory<WebSocketServerSocketImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebSocketServerSocketImpl);
 };

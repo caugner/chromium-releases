@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/time.h"
+#include "chrome/browser/sync/internal_api/includes/syncer_error.h"
 #include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/blob.h"
 #include "chrome/browser/sync/syncable/model_type.h"
@@ -39,10 +40,9 @@ class CommitResponse_EntryResponse;
 class SyncerProtoUtil {
  public:
   // Posts the given message and fills the buffer with the returned value.
-  // Returns true on success.  Also handles store birthday verification:
-  // session->status()->syncer_stuck_ is set true if the birthday is
-  // incorrect.  A false value will always be returned if birthday is bad.
-  static bool PostClientToServerMessage(
+  // Returns true on success.  Also handles store birthday verification: will
+  // produce a SyncError if the birthday is incorrect.
+  static SyncerError PostClientToServerMessage(
       const ClientToServerMessage& msg,
       sync_pb::ClientToServerResponse* response,
       sessions::SyncSession* session);

@@ -8,7 +8,6 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
@@ -611,9 +610,13 @@ TEST_F(ProtocolHandlerRegistryTest, TestOSRegistration) {
   registry()->OnAcceptRegisterProtocolHandler(ph_do2);
 }
 
-// Test fails on 963 branch.
-#define MAYBE_TestOSRegistrationFailure DISABLED_TestOSRegistrationFailure
-
+#if defined(OS_LINUX)
+// TODO(benwells): When Linux support is more reliable and
+// http://crbut.com/88255 is fixed this test will pass.
+#define MAYBE_TestOSRegistrationFailure FAILS_TestOSRegistrationFailure
+#else
+#define MAYBE_TestOSRegistrationFailure TestOSRegistrationFailure
+#endif
 
 TEST_F(ProtocolHandlerRegistryTest, MAYBE_TestOSRegistrationFailure) {
   ProtocolHandler ph_do = CreateProtocolHandler("do", "test1");
@@ -636,7 +639,7 @@ TEST_F(ProtocolHandlerRegistryTest, MAYBE_TestOSRegistrationFailure) {
 static void MakeRequest(const GURL& url, ProtocolHandlerRegistry* registry) {
   net::URLRequest request(url, NULL);
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          new MessageLoop::QuitTask());
+                          MessageLoop::QuitClosure());
   scoped_refptr<net::URLRequestJob> job(registry->MaybeCreateJob(&request));
   ASSERT_TRUE(job.get() != NULL);
 }
@@ -654,7 +657,7 @@ TEST_F(ProtocolHandlerRegistryTest, TestMaybeCreateTaskWorksFromIOThread) {
 static void CheckIsHandled(const std::string& scheme, bool expected,
     ProtocolHandlerRegistry* registry) {
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          new MessageLoop::QuitTask());
+                          MessageLoop::QuitClosure());
   ASSERT_EQ(expected, registry->IsHandledProtocolIO(scheme));
 }
 
@@ -720,7 +723,7 @@ TEST_F(ProtocolHandlerRegistryTest, TestClearDefaultGetsPropagatedToIO) {
 
 static void QuitUILoop() {
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          new MessageLoop::QuitTask());
+                          MessageLoop::QuitClosure());
 }
 
 TEST_F(ProtocolHandlerRegistryTest, TestLoadEnabledGetsPropogatedToIO) {

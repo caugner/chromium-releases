@@ -11,10 +11,10 @@
 #include "native_client/src/include/nacl_string.h"
 #include "ppapi/c/trusted/ppb_file_io_trusted.h"
 #include "ppapi/c/trusted/ppb_url_loader_trusted.h"
-#include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/file_io.h"
 #include "ppapi/cpp/url_loader.h"
 #include "ppapi/cpp/instance.h"
+#include "ppapi/utility/completion_callback_factory.h"
 
 namespace plugin {
 
@@ -57,6 +57,7 @@ class FileDownloader {
   // update received by the loader.
   bool Open(const nacl::string& url,
             DownloadFlags flags,
+            bool allow_extension_url,
             const pp::CompletionCallback& callback,
             PP_URLLoaderTrusted_StatusCallback progress_callback);
 

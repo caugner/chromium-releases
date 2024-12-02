@@ -69,9 +69,7 @@
     <output filename="locale_settings_lv.pak" type="data_package" lang="lv" />
     <output filename="locale_settings_ml.pak" type="data_package" lang="ml" />
     <output filename="locale_settings_mr.pak" type="data_package" lang="mr" />
-    <if expr="pp_ifdef('use_third_party_translations')">
-      <output filename="locale_settings_ms.pak" type="data_package" lang="ms" />
-    </if>
+    <output filename="locale_settings_ms.pak" type="data_package" lang="ms" />
     <output filename="locale_settings_nl.pak" type="data_package" lang="nl" />
     <!-- The translation console uses 'no' for Norwegian Bokmål. It should
          be 'nb'. -->
@@ -130,6 +128,7 @@
     <file path="locale_settings_lv.xtb" lang="lv" />
     <file path="locale_settings_ml.xtb" lang="ml" />
     <file path="locale_settings_mr.xtb" lang="mr" />
+    <file path="locale_settings_ms.xtb" lang="ms" />
     <file path="locale_settings_nl.xtb" lang="nl" />
     <file path="locale_settings_nb.xtb" lang="no" />
     <file path="locale_settings_pl.xtb" lang="pl" />
@@ -298,23 +297,6 @@
         25
       </message>
 
-      <!-- The width and height of the First Run Search Engine Selection dialog box in characters and -->
-      <!-- lines (See above). -->
-      <message name="IDS_FIRSTRUN_SEARCH_ENGINE_SELECTION_WIDTH_CHARS" use_name_for_id="true">
-        128
-      </message>
-      <if expr="pp_ifdef('_google_chrome')">
-        <message name="IDS_FIRSTRUN_SEARCH_ENGINE_SELECTION_HEIGHT_LINES" use_name_for_id="true">
-          22
-        </message>
-      </if>
-      <!-- With text instead of images, the selection dialog is much smaller. -->
-      <if expr="not pp_ifdef('_google_chrome')">
-        <message name="IDS_FIRSTRUN_SEARCH_ENGINE_SELECTION_HEIGHT_LINES" use_name_for_id="true">
-          14
-        </message>
-      </if>
-
       <!-- The width and height of the Import Progress dialog box in characters and -->
       <!-- lines (See above). -->
       <message name="IDS_IMPORTPROGRESS_DIALOG_WIDTH_CHARS" use_name_for_id="true">
@@ -331,24 +313,6 @@
       </message>
       <message name="IDS_IMPORTLOCK_DIALOG_HEIGHT_LINES" use_name_for_id="true">
         8
-      </message>
-
-      <!-- The width and height of the First Run Search Information bubble in -->
-      <!-- characters and lines (See above). -->
-      <message name="IDS_FIRSTRUNBUBBLE_DIALOG_WIDTH_CHARS" use_name_for_id="true">
-        93
-      </message>
-
-      <!-- The width and height of the First Run Search Information OEM -->
-      <!-- bubble in characters and lines (See above). -->
-      <message name="IDS_FIRSTRUNOEMBUBBLE_DIALOG_WIDTH_CHARS" use_name_for_id="true">
-        37
-      </message>
-
-      <!-- The width and height of the First Run Omnibox Information minimal -->
-      <!-- bubble in characters and lines (See above). -->
-      <message name="IDS_FIRSTRUN_MINIMAL_BUBBLE_DIALOG_WIDTH_CHARS" use_name_for_id="true">
-        82
       </message>
 
       <!-- The minimum width of javascript alert popups. -->

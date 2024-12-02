@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,8 @@
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "ppapi/c/pp_graphics_3d.h"
 #include "ppapi/c/pp_resource.h"
+#include "ppapi/c/ppb_core.h"
 #include "ppapi/c/trusted/ppb_graphics_3d_trusted.h"
-
-struct PPB_Core;
 
 // A CommandBuffer proxy implementation that uses trusted PPAPI interface to
 // access a CommandBuffer.
@@ -22,16 +21,12 @@ class CommandBufferNacl : public gpu::CommandBuffer {
   virtual ~CommandBufferNacl();
 
   // CommandBuffer implementation.
-  virtual bool Initialize(int32 size);
-  virtual bool Initialize(base::SharedMemory* buffer, int32 size) {
-    // TODO(neb): support for nacl if neccessary
-    return false;
-  }
-  virtual gpu::Buffer GetRingBuffer();
+  virtual bool Initialize();
   virtual State GetState();
   virtual State GetLastState();
   virtual void Flush(int32 put_offset);
   virtual State FlushSync(int32 put_offset, int32 last_known_get);
+  virtual void SetGetBuffer(int32 transfer_buffer_id);
   virtual void SetGetOffset(int32 get_offset);
   virtual int32 CreateTransferBuffer(size_t size, int32 id_request);
   virtual int32 RegisterTransferBuffer(base::SharedMemory* buffer,

@@ -18,6 +18,7 @@
 #include "chrome/browser/web_resource/notification_promo.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -28,27 +29,31 @@ static const int kIntroDisplayMax = 10;
 static const char kNTP4IntroURL[] =
   "http://www.google.com/support/chrome/bin/answer.py?answer=95451";
 
-WebUIMessageHandler* NewTabPageHandler::Attach(WebUI* web_ui) {
+NewTabPageHandler::NewTabPageHandler() : page_switch_count_(0) {
+}
+
+NewTabPageHandler::~NewTabPageHandler() {
+  HISTOGRAM_COUNTS_100("NewTabPage.SingleSessionPageSwitches",
+                       page_switch_count_);
+}
+
+void NewTabPageHandler::RegisterMessages() {
   // Record an open of the NTP with its default page type.
-  PrefService* prefs = Profile::FromWebUI(web_ui)->GetPrefs();
+  PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
   int shown_page_type = prefs->GetInteger(prefs::kNTPShownPage) >>
       kPageIdOffset;
   UMA_HISTOGRAM_ENUMERATION("NewTabPage.DefaultPageType",
                             shown_page_type, kHistogramEnumerationMax);
 
   static bool default_apps_trial_exists =
-      base::FieldTrialList::TrialExists(kDefaultAppsTrial_Name);
+      base::FieldTrialList::TrialExists(kDefaultAppsTrialName);
   if (default_apps_trial_exists) {
     UMA_HISTOGRAM_ENUMERATION(
         base::FieldTrial::MakeName("NewTabPage.DefaultPageType",
-                                   kDefaultAppsTrial_Name),
+                                   kDefaultAppsTrialName),
         shown_page_type, kHistogramEnumerationMax);
   }
 
-  return WebUIMessageHandler::Attach(web_ui);
-}
-
-void NewTabPageHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("closeNotificationPromo",
       base::Bind(&NewTabPageHandler::HandleCloseNotificationPromo,
                  base::Unretained(this)));
@@ -75,12 +80,14 @@ void NewTabPageHandler::HandleCloseNotificationPromo(const ListValue* args) {
 
 void NewTabPageHandler::HandleNotificationPromoViewed(const ListValue* args) {
   scoped_refptr<NotificationPromo> notification_promo =
-      NotificationPromo::Create(Profile::FromWebUI(web_ui_), NULL);
+      NotificationPromo::Create(Profile::FromWebUI(web_ui()), NULL);
   if (notification_promo->HandleViewed())
     Notify(chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED);
 }
 
 void NewTabPageHandler::HandlePageSelected(const ListValue* args) {
+  page_switch_count_++;
+
   double page_id_double;
   CHECK(args->GetDouble(0, &page_id_double));
   int page_id = static_cast<int>(page_id_double);
@@ -102,11 +109,11 @@ void NewTabPageHandler::HandlePageSelected(const ListValue* args) {
                             shown_page_type, kHistogramEnumerationMax);
 
   static bool default_apps_trial_exists =
-      base::FieldTrialList::TrialExists(kDefaultAppsTrial_Name);
+      base::FieldTrialList::TrialExists(kDefaultAppsTrialName);
   if (default_apps_trial_exists) {
     UMA_HISTOGRAM_ENUMERATION(
         base::FieldTrial::MakeName("NewTabPage.SelectedPageType",
-                                   kDefaultAppsTrial_Name),
+                                   kDefaultAppsTrialName),
         shown_page_type, kHistogramEnumerationMax);
   }
 }

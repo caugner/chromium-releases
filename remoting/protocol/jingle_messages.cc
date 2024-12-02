@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,14 +55,15 @@ T NameToValue(const NameMapElement<T> map[], size_t map_size,
   return default_value;
 }
 
-static const NameMapElement<JingleMessage::ActionType> kActionTypes[] = {
+const NameMapElement<JingleMessage::ActionType> kActionTypes[] = {
   { JingleMessage::SESSION_INITIATE, "session-initiate" },
   { JingleMessage::SESSION_ACCEPT, "session-accept" },
   { JingleMessage::SESSION_TERMINATE, "session-terminate" },
+  { JingleMessage::SESSION_INFO, "session-info" },
   { JingleMessage::TRANSPORT_INFO, "transport-info" },
 };
 
-static const NameMapElement<JingleMessage::Reason> kReasons[] = {
+const NameMapElement<JingleMessage::Reason> kReasons[] = {
   { JingleMessage::SUCCESS, "success" },
   { JingleMessage::DECLINE, "decline" },
   { JingleMessage::GENERAL_ERROR, "general-error" },
@@ -134,7 +135,10 @@ XmlElement* FormatCandidate(const cricket::Candidate& candidate) {
 
 // static
 bool JingleMessage::IsJingleMessage(const buzz::XmlElement* stanza) {
-  return stanza->FirstNamed(QName(kJingleNamespace, "jingle")) != NULL;
+  return
+      stanza->Name() == QName(kJabberNamespace, "iq") &&
+      stanza->Attr(QName("", "type")) == "set" &&
+      stanza->FirstNamed(QName(kJingleNamespace, "jingle")) != NULL;
 }
 
 JingleMessage::JingleMessage()
@@ -157,6 +161,11 @@ JingleMessage::~JingleMessage() {
 
 bool JingleMessage::ParseXml(const buzz::XmlElement* stanza,
                              std::string* error) {
+  if (!IsJingleMessage(stanza)) {
+    *error = "Not a jingle message";
+    return false;
+  }
+
   const XmlElement* jingle_tag =
       stanza->FirstNamed(QName(kJingleNamespace, "jingle"));
   if (jingle_tag == NULL) {
@@ -183,6 +192,19 @@ bool JingleMessage::ParseXml(const buzz::XmlElement* stanza,
   if (sid.empty()) {
     *error = "sid attribute is missing";
     return false;
+  }
+
+  if (action == SESSION_INFO) {
+    // session-info messages may contain arbitrary information not
+    // defined by the Jingle protocol. We don't need to parse it.
+    const XmlElement* child = jingle_tag->FirstElement();
+    if (child) {
+      // session-info is allowed to be empty.
+      info.reset(new XmlElement(*child));
+    } else {
+      info.reset(NULL);
+    }
+    return true;
   }
 
   const XmlElement* reason_tag =
@@ -266,6 +288,12 @@ buzz::XmlElement* JingleMessage::ToXml() {
   if (!action_attr)
     LOG(FATAL) << "Invalid action value " << action;
   jingle_tag->AddAttr(QName(kEmptyNamespace, "action"), action_attr);
+
+  if (action == SESSION_INFO) {
+    if (info.get())
+      jingle_tag->AddElement(new XmlElement(*info.get()));
+    return root.release();
+  }
 
   if (action == SESSION_INITIATE)
     jingle_tag->AddAttr(QName(kEmptyNamespace, "initiator"), from);
@@ -370,6 +398,10 @@ buzz::XmlElement* JingleMessageReply::ToXml(
     case UNEXPECTED_REQUEST:
       type = "modify";
       name = QName(kJabberNamespace, "unexpected-request");
+      break;
+    case UNSUPPORTED_INFO:
+      type = "modify";
+      name = QName(kJabberNamespace, "feature-not-implemented");
       break;
     default:
       NOTREACHED();

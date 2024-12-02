@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include <cairo/cairo.h>
 #include <pango/pango.h>
+#include <string>
 
 #include "base/i18n/rtl.h"
 #include "base/string16.h"
@@ -47,6 +48,16 @@ void SetupPangoLayout(PangoLayout* layout,
                       base::i18n::TextDirection text_direction,
                       int flags);
 
+// Setup pango layout |layout| the same way as SetupPangoLayout(), except this
+// sets the font description based on |font_description|.
+void SetupPangoLayoutWithFontDescription(
+    PangoLayout* layout,
+    const string16& text,
+    const std::string& font_description,
+    int width,
+    base::i18n::TextDirection text_direction,
+    int flags);
+
 // Get Pango's calculated size of |layout| and modify |text_rect| within
 // |bounds|.
 void AdjustTextRectBasedOnLayout(PangoLayout* layout,
@@ -72,6 +83,9 @@ void DrawPangoTextUnderline(cairo_t* cr,
                             gfx::PlatformFontPango* platform_font,
                             double extra_edge_width,
                             const Rect& text_rect);
+
+// Returns the size in pixels for the specified |pango_font|.
+size_t GetPangoFontSizeInPixels(PangoFontDescription* pango_font);
 
 }  // namespace gfx
 

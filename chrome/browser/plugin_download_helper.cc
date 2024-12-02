@@ -1,83 +1,94 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/plugin_download_helper.h"
 
-#include <windows.h>
-
+#include "base/bind.h"
 #include "base/file_util.h"
+#include "base/stringprintf.h"
+#include "base/message_loop_proxy.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/url_fetcher.h"
-#include "net/base/io_buffer.h"
+#include "net/base/net_errors.h"
+#include "net/url_request/url_request_status.h"
 
-PluginDownloadUrlHelper::PluginDownloadUrlHelper(
-    const std::string& download_url,
-    gfx::NativeWindow caller_window,
-    PluginDownloadUrlHelper::DownloadDelegate* delegate)
-    : download_file_fetcher_(NULL),
-      download_file_caller_window_(caller_window),
-      download_url_(download_url),
-      delegate_(delegate) {
+using content::BrowserThread;
+using content::URLFetcher;
+
+PluginDownloadUrlHelper::PluginDownloadUrlHelper() {
 }
 
 PluginDownloadUrlHelper::~PluginDownloadUrlHelper() {
 }
 
 void PluginDownloadUrlHelper::InitiateDownload(
+    const GURL& download_url,
     net::URLRequestContextGetter* request_context,
-    base::MessageLoopProxy* file_thread_proxy) {
-  download_file_fetcher_.reset(content::URLFetcher::Create(
-      GURL(download_url_), content::URLFetcher::GET, this));
+    const DownloadFinishedCallback& finished_callback,
+    const ErrorCallback& error_callback) {
+  download_url_ = download_url;
+  download_finished_callback_ = finished_callback;
+  error_callback_ = error_callback;
+  download_file_fetcher_.reset(URLFetcher::Create(
+      download_url_, URLFetcher::GET, this));
   download_file_fetcher_->SetRequestContext(request_context);
-  download_file_fetcher_->SaveResponseToTemporaryFile(file_thread_proxy);
+  download_file_fetcher_->SaveResponseToTemporaryFile(
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
   download_file_fetcher_->Start();
 }
 
-void PluginDownloadUrlHelper::OnURLFetchComplete(
-    const content::URLFetcher* source) {
-  bool success = source->GetStatus().is_success();
-  FilePath response_file;
-
-  if (success) {
-    if (source->GetResponseAsFilePath(true, &response_file)) {
-      FilePath new_download_file_path =
-          response_file.DirName().AppendASCII(
-              download_file_fetcher_->GetURL().ExtractFileName());
-
-      file_util::Delete(new_download_file_path, false);
-
-      if (!file_util::ReplaceFileW(response_file,
-                                   new_download_file_path)) {
-        DLOG(ERROR) << "Failed to rename file:"
-                    << response_file.value()
-                    << " to file:"
-                    << new_download_file_path.value();
-      } else {
-        response_file = new_download_file_path;
-      }
-    } else {
-      NOTREACHED() << "Failed to download the plugin installer.";
-      success = false;
-    }
+void PluginDownloadUrlHelper::OnURLFetchComplete(const URLFetcher* source) {
+  net::URLRequestStatus status = source->GetStatus();
+  if (!status.is_success()) {
+    RunErrorCallback(base::StringPrintf("Error %d: %s",
+                                        status.error(),
+                                        net::ErrorToString(status.error())));
+    return;
   }
+  int response_code = source->GetResponseCode();
+  if (response_code != 200 &&
+      response_code != URLFetcher::RESPONSE_CODE_INVALID) {
+    // If we don't get a HTTP response code, the URL request either failed
+    // (which should be covered by the status check above) or the fetched URL
+    // was a file: URL (in unit tests for example), in which case it's fine.
+    RunErrorCallback(base::StringPrintf("HTTP status %d", response_code));
+    return;
+  }
+  bool success = source->GetResponseAsFilePath(true, &downloaded_file_);
+  DCHECK(success);
+  BrowserThread::PostTaskAndReply(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&PluginDownloadUrlHelper::RenameDownloadedFile,
+                 base::Unretained(this)),
+      base::Bind(&PluginDownloadUrlHelper::RunFinishedCallback,
+                 base::Unretained(this)));
+}
 
-  if (delegate_) {
-    delegate_->OnDownloadCompleted(response_file, success);
+void PluginDownloadUrlHelper::RenameDownloadedFile() {
+  FilePath new_download_file_path =
+      downloaded_file_.DirName().AppendASCII(
+          download_file_fetcher_->GetURL().ExtractFileName());
+
+  file_util::Delete(new_download_file_path, false);
+
+  if (file_util::ReplaceFile(downloaded_file_,
+                             new_download_file_path)) {
+    downloaded_file_ = new_download_file_path;
   } else {
-    std::wstring path = response_file.value();
-    COPYDATASTRUCT download_file_data = {0};
-    download_file_data.cbData =
-        static_cast<unsigned long>((path.length() + 1) * sizeof(wchar_t));
-    download_file_data.lpData = const_cast<wchar_t *>(path.c_str());
-    download_file_data.dwData = success;
-
-    if (::IsWindow(download_file_caller_window_)) {
-      ::SendMessage(download_file_caller_window_, WM_COPYDATA, NULL,
-                    reinterpret_cast<LPARAM>(&download_file_data));
-    }
+    DPLOG(ERROR) << "Failed to rename file: "
+                 << downloaded_file_.value()
+                 << " to file: "
+                 << new_download_file_path.value();
   }
-  // Don't access any members after this.
+}
+
+void PluginDownloadUrlHelper::RunFinishedCallback() {
+  download_finished_callback_.Run(downloaded_file_);
   delete this;
 }
 
+void PluginDownloadUrlHelper::RunErrorCallback(const std::string& msg) {
+  error_callback_.Run(msg);
+  delete this;
+}

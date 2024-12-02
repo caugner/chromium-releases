@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,6 +32,9 @@ const char kBrowserSubprocessPath[]         = "browser-subprocess-path";
 // Run Chrome in Chrome Frame mode. This means that Chrome expects to be run
 // as a dependent process of the Chrome Frame plugin.
 const char kChromeFrame[]                   = "chrome-frame";
+
+// Options to pass to the Dart VM.
+const char kDartFlags[]                     = "dart-flags";
 
 // Disables client-visible 3D APIs, in particular WebGL and Pepper 3D.
 // This is controlled by policy and is kept separate from the other
@@ -83,6 +86,13 @@ const char kDisableDeviceOrientation[]      = "disable-device-orientation";
 // Disable experimental WebGL support.
 const char kDisableExperimentalWebGL[]      = "disable-webgl";
 
+// Blacklist the GPU for accelerated compositing.
+const char kBlacklistAcceleratedCompositing[] =
+    "blacklist-accelerated-compositing";
+
+// Blacklist the GPU for WebGL.
+const char kBlacklistWebGL[]                = "blacklist-webgl";
+
 // Disable FileSystem API.
 const char kDisableFileSystem[]             = "disable-file-system";
 
@@ -102,17 +112,21 @@ const char kDisableGpuDriverBugWorkarounds[] =
 // Disable the GPU process sandbox.
 const char kDisableGpuSandbox[]             = "disable-gpu-sandbox";
 
+// Reduces the GPU process sandbox to be less strict.
+const char kReduceGpuSandbox[]              = "reduce-gpu-sandbox";
+
 // Suppresses hang monitor dialogs in renderer processes.  This may allow slow
 // unload handlers on a page to prevent the tab from closing, but the Task
 // Manager can be used to terminate the offending process in this case.
 const char kDisableHangMonitor[]            = "disable-hang-monitor";
 
+// Disable the use of an ImageTransportSurface. This means the GPU process
+// will present the rendered page rather than the browser process.
+const char kDisableImageTransportSurface[]  = "disable-image-transport-surface";
+
 // Disable the thread that crashes the GPU process if it stops responding to
 // messages.
 const char kDisableGpuWatchdog[]            = "disable-gpu-watchdog";
-
-// Disable the Indexed Database API.
-const char kDisableIndexedDatabase[]        = "disable-indexed-database";
 
 // Prevent Java from running.
 const char kDisableJava[]                   = "disable-java";
@@ -169,11 +183,11 @@ const char kDisableWebSockets[]             = "disable-web-sockets";
 // Enable gpu-accelerated 2d canvas.
 const char kEnableAccelerated2dCanvas[]     = "enable-accelerated-2d-canvas";
 
-// Enable hardware accelerated page drawing.
-// Please note that this flag is honored only if chromium is compiled with
-// SKIA_GPU flag, which can be enabled by setting use_skia_gpu variable to 1
-// in build/features_override.gypi.
-const char kEnableAcceleratedDrawing[]      = "enable-accelerated-drawing";
+// Enable hardware accelerated page painting.
+const char kEnableAcceleratedPainting[]     = "enable-accelerated-painting";
+
+// Enable gpu-accelerated SVG/W3C filters.
+const char kEnableAcceleratedFilters[]      = "enable-accelerated-filters";
 
 // Enables WebKit accessibility within the renderer process.
 const char kEnableAccessibility[]           = "enable-accessibility";
@@ -241,6 +255,9 @@ const char kEnableSandboxLogging[]          = "enable-sandbox-logging";
 
 // Enable the seccomp sandbox (Linux only)
 const char kEnableSeccompSandbox[]          = "enable-seccomp-sandbox";
+
+// Enable shadow DOM API
+const char kEnableShadowDOM[]          = "enable-shadow-dom";
 
 // Enables StatsTable, logging statistics to a global named shared memory table.
 const char kEnableStatsTable[]              = "enable-stats-table";
@@ -431,6 +448,9 @@ const char kProcessType[]                   = "type";
 // Register Pepper plugins (see pepper_plugin_registry.cc for its format).
 const char kRegisterPepperPlugins[]         = "register-pepper-plugins";
 
+// Enables remote debug over HTTP on the specified port.
+const char kRemoteDebuggingPort[]           = "remote-debugging-port";
+
 // Causes the renderer process to throw an assertion on launch.
 const char kRendererAssertTest[]            = "renderer-assert-test";
 
@@ -453,10 +473,6 @@ const char kServiceProcess[]                = "service";
 // Visibly render a border around paint rects in the web page to help debug
 // and study painting behavior.
 const char kShowPaintRects[]                = "show-paint-rects";
-//
-// TODO(scherkus): remove --simple-data-source when our media resource loading
-// is cleaned up and playback testing completed.
-const char kSimpleDataSource[]              = "simple-data-source";
 
 // Runs the renderer and plugins in the same process as the browser
 const char kSingleProcess[]                 = "single-process";
@@ -469,6 +485,9 @@ const char kSkipGpuDataLoading[]            = "skip-gpu-data-loading";
 
 // Runs the security test for the renderer sandbox.
 const char kTestSandbox[]                   = "test-sandbox";
+
+// Enables UI changes that make it easier to use with a touchscreen.
+const char kTouchOptimizedUI[]              = "touch-optimized-ui";
 
 // Causes TRACE_EVENT flags to be recorded from startup. Optionally, can
 // specify the specific trace categories to include (e.g.
@@ -551,5 +570,11 @@ const char kUseSystemSSL[]                  = "use-system-ssl";
 // Causes the renderer process to throw an assertion on launch.
 const char kRendererCheckFalseTest[]        = "renderer-check-false-test";
 #endif
+
+// Enable per-tile page painting.
+const char kEnablePerTilePainting[]         = "enable-per-tile-painting";
+
+// Disables the use of a 3D software rasterizer.
+const char kDisableSoftwareRasterizer[]     = "disable-software-rasterizer";
 
 }  // namespace switches

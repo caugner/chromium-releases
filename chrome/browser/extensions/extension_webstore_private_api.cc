@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,10 @@
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/webstore_installer.h"
-#include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -26,9 +27,9 @@
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -59,10 +60,12 @@ ProfileSyncService* test_sync_service = NULL;
 
 // Returns either the test sync service, or the real one from |profile|.
 ProfileSyncService* GetSyncService(Profile* profile) {
+  // TODO(webstore): It seems |test_sync_service| is not used anywhere. It
+  // should be removed.
   if (test_sync_service)
     return test_sync_service;
   else
-    return profile->GetProfileSyncService();
+    return ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
 }
 
 bool IsWebStoreURL(Profile* profile, const GURL& url) {
@@ -72,7 +75,8 @@ bool IsWebStoreURL(Profile* profile, const GURL& url) {
     NOTREACHED();
     return false;
   }
-  return (service->GetExtensionByWebExtent(url) == store);
+  return (service->extensions()->GetHostedAppByURL(ExtensionURLInfo(url)) ==
+          store);
 }
 
 // Whitelists extension IDs for use by webstorePrivate.silentlyInstall.
@@ -92,6 +96,8 @@ bool IsTrustedForSilentInstall(const std::string& id) {
       id == "cpembckmhnjipbgbnfiocbgnkpjdokdd" ||  // +1 Extension - dev
       id == "boemmnepglcoinjcdlfcpcbmhiecichi" ||  // Notifications
       id == "flibmgiapaohcbondaoopaalfejliklp" ||  // Notifications - dev
+      id == "nckgahadagoaajjgafhacjanaoiihapd" ||  // Talk
+      id == "eggnbpckecmjlblplehfpjjdhhidfdoj" ||  // Talk Beta
       id == "dlppkpafhbajpcmmoheippocdidnckmm" ||  // Remaining are placeholders
       id == "hmglfmpefabcafaimbpldpambdfomanl" ||
       id == "idfijlieiecpfcjckpkliefekpokhhnd" ||
@@ -370,7 +376,7 @@ bool CompleteInstallFunction::RunImpl() {
   // permissions install dialog.
   scoped_refptr<WebstoreInstaller> installer = new WebstoreInstaller(
       profile(), test_webstore_installer_delegate,
-      &(dispatcher()->delegate()->GetAssociatedTabContents()->controller()),
+      &(dispatcher()->delegate()->GetAssociatedWebContents()->GetController()),
       id, WebstoreInstaller::FLAG_NONE);
   installer->Start();
 
@@ -425,7 +431,7 @@ void SilentlyInstallFunction::OnWebstoreParseSuccess(
 
   scoped_refptr<WebstoreInstaller> installer = new WebstoreInstaller(
       profile(), this,
-      &(dispatcher()->delegate()->GetAssociatedTabContents()->controller()),
+      &(dispatcher()->delegate()->GetAssociatedWebContents()->GetController()),
       id_, WebstoreInstaller::FLAG_NONE);
   installer->Start();
 }
@@ -489,5 +495,67 @@ bool SetStoreLoginFunction::RunImpl() {
   ExtensionService* service = profile_->GetExtensionService();
   ExtensionPrefs* prefs = service->extension_prefs();
   prefs->SetWebStoreLogin(login);
+  return true;
+}
+
+GetWebGLStatusFunction::GetWebGLStatusFunction() {}
+GetWebGLStatusFunction::~GetWebGLStatusFunction() {}
+
+// static
+bool GetWebGLStatusFunction::IsWebGLAllowed(GpuDataManager* manager) {
+  bool webgl_allowed = true;
+  if (!manager->GpuAccessAllowed()) {
+    webgl_allowed = false;
+  } else {
+    uint32 blacklist_flags = manager->GetGpuFeatureFlags().flags();
+    if (blacklist_flags & GpuFeatureFlags::kGpuFeatureWebgl)
+      webgl_allowed = false;
+  }
+  return webgl_allowed;
+}
+
+void GetWebGLStatusFunction::OnGpuInfoUpdate() {
+  GpuDataManager* manager = GpuDataManager::GetInstance();
+  manager->RemoveObserver(this);
+  bool webgl_allowed = IsWebGLAllowed(manager);
+  CreateResult(webgl_allowed);
+  SendResponse(true);
+
+  // Matches the AddRef in RunImpl().
+  Release();
+}
+
+void GetWebGLStatusFunction::CreateResult(bool webgl_allowed) {
+  result_.reset(Value::CreateStringValue(
+      webgl_allowed ? "webgl_allowed" : "webgl_blocked"));
+}
+
+bool GetWebGLStatusFunction::RunImpl() {
+  bool finalized = true;
+#if defined(OS_LINUX)
+  // On Windows and Mac, so far we can always make the final WebGL blacklisting
+  // decision based on partial GPU info; on Linux, we need to launch the GPU
+  // process to collect full GPU info and make the final decision.
+  finalized = false;
+#endif
+
+  GpuDataManager* manager = GpuDataManager::GetInstance();
+  if (manager->complete_gpu_info_available())
+    finalized = true;
+
+  bool webgl_allowed = IsWebGLAllowed(manager);
+  if (!webgl_allowed)
+    finalized = true;
+
+  if (finalized) {
+    CreateResult(webgl_allowed);
+    SendResponse(true);
+  } else {
+    // Matched with a Release in OnGpuInfoUpdate.
+    AddRef();
+
+    manager->AddObserver(this);
+    manager->RequestCompleteGpuInfoIfNeeded();
+  }
   return true;
 }

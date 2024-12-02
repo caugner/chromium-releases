@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -105,7 +105,7 @@ TEST(JingleMessageTest, SessionInitiate) {
       "name='chromoting' creator='initiator'><description "
       "xmlns='google:remoting'><control transport='stream' version='2'/><event "
       "transport='stream' version='2'/><video transport='stream' version='2' "
-      "codec='vp8'/><initial-resolution width='800' height='600'/>"
+      "codec='vp8'/><initial-resolution width='640' height='480'/>"
       "<authentication><auth-token>j7whCMii0Z0AAPwj7whCM/j7whCMii0Z0AAPw="
       "</auth-token></authentication></description><transport "
       "xmlns='http://www.google.com/transport/p2p'/></content></jingle>"
@@ -137,7 +137,7 @@ TEST(JingleMessageTest, SessionAccept) {
       "name='chromoting'><description xmlns='google:remoting'><control "
       "transport='stream' version='2'/><event transport='stream' version='2'/>"
       "<video codec='vp8' transport='stream' version='2'/><initial-resolution "
-      "height='2048' width='2048'/><authentication><certificate>"
+      "height='480' width='640'/><authentication><certificate>"
       "MIICpjCCAY6gW0Cert0TANBgkqhkiG9w0BAQUFA=</certificate>"
       "</authentication></description><transport xmlns="
       "'http://www.google.com/transport/p2p'/></content></jingle></cli:iq>";
@@ -220,6 +220,35 @@ TEST(JingleMessageTest, SessionTerminate) {
       << error;
 }
 
+TEST(JingleMessageTest, SessionInfo) {
+  const char* kTestSessionTerminateMessage =
+      "<cli:iq from='user@gmail.com/chromoting016DBB07' "
+      "to='user@gmail.com/chromiumsy5C6A652D' type='set' "
+      "xmlns:cli='jabber:client'><jingle action='session-info' "
+      "sid='2227053353' xmlns='urn:xmpp:jingle:1'><test-info>TestMessage"
+      "</test-info></jingle></cli:iq>";
+
+  scoped_ptr<XmlElement> source_message(
+      XmlElement::ForStr(kTestSessionTerminateMessage));
+  ASSERT_TRUE(source_message.get());
+
+  EXPECT_TRUE(JingleMessage::IsJingleMessage(source_message.get()));
+
+  JingleMessage message;
+  std::string error;
+  EXPECT_TRUE(message.ParseXml(source_message.get(), &error)) << error;
+
+  EXPECT_EQ(message.action, JingleMessage::SESSION_INFO);
+  ASSERT_TRUE(message.info.get() != NULL);
+  EXPECT_TRUE(message.info->Name() ==
+              buzz::QName("urn:xmpp:jingle:1", "test-info"));
+
+  scoped_ptr<XmlElement> formatted_message(message.ToXml());
+  ASSERT_TRUE(formatted_message.get());
+  EXPECT_TRUE(VerifyXml(source_message.get(), formatted_message.get(), &error))
+      << error;
+}
+
 TEST(JingleMessageReplyTest, ToXml) {
   const char* kTestIncomingMessage =
       "<cli:iq from='user@gmail.com/chromoting016DBB07' id='4' "
@@ -283,6 +312,35 @@ TEST(JingleMessageReplyTest, ToXml) {
     std::string error;
     EXPECT_TRUE(VerifyXml(expected.get(), reply.get(), &error)) << error;
   }
+}
+
+TEST(JingleMessageTest, ErrorMessage) {
+  const char* kTestSessionInitiateErrorMessage =
+      "<iq to='user@gmail.com/chromoting016DBB07' type='error' "
+      "from='user@gmail.com/chromiumsy5C6A652D' "
+      "xmlns='jabber:client'><jingle xmlns='urn:xmpp:jingle:1' "
+      "action='session-initiate' sid='2227053353' "
+      "initiator='user@gmail.com/chromiumsy5C6A652D'><content "
+      "name='chromoting' creator='initiator'><description "
+      "xmlns='google:remoting'><control transport='stream' version='2'/><event "
+      "transport='stream' version='2'/><video transport='stream' version='2' "
+      "codec='vp8'/><initial-resolution width='800' height='600'/>"
+      "<authentication><auth-token>j7whCMii0Z0AAPwj7whCM/j7whCMii0Z0AAPw="
+      "</auth-token></authentication></description><transport "
+      "xmlns='http://www.google.com/transport/p2p'/></content></jingle>"
+      "<error code='501' type='cancel'><feature-not-implemented "
+      "xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error>"
+      "</iq>";
+  scoped_ptr<XmlElement> source_message(
+      XmlElement::ForStr(kTestSessionInitiateErrorMessage));
+  ASSERT_TRUE(source_message.get());
+
+  EXPECT_FALSE(JingleMessage::IsJingleMessage(source_message.get()));
+
+  JingleMessage message;
+  std::string error;
+  EXPECT_FALSE(message.ParseXml(source_message.get(), &error));
+  EXPECT_FALSE(error.empty());
 }
 
 }  // namespace protocol

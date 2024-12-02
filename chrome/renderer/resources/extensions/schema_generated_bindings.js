@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,29 +7,25 @@
 
 var chrome = chrome || {};
 (function() {
-  native function GetExtensionAPIDefinition();
-  native function StartRequest();
   native function GetChromeHidden();
+  native function GetExtensionAPIDefinition();
   native function GetNextRequestId();
-  native function Print();
-
-  native function GetCurrentPageActions(extensionId);
-  native function GetExtensionViews();
-  native function GetNextContextMenuId();
-  native function GetNextTtsEventId();
-  native function OpenChannelToTab();
-  native function GetRenderViewId();
+  native function StartRequest();
   native function SetIconCommon();
-  native function GetUniqueSubEventName(eventName);
-  native function GetLocalFileSystem(name, path);
-  native function DecodeJPEG(jpegImage);
-  native function CreateBlob(filePath);
-  native function SendResponseAck(requestId);
 
   var chromeHidden = GetChromeHidden();
 
   if (!chrome)
     chrome = {};
+
+  function apiExists(path) {
+    var resolved = chrome;
+    path.split(".").forEach(function(next) {
+      if (resolved)
+        resolved = resolved[next];
+    });
+    return !!resolved;
+  }
 
   function forEach(dict, f) {
     for (key in dict) {
@@ -187,113 +183,132 @@ var chrome = chrome || {};
                           opt_args.forIOThread);
   }
 
-  // --- Setup additional api's not currently handled in common/extensions/api
-
-  // WebRequestEvent object. This is used for special webRequest events with
-  // extra parameters. Each invocation of addListener creates a new named
-  // sub-event. That sub-event is associated with the extra parameters in the
-  // browser process, so that only it is dispatched when the main event occurs
-  // matching the extra parameters.
-  //
-  // Example:
-  //   chrome.webRequest.onBeforeRequest.addListener(
-  //       callback, {urls: "http://*.google.com/*"});
-  //   ^ callback will only be called for onBeforeRequests matching the filter.
-  chrome.WebRequestEvent =
-     function(eventName, opt_argSchemas, opt_extraArgSchemas) {
-    if (typeof eventName != "string")
-      throw new Error("chrome.WebRequestEvent requires an event name.");
-
-    this.eventName_ = eventName;
-    this.argSchemas_ = opt_argSchemas;
-    this.extraArgSchemas_ = opt_extraArgSchemas;
-    this.subEvents_ = [];
-  };
-
-  // Test if the given callback is registered for this event.
-  chrome.WebRequestEvent.prototype.hasListener = function(cb) {
-    return this.findListener_(cb) > -1;
-  };
-
-  // Test if any callbacks are registered fur thus event.
-  chrome.WebRequestEvent.prototype.hasListeners = function(cb) {
-    return this.subEvents_.length > 0;
-  };
-
-  // Registers a callback to be called when this event is dispatched. If
-  // opt_filter is specified, then the callback is only called for events that
-  // match the given filters. If opt_extraInfo is specified, the given optional
-  // info is sent to the callback.
-  chrome.WebRequestEvent.prototype.addListener =
-      function(cb, opt_filter, opt_extraInfo) {
-    var subEventName = GetUniqueSubEventName(this.eventName_);
-    // Note: this could fail to validate, in which case we would not add the
-    // subEvent listener.
-    chromeHidden.validate(Array.prototype.slice.call(arguments, 1),
-                          this.extraArgSchemas_);
-    chrome.webRequest.addEventListener(
-        cb, opt_filter, opt_extraInfo, this.eventName_, subEventName);
-
-    var subEvent = new chrome.Event(subEventName, this.argSchemas_);
-    var subEventCallback = cb;
-    if (opt_extraInfo && opt_extraInfo.indexOf("blocking") >= 0) {
-      var eventName = this.eventName_;
-      subEventCallback = function() {
-        var requestId = arguments[0].requestId;
-        try {
-          var result = cb.apply(null, arguments);
-          chrome.webRequest.eventHandled(
-              eventName, subEventName, requestId, result);
-        } catch (e) {
-          chrome.webRequest.eventHandled(
-              eventName, subEventName, requestId);
-          throw e;
-        }
-      };
-    } else if (opt_extraInfo && opt_extraInfo.indexOf("asyncBlocking") >= 0) {
-      var eventName = this.eventName_;
-      subEventCallback = function() {
-        var details = arguments[0];
-        var requestId = details.requestId;
-        var handledCallback = function(response) {
-          chrome.webRequest.eventHandled(
-              eventName, subEventName, requestId, response);
-        };
-        cb.apply(null, [details, handledCallback]);
-      };
-    }
-    this.subEvents_.push(
-        {subEvent: subEvent, callback: cb, subEventCallback: subEventCallback});
-    subEvent.addListener(subEventCallback);
-  };
-
-  // Unregisters a callback.
-  chrome.WebRequestEvent.prototype.removeListener = function(cb) {
-    var idx = this.findListener_(cb);
-    if (idx < 0) {
-      return;
-    }
-
-    var e = this.subEvents_[idx];
-    e.subEvent.removeListener(e.subEventCallback);
-    if (e.subEvent.hasListeners()) {
-      console.error(
-          "Internal error: webRequest subEvent has orphaned listeners.");
-    }
-    this.subEvents_.splice(idx, 1);
-  };
-
-  chrome.WebRequestEvent.prototype.findListener_ = function(cb) {
-    for (var i in this.subEvents_) {
-      var e = this.subEvents_[i];
-      if (e.callback === cb) {
-        if (e.subEvent.findListener_(e.subEventCallback) > -1)
-          return i;
-        console.error("Internal error: webRequest subEvent has no callback.");
+  // TODO(kalman): It's a shame to need to define this function here, since it's
+  // only used in 2 APIs (browserAction and pageAction). It would be nice to
+  // only load this if one of those APIs has been loaded.
+  // That said, both of those APIs are always injected into pages anyway (see
+  // chrome/common/extensions/extension_permission_set.cc).
+  function setIcon(details, name, parameters, actionType) {
+    var iconSize = 19;
+    if ("iconIndex" in details) {
+      sendRequest(name, [details], parameters);
+    } else if ("imageData" in details) {
+      // Verify that this at least looks like an ImageData element.
+      // Unfortunately, we cannot use instanceof because the ImageData
+      // constructor is not public.
+      //
+      // We do this manually instead of using JSONSchema to avoid having these
+      // properties show up in the doc.
+      if (!("width" in details.imageData) ||
+          !("height" in details.imageData) ||
+          !("data" in details.imageData)) {
+        throw new Error(
+            "The imageData property must contain an ImageData object.");
       }
-    }
 
-    return -1;
+      if (details.imageData.width > iconSize ||
+          details.imageData.height > iconSize) {
+        throw new Error(
+            "The imageData property must contain an ImageData object that " +
+            "is no larger than " + iconSize + " pixels square.");
+      }
+
+      sendRequest(name, [details], parameters,
+                  {noStringify: true, nativeFunction: SetIconCommon});
+    } else if ("path" in details) {
+      var img = new Image();
+      img.onerror = function() {
+        console.error("Could not load " + actionType + " icon '" +
+                      details.path + "'.");
+      };
+      img.onload = function() {
+        var canvas = document.createElement("canvas");
+        canvas.width = img.width > iconSize ? iconSize : img.width;
+        canvas.height = img.height > iconSize ? iconSize : img.height;
+
+        var canvas_context = canvas.getContext('2d');
+        canvas_context.clearRect(0, 0, canvas.width, canvas.height);
+        canvas_context.drawImage(img, 0, 0, canvas.width, canvas.height);
+        delete details.path;
+        details.imageData = canvas_context.getImageData(0, 0, canvas.width,
+                                                        canvas.height);
+        sendRequest(name, [details], parameters,
+                    {noStringify: true, nativeFunction: SetIconCommon});
+      };
+      img.src = details.path;
+    } else {
+      throw new Error(
+          "Either the path or imageData property must be specified.");
+    }
+  }
+
+  // Stores the name and definition of each API function, with methods to
+  // modify their behaviour (such as a custom way to handle requests to the
+  // API, a custom callback, etc).
+  function APIFunctions() {
+    this._apiFunctions = {};
+  }
+  APIFunctions.prototype.register = function(apiName, apiFunction) {
+    this._apiFunctions[apiName] = apiFunction;
+  };
+  APIFunctions.prototype._setHook =
+      function(apiName, propertyName, customizedFunction) {
+    if (this._apiFunctions.hasOwnProperty(apiName))
+      this._apiFunctions[apiName][propertyName] = customizedFunction;
+  };
+  APIFunctions.prototype.setHandleRequest =
+      function(apiName, customizedFunction) {
+    return this._setHook(apiName, 'handleRequest', customizedFunction);
+  };
+  APIFunctions.prototype.setUpdateArgumentsPostValidate =
+      function(apiName, customizedFunction) {
+    return this._setHook(
+      apiName, 'updateArgumentsPostValidate', customizedFunction);
+  };
+  APIFunctions.prototype.setUpdateArgumentsPreValidate =
+      function(apiName, customizedFunction) {
+    return this._setHook(
+      apiName, 'updateArgumentsPreValidate', customizedFunction);
+  };
+  APIFunctions.prototype.setCustomCallback =
+      function(apiName, customizedFunction) {
+    return this._setHook(apiName, 'customCallback', customizedFunction);
+  };
+
+  var apiFunctions = new APIFunctions();
+
+  //
+  // The API through which the ${api_name}_custom_bindings.js files customize
+  // their API bindings beyond what can be generated.
+  //
+  // There are 2 types of customizations available: those which are required in
+  // order to do the schema generation (registerCustomEvent and
+  // registerCustomType), and those which can only run after the bindings have
+  // been generated (registerCustomHook).
+  //
+
+  // Registers a custom event type for the API identified by |namespace|.
+  // |event| is the event's constructor.
+  var customEvents = {};
+  chromeHidden.registerCustomEvent = function(namespace, event) {
+    if (typeof(namespace) !== 'string') {
+      throw new Error("registerCustomEvent requires the namespace of the " +
+                      "API as its first argument");
+    }
+    customEvents[namespace] = event;
+  };
+
+  // Registers a function |hook| to run after the schema for all APIs has been
+  // generated.  The hook is passed as its first argument an "API" object to
+  // interact with, and second the current extension ID. See where
+  // |customHooks| is used.
+  var customHooks = {};
+  chromeHidden.registerCustomHook = function(namespace, fn) {
+    if (typeof(namespace) !== 'string') {
+      throw new Error("registerCustomHook requires the namespace of the " +
+                      "API as its first argument");
+    }
+    customHooks[namespace] = fn;
   };
 
   function CustomBindingsObject() {
@@ -308,279 +323,16 @@ var chrome = chrome || {};
     });
   };
 
-  function extendSchema(schema) {
-    var extendedSchema = schema.slice();
-    extendedSchema.unshift({'type': 'string'});
-    return extendedSchema;
-  }
-
-  var customBindings = {};
-
-  function setupChromeSetting() {
-    function ChromeSetting(prefKey, valueSchema) {
-      this.get = function(details, callback) {
-        var getSchema = this.parameters.get;
-        chromeHidden.validate([details, callback], getSchema);
-        return sendRequest('types.ChromeSetting.get',
-                           [prefKey, details, callback],
-                           extendSchema(getSchema));
-      };
-      this.set = function(details, callback) {
-        var setSchema = this.parameters.set.slice();
-        setSchema[0].properties.value = valueSchema;
-        chromeHidden.validate([details, callback], setSchema);
-        return sendRequest('types.ChromeSetting.set',
-                           [prefKey, details, callback],
-                           extendSchema(setSchema));
-      };
-      this.clear = function(details, callback) {
-        var clearSchema = this.parameters.clear;
-        chromeHidden.validate([details, callback], clearSchema);
-        return sendRequest('types.ChromeSetting.clear',
-                           [prefKey, details, callback],
-                           extendSchema(clearSchema));
-      };
-      this.onChange = new chrome.Event('types.ChromeSetting.' + prefKey +
-                                       '.onChange');
-    };
-    ChromeSetting.prototype = new CustomBindingsObject();
-    customBindings['ChromeSetting'] = ChromeSetting;
-  }
-
-  function setupContentSetting() {
-    function ContentSetting(contentType, settingSchema) {
-      this.get = function(details, callback) {
-        var getSchema = this.parameters.get;
-        chromeHidden.validate([details, callback], getSchema);
-        return sendRequest('contentSettings.get',
-                           [contentType, details, callback],
-                           extendSchema(getSchema));
-      };
-      this.set = function(details, callback) {
-        var setSchema = this.parameters.set.slice();
-        setSchema[0].properties.setting = settingSchema;
-        chromeHidden.validate([details, callback], setSchema);
-        return sendRequest('contentSettings.set',
-                           [contentType, details, callback],
-                           extendSchema(setSchema));
-      };
-      this.clear = function(details, callback) {
-        var clearSchema = this.parameters.clear;
-        chromeHidden.validate([details, callback], clearSchema);
-        return sendRequest('contentSettings.clear',
-                           [contentType, details, callback],
-                           extendSchema(clearSchema));
-      };
-      this.getResourceIdentifiers = function(callback) {
-        var schema = this.parameters.getResourceIdentifiers;
-        chromeHidden.validate([callback], schema);
-        return sendRequest(
-            'contentSettings.getResourceIdentifiers',
-            [contentType, callback],
-            extendSchema(schema));
-      };
-    }
-    ContentSetting.prototype = new CustomBindingsObject();
-    customBindings['ContentSetting'] = ContentSetting;
-  }
-
-  function setupStorageNamespace() {
-    function StorageNamespace(namespace, schema) {
-      // Binds an API function for a namespace to its browser-side call, e.g.
-      // experimental.storage.sync.get('foo') -> (binds to) ->
-      // experimental.storage.get('sync', 'foo').
-      //
-      // TODO(kalman): Put as a method on CustomBindingsObject and re-use (or
-      // even generate) for other APIs that need to do this.
-      function bindApiFunction(functionName) {
-        this[functionName] = function() {
-          var schema = this.parameters[functionName];
-          chromeHidden.validate(arguments, schema);
-          return sendRequest(
-              'experimental.storage.' + functionName,
-              [namespace].concat(Array.prototype.slice.call(arguments)),
-              extendSchema(schema));
-        };
-      }
-      ['get', 'set', 'remove', 'clear'].forEach(bindApiFunction.bind(this));
-    }
-    StorageNamespace.prototype = new CustomBindingsObject();
-    customBindings['StorageNamespace'] = StorageNamespace;
-  }
-  function setupInputEvents() {
-    chrome.experimental.input.ime.onKeyEvent.dispatch =
-        function(engineID, keyData) {
-      var args = Array.prototype.slice.call(arguments);
-      if (this.validate_) {
-        var validationErrors = this.validate_(args);
-        if (validationErrors) {
-          chrome.experimental.input.ime.eventHandled(requestId, false);
-          return validationErrors;
-        }
-      }
-      if (this.listeners_.length > 1) {
-        console.error("Too many listeners for 'onKeyEvent': " + e.stack);
-        chrome.experimental.input.ime.eventHandled(requestId, false);
-        return;
-      }
-      for (var i = 0; i < this.listeners_.length; i++) {
-        try {
-          var requestId = keyData.requestId;
-          var result = this.listeners_[i].apply(null, args);
-          chrome.experimental.input.ime.eventHandled(requestId, result);
-        } catch (e) {
-          console.error("Error in event handler for 'onKeyEvent': " + e.stack);
-          chrome.experimental.input.ime.eventHandled(requestId, false);
-        }
-      }
-    };
-  }
-
-  // Page action events send (pageActionId, {tabId, tabUrl}).
-  function setupPageActionEvents(extensionId) {
-    var pageActions = GetCurrentPageActions(extensionId);
-
-    var oldStyleEventName = "pageActions";
-    // TODO(EXTENSIONS_DEPRECATED): only one page action
-    for (var i = 0; i < pageActions.length; ++i) {
-      // Setup events for each extension_id/page_action_id string we find.
-      chrome.pageActions[pageActions[i]] = new chrome.Event(oldStyleEventName);
-    }
-  }
-
-  function setupHiddenContextMenuEvent(extensionId) {
-    chromeHidden.contextMenus = {};
-    chromeHidden.contextMenus.handlers = {};
-    var eventName = "contextMenus";
-    chromeHidden.contextMenus.event = new chrome.Event(eventName);
-    chromeHidden.contextMenus.ensureListenerSetup = function() {
-      if (chromeHidden.contextMenus.listening) {
-        return;
-      }
-      chromeHidden.contextMenus.listening = true;
-      chromeHidden.contextMenus.event.addListener(function() {
-        // An extension context menu item has been clicked on - fire the onclick
-        // if there is one.
-        var id = arguments[0].menuItemId;
-        var onclick = chromeHidden.contextMenus.handlers[id];
-        if (onclick) {
-          onclick.apply(null, arguments);
-        }
-      });
-    };
-  }
-
-  // Remove invalid characters from |text| so that it is suitable to use
-  // for |AutocompleteMatch::contents|.
-  function sanitizeString(text, shouldTrim) {
-    // NOTE: This logic mirrors |AutocompleteMatch::SanitizeString()|.
-    // 0x2028 = line separator; 0x2029 = paragraph separator.
-    var kRemoveChars = /(\r|\n|\t|\u2028|\u2029)/gm;
-    if (shouldTrim)
-      text = text.trimLeft();
-    return text.replace(kRemoveChars, '');
-  }
-
-  // Parses the xml syntax supported by omnibox suggestion results. Returns an
-  // object with two properties: 'description', which is just the text content,
-  // and 'descriptionStyles', which is an array of style objects in a format
-  // understood by the C++ backend.
-  function parseOmniboxDescription(input) {
-    var domParser = new DOMParser();
-
-    // The XML parser requires a single top-level element, but we want to
-    // support things like 'hello, <match>world</match>!'. So we wrap the
-    // provided text in generated root level element.
-    var root = domParser.parseFromString(
-        '<fragment>' + input + '</fragment>', 'text/xml');
-
-    // DOMParser has a terrible error reporting facility. Errors come out nested
-    // inside the returned document.
-    var error = root.querySelector('parsererror div');
-    if (error) {
-      throw new Error(error.textContent);
-    }
-
-    // Otherwise, it's valid, so build up the result.
-    var result = {
-      description: '',
-      descriptionStyles: []
-    };
-
-    // Recursively walk the tree.
-    (function(node) {
-      for (var i = 0, child; child = node.childNodes[i]; i++) {
-        // Append text nodes to our description.
-        if (child.nodeType == Node.TEXT_NODE) {
-          var shouldTrim = result.description.length == 0;
-          result.description += sanitizeString(child.nodeValue, shouldTrim);
-          continue;
-        }
-
-        // Process and descend into a subset of recognized tags.
-        if (child.nodeType == Node.ELEMENT_NODE &&
-            (child.nodeName == 'dim' || child.nodeName == 'match' ||
-             child.nodeName == 'url')) {
-          var style = {
-            'type': child.nodeName,
-            'offset': result.description.length
-          };
-          result.descriptionStyles.push(style);
-          arguments.callee(child);
-          style.length = result.description.length - style.offset;
-          continue;
-        }
-
-        // Descend into all other nodes, even if they are unrecognized, for
-        // forward compat.
-        arguments.callee(child);
-      }
-    })(root);
-
-    return result;
-  }
-
-  function setupOmniboxEvents() {
-    chrome.omnibox.onInputChanged.dispatch =
-        function(text, requestId) {
-      var suggestCallback = function(suggestions) {
-        chrome.omnibox.sendSuggestions(requestId, suggestions);
-      };
-      chrome.Event.prototype.dispatch.apply(this, [text, suggestCallback]);
-    };
-  }
-
-  function setupTtsEvents() {
-    chromeHidden.tts = {};
-    chromeHidden.tts.handlers = {};
-    chrome.ttsEngine.onSpeak.dispatch =
-        function(text, options, requestId) {
-          var sendTtsEvent = function(event) {
-            chrome.ttsEngine.sendTtsEvent(requestId, event);
-          };
-          chrome.Event.prototype.dispatch.apply(
-              this, [text, options, sendTtsEvent]);
-        };
-    try {
-      chrome.tts.onEvent.addListener(
-          function(event) {
-            var eventHandler = chromeHidden.tts.handlers[event.srcId];
-            if (eventHandler) {
-              eventHandler({
-                             type: event.type,
-                             charIndex: event.charIndex,
-                             errorMessage: event.errorMessage
-                           });
-              if (event.isFinalEvent) {
-                delete chromeHidden.tts.handlers[event.srcId];
-              }
-            }
-          });
-      } catch (e) {
-        // This extension doesn't have permission to access TTS, so we
-        // can safely ignore this.
-      }
-  }
+  // Registers a custom type referenced via "$ref" fields in the API schema
+  // JSON.
+  var customTypes = {};
+  chromeHidden.registerCustomType = function(typeName, customTypeFactory) {
+    var customType = customTypeFactory({
+      sendRequest: sendRequest,
+    });
+    customType.prototype = new CustomBindingsObject();
+    customTypes[typeName] = customType;
+  };
 
   // Get the platform from navigator.appVersion.
   function getPlatform() {
@@ -600,22 +352,26 @@ var chrome = chrome || {};
     return "unknown";
   }
 
-  chromeHidden.onLoad.addListener(function(extensionId, isExtensionProcess,
-                                           isIncognitoProcess) {
-    // Setup the ChromeSetting class so we can use it to construct
-    // ChromeSetting objects from the API definition.
-    setupChromeSetting();
+  function isPlatformSupported(schemaNode, platform) {
+    return !schemaNode.platforms ||
+        schemaNode.platforms.indexOf(platform) > -1;
+  }
 
-    // Ditto ContentSetting.
-    setupContentSetting();
+  function isManifestVersionSupported(schemaNode, manifestVersion) {
+    return !schemaNode.maximumManifestVersion ||
+        manifestVersion <= schemaNode.maximumManifestVersion;
+  }
 
-    // Ditto StorageNamespace.
-    setupStorageNamespace();
+  function isSchemaNodeSupported(schemaNode, platform, manifestVersion) {
+    return isPlatformSupported(schemaNode, platform) &&
+        isManifestVersionSupported(schemaNode, manifestVersion);
+  }
 
-    // |apiFunctions| is a hash of name -> object that stores the
-    // name & definition of the apiFunction. Custom handling of api functions
-    // is implemented by adding a "handleRequest" function to the object.
-    var apiFunctions = {};
+  chromeHidden.onLoad.addListener(function(extensionId,
+                                           isExtensionProcess,
+                                           isIncognitoProcess,
+                                           manifestVersion) {
+    var apiDefinitions = GetExtensionAPIDefinition();
 
     // Read api definitions and setup api functions in the chrome namespace.
     // TODO(rafaelw): Consider defining a json schema for an api definition
@@ -623,14 +379,11 @@ var chrome = chrome || {};
     // TODO(rafaelw): Handle synchronous functions.
     // TODO(rafaelw): Consider providing some convenient override points
     //   for api functions that wish to insert themselves into the call.
-    var apiDefinitions = GetExtensionAPIDefinition();
     var platform = getPlatform();
 
     apiDefinitions.forEach(function(apiDef) {
-      // Check platform, if apiDef has platforms key.
-      if (apiDef.platforms && apiDef.platforms.indexOf(platform) == -1) {
+      if (!isSchemaNodeSupported(apiDef, platform, manifestVersion))
         return;
-      }
 
       var module = chrome;
       var namespaces = apiDef.namespace.split('.');
@@ -642,15 +395,18 @@ var chrome = chrome || {};
       // Add types to global validationTypes
       if (apiDef.types) {
         apiDef.types.forEach(function(t) {
+          if (!isSchemaNodeSupported(t, platform, manifestVersion))
+            return;
+
           chromeHidden.validationTypes.push(t);
-          if (t.type == 'object' && customBindings[t.id]) {
-            customBindings[t.id].prototype.setSchema(t);
+          if (t.type == 'object' && customTypes[t.id]) {
+            customTypes[t.id].prototype.setSchema(t);
           }
         });
       }
 
       // Adds a getter that throws an access denied error to object |module|
-      // for property |name| described by |schemaNode| if necessary.
+      // for property |name|.
       //
       // Returns true if the getter was necessary (access is disallowed), or
       // false otherwise.
@@ -669,6 +425,9 @@ var chrome = chrome || {};
       // Setup Functions.
       if (apiDef.functions) {
         apiDef.functions.forEach(function(functionDef) {
+          if (!isSchemaNodeSupported(functionDef, platform, manifestVersion))
+            return;
+
           if (functionDef.name in module ||
               addUnprivilegedAccessGetter(module, functionDef.name,
                                           functionDef.unprivileged)) {
@@ -678,7 +437,7 @@ var chrome = chrome || {};
           var apiFunction = {};
           apiFunction.definition = functionDef;
           apiFunction.name = apiDef.namespace + "." + functionDef.name;
-          apiFunctions[apiFunction.name] = apiFunction;
+          apiFunctions.register(apiFunction.name, apiFunction);
 
           module[functionDef.name] = (function() {
             var args = arguments;
@@ -711,6 +470,9 @@ var chrome = chrome || {};
       // Setup Events
       if (apiDef.events) {
         apiDef.events.forEach(function(eventDef) {
+          if (!isSchemaNodeSupported(eventDef, platform, manifestVersion))
+            return;
+
           if (eventDef.name in module ||
               addUnprivilegedAccessGetter(module, eventDef.name,
                                           eventDef.unprivileged)) {
@@ -718,12 +480,13 @@ var chrome = chrome || {};
           }
 
           var eventName = apiDef.namespace + "." + eventDef.name;
-          if (apiDef.namespace == "webRequest") {
-            module[eventDef.name] = new chrome.WebRequestEvent(eventName,
-                eventDef.parameters, eventDef.extraParameters);
+          var customEvent = customEvents[apiDef.namespace];
+          if (customEvent) {
+            module[eventDef.name] = new customEvent(
+                eventName, eventDef.parameters, eventDef.extraParameters);
           } else {
-            module[eventDef.name] = new chrome.Event(eventName,
-                eventDef.parameters);
+            module[eventDef.name] = new chrome.Event(
+                eventName, eventDef.parameters);
           }
         });
       }
@@ -732,6 +495,9 @@ var chrome = chrome || {};
         // Parse any values defined for properties.
         if (def.properties) {
           forEach(def.properties, function(prop, property) {
+            if (!isSchemaNodeSupported(property, platform, manifestVersion))
+              return;
+
             if (prop in m ||
                 addUnprivilegedAccessGetter(m, prop, property.unprivileged)) {
               return;
@@ -744,7 +510,9 @@ var chrome = chrome || {};
               } else if (property.type === 'boolean') {
                 value = value === "true";
               } else if (property["$ref"]) {
-                var constructor = customBindings[property["$ref"]];
+                var constructor = customTypes[property["$ref"]];
+                if (!constructor)
+                  throw new Error("No custom binding for " + property["$ref"]);
                 var args = value;
                 // For an object property, |value| is an array of constructor
                 // arguments, but we want to pass the arguments directly
@@ -752,6 +520,8 @@ var chrome = chrome || {};
                 // the constructor.
                 value = { __proto__: constructor.prototype };
                 constructor.apply(value, args);
+                // Recursively add properties.
+                addProperties(value, property);
               } else if (property.type === 'object') {
                 // Recursively add properties.
                 addProperties(value, property);
@@ -778,343 +548,36 @@ var chrome = chrome || {};
     if (!isExtensionProcess)
       return;
 
-    // getTabContentses is retained for backwards compatibility
-    // See http://crbug.com/21433
-    chrome.extension.getTabContentses = chrome.extension.getExtensionTabs;
+    // TODO(kalman/aa): "The rest of this crap..." comment above. Only run the
+    // custom hooks in extension processes, to maintain current behaviour. We
+    // should fix this this with a smaller hammer.
+    apiDefinitions.forEach(function(apiDef) {
+      if (!isSchemaNodeSupported(apiDef, platform, manifestVersion))
+        return;
+
+      var hook = customHooks[apiDef.namespace];
+      if (!hook)
+        return;
+
+      // Pass through the public API of schema_generated_bindings, to be used
+      // by custom bindings JS files. Create a new one so that bindings can't
+      // interfere with each other.
+      hook({
+        apiFunctions: apiFunctions,
+        sendRequest: sendRequest,
+        setIcon: setIcon,
+      }, extensionId);
+    });
+
     // TOOD(mihaip): remove this alias once the webstore stops calling
     // beginInstallWithManifest2.
     // See http://crbug.com/100242
-    chrome.webstorePrivate.beginInstallWithManifest2 =
-        chrome.webstorePrivate.beginInstallWithManifest3;
-
-    apiFunctions["tabs.connect"].handleRequest = function(tabId, connectInfo) {
-      var name = "";
-      if (connectInfo) {
-        name = connectInfo.name || name;
-      }
-      var portId = OpenChannelToTab(tabId, chromeHidden.extensionId, name);
-      return chromeHidden.Port.createPort(portId, name);
-    };
-
-    apiFunctions["tabs.sendRequest"].handleRequest =
-        function(tabId, request, responseCallback) {
-      var port = chrome.tabs.connect(tabId,
-                                     {name: chromeHidden.kRequestChannel});
-      port.postMessage(request);
-      port.onDisconnect.addListener(function() {
-        // For onDisconnects, we only notify the callback if there was an error.
-        if (chrome.extension.lastError && responseCallback)
-          responseCallback();
-      });
-      port.onMessage.addListener(function(response) {
-        try {
-          if (responseCallback)
-            responseCallback(response);
-        } finally {
-          port.disconnect();
-          port = null;
-        }
-      });
-    };
-
-    apiFunctions["pageCapture.saveAsMHTML"].customCallback =
-      function(name, request, response) {
-        var params = chromeHidden.JSON.parse(response);
-        var path = params.mhtmlFilePath;
-        var size = params.mhtmlFileLength;
-
-        if (request.callback)
-          request.callback(CreateBlob(path, size));
-        request.callback = null;
-
-        // Notify the browser. Now that the blob is referenced from JavaScript,
-        // the browser can drop its reference to it.
-        SendResponseAck(request.id);
-      };
-
-    apiFunctions["fileBrowserPrivate.requestLocalFileSystem"].customCallback =
-      function(name, request, response) {
-        var resp = response ? [chromeHidden.JSON.parse(response)] : [];
-        var fs = null;
-        if (!resp[0].error)
-          fs = GetLocalFileSystem(resp[0].name, resp[0].path);
-        if (request.callback)
-          request.callback(fs);
-        request.callback = null;
-      };
-
-    apiFunctions["chromePrivate.decodeJPEG"].handleRequest =
-      function(jpeg_image) {
-        return DecodeJPEG(jpeg_image);
-      };
-
-    apiFunctions["extension.getViews"].handleRequest = function(properties) {
-      var windowId = -1;
-      var type = "ALL";
-      if (typeof(properties) != "undefined") {
-        if (typeof(properties.type) != "undefined") {
-          type = properties.type;
-        }
-        if (typeof(properties.windowId) != "undefined") {
-          windowId = properties.windowId;
-        }
-      }
-      return GetExtensionViews(windowId, type) || null;
-    };
-
-    apiFunctions["extension.getBackgroundPage"].handleRequest = function() {
-      return GetExtensionViews(-1, "BACKGROUND")[0] || null;
-    };
-
-    apiFunctions["extension.getExtensionTabs"].handleRequest =
-        function(windowId) {
-      if (typeof(windowId) == "undefined")
-        windowId = -1;
-      return GetExtensionViews(windowId, "TAB");
-    };
-
-    apiFunctions["devtools.getTabEvents"].handleRequest = function(tabId) {
-      var tabIdProxy = {};
-      var functions = ["onPageEvent", "onTabClose"];
-      functions.forEach(function(name) {
-        // Event disambiguation is handled by name munging.  See
-        // chrome/browser/extensions/extension_devtools_events.h for the C++
-        // equivalent of this logic.
-        tabIdProxy[name] = new chrome.Event("devtools." + tabId + "." + name);
-      });
-      return tabIdProxy;
-    };
-
-    var canvas;
-    function setIconCommon(details, name, parameters, actionType, iconSize,
-                           nativeFunction) {
-      if ("iconIndex" in details) {
-        sendRequest(name, [details], parameters);
-      } else if ("imageData" in details) {
-        // Verify that this at least looks like an ImageData element.
-        // Unfortunately, we cannot use instanceof because the ImageData
-        // constructor is not public.
-        //
-        // We do this manually instead of using JSONSchema to avoid having these
-        // properties show up in the doc.
-        if (!("width" in details.imageData) ||
-            !("height" in details.imageData) ||
-            !("data" in details.imageData)) {
-          throw new Error(
-              "The imageData property must contain an ImageData object.");
-        }
-
-        if (details.imageData.width > iconSize ||
-            details.imageData.height > iconSize) {
-          throw new Error(
-              "The imageData property must contain an ImageData object that " +
-              "is no larger than " + iconSize + " pixels square.");
-        }
-
-        sendRequest(name, [details], parameters,
-                    {noStringify: true, nativeFunction: nativeFunction});
-      } else if ("path" in details) {
-        var img = new Image();
-        img.onerror = function() {
-          console.error("Could not load " + actionType + " icon '" +
-                        details.path + "'.");
-        };
-        img.onload = function() {
-          var canvas = document.createElement("canvas");
-          canvas.width = img.width > iconSize ? iconSize : img.width;
-          canvas.height = img.height > iconSize ? iconSize : img.height;
-
-          var canvas_context = canvas.getContext('2d');
-          canvas_context.clearRect(0, 0, canvas.width, canvas.height);
-          canvas_context.drawImage(img, 0, 0, canvas.width, canvas.height);
-          delete details.path;
-          details.imageData = canvas_context.getImageData(0, 0, canvas.width,
-                                                          canvas.height);
-          sendRequest(name, [details], parameters,
-                      {noStringify: true, nativeFunction: nativeFunction});
-        };
-        img.src = details.path;
-      } else {
-        throw new Error(
-            "Either the path or imageData property must be specified.");
-      }
+    if (apiExists("webstorePrivate")) {
+      chrome.webstorePrivate.beginInstallWithManifest2 =
+          chrome.webstorePrivate.beginInstallWithManifest3;
     }
 
-    function setExtensionActionIconCommon(details, name, parameters,
-                                          actionType) {
-      var EXTENSION_ACTION_ICON_SIZE = 19;
-      setIconCommon(details, name, parameters, actionType,
-                    EXTENSION_ACTION_ICON_SIZE, SetIconCommon);
-    }
-
-    apiFunctions["browserAction.setIcon"].handleRequest = function(details) {
-      setExtensionActionIconCommon(
-          details, this.name, this.definition.parameters, "browser action");
-    };
-
-    apiFunctions["pageAction.setIcon"].handleRequest = function(details) {
-      setExtensionActionIconCommon(
-          details, this.name, this.definition.parameters, "page action");
-    };
-
-    apiFunctions["experimental.sidebar.setIcon"].handleRequest =
-        function(details) {
-      var SIDEBAR_ICON_SIZE = 16;
-      setIconCommon(
-          details, this.name, this.definition.parameters, "sidebar",
-          SIDEBAR_ICON_SIZE, SetIconCommon);
-    };
-
-    apiFunctions["contextMenus.create"].handleRequest =
-        function() {
-      var args = arguments;
-      var id = GetNextContextMenuId();
-      args[0].generatedId = id;
-      sendRequest(this.name, args, this.definition.parameters,
-                  {customCallback: this.customCallback});
-      return id;
-    };
-
-    apiFunctions["omnibox.setDefaultSuggestion"].handleRequest =
-        function(details) {
-      var parseResult = parseOmniboxDescription(details.description);
-      sendRequest(this.name, [parseResult], this.definition.parameters);
-    };
-
-    apiFunctions["webRequest.addEventListener"].handleRequest =
-        function() {
-      var args = Array.prototype.slice.call(arguments);
-      sendRequest(this.name, args, this.definition.parameters,
-                  {forIOThread: true});
-    };
-
-    apiFunctions["webRequest.eventHandled"].handleRequest =
-        function() {
-      var args = Array.prototype.slice.call(arguments);
-      sendRequest(this.name, args, this.definition.parameters,
-                  {forIOThread: true});
-    };
-
-    apiFunctions["webRequest.handlerBehaviorChanged"].
-        handleRequest = function() {
-      var args = Array.prototype.slice.call(arguments);
-      sendRequest(this.name, args, this.definition.parameters,
-                  {forIOThread: true});
-    };
-
-    apiFunctions["contextMenus.create"].customCallback =
-        function(name, request, response) {
-      if (chrome.extension.lastError) {
-        return;
-      }
-
-      var id = request.args[0].generatedId;
-
-      // Set up the onclick handler if we were passed one in the request.
-      var onclick = request.args.length ? request.args[0].onclick : null;
-      if (onclick) {
-        chromeHidden.contextMenus.ensureListenerSetup();
-        chromeHidden.contextMenus.handlers[id] = onclick;
-      }
-    };
-
-    apiFunctions["contextMenus.remove"].customCallback =
-        function(name, request, response) {
-      if (chrome.extension.lastError) {
-        return;
-      }
-      var id = request.args[0];
-      delete chromeHidden.contextMenus.handlers[id];
-    };
-
-    apiFunctions["contextMenus.update"].customCallback =
-        function(name, request, response) {
-      if (chrome.extension.lastError) {
-        return;
-      }
-      var id = request.args[0];
-      if (request.args[1].onclick) {
-        chromeHidden.contextMenus.handlers[id] = request.args[1].onclick;
-      }
-    };
-
-    apiFunctions["contextMenus.removeAll"].customCallback =
-        function(name, request, response) {
-      if (chrome.extension.lastError) {
-        return;
-      }
-      chromeHidden.contextMenus.handlers = {};
-    };
-
-    apiFunctions["tabs.captureVisibleTab"].updateArgumentsPreValidate =
-        function() {
-      // Old signature:
-      //    captureVisibleTab(int windowId, function callback);
-      // New signature:
-      //    captureVisibleTab(int windowId, object details, function callback);
-      //
-      // TODO(skerner): The next step to omitting optional arguments is the
-      // replacement of this code with code that matches arguments by type.
-      // Once this is working for captureVisibleTab() it can be enabled for
-      // the rest of the API. See crbug/29215 .
-      if (arguments.length == 2 && typeof(arguments[1]) == "function") {
-        // If the old signature is used, add a null details object.
-        newArgs = [arguments[0], null, arguments[1]];
-      } else {
-        newArgs = arguments;
-      }
-      return newArgs;
-    };
-
-    apiFunctions["omnibox.sendSuggestions"].updateArgumentsPostValidate =
-        function(requestId, userSuggestions) {
-      var suggestions = [];
-      for (var i = 0; i < userSuggestions.length; i++) {
-        var parseResult = parseOmniboxDescription(
-            userSuggestions[i].description);
-        parseResult.content = userSuggestions[i].content;
-        suggestions.push(parseResult);
-      }
-      return [requestId, suggestions];
-    };
-
-    apiFunctions["tts.speak"].handleRequest = function() {
-      var args = arguments;
-      if (args.length > 1 && args[1] && args[1].onEvent) {
-        var id = GetNextTtsEventId();
-        args[1].srcId = id;
-        chromeHidden.tts.handlers[id] = args[1].onEvent;
-      }
-      sendRequest(this.name, args, this.definition.parameters);
-      return id;
-    };
-
-    if (chrome.test) {
+    if (apiExists("test"))
       chrome.test.getApiDefinitions = GetExtensionAPIDefinition;
-    }
-
-    setupPageActionEvents(extensionId);
-    setupHiddenContextMenuEvent(extensionId);
-    setupInputEvents();
-    setupOmniboxEvents();
-    setupTtsEvents();
   });
-
-  if (!chrome.experimental)
-    chrome.experimental = {};
-
-  if (!chrome.experimental.accessibility)
-    chrome.experimental.accessibility = {};
-
-  if (!chrome.experimental.speechInput)
-    chrome.experimental.speechInput = {};
-
-  if (!chrome.tts)
-    chrome.tts = {};
-
-  if (!chrome.ttsEngine)
-    chrome.ttsEngine = {};
-
-  if (!chrome.experimental.downloads)
-    chrome.experimental.downloads = {};
 })();

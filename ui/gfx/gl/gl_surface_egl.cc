@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,13 @@
 #include "build/build_config.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #if !defined(OS_ANDROID)
 #include "third_party/angle/include/EGL/egl.h"
 #include "third_party/angle/include/EGL/eglext.h"
 #endif
 #include "ui/gfx/gl/egl_util.h"
+#include "ui/gfx/gl/gl_context.h"
 
 #if defined(OS_ANDROID)
 #include <EGL/egl.h>
@@ -56,7 +58,7 @@ bool GLSurfaceEGL::InitializeOneOff() {
 #if defined(USE_WAYLAND)
   g_native_display = ui::WaylandDisplay::Connect(NULL)->display();
 #elif defined(USE_X11)
-  g_native_display = XOpenDisplay(NULL);
+  g_native_display = base::MessagePumpForUI::GetDefaultXDisplay();
 #else
   g_native_display = EGL_DEFAULT_DISPLAY;
 #endif
@@ -293,6 +295,10 @@ bool NativeViewGLSurfaceEGL::PostSubBuffer(
   return true;
 }
 
+void NativeViewGLSurfaceEGL::SetHandle(EGLSurface surface) {
+  surface_ = surface;
+}
+
 PbufferGLSurfaceEGL::PbufferGLSurfaceEGL(bool software, const gfx::Size& size)
     : size_(size),
       surface_(NULL) {
@@ -357,9 +363,22 @@ bool PbufferGLSurfaceEGL::Resize(const gfx::Size& size) {
   if (size == size_)
     return true;
 
+  GLContext* current_context = GLContext::GetCurrent();
+  bool was_current = current_context && current_context->IsCurrent(this);
+  if (was_current)
+    current_context->ReleaseCurrent(this);
+
   Destroy();
+
   size_ = size;
-  return Initialize();
+
+  if (!Initialize())
+    return false;
+
+  if (was_current)
+    return current_context->MakeCurrent(this);
+
+  return true;
 }
 
 EGLSurface PbufferGLSurfaceEGL::GetHandle() {

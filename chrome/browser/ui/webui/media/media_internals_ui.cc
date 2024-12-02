@@ -12,8 +12,12 @@
 #include "chrome/browser/ui/webui/media/media_internals_handler.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/browser_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -35,11 +39,11 @@ ChromeWebUIDataSource* CreateMediaInternalsHTMLSource() {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-MediaInternalsUI::MediaInternalsUI(TabContents* contents)
-    : ChromeWebUI(contents) {
-  AddMessageHandler((new MediaInternalsMessageHandler())->Attach(this));
+MediaInternalsUI::MediaInternalsUI(content::WebUI* web_ui)
+    : WebUIController(web_ui) {
+  web_ui->AddMessageHandler(new MediaInternalsMessageHandler());
 
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  Profile* profile = Profile::FromWebUI(web_ui);
   profile->GetChromeURLDataManager()->AddDataSource(
       CreateMediaInternalsHTMLSource());
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,11 +43,11 @@ class PanelBrowserWindowCocoa : public NativePanel,
   virtual void ShowTaskManagerForPanel() OVERRIDE;
   virtual FindBar* CreatePanelFindBar() OVERRIDE;
   virtual void NotifyPanelOnUserChangedTheme() OVERRIDE;
-  virtual void PanelTabContentsFocused(TabContents* tab_contents) OVERRIDE;
+  virtual void PanelWebContentsFocused(content::WebContents* contents) OVERRIDE;
   virtual void PanelCut() OVERRIDE;
   virtual void PanelCopy() OVERRIDE;
   virtual void PanelPaste() OVERRIDE;
-  virtual void DrawAttention() OVERRIDE;
+  virtual void DrawAttention(bool draw_attention) OVERRIDE;
   virtual bool IsDrawingAttention() const OVERRIDE;
   virtual bool PreHandlePanelKeyboardEvent(
       const NativeWebKeyboardEvent& event,
@@ -59,6 +59,7 @@ class PanelBrowserWindowCocoa : public NativePanel,
   virtual void DestroyPanelBrowser() OVERRIDE;
   virtual gfx::Size IconOnlySize() const OVERRIDE;
   virtual void EnsurePanelFullyVisible() OVERRIDE;
+  virtual void SetPanelAppIconVisibility(bool visible) OVERRIDE;
 
   // These sizes are in screen coordinates.
   virtual gfx::Size WindowSizeFromContentSize(

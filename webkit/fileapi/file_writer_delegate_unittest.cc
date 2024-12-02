@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -26,7 +26,6 @@
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation.h"
 #include "webkit/fileapi/file_system_operation_context.h"
-#include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_system_test_helper.h"
 #include "webkit/fileapi/file_system_usage_cache.h"
 #include "webkit/fileapi/file_writer_delegate.h"
@@ -146,13 +145,14 @@ class FileWriterDelegateTestJob : public net::URLRequestJob {
         cursor_(0) {
   }
 
-  void Start() {
+  virtual void Start() OVERRIDE {
     MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&FileWriterDelegateTestJob::NotifyHeadersComplete, this));
   }
 
-  bool ReadRawData(net::IOBuffer* buf, int buf_size, int *bytes_read) {
+  virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int *bytes_read)
+      OVERRIDE {
     if (remaining_bytes_ < buf_size)
       buf_size = static_cast<int>(remaining_bytes_);
 
@@ -163,6 +163,10 @@ class FileWriterDelegateTestJob : public net::URLRequestJob {
     SetStatus(net::URLRequestStatus());
     *bytes_read = buf_size;
     return true;
+  }
+
+  virtual int GetResponseCode() const OVERRIDE {
+    return 200;
   }
 
  private:

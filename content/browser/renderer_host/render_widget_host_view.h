@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/scoped_ptr.h"
 #include "base/process_util.h"
 #include "base/callback_forward.h"
 #include "content/common/content_export.h"
@@ -23,13 +24,13 @@
 #include "ui/base/ime/text_input_type.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/rect.h"
 #include "ui/gfx/surface/transport_dib.h"
 
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
 
 class BackingStore;
+class BrowserAccessibilityManager;
 class RenderWidgetHost;
 class WebCursor;
 struct NativeWebKeyboardEvent;
@@ -67,6 +68,24 @@ class RenderWidgetHostView {
  public:
   CONTENT_EXPORT virtual ~RenderWidgetHostView();
 
+  // Platform-specific creator. Use this to construct new RenderWidgetHostViews
+  // rather than using RenderWidgetHostViewWin & friends.
+  //
+  // This function must NOT size it, because the RenderView in the renderer
+  // wouldn't have been created yet. The widget would set its "waiting for
+  // resize ack" flag, and the ack would never come becasue no RenderView
+  // received it.
+  //
+  // The RenderWidgetHost must already be created (because we can't know if it's
+  // going to be a regular RenderWidgetHost or a RenderViewHost (a subclass).
+  CONTENT_EXPORT static RenderWidgetHostView* CreateViewForWidget(
+      RenderWidgetHost* widget);
+
+  // Initialize this object for use as a drawing area.  |parent_view| may be
+  // left as NULL on platforms where a parent view is not required to initialize
+  // a child window.
+  virtual void InitAsChild(gfx::NativeView parent_view) = 0;
+
   // Perform all the initialization steps necessary for this object to represent
   // a popup (such as a <select> dropdown), then shows the popup at |pos|.
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
@@ -98,6 +117,7 @@ class RenderWidgetHostView {
   // renderer in IPC messages.
   virtual gfx::NativeView GetNativeView() const = 0;
   virtual gfx::NativeViewId GetNativeViewId() const = 0;
+  virtual gfx::NativeViewAccessible GetNativeViewAccessible() = 0;
 
   // Moves all plugin windows as described in the given list.
   virtual void MovePluginWindows(
@@ -290,6 +310,12 @@ class RenderWidgetHostView {
 
   virtual void UnhandledWheelEvent(const WebKit::WebMouseWheelEvent& event) = 0;
 
+  // Because the associated remote WebKit instance can asynchronously
+  // prevent-default on a dispatched touch event, the touch events are queued in
+  // the GestureRecognizer until invocation of ProcessTouchAck releases it to be
+  // processed (when |processed| is false) or ignored (when |processed| is true)
+  virtual void ProcessTouchAck(bool processed) = 0;
+
   virtual void SetHasHorizontalScrollbar(bool has_horizontal_scrollbar) = 0;
   virtual void SetScrollOffsetPinning(
       bool is_pinned_to_left, bool is_pinned_to_right) = 0;
@@ -312,12 +338,8 @@ class RenderWidgetHostView {
       const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params) {
   }
 
-  gfx::Rect reserved_contents_rect() const {
-    return reserved_rect_;
-  }
-  void set_reserved_contents_rect(const gfx::Rect& reserved_rect) {
-    reserved_rect_ = reserved_rect;
-  }
+  BrowserAccessibilityManager* GetBrowserAccessibilityManager() const;
+  void SetBrowserAccessibilityManager(BrowserAccessibilityManager* manager);
 
   bool mouse_locked() const { return mouse_locked_; }
 
@@ -332,10 +354,6 @@ class RenderWidgetHostView {
   // A custom background to paint behind the web content. This will be tiled
   // horizontally. Can be null, in which case we fall back to painting white.
   SkBitmap background_;
-
-  // The current reserved area in view coordinates where contents should not be
-  // rendered to draw the resize corner, sidebar mini tabs etc.
-  gfx::Rect reserved_rect_;
 
   // While the mouse is locked, the cursor is hidden from the user. Mouse events
   // are still generated. However, the position they report is the last known
@@ -355,6 +373,9 @@ class RenderWidgetHostView {
   ui::Range selection_range_;
 
  private:
+  // Manager of the tree representation of the WebKit render tree.
+  scoped_ptr<BrowserAccessibilityManager> browser_accessibility_manager_;
+
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostView);
 };
 

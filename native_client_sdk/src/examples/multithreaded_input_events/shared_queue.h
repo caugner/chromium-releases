@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <cassert>
 #include <deque>
 
-#include "examples/multithreaded_input_events/thread_safe_ref_count.h"
+#include "thread_safe_ref_count.h"
 
 namespace event_queue {
 

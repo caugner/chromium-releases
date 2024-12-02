@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,9 @@
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "net/base/x509_certificate.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -94,7 +95,10 @@ SSLClientCertificateSelector::SSLClientCertificateSelector(
       delegate_(delegate),
       model_(new CertificateSelectorTableModel(cert_request_info)),
       wrapper_(wrapper),
-      window_(NULL) {
+      window_(NULL),
+      table_(NULL),
+      view_cert_button_(NULL),
+      view_cert_button_container_(NULL) {
   DVLOG(1) << __FUNCTION__;
 }
 
@@ -113,9 +117,9 @@ void SSLClientCertificateSelector::Init() {
       1, views::GridLayout::USE_PREF, 0, 0);
 
   layout->StartRow(0, column_set_id);
-  std::wstring text = UTF16ToWide(l10n_util::GetStringFUTF16(
+  string16 text = l10n_util::GetStringFUTF16(
       IDS_CLIENT_CERT_DIALOG_TEXT,
-      ASCIIToUTF16(cert_request_info_->host_and_port)));
+      ASCIIToUTF16(cert_request_info_->host_and_port));
   views::Label* label = new views::Label(text);
   label->SetMultiLine(true);
   label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
@@ -126,7 +130,9 @@ void SSLClientCertificateSelector::Init() {
 
   CreateCertTable();
   layout->StartRow(1, column_set_id);
-  layout->AddView(table_);
+  layout->AddView(table_->CreateParentIfNecessary(), 1, 1,
+                  views::GridLayout::FILL,
+                  views::GridLayout::FILL, kTableViewWidth, kTableViewHeight);
 
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
@@ -228,8 +234,9 @@ void SSLClientCertificateSelector::ButtonPressed(
   if (sender == view_cert_button_) {
     net::X509Certificate* cert = GetSelectedCert();
     if (cert)
-      ShowCertificateViewer(wrapper_->tab_contents()->GetDialogRootWindow(),
-                            cert);
+      ShowCertificateViewer(
+          wrapper_->web_contents()->GetView()->GetTopLevelNativeWindow(),
+          cert);
   }
 }
 
@@ -256,13 +263,12 @@ void SSLClientCertificateSelector::CreateCertTable() {
                                 true,  // single_selection
                                 true,  // resizable_columns
                                 true);  // autosize_columns
-  table_->SetPreferredSize(gfx::Size(kTableViewWidth, kTableViewHeight));
   table_->SetObserver(this);
 }
 
 void SSLClientCertificateSelector::CreateViewCertButton() {
-  view_cert_button_ = new views::NativeTextButton(this, UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_PAGEINFO_CERT_INFO_BUTTON)));
+  view_cert_button_ = new views::NativeTextButton(this,
+      l10n_util::GetStringUTF16(IDS_PAGEINFO_CERT_INFO_BUTTON));
 
   // Wrap the view cert button in a grid layout in order to left-align it.
   view_cert_button_container_ = new views::View();
@@ -283,7 +289,7 @@ void SSLClientCertificateSelector::CreateViewCertButton() {
 
 namespace browser {
 
-void ShowSSLClientCertificateSelector(
+void ShowNativeSSLClientCertificateSelector(
     TabContentsWrapper* wrapper,
     net::SSLCertRequestInfo* cert_request_info,
     SSLClientAuthHandler* delegate) {
@@ -293,5 +299,16 @@ void ShowSSLClientCertificateSelector(
                                    cert_request_info,
                                    delegate))->Init();
 }
+
+#if !defined(USE_NSS) && !defined(USE_OPENSSL)
+// The webui version of the SSL client cert selector is excluded from the build
+// under these conditions.  Add stub implementation for the required method.
+void ShowSSLClientCertificateSelector(
+    TabContentsWrapper* wrapper,
+    net::SSLCertRequestInfo* cert_request_info,
+    SSLClientAuthHandler* delegate) {
+  ShowNativeSSLClientCertificateSelector(wrapper, cert_request_info, delegate);
+}
+#endif
 
 }  // namespace browser

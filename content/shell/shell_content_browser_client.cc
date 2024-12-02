@@ -1,22 +1,26 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/shell/shell_content_browser_client.h"
 
+#include "base/command_line.h"
 #include "base/file_path.h"
-#include "content/browser/webui/empty_web_ui_factory.h"
 #include "content/shell/shell.h"
 #include "content/shell/shell_browser_main.h"
+#include "content/shell/shell_devtools_delegate.h"
+#include "content/shell/shell_render_view_host_observer.h"
+#include "content/shell/shell_switches.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/webpreferences.h"
 
 #if defined(OS_WIN)
-#include "content/browser/renderer_host/render_widget_host_view_win.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view_win.h"
 #include "content/common/view_messages.h"
+#elif defined(OS_LINUX)
+#include "content/browser/tab_contents/tab_contents_view_gtk.h"
 #endif
 
 namespace content {
@@ -33,19 +37,17 @@ BrowserMainParts* ShellContentBrowserClient::CreateBrowserMainParts(
   return new ShellBrowserMainParts(parameters);
 }
 
-RenderWidgetHostView* ShellContentBrowserClient::CreateViewForWidget(
-    RenderWidgetHost* widget) {
-#if defined(OS_WIN)
-  return new RenderWidgetHostViewWin(widget);
-#else
-  return NULL;
-#endif
-}
+WebContentsView* ShellContentBrowserClient::CreateWebContentsView(
+    WebContents* web_contents) {
+  ShellDevToolsDelegate* devtools_delegate =
+      shell_browser_main_parts_->devtools_delegate();
+  if (devtools_delegate)
+    devtools_delegate->AddWebContents(web_contents);
 
-TabContentsView* ShellContentBrowserClient::CreateTabContentsView(
-    TabContents* tab_contents) {
 #if defined(OS_WIN)
-  return new TabContentsViewWin(tab_contents, this);
+  return new TabContentsViewWin(web_contents);
+#elif defined(OS_LINUX)
+  return new TabContentsViewGtk(web_contents, NULL);
 #else
   return NULL;
 #endif
@@ -53,19 +55,15 @@ TabContentsView* ShellContentBrowserClient::CreateTabContentsView(
 
 void ShellContentBrowserClient::RenderViewHostCreated(
     RenderViewHost* render_view_host) {
+  new ShellRenderViewHostObserver(render_view_host);
 }
 
 void ShellContentBrowserClient::RenderProcessHostCreated(
     RenderProcessHost* host) {
 }
 
-void ShellContentBrowserClient::PluginProcessHostCreated(
-    PluginProcessHost* host) {
-}
-
-WebUIFactory* ShellContentBrowserClient::GetWebUIFactory() {
-  // Return an empty factory so callsites don't have to check for NULL.
-  return EmptyWebUIFactory::GetInstance();
+WebUIControllerFactory* ShellContentBrowserClient::GetWebUIControllerFactory() {
+  return NULL;
 }
 
 GURL ShellContentBrowserClient::GetEffectiveURL(
@@ -79,6 +77,10 @@ bool ShellContentBrowserClient::ShouldUseProcessPerSite(
 }
 
 bool ShellContentBrowserClient::IsURLSameAsAnySiteInstance(const GURL& url) {
+  return false;
+}
+
+bool ShellContentBrowserClient::IsHandledURL(const GURL& url) {
   return false;
 }
 
@@ -109,6 +111,8 @@ std::string ShellContentBrowserClient::GetCanonicalEncodingNameByAliasName(
 
 void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
     CommandLine* command_line, int child_process_id) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
+    command_line->AppendSwitch(switches::kDumpRenderTree);
 }
 
 std::string ShellContentBrowserClient::GetApplicationLocale() {
@@ -251,8 +255,7 @@ std::string ShellContentBrowserClient::GetWorkerProcessTitle(
   return std::string();
 }
 
-ResourceDispatcherHost* ShellContentBrowserClient::GetResourceDispatcherHost() {
-  return shell_browser_main_parts_->GetResourceDispatcherHost();
+void ShellContentBrowserClient::ResourceDispatcherHostCreated() {
 }
 
 ui::Clipboard* ShellContentBrowserClient::GetClipboard() {
@@ -309,6 +312,10 @@ std::string ShellContentBrowserClient::GetDefaultDownloadName() {
   return "download";
 }
 
+bool ShellContentBrowserClient::AllowSocketAPI(const GURL& url) {
+  return false;
+}
+
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 int ShellContentBrowserClient::GetCrashSignalFD(
     const CommandLine& command_line) {
@@ -326,21 +333,6 @@ const wchar_t* ShellContentBrowserClient::GetResourceDllName() {
 crypto::CryptoModuleBlockingPasswordDelegate*
     ShellContentBrowserClient::GetCryptoPasswordDelegate(const GURL& url) {
   return NULL;
-}
-#endif
-
-#if defined(OS_WIN)
-TabContents* ShellContentBrowserClient::CreateNewWindow(
-    TabContentsViewWin* tab_contents_view,
-    int route_id,
-    const ViewHostMsg_CreateWindow_Params& params) {
-  Shell* shell = Shell::CreateNewWindow(
-      tab_contents_view->tab_contents()->browser_context(),
-      GURL(),
-      tab_contents_view->tab_contents()->GetSiteInstance(),
-      route_id,
-      tab_contents_view->tab_contents());
-  return shell->tab_contents();
 }
 #endif
 

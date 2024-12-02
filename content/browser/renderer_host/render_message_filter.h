@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,18 +15,19 @@
 
 #include "base/file_path.h"
 #include "base/memory/linked_ptr.h"
+#include "base/message_loop_helpers.h"
 #include "base/shared_memory.h"
 #include "base/string16.h"
 #include "build/build_config.h"
-#include "content/browser/browser_message_filter.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/public/browser/browser_message_filter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/surface/transport_dib.h"
 
 struct FontDescriptor;
-class PluginService;
+class PluginServiceImpl;
 class RenderWidgetHelper;
 struct ViewHostMsg_CreateWindow_Params;
 
@@ -63,11 +64,11 @@ struct WebPluginInfo;
 
 // This class filters out incoming IPC messages for the renderer process on the
 // IPC thread.
-class RenderMessageFilter : public BrowserMessageFilter {
+class RenderMessageFilter : public content::BrowserMessageFilter {
  public:
   // Create the filter.
   RenderMessageFilter(int render_process_id,
-                      PluginService* plugin_service,
+                      PluginServiceImpl * plugin_service,
                       content::BrowserContext* browser_context,
                       net::URLRequestContextGetter* request_context,
                       RenderWidgetHelper* render_widget_helper);
@@ -76,7 +77,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
   virtual void OnChannelClosing() OVERRIDE;
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
 
-  // BrowserMessageFilter methods:
+  // content::BrowserMessageFilter methods:
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
   virtual void OnDestruct() const OVERRIDE;
@@ -84,9 +85,6 @@ class RenderMessageFilter : public BrowserMessageFilter {
   bool OffTheRecord() const;
 
   int render_process_id() const { return render_process_id_; }
-  ResourceDispatcherHost* resource_dispatcher_host() {
-    return resource_dispatcher_host_;
-  }
 
   // Returns the correct net::URLRequestContext depending on what type of url is
   // given.
@@ -95,7 +93,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
 
  private:
   friend class content::BrowserThread;
-  friend class DeleteTask<RenderMessageFilter>;
+  friend class base::DeleteHelper<RenderMessageFilter>;
 
   class OpenChannelToNpapiPluginCallback;
 
@@ -103,11 +101,15 @@ class RenderMessageFilter : public BrowserMessageFilter {
 
   void OnMsgCreateWindow(const ViewHostMsg_CreateWindow_Params& params,
                          int* route_id,
+                         int* surface_id,
                          int64* cloned_session_storage_namespace_id);
   void OnMsgCreateWidget(int opener_id,
                          WebKit::WebPopupType popup_type,
-                         int* route_id);
-  void OnMsgCreateFullscreenWidget(int opener_id, int* route_id);
+                         int* route_id,
+                         int* surface_id);
+  void OnMsgCreateFullscreenWidget(int opener_id,
+                                   int* route_id,
+                                   int* surface_id);
   void OnSetCookie(const IPC::Message& message,
                    const GURL& url,
                    const GURL& first_party_for_cookies,
@@ -173,6 +175,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
   void OnGetHardwareBufferSize(uint32* buffer_size);
   void OnGetHardwareInputSampleRate(double* sample_rate);
   void OnGetHardwareSampleRate(double* sample_rate);
+  void OnGetHardwareInputChannelCount(uint32* channels);
 
   // Used to ask the browser to allocate a block of shared memory for the
   // renderer to send back data in, since shared memory can't be created
@@ -224,11 +227,13 @@ class RenderMessageFilter : public BrowserMessageFilter {
   void OnCompletedOpenChannelToNpapiPlugin(
       OpenChannelToNpapiPluginCallback* client);
 
+  void OnUpdateIsDelayed(const IPC::Message& msg);
+
   // Cached resource request dispatcher host and plugin service, guaranteed to
   // be non-null if Init succeeds. We do not own the objects, they are managed
   // by the BrowserProcess, which has a wider scope than we do.
   ResourceDispatcherHost* resource_dispatcher_host_;
-  PluginService* plugin_service_;
+  PluginServiceImpl* plugin_service_;
 
   // The browser context associated with our renderer process.  This should only
   // be accessed on the UI thread!

@@ -13,7 +13,7 @@
 #include "chrome/browser/ui/views/content_setting_bubble_contents.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/window.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -21,6 +21,8 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/views/border.h"
+
+using content::WebContents;
 
 namespace {
 // Animation parameters.
@@ -62,8 +64,8 @@ ContentSettingImageView::ContentSettingImageView(
 ContentSettingImageView::~ContentSettingImageView() {
 }
 
-void ContentSettingImageView::UpdateFromTabContents(TabContents* tab_contents) {
-  content_setting_image_model_->UpdateFromTabContents(tab_contents);
+void ContentSettingImageView::UpdateFromWebContents(WebContents* web_contents) {
+  content_setting_image_model_->UpdateFromWebContents(web_contents);
   if (!content_setting_image_model_->is_visible()) {
     SetVisible(false);
     return;
@@ -74,9 +76,9 @@ void ContentSettingImageView::UpdateFromTabContents(TabContents* tab_contents) {
   SetVisible(true);
 
   TabSpecificContentSettings* content_settings = NULL;
-  if (tab_contents) {
+  if (web_contents) {
     content_settings = TabContentsWrapper::GetCurrentWrapperForContents(
-        tab_contents)->content_settings();
+        web_contents)->content_settings();
   }
   if (!content_settings || content_settings->IsBlockageIndicated(
       content_setting_image_model_->get_content_settings_type()))
@@ -137,7 +139,7 @@ void ContentSettingImageView::OnMouseReleased(const views::MouseEvent& event) {
           profile,
           content_setting_image_model_->get_content_settings_type()),
       profile,
-      tab_contents->tab_contents(),
+      tab_contents->web_contents(),
       this,
       views::BubbleBorder::TOP_RIGHT);
   browser::CreateViewsBubble(bubble);

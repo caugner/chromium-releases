@@ -11,7 +11,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/browser/printing/print_job_manager.h"
-#include "chrome/browser/ui/webui/print_preview_ui.h"
+#include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/common/print_messages.h"
 
 #if defined(OS_CHROMEOS)
@@ -47,6 +47,11 @@ void RenderParamsFromPrintSettings(const printing::PrintSettings& settings,
   params->content_size.SetSize(
       settings.page_setup_device_units().content_area().width(),
       settings.page_setup_device_units().content_area().height());
+  params->printable_area.SetRect(
+      settings.page_setup_device_units().printable_area().x(),
+      settings.page_setup_device_units().printable_area().y(),
+      settings.page_setup_device_units().printable_area().width(),
+      settings.page_setup_device_units().printable_area().height());
   params->margin_top = settings.page_setup_device_units().content_area().y();
   params->margin_left = settings.page_setup_device_units().content_area().x();
   params->dpi = settings.dpi();

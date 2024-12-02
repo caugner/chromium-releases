@@ -1,8 +1,8 @@
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
 CREATE TABLE meta(key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY,value LONGVARCHAR);
-INSERT INTO "meta" VALUES('version','40');
-INSERT INTO "meta" VALUES('last_compatible_version','40');
+INSERT INTO "meta" VALUES('version','41');
+INSERT INTO "meta" VALUES('last_compatible_version','41');
 INSERT INTO "meta" VALUES('Default Search Provider ID','2');
 INSERT INTO "meta" VALUES('Default Search Provider ID Backup','2');
 INSERT INTO "meta" VALUES('Default Search Provider ID Backup Signature','Signature');

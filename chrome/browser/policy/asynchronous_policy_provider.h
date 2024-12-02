@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 namespace policy {
 
 class AsynchronousPolicyLoader;
+class PolicyMap;
 
 // Policy provider that loads policy asynchronously. Providers should subclass
 // from this class if loading the policy requires disk access or must for some
@@ -29,7 +30,9 @@ class AsynchronousPolicyProvider
    public:
     virtual ~Delegate() {}
 
-    virtual DictionaryValue* Load() = 0;
+    // Load policy from the delegate's source, and return a PolicyMap. Ownership
+    // is transferred to the caller.
+    virtual PolicyMap* Load() = 0;
   };
 
   // Assumes ownership of |loader|.

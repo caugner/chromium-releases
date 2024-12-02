@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,12 +29,17 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/service_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_font_util.h"
 #include "ui/gfx/font.h"
+
+using content::OpenURLParams;
+using content::Referrer;
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 namespace {
 
@@ -57,6 +62,7 @@ CloudPrintSetupFlow* CloudPrintSetupFlow::OpenDialog(
     const base::WeakPtr<Delegate>& delegate,
     gfx::NativeWindow parent_window) {
   DCHECK(profile);
+  Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
   // Set the arguments for showing the gaia login page.
   DictionaryValue args;
   args.SetString("user", "");
@@ -78,12 +84,9 @@ CloudPrintSetupFlow* CloudPrintSetupFlow::OpenDialog(
   // invoked in the context of a "token expired" notfication. If we don't have
   // a brower, use the underlying dialog system to show the dialog without
   // using a browser.
-  if (!parent_window) {
-    Browser* browser = BrowserList::GetLastActive();
-    if (browser && browser->window())
-      parent_window = browser->window()->GetNativeHandle();
-  }
-  browser::ShowHtmlDialog(parent_window, profile, flow, STYLE_GENERIC);
+  if (!parent_window && browser && browser->window())
+    parent_window = browser->window()->GetNativeHandle();
+  browser::ShowHtmlDialog(parent_window, profile, browser, flow, STYLE_GENERIC);
   return flow;
 }
 
@@ -130,8 +133,8 @@ void CloudPrintSetupFlow::GetWebUIMessageHandlers(
 void CloudPrintSetupFlow::GetDialogSize(gfx::Size* size) const {
   PrefService* prefs = profile_->GetPrefs();
   gfx::Font approximate_web_font(
-      prefs->GetString(prefs::kWebKitSansSerifFontFamily),
-      prefs->GetInteger(prefs::kWebKitDefaultFontSize));
+      prefs->GetString(prefs::kWebKitGlobalSansSerifFontFamily),
+      prefs->GetInteger(prefs::kWebKitGlobalDefaultFontSize));
 
   if (setup_done_) {
     *size = ui::GetLocalizedContentsSizeForFont(
@@ -178,17 +181,18 @@ std::string CloudPrintSetupFlow::GetDialogArgs() const {
   return dialog_start_args_;
 }
 
-void CloudPrintSetupFlow::OnCloseContents(TabContents* source,
+void CloudPrintSetupFlow::OnCloseContents(WebContents* source,
                                           bool* out_close_dialog) {
 }
 
 string16 CloudPrintSetupFlow::GetDialogTitle() const {
-  return l10n_util::GetStringUTF16(IDS_CLOUD_PRINT_SETUP_DIALOG_TITLE);
+  return l10n_util::GetStringFUTF16(IDS_CLOUD_PRINT_SETUP_DIALOG_TITLE,
+      l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT));
 }
 
-bool CloudPrintSetupFlow::IsDialogModal() const {
+ui::ModalType CloudPrintSetupFlow::GetDialogModalType() const {
   // We are always modeless.
-  return false;
+  return ui::MODAL_TYPE_NONE;
 }
 
 bool CloudPrintSetupFlow::ShouldShowDialogTitle() const {
@@ -226,7 +230,7 @@ void CloudPrintSetupFlow::OnClientLoginFailure(
 
 ///////////////////////////////////////////////////////////////////////////////
 // Methods called by CloudPrintSetupMessageHandler
-void CloudPrintSetupFlow::Attach(WebUI* web_ui) {
+void CloudPrintSetupFlow::Attach(content::WebUI* web_ui) {
   web_ui_ = web_ui;
 }
 
@@ -256,15 +260,17 @@ void CloudPrintSetupFlow::OnUserSubmittedAuth(const std::string& user,
 }
 
 void CloudPrintSetupFlow::OnUserClickedLearnMore() {
-  web_ui_->tab_contents()->OpenURL(CloudPrintURL::GetCloudPrintLearnMoreURL(),
-                                   GURL(), NEW_FOREGROUND_TAB,
-                                   content::PAGE_TRANSITION_LINK);
+  OpenURLParams params(CloudPrintURL::GetCloudPrintLearnMoreURL(),
+                       Referrer(), NEW_FOREGROUND_TAB,
+                       content::PAGE_TRANSITION_LINK, false);
+  web_ui_->GetWebContents()->OpenURL(params);
 }
 
 void CloudPrintSetupFlow::OnUserClickedPrintTestPage() {
-  web_ui_->tab_contents()->OpenURL(CloudPrintURL::GetCloudPrintTestPageURL(),
-                                   GURL(), NEW_FOREGROUND_TAB,
-                                   content::PAGE_TRANSITION_LINK);
+  OpenURLParams params(CloudPrintURL::GetCloudPrintTestPageURL(),
+                       Referrer(), NEW_FOREGROUND_TAB,
+                       content::PAGE_TRANSITION_LINK, false);
+  web_ui_->GetWebContents()->OpenURL(params);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -309,8 +315,8 @@ void CloudPrintSetupFlow::ShowSetupDone() {
   if (web_ui_) {
     PrefService* prefs = profile_->GetPrefs();
     gfx::Font approximate_web_font(
-        prefs->GetString(prefs::kWebKitSansSerifFontFamily),
-        prefs->GetInteger(prefs::kWebKitDefaultFontSize));
+        prefs->GetString(prefs::kWebKitGlobalSansSerifFontFamily),
+        prefs->GetInteger(prefs::kWebKitGlobalDefaultFontSize));
     gfx::Size done_size = ui::GetLocalizedContentsSizeForFont(
         IDS_CLOUD_PRINT_SETUP_WIZARD_DONE_WIDTH_CHARS,
         IDS_CLOUD_PRINT_SETUP_WIZARD_DONE_HEIGHT_LINES,
@@ -330,7 +336,7 @@ void CloudPrintSetupFlow::ExecuteJavascriptInIFrame(
     const string16& iframe_xpath,
     const string16& js) {
   if (web_ui_) {
-    RenderViewHost* rvh = web_ui_->tab_contents()->render_view_host();
+    RenderViewHost* rvh = web_ui_->GetWebContents()->GetRenderViewHost();
     rvh->ExecuteJavascriptInWebFrame(iframe_xpath, js);
   }
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -128,14 +128,14 @@ MouseEvent::MouseEvent(const TouchEvent& touch)
   // MouseEvent from the native event for a TouchEvent, so the flags are
   // explicitly updated as well. The button is approximated from the touchpoint
   // identity.
-  int new_flags = flags() & ~(ui::EF_LEFT_BUTTON_DOWN |
-                              ui::EF_RIGHT_BUTTON_DOWN |
-                              ui::EF_MIDDLE_BUTTON_DOWN);
-  int button = ui::EF_LEFT_BUTTON_DOWN;
+  int new_flags = flags() & ~(ui::EF_LEFT_MOUSE_BUTTON |
+                              ui::EF_RIGHT_MOUSE_BUTTON |
+                              ui::EF_MIDDLE_MOUSE_BUTTON);
+  int button = ui::EF_LEFT_MOUSE_BUTTON;
   if (touch.identity() == 1)
-    button = ui::EF_RIGHT_BUTTON_DOWN;
+    button = ui::EF_RIGHT_MOUSE_BUTTON;
   else if (touch.identity() == 2)
-    button = ui::EF_MIDDLE_BUTTON_DOWN;
+    button = ui::EF_MIDDLE_MOUSE_BUTTON;
   set_flags(new_flags | button);
 }
 
@@ -201,4 +201,37 @@ const int MouseWheelEvent::kWheelDelta = 120;
 // This value matches GTK+ wheel scroll amount.
 const int MouseWheelEvent::kWheelDelta = 53;
 #endif
+
+////////////////////////////////////////////////////////////////////////////////
+// GestureEvent, public:
+
+GestureEvent::GestureEvent(const GestureEvent& model, View* source,
+                           View* target)
+    : LocatedEvent(model, source, target),
+      delta_x_(model.delta_x_),
+      delta_y_(model.delta_y_) {
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// GestureEvent, private:
+
+GestureEvent::GestureEvent(const GestureEvent& model, View* root)
+    : LocatedEvent(model, root),
+      delta_x_(model.delta_x_),
+      delta_y_(model.delta_y_) {
+}
+
+GestureEvent::GestureEvent(ui::EventType type, int x, int y, int flags)
+    : LocatedEvent(type, gfx::Point(x, y), flags),
+      delta_x_(0),
+      delta_y_(0) {
+}
+
+GestureEventForTest::GestureEventForTest(ui::EventType type,
+                                         int x,
+                                         int y,
+                                         int flags)
+    : GestureEvent(type, x, y, flags) {
+}
+
 }  // namespace views

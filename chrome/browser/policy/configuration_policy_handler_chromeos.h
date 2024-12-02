@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_POLICY_CONFIGURATION_POLICY_HANDLER_CHROMEOS_H_
 #pragma once
 
+#include "chrome/browser/chromeos/cros/network_ui_data.h"
 #include "chrome/browser/policy/configuration_policy_handler.h"
 
 namespace policy {
@@ -15,7 +16,9 @@ namespace policy {
 // generates error messages.
 class NetworkConfigurationPolicyHandler : public TypeCheckingPolicyHandler {
  public:
-  explicit NetworkConfigurationPolicyHandler(ConfigurationPolicyType type);
+  NetworkConfigurationPolicyHandler(
+      const char* policy_name,
+      chromeos::NetworkUIData::ONCSource onc_source);
   virtual ~NetworkConfigurationPolicyHandler();
 
   // ConfigurationPolicyHandler methods:
@@ -35,6 +38,8 @@ class NetworkConfigurationPolicyHandler : public TypeCheckingPolicyHandler {
   // Filters a network dictionary to remove all sensitive fields and replace
   // their values with placeholders.
   static void StripSensitiveValues(DictionaryValue* network_dict);
+
+  chromeos::NetworkUIData::ONCSource onc_source_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkConfigurationPolicyHandler);
 };

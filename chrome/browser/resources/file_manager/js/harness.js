@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,12 +19,24 @@ var harness = {
       console.log('Filesystem found.');
       self.filesystem = filesystem;
       util.getOrCreateDirectory(filesystem.root, '/Downloads', function () {});
-      util.getOrCreateDirectory(filesystem.root, '/media', function () {});
-    };
+      util.getOrCreateDirectory(filesystem.root, '/removable', function () {});
+      util.getOrCreateDirectory(filesystem.root, '/removable/disk1',
+          function () {});
+      util.getOrCreateDirectory(filesystem.root, '/removable/disk2',
+          function () {});
+    }
 
-    window.webkitRequestFileSystem(window.PERSISTENT, 16 * 1024 * 1024,
-                                   onFilesystem,
-                                   util.flog('Error initializing filesystem'));
+    window.webkitStorageInfo.requestQuota(
+        window.PERSISTENT,
+        1024*1024*1024, // 1 Gig should be enough for everybody:)
+        function(grantedBytes) {
+          window.webkitRequestFileSystem(
+              window.PERSISTENT,
+              grantedBytes,
+              onFilesystem,
+              util.flog('Error initializing filesystem'));
+        },
+        util.flog('Error requesting filesystem quota'));
 
     var paramstr = decodeURIComponent(document.location.search.substr(1));
     this.params = paramstr ? JSON.parse(paramstr) : {};
@@ -132,7 +144,7 @@ var harness = {
       }
 
       currentSrc = files.shift();
-      var destPath = harness.fileManager.currentDirEntry_.fullPath + '/' +
+      var destPath = harness.fileManager.getCurrentDirectory() + '/' +
           currentSrc.name.replace(/\^\^/g, '/');
       util.getOrCreateFile(self.filesystem.root, destPath, onFileFound,
                            util.flog('Error finding path: ' + destPath));
@@ -140,5 +152,5 @@ var harness = {
 
     console.log('Start import: ' + files.length + ' file(s)');
     processNextFile();
-  },
+  }
 };

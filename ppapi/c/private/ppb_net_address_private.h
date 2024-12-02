@@ -1,9 +1,11 @@
-/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
 
-/* From private/ppb_net_address_private.idl modified Wed Nov  9 12:53:35 2011. */
+/* From private/ppb_net_address_private.idl,
+ *   modified Wed Jan  4 11:09:00 2012.
+ */
 
 #ifndef PPAPI_C_PRIVATE_PPB_NET_ADDRESS_PRIVATE_H_
 #define PPAPI_C_PRIVATE_PPB_NET_ADDRESS_PRIVATE_H_
@@ -47,7 +49,7 @@ PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_NetAddress_Private, 132);
  * The <code>PPB_NetAddress_Private</code> interface provides operations on
  * network addresses.
  */
-struct PPB_NetAddress_Private {
+struct PPB_NetAddress_Private_0_1 {
   /**
    * Returns PP_TRUE if the two addresses are equal (host and port).
    */
@@ -77,6 +79,8 @@ struct PPB_NetAddress_Private {
    */
   void (*GetAnyAddress)(PP_Bool is_ipv6, struct PP_NetAddress_Private* addr);
 };
+
+typedef struct PPB_NetAddress_Private_0_1 PPB_NetAddress_Private;
 /**
  * @}
  */

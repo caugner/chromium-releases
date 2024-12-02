@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/logging_work_scheduler.h"
 #include "chrome/browser/policy/mock_cloud_policy_data_store.h"
-#include "chrome/browser/policy/mock_device_management_backend.h"
 #include "chrome/browser/policy/mock_device_management_service.h"
 #include "chrome/browser/policy/policy_notifier.h"
 #include "chrome/browser/policy/user_policy_cache.h"
@@ -17,14 +16,16 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace em = enterprise_management;
+
 namespace policy {
 
 const char kTestToken[] = "device_token_fetcher_test_auth_token";
 
 using content::BrowserThread;
-using testing::_;
 using testing::AnyNumber;
 using testing::Mock;
+using testing::_;
 
 class DeviceTokenFetcherTest : public testing::Test {
  protected:
@@ -32,15 +33,15 @@ class DeviceTokenFetcherTest : public testing::Test {
       : ui_thread_(BrowserThread::UI, &loop_),
         file_thread_(BrowserThread::FILE, &loop_) {
     EXPECT_TRUE(temp_user_data_dir_.CreateUniqueTempDir());
+    successful_registration_response_.mutable_register_response()->
+        set_device_management_token("fake_token");
   }
 
   virtual void SetUp() {
     cache_.reset(new UserPolicyCache(
         temp_user_data_dir_.path().AppendASCII("DeviceTokenFetcherTest"),
         false  /* wait_for_policy_fetch */));
-    EXPECT_CALL(service_, CreateBackend())
-        .Times(AnyNumber())
-        .WillRepeatedly(MockDeviceManagementServiceProxyBackend(&backend_));
+    EXPECT_CALL(service_, StartJob(_)).Times(AnyNumber());
     data_store_.reset(CloudPolicyDataStore::CreateForUserPolicies());
     data_store_->AddObserver(&observer_);
   }
@@ -69,23 +70,39 @@ class DeviceTokenFetcherTest : public testing::Test {
   }
 
   MessageLoop loop_;
-  MockDeviceManagementBackend backend_;
   MockDeviceManagementService service_;
   scoped_ptr<CloudPolicyCacheBase> cache_;
   scoped_ptr<CloudPolicyDataStore> data_store_;
   MockCloudPolicyDataStoreObserver observer_;
   PolicyNotifier notifier_;
   ScopedTempDir temp_user_data_dir_;
+  em::DeviceManagementResponse successful_registration_response_;
 
  private:
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
 };
 
+ACTION_P(VerifyRegisterRequest, known_machine_id) {
+  ASSERT_TRUE(arg0);
+  ASSERT_TRUE(arg0->GetRequest());
+  ASSERT_TRUE(arg0->GetRequest()->has_register_request());
+  const em::DeviceRegisterRequest& request =
+      arg0->GetRequest()->register_request();
+  if (known_machine_id) {
+    EXPECT_TRUE(request.has_known_machine_id());
+    EXPECT_TRUE(request.known_machine_id());
+  } else {
+    EXPECT_FALSE(request.has_known_machine_id());
+  }
+}
+
 TEST_F(DeviceTokenFetcherTest, FetchToken) {
   testing::InSequence s;
-  EXPECT_CALL(backend_, ProcessRegisterRequest(_, _, _, _, _)).WillOnce(
-      MockDeviceManagementBackendSucceedRegister());
+  EXPECT_CALL(service_,
+              CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION))
+      .WillOnce(service_.SucceedJob(successful_registration_response_));
+  EXPECT_CALL(service_, StartJob(_)).WillOnce(VerifyRegisterRequest(false));
   DeviceTokenFetcher fetcher(&service_, cache_.get(), data_store_.get(),
                              &notifier_);
   EXPECT_CALL(observer_, OnDeviceTokenChanged());
@@ -97,8 +114,11 @@ TEST_F(DeviceTokenFetcherTest, FetchToken) {
   EXPECT_NE("", token);
 
   // Calling FetchToken() again should result in a new token being fetched.
-  EXPECT_CALL(backend_, ProcessRegisterRequest(_, _, _, _, _)).WillOnce(
-      MockDeviceManagementBackendSucceedRegister());
+  successful_registration_response_.mutable_register_response()->
+      set_device_management_token("new_fake_token");
+  EXPECT_CALL(service_,
+              CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION))
+      .WillOnce(service_.SucceedJob(successful_registration_response_));
   EXPECT_CALL(observer_, OnDeviceTokenChanged());
   FetchToken(&fetcher);
   loop_.RunAllPending();
@@ -110,10 +130,10 @@ TEST_F(DeviceTokenFetcherTest, FetchToken) {
 
 TEST_F(DeviceTokenFetcherTest, RetryOnError) {
   testing::InSequence s;
-  EXPECT_CALL(backend_, ProcessRegisterRequest(_, _, _, _, _)).WillOnce(
-      MockDeviceManagementBackendFailRegister(
-          DeviceManagementBackend::kErrorRequestFailed)).WillOnce(
-      MockDeviceManagementBackendSucceedRegister());
+  EXPECT_CALL(service_,
+              CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION))
+      .WillOnce(service_.FailJob(DM_STATUS_REQUEST_FAILED))
+      .WillOnce(service_.SucceedJob(successful_registration_response_));
   DeviceTokenFetcher fetcher(&service_, cache_.get(), data_store_.get(),
                              &notifier_, new DummyWorkScheduler);
   EXPECT_CALL(observer_, OnDeviceTokenChanged());
@@ -124,9 +144,9 @@ TEST_F(DeviceTokenFetcherTest, RetryOnError) {
 }
 
 TEST_F(DeviceTokenFetcherTest, UnmanagedDevice) {
-  EXPECT_CALL(backend_, ProcessRegisterRequest(_, _, _, _, _)).WillOnce(
-      MockDeviceManagementBackendFailRegister(
-          DeviceManagementBackend::kErrorServiceManagementNotSupported));
+  EXPECT_CALL(service_,
+              CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION))
+      .WillOnce(service_.FailJob(DM_STATUS_SERVICE_MANAGEMENT_NOT_SUPPORTED));
   EXPECT_FALSE(cache_->is_unmanaged());
   DeviceTokenFetcher fetcher(&service_, cache_.get(), data_store_.get(),
                              &notifier_);
@@ -147,8 +167,9 @@ TEST_F(DeviceTokenFetcherTest, DontSetFetchingDone) {
 
 TEST_F(DeviceTokenFetcherTest, DontSetFetchingDoneWithoutPolicyFetch) {
   CreateNewWaitingCache();
-  EXPECT_CALL(backend_, ProcessRegisterRequest(_, _, _, _, _)).WillOnce(
-      MockDeviceManagementBackendSucceedRegister());
+  EXPECT_CALL(service_,
+              CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION))
+      .WillOnce(service_.SucceedJob(successful_registration_response_));
   EXPECT_CALL(observer_, OnDeviceTokenChanged());
   DeviceTokenFetcher fetcher(&service_, cache_.get(), data_store_.get(),
                              &notifier_);
@@ -170,15 +191,35 @@ TEST_F(DeviceTokenFetcherTest, SetFetchingDoneWhenUnmanaged) {
 
 TEST_F(DeviceTokenFetcherTest, SetFetchingDoneOnFailures) {
   CreateNewWaitingCache();
-  EXPECT_CALL(backend_, ProcessRegisterRequest(_, _, _, _, _)).WillOnce(
-      MockDeviceManagementBackendFailRegister(
-          DeviceManagementBackend::kErrorRequestFailed));
+  EXPECT_CALL(service_,
+              CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION))
+      .WillOnce(service_.FailJob(DM_STATUS_REQUEST_FAILED));
   DeviceTokenFetcher fetcher(&service_, cache_.get(), data_store_.get(),
                              &notifier_);
   FetchToken(&fetcher);
   loop_.RunAllPending();
   // This is the opposite case of DontSetFetchingDone1.
   EXPECT_TRUE(cache_->IsReady());
+}
+
+TEST_F(DeviceTokenFetcherTest, SetKnownMachineId) {
+  EXPECT_CALL(service_,
+              CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION))
+      .WillOnce(service_.SucceedJob(successful_registration_response_));
+  EXPECT_CALL(service_, StartJob(_)).WillOnce(VerifyRegisterRequest(true));
+
+  DeviceTokenFetcher fetcher(&service_, cache_.get(), data_store_.get(),
+                             &notifier_);
+  EXPECT_CALL(observer_, OnDeviceTokenChanged());
+  EXPECT_EQ("", data_store_->device_token());
+
+  data_store_->set_known_machine_id(true);
+  FetchToken(&fetcher);
+  loop_.RunAllPending();
+
+  Mock::VerifyAndClearExpectations(&observer_);
+  std::string token = data_store_->device_token();
+  EXPECT_NE("", token);
 }
 
 }  // namespace policy

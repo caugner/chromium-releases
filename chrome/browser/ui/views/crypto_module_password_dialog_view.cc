@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,7 +75,7 @@ void CryptoModulePasswordDialogView::Init(
   password_label_ = new views::Label(l10n_util::GetStringUTF16(
       IDS_CRYPTO_MODULE_AUTH_DIALOG_PASSWORD_FIELD));
 
-  password_entry_ = new views::Textfield(views::Textfield::STYLE_PASSWORD);
+  password_entry_ = new views::Textfield(views::Textfield::STYLE_OBSCURED);
   password_entry_->SetController(this);
 
   views::GridLayout* layout = views::GridLayout::CreatePanel(this);
@@ -107,8 +107,8 @@ void CryptoModulePasswordDialogView::Init(
 views::View* CryptoModulePasswordDialogView::GetInitiallyFocusedView() {
   return password_entry_;
 }
-bool CryptoModulePasswordDialogView::IsModal() const {
-  return true;
+ui::ModalType CryptoModulePasswordDialogView::GetModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 views::View* CryptoModulePasswordDialogView::GetContentsView() {
   return this;

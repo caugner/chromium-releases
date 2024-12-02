@@ -14,7 +14,7 @@ using passwords_helper::CreateTestPasswordForm;
 using passwords_helper::GetPasswordCount;
 using passwords_helper::GetPasswordStore;
 
-using webkit_glue::PasswordForm;
+using webkit::forms::PasswordForm;
 
 class MultipleClientPasswordsSyncTest : public SyncTest {
  public:
@@ -25,8 +25,7 @@ class MultipleClientPasswordsSyncTest : public SyncTest {
   DISALLOW_COPY_AND_ASSIGN(MultipleClientPasswordsSyncTest);
 };
 
-// TODO(rsimha): Enable after crbug.com/77993 is fixed.
-IN_PROC_BROWSER_TEST_F(MultipleClientPasswordsSyncTest, DISABLED_Sanity) {
+IN_PROC_BROWSER_TEST_F(MultipleClientPasswordsSyncTest, Sanity) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   for (int i = 0; i < num_clients(); ++i) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,12 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
-#include "base/stringprintf.h"
 #include "base/stl_util.h"
+#include "base/stringprintf.h"
 #include "base/test/test_file_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_history.h"
@@ -39,20 +40,22 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/cancelable_request.h"
 #include "content/browser/download/download_file_manager.h"
-#include "content/browser/download/download_item.h"
-#include "content/browser/download/download_manager.h"
 #include "content/browser/download/download_persistent_store_info.h"
 #include "content/browser/net/url_request_mock_http_job.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/net/url_request_slow_download_job.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/public/browser/download_item.h"
+#include "content/public/browser/download_manager.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/page_transition_types.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
+using content::DownloadItem;
+using content::DownloadManager;
+using content::WebContents;
 
 namespace {
 
@@ -94,9 +97,7 @@ class CancelTestDataCollector
     : public base::RefCountedThreadSafe<CancelTestDataCollector> {
  public:
   CancelTestDataCollector()
-      : resource_dispatcher_host_(
-          g_browser_process->resource_dispatcher_host()),
-        slow_download_job_pending_requests_(0),
+      : slow_download_job_pending_requests_(0),
         dfm_pending_downloads_(0) { }
 
   void WaitForDataCollected() {
@@ -121,7 +122,8 @@ class CancelTestDataCollector
  private:
 
   void IOInfoCollector() {
-    download_file_manager_ = resource_dispatcher_host_->download_file_manager();
+    download_file_manager_ =
+        ResourceDispatcherHost::Get()->download_file_manager();
     slow_download_job_pending_requests_ =
         URLRequestSlowDownloadJob::NumberOutstandingRequests();
     BrowserThread::PostTask(
@@ -132,10 +134,9 @@ class CancelTestDataCollector
   void FileInfoCollector() {
     dfm_pending_downloads_ = download_file_manager_->NumberOfActiveDownloads();
     BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE, new MessageLoop::QuitTask());
+        BrowserThread::UI, FROM_HERE, MessageLoop::QuitClosure());
   }
 
-  ResourceDispatcherHost* resource_dispatcher_host_;
   DownloadFileManager* download_file_manager_;
   int slow_download_job_pending_requests_;
   int dfm_pending_downloads_;
@@ -151,7 +152,7 @@ class PickSuggestedFileDelegate : public ChromeDownloadManagerDelegate {
         DownloadServiceFactory::GetForProfile(profile)->GetDownloadManager());
   }
 
-  virtual void ChooseDownloadPath(TabContents* tab_contents,
+  virtual void ChooseDownloadPath(WebContents* web_contents,
                                   const FilePath& suggested_path,
                                   void* data) OVERRIDE {
     if (download_manager_)
@@ -167,7 +168,7 @@ class DownloadsHistoryDataCollector {
       : result_valid_(false),
         download_db_handle_(download_db_handle) {
     HistoryService* hs =
-        Profile::FromBrowserContext(manager->BrowserContext())->
+        Profile::FromBrowserContext(manager->GetBrowserContext())->
             GetHistoryService(Profile::EXPLICIT_ACCESS);
     DCHECK(hs);
     hs->QueryDownloads(
@@ -225,7 +226,7 @@ class MockAbortExtensionInstallUI : public ExtensionInstallUI {
   }
 
   virtual void OnInstallSuccess(const Extension* extension, SkBitmap* icon) {}
-  virtual void OnInstallFailure(const std::string& error) {}
+  virtual void OnInstallFailure(const string16& error) {}
 };
 
 // Mock that simulates a permissions dialog where the user allows
@@ -241,7 +242,7 @@ class MockAutoConfirmExtensionInstallUI : public ExtensionInstallUI {
   }
 
   virtual void OnInstallSuccess(const Extension* extension, SkBitmap* icon) {}
-  virtual void OnInstallFailure(const std::string& error) {}
+  virtual void OnInstallFailure(const string16& error) {}
 };
 
 static DownloadManager* DownloadManagerForBrowser(Browser* browser) {
@@ -253,7 +254,7 @@ static DownloadManager* DownloadManagerForBrowser(Browser* browser) {
 
 // While an object of this class exists, it will mock out download
 // opening for all downloads created on the specified download manager.
-class MockDownloadOpeningObserver : public DownloadManager::Observer {
+class MockDownloadOpeningObserver : public content::DownloadManager::Observer {
  public:
   explicit MockDownloadOpeningObserver(DownloadManager* manager)
       : download_manager_(manager) {
@@ -467,6 +468,13 @@ class DownloadTest : public InProcessBrowserTest {
 
     // Find the origin path (from which the data comes).
     FilePath origin_file(OriginFile(origin_filename));
+    return CheckDownloadFullPaths(browser, downloaded_file, origin_file);
+  }
+
+  // A version of CheckDownload that allows complete path specification.
+  bool CheckDownloadFullPaths(Browser* browser,
+                              const FilePath& downloaded_file,
+                              const FilePath& origin_file) {
     bool origin_file_exists = file_util::PathExists(origin_file);
     EXPECT_TRUE(origin_file_exists);
     if (!origin_file_exists)
@@ -586,7 +594,7 @@ class DownloadTest : public InProcessBrowserTest {
       return;
 
     ActiveDownloadsUI* downloads_ui = static_cast<ActiveDownloadsUI*>(
-        popup->GetSelectedTabContents()->web_ui());
+        popup->GetSelectedWebContents()->GetWebUI()->GetController());
 
     ASSERT_TRUE(downloads_ui);
     const ActiveDownloadsUI::DownloadList& downloads =
@@ -1314,11 +1322,11 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, ChromeURLAfterDownload) {
   ui_test_utils::NavigateToURL(browser(), flags_url);
   DownloadAndWait(browser(), download_url, EXPECT_NO_SELECT_DIALOG);
   ui_test_utils::NavigateToURL(browser(), extensions_url);
-  TabContents* contents = browser()->GetSelectedTabContents();
+  WebContents* contents = browser()->GetSelectedWebContents();
   ASSERT_TRUE(contents);
   bool webui_responded = false;
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      contents->render_view_host(),
+      contents->GetRenderViewHost(),
       L"",
       L"window.domAutomationController.send(window.webui_responded_);",
       &webui_responded));
@@ -1335,11 +1343,11 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, BrowserCloseAfterDownload) {
   GURL download_url(URLRequestMockHTTPJob::GetMockUrl(file));
 
   ui_test_utils::NavigateToURL(browser(), downloads_url);
-  TabContents* contents = browser()->GetSelectedTabContents();
+  WebContents* contents = browser()->GetSelectedWebContents();
   ASSERT_TRUE(contents);
   bool result = false;
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      contents->render_view_host(),
+      contents->GetRenderViewHost(),
       L"",
       L"window.onunload = function() { var do_nothing = 0; }; "
       L"window.domAutomationController.send(true);",
@@ -1669,4 +1677,99 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, SearchDownloads) {
   EXPECT_EQ(2, search_results[0]->GetDbHandle());
   EXPECT_EQ(3, search_results[1]->GetDbHandle());
   search_results.clear();
+}
+
+// Tests for download initiation functions.
+IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadUrl) {
+  ASSERT_TRUE(InitialSetup(false));
+  FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+  GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
+
+  // DownloadUrl always prompts; return acceptance of whatever it prompts.
+  NullSelectFile(browser());
+
+  WebContents* web_contents = browser()->GetSelectedWebContents();
+  ASSERT_TRUE(web_contents);
+
+  DownloadTestObserver* observer(
+    new DownloadTestObserver(
+        DownloadManagerForBrowser(browser()), 1,
+        DownloadItem::COMPLETE,  // Really done
+        false,                   // Ignore select file.
+        DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
+  DownloadSaveInfo save_info;
+  save_info.prompt_for_save_location = true;
+  DownloadManagerForBrowser(browser())->DownloadUrl(
+      url, GURL(""), "", false, save_info, web_contents);
+  observer->WaitForFinished();
+  EXPECT_TRUE(observer->select_file_dialog_seen());
+
+  // Check state.
+  EXPECT_EQ(1, browser()->tab_count());
+  ASSERT_TRUE(CheckDownload(browser(), file, file));
+  CheckDownloadUI(browser(), true, true, file);
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadUrlToPath) {
+  ASSERT_TRUE(InitialSetup(false));
+  FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+  GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
+
+  WebContents* web_contents = browser()->GetSelectedWebContents();
+  ASSERT_TRUE(web_contents);
+
+  ScopedTempDir other_directory;
+  ASSERT_TRUE(other_directory.CreateUniqueTempDir());
+  FilePath target_file_full_path
+      = other_directory.path().Append(file.BaseName());
+  DownloadSaveInfo save_info;
+  save_info.file_path = target_file_full_path;
+
+  DownloadTestObserver* observer(CreateWaiter(browser(), 1));
+  DownloadManagerForBrowser(browser())->DownloadUrl(
+      url, GURL(""), "", false, save_info, web_contents);
+  observer->WaitForFinished();
+
+  // Check state.
+  EXPECT_EQ(1, browser()->tab_count());
+  ASSERT_TRUE(CheckDownloadFullPaths(browser(),
+                                     target_file_full_path,
+                                     OriginFile(file)));
+
+  // Temporary downloads won't be visible.
+  CheckDownloadUI(browser(), false, false, file);
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadTest, SavePageNonHTMLViaGet) {
+  // Do initial setup.
+  ASSERT_TRUE(InitialSetup(false));
+  ASSERT_TRUE(test_server()->Start());
+  NullSelectFile(browser());
+  std::vector<DownloadItem*> download_items;
+  GetDownloads(browser(), &download_items);
+  ASSERT_TRUE(download_items.empty());
+
+  // Navigate to a non-HTML resource. The resource also has
+  // Cache-Control: no-cache set, which normally requires revalidation
+  // each time.
+  GURL url = test_server()->GetURL("files/downloads/image.jpg");
+  ASSERT_TRUE(url.is_valid());
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  // Stop the test server, and then try to save the page. If cache validation
+  // is not bypassed then this will fail since the server is no longer
+  // reachable.
+  ASSERT_TRUE(test_server()->Stop());
+  scoped_ptr<DownloadTestObserver> waiter(
+      new DownloadTestObserver(
+          DownloadManagerForBrowser(browser()), 1, DownloadItem::COMPLETE,
+          false, DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
+  browser()->SavePage();
+  waiter->WaitForFinished();
+
+  // Validate that the correct file was downloaded.
+  GetDownloads(browser(), &download_items);
+  EXPECT_TRUE(waiter->select_file_dialog_seen());
+  ASSERT_EQ(1u, download_items.size());
+  ASSERT_EQ(url, download_items[0]->GetOriginalUrl());
 }

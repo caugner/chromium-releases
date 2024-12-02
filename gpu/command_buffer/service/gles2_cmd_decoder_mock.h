@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,6 @@ class MockGLES2Decoder : public GLES2Decoder {
   MOCK_METHOD0(GetGLContext, gfx::GLContext*());
   MOCK_METHOD0(GetContextGroup, ContextGroup*());
   MOCK_METHOD1(SetResizeCallback, void(const base::Callback<void(gfx::Size)>&));
-  MOCK_METHOD1(SetSwapBuffersCallback, void(const base::Closure&));
   MOCK_METHOD1(SetStreamTextureManager, void(StreamTextureManager*));
   MOCK_METHOD3(DoCommand, error::Error(unsigned int command,
                                        unsigned int arg_count,
@@ -57,7 +56,7 @@ class MockGLES2Decoder : public GLES2Decoder {
                                          uint32* service_texture_id));
   MOCK_METHOD0(GetContextLostReason, error::ContextLostReason());
   MOCK_CONST_METHOD1(GetCommandName, const char*(unsigned int command_id));
-  MOCK_METHOD8(ClearLevel, bool(
+  MOCK_METHOD9(ClearLevel, bool(
       unsigned service_id,
       unsigned bind_target,
       unsigned target,
@@ -65,7 +64,9 @@ class MockGLES2Decoder : public GLES2Decoder {
       unsigned format,
       unsigned type,
       int width,
-      int height));
+      int height,
+      bool is_texture_immutable));
+  MOCK_METHOD1(SetMsgCallback, void(const MsgCallback& callback));
 
   DISALLOW_COPY_AND_ASSIGN(MockGLES2Decoder);
 };

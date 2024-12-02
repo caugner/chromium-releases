@@ -1,71 +1,43 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gfx/surface/accelerated_surface_win.h"
 
+#include <d3d9.h>
 #include <windows.h>
 
 #include <list>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
+#include "base/file_path.h"
 #include "base/lazy_instance.h"
+#include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_native_library.h"
 #include "base/stringprintf.h"
+#include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "base/tracked_objects.h"
+#include "base/win/scoped_comptr.h"
 #include "base/win/wrapped_window_proc.h"
 #include "ipc/ipc_message.h"
 #include "ui/base/win/hwnd_util.h"
 #include "ui/gfx/gl/gl_switches.h"
-
-#pragma comment(lib, "d3d9.lib")
 
 namespace {
 
 typedef HRESULT (WINAPI *Direct3DCreate9ExFunc)(UINT sdk_version,
                                                 IDirect3D9Ex **d3d);
 
-const int64 kPollQueryInterval = 1;
-
 const wchar_t kD3D9ModuleName[] = L"d3d9.dll";
 const char kCreate3D9DeviceExName[] = "Direct3DCreate9Ex";
-
-class QuerySyncThread
-    : public base::Thread,
-      public base::RefCounted<QuerySyncThread> {
- public:
-  explicit QuerySyncThread(const char* name);
-  virtual ~QuerySyncThread();
-
-  // Invoke the completion task when the query completes.
-  void AcknowledgeQuery(const base::win::ScopedComPtr<IDirect3DQuery9>& query,
-                        const base::Closure& completion_task);
-
-  // Acknowledge all pending queries for the given device early then invoke
-  // the given task.
-  void AcknowledgeEarly(
-      const base::win::ScopedComPtr<IDirect3DDevice9Ex>& device,
-      const base::Closure& completion_task);
-
- private:
-  void PollQueries();
-
-  struct PendingQuery {
-    base::win::ScopedComPtr<IDirect3DQuery9> query;
-    base::Closure completion_task;
-  };
-
-  typedef std::list<PendingQuery> PendingQueries;
-  PendingQueries pending_queries_;
-  base::WeakPtrFactory<QuerySyncThread> poll_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(QuerySyncThread);
-};
 
 class PresentThreadPool {
  public:
@@ -79,19 +51,9 @@ class PresentThreadPool {
                 const tracked_objects::Location& from_here,
                 const base::Closure& task);
 
-  void AcknowledgeQuery(const tracked_objects::Location& from_here,
-                        const base::win::ScopedComPtr<IDirect3DQuery9>& query,
-                        const base::Closure& completion_task);
-
-  void AcknowledgeEarly(
-      const tracked_objects::Location& from_here,
-      const base::win::ScopedComPtr<IDirect3DDevice9Ex>& device,
-      const base::Closure& completion_task);
-
  private:
   int next_thread_;
   scoped_ptr<base::Thread> present_threads_[kNumPresentThreads];
-  scoped_refptr<QuerySyncThread> query_sync_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(PresentThreadPool);
 };
@@ -99,82 +61,8 @@ class PresentThreadPool {
 base::LazyInstance<PresentThreadPool>
     g_present_thread_pool = LAZY_INSTANCE_INITIALIZER;
 
-QuerySyncThread::QuerySyncThread(const char* name)
-    : base::Thread(name),
-      poll_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
-}
-
-QuerySyncThread::~QuerySyncThread() {
-}
-
-void QuerySyncThread::AcknowledgeQuery(
-    const base::win::ScopedComPtr<IDirect3DQuery9>& query,
-    const base::Closure& completion_task) {
-  PendingQuery pending_query;
-  pending_query.query = query;
-  pending_query.completion_task = completion_task;
-  pending_queries_.push_back(pending_query);
-
-  // Cancel any pending poll tasks. There should only ever be one pending at a
-  // time.
-  poll_factory_.InvalidateWeakPtrs();
-
-  PollQueries();
-}
-
-void QuerySyncThread::AcknowledgeEarly(
-    const base::win::ScopedComPtr<IDirect3DDevice9Ex>& device,
-    const base::Closure& completion_task) {
-  TRACE_EVENT0("surface", "AcknowledgeEarly");
-
-  PendingQueries::iterator it = pending_queries_.begin();
-  while (it != pending_queries_.end()) {
-    const PendingQuery& pending_query = *it;
-
-    base::win::ScopedComPtr<IDirect3DDevice9> query_device;
-    pending_query.query->GetDevice(query_device.Receive());
-
-    base::win::ScopedComPtr<IDirect3DDevice9Ex> query_device_ex;
-    query_device_ex.QueryFrom(query_device.get());
-
-    if (query_device_ex.get() != device.get()) {
-      ++it;
-    } else {
-      pending_query.completion_task.Run();
-      it = pending_queries_.erase(it);
-    }
-  }
-
-  if (!completion_task.is_null())
-    completion_task.Run();
-}
-
-
-void QuerySyncThread::PollQueries() {
-  TRACE_EVENT0("surface", "PollQueries");
-
-  PendingQueries::iterator it = pending_queries_.begin();
-  while (it != pending_queries_.end()) {
-    const PendingQuery& pending_query = *it;
-
-    HRESULT hr = pending_query.query->GetData(NULL, 0, D3DGETDATA_FLUSH);
-    if (hr == S_FALSE) {
-      ++it;
-    } else {
-      pending_query.completion_task.Run();
-      it = pending_queries_.erase(it);
-    }
-  }
-
-  // Try again later if there are incomplete queries. Otherwise don't poll again
-  // until AcknowledgeQuery is called with a new query.
-  if (!pending_queries_.empty()) {
-    message_loop()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&QuerySyncThread::PollQueries, poll_factory_.GetWeakPtr()),
-        kPollQueryInterval);
-  }
-}
+base::LazyInstance<std::vector<linked_ptr<AcceleratedPresenter> > >
+    g_unused_accelerated_presenters;
 
 PresentThreadPool::PresentThreadPool() : next_thread_(0) {
   for (int i = 0; i < kNumPresentThreads; ++i) {
@@ -182,9 +70,6 @@ PresentThreadPool::PresentThreadPool() : next_thread_(0) {
         base::StringPrintf("PresentThread #%d", i).c_str()));
     present_threads_[i]->Start();
   }
-
-  query_sync_thread_ = new QuerySyncThread("QuerySyncThread");
-  query_sync_thread_->Start();
 }
 
 int PresentThreadPool::NextThread() {
@@ -201,30 +86,6 @@ void PresentThreadPool::PostTask(int thread,
   present_threads_[thread]->message_loop()->PostTask(from_here, task);
 }
 
-void PresentThreadPool::AcknowledgeQuery(
-    const tracked_objects::Location& from_here,
-    const base::win::ScopedComPtr<IDirect3DQuery9>& query,
-    const base::Closure& completion_task) {
-  query_sync_thread_->message_loop()->PostTask(
-      from_here,
-      base::Bind(&QuerySyncThread::AcknowledgeQuery,
-                 query_sync_thread_,
-                 query,
-                 completion_task));
-}
-
-void PresentThreadPool::AcknowledgeEarly(
-    const tracked_objects::Location& from_here,
-    const base::win::ScopedComPtr<IDirect3DDevice9Ex>& device,
-    const base::Closure& completion_task) {
-  query_sync_thread_->message_loop()->PostTask(
-      from_here,
-      base::Bind(&QuerySyncThread::AcknowledgeEarly,
-                 query_sync_thread_,
-                 device,
-                 completion_task));
-}
-
 UINT GetPresentationInterval() {
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableGpuVsync))
     return D3DPRESENT_INTERVAL_IMMEDIATE;
@@ -234,32 +95,83 @@ UINT GetPresentationInterval() {
 
 }  // namespace anonymous
 
-AcceleratedSurface::AcceleratedSurface(HWND parent)
+class AcceleratedPresenter {
+ public:
+  AcceleratedPresenter();
+  ~AcceleratedPresenter();
+
+  void AsyncPresentAndAcknowledge(gfx::NativeWindow window,
+                                  const gfx::Size& size,
+                                  int64 surface_id,
+                                  const base::Closure& completion_task);
+
+  bool Present(gfx::NativeWindow window);
+
+  void Suspend();
+
+ private:
+  void DoInitialize();
+  void DoResize(const gfx::Size& size);
+  void DoReset();
+  void DoPresentAndAcknowledge(gfx::NativeWindow window,
+                               const gfx::Size& size,
+                               int64 surface_id,
+                               const base::Closure& completion_task);
+
+  // Immutable and accessible from any thread without the lock.
+  const int thread_affinity_;
+  base::ScopedNativeLibrary d3d_module_;
+
+  // Whether the presenter is suspended and therefore unable to represent. Only
+  // accessed on the UI thread so the lock is unnecessary.
+  bool suspended_;
+
+  // The size of the swap chain once any pending resizes have been processed.
+  // Only accessed on the UI thread so the lock is unnecessary.
+  gfx::Size pending_size_;
+
+  // The current size of the swap chain. This is only accessed on the thread
+  // with which the surface has affinity.
+  gfx::Size size_;
+
+  // The number of pending resizes. This is accessed with atomic operations so
+  // the lock is not necessary.
+  base::AtomicRefCount num_pending_resizes_;
+
+  // Take the lock before accessing any other state.
+  base::Lock lock_;
+
+  // This device's swap chain is presented to the child window. Copy semantics
+  // are used so it is possible to represent it to quickly validate the window.
+  base::win::ScopedComPtr<IDirect3DDevice9Ex> device_;
+
+  // This query is used to wait until a certain amount of progress has been
+  // made by the GPU and it is safe for the producer to modify its shared
+  // texture again.
+  base::win::ScopedComPtr<IDirect3DQuery9> query_;
+
+  DISALLOW_COPY_AND_ASSIGN(AcceleratedPresenter);
+};
+
+AcceleratedPresenter::AcceleratedPresenter()
     : thread_affinity_(g_present_thread_pool.Pointer()->NextThread()),
-      window_(parent),
+      suspended_(true),
       num_pending_resizes_(0) {
-}
-
-AcceleratedSurface::~AcceleratedSurface() {
-  // Destroy should have been called prior to the last reference going away.
-  DCHECK(!device_);
-}
-
-void AcceleratedSurface::Initialize() {
   g_present_thread_pool.Pointer()->PostTask(
       thread_affinity_,
       FROM_HERE,
-      base::Bind(&AcceleratedSurface::DoInitialize, this));
+      base::Bind(&AcceleratedPresenter::DoInitialize, base::Unretained(this)));
 }
 
-void AcceleratedSurface::Destroy() {
-  g_present_thread_pool.Pointer()->AcknowledgeEarly(
-      FROM_HERE,
-      device_,
-      base::Bind(&AcceleratedSurface::QueriesDestroyed, this));
+AcceleratedPresenter::~AcceleratedPresenter() {
+  // The D3D device and query are leaked because destroying the associated D3D
+  // query crashes some Intel drivers.
+  device_.Detach();
+  query_.Detach();
 }
 
-void AcceleratedSurface::AsyncPresentAndAcknowledge(
+void AcceleratedPresenter::AsyncPresentAndAcknowledge(
+    gfx::NativeWindow window,
     const gfx::Size& size,
     int64 surface_id,
     const base::Closure& completion_task) {
@@ -275,50 +187,68 @@ void AcceleratedSurface::AsyncPresentAndAcknowledge(
     g_present_thread_pool.Pointer()->PostTask(
         thread_affinity_,
         FROM_HERE,
-        base::Bind(&AcceleratedSurface::DoResize, this, quantized_size));
+        base::Bind(&AcceleratedPresenter::DoResize,
+                   base::Unretained(this),
+                   quantized_size));
   }
 
-  // This might unnecessarily post to the thread with which the swap chain has
-  // affinity. This will only result in potentially delaying the present.
   g_present_thread_pool.Pointer()->PostTask(
-      num_pending_resizes_ ?
-          thread_affinity_ : g_present_thread_pool.Pointer()->NextThread(),
+      thread_affinity_,
       FROM_HERE,
-      base::Bind(&AcceleratedSurface::DoPresentAndAcknowledge,
-                 this,
+      base::Bind(&AcceleratedPresenter::DoPresentAndAcknowledge,
+                 base::Unretained(this),
+                 window,
                  size,
                  surface_id,
                  completion_task));
+
+  suspended_ = false;
 }
 
-void AcceleratedSurface::Present() {
+bool AcceleratedPresenter::Present(gfx::NativeWindow window) {
   TRACE_EVENT0("surface", "Present");
 
   HRESULT hr;
 
+  if (suspended_)
+    return false;
+
   base::AutoLock locked(lock_);
 
   if (!device_)
-    return;
+    return true;
 
   RECT rect;
-  if (!GetClientRect(window_, &rect))
-    return;
+  if (!GetClientRect(window, &rect))
+    return true;
 
   {
     TRACE_EVENT0("surface", "PresentEx");
     hr = device_->PresentEx(&rect,
                             &rect,
-                            NULL,
+                            window,
                             NULL,
                             D3DPRESENT_INTERVAL_IMMEDIATE);
+
+    // If the device hung, force a resize to reset the device.
+    if (hr == D3DERR_DEVICELOST || hr == D3DERR_DEVICEHUNG) {
+      base::AtomicRefCountInc(&num_pending_resizes_);
+      g_present_thread_pool.Pointer()->PostTask(
+          thread_affinity_,
+          FROM_HERE,
+          base::Bind(&AcceleratedPresenter::DoReset, base::Unretained(this)));
+
+      // A device hang destroys the contents of the back buffer so no point in
+      // scheduling a present.
+    }
+
     if (FAILED(hr))
-      return;
+      return false;
   }
 
   hr = query_->Issue(D3DISSUE_END);
   if (FAILED(hr))
-    return;
+    return true;
 
   {
     TRACE_EVENT0("surface", "spin");
@@ -329,19 +259,35 @@ void AcceleratedSurface::Present() {
         Sleep(0);
     } while (hr == S_FALSE);
   }
+
+  return true;
 }
 
-void AcceleratedSurface::DoInitialize() {
+void AcceleratedPresenter::Suspend() {
+  // Resize the swap chain to 1 x 1 to save memory while the presenter is not
+  // in use.
+  pending_size_ = gfx::Size(1, 1);
+  base::AtomicRefCountInc(&num_pending_resizes_);
+
+  g_present_thread_pool.Pointer()->PostTask(
+      thread_affinity_,
+      FROM_HERE,
+      base::Bind(&AcceleratedPresenter::DoResize,
+                 base::Unretained(this),
+                 gfx::Size(1, 1)));
+
+  suspended_ = true;
+}
+
+void AcceleratedPresenter::DoInitialize() {
   TRACE_EVENT0("surface", "DoInitialize");
 
   HRESULT hr;
 
-  HMODULE module = GetModuleHandle(kD3D9ModuleName);
-  if (!module)
-    return;
+  d3d_module_.Reset(base::LoadNativeLibrary(FilePath(kD3D9ModuleName), NULL));
 
   Direct3DCreate9ExFunc create_func = reinterpret_cast<Direct3DCreate9ExFunc>(
-      GetProcAddress(module, kCreate3D9DeviceExName));
+      d3d_module_.GetFunctionPointer(kCreate3D9DeviceExName));
   if (!create_func)
     return;
 
@@ -350,12 +296,16 @@ void AcceleratedSurface::DoInitialize() {
   if (FAILED(hr))
     return;
 
+  // Any old window will do to create the device. In practice the window to
+  // present to is an argument to IDirect3DDevice9::Present.
+  HWND window = GetShellWindow();
+
   D3DPRESENT_PARAMETERS parameters = { 0 };
   parameters.BackBufferWidth = 1;
   parameters.BackBufferHeight = 1;
   parameters.BackBufferCount = 1;
   parameters.BackBufferFormat = D3DFMT_A8R8G8B8;
-  parameters.hDeviceWindow = window_;
+  parameters.hDeviceWindow = window;
   parameters.Windowed = TRUE;
   parameters.Flags = 0;
   parameters.PresentationInterval = GetPresentationInterval();
@@ -364,7 +314,7 @@ void AcceleratedSurface::DoInitialize() {
   hr = d3d->CreateDeviceEx(
       D3DADAPTER_DEFAULT,
       D3DDEVTYPE_HAL,
-      window_,
+      window,
       D3DCREATE_FPU_PRESERVE | D3DCREATE_SOFTWARE_VERTEXPROCESSING |
           D3DCREATE_MULTITHREADED,
       &parameters,
@@ -382,36 +332,32 @@ void AcceleratedSurface::DoInitialize() {
   return;
 }
 
-void AcceleratedSurface::QueriesDestroyed() {
-  g_present_thread_pool.Pointer()->PostTask(
-      thread_affinity_,
-      FROM_HERE,
-      base::Bind(&AcceleratedSurface::DoDestroy,
-                 this));
-}
-
-void AcceleratedSurface::DoDestroy() {
-  TRACE_EVENT0("surface", "DoDestroy");
-
-  base::AutoLock locked(lock_);
-
-  device_ = NULL;
-  query_ = NULL;
-}
-
-void AcceleratedSurface::DoResize(const gfx::Size& size) {
+void AcceleratedPresenter::DoResize(const gfx::Size& size) {
   TRACE_EVENT0("surface", "DoResize");
+  size_ = size;
+  DoReset();
+}
+
+void AcceleratedPresenter::DoReset() {
+  TRACE_EVENT0("surface", "DoReset");
 
   HRESULT hr;
 
   base::AtomicRefCountDec(&num_pending_resizes_);
 
+  base::AutoLock locked(lock_);
+
+  if (!device_)
+    return;
+
+  gfx::NativeWindow window = GetShellWindow();
+
   D3DPRESENT_PARAMETERS parameters = { 0 };
-  parameters.BackBufferWidth = size.width();
-  parameters.BackBufferHeight = size.height();
+  parameters.BackBufferWidth = size_.width();
+  parameters.BackBufferHeight = size_.height();
   parameters.BackBufferCount = 1;
   parameters.BackBufferFormat = D3DFMT_A8R8G8B8;
-  parameters.hDeviceWindow = window_;
+  parameters.hDeviceWindow = window;
   parameters.Windowed = TRUE;
   parameters.Flags = 0;
   parameters.PresentationInterval = GetPresentationInterval();
@@ -421,12 +367,11 @@ void AcceleratedSurface::DoResize(const gfx::Size& size) {
   if (FAILED(hr))
     return;
 
-  size_ = size;
-
   device_->Clear(0, NULL, D3DCLEAR_TARGET, 0xFFFFFFFF, 0, 0);
 }
 
-void AcceleratedSurface::DoPresentAndAcknowledge(
+void AcceleratedPresenter::DoPresentAndAcknowledge(
+    gfx::NativeWindow window,
     const gfx::Size& size,
     int64 surface_id,
     const base::Closure& completion_task) {
@@ -439,7 +384,7 @@ void AcceleratedSurface::DoPresentAndAcknowledge(
   // Ensure the task is always run and while the lock is taken.
   base::ScopedClosureRunner scoped_completion_runner(completion_task);
 
-  if (!window_)
+  if (!device_)
     return;
 
   HANDLE handle = reinterpret_cast<HANDLE>(surface_id);
@@ -496,25 +441,78 @@ void AcceleratedSurface::DoPresentAndAcknowledge(
   query_->GetData(NULL, 0, D3DGETDATA_FLUSH);
 
   ::SetWindowPos(
-      window_,
+      window,
       NULL,
       0, 0,
       size.width(), size.height(),
       SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOMOVE |SWP_NOOWNERZORDER |
           SWP_NOREDRAW | SWP_NOSENDCHANGING | SWP_NOSENDCHANGING |
-          SWP_ASYNCWINDOWPOS);
+          SWP_ASYNCWINDOWPOS | SWP_NOZORDER);
+
+  // Wait for the StretchRect to complete before notifying the GPU process
+  // that it is safe to write to its backing store again.
+  {
+    TRACE_EVENT0("surface", "spin");
+    do {
+      hr = query_->GetData(NULL, 0, D3DGETDATA_FLUSH);
+
+      if (hr == S_FALSE)
+        Sleep(0);
+    } while (hr == S_FALSE);
+  }
 
   scoped_completion_runner.Release();
-  if (!completion_task.is_null()) {
-    g_present_thread_pool.Pointer()->AcknowledgeQuery(FROM_HERE,
-                                                      query_,
-                                                      completion_task);
-  }
+  if (!completion_task.is_null())
+    completion_task.Run();
 
   {
     TRACE_EVENT0("surface", "Present");
-    hr = device_->Present(&rect, &rect, NULL, NULL);
-    if (FAILED(hr))
-      return;
+    hr = device_->Present(&rect, &rect, window, NULL);
+
+    // If the device hung, force a resize to reset the device.
+    if (hr == D3DERR_DEVICELOST || hr == D3DERR_DEVICEHUNG) {
+      base::AtomicRefCountInc(&num_pending_resizes_);
+      g_present_thread_pool.Pointer()->PostTask(
+          thread_affinity_,
+          FROM_HERE,
+          base::Bind(&AcceleratedPresenter::DoReset, base::Unretained(this)));
+
+      // A device hang destroys the contents of the back buffer so no point in
+      // scheduling a present.
+    }
   }
 }
+
+AcceleratedSurface::AcceleratedSurface() {
+  if (g_unused_accelerated_presenters.Pointer()->empty()) {
+    presenter_.reset(new AcceleratedPresenter);
+  } else {
+    presenter_ = g_unused_accelerated_presenters.Pointer()->back();
+    g_unused_accelerated_presenters.Pointer()->pop_back();
+  }
+}
+
+AcceleratedSurface::~AcceleratedSurface() {
+  presenter_->Suspend();
+  g_unused_accelerated_presenters.Pointer()->push_back(presenter_);
+}
+
+void AcceleratedSurface::AsyncPresentAndAcknowledge(
+    HWND window,
+    const gfx::Size& size,
+    int64 surface_id,
+    const base::Closure& completion_task) {
+  presenter_->AsyncPresentAndAcknowledge(window,
+                                         size,
+                                         surface_id,
+                                         completion_task);
+}
+
+bool AcceleratedSurface::Present(HWND window) {
+  return presenter_->Present(window);
+}
+
+void AcceleratedSurface::Suspend() {
+  presenter_->Suspend();
+}
+

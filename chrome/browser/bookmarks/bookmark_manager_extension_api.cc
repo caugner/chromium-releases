@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,11 @@
 #include "base/json/json_writer.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/bookmarks/bookmark_extension_api_constants.h"
+#include "chrome/browser/bookmarks/bookmark_extension_helpers.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/browser/bookmarks/bookmark_extension_api_constants.h"
-#include "chrome/browser/bookmarks/bookmark_extension_helpers.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
@@ -21,14 +21,18 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/chrome_view_type.h"
+#include "chrome/common/pref_names.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace keys = bookmark_extension_api_constants;
+
+using content::WebContents;
 
 namespace {
 
@@ -274,7 +278,6 @@ bool CanPasteBookmarkManagerFunction::RunImpl() {
   }
   bool can_paste = bookmark_utils::CanPasteFromClipboard(parent_node);
   result_.reset(Value::CreateBooleanValue(can_paste));
-  SendResponse(true);
   return true;
 }
 
@@ -364,7 +367,11 @@ bool BookmarkManagerGetStringsFunction::RunImpl() {
   ChromeURLDataManager::DataSource::SetFontAndTextDirection(localized_strings);
 
   result_.reset(localized_strings);
+
+  // This is needed because unlike the rest of these functions, this class
+  // inherits from AsyncFunction directly, rather than BookmarkFunction.
   SendResponse(true);
+
   return true;
 }
 
@@ -378,11 +385,11 @@ bool StartDragBookmarkManagerFunction::RunImpl() {
 
   if (render_view_host_->delegate()->GetRenderViewType() ==
       content::VIEW_TYPE_TAB_CONTENTS) {
-    TabContents* tab_contents =
-        dispatcher()->delegate()->GetAssociatedTabContents();
-    CHECK(tab_contents);
+    WebContents* web_contents =
+        dispatcher()->delegate()->GetAssociatedWebContents();
+    CHECK(web_contents);
     bookmark_utils::DragBookmarks(profile(), nodes,
-                                  tab_contents->GetNativeView());
+                                  web_contents->GetNativeView());
 
     return true;
   } else {
@@ -420,11 +427,11 @@ bool DropBookmarkManagerFunction::RunImpl() {
 
   if (render_view_host_->delegate()->GetRenderViewType() ==
       content::VIEW_TYPE_TAB_CONTENTS) {
-    TabContents* tab_contents =
-        dispatcher()->delegate()->GetAssociatedTabContents();
-    CHECK(tab_contents);
+    WebContents* web_contents =
+        dispatcher()->delegate()->GetAssociatedWebContents();
+    CHECK(web_contents);
     ExtensionWebUI* web_ui =
-        static_cast<ExtensionWebUI*>(tab_contents->web_ui());
+        static_cast<ExtensionWebUI*>(web_contents->GetWebUI()->GetController());
     CHECK(web_ui);
     BookmarkManagerExtensionEventRouter* router =
         web_ui->bookmark_manager_extension_event_router();
@@ -440,7 +447,6 @@ bool DropBookmarkManagerFunction::RunImpl() {
                                         drop_parent, drop_index);
 
     router->ClearBookmarkNodeData();
-    SendResponse(true);
     return true;
   } else {
     NOTREACHED();

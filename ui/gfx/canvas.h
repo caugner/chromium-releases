@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@ class SkCanvas;
 
 namespace ui {
 class Transform;
-typedef unsigned int TextureID;
 }
 
 namespace gfx {
@@ -122,20 +121,18 @@ class UI_EXPORT Canvas {
   // color, using a transfer mode of SkXfermode::kSrcOver_Mode.
   //
   // NOTE: if you need a single pixel line, use DrawLineInt.
-  virtual void DrawRectInt(const SkColor& color,
-                           int x, int y, int w, int h) = 0;
+  virtual void DrawRect(const gfx::Rect& rect, const SkColor& color) = 0;
 
   // Draws a single pixel rect in the specified region with the specified
   // color and transfer mode.
   //
   // NOTE: if you need a single pixel line, use DrawLineInt.
-  virtual void DrawRectInt(const SkColor& color,
-                           int x, int y, int w, int h,
-                           SkXfermode::Mode mode) = 0;
+  virtual void DrawRect(const gfx::Rect& rect,
+                        const SkColor& color,
+                        SkXfermode::Mode mode) = 0;
 
   // Draws the given rectangle with the given paint's parameters.
-  virtual void DrawRectInt(int x, int y, int w, int h,
-                           const SkPaint& paint) = 0;
+  virtual void DrawRect(const gfx::Rect& rect, const SkPaint& paint) = 0;
 
   // Draws a single pixel line with the specified color.
   virtual void DrawLineInt(const SkColor& color,
@@ -214,13 +211,8 @@ class UI_EXPORT Canvas {
   // returned by BeginPlatformPaint().
   virtual void EndPlatformPaint() = 0;
 
-#if !defined(OS_MACOSX)
   // Apply transformation on the canvas.
   virtual void Transform(const ui::Transform& transform) = 0;
-#endif
-
-  // Create a texture ID that can be used for accelerated drawing.
-  virtual ui::TextureID GetTextureID() = 0;
 
   // TODO(beng): remove this once we don't need to use any skia-specific methods
   //             through this interface.

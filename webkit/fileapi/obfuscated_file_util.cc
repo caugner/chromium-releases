@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@
 #include "googleurl/src/gurl.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation_context.h"
-#include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_system_quota_util.h"
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
@@ -90,6 +89,13 @@ void UpdatePathQuotaUsage(
       context->file_system_context()->quota_manager_proxy();
   quota_util->UpdateOriginUsageOnFileThread(quota_manager_proxy, origin_url,
       type, growth);
+}
+
+void TouchDirectory(fileapi::FileSystemDirectoryDatabase* db,
+                    fileapi::FileSystemDirectoryDatabase::FileId dir_id) {
+  DCHECK(db);
+  if (!db->UpdateModificationTime(dir_id, base::Time::Now()))
+    NOTREACHED();
 }
 
 const FilePath::CharType kLegacyDataDirectory[] = FILE_PATH_LITERAL("Legacy");
@@ -391,6 +397,7 @@ PlatformFileError ObfuscatedFileUtil::CreateDirectory(
   }
   if (!recursive && components.size() - index > 1)
     return base::PLATFORM_FILE_ERROR_NOT_FOUND;
+  bool first = true;
   for (; index < components.size(); ++index) {
     FileInfo file_info;
     file_info.name = components[index];
@@ -406,6 +413,10 @@ PlatformFileError ObfuscatedFileUtil::CreateDirectory(
     }
     UpdatePathQuotaUsage(context, context->src_origin_url(),
       context->src_type(), 1, file_info.name.size());
+    if (first) {
+      first = false;
+      TouchDirectory(db, file_info.parent_id);
+    }
   }
   return base::PLATFORM_FILE_OK;
 }
@@ -533,8 +544,7 @@ PlatformFileError ObfuscatedFileUtil::Touch(
     return base::PLATFORM_FILE_ERROR_FAILED;
   }
   if (file_info.is_directory()) {
-    file_info.modification_time = last_modified_time;
-    if (!db->UpdateFileInfo(file_id, file_info))
+    if (!db->UpdateModificationTime(file_id, last_modified_time))
       return base::PLATFORM_FILE_ERROR_FAILED;
     return base::PLATFORM_FILE_OK;
   }
@@ -682,8 +692,11 @@ PlatformFileError ObfuscatedFileUtil::CopyOrMoveFile(
     if (overwrite) {
       FilePath dest_data_path = DataPathToLocalPath(context->src_origin_url(),
         context->src_type(), dest_file_info.data_path);
-      return underlying_file_util()->CopyOrMoveFile(context,
+      PlatformFileError error = underlying_file_util()->CopyOrMoveFile(context,
           src_data_path, dest_data_path, copy);
+      if (error == base::PLATFORM_FILE_OK)
+        TouchDirectory(db, dest_file_info.parent_id);
+      return error;
     } else {
       FileId dest_parent_id;
       if (!db->GetFileWithPath(dest_file_path.DirName(), &dest_parent_id)) {
@@ -712,6 +725,8 @@ PlatformFileError ObfuscatedFileUtil::CopyOrMoveFile(
       UpdatePathQuotaUsage(context, context->src_origin_url(),
           context->src_type(), -1,
           -static_cast<int64>(src_file_info.name.size()));
+      TouchDirectory(db, src_file_info.parent_id);
+      TouchDirectory(db, dest_file_info.parent_id);
       return base::PLATFORM_FILE_OK;
     } else {
       FileId dest_parent_id;
@@ -724,6 +739,7 @@ PlatformFileError ObfuscatedFileUtil::CopyOrMoveFile(
           static_cast<int64>(dest_file_path.BaseName().value().size())
               - static_cast<int64>(src_file_info.name.size())))
         return base::PLATFORM_FILE_ERROR_NO_SPACE;
+      FileId src_parent_id = src_file_info.parent_id;
       src_file_info.parent_id = dest_parent_id;
       src_file_info.name = dest_file_path.BaseName().value();
       if (!db->UpdateFileInfo(src_file_id, src_file_info))
@@ -732,6 +748,8 @@ PlatformFileError ObfuscatedFileUtil::CopyOrMoveFile(
           context, context->src_origin_url(), context->src_type(), 0,
           static_cast<int64>(dest_file_path.BaseName().value().size()) -
               static_cast<int64>(src_file_path.BaseName().value().size()));
+      TouchDirectory(db, src_parent_id);
+      TouchDirectory(db, dest_parent_id);
       return base::PLATFORM_FILE_OK;
     }
   }
@@ -803,6 +821,7 @@ PlatformFileError ObfuscatedFileUtil::DeleteFile(
   if (base::PLATFORM_FILE_OK !=
       underlying_file_util()->DeleteFile(context, data_path))
     LOG(WARNING) << "Leaked a backing file.";
+  TouchDirectory(db, file_info.parent_id);
   return base::PLATFORM_FILE_OK;
 }
 
@@ -826,6 +845,7 @@ PlatformFileError ObfuscatedFileUtil::DeleteSingleDirectory(
   AllocateQuotaForPath(context, -1, -static_cast<int64>(file_info.name.size()));
   UpdatePathQuotaUsage(context, context->src_origin_url(), context->src_type(),
       -1, -static_cast<int64>(file_info.name.size()));
+  TouchDirectory(db, file_info.parent_id);
   return base::PLATFORM_FILE_OK;
 }
 
@@ -972,8 +992,7 @@ ObfuscatedFileUtil::CreateOriginEnumerator() {
 
 bool ObfuscatedFileUtil::DestroyDirectoryDatabase(
     const GURL& origin, FileSystemType type) {
-  std::string type_string =
-      FileSystemPathManager::GetFileSystemTypeString(type);
+  std::string type_string = GetFileSystemTypeString(type);
   if (type_string.empty()) {
     LOG(WARNING) << "Unknown filesystem type requested:" << type;
     return true;
@@ -1117,6 +1136,7 @@ PlatformFileError ObfuscatedFileUtil::CreateFile(
     return base::PLATFORM_FILE_ERROR_FAILED;
   }
   UpdatePathQuotaUsage(context, origin_url, type, 1, file_info->name.size());
+  TouchDirectory(db, file_info->parent_id);
 
   return base::PLATFORM_FILE_OK;
 }
@@ -1163,8 +1183,7 @@ FilePath ObfuscatedFileUtil::LocalPathToDataPath(
 // Still doesn't answer the quota issue, though.
 FileSystemDirectoryDatabase* ObfuscatedFileUtil::GetDirectoryDatabase(
     const GURL& origin, FileSystemType type, bool create) {
-  std::string type_string =
-      FileSystemPathManager::GetFileSystemTypeString(type);
+  std::string type_string = GetFileSystemTypeString(type);
   if (type_string.empty()) {
     LOG(WARNING) << "Unknown filesystem type requested:" << type;
     return NULL;

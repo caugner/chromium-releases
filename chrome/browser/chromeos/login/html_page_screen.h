@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,23 +14,11 @@
 #include "chrome/browser/chromeos/login/view_screen.h"
 #include "chrome/browser/chromeos/login/web_page_screen.h"
 #include "chrome/browser/chromeos/login/web_page_view.h"
+#include "chrome/browser/ui/views/unhandled_keyboard_event_handler.h"
 
 namespace chromeos {
 
 class ViewScreenDelegate;
-
-class HTMLPageDomView : public WebPageDomView {
- public:
-  HTMLPageDomView() {}
-
- protected:
-  // Overriden from DOMView:
-  virtual TabContents* CreateTabContents(Profile* profile,
-                                         SiteInstance* instance) OVERRIDE;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(HTMLPageDomView);
-};
 
 class HTMLPageView : public WebPageView {
  public:
@@ -41,7 +29,7 @@ class HTMLPageView : public WebPageView {
 
  private:
   // View that renders page.
-  HTMLPageDomView* dom_view_;
+  WebPageDomView* dom_view_;
 
   DISALLOW_COPY_AND_ASSIGN(HTMLPageView);
 };
@@ -49,15 +37,10 @@ class HTMLPageView : public WebPageView {
 // HTMLPageScreen is used to show arbitrary HTML page. It is used to show
 // simple screens like recover.
 class HTMLPageScreen : public ViewScreen<HTMLPageView>,
-                       public WebPageScreen,
-                       public WebPageDelegate {
+                       public WebPageScreen {
  public:
   HTMLPageScreen(ViewScreenDelegate* delegate, const std::string& url);
   virtual ~HTMLPageScreen();
-
-  // WebPageDelegate implementation:
-  virtual void OnPageLoaded() OVERRIDE;
-  virtual void OnPageLoadFailed(const std::string& url) OVERRIDE;
 
  protected:
   // Overrides WebPageScreen:
@@ -77,6 +60,8 @@ class HTMLPageScreen : public ViewScreen<HTMLPageView>,
 
   // URL to navigate.
   std::string url_;
+
+  UnhandledKeyboardEventHandler unhandled_keyboard_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(HTMLPageScreen);
 };

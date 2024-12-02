@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,7 @@
 #include "net/socket/client_socket_pool_base.h"
 #include "net/socket/client_socket_pool_histograms.h"
 #include "net/socket/client_socket_pool.h"
+#include "net/socket/ssl_client_socket.h"
 
 namespace net {
 
@@ -45,7 +46,7 @@ class NET_EXPORT_PRIVATE HttpProxySocketParams
       const scoped_refptr<SSLSocketParams>& ssl_params,
       const GURL& request_url,
       const std::string& user_agent,
-      HostPortPair endpoint,
+      const HostPortPair& endpoint,
       HttpAuthCache* http_auth_cache,
       HttpAuthHandlerFactory* http_auth_handler_factory,
       SpdySessionPool* spdy_session_pool,
@@ -155,10 +156,12 @@ class HttpProxyConnectJob : public ConnectJob {
   HostResolver* const resolver_;
 
   State next_state_;
-  OldCompletionCallbackImpl<HttpProxyConnectJob> callback_;
+  CompletionCallback callback_;
   scoped_ptr<ClientSocketHandle> transport_socket_handle_;
   scoped_ptr<ProxyClientSocket> transport_socket_;
   bool using_spdy_;
+  // Protocol negotiated with the server.
+  SSLClientSocket::NextProto protocol_negotiated_;
 
   HttpResponseInfo error_response_info_;
 
@@ -180,12 +183,12 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketPool : public ClientSocketPool {
 
   virtual ~HttpProxyClientSocketPool();
 
-  // ClientSocketPool methods:
+  // ClientSocketPool implementation.
   virtual int RequestSocket(const std::string& group_name,
                             const void* connect_params,
                             RequestPriority priority,
                             ClientSocketHandle* handle,
-                            OldCompletionCallback* callback,
+                            const CompletionCallback& callback,
                             const BoundNetLog& net_log) OVERRIDE;
 
   virtual void RequestSockets(const std::string& group_name,

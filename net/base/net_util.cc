@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,6 +63,7 @@
 #if defined(OS_WIN)
 #include "net/base/winsock_init.h"
 #endif
+#include "net/http/http_content_disposition.h"
 #include "unicode/datefmt.h"
 #include "unicode/regex.h"
 #include "unicode/ucnv.h"
@@ -160,7 +161,7 @@ static const int kAllowedFtpPorts[] = {
 };
 
 std::string::size_type CountTrailingChars(
-    const std::string input,
+    const std::string& input,
     const std::string::value_type trailing_chars[]) {
   const size_t last_good_char = input.find_last_not_of(trailing_chars);
   return (last_good_char == std::string::npos) ?
@@ -357,38 +358,6 @@ bool DecodeWord(const std::string& encoded_word,
   return false;
 }
 
-bool DecodeParamValue(const std::string& input,
-                      const std::string& referrer_charset,
-                      std::string* output) {
-  std::string tmp;
-  // Tokenize with whitespace characters.
-  StringTokenizer t(input, " \t\n\r");
-  t.set_options(StringTokenizer::RETURN_DELIMS);
-  bool is_previous_token_rfc2047 = true;
-  while (t.GetNext()) {
-    if (t.token_is_delim()) {
-      // If the previous non-delimeter token is not RFC2047-encoded,
-      // put in a space in its place. Otheriwse, skip over it.
-      if (!is_previous_token_rfc2047) {
-        tmp.push_back(' ');
-      }
-      continue;
-    }
-    // We don't support a single multibyte character split into
-    // adjacent encoded words. Some broken mail clients emit headers
-    // with that problem, but most web servers usually encode a filename
-    // in a single encoded-word. Firefox/Thunderbird do not support
-    // it, either.
-    std::string decoded;
-    if (!DecodeWord(t.token(), referrer_charset, &is_previous_token_rfc2047,
-                    &decoded))
-      return false;
-    tmp.append(decoded);
-  }
-  output->swap(tmp);
-  return true;
-}
-
 // Does some simple normalization of scripts so we can allow certain scripts
 // to exist together.
 // TODO(brettw) bug 880223: we should allow some other languages to be
@@ -484,8 +453,7 @@ void SetExemplarSetForLang(const std::string& lang,
   map.insert(std::make_pair(lang, lang_set));
 }
 
-static base::LazyInstance<base::Lock,
-                          base::LeakyLazyInstanceTraits<base::Lock> >
+static base::LazyInstance<base::Lock>::Leaky
     g_lang_set_lock = LAZY_INSTANCE_INITIALIZER;
 
 // Returns true if all the characters in component_characters are used by
@@ -1110,8 +1078,7 @@ const FormatUrlType kFormatUrlOmitTrailingSlashOnBareHostname = 1 << 2;
 const FormatUrlType kFormatUrlOmitAll = kFormatUrlOmitUsernamePassword |
     kFormatUrlOmitHTTP | kFormatUrlOmitTrailingSlashOnBareHostname;
 
-static base::LazyInstance<std::multiset<int>,
-                          base::LeakyLazyInstanceTraits<std::multiset<int> > >
+static base::LazyInstance<std::multiset<int> >::Leaky
     g_explicitly_allowed_ports = LAZY_INSTANCE_INITIALIZER;
 
 size_t GetCountOfExplicitlyAllowedPorts() {
@@ -1219,83 +1186,57 @@ bool DecodeCharset(const std::string& input,
   return true;
 }
 
-std::string GetFileNameFromCD(const std::string& header,
-                              const std::string& referrer_charset) {
-  std::string decoded;
-  std::string param_value = GetHeaderParamValue(header, "filename*",
-                                                QuoteRule::KEEP_OUTER_QUOTES);
-  if (!param_value.empty()) {
-    if (param_value.find('"') == std::string::npos) {
-      std::string charset;
-      std::string value;
-      if (DecodeCharset(param_value, &charset, &value)) {
-        // RFC 5987 value should be ASCII-only.
-        if (!IsStringASCII(value))
-          return std::string();
-        std::string tmp = UnescapeURLComponent(
-            value,
-            UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS);
-        if (base::ConvertToUtf8AndNormalize(tmp, charset, &decoded))
-          return decoded;
+bool DecodeFilenameValue(const std::string& input,
+                         const std::string& referrer_charset,
+                         std::string* output) {
+  std::string tmp;
+  // Tokenize with whitespace characters.
+  StringTokenizer t(input, " \t\n\r");
+  t.set_options(StringTokenizer::RETURN_DELIMS);
+  bool is_previous_token_rfc2047 = true;
+  while (t.GetNext()) {
+    if (t.token_is_delim()) {
+      // If the previous non-delimeter token is not RFC2047-encoded,
+      // put in a space in its place. Otheriwse, skip over it.
+      if (!is_previous_token_rfc2047) {
+        tmp.push_back(' ');
       }
+      continue;
     }
+    // We don't support a single multibyte character split into
+    // adjacent encoded words. Some broken mail clients emit headers
+    // with that problem, but most web servers usually encode a filename
+    // in a single encoded-word. Firefox/Thunderbird do not support
+    // it, either.
+    std::string decoded;
+    if (!DecodeWord(t.token(), referrer_charset, &is_previous_token_rfc2047,
+                    &decoded))
+      return false;
+    tmp.append(decoded);
   }
-  param_value = GetHeaderParamValue(header, "filename",
-                                    QuoteRule::REMOVE_OUTER_QUOTES);
-  if (param_value.empty()) {
-    // Some servers use 'name' parameter.
-    param_value = GetHeaderParamValue(header, "name",
-                                      QuoteRule::REMOVE_OUTER_QUOTES);
-  }
-  if (param_value.empty())
-    return std::string();
-  if (DecodeParamValue(param_value, referrer_charset, &decoded))
-    return decoded;
-  return std::string();
+  output->swap(tmp);
+  return true;
 }
 
-// TODO(mpcomplete): This is a quick and dirty implementation for now.  I'm
-// sure this doesn't properly handle all (most?) cases.
-std::string GetHeaderParamValue(const std::string& header,
-                                const std::string& param_name,
-                                QuoteRule::Type quote_rule) {
-  // This assumes args are formatted exactly like "bla; arg1=value; arg2=value".
-  std::string::const_iterator param_begin =
-      std::search(header.begin(), header.end(), param_name.begin(),
-                  param_name.end(), base::CaseInsensitiveCompareASCII<char>());
+bool DecodeExtValue(const std::string& param_value, std::string* decoded) {
+  if (param_value.find('"') != std::string::npos)
+    return false;
 
-  if (param_begin == header.end())
-    return std::string();
-  param_begin += param_name.length();
+  std::string charset;
+  std::string value;
+  if (!DecodeCharset(param_value, &charset, &value))
+    return false;
 
-  std::string whitespace(" \t");
-  size_t equals_offset =
-      header.find_first_not_of(whitespace, param_begin - header.begin());
-  if (equals_offset == std::string::npos || header[equals_offset] != '=')
-    return std::string();
-
-  size_t param_value_offset =
-      header.find_first_not_of(whitespace, equals_offset + 1);
-  if (param_value_offset == std::string::npos)
-    return std::string();
-
-  param_begin = header.begin() + param_value_offset;
-  if (param_begin == header.end())
-    return std::string();
-
-  std::string::const_iterator param_end;
-  if (*param_begin == '"' && quote_rule == QuoteRule::REMOVE_OUTER_QUOTES) {
-    ++param_begin;  // skip past the quote.
-    param_end = std::find(param_begin, header.end(), '"');
-    // If the closing quote is missing, we will treat the rest of the
-    // string as the parameter.  We can't set |param_end| to the
-    // location of the separator (';'), since the separator is
-    // technically quoted. See: http://crbug.com/58840
-  } else {
-    param_end = std::find(param_begin + 1, header.end(), ';');
+  // RFC 5987 value should be ASCII-only.
+  if (!IsStringASCII(value)) {
+    decoded->clear();
+    return true;
   }
 
-  return std::string(param_begin, param_end);
+  std::string unescaped = UnescapeURLComponent(value,
+      UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS);
+
+  return base::ConvertToUtf8AndNormalize(unescaped, charset, decoded);
 }
 
 string16 IDNToUnicode(const std::string& host,
@@ -1411,7 +1352,11 @@ std::string GetDirectoryListingEntry(const string16& name,
     result.append(",0,");
   }
 
-  base::JsonDoubleQuote(FormatBytesUnlocalized(size), true, &result);
+  // Negative size means unknown or not applicable (e.g. directory).
+  string16 size_string;
+  if (size >= 0)
+    size_string = FormatBytesUnlocalized(size);
+  base::JsonDoubleQuote(size_string, true, &result);
 
   result.append(",");
 
@@ -1470,8 +1415,10 @@ string16 GetSuggestedFilename(const GURL& url,
   bool overwrite_extension = false;
 
   // Try to extract a filename from content-disposition first.
-  if (!content_disposition.empty())
-    filename = GetFileNameFromCD(content_disposition, referrer_charset);
+  if (!content_disposition.empty()) {
+    HttpContentDisposition header(content_disposition, referrer_charset);
+    filename = header.filename();
+  }
 
   // Then try to use the suggested name.
   if (filename.empty() && !suggested_name.empty())
@@ -1514,7 +1461,7 @@ string16 GetSuggestedFilename(const GURL& url,
   // whitespace to prevent file extension obfuscation on trusted websites
   // e.g. Gmail might think evil.exe. is safe, so we don't want it to become
   // evil.exe when we download it
-  std::wstring::size_type path_length_before_trim = path.length();
+  string16::size_type path_length_before_trim = path.length();
   TrimWhitespace(path, TRIM_TRAILING, &path);
   trimmed_trailing_character_count += path_length_before_trim - path.length();
   file_util::ReplaceIllegalCharactersInPath(&path, '-');
@@ -1985,8 +1932,8 @@ void SetExplicitlyAllowedPorts(const std::string& allowed_ports) {
     if (i == size || allowed_ports[i] == kComma) {
       if (i > last) {
         int port;
-        base::StringToInt(allowed_ports.begin() + last,
-                          allowed_ports.begin() + i,
+        base::StringToInt(base::StringPiece(allowed_ports.begin() + last,
+                                            allowed_ports.begin() + i),
                           &port);
         ports.insert(port);
       }
@@ -2039,6 +1986,8 @@ bool IPv6Supported() {
   // Another approach is implementing the similar feature by
   // java.net.NetworkInterface through JNI.
   NOTIMPLEMENTED();
+  // so we don't get a 'defined but not used' warning/err
+  IPv6SupportResults(IPV6_GETIFADDRS_FAILED);
   return true;
 #elif defined(OS_POSIX)
   int test_socket = socket(AF_INET6, SOCK_STREAM, 0);

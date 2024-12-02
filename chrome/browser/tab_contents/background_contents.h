@@ -9,26 +9,30 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class Profile;
 
+namespace content {
+class SiteInstance;
+};
+
 // This class consumes TabContents. It can host a renderer, but does not
 // have any visible display.
-class BackgroundContents : public TabContentsDelegate,
-                           public TabContentsObserver,
+class BackgroundContents : public content::WebContentsDelegate,
+                           public content::WebContentsObserver,
                            public content::NotificationObserver {
  public:
   class Delegate {
    public:
     // Called by AddNewContents(). Asks the delegate to attach the opened
-    // TabContents to a suitable container (e.g. browser) or to show it if it's
+    // WebContents to a suitable container (e.g. browser) or to show it if it's
     // a popup window.
-    virtual void AddTabContents(TabContents* new_contents,
+    virtual void AddWebContents(content::WebContents* new_contents,
                                 WindowOpenDisposition disposition,
                                 const gfx::Rect& initial_pos,
                                 bool user_gesture) = 0;
@@ -37,25 +41,26 @@ class BackgroundContents : public TabContentsDelegate,
     virtual ~Delegate() {}
   };
 
-  BackgroundContents(SiteInstance* site_instance,
+  BackgroundContents(content::SiteInstance* site_instance,
                      int routing_id,
                      Delegate* delegate);
   virtual ~BackgroundContents();
 
-  TabContents* tab_contents() { return tab_contents_.get(); }
+  content::WebContents* web_contents() const { return web_contents_.get(); }
   virtual const GURL& GetURL() const;
 
-  // TabContentsDelegate implementation:
-  virtual void CloseContents(TabContents* source) OVERRIDE;
+  // content::WebContentsDelegate implementation:
+  virtual void CloseContents(content::WebContents* source) OVERRIDE;
   virtual bool ShouldSuppressDialogs() OVERRIDE;
-  virtual void DidNavigateMainFramePostCommit(TabContents* tab) OVERRIDE;
-  virtual void AddNewContents(TabContents* source,
-                              TabContents* new_contents,
+  virtual void DidNavigateMainFramePostCommit(
+      content::WebContents* tab) OVERRIDE;
+  virtual void AddNewContents(content::WebContents* source,
+                              content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
                               bool user_gesture) OVERRIDE;
 
-  // TabContentsObserver implementation:
+  // content::WebContentsObserver implementation:
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
 
   // content::NotificationObserver
@@ -72,7 +77,7 @@ class BackgroundContents : public TabContentsDelegate,
   Delegate* delegate_;
 
   Profile* profile_;
-  scoped_ptr<TabContents> tab_contents_;
+  scoped_ptr<content::WebContents> web_contents_;
   content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(BackgroundContents);

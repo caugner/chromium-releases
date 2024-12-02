@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -107,10 +107,21 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     FRAME_TYPE_FORCE_NATIVE     // Force the native frame.
   };
 
+  // Result from RunMoveLoop().
+  enum MoveLoopResult {
+    // The move loop completed successfully.
+    MOVE_LOOP_SUCCESSFUL,
+
+    // The user canceled the move loop.
+    MOVE_LOOP_CANCELED
+  };
+
   struct VIEWS_EXPORT InitParams {
     enum Type {
       TYPE_WINDOW,      // A decorated Window, like a frame window.
                         // Widgets of TYPE_WINDOW will have a NonClientView.
+      TYPE_PANEL,       // Always on top window managed by PanelManager.
+                        // Widgets of TYPE_PANEL will have a NonClientView.
       TYPE_WINDOW_FRAMELESS,
                         // An undecorated Window.
       TYPE_CONTROL,     // A control, like a button.
@@ -211,8 +222,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   static Widget* GetWidgetForNativeWindow(gfx::NativeWindow native_window);
 
   // Retrieves the top level widget in a native view hierarchy
-  // starting at |native_view|. Top level widget is a widget with
-  // TYPE_WINDOW, TYPE_WINDOW_FRAMELESS, POPUP or MENU and has its own
+  // starting at |native_view|. Top level widget is a widget with TYPE_WINDOW,
+  // TYPE_PANEL, TYPE_WINDOW_FRAMELESS, POPUP or MENU and has its own
   // focus manager. This may be itself if the |native_view| is top level,
   // or NULL if there is no toplevel in a native view hierarchy.
   static Widget* GetTopLevelWidgetForNativeView(gfx::NativeView native_view);
@@ -251,7 +262,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Returns the gfx::NativeWindow associated with this Widget. This may return
   // NULL on some platforms if the widget was created with a type other than
-  // TYPE_WINDOW.
+  // TYPE_WINDOW or TYPE_PANEL.
   gfx::NativeWindow GetNativeWindow() const;
 
   // Add/remove observer.
@@ -303,6 +314,18 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // resizing and/or repositioning as necessary. This is only useful for
   // non-child widgets.
   void SetBoundsConstrained(const gfx::Rect& bounds);
+
+  // Sets whether animations that occur when visibility is changed are enabled.
+  // Default is true.
+  void SetVisibilityChangedAnimationsEnabled(bool value);
+
+  // Starts a nested message loop that moves the window. This can be used to
+  // start a window move operation from a mouse moved event. This returns when
+  // the move completes.
+  MoveLoopResult RunMoveLoop();
+
+  // Stops a previously started move loop. This is not immediate.
+  void EndMoveLoop();
 
   // Places the widget in front of the specified widget in z-order.
   void StackAboveWidget(Widget* widget);
@@ -531,6 +554,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     return native_widget_;
   }
 
+  // Sets mouse capture on the specified view.
+  void SetMouseCapture(views::View* view);
+
+  // Releases mouse capture.
+  void ReleaseMouseCapture();
+
   // Returns the current event being processed. If there are multiple events
   // being processed at the same time (e.g. one event triggers another event),
   // then the most recent event is returned. Returns NULL if no event is being
@@ -556,9 +585,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   virtual View* GetChildViewParent();
 
   // True if the widget is considered top level widget. Top level widget
-  // is a widget of TYPE_WINDOW, TYPE_WINDOW_FRAMELESS, BUBBLE, POPUP or MENU,
-  // and has a focus manager and input method object associated with it.
-  // TYPE_CONTROL and TYPE_TOOLTIP is not considered top level.
+  // is a widget of TYPE_WINDOW, TYPE_PANEL, TYPE_WINDOW_FRAMELESS, BUBBLE,
+  // POPUP or MENU, and has a focus manager and input method object associated
+  // with it. TYPE_CONTROL and TYPE_TOOLTIP is not considered top level.
   bool is_top_level() const { return is_top_level_; }
 
   // Returns the bounds of work area in the screen that Widget belongs to.
@@ -590,6 +619,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   virtual bool OnMouseEvent(const MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
   virtual ui::TouchStatus OnTouchEvent(const TouchEvent& event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event) OVERRIDE;
   virtual bool ExecuteCommand(int command_id) OVERRIDE;
   virtual InputMethod* GetInputMethodDirect() OVERRIDE;
   virtual Widget* AsWidget() OVERRIDE;

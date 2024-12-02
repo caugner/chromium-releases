@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
+#include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/gles2_conform_support/egl/config.h"
 #include "gpu/gles2_conform_support/egl/surface.h"
@@ -21,8 +22,7 @@ namespace egl {
 
 Display::Display(EGLNativeDisplayType display_id)
     : display_id_(display_id),
-      is_initialized_(false),
-      transfer_buffer_id_(-1) {
+      is_initialized_(false) {
 }
 
 Display::~Display() {
@@ -30,29 +30,8 @@ Display::~Display() {
 }
 
 bool Display::Initialize() {
-  scoped_ptr<gpu::CommandBufferService> command_buffer(
-      new gpu::CommandBufferService);
-  if (!command_buffer->Initialize(kCommandBufferSize))
-    return false;
-
-  int32 transfer_buffer_id =
-      command_buffer->CreateTransferBuffer(kTransferBufferSize, -1);
-  gpu::Buffer transfer_buffer =
-      command_buffer->GetTransferBuffer(transfer_buffer_id);
-  if (transfer_buffer.ptr == NULL)
-    return false;
-
-  scoped_ptr<gpu::gles2::GLES2CmdHelper> cmd_helper(
-      new gpu::gles2::GLES2CmdHelper(command_buffer.get()));
-  if (!cmd_helper->Initialize(kCommandBufferSize))
-    return false;
-
   gles2::Initialize();
-
   is_initialized_ = true;
-  command_buffer_.reset(command_buffer.release());
-  transfer_buffer_id_ = transfer_buffer_id;
-  gles2_cmd_helper_.reset(cmd_helper.release());
   return true;
 }
 
@@ -103,13 +82,18 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
     return EGL_NO_SURFACE;
   }
 
+  scoped_ptr<gpu::CommandBufferService> command_buffer(
+      new gpu::CommandBufferService);
+  if (!command_buffer->Initialize())
+    return false;
+
   gpu::gles2::ContextGroup::Ref group(new gpu::gles2::ContextGroup(true));
 
   decoder_.reset(gpu::gles2::GLES2Decoder::Create(group.get()));
   if (!decoder_.get())
     return EGL_NO_SURFACE;
 
-  gpu_scheduler_.reset(new gpu::GpuScheduler(command_buffer_.get(),
+  gpu_scheduler_.reset(new gpu::GpuScheduler(command_buffer.get(),
                                              decoder_.get(),
                                              NULL));
 
@@ -135,10 +119,24 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
     return EGL_NO_SURFACE;
   }
 
-  command_buffer_->SetPutOffsetChangeCallback(
+  command_buffer->SetPutOffsetChangeCallback(
       base::Bind(&gpu::GpuScheduler::PutChanged,
                  base::Unretained(gpu_scheduler_.get())));
+  command_buffer->SetGetBufferChangeCallback(
+      base::Bind(&gpu::GpuScheduler::SetGetBuffer,
+                 base::Unretained(gpu_scheduler_.get())));
 
+  scoped_ptr<gpu::gles2::GLES2CmdHelper> cmd_helper(
+      new gpu::gles2::GLES2CmdHelper(command_buffer.get()));
+  if (!cmd_helper->Initialize(kCommandBufferSize))
+    return false;
+
+  scoped_ptr<gpu::TransferBuffer> transfer_buffer(new gpu::TransferBuffer(
+      cmd_helper.get()));
+
+  command_buffer_.reset(command_buffer.release());
+  transfer_buffer_.reset(transfer_buffer.release());
+  gles2_cmd_helper_.reset(cmd_helper.release());
   surface_.reset(new Surface(win));
 
   return surface_.get();
@@ -147,6 +145,9 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
 void Display::DestroySurface(EGLSurface surface) {
   DCHECK(IsValidSurface(surface));
   gpu_scheduler_.reset();
+  if (decoder_.get()) {
+    decoder_->Destroy();
+  }
   decoder_.reset();
   gl_surface_ = NULL;
   gl_context_ = NULL;
@@ -166,22 +167,25 @@ EGLContext Display::CreateContext(EGLConfig config,
                                   EGLContext share_ctx,
                                   const EGLint* attrib_list) {
   DCHECK(IsValidConfig(config));
-  // TODO(alokp): Command buffer does not support shared contexts.
+  // TODO(alokp): Add support for shared contexts.
   if (share_ctx != NULL)
     return EGL_NO_CONTEXT;
 
   DCHECK(command_buffer_ != NULL);
-  DCHECK(transfer_buffer_id_ != -1);
-  gpu::Buffer buffer = command_buffer_->GetTransferBuffer(transfer_buffer_id_);
-  DCHECK(buffer.ptr != NULL);
+  DCHECK(transfer_buffer_.get());
   bool share_resources = share_ctx != NULL;
   context_.reset(new gpu::gles2::GLES2Implementation(
       gles2_cmd_helper_.get(),
-      buffer.size,
-      buffer.ptr,
-      transfer_buffer_id_,
+      transfer_buffer_.get(),
       share_resources,
       true));
+
+  if (!context_->Initialize(
+      kTransferBufferSize / 2,
+      kTransferBufferSize,
+      kTransferBufferSize * 2)) {
+    return EGL_NO_CONTEXT;
+  }
 
   context_->EnableFeatureCHROMIUM("pepper3d_allow_buffers_on_multiple_targets");
   context_->EnableFeatureCHROMIUM("pepper3d_support_fixed_attribs");

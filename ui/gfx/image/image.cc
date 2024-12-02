@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,10 @@
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/size.h"
 
 #if defined(TOOLKIT_USES_GTK)
+#include <gdk/gdk.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <glib-object.h>
 #include "ui/gfx/canvas_skia.h"
@@ -33,10 +35,14 @@ bool NSImageToSkBitmaps(NSImage* image, std::vector<const SkBitmap*>* bitmaps);
 
 #if defined(TOOLKIT_USES_GTK)
 const SkBitmap* GdkPixbufToSkBitmap(GdkPixbuf* pixbuf) {
-  gfx::CanvasSkia canvas(gdk_pixbuf_get_width(pixbuf),
-                         gdk_pixbuf_get_height(pixbuf),
+  CHECK(pixbuf);
+  gfx::CanvasSkia canvas(gfx::Size(gdk_pixbuf_get_width(pixbuf),
+                                   gdk_pixbuf_get_height(pixbuf)),
                          /*is_opaque=*/false);
-  canvas.DrawGdkPixbuf(pixbuf, 0, 0);
+  skia::ScopedPlatformPaint scoped_platform_paint(canvas.sk_canvas());
+  cairo_t* cr = scoped_platform_paint.GetPlatformSurface();
+  gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
+  cairo_paint(cr);
   return new SkBitmap(canvas.ExtractBitmap());
 }
 #endif
@@ -402,19 +408,19 @@ internal::ImageRep* Image::GetRepresentation(
 
   // Handle Skia-to-native conversions.
   if (default_rep->type() == Image::kImageRepSkia) {
-    internal::ImageRepSkia* skia_rep = default_rep->AsImageRepSkia();
     internal::ImageRep* native_rep = NULL;
 #if defined(USE_AURA)
-    static_cast<void>(skia_rep);
     NOTIMPLEMENTED();
 #elif defined(TOOLKIT_USES_GTK)
     if (rep_type == Image::kImageRepGdk) {
-      GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(skia_rep->bitmap());
+      GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(
+          default_rep->AsImageRepSkia()->bitmap());
       native_rep = new internal::ImageRepGdk(pixbuf);
     }
 #elif defined(OS_MACOSX)
     if (rep_type == Image::kImageRepCocoa) {
-      NSImage* image = gfx::SkBitmapsToNSImage(skia_rep->bitmaps());
+      NSImage* image = gfx::SkBitmapsToNSImage(
+          default_rep->AsImageRepSkia()->bitmaps());
       base::mac::NSObjectRetain(image);
       native_rep = new internal::ImageRepCocoa(image);
     }

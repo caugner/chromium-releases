@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,17 +52,17 @@ void InstantFieldTrial::Activate() {
   g_hidden_experiment_a = trial->AppendGroup("HiddenExperimentA", 50);
   g_hidden_experiment_b = trial->AppendGroup("HiddenExperimentB", 50);
 
-  g_silent_experiment_a = trial->AppendGroup("SilentExperimentA", 340);
-  g_silent_experiment_b = trial->AppendGroup("SilentExperimentB", 340);
+  g_silent_experiment_a = trial->AppendGroup("SilentExperimentA", 50);
+  g_silent_experiment_b = trial->AppendGroup("SilentExperimentB", 50);
 
   g_suggest_experiment_a = trial->AppendGroup("SuggestExperimentA", 50);
   g_suggest_experiment_b = trial->AppendGroup("SuggestExperimentB", 50);
 
-  g_uma_control_a = trial->AppendGroup("UmaControlA", 5);
-  g_uma_control_b = trial->AppendGroup("UmaControlB", 5);
+  g_uma_control_a = trial->AppendGroup("UmaControlA", 50);
+  g_uma_control_b = trial->AppendGroup("UmaControlB", 50);
 
-  g_all_control_a = trial->AppendGroup("AllControlA", 5);
-  g_all_control_b = trial->AppendGroup("AllControlB", 5);
+  g_all_control_a = trial->AppendGroup("AllControlA", 50);
+  g_all_control_b = trial->AppendGroup("AllControlB", 50);
 }
 
 // static

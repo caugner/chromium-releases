@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/gfx/brush.h"
 #include "ui/gfx/font.h"
@@ -48,9 +49,17 @@ namespace gfx {
 ////////////////////////////////////////////////////////////////////////////////
 // CanvasSkia, public:
 
-CanvasSkia::CanvasSkia(int width, int height, bool is_opaque)
-    : owned_canvas_(new skia::PlatformCanvas(width, height, is_opaque)),
+CanvasSkia::CanvasSkia(const gfx::Size& size, bool is_opaque)
+    : owned_canvas_(new skia::PlatformCanvas(size.width(), size.height(),
+                                             is_opaque)),
       canvas_(owned_canvas_.get()) {
+}
+
+CanvasSkia::CanvasSkia(const SkBitmap& bitmap, bool is_opaque)
+    : owned_canvas_(new skia::PlatformCanvas(bitmap.width(), bitmap.height(),
+                                             is_opaque)),
+      canvas_(owned_canvas_.get()) {
+  DrawBitmapInt(bitmap, 0, 0);
 }
 
 CanvasSkia::CanvasSkia()
@@ -65,6 +74,13 @@ CanvasSkia::CanvasSkia(SkCanvas* canvas)
 }
 
 CanvasSkia::~CanvasSkia() {
+}
+
+// static
+int CanvasSkia::GetStringWidth(const string16& text, const gfx::Font& font) {
+  int width = 0, height = 0;
+  CanvasSkia::SizeStringInt(text, font, &width, &height, Canvas::NO_ELLIPSIS);
+  return width;
 }
 
 // static
@@ -133,7 +149,7 @@ void CanvasSkia::FillRect(const SkColor& color,
   paint.setColor(color);
   paint.setStyle(SkPaint::kFill_Style);
   paint.setXfermodeMode(mode);
-  DrawRectInt(rect.x(), rect.y(), rect.width(), rect.height(), paint);
+  DrawRect(rect, paint);
 }
 
 void CanvasSkia::FillRect(const gfx::Brush* brush, const gfx::Rect& rect) {
@@ -141,16 +157,16 @@ void CanvasSkia::FillRect(const gfx::Brush* brush, const gfx::Rect& rect) {
   SkPaint paint;
   paint.setShader(shader->shader());
   // TODO(beng): set shader transform to match canvas transform.
-  DrawRectInt(rect.x(), rect.y(), rect.width(), rect.height(), paint);
+  DrawRect(rect, paint);
 }
 
-void CanvasSkia::DrawRectInt(const SkColor& color, int x, int y, int w, int h) {
-  DrawRectInt(color, x, y, w, h, SkXfermode::kSrcOver_Mode);
+void CanvasSkia::DrawRect(const gfx::Rect& rect, const SkColor& color) {
+  DrawRect(rect, color, SkXfermode::kSrcOver_Mode);
 }
 
-void CanvasSkia::DrawRectInt(const SkColor& color,
-                             int x, int y, int w, int h,
-                             SkXfermode::Mode mode) {
+void CanvasSkia::DrawRect(const gfx::Rect& rect,
+                          const SkColor& color,
+                          SkXfermode::Mode mode) {
   SkPaint paint;
   paint.setColor(color);
   paint.setStyle(SkPaint::kStroke_Style);
@@ -160,12 +176,11 @@ void CanvasSkia::DrawRectInt(const SkColor& color,
   paint.setStrokeWidth(SkIntToScalar(0));
   paint.setXfermodeMode(mode);
 
-  DrawRectInt(x, y, w, h, paint);
+  DrawRect(rect, paint);
 }
 
-void CanvasSkia::DrawRectInt(int x, int y, int w, int h, const SkPaint& paint) {
-  SkIRect rc = { x, y, x + w, y + h };
-  canvas_->drawIRect(rc, paint);
+void CanvasSkia::DrawRect(const gfx::Rect& rect, const SkPaint& paint) {
+  canvas_->drawIRect(RectToSkIRect(rect), paint);
 }
 
 void CanvasSkia::DrawLineInt(const SkColor& color,
@@ -214,10 +229,12 @@ void CanvasSkia::DrawFocusRect(const gfx::Rect& rect) {
   paint.setShader(shader);
   shader->unref();
 
-  DrawRectInt(rect.x(), rect.y(), rect.width(), 1, paint);
-  DrawRectInt(rect.x(), rect.y() + rect.height() - 1, rect.width(), 1, paint);
-  DrawRectInt(rect.x(), rect.y(), 1, rect.height(), paint);
-  DrawRectInt(rect.x() + rect.width() - 1, rect.y(), 1, rect.height(), paint);
+  DrawRect(gfx::Rect(rect.x(), rect.y(), rect.width(), 1), paint);
+  DrawRect(gfx::Rect(rect.x(), rect.y() + rect.height() - 1, rect.width(), 1),
+           paint);
+  DrawRect(gfx::Rect(rect.x(), rect.y(), 1, rect.height()), paint);
+  DrawRect(gfx::Rect(rect.x() + rect.width() - 1, rect.y(), 1, rect.height()),
+           paint);
 }
 
 void CanvasSkia::DrawBitmapInt(const SkBitmap& bitmap, int x, int y) {
@@ -346,11 +363,9 @@ void CanvasSkia::EndPlatformPaint() {
   skia::EndPlatformPaint(canvas_);
 }
 
-#if !defined(OS_MACOSX)
 void CanvasSkia::Transform(const ui::Transform& transform) {
   canvas_->concat(transform.matrix());
 }
-#endif
 
 CanvasSkia* CanvasSkia::AsCanvasSkia() {
   return this;
@@ -386,7 +401,7 @@ Canvas* Canvas::CreateCanvas() {
 }
 
 Canvas* Canvas::CreateCanvas(const gfx::Size& size, bool is_opaque) {
-  return new CanvasSkia(size.width(), size.height(), is_opaque);
+  return new CanvasSkia(size, is_opaque);
 }
 
 #if defined(OS_WIN) && !defined(USE_AURA)

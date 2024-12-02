@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,8 @@
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
+
+#define IS_HTTP_SUCCESS_CODE(code) (code >= 200 && code <= 299)
 
 UrlmonUrlRequest::UrlmonUrlRequest()
     : pending_read_size_(0),
@@ -381,13 +383,25 @@ STDMETHODIMP UrlmonUrlRequest::OnStopBinding(HRESULT result, LPCWSTR error) {
   if (state == Status::WORKING) {
     status_.set_result(result);
 
-    // Special case. If the last request was a redirect and the current OS
-    // error value is E_ACCESSDENIED, that means an unsafe redirect was
-    // attempted. In that case, correct the OS error value to be the more
-    // specific ERR_UNSAFE_REDIRECT error value.
-    if (result == E_ACCESSDENIED) {
+    if (FAILED(result)) {
       int http_code = GetHttpResponseStatusFromBinding(binding_);
-      if (300 <= http_code && http_code < 400) {
+      // For certain requests like empty POST requests the server can return
+      // back a HTTP success code in the range 200 to 299. We need to flag
+      // these requests as succeeded.
+      if (IS_HTTP_SUCCESS_CODE(http_code)) {
+        // If this DCHECK fires it means that the server returned a HTTP
+        // success code outside the standard range 200-206. We need to confirm
+        // if the following code path is correct.
+        DCHECK_LE(http_code, 206);
+        status_.set_result(S_OK);
+        std::string headers = GetHttpHeadersFromBinding(binding_);
+        OnResponse(0, UTF8ToWide(headers).c_str(), NULL, NULL);
+      } else if (net::HttpResponseHeaders::IsRedirectResponseCode(http_code) &&
+                 result == E_ACCESSDENIED) {
+        // Special case. If the last request was a redirect and the current OS
+        // error value is E_ACCESSDENIED, that means an unsafe redirect was
+        // attempted. In that case, correct the OS error value to be the more
+        // specific ERR_UNSAFE_REDIRECT error value.
         status_.set_result(net::URLRequestStatus::FAILED,
                            net::ERR_UNSAFE_REDIRECT);
       }
@@ -635,16 +649,19 @@ STDMETHODIMP UrlmonUrlRequest::OnResponse(DWORD dwResponseCode,
     const wchar_t* response_headers, const wchar_t* request_headers,
     wchar_t** additional_headers) {
   DCHECK_EQ(thread_, base::PlatformThread::CurrentId());
-  DVLOG(1) << __FUNCTION__ << me() << "headers: \n" << response_headers;
+  DVLOG(1) << __FUNCTION__ << me() << "headers: \n"
+           << (response_headers == NULL ? L"EMPTY" : response_headers);
 
   if (!delegate_) {
     DLOG(WARNING) << "Invalid delegate";
     return S_OK;
   }
 
-  std::string raw_headers = WideToUTF8(response_headers);
-
   delegate_->AddPrivacyDataForUrl(url(), "", 0);
+
+  std::string raw_headers;
+  if (response_headers)
+    raw_headers = WideToUTF8(response_headers);
 
   // Security check for frame busting headers. We don't honor the headers
   // as-such, but instead simply kill requests which we've been asked to
@@ -1106,8 +1123,8 @@ void UrlmonUrlRequestManager::ReadRequest(int request_id, int bytes_to_read) {
     request = LookupRequest(request_id, &background_request_map_);
     if (request) {
       background_thread_->message_loop()->PostTask(
-          FROM_HERE, base::IgnoreReturn<bool>(base::Bind(
-              &UrlmonUrlRequest::Read, request.get(), bytes_to_read)));
+          FROM_HERE, base::Bind(base::IgnoreResult(&UrlmonUrlRequest::Read),
+                                request.get(), bytes_to_read));
     }
   }
   if (!request)
@@ -1418,4 +1435,3 @@ void UrlmonUrlRequestManager::ResourceFetcherThread::Init() {
 void UrlmonUrlRequestManager::ResourceFetcherThread::CleanUp() {
   CoUninitialize();
 }
-

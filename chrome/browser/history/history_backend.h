@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/mru_cache.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/history/archived_database.h"
 #include "chrome/browser/history/expire_history_backend.h"
 #include "chrome/browser/history/history_database.h"
@@ -22,7 +23,6 @@
 #include "chrome/browser/history/thumbnail_database.h"
 #include "chrome/browser/history/visit_tracker.h"
 #include "chrome/browser/search_engines/template_url_id.h"
-#include "content/browser/cancelable_request.h"
 #include "sql/init_status.h"
 
 class BookmarkService;
@@ -334,7 +334,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Sets the task to run and the message loop to run it on when this object
   // is destroyed. See HistoryService::SetOnBackendDestroyTask for a more
   // complete description.
-  void SetOnBackendDestroyTask(MessageLoop* message_loop, Task* task);
+  void SetOnBackendDestroyTask(MessageLoop* message_loop,
+                               const base::Closure& task);
 
   // Adds the given rows to the database if it doesn't exist. A visit will be
   // added for each given URL at the last visit time in the URLRow if the
@@ -348,6 +349,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   ExpireHistoryBackend* expire_backend() { return &expirer_; }
 #endif
+
+  // Returns true if the passed visit time is already expired (used by the sync
+  // code to avoid syncing visits that would immediately be expired).
+  virtual bool IsExpiredVisitTime(const base::Time& time);
 
  protected:
   virtual ~HistoryBackend();
@@ -615,9 +620,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Timestamp of the first entry in our database.
   base::Time first_recorded_time_;
 
-  // When non-NULL, this is the task that should be invoked on
+  // When set, this is the task that should be invoked on destruction.
   MessageLoop* backend_destroy_message_loop_;
-  Task* backend_destroy_task_;
+  base::Closure backend_destroy_task_;
 
   // Tracks page transition types.
   VisitTracker tracker_;

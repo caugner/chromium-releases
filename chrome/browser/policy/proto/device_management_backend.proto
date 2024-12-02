@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,6 +37,12 @@ message DeviceRegisterRequest {
   // model name is not available, client SHOULD send generic name like
   // "Android", or "Chrome OS".
   optional string machine_model = 4;
+
+  // When true, indicates that the |machine_id| field should be known to the
+  // server. The server can do additional checks based on this information.
+  // This is currently used for requests triggered by auto-enrollment.
+  // Defaults to false when not present.
+  optional bool known_machine_id = 5;
 }
 
 // Response from server to device register request.
@@ -250,6 +256,9 @@ message DeviceStatusReportRequest {
 
   // Device active times collection since last report rpc call.
   repeated TimePeriod active_time = 4;
+
+  // The browser version string as shown in the About dialog.
+  optional string browser_version = 5;
 }
 
 // Report session (a user on one device) level status.
@@ -298,7 +307,11 @@ message DeviceAutoEnrollmentRequest {
   // Should always be present.
   optional int64 remainder = 1;
 
-  // Modulus of the hash used by the client. Should always be present.
+  // Modulus of the hash used by the client. Should always be present. This
+  // is the number of buckets the client thinks the server has. For now,
+  // it is a power of 2, but due to the strict constraint on how many serial
+  // numbers a bucket can contain, it may become non power of 2. If that
+  // happens, client-side needs to change its assumption.
   optional int64 modulus = 2;
 }
 
@@ -308,13 +321,16 @@ message DeviceAutoEnrollmentResponse {
   // should send a new DeviceAutoEnrollmentRequest with a new |remainder|
   // computed using this new |modulus|. If this field is empty, the client's
   // request was accepted.
-  optional int64 modulus = 1;
+  // DMServer guarantees that if the modulus sent by client in
+  // DeviceAutoEnrollmentRequest matches server's expectation, this field
+  // is unset.
+  optional int64 expected_modulus = 1;
 
   // List of hashes in the client's hash bucket. If the client's hash matches
   // any in this list, the client device should do enterprise enrollment.
   // If it matches none, enrollment should be optional.
   // Each entry has exactly 256 bits (32 bytes).
-  repeated bytes hashes = 2;
+  repeated bytes hash = 2;
 }
 
 // Request from the DMAgent on the device to the DMServer.  This is

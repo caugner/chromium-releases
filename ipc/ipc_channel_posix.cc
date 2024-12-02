@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -170,6 +170,8 @@ bool CreateServerUnixDomainSocket(const std::string& pipe_name,
   FilePath path(pipe_name);
   FilePath dir_path = path.DirName();
   if (!file_util::CreateDirectory(dir_path)) {
+    if (HANDLE_EINTR(close(fd)) < 0)
+      PLOG(ERROR) << "close " << pipe_name;
     return false;
   }
 
@@ -966,7 +968,7 @@ bool Channel::ChannelImpl::GetClientEuid(uid_t* client_euid) const {
     PLOG(ERROR) << "getsockopt " << pipe_;
     return false;
   }
-  if (cred_len < sizeof(cred)) {
+  if (static_cast<unsigned>(cred_len) < sizeof(cred)) {
     NOTREACHED() << "Truncated ucred from SO_PEERCRED?";
     return false;
   }

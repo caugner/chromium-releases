@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,15 @@
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/renderer_host/chrome_url_request_user_data.h"
-#include "content/browser/renderer_host/global_request_id.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/renderer_host/resource_message_filter.h"
+#include "content/public/browser/global_request_id.h"
 #include "content/public/common/resource_response.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request.h"
+
+using content::GlobalRequestID;
 
 // Maximum time in milliseconds to wait for the safe browsing service to
 // verify a URL. After this amount of time the outstanding check will be
@@ -217,7 +218,6 @@ void SafeBrowsingResourceHandler::StartDisplayingBlockingPage(
   CHECK(deferred_request_id_ != -1);
 
   state_ = STATE_DISPLAYING_BLOCKING_PAGE;
-  AddRef();  // Balanced in OnBlockingPageComplete().
 
   // Grab the original url of this request as well.
   GURL original_url;
@@ -229,8 +229,14 @@ void SafeBrowsingResourceHandler::StartDisplayingBlockingPage(
     original_url = url;
 
   safe_browsing_->DisplayBlockingPage(
-      url, original_url, redirect_urls_, is_subresource_,
-      result, this, render_process_host_id_, render_view_id_);
+      url,
+      original_url,
+      redirect_urls_,
+      is_subresource_,
+      result,
+      base::Bind(&SafeBrowsingResourceHandler::OnBlockingPageComplete, this),
+      render_process_host_id_,
+      render_view_id_);
 }
 
 // SafeBrowsingService::Client implementation, called on the IO thread when
@@ -251,8 +257,6 @@ void SafeBrowsingResourceHandler::OnBlockingPageComplete(bool proceed) {
   } else {
     rdh_->CancelRequest(render_process_host_id_, deferred_request_id_, false);
   }
-
-  Release();  // Balances the AddRef() in StartDisplayingBlockingPage().
 }
 
 void SafeBrowsingResourceHandler::Shutdown() {

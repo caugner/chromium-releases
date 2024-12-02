@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/callback_old.h"
 #include "base/command_line.h"
 #include "base/md5.h"
 #include "base/memory/scoped_vector.h"
@@ -30,14 +29,17 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_ui.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::UserMetricsAction;
 
 MostVisitedHandler::MostVisitedHandler()
     : got_first_most_visited_request_(false) {
@@ -46,16 +48,14 @@ MostVisitedHandler::MostVisitedHandler()
 MostVisitedHandler::~MostVisitedHandler() {
 }
 
-WebUIMessageHandler* MostVisitedHandler::Attach(WebUI* web_ui) {
-  Profile* profile = Profile::FromWebUI(web_ui);
+void MostVisitedHandler::RegisterMessages() {
+  Profile* profile = Profile::FromWebUI(web_ui());
   // Set up our sources for thumbnail and favicon data.
   ThumbnailSource* thumbnail_src = new ThumbnailSource(profile);
   profile->GetChromeURLDataManager()->AddDataSource(thumbnail_src);
 
   profile->GetChromeURLDataManager()->AddDataSource(
       new FaviconSource(profile, FaviconSource::FAVICON));
-
-  WebUIMessageHandler* result = WebUIMessageHandler::Attach(web_ui);
 
   history::TopSites* ts = profile->GetTopSites();
   if (ts) {
@@ -73,22 +73,19 @@ WebUIMessageHandler* MostVisitedHandler::Attach(WebUI* web_ui) {
   // We pre-emptively make a fetch for the most visited pages so we have the
   // results sooner.
   StartQueryForMostVisited();
-  return result;
-}
 
-void MostVisitedHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("getMostVisited",
+  web_ui()->RegisterMessageCallback("getMostVisited",
       base::Bind(&MostVisitedHandler::HandleGetMostVisited,
                  base::Unretained(this)));
 
   // Register ourselves for any most-visited item blacklisting.
-  web_ui_->RegisterMessageCallback("blacklistURLFromMostVisited",
+  web_ui()->RegisterMessageCallback("blacklistURLFromMostVisited",
       base::Bind(&MostVisitedHandler::HandleBlacklistURL,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("removeURLsFromMostVisitedBlacklist",
+  web_ui()->RegisterMessageCallback("removeURLsFromMostVisitedBlacklist",
       base::Bind(&MostVisitedHandler::HandleRemoveURLsFromBlacklist,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("clearMostVisitedURLsBlacklist",
+  web_ui()->RegisterMessageCallback("clearMostVisitedURLsBlacklist",
       base::Bind(&MostVisitedHandler::HandleClearBlacklist,
                  base::Unretained(this)));
 }
@@ -105,7 +102,7 @@ void MostVisitedHandler::HandleGetMostVisited(const ListValue* args) {
 
 void MostVisitedHandler::SendPagesValue() {
   if (pages_value_.get()) {
-    Profile* profile = Profile::FromWebUI(web_ui_);
+    Profile* profile = Profile::FromWebUI(web_ui());
     const DictionaryValue* url_blacklist =
         profile->GetPrefs()->GetDictionary(prefs::kNTPMostVisitedURLsBlacklist);
     bool has_blacklisted_urls = !url_blacklist->empty();
@@ -113,15 +110,15 @@ void MostVisitedHandler::SendPagesValue() {
     if (ts)
       has_blacklisted_urls = ts->HasBlacklistedItems();
     base::FundamentalValue has_blacklisted_urls_value(has_blacklisted_urls);
-    web_ui_->CallJavascriptFunction("setMostVisitedPages",
-                                    *(pages_value_.get()),
-                                    has_blacklisted_urls_value);
+    web_ui()->CallJavascriptFunction("setMostVisitedPages",
+                                     *(pages_value_.get()),
+                                     has_blacklisted_urls_value);
     pages_value_.reset();
   }
 }
 
 void MostVisitedHandler::StartQueryForMostVisited() {
-  history::TopSites* ts = Profile::FromWebUI(web_ui_)->GetTopSites();
+  history::TopSites* ts = Profile::FromWebUI(web_ui())->GetTopSites();
   if (ts) {
     ts->GetMostVisitedURLs(
         &topsites_consumer_,
@@ -146,17 +143,17 @@ void MostVisitedHandler::HandleRemoveURLsFromBlacklist(const ListValue* args) {
       NOTREACHED();
       return;
     }
-    UserMetrics::RecordAction(UserMetricsAction("MostVisited_UrlRemoved"));
-    history::TopSites* ts = Profile::FromWebUI(web_ui_)->GetTopSites();
+    content::RecordAction(UserMetricsAction("MostVisited_UrlRemoved"));
+    history::TopSites* ts = Profile::FromWebUI(web_ui())->GetTopSites();
     if (ts)
       ts->RemoveBlacklistedURL(GURL(url));
   }
 }
 
 void MostVisitedHandler::HandleClearBlacklist(const ListValue* args) {
-  UserMetrics::RecordAction(UserMetricsAction("MostVisited_BlacklistCleared"));
+  content::RecordAction(UserMetricsAction("MostVisited_BlacklistCleared"));
 
-  history::TopSites* ts = Profile::FromWebUI(web_ui_)->GetTopSites();
+  history::TopSites* ts = Profile::FromWebUI(web_ui())->GetTopSites();
   if (ts)
     ts->ClearBlacklistedURLs();
 }
@@ -198,10 +195,10 @@ void MostVisitedHandler::Observe(int type,
 }
 
 void MostVisitedHandler::BlacklistURL(const GURL& url) {
-  history::TopSites* ts = Profile::FromWebUI(web_ui_)->GetTopSites();
+  history::TopSites* ts = Profile::FromWebUI(web_ui())->GetTopSites();
   if (ts)
     ts->AddBlacklistedURL(url);
-  UserMetrics::RecordAction(UserMetricsAction("MostVisited_UrlBlacklisted"));
+  content::RecordAction(UserMetricsAction("MostVisited_UrlBlacklisted"));
 }
 
 std::string MostVisitedHandler::GetDictionaryKeyForURL(const std::string& url) {

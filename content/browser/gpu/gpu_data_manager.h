@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,8 @@
 #include "base/memory/singleton.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/synchronization/lock.h"
-#include "base/task.h"
 #include "base/values.h"
+#include "content/browser/gpu/gpu_performance_stats.h"
 #include "content/common/content_export.h"
 #include "content/common/gpu/gpu_feature_flags.h"
 #include "content/public/common/gpu_info.h"
@@ -47,6 +47,10 @@ class CONTENT_EXPORT GpuDataManager {
 
   const content::GPUInfo& gpu_info() const;
 
+  bool complete_gpu_info_available() const {
+    return complete_gpu_info_available_;
+  }
+
   // Returns status of various GPU features. This is two parted:
   // {
   //    featureStatus: []
@@ -76,6 +80,8 @@ class CONTENT_EXPORT GpuDataManager {
   //
   // Caller is responsible for deleting the returned value.
   Value* GetFeatureStatus();
+
+  GpuPerformanceStats GetPerformanceStats() const;
 
   std::string GetBlacklistVersion() const;
 
@@ -153,11 +159,21 @@ class CONTENT_EXPORT GpuDataManager {
 
     bool disable_gl_multisampling() const { return disable_gl_multisampling_; }
 
+    bool disable_software_rasterizer() const {
+      return disable_software_rasterizer_;
+    }
+
     bool ignore_gpu_blacklist() const { return ignore_gpu_blacklist_; }
 
     bool skip_gpu_data_loading() const { return skip_gpu_data_loading_; }
 
     const std::string& use_gl() const { return use_gl_; }
+
+    bool blacklist_accelerated_compositing() const {
+      return blacklist_accelerated_compositing_;
+    }
+
+    bool blacklist_webgl() const { return blacklist_webgl_; }
 
    private:
     // Manage the correlations between switches.
@@ -168,11 +184,17 @@ class CONTENT_EXPORT GpuDataManager {
     bool disable_accelerated_layers_;
     bool disable_experimental_webgl_;
     bool disable_gl_multisampling_;
+    bool disable_software_rasterizer_;
 
     bool ignore_gpu_blacklist_;
     bool skip_gpu_data_loading_;
 
     std::string use_gl_;
+
+    // Flags to disallow running accelerated compositing or webgl on the GPU.
+    // Software rendering is still allowed.
+    bool blacklist_accelerated_compositing_;
+    bool blacklist_webgl_;
   };
 
   typedef ObserverListThreadSafe<GpuDataManager::Observer>
@@ -216,6 +238,7 @@ class CONTENT_EXPORT GpuDataManager {
   void EnableSoftwareRenderingIfNecessary();
 
   bool complete_gpu_info_already_requested_;
+  bool complete_gpu_info_available_;
 
   GpuFeatureFlags gpu_feature_flags_;
   GpuFeatureFlags preliminary_gpu_feature_flags_;

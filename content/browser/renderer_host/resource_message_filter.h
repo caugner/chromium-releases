@@ -6,12 +6,10 @@
 #define CONTENT_BROWSER_RENDERER_HOST_RESOURCE_MESSAGE_FILTER_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "content/browser/browser_message_filter.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/browser_message_filter.h"
 #include "content/public/common/process_type.h"
 #include "webkit/glue/resource_type.h"
-
-class ResourceDispatcherHost;
 
 namespace content {
 class ResourceContext;
@@ -26,7 +24,8 @@ class URLRequestContext;
 // delayed by costly UI processing that may be occuring on the main thread of
 // the browser.  It also means that any hangs in starting a network request
 // will not interfere with browser UI.
-class CONTENT_EXPORT ResourceMessageFilter : public BrowserMessageFilter {
+class CONTENT_EXPORT ResourceMessageFilter
+    : public content::BrowserMessageFilter {
  public:
   // Allows selecting the net::URLRequestContext used to service requests.
   class URLRequestContextSelector {
@@ -41,13 +40,13 @@ class CONTENT_EXPORT ResourceMessageFilter : public BrowserMessageFilter {
     DISALLOW_COPY_AND_ASSIGN(URLRequestContextSelector);
   };
 
-  ResourceMessageFilter(int child_id,
-                        content::ProcessType process_type,
-                        const content::ResourceContext* resource_context,
-                        URLRequestContextSelector* url_request_context_selector,
-                        ResourceDispatcherHost* resource_dispatcher_host);
+  ResourceMessageFilter(
+      int child_id,
+      content::ProcessType process_type,
+      const content::ResourceContext* resource_context,
+      URLRequestContextSelector* url_request_context_selector);
 
-  // BrowserMessageFilter implementation.
+  // content::BrowserMessageFilter implementation.
   virtual void OnChannelClosing() OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
@@ -77,9 +76,6 @@ class CONTENT_EXPORT ResourceMessageFilter : public BrowserMessageFilter {
   const content::ResourceContext* const resource_context_;
 
   const scoped_ptr<URLRequestContextSelector> url_request_context_selector_;
-
-  // Owned by BrowserProcess, which is guaranteed to outlive us.
-  ResourceDispatcherHost* resource_dispatcher_host_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(ResourceMessageFilter);
 };

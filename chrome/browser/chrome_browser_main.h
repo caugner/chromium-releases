@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,20 +56,26 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
       const content::MainFunctionParams& parameters);
 
   // content::BrowserMainParts overrides.
+  // These are called in-order by content::BrowserMainLoop.
+  // Each stage calls the same stages in any ChromeBrowserMainExtraParts added
+  // with AddParts() from ChromeContentBrowserClient::CreateBrowserMainParts.
   virtual void PreEarlyInitialization() OVERRIDE;
   virtual void PostEarlyInitialization() OVERRIDE;
   virtual void ToolkitInitialized() OVERRIDE;
   virtual void PreMainMessageLoopStart() OVERRIDE;
   virtual void PostMainMessageLoopStart() OVERRIDE;
-  virtual void PreCreateThreads() OVERRIDE;
-  virtual void PreStartThread(content::BrowserThread::ID identifier) OVERRIDE;
-  virtual void PostStartThread(content::BrowserThread::ID identifier) OVERRIDE;
+  virtual int PreCreateThreads() OVERRIDE;
   virtual void PreMainMessageLoopRun() OVERRIDE;
   virtual bool MainMessageLoopRun(int* result_code) OVERRIDE;
   virtual void PostMainMessageLoopRun() OVERRIDE;
-  virtual void PreStopThread(content::BrowserThread::ID identifier) OVERRIDE;
-  virtual void PostStopThread(content::BrowserThread::ID identifier) OVERRIDE;
   virtual void PostDestroyThreads() OVERRIDE;
+
+  // Additional stages for ChromeBrowserMainExtraParts. These stages are called
+  // in order from PreMainMessageLoopStart(). See implementation for details.
+  virtual void PreProfileInit();
+  virtual void PostProfileInit();
+  virtual void PreBrowserStart();
+  virtual void PostBrowserStart();
 
   // Displays a warning message that we can't find any locale data files.
   virtual void ShowMissingLocaleMessageBox() = 0;
@@ -113,20 +119,27 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // has on retention and general apps/webstore usage.
   void DefaultAppsFieldTrial();
 
+  // A field trial to see what effects launching Chrome automatically on
+  // computer startup has on retention and usage of Chrome.
+  void AutoLaunchChromeFieldTrial();
+
   // Methods for |SetupMetricsAndFieldTrials()| --------------------------------
 
   // Constructs metrics service and does related initialization, including
   // creation of field trials. Call only after labs have been converted to
   // switches.
-  MetricsService* SetupMetricsAndFieldTrials(PrefService* local_state);
-
-  static MetricsService* InitializeMetrics(
-      const CommandLine& parsed_command_line,
-      const PrefService* local_state);
+  void SetupMetricsAndFieldTrials();
 
   // Add an invocation of your field trial init function to this method.
   void SetupFieldTrials(bool metrics_recording_enabled,
                         bool proxy_policy_is_set);
+
+  // Starts recording of metrics. This can only be called after we have a file
+  // thread.
+  void StartMetricsRecording();
+
+  // Returns true if the user opted in to sending metric reports.
+  bool IsMetricsReportingEnabled();
 
   // Methods for Main Message Loop -------------------------------------------
 
@@ -168,7 +181,7 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   scoped_refptr<chrome_browser_metrics::TrackingSynchronizer>
       tracking_synchronizer_;
   scoped_ptr<ProcessSingleton> process_singleton_;
-  scoped_ptr<FirstRun::MasterPrefs> master_prefs_;
+  scoped_ptr<first_run::MasterPrefs> master_prefs_;
   bool record_search_engine_;
   TranslateManager* translate_manager_;
   Profile* profile_;
@@ -182,7 +195,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // PreMainMessageLoopRunThreadsCreated.
   bool is_first_run_;
   bool first_run_ui_bypass_;
-  MetricsService* metrics_;
   PrefService* local_state_;
   FilePath user_data_dir_;
 

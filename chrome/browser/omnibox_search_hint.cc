@@ -1,15 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/omnibox_search_hint.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/task.h"
-// TODO(avi): remove when conversions not needed any more
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -28,14 +27,19 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/navigation_details.h"
+#include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::NavigationController;
+using content::NavigationEntry;
 
 // The URLs of search engines for which we want to trigger the infobar.
 const char* const kSearchEngineURLs[] = {
@@ -80,7 +84,7 @@ class HintInfoBar : public ConfirmInfoBarDelegate {
   bool should_expire_;
 
   // Used to delay the expiration of the info-bar.
-  ScopedRunnableMethodFactory<HintInfoBar> method_factory_;
+  base::WeakPtrFactory<HintInfoBar> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(HintInfoBar);
 };
@@ -90,12 +94,13 @@ HintInfoBar::HintInfoBar(OmniboxSearchHint* omnibox_hint)
       omnibox_hint_(omnibox_hint),
       action_taken_(false),
       should_expire_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   // We want the info-bar to stick-around for few seconds and then be hidden
   // on the next navigation after that.
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      method_factory_.NewRunnableMethod(&HintInfoBar::AllowExpiry),
-      8000);  // 8 seconds.
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&HintInfoBar::AllowExpiry, weak_factory_.GetWeakPtr()),
+      base::TimeDelta::FromSeconds(8));
 }
 
 HintInfoBar::~HintInfoBar() {
@@ -150,7 +155,7 @@ bool HintInfoBar::Accept() {
 // OmniboxSearchHint ----------------------------------------------------------
 
 OmniboxSearchHint::OmniboxSearchHint(TabContentsWrapper* tab) : tab_(tab) {
-  NavigationController* controller = &(tab->controller());
+  NavigationController* controller = &(tab->web_contents()->GetController());
   notification_registrar_.Add(
       this,
       content::NOTIFICATION_NAV_ENTRY_COMMITTED,
@@ -172,8 +177,9 @@ void OmniboxSearchHint::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
   if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
-    NavigationEntry* entry = tab_->controller().GetActiveEntry();
-    if (search_engine_urls_.find(entry->url().spec()) ==
+    content::NavigationEntry* entry =
+        tab_->web_contents()->GetController().GetActiveEntry();
+    if (search_engine_urls_.find(entry->GetURL().spec()) ==
         search_engine_urls_.end()) {
       // The search engine is not in our white-list, bail.
       return;
@@ -185,7 +191,7 @@ void OmniboxSearchHint::Observe(int type,
       return;
 
     const TemplateURLRef* const search_url = default_provider->url();
-    if (search_url->GetHost() == entry->url().host())
+    if (search_url->GetHost() == entry->GetURL().host())
       ShowInfoBar();
   } else if (type == chrome::NOTIFICATION_OMNIBOX_OPENED_URL) {
     AutocompleteLog* log = content::Details<AutocompleteLog>(details).ptr();

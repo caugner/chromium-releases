@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -50,13 +50,14 @@ class NonBlockingInvalidationNotifier
   virtual void UpdateCredentials(
       const std::string& email, const std::string& token) OVERRIDE;
   virtual void UpdateEnabledTypes(
-      const syncable::ModelTypeSet& enabled_types) OVERRIDE;
+      syncable::ModelTypeSet enabled_types) OVERRIDE;
   virtual void SendNotification(
-      const syncable::ModelTypeSet& changed_types) OVERRIDE;
+      syncable::ModelTypeSet changed_types) OVERRIDE;
 
   // SyncNotifierObserver implementation.
   virtual void OnIncomingNotification(
-      const syncable::ModelTypePayloadMap& type_payloads) OVERRIDE;
+      const syncable::ModelTypePayloadMap& type_payloads,
+      IncomingNotificationSource source) OVERRIDE;
   virtual void OnNotificationStateChange(bool notifications_enabled) OVERRIDE;
   virtual void StoreState(const std::string& state) OVERRIDE;
 

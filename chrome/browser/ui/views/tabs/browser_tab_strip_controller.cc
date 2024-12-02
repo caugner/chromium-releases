@@ -14,24 +14,27 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
-#include "chrome/browser/ui/views/tabs/base_tab_strip.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
+#include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/widget/widget.h"
 
+using content::UserMetricsAction;
+using content::WebContents;
+
 static TabRendererData::NetworkState TabContentsNetworkState(
-    TabContents* contents) {
+    WebContents* contents) {
   if (!contents || !contents->IsLoading())
     return TabRendererData::NETWORK_STATE_NONE;
-  if (contents->waiting_for_response())
+  if (contents->IsWaitingForResponse())
     return TabRendererData::NETWORK_STATE_WAITING;
   return TabRendererData::NETWORK_STATE_LOADING;
 }
@@ -151,7 +154,7 @@ BrowserTabStripController::~BrowserTabStripController() {
   model_->RemoveObserver(this);
 }
 
-void BrowserTabStripController::InitFromModel(BaseTabStrip* tabstrip) {
+void BrowserTabStripController::InitFromModel(TabStrip* tabstrip) {
   tabstrip_ = tabstrip;
   // Walk the model, calling our insertion observer method for each item within
   // it.
@@ -210,7 +213,7 @@ bool BrowserTabStripController::IsTabCloseable(int model_index) const {
 
 bool BrowserTabStripController::IsNewTabPage(int model_index) const {
   return model_->ContainsIndex(model_index) &&
-      model_->GetTabContentsAt(model_index)->tab_contents()->GetURL() ==
+      model_->GetTabContentsAt(model_index)->web_contents()->GetURL() ==
       GURL(chrome::kChromeUINewTabURL);
 }
 
@@ -257,7 +260,7 @@ void BrowserTabStripController::UpdateLoadingAnimations() {
     if (model_->ContainsIndex(model_index)) {
       TabContentsWrapper* contents = model_->GetTabContentsAt(model_index);
       tab->UpdateLoadingAnimation(
-          TabContentsNetworkState(contents->tab_contents()));
+          TabContentsNetworkState(contents->web_contents()));
     }
   }
 }
@@ -285,10 +288,10 @@ void BrowserTabStripController::PerformDrop(bool drop_before,
   params.tabstrip_index = index;
 
   if (drop_before) {
-    UserMetrics::RecordAction(UserMetricsAction("Tab_DropURLBetweenTabs"));
+    content::RecordAction(UserMetricsAction("Tab_DropURLBetweenTabs"));
     params.disposition = NEW_FOREGROUND_TAB;
   } else {
-    UserMetrics::RecordAction(UserMetricsAction("Tab_DropURLOnTab"));
+    content::RecordAction(UserMetricsAction("Tab_DropURLOnTab"));
     params.disposition = CURRENT_TAB;
     params.source_contents = model_->GetTabContentsAt(index);
   }
@@ -296,20 +299,24 @@ void BrowserTabStripController::PerformDrop(bool drop_before,
   browser::Navigate(&params);
 }
 
-bool BrowserTabStripController::IsCompatibleWith(BaseTabStrip* other) const {
+bool BrowserTabStripController::IsCompatibleWith(TabStrip* other) const {
   Profile* other_profile =
       static_cast<BrowserTabStripController*>(other->controller())->profile();
   return other_profile == profile();
 }
 
 void BrowserTabStripController::CreateNewTab() {
-  UserMetrics::RecordAction(UserMetricsAction("NewTab_Button"));
+  content::RecordAction(UserMetricsAction("NewTab_Button"));
   model_->delegate()->AddBlankTab(true);
 }
 
 void BrowserTabStripController::ClickActiveTab(int index) {
   DCHECK(model_->active_index() == index);
   model_->ActiveTabClicked(index);
+}
+
+bool BrowserTabStripController::IsIncognito() {
+  return browser_->profile()->IsOffTheRecord();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -326,7 +333,7 @@ void BrowserTabStripController::TabInsertedAt(TabContentsWrapper* contents,
   hover_tab_selector_.CancelTabTransition();
 
   TabRendererData data;
-  SetTabRendererDataFromModel(contents->tab_contents(), model_index, &data,
+  SetTabRendererDataFromModel(contents->web_contents(), model_index, &data,
                               NEW_TAB);
   tabstrip_->AddTabAt(model_index, data);
 }
@@ -353,7 +360,7 @@ void BrowserTabStripController::TabMoved(TabContentsWrapper* contents,
 
   // Update the data first as the pinned state may have changed.
   TabRendererData data;
-  SetTabRendererDataFromModel(contents->tab_contents(), to_model_index, &data,
+  SetTabRendererDataFromModel(contents->web_contents(), to_model_index, &data,
                               EXISTING_TAB);
   tabstrip_->SetTabData(from_model_index, data);
 
@@ -414,7 +421,7 @@ void BrowserTabStripController::Observe(int type,
 }
 
 void BrowserTabStripController::SetTabRendererDataFromModel(
-    TabContents* contents,
+    WebContents* contents,
     int model_index,
     TabRendererData* data,
     TabStatus tab_status) {
@@ -435,8 +442,8 @@ void BrowserTabStripController::SetTabRendererDataFromModel(
   data->title = contents->GetTitle();
   data->url = contents->GetURL();
   data->loading = contents->IsLoading();
-  data->crashed_status = contents->crashed_status();
-  data->incognito = contents->browser_context()->IsOffTheRecord();
+  data->crashed_status = contents->GetCrashedStatus();
+  data->incognito = contents->GetBrowserContext()->IsOffTheRecord();
   data->show_icon = wrapper->favicon_tab_helper()->ShouldDisplayFavicon();
   data->mini = model_->IsMiniTab(model_index);
   data->blocked = model_->IsTabBlocked(model_index);
@@ -447,7 +454,7 @@ void BrowserTabStripController::SetTabDataAt(
     TabContentsWrapper* contents,
     int model_index) {
   TabRendererData data;
-  SetTabRendererDataFromModel(contents->tab_contents(), model_index, &data,
+  SetTabRendererDataFromModel(contents->web_contents(), model_index, &data,
                               EXISTING_TAB);
   tabstrip_->SetTabData(model_index, data);
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -475,7 +475,7 @@ class WatchDogThread : public base::Thread {
                        const base::Closure& task);
   static bool PostDelayedTask(const tracked_objects::Location& from_here,
                               const base::Closure& task,
-                              int64 delay_ms);
+                              base::TimeDelta delay);
 
  protected:
   virtual void Init() OVERRIDE;
@@ -485,7 +485,7 @@ class WatchDogThread : public base::Thread {
   static bool PostTaskHelper(
       const tracked_objects::Location& from_here,
       const base::Closure& task,
-      int64 delay_ms);
+      base::TimeDelta delay);
 
   DISALLOW_COPY_AND_ASSIGN(WatchDogThread);
 };
@@ -514,6 +514,10 @@ class StartupTimeBomb {
   static void DisarmStartupTimeBomb();
 
  private:
+  // Deletes |startup_watchdog_| if it is joinable. If |startup_watchdog_| is
+  // not joinable, then it will post a delayed task to try again.
+  void DeleteStartupWatchdog();
+
   // The singleton of this class.
   static StartupTimeBomb* g_startup_timebomb_;
 
@@ -548,10 +552,5 @@ class ShutdownWatcherHelper {
 
   DISALLOW_COPY_AND_ASSIGN(ShutdownWatcherHelper);
 };
-
-// DISABLE_RUNNABLE_METHOD_REFCOUNT is a convenience macro for disabling
-// refcounting of ThreadWatcher and ThreadWatcherList classes.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(ThreadWatcher);
-DISABLE_RUNNABLE_METHOD_REFCOUNT(ThreadWatcherList);
 
 #endif  // CHROME_BROWSER_METRICS_THREAD_WATCHER_H_

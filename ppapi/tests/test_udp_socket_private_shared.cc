@@ -11,10 +11,6 @@
 
 REGISTER_TEST_CASE(UDPSocketPrivateShared);
 
-// TODO(ygorshenin): get rid of using external server in tests,
-// http://crbug.com/105863
-const char* const TestUDPSocketPrivateShared::kHost = "www.google.com";
-
 TestUDPSocketPrivateShared::TestUDPSocketPrivateShared(
     TestingInstance* instance)
     : TestCase(instance),
@@ -23,22 +19,26 @@ TestUDPSocketPrivateShared::TestUDPSocketPrivateShared(
 }
 
 bool TestUDPSocketPrivateShared::Init() {
-  tcp_socket_private_interface_ =
-      reinterpret_cast<PPB_TCPSocket_Private const*>(
-          pp::Module::Get()->GetBrowserInterface(
-              PPB_TCPSOCKET_PRIVATE_INTERFACE));
+  tcp_socket_private_interface_ = static_cast<const PPB_TCPSocket_Private*>(
+      pp::Module::Get()->GetBrowserInterface(PPB_TCPSOCKET_PRIVATE_INTERFACE));
   if (!tcp_socket_private_interface_)
     instance_->AppendError("TCPSocketPrivate interface not available");
 
-  udp_socket_private_interface_ =
-      reinterpret_cast<PPB_UDPSocket_Private const*>(
-          pp::Module::Get()->GetBrowserInterface(
-              PPB_UDPSOCKET_PRIVATE_INTERFACE));
+  udp_socket_private_interface_ = static_cast<const PPB_UDPSocket_Private*>(
+      pp::Module::Get()->GetBrowserInterface(PPB_UDPSOCKET_PRIVATE_INTERFACE));
   if (!udp_socket_private_interface_)
     instance_->AppendError("UDPSocketPrivate interface not available");
 
-  return tcp_socket_private_interface_ && udp_socket_private_interface_ &&
-      InitTestingInterface();
+  bool init_host_port = false;
+  if (!GetLocalHostPort(instance_->pp_instance(), &host_, &port_))
+    instance_->AppendError("Can't init host and port");
+  else
+    init_host_port = true;
+
+  return tcp_socket_private_interface_ &&
+      udp_socket_private_interface_ &&
+      init_host_port &&
+      CheckTestingInterface();
 }
 
 void TestUDPSocketPrivateShared::RunTests(const std::string& filter) {
@@ -58,7 +58,7 @@ std::string TestUDPSocketPrivateShared::GenerateNetAddress(
 
   TestCompletionCallback callback(instance_->pp_instance(), force_async_);
   int32_t rv = tcp_socket_private_interface_->Connect(
-      *socket, kHost, kPort,
+      *socket, host_.c_str(), port_,
       static_cast<pp::CompletionCallback>(callback).pp_completion_callback());
   if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
     return ReportError("PPB_TCPSocket_Private::Connect force_async", rv);

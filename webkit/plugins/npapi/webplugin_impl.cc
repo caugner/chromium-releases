@@ -81,11 +81,12 @@ namespace npapi {
 
 namespace {
 
-static const char kFlashMimeType[] = "application/x-shockwave-flash";
-static const char kOctetStreamMimeType[] = "application/octet-stream";
-static const char kHTMLMimeType[] = "text/html";
-static const char kPlainTextMimeType[] = "text/plain";
-static const char kPluginFlashMimeType[] = "Plugin.FlashMIMEType";
+const char kFlashMimeType[] = "application/x-shockwave-flash";
+const char kOctetStreamMimeType[] = "application/octet-stream";
+const char kHTMLMimeType[] = "text/html";
+const char kPlainTextMimeType[] = "text/plain";
+const char kPluginFlashMimeType[] = "Plugin.FlashMIMEType";
+
 enum {
   MIME_TYPE_OK = 0,
   MIME_TYPE_EMPTY,
@@ -279,13 +280,13 @@ NPObject* WebPluginImpl::scriptableObject() {
   return delegate_->GetPluginScriptableObject();
 }
 
-bool WebPluginImpl::getFormValue(WebKit::WebString* value) {
+bool WebPluginImpl::getFormValue(WebKit::WebString& value) {
   if (!delegate_)
     return false;
   string16 form_value;
   if (!delegate_->GetFormValue(&form_value))
     return false;
-  *value = form_value;
+  value = form_value;
   return true;
 }
 

@@ -13,31 +13,34 @@
 #include "chrome/browser/metrics/metric_event_duration_details.h"
 #include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 
 using base::ListValue;
+using content::UserMetricsAction;
+using content::WebContents;
 
 MetricsHandler::MetricsHandler() {}
 MetricsHandler::~MetricsHandler() {}
 
 void MetricsHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "metricsHandler:recordAction",
       base::Bind(&MetricsHandler::HandleRecordAction, base::Unretained(this)));
-  web_ui_->RegisterMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "metricsHandler:recordInHistogram",
       base::Bind(&MetricsHandler::HandleRecordInHistogram,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "metricsHandler:logEventTime",
       base::Bind(&MetricsHandler::HandleLogEventTime, base::Unretained(this)));
 }
 
 void MetricsHandler::HandleRecordAction(const ListValue* args) {
   std::string string_action = UTF16ToUTF8(ExtractStringValue(args));
-  UserMetrics::RecordComputedAction(string_action);
+  content::RecordComputedAction(string_action);
 }
 
 void MetricsHandler::HandleRecordInHistogram(const ListValue* args) {
@@ -76,14 +79,14 @@ void MetricsHandler::HandleRecordInHistogram(const ListValue* args) {
 
 void MetricsHandler::HandleLogEventTime(const ListValue* args) {
   std::string event_name = UTF16ToUTF8(ExtractStringValue(args));
-  TabContents* tab = web_ui_->tab_contents();
+  WebContents* tab = web_ui()->GetWebContents();
 
   // Not all new tab pages get timed. In those cases, we don't have a
   // new_tab_start_time_.
-  if (tab->new_tab_start_time().is_null())
+  if (tab->GetNewTabStartTime().is_null())
     return;
 
-  base::TimeDelta duration = base::TimeTicks::Now() - tab->new_tab_start_time();
+  base::TimeDelta duration = base::TimeTicks::Now() - tab->GetNewTabStartTime();
   MetricEventDurationDetails details(event_name,
       static_cast<int>(duration.InMilliseconds()));
 
@@ -94,12 +97,12 @@ void MetricsHandler::HandleLogEventTime(const ListValue* args) {
   } else if (event_name == "Tab.NewTabOnload") {
     UMA_HISTOGRAM_TIMES("Tab.NewTabOnload", duration);
     // The new tab page has finished loading; reset it.
-    tab->set_new_tab_start_time(base::TimeTicks());
+    tab->SetNewTabStartTime(base::TimeTicks());
   } else {
     NOTREACHED();
   }
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_METRIC_EVENT_DURATION,
-      content::Source<TabContents>(tab),
+      content::Source<WebContents>(tab),
       content::Details<MetricEventDurationDetails>(&details));
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,20 +10,16 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
-#include "media/base/composite_data_source_factory.h"
 #include "media/base/filter_collection.h"
 #include "media/base/limits.h"
 #include "media/base/media_log.h"
 #include "media/base/media_switches.h"
-#include "media/base/pipeline_impl.h"
+#include "media/base/pipeline.h"
 #include "media/base/video_frame.h"
-#include "media/filters/chunk_demuxer_factory.h"
-#include "media/filters/dummy_demuxer_factory.h"
-#include "media/filters/ffmpeg_audio_decoder.h"
-#include "media/filters/ffmpeg_demuxer_factory.h"
-#include "media/filters/ffmpeg_video_decoder.h"
 #include "media/filters/null_audio_renderer.h"
+#include "media/filters/video_renderer_base.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebVideoFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
@@ -31,9 +27,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 #include "v8/include/v8.h"
 #include "webkit/media/buffered_data_source.h"
-#include "webkit/media/media_stream_client.h"
+#include "webkit/media/filter_helpers.h"
 #include "webkit/media/simple_data_source.h"
-#include "webkit/media/video_renderer_impl.h"
 #include "webkit/media/webmediaplayer_delegate.h"
 #include "webkit/media/webmediaplayer_proxy.h"
 #include "webkit/media/webvideoframe_impl.h"
@@ -99,128 +94,69 @@ base::TimeDelta ConvertSecondsToTimestamp(float seconds) {
 namespace webkit_media {
 
 WebMediaPlayerImpl::WebMediaPlayerImpl(
+    WebKit::WebFrame* frame,
     WebKit::WebMediaPlayerClient* client,
     base::WeakPtr<WebMediaPlayerDelegate> delegate,
     media::FilterCollection* collection,
+    WebKit::WebAudioSourceProvider* audio_source_provider,
     media::MessageLoopFactory* message_loop_factory,
     MediaStreamClient* media_stream_client,
     media::MediaLog* media_log)
-    : network_state_(WebKit::WebMediaPlayer::Empty),
+    : frame_(frame),
+      network_state_(WebKit::WebMediaPlayer::Empty),
       ready_state_(WebKit::WebMediaPlayer::HaveNothing),
-      main_loop_(NULL),
+      main_loop_(MessageLoop::current()),
       filter_collection_(collection),
-      pipeline_(NULL),
+      started_(false),
       message_loop_factory_(message_loop_factory),
       paused_(true),
       seeking_(false),
       playback_rate_(0.0f),
       pending_seek_(false),
+      pending_seek_seconds_(0.0f),
       client_(client),
-      proxy_(NULL),
+      proxy_(new WebMediaPlayerProxy(main_loop_->message_loop_proxy(), this)),
       delegate_(delegate),
       media_stream_client_(media_stream_client),
       media_log_(media_log),
       is_accelerated_compositing_active_(false),
-      incremented_externally_allocated_memory_(false) {
-  // Saves the current message loop.
-  DCHECK(!main_loop_);
-  main_loop_ = MessageLoop::current();
+      incremented_externally_allocated_memory_(false),
+      audio_source_provider_(audio_source_provider) {
   media_log_->AddEvent(
       media_log_->CreateEvent(media::MediaLogEvent::WEBMEDIAPLAYER_CREATED));
-}
 
-bool WebMediaPlayerImpl::Initialize(
-    WebKit::WebFrame* frame,
-    bool use_simple_data_source) {
-  DCHECK_EQ(main_loop_, MessageLoop::current());
   MessageLoop* pipeline_message_loop =
       message_loop_factory_->GetMessageLoop("PipelineThread");
-  if (!pipeline_message_loop) {
-    NOTREACHED() << "Could not start PipelineThread";
-    return false;
-  }
+  CHECK(pipeline_message_loop) << "Failed to create a new thread";
+  pipeline_ = new media::Pipeline(pipeline_message_loop, media_log_);
 
   // Let V8 know we started new thread if we did not did it yet.
   // Made separate task to avoid deletion of player currently being created.
   // Also, delaying GC until after player starts gets rid of starting lag --
   // collection happens in parallel with playing.
+  //
   // TODO(enal): remove when we get rid of per-audio-stream thread.
-  if (!incremented_externally_allocated_memory_) {
-    MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&WebMediaPlayerImpl::IncrementExternallyAllocatedMemory,
-                   AsWeakPtr()));
-  }
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&WebMediaPlayerImpl::IncrementExternallyAllocatedMemory,
+                 AsWeakPtr()));
 
   is_accelerated_compositing_active_ =
       frame->view()->isAcceleratedCompositingActive();
 
-  pipeline_ = new media::PipelineImpl(pipeline_message_loop, media_log_);
-
   // Also we want to be notified of |main_loop_| destruction.
   main_loop_->AddDestructionObserver(this);
 
-  // Create proxy and default video renderer.
-  proxy_ = new WebMediaPlayerProxy(main_loop_, this);
-  scoped_refptr<VideoRendererImpl> video_renderer =
-      new VideoRendererImpl(proxy_);
+  // Create default video renderer.
+  scoped_refptr<media::VideoRendererBase> video_renderer =
+      new media::VideoRendererBase(
+          base::Bind(&WebMediaPlayerProxy::Repaint, proxy_),
+          base::Bind(&WebMediaPlayerProxy::SetOpaque, proxy_.get()));
   filter_collection_->AddVideoRenderer(video_renderer);
-  proxy_->SetVideoRenderer(video_renderer);
+  proxy_->set_frame_provider(video_renderer);
 
-  // Set our pipeline callbacks.
-  pipeline_->Init(
-      base::Bind(&WebMediaPlayerProxy::PipelineEndedCallback,
-                 proxy_.get()),
-      base::Bind(&WebMediaPlayerProxy::PipelineErrorCallback,
-                 proxy_.get()),
-      base::Bind(&WebMediaPlayerProxy::NetworkEventCallback,
-                 proxy_.get()));
-
-  // A simple data source that keeps all data in memory.
-  scoped_ptr<media::DataSourceFactory> simple_data_source_factory(
-      SimpleDataSource::CreateFactory(MessageLoop::current(), frame,
-                                      media_log_,
-                                      proxy_->GetBuildObserver()));
-
-  // A sophisticated data source that does memory caching.
-  scoped_ptr<media::DataSourceFactory> buffered_data_source_factory(
-      BufferedDataSource::CreateFactory(MessageLoop::current(), frame,
-                                        media_log_,
-                                        proxy_->GetBuildObserver()));
-
-  scoped_ptr<media::CompositeDataSourceFactory> data_source_factory(
-      new media::CompositeDataSourceFactory());
-
-  if (use_simple_data_source) {
-    data_source_factory->AddFactory(simple_data_source_factory.release());
-    data_source_factory->AddFactory(buffered_data_source_factory.release());
-  } else {
-    data_source_factory->AddFactory(buffered_data_source_factory.release());
-    data_source_factory->AddFactory(simple_data_source_factory.release());
-  }
-
-  scoped_ptr<media::DemuxerFactory> demuxer_factory(
-      new media::FFmpegDemuxerFactory(data_source_factory.release(),
-                                      pipeline_message_loop));
-
-  std::string source_url = GetClient()->sourceURL().spec();
-
-  if (!source_url.empty()) {
-    demuxer_factory.reset(
-        new media::ChunkDemuxerFactory(source_url,
-                                       demuxer_factory.release(),
-                                       proxy_));
-  }
-  filter_collection_->SetDemuxerFactory(demuxer_factory.release());
-
-  // Add in the default filter factories.
-  filter_collection_->AddAudioDecoder(new media::FFmpegAudioDecoder(
-      message_loop_factory_->GetMessageLoop("AudioDecoderThread")));
-  filter_collection_->AddVideoDecoder(new media::FFmpegVideoDecoder(
-      message_loop_factory_->GetMessageLoop("VideoDecoderThread")));
+  // Create default audio renderer.
   filter_collection_->AddAudioRenderer(new media::NullAudioRenderer());
-
-  return true;
 }
 
 WebMediaPlayerImpl::~WebMediaPlayerImpl() {
@@ -273,49 +209,45 @@ URLSchemeForHistogram URLScheme(const GURL& url) {
 
 void WebMediaPlayerImpl::load(const WebKit::WebURL& url) {
   DCHECK_EQ(main_loop_, MessageLoop::current());
-  DCHECK(proxy_);
 
-  UMA_HISTOGRAM_ENUMERATION("Media.URLScheme", URLScheme(url), kMaxURLScheme);
+  GURL gurl(url);
+  UMA_HISTOGRAM_ENUMERATION("Media.URLScheme", URLScheme(gurl), kMaxURLScheme);
 
-  if (media_stream_client_) {
-    bool has_video = false;
-    bool has_audio = false;
-    scoped_refptr<media::VideoDecoder> new_decoder =
-        media_stream_client_->GetVideoDecoder(url, message_loop_factory_.get());
-    if (new_decoder.get()) {
-      // Remove the default decoder.
-      scoped_refptr<media::VideoDecoder> old_videodecoder;
-      filter_collection_->SelectVideoDecoder(&old_videodecoder);
-      filter_collection_->AddVideoDecoder(new_decoder.get());
-      has_video = true;
-    }
-
-    // TODO(wjia): add audio decoder handling when it's available.
-    if (has_video || has_audio) {
-      // TODO(vrk/wjia): Setting true for local_source is under the assumption
-      // that the MediaStream represents a local webcam. This will need to
-      // change in the future when GetVideoDecoder is no longer hardcoded to
-      // only return CaptureVideoDecoders.
-      filter_collection_->SetDemuxerFactory(
-          new media::DummyDemuxerFactory(has_video, has_audio, true));
-    }
-  }
-
-  // Handle any volume changes that occured before load().
+  // Handle any volume/preload changes that occured before load().
   setVolume(GetClient()->volume());
-  // Get the preload value.
   setPreload(GetClient()->preload());
 
-  // Initialize the pipeline.
   SetNetworkState(WebKit::WebMediaPlayer::Loading);
   SetReadyState(WebKit::WebMediaPlayer::HaveNothing);
-  pipeline_->Start(
-      filter_collection_.release(),
-      url.spec(),
-      base::Bind(&WebMediaPlayerProxy::PipelineInitializationCallback,
-                 proxy_.get()));
-
   media_log_->AddEvent(media_log_->CreateLoadEvent(url.spec()));
+
+  // Media streams pipelines can start immediately.
+  if (BuildMediaStreamCollection(url, media_stream_client_,
+                                 message_loop_factory_.get(),
+                                 filter_collection_.get())) {
+    StartPipeline(gurl);
+    return;
+  }
+
+  // Media source pipelines can start immediately.
+  if (BuildMediaSourceCollection(url, GetClient()->sourceURL(), proxy_,
+                                 message_loop_factory_.get(),
+                                 filter_collection_.get())) {
+    StartPipeline(gurl);
+    return;
+  }
+
+  // Otherwise it's a regular request which requires resolving the URL first.
+  scoped_refptr<WebDataSource> data_source;
+  if (gurl.SchemeIs(kDataScheme)) {
+    data_source = new SimpleDataSource(main_loop_, frame_);
+  } else {
+    data_source = new BufferedDataSource(main_loop_, frame_, media_log_);
+  }
+  proxy_->set_data_source(data_source);
+  data_source->Initialize(url, base::Bind(
+      &WebMediaPlayerImpl::DataSourceInitialized,
+      base::Unretained(this), gurl));
 }
 
 void WebMediaPlayerImpl::cancelLoad() {
@@ -498,8 +430,12 @@ float WebMediaPlayerImpl::duration() const {
   DCHECK_EQ(main_loop_, MessageLoop::current());
 
   base::TimeDelta duration = pipeline_->GetMediaDuration();
-  if (duration.InMicroseconds() == media::Limits::kMaxTimeInMicroseconds)
+
+  // Return positive infinity if the resource is unbounded.
+  // http://www.whatwg.org/specs/web-apps/current-work/multipage/video.html#dom-media-duration
+  if (duration == media::kInfiniteDuration())
     return std::numeric_limits<float>::infinity();
+
   return static_cast<float>(duration.InSecondsF());
 }
 
@@ -588,10 +524,10 @@ void WebMediaPlayerImpl::paint(WebCanvas* canvas,
 
   // Make sure we don't create a huge canvas.
   // TODO(hclam): Respect the aspect ratio.
-  if (scaled_width > static_cast<int>(media::Limits::kMaxCanvas))
-    scaled_width = media::Limits::kMaxCanvas;
-  if (scaled_height > static_cast<int>(media::Limits::kMaxCanvas))
-    scaled_height = media::Limits::kMaxCanvas;
+  if (scaled_width > static_cast<int>(media::limits::kMaxCanvas))
+    scaled_width = media::limits::kMaxCanvas;
+  if (scaled_height > static_cast<int>(media::limits::kMaxCanvas))
+    scaled_height = media::limits::kMaxCanvas;
 
   // If there is no preexisting platform canvas, or if the size has
   // changed, recreate the canvas.  This is to avoid recreating the bitmap
@@ -696,6 +632,8 @@ void WebMediaPlayerImpl::putCurrentFrame(
         WebVideoFrameImpl::toVideoFrame(web_video_frame));
     proxy_->PutCurrentFrame(video_frame);
     delete web_video_frame;
+  } else {
+    proxy_->PutCurrentFrame(NULL);
   }
 }
 
@@ -749,13 +687,18 @@ void WebMediaPlayerImpl::OnPipelineInitialize(PipelineStatus status) {
     if (hasVideo()) {
       UMA_HISTOGRAM_BOOLEAN("Media.AcceleratedCompositingActive",
                             is_accelerated_compositing_active_);
+    } else {
+      GetClient()->disableAcceleratedCompositing();
     }
 
     if (pipeline_->IsLocalSource())
       SetNetworkState(WebKit::WebMediaPlayer::Loaded);
 
     SetReadyState(WebKit::WebMediaPlayer::HaveMetadata);
-    SetReadyState(WebKit::WebMediaPlayer::HaveFutureData);
+    // Fire canplaythrough immediately after playback begins because of
+    // crbug.com/106480.
+    // TODO(vrk): set ready state to HaveFutureData when bug above is fixed.
+    SetReadyState(WebKit::WebMediaPlayer::HaveEnoughData);
   } else {
     // TODO(hclam): should use |status| to determine the state
     // properly and reports error using MediaError.
@@ -844,7 +787,10 @@ void WebMediaPlayerImpl::OnNetworkEvent(NetworkEvent type) {
       SetNetworkState(WebKit::WebMediaPlayer::Idle);
       break;
     case media::CAN_PLAY_THROUGH:
-      SetReadyState(WebKit::WebMediaPlayer::HaveEnoughData);
+      // Temporarily disable delayed firing of CAN_PLAY_THROUGH due to
+      // crbug.com/106480.
+      // TODO(vrk): uncomment code below when bug above is fixed.
+      // SetReadyState(WebKit::WebMediaPlayer::HaveEnoughData);
       break;
     default:
       NOTREACHED();
@@ -855,6 +801,41 @@ void WebMediaPlayerImpl::OnDemuxerOpened() {
   DCHECK_EQ(main_loop_, MessageLoop::current());
 
   GetClient()->sourceOpened();
+}
+
+void WebMediaPlayerImpl::SetOpaque(bool opaque) {
+  DCHECK_EQ(main_loop_, MessageLoop::current());
+
+  GetClient()->setOpaque(opaque);
+}
+
+void WebMediaPlayerImpl::DataSourceInitialized(
+    const GURL& gurl,
+    media::PipelineStatus status) {
+  DCHECK_EQ(main_loop_, MessageLoop::current());
+
+  if (status != media::PIPELINE_OK) {
+    SetNetworkState(WebKit::WebMediaPlayer::FormatError);
+    Repaint();
+    return;
+  }
+
+  BuildDefaultCollection(proxy_->data_source(),
+                         message_loop_factory_.get(),
+                         filter_collection_.get());
+  StartPipeline(gurl);
+}
+
+void WebMediaPlayerImpl::StartPipeline(const GURL& gurl) {
+  started_ = true;
+  pipeline_->Start(
+      filter_collection_.Pass(),
+      gurl.spec(),
+      base::Bind(&WebMediaPlayerProxy::PipelineEndedCallback, proxy_.get()),
+      base::Bind(&WebMediaPlayerProxy::PipelineErrorCallback, proxy_.get()),
+      base::Bind(&WebMediaPlayerProxy::NetworkEventCallback, proxy_.get()),
+      base::Bind(&WebMediaPlayerProxy::PipelineInitializationCallback,
+                 proxy_.get()));
 }
 
 void WebMediaPlayerImpl::SetNetworkState(
@@ -879,22 +860,23 @@ void WebMediaPlayerImpl::Destroy() {
   // Tell the data source to abort any pending reads so that the pipeline is
   // not blocked when issuing stop commands to the other filters.
   if (proxy_) {
-    proxy_->AbortDataSources();
+    proxy_->AbortDataSource();
     proxy_->DemuxerShutdown();
   }
 
   // Make sure to kill the pipeline so there's no more media threads running.
   // Note: stopping the pipeline might block for a long time.
-  if (pipeline_) {
+  if (started_) {
     media::PipelineStatusNotification note;
     pipeline_->Stop(note.Callback());
     note.Wait();
+    started_ = false;
+  }
 
-    // Let V8 know we are not using extra resources anymore.
-    if (incremented_externally_allocated_memory_) {
-      v8::V8::AdjustAmountOfExternalAllocatedMemory(-kPlayerExtraMemory);
-      incremented_externally_allocated_memory_ = false;
-    }
+  // Let V8 know we are not using extra resources anymore.
+  if (incremented_externally_allocated_memory_) {
+    v8::V8::AdjustAmountOfExternalAllocatedMemory(-kPlayerExtraMemory);
+    incremented_externally_allocated_memory_ = false;
   }
 
   message_loop_factory_.reset();
@@ -911,6 +893,10 @@ WebKit::WebMediaPlayerClient* WebMediaPlayerImpl::GetClient() {
   DCHECK_EQ(main_loop_, MessageLoop::current());
   DCHECK(client_);
   return client_;
+}
+
+WebKit::WebAudioSourceProvider* WebMediaPlayerImpl::audioSourceProvider() {
+  return audio_source_provider_;
 }
 
 void WebMediaPlayerImpl::IncrementExternallyAllocatedMemory() {

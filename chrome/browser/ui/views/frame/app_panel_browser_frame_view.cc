@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,12 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -23,7 +24,10 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
+using content::WebContents;
+
 namespace {
+
 // The frame border is only visible in restored mode and is hardcoded to 1 px on
 // each side regardless of the system window border size.
 const int kFrameBorderThickness = 1;
@@ -46,7 +50,11 @@ const int kIconTitleSpacing = 4;
 const int kTitleCloseButtonSpacing = 5;
 // There is a 4 px gap between the close button and the frame border.
 const int kCloseButtonFrameBorderSpacing = 4;
-}
+
+const SkColor kFrameColorAppPanel = SK_ColorWHITE;
+const SkColor kFrameColorAppPanelInactive = SK_ColorWHITE;
+
+}  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
 // AppPanelBrowserFrameView, public:
@@ -152,7 +160,7 @@ int AppPanelBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
     return frame_component;
 
   // Then see if the point is within any of the window controls.
-  if (close_button_->IsVisible() &&
+  if (close_button_->visible() &&
       close_button_->GetMirroredBounds().Contains(point))
     return HTCLOSE;
 
@@ -233,8 +241,8 @@ void AppPanelBrowserFrameView::ButtonPressed(views::Button* sender,
 bool AppPanelBrowserFrameView::ShouldTabIconViewAnimate() const {
   // This function is queried during the creation of the window as the
   // TabIconView we host is initialized, so we need to NULL check the selected
-  // TabContents because in this condition there is not yet a selected tab.
-  TabContents* current_tab = browser_view()->GetSelectedTabContents();
+  // WebContents because in this condition there is not yet a selected tab.
+  WebContents* current_tab = browser_view()->GetSelectedWebContents();
   return current_tab ? current_tab->IsLoading() : false;
 }
 
@@ -319,10 +327,10 @@ void AppPanelBrowserFrameView::PaintRestoredFrameBorder(gfx::Canvas* canvas) {
   SkColor frame_color;
   if (ShouldPaintAsActive()) {
     theme_frame = rb.GetBitmapNamed(IDR_FRAME_APP_PANEL);
-    frame_color = ResourceBundle::frame_color_app_panel;
+    frame_color = kFrameColorAppPanel;
   } else {
-    theme_frame = rb.GetBitmapNamed(IDR_FRAME_APP_PANEL);  // TODO
-    frame_color = ResourceBundle::frame_color_app_panel_inactive;
+    theme_frame = rb.GetBitmapNamed(IDR_FRAME_APP_PANEL);
+    frame_color = kFrameColorAppPanelInactive;
   }
 
   // Fill with the frame color first so we have a constant background for
@@ -450,11 +458,12 @@ void AppPanelBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
       client_area_top, left->width(), client_area_height);
 
   // Draw the toolbar color to fill in the edges.
-  canvas->DrawRectInt(ResourceBundle::toolbar_color,
+  canvas->DrawRect(gfx::Rect(
       client_area_bounds.x() - kClientEdgeThickness,
       client_area_top - kClientEdgeThickness,
       client_area_bounds.width() + kClientEdgeThickness,
-      client_area_bottom - client_area_top + kClientEdgeThickness);
+      client_area_bottom - client_area_top + kClientEdgeThickness),
+      ResourceBundle::toolbar_color);
 }
 
 void AppPanelBrowserFrameView::LayoutWindowControls() {

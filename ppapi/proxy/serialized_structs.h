@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,6 +81,7 @@ struct PPBFlash_DrawGlyphs_Params {
   PP_Point position;
   PP_Rect clip;
   float transformation[3][3];
+  PP_Bool allow_subpixel_aa;
   std::vector<uint16_t> glyph_indices;
   std::vector<PP_Point> glyph_advances;
 };
@@ -110,7 +111,7 @@ struct PPPVideoCapture_Buffer {
 
 #if defined(OS_WIN)
 typedef HANDLE ImageHandle;
-#elif defined(OS_MACOSX)
+#elif defined(OS_MACOSX) || defined(OS_ANDROID)
 typedef base::SharedMemoryHandle ImageHandle;
 #else
 // On X Windows this is a SysV shared memory key.

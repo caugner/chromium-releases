@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -21,6 +21,7 @@ class desktopui_PyAutoPerfTests(chrome_test.ChromeTestBase):
     """
     _PERF_MARKER_PRE = '_PERF_PRE_'
     _PERF_MARKER_POST = '_PERF_POST_'
+    _DEFAULT_NUM_ITERATIONS = 10  # Keep synced with perf.py.
 
     version = 1
 
@@ -68,9 +69,9 @@ class desktopui_PyAutoPerfTests(chrome_test.ChromeTestBase):
         """Parses input arguments to this autotest."""
         parser = optparse.OptionParser()
         parser.add_option('--iterations', dest='num_iterations', type='int',
-                          default=0,
+                          default=self._DEFAULT_NUM_ITERATIONS,
                           help='Number of iterations for perf measurements. '
-                               'Defaults to the value given in perf.py.')
+                               'Defaults to %default iterations.')
         parser.add_option('--max-timeouts', dest='max_timeouts', type='int',
                           default=0,
                           help='Maximum number of automation timeouts to '
@@ -105,15 +106,25 @@ class desktopui_PyAutoPerfTests(chrome_test.ChromeTestBase):
         utils.system(login_cmd)
 
         # Run the PyAuto performance tests.
+        print 'About to run the pyauto performance tests.'
+        print 'Note: you will see two timestamps for each logging message.'
+        print '      The outer timestamp occurs when the autotest dumps the '
+        print '      pyauto output, which only occurs after all tests are '
+        print '      complete. The inner timestamp is the time at which the '
+        print '      message was logged by pyauto while the test was actually '
+        print '      running.'
         functional_cmd = cros_ui.xcommand_as(
             '%s/chrome_test/test_src/chrome/test/functional/'
-            'pyauto_functional.py --suite=%s -v %s' % (
+            'pyauto_functional.py --suite=%s %s' % (
                 deps_dir, options.suite, test_args))
         environment = os.environ.copy()
-        if options.num_iterations:
-          environment['NUM_ITERATIONS'] = str(options.num_iterations)
+
+        environment['NUM_ITERATIONS'] = str(options.num_iterations)
+        self.write_perf_keyval({'iterations': options.num_iterations})
+
         if options.max_timeouts:
           environment['MAX_TIMEOUT_COUNT'] = str(options.max_timeouts)
+
         proc = subprocess.Popen(
             functional_cmd, shell=True, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, env=environment)

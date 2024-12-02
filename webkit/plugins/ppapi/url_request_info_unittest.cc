@@ -1,8 +1,7 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ppapi/shared_impl/url_request_info_impl.h"
 #include "ppapi/thunk/thunk.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
@@ -124,7 +123,7 @@ WebFrame* URLRequestInfoTest::frame_;
 
 TEST_F(URLRequestInfoTest, GetInterface) {
   const PPB_URLRequestInfo* request_info =
-      ::ppapi::thunk::GetPPB_URLRequestInfo_Thunk();
+      ::ppapi::thunk::GetPPB_URLRequestInfo_1_0_Thunk();
   EXPECT_TRUE(request_info);
   EXPECT_TRUE(request_info->Create);
   EXPECT_TRUE(request_info->IsURLRequestInfo);
@@ -258,4 +257,3 @@ TEST_F(URLRequestInfoTest, SetHeaders) {
 
 }  // namespace ppapi
 }  // namespace webkit
-

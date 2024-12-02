@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,6 @@
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/threading/platform_thread.h"
-#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -349,11 +348,11 @@ TEST_F(FileUtilTest, FLAKY_CountFilesCreatedAfter) {
 
   // Age to perfection
 #if defined(OS_WIN)
-  base::PlatformThread::Sleep(100);
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
 #elif defined(OS_POSIX)
   // We need to wait at least one second here because the precision of
   // file creation time is one second.
-  base::PlatformThread::Sleep(1500);
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(1500));
 #endif
 
   // Establish our cutoff time
@@ -579,6 +578,95 @@ TEST_F(FileUtilTest, NormalizeFilePathReparsePoints) {
 
   ASSERT_FALSE(file_util::NormalizeFilePath(to_sub_a.Append(FPL("file.txt")),
                                             &normalized_path));
+}
+
+TEST_F(FileUtilTest, DevicePathToDriveLetter) {
+  // Get a drive letter.
+  std::wstring real_drive_letter = temp_dir_.path().value().substr(0, 2);
+  if (!isalpha(real_drive_letter[0]) || ':' != real_drive_letter[1]) {
+    LOG(ERROR) << "Can't get a drive letter to test with.";
+    return;
+  }
+
+  // Get the NT style path to that drive.
+  wchar_t device_path[MAX_PATH] = {'\0'};
+  ASSERT_TRUE(
+      ::QueryDosDevice(real_drive_letter.c_str(), device_path, MAX_PATH));
+  FilePath actual_device_path(device_path);
+  FilePath win32_path;
+
+  // Run DevicePathToDriveLetterPath() on the NT style path we got from
+  // QueryDosDevice().  Expect the drive letter we started with.
+  ASSERT_TRUE(file_util::DevicePathToDriveLetterPath(actual_device_path,
+                                                     &win32_path));
+  ASSERT_EQ(real_drive_letter, win32_path.value());
+
+  // Add some directories to the path.  Expect those extra path componenets
+  // to be preserved.
+  FilePath kRelativePath(FPL("dir1\\dir2\\file.txt"));
+  ASSERT_TRUE(file_util::DevicePathToDriveLetterPath(
+      actual_device_path.Append(kRelativePath),
+      &win32_path));
+  EXPECT_EQ(FilePath(real_drive_letter + L"\\").Append(kRelativePath).value(),
+            win32_path.value());
+
+  // Deform the real path so that it is invalid by removing the last four
+  // characters.  The way windows names devices that are hard disks
+  // (\Device\HardDiskVolume${NUMBER}) guarantees that the string is longer
+  // than three characters.  The only way the truncated string could be a
+  // real drive is if more than 10^3 disks are mounted:
+  // \Device\HardDiskVolume10000 would be truncated to \Device\HardDiskVolume1
+  // Check that DevicePathToDriveLetterPath fails.
+  int path_length = actual_device_path.value().length();
+  int new_length = path_length - 4;
+  ASSERT_LT(0, new_length);
+  FilePath prefix_of_real_device_path(
+      actual_device_path.value().substr(0, new_length));
+  ASSERT_FALSE(file_util::DevicePathToDriveLetterPath(
+      prefix_of_real_device_path,
+      &win32_path));
+
+  ASSERT_FALSE(file_util::DevicePathToDriveLetterPath(
+      prefix_of_real_device_path.Append(kRelativePath),
+      &win32_path));
+
+  // Deform the real path so that it is invalid by adding some characters. For
+  // example, if C: maps to \Device\HardDiskVolume8, then we simulate a
+  // request for the drive letter whose native path is
+  // \Device\HardDiskVolume812345 .  We assume such a device does not exist,
+  // because drives are numbered in order and mounting 112345 hard disks will
+  // never happen.
+  const FilePath::StringType kExtraChars = FPL("12345");
+
+  FilePath real_device_path_plus_numbers(
+      actual_device_path.value() + kExtraChars);
+
+  ASSERT_FALSE(file_util::DevicePathToDriveLetterPath(
+      real_device_path_plus_numbers,
+      &win32_path));
+
+  ASSERT_FALSE(file_util::DevicePathToDriveLetterPath(
+      real_device_path_plus_numbers.Append(kRelativePath),
+      &win32_path));
+}
+
+TEST_F(FileUtilTest, GetPlatformFileInfoForDirectory) {
+  FilePath empty_dir = temp_dir_.path().Append(FPL("gpfi_test"));
+  ASSERT_TRUE(file_util::CreateDirectory(empty_dir));
+  base::win::ScopedHandle dir(
+      ::CreateFile(empty_dir.value().c_str(),
+                   FILE_ALL_ACCESS,
+                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                   NULL,
+                   OPEN_EXISTING,
+                   FILE_FLAG_BACKUP_SEMANTICS,  // Needed to open a directory.
+                   NULL));
+  ASSERT_TRUE(dir.IsValid());
+  base::PlatformFileInfo info;
+  EXPECT_TRUE(base::GetPlatformFileInfo(dir.Get(), &info));
+  EXPECT_TRUE(info.is_directory);
+  EXPECT_FALSE(info.is_symbolic_link);
+  EXPECT_EQ(0, info.size);
 }
 
 #endif  // defined(OS_WIN)
@@ -1231,9 +1319,9 @@ TEST_F(FileUtilTest, GetFileCreationLocalTime) {
 
   SYSTEMTIME start_time;
   GetLocalTime(&start_time);
-  Sleep(100);
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
   CreateTextFile(file_name, L"New file!");
-  Sleep(100);
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
   SYSTEMTIME end_time;
   GetLocalTime(&end_time);
 
@@ -1545,7 +1633,7 @@ TEST_F(FileUtilTest, CreateNewTemporaryDirInDirTest) {
 
 TEST_F(FileUtilTest, GetShmemTempDirTest) {
   FilePath dir;
-  EXPECT_TRUE(file_util::GetShmemTempDir(&dir));
+  EXPECT_TRUE(file_util::GetShmemTempDir(&dir, false));
   EXPECT_TRUE(file_util::DirectoryExists(dir));
 }
 
@@ -1612,7 +1700,6 @@ TEST_F(FileUtilTest, DetectDirectoryTest) {
   EXPECT_TRUE(file_util::CreateDirectory(test_root));
   EXPECT_TRUE(file_util::PathExists(test_root));
   EXPECT_TRUE(file_util::DirectoryExists(test_root));
-
   // Check a file
   FilePath test_path =
       test_root.Append(FILE_PATH_LITERAL("foobar.txt"));

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,21 +55,16 @@ class CONTENT_EXPORT BrowserAccessibility {
   // Perform platform specific initialization. This can be called multiple times
   // during the lifetime of this instance after the members of this base object
   // have been reset with new values from the renderer process.
-  virtual void Initialize();
-
-  // Optionally send events triggered simply by the fact that this node
-  // has been created or modified (and has been attached to the tree).
-  // This can include "show" events, "text changed" events in live regions,
-  // or "alert" events.
-  virtual void SendNodeUpdateEvents() {}
+  // Child dependent initialization can be done here.
+  virtual void PostInitialize() {}
 
   // Initialize this object, reading attributes from |src|. Does not
   // recurse into children of |src| and build the whole subtree.
-  void Initialize(BrowserAccessibilityManager* manager,
-                  BrowserAccessibility* parent,
-                  int32 child_id,
-                  int32 index_in_parent,
-                  const WebAccessibility& src);
+  void PreInitialize(BrowserAccessibilityManager* manager,
+      BrowserAccessibility* parent,
+      int32 child_id,
+      int32 index_in_parent,
+      const WebAccessibility& src);
 
   // Add a child of this object.
   void AddChild(BrowserAccessibility* child);
@@ -107,53 +102,6 @@ class CONTENT_EXPORT BrowserAccessibility {
   // Returns the deepest descendant that contains the specified point
   // (in global screen coordinates).
   BrowserAccessibility* BrowserAccessibilityForPoint(const gfx::Point& point);
-
-  // Scrolls this element so that the |focus| rect (in local coordinates
-  // relative to this element) is scrolled to fit within the given
-  // |viewport| (which is clipped to the actual bounds of this
-  // object if you specify something larger). If the whole focus area
-  // doesn't fit, you can specify |subfocus|, which will prioritize
-  // a smaller area within |focus|.
-  //
-  // Note that "focus" doesn't necessarily mean the rectangle must correspond
-  // to a focused element on the page; assistive technology might request
-  // that any object be made visible.
-  void ScrollToMakeVisible(const gfx::Rect& subfocus,
-                           const gfx::Rect& focus,
-                           const gfx::Rect& viewport);
-
-  // This is a 1-dimensional scroll offset helper function that's applied
-  // separately in the horizontal and vertical directions, because the
-  // logic is the same.  The goal is to compute the best scroll offset
-  // in order to make a focused item visible within a viewport.
-  //
-  // In case the whole focused item cannot fit, you can specify a
-  // subfocus - a smaller region within the focus that should
-  // be prioritized. If the whole focused item can fit, the subfocus is
-  // ignored.
-  //
-  // Example: the viewport is scrolled to the right just enough
-  // that the focus is in view.
-  //   Before:
-  //   +----------Viewport---------+
-  //                         +----Focus---+
-  //                         +--SubFocus--+
-  //
-  //   After:
-  //          +----------Viewport---------+
-  //                         +----Focus---+
-  //                         +--SubFocus--+
-  //
-  // When constraints cannot be fully satisfied, the min
-  // (left/top) position takes precedence over the max (right/bottom).
-  //
-  // Note that the return value represents the ideal new scroll offset.
-  // This may be out of range - the calling function should clip this
-  // to the available range.
-  static int ComputeBestScrollOffset(int current_scroll_offset,
-                                     int subfocus_min, int subfocus_max,
-                                     int focus_min, int focus_max,
-                                     int viewport_min, int viewport_max);
 
   //
   // Reference counting
@@ -245,6 +193,10 @@ class CONTENT_EXPORT BrowserAccessibility {
   BrowserAccessibilityWin* toBrowserAccessibilityWin();
 #endif
 
+  // A string representation of this node.
+  // TODO(dtseng): Move to test only library.
+  std::string ToString();
+
   // Retrieve the value of a bool attribute from the bool attribute
   // map and returns true if found.
   bool GetBoolAttribute(WebAccessibility::BoolAttribute attr, bool* value)
@@ -279,6 +231,12 @@ class CONTENT_EXPORT BrowserAccessibility {
   string16 GetTextRecursive() const;
 
  protected:
+  // Perform platform specific initialization. This can be called multiple times
+  // during the lifetime of this instance after the members of this base object
+  // have been reset with new values from the renderer process.
+  // Perform child independent initialization in this method.
+  virtual void PreInitialize();
+
   BrowserAccessibility();
 
   // The manager of this tree of accessibility objects; needed for

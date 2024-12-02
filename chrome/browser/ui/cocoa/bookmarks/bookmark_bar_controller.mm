@@ -1,9 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/metrics/histogram.h"
 #include "base/sys_string_conversions.h"
@@ -41,9 +42,9 @@
 #import "chrome/browser/ui/cocoa/view_resizer.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
@@ -52,6 +53,11 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/mac/nsimage_cache.h"
+
+using content::OpenURLParams;
+using content::Referrer;
+using content::UserMetricsAction;
+using content::WebContents;
 
 // Bookmark bar state changing and animations
 //
@@ -228,7 +234,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
              delegate:(id<BookmarkBarControllerDelegate>)delegate
        resizeDelegate:(id<ViewResizer>)resizeDelegate {
   if ((self = [super initWithNibName:@"BookmarkBar"
-                              bundle:base::mac::MainAppBundle()])) {
+                              bundle:base::mac::FrameworkBundle()])) {
     // Initialize to an invalid state.
     visualState_ = bookmarks::kInvalidState;
     lastVisualState_ = bookmarks::kInvalidState;
@@ -750,7 +756,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   const BookmarkNode* node = [self nodeFromMenuItem:sender];
   if (node) {
     [self openAll:node disposition:NEW_FOREGROUND_TAB];
-    UserMetrics::RecordAction(UserMetricsAction("OpenAllBookmarks"));
+    content::RecordAction(UserMetricsAction("OpenAllBookmarks"));
   }
 }
 
@@ -758,7 +764,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   const BookmarkNode* node = [self nodeFromMenuItem:sender];
   if (node) {
     [self openAll:node disposition:NEW_WINDOW];
-    UserMetrics::RecordAction(UserMetricsAction("OpenAllBookmarksNewWindow"));
+    content::RecordAction(UserMetricsAction("OpenAllBookmarksNewWindow"));
   }
 }
 
@@ -766,7 +772,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   const BookmarkNode* node = [self nodeFromMenuItem:sender];
   if (node) {
     [self openAll:node disposition:OFF_THE_RECORD];
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("OpenAllBookmarksIncognitoWindow"));
   }
 }
@@ -1107,8 +1113,10 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 // Actually open the URL.  This is the last chance for a unit test to
 // override.
 - (void)openURL:(GURL)url disposition:(WindowOpenDisposition)disposition {
-  browser_->OpenURL(
-      url, GURL(), disposition, content::PAGE_TRANSITION_AUTO_BOOKMARK);
+  OpenURLParams params(
+      url, Referrer(), disposition, content::PAGE_TRANSITION_AUTO_BOOKMARK,
+      false);
+  browser_->OpenURL(params);
 }
 
 - (void)clearMenuTagMap {
@@ -2277,8 +2285,8 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 #pragma mark BookmarkBarToolbarViewController Protocol
 
 - (int)currentTabContentsHeight {
-  TabContents* tc = browser_->GetSelectedTabContents();
-  return tc ? tc->view()->GetContainerSize().height() : 0;
+  WebContents* wc = browser_->GetSelectedWebContents();
+  return wc ? wc->GetView()->GetContainerSize().height() : 0;
 }
 
 - (ui::ThemeProvider*)themeProvider {

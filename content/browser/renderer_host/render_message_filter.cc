@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,32 +9,33 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/debug/alias.h"
 #include "base/file_util.h"
 #include "base/process_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/browser_context.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/download/download_stats.h"
 #include "content/browser/download/download_types.h"
 #include "content/browser/plugin_process_host.h"
-#include "content/browser/plugin_service.h"
 #include "content/browser/plugin_service_filter.h"
+#include "content/browser/plugin_service_impl.h"
 #include "content/browser/ppapi_plugin_process_host.h"
 #include "content/browser/renderer_host/media/media_observer.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/resource_context.h"
-#include "content/browser/user_metrics.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/child_process_messages.h"
 #include "content/common/desktop_notification_messages.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "ipc/ipc_channel_handle.h"
@@ -66,9 +67,11 @@
 #include "base/file_descriptor_posix.h"
 #endif
 
+using content::BrowserMessageFilter;
 using content::BrowserThread;
 using content::ChildProcessHostImpl;
 using content::PluginServiceFilter;
+using content::UserMetricsAction;
 using net::CookieStore;
 
 namespace {
@@ -264,12 +267,11 @@ class RenderMessageFilter::OpenChannelToNpapiPluginCallback
 
 RenderMessageFilter::RenderMessageFilter(
     int render_process_id,
-    PluginService* plugin_service,
+    PluginServiceImpl* plugin_service,
     content::BrowserContext* browser_context,
     net::URLRequestContextGetter* request_context,
     RenderWidgetHelper* render_widget_helper)
-    : resource_dispatcher_host_(
-          content::GetContentClient()->browser()->GetResourceDispatcherHost()),
+    : resource_dispatcher_host_(ResourceDispatcherHost::Get()),
       plugin_service_(plugin_service),
       browser_context_(browser_context),
       request_context_(request_context),
@@ -277,7 +279,8 @@ RenderMessageFilter::RenderMessageFilter(
       render_widget_helper_(render_widget_helper),
       incognito_(browser_context->IsOffTheRecord()),
       webkit_context_(browser_context->GetWebKitContext()),
-      render_process_id_(render_process_id) {
+      render_process_id_(render_process_id),
+      cpu_usage_(0) {
   DCHECK(request_context_);
 
   render_widget_helper_->Init(render_process_id_, resource_dispatcher_host_);
@@ -357,6 +360,7 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
                         OnOpenChannelToPpapiBroker)
     IPC_MESSAGE_HANDLER_GENERIC(ViewHostMsg_UpdateRect,
         render_widget_helper_->DidReceiveUpdateMsg(message))
+    IPC_MESSAGE_HANDLER(ViewHostMsg_UpdateIsDelayed, OnUpdateIsDelayed)
     IPC_MESSAGE_HANDLER(DesktopNotificationHostMsg_CheckPermission,
                         OnCheckNotificationPermission)
     IPC_MESSAGE_HANDLER(ChildProcessHostMsg_SyncAllocateSharedMemory,
@@ -376,6 +380,8 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
                         OnGetHardwareInputSampleRate)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareSampleRate,
                         OnGetHardwareSampleRate)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareInputChannelCount,
+                        OnGetHardwareInputChannelCount)
     IPC_MESSAGE_HANDLER(ViewHostMsg_MediaLogEvent, OnMediaLogEvent)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
@@ -393,11 +399,14 @@ bool RenderMessageFilter::OffTheRecord() const {
 
 void RenderMessageFilter::OnMsgCreateWindow(
     const ViewHostMsg_CreateWindow_Params& params,
-    int* route_id, int64* cloned_session_storage_namespace_id) {
+    int* route_id,
+    int* surface_id,
+    int64* cloned_session_storage_namespace_id) {
   if (!content::GetContentClient()->browser()->CanCreateWindow(
           GURL(params.opener_security_origin), params.window_container_type,
           resource_context_, render_process_id_)) {
     *route_id = MSG_ROUTING_NONE;
+    *surface_id = 0;
     return;
   }
 
@@ -406,18 +415,23 @@ void RenderMessageFilter::OnMsgCreateWindow(
           params.session_storage_namespace_id);
   render_widget_helper_->CreateNewWindow(params,
                                          peer_handle(),
-                                         route_id);
+                                         route_id,
+                                         surface_id);
 }
 
 void RenderMessageFilter::OnMsgCreateWidget(int opener_id,
                                             WebKit::WebPopupType popup_type,
-                                            int* route_id) {
-  render_widget_helper_->CreateNewWidget(opener_id, popup_type, route_id);
+                                            int* route_id,
+                                            int* surface_id) {
+  render_widget_helper_->CreateNewWidget(
+      opener_id, popup_type, route_id, surface_id);
 }
 
 void RenderMessageFilter::OnMsgCreateFullscreenWidget(int opener_id,
-                                                      int* route_id) {
-  render_widget_helper_->CreateNewFullscreenWidget(opener_id, route_id);
+                                                      int* route_id,
+                                                      int* surface_id) {
+  render_widget_helper_->CreateNewFullscreenWidget(
+      opener_id, route_id, surface_id);
 }
 
 void RenderMessageFilter::OnSetCookie(const IPC::Message& message,
@@ -450,6 +464,12 @@ void RenderMessageFilter::OnGetCookies(const GURL& url,
     SendGetCookiesResponse(reply_msg, std::string());
     return;
   }
+
+  // If we crash here, figure out what URL the renderer was requesting.
+  // http://crbug.com/99242
+  char url_buf[128];
+  base::strlcpy(url_buf, url.spec().c_str(), arraysize(url_buf));
+  base::debug::Alias(url_buf);
 
   net::URLRequestContext* context = GetRequestContextForURL(url);
   net::CookieMonster* cookie_monster =
@@ -548,12 +568,12 @@ void RenderMessageFilter::OnGetPlugins(
     const base::TimeTicks now = base::TimeTicks::Now();
     if (now - last_plugin_refresh_time_ >= threshold) {
       // Only refresh if the threshold hasn't been exceeded yet.
-      PluginService::GetInstance()->RefreshPlugins();
+      PluginServiceImpl::GetInstance()->RefreshPlugins();
       last_plugin_refresh_time_ = now;
     }
   }
 
-  PluginService::GetInstance()->GetPlugins(
+  PluginServiceImpl::GetInstance()->GetPlugins(
       base::Bind(&RenderMessageFilter::GetPluginsCallback, this, reply_msg));
 }
 
@@ -561,7 +581,8 @@ void RenderMessageFilter::GetPluginsCallback(
     IPC::Message* reply_msg,
     const std::vector<webkit::WebPluginInfo>& all_plugins) {
   // Filter the plugin list.
-  content::PluginServiceFilter* filter = PluginService::GetInstance()->filter();
+  content::PluginServiceFilter* filter =
+      PluginServiceImpl::GetInstance()->GetFilter();
   std::vector<webkit::WebPluginInfo> plugins;
 
   int child_process_id = -1;
@@ -654,21 +675,23 @@ void RenderMessageFilter::OnGetHardwareSampleRate(double* sample_rate) {
   *sample_rate = media::GetAudioHardwareSampleRate();
 }
 
+void RenderMessageFilter::OnGetHardwareInputChannelCount(uint32* channels) {
+  *channels = static_cast<uint32>(media::GetAudioInputHardwareChannelCount());
+}
+
 void RenderMessageFilter::OnDownloadUrl(const IPC::Message& message,
                                         const GURL& url,
                                         const GURL& referrer,
                                         const string16& suggested_name) {
-  // Don't show "Save As" UI.
-  bool prompt_for_save_location = false;
   DownloadSaveInfo save_info;
   save_info.suggested_name = suggested_name;
-  net::URLRequest* request = new net::URLRequest(
-      url, resource_dispatcher_host_);
+  scoped_ptr<net::URLRequest> request(
+      new net::URLRequest(url, resource_dispatcher_host_));
   request->set_referrer(referrer.spec());
   resource_dispatcher_host_->BeginDownload(
-      request,
+      request.Pass(),
+      false,
       save_info,
-      prompt_for_save_location,
       DownloadResourceHandler::OnStartedCallback(),
       render_process_id_,
       message.routing_id(),
@@ -811,7 +834,7 @@ void RenderMessageFilter::OnAsyncOpenFile(const IPC::Message& msg,
   if (!ChildProcessSecurityPolicy::GetInstance()->HasPermissionsForFile(
           render_process_id_, path, flags)) {
     DLOG(ERROR) << "Bad flags in ViewMsgHost_AsyncOpenFile message: " << flags;
-    UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_AOF"));
+    content::RecordAction(UserMetricsAction("BadMessageTerminate_AOF"));
     BadMessageReceived();
     return;
   }
@@ -838,8 +861,8 @@ void RenderMessageFilter::AsyncOpenFileOnFileThread(const FilePath& path,
   IPC::Message* reply = new ViewMsg_AsyncOpenFile_ACK(
       routing_id, error_code, file_for_transit, message_id);
   BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE, base::IgnoreReturn<bool>(base::Bind(
-          &RenderMessageFilter::Send, this, reply)));
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(base::IgnoreResult(&RenderMessageFilter::Send), this, reply));
 }
 
 void RenderMessageFilter::OnMediaLogEvent(const media::MediaLogEvent& event) {
@@ -888,4 +911,17 @@ void RenderMessageFilter::OnCompletedOpenChannelToNpapiPlugin(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(ContainsKey(plugin_host_clients_, client));
   plugin_host_clients_.erase(client);
+}
+
+void RenderMessageFilter::OnUpdateIsDelayed(const IPC::Message& msg) {
+  // When not in accelerated compositing mode, in certain cases (e.g. waiting
+  // for a resize or if no backing store) the RenderWidgetHost is blocking the
+  // UI thread for some time, waiting for an UpdateRect from the renderer. If we
+  // are going to switch to accelerated compositing, the GPU process may need
+  // round-trips to the UI thread before finishing the frame, causing deadlocks
+  // if we delay the UpdateRect until we receive the OnSwapBuffersComplete. So
+  // the renderer sent us this message, so that we can unblock the UI thread.
+  // We will simply re-use the UpdateRect unblock mechanism, just with a
+  // different message.
+  render_widget_helper_->DidReceiveUpdateMsg(msg);
 }

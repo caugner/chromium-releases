@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,14 +14,16 @@ namespace protector {
 const char kProtectorHistogramDefaultSearchProvider[] =
     "Protector.DefaultSearchProvider";
 
-const char kProtectorHistogramNewSearchProvider[] =
-    "Protector.SearchProvider.New";
 const char kProtectorHistogramSearchProviderApplied[] =
     "Protector.SearchProvider.Applied";
+const char kProtectorHistogramSearchProviderCorrupt[] =
+    "Protector.SearchProvider.Corrupt";
 const char kProtectorHistogramSearchProviderDiscarded[] =
     "Protector.SearchProvider.Discarded";
 const char kProtectorHistogramSearchProviderFallback[] =
     "Protector.SearchProvider.Fallback";
+const char kProtectorHistogramSearchProviderHijacked[] =
+    "Protector.SearchProvider.Hijacked";
 const char kProtectorHistogramSearchProviderMissing[] =
     "Protector.SearchProvider.Missing";
 const char kProtectorHistogramSearchProviderRestored[] =
@@ -31,15 +33,14 @@ const char kProtectorHistogramSearchProviderTimeout[] =
 
 const int kProtectorMaxSearchProviderID = SEARCH_ENGINE_MAX;
 
-int GetSearchProviderHistogramID(const TemplateURL* t_url) {
-  if (t_url && t_url->url()) {
-    scoped_ptr<TemplateURL> prepopulated_url(
-        TemplateURLPrepopulateData::FindPrepopulatedEngine(
-            t_url->url()->url()));
-    if (prepopulated_url.get())
-      return static_cast<int>(prepopulated_url->search_engine_type());
-  }
-  // If |t_url| is NULL or not among the prepopulated providers, return
+int GetSearchProviderHistogramID(const TemplateURL* turl) {
+  if (!turl || !turl->url())
+    return SEARCH_ENGINE_NONE;
+  scoped_ptr<TemplateURL> prepopulated_url(
+      TemplateURLPrepopulateData::FindPrepopulatedEngine(turl->url()->url()));
+  if (prepopulated_url.get())
+    return static_cast<int>(prepopulated_url->search_engine_type());
+  // If |turl| is not among the prepopulated providers, return
   // SEARCH_ENGINE_OTHER as well.
   return SEARCH_ENGINE_OTHER;
 }

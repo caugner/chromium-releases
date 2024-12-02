@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
+#include "chrome/browser/extensions/extension_sorting.h"
 #include "chrome/browser/prefs/pref_notifier.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -21,10 +22,6 @@
 using base::Time;
 
 namespace {
-
-// The number of apps per page. This isn't a hard limit, but new apps installed
-// from the webstore will overflow onto a new page if this limit is reached.
-const int kNaturalAppPageSize = 18;
 
 // Additional preferences keys
 
@@ -110,12 +107,6 @@ const char kWebStoreLogin[] = "extensions.webstore_login";
 // used for apps.
 const char kPrefLaunchType[] = "launchType";
 
-// A preference determining the order of which the apps appear on the NTP.
-const char kPrefAppLaunchIndex[] = "app_launcher_index";
-
-// A preference determining the page on which an app appears in the NTP.
-const char kPrefPageIndex[] = "page_index";
-
 // A preference specifying if the user dragged the app on the NTP.
 const char kPrefUserDraggedApp[] = "user_dragged_app_ntp";
 
@@ -172,11 +163,9 @@ class ScopedExtensionPrefUpdate : public DictionaryPrefUpdate {
   ScopedExtensionPrefUpdate(PrefService* service,
                             const std::string& extension_id) :
     DictionaryPrefUpdate(service, ExtensionPrefs::kExtensionsPref),
-    prefs_(service),
     extension_id_(extension_id) {}
 
   virtual ~ScopedExtensionPrefUpdate() {
-    prefs_->ScheduleSavePersistentPrefs();
   }
 
   virtual DictionaryValue* Get() {
@@ -191,7 +180,6 @@ class ScopedExtensionPrefUpdate : public DictionaryPrefUpdate {
   }
 
  private:
-  PrefService* prefs_;
   const std::string extension_id_;
 
   DISALLOW_COPY_AND_ASSIGN(ScopedExtensionPrefUpdate);
@@ -208,12 +196,10 @@ class ScopedExtensionControlledPrefUpdate : public DictionaryPrefUpdate {
       const std::string& extension_id,
       const std::string& incognito_or_regular_path) :
     DictionaryPrefUpdate(service, ExtensionPrefs::kExtensionsPref),
-    prefs_(service),
     extension_id_(extension_id),
     incognito_or_regular_path_(incognito_or_regular_path) {}
 
   virtual ~ScopedExtensionControlledPrefUpdate() {
-    prefs_->ScheduleSavePersistentPrefs();
   }
 
   virtual DictionaryValue* Get() {
@@ -229,14 +215,13 @@ class ScopedExtensionControlledPrefUpdate : public DictionaryPrefUpdate {
   }
 
  private:
-  PrefService* prefs_;
   const std::string extension_id_;
   const std::string incognito_or_regular_path_;
 
   DISALLOW_COPY_AND_ASSIGN(ScopedExtensionControlledPrefUpdate);
 };
 
-std::string JoinPrefs(std::string parent, const char* child) {
+std::string JoinPrefs(const std::string& parent, const char* child) {
   return parent + "." + child;
 }
 
@@ -249,6 +234,8 @@ ExtensionPrefs::ExtensionPrefs(
     : prefs_(prefs),
       install_directory_(root_dir),
       extension_pref_value_map_(extension_pref_value_map),
+      ALLOW_THIS_IN_INITIALIZER_LIST(extension_sorting_(
+          new ExtensionSorting(this, prefs))),
       content_settings_store_(new ExtensionContentSettingsStore()) {
 }
 
@@ -323,7 +310,6 @@ void ExtensionPrefs::MakePathsRelative() {
     extension_dict->SetString(kPrefPath,
         MakePathRelative(install_directory_, path));
   }
-  SavePrefs();
 }
 
 void ExtensionPrefs::MakePathsAbsolute(DictionaryValue* dict) {
@@ -349,7 +335,8 @@ void ExtensionPrefs::MakePathsAbsolute(DictionaryValue* dict) {
     if (!extension_dict->GetString(kPrefPath, &path_string))
       continue;
 
-    DCHECK(!FilePath(path_string).IsAbsolute());
+    DCHECK(location_value == Extension::COMPONENT ||
+           !FilePath(path_string).IsAbsolute());
     extension_dict->SetString(
         kPrefPath, install_directory_.Append(path_string).value());
   }
@@ -394,7 +381,7 @@ bool ExtensionPrefs::ReadIntegerFromPref(
 
 bool ExtensionPrefs::ReadExtensionPrefInteger(
     const std::string& extension_id, const std::string& pref_key,
-    int* out_value) {
+    int* out_value) const {
   const DictionaryValue* ext = GetExtensionPref(extension_id);
   if (!ext) {
     // No such extension yet.
@@ -405,13 +392,24 @@ bool ExtensionPrefs::ReadExtensionPrefInteger(
 
 bool ExtensionPrefs::ReadExtensionPrefList(
     const std::string& extension_id, const std::string& pref_key,
-    const ListValue** out_value) {
+    const ListValue** out_value) const {
   const DictionaryValue* ext = GetExtensionPref(extension_id);
   ListValue* out = NULL;
   if (!ext || !ext->GetList(pref_key, &out))
     return false;
   if (out_value)
     *out_value = out;
+
+  return true;
+}
+
+bool ExtensionPrefs::ReadExtensionPrefString(
+    const std::string& extension_id, const std::string& pref_key,
+    std::string* out_value) const {
+  const DictionaryValue* ext = GetExtensionPref(extension_id);
+
+  if (!ext || !ext->GetString(pref_key, out_value))
+    return false;
 
   return true;
 }
@@ -433,9 +431,8 @@ bool ExtensionPrefs::ReadExtensionPrefURLPatternSet(
     if (!value->GetString(i, &item))
       return false;
     URLPattern pattern(valid_schemes);
-    if (pattern.Parse(item, URLPattern::IGNORE_PORTS) !=
-        URLPattern::PARSE_SUCCESS) {
-      NOTREACHED();
+    if (pattern.Parse(item) != URLPattern::PARSE_SUCCESS) {
+      LOG(ERROR) << "Invaid permission pattern: " << item;
       return false;
     }
     if (!allow_file_access && pattern.MatchesScheme(chrome::kFileScheme)) {
@@ -527,10 +524,6 @@ void ExtensionPrefs::SetExtensionPrefPermissionSet(
                                   JoinPrefs(pref_key, kPrefScriptableHosts),
                                   new_value->scriptable_hosts());
   }
-}
-
-void ExtensionPrefs::SavePrefs() {
-  prefs_->ScheduleSavePersistentPrefs();
 }
 
 // static
@@ -1072,14 +1065,13 @@ void ExtensionPrefs::SetToolbarOrder(
        iter != extension_ids.end(); ++iter) {
     toolbar_order->Append(new StringValue(*iter));
   }
-  SavePrefs();
 }
 
 void ExtensionPrefs::OnExtensionInstalled(
     const Extension* extension,
     Extension::State initial_state,
     bool from_webstore,
-    int page_index) {
+    const StringOrdinal& page_ordinal) {
   const std::string& id = extension->id();
   CHECK(Extension::IdIsValid(id));
   ScopedExtensionPrefUpdate update(prefs_, id);
@@ -1111,13 +1103,15 @@ void ExtensionPrefs::OnExtensionInstalled(
   }
 
   if (extension->is_app()) {
-    if (page_index == -1)
-      page_index = GetNaturalAppPageIndex();
-    extension_dict->Set(kPrefPageIndex,
-                        Value::CreateIntegerValue(page_index));
-    extension_dict->Set(kPrefAppLaunchIndex,
-        Value::CreateIntegerValue(GetNextAppLaunchIndex(page_index)));
+    StringOrdinal new_page_ordinal = page_ordinal.IsValid() ?
+        page_ordinal : extension_sorting_->GetNaturalAppPageOrdinal();
+    if (!extension_sorting_->GetPageOrdinal(id).IsValid())
+      extension_sorting_->SetPageOrdinal(id, new_page_ordinal);
+    if (!extension_sorting_->GetAppLaunchOrdinal(id).IsValid())
+      extension_sorting_->SetAppLaunchOrdinal(
+          id, extension_sorting_->CreateNextAppLaunchOrdinal(new_page_ordinal));
   }
+
   extension_pref_value_map_->RegisterExtension(
       id, install_time, initial_state == Extension::ENABLED);
   content_settings_store_->RegisterExtension(
@@ -1127,6 +1121,8 @@ void ExtensionPrefs::OnExtensionInstalled(
 void ExtensionPrefs::OnExtensionUninstalled(const std::string& extension_id,
                                             const Extension::Location& location,
                                             bool external_uninstall) {
+  extension_sorting_->ClearOrdinals(extension_id);
+
   // For external extensions, we save a preference reminding ourself not to try
   // and install the extension anymore (except when |external_uninstall| is
   // true, which signifies that the registry key was deleted or the pref file
@@ -1236,10 +1232,7 @@ void ExtensionPrefs::DeleteExtensionPrefs(const std::string& extension_id) {
   content_settings_store_->UnregisterExtension(extension_id);
   DictionaryPrefUpdate update(prefs_, kExtensionsPref);
   DictionaryValue* dict = update.Get();
-  if (dict->HasKey(extension_id)) {
-    dict->Remove(extension_id, NULL);
-    SavePrefs();
-  }
+  dict->Remove(extension_id, NULL);
 }
 
 const DictionaryValue* ExtensionPrefs::GetExtensionPref(
@@ -1446,82 +1439,6 @@ bool ExtensionPrefs::GetWebStoreLogin(std::string* result) {
 
 void ExtensionPrefs::SetWebStoreLogin(const std::string& login) {
   prefs_->SetString(kWebStoreLogin, login);
-  SavePrefs();
-}
-
-int ExtensionPrefs::GetAppLaunchIndex(const std::string& extension_id) {
-  int value;
-  if (ReadExtensionPrefInteger(extension_id, kPrefAppLaunchIndex, &value))
-    return value;
-
-  return -1;
-}
-
-void ExtensionPrefs::SetAppLaunchIndex(const std::string& extension_id,
-                                       int index) {
-  UpdateExtensionPref(extension_id, kPrefAppLaunchIndex,
-                      Value::CreateIntegerValue(index));
-}
-
-int ExtensionPrefs::GetNextAppLaunchIndex(int on_page) {
-  const DictionaryValue* extensions = prefs_->GetDictionary(kExtensionsPref);
-  if (!extensions)
-    return 0;
-
-  int max_value = -1;
-  for (DictionaryValue::key_iterator extension_id = extensions->begin_keys();
-       extension_id != extensions->end_keys(); ++extension_id) {
-    int value = GetAppLaunchIndex(*extension_id);
-    int page = GetPageIndex(*extension_id);
-    if (page == on_page && value > max_value)
-      max_value = value;
-  }
-  return max_value + 1;
-}
-
-int ExtensionPrefs::GetNaturalAppPageIndex() {
-  const DictionaryValue* extensions = prefs_->GetDictionary(kExtensionsPref);
-  if (!extensions)
-    return 0;
-
-  std::map<int, int> page_counts;
-  for (DictionaryValue::key_iterator extension_id = extensions->begin_keys();
-       extension_id != extensions->end_keys(); ++extension_id) {
-    int page_index = GetPageIndex(*extension_id);
-    if (page_index >= 0)
-      page_counts[page_index] = page_counts[page_index] + 1;
-  }
-  for (int i = 0; ; i++) {
-    std::map<int, int>::const_iterator it = page_counts.find(i);
-    if (it == page_counts.end() || it->second < kNaturalAppPageSize)
-      return i;
-  }
-}
-
-void ExtensionPrefs::SetAppLauncherOrder(
-    const std::vector<std::string>& extension_ids) {
-  for (size_t i = 0; i < extension_ids.size(); ++i)
-    SetAppLaunchIndex(extension_ids.at(i), i);
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_EXTENSION_LAUNCHER_REORDERED,
-      content::Source<ExtensionPrefs>(this),
-      content::NotificationService::NoDetails());
-}
-
-int ExtensionPrefs::GetPageIndex(const std::string& extension_id) {
-  int value = -1;
-  ReadExtensionPrefInteger(extension_id, kPrefPageIndex, &value);
-  return value;
-}
-
-void ExtensionPrefs::SetPageIndex(const std::string& extension_id, int index) {
-  UpdateExtensionPref(extension_id, kPrefPageIndex,
-                      Value::CreateIntegerValue(index));
-}
-
-void ExtensionPrefs::ClearPageIndex(const std::string& extension_id) {
-  UpdateExtensionPref(extension_id, kPrefPageIndex, NULL);
 }
 
 bool ExtensionPrefs::WasAppDraggedByUser(const std::string& extension_id) {
@@ -1669,6 +1586,7 @@ void ExtensionPrefs::InitPrefStore(bool extensions_disabled) {
 
   FixMissingPrefs(extension_ids);
   MigratePermissions(extension_ids);
+  extension_sorting_->Initialize(extension_ids);
 
   // Store extension controlled preference values in the
   // |extension_pref_value_map_|, which then informs the subscribers

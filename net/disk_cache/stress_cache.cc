@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "base/at_exit.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
 #include "base/file_path.h"
@@ -113,8 +114,8 @@ void StressTheCache(int iteration) {
   cache->SetMaxSize(cache_size);
   cache->SetFlags(disk_cache::kNoLoadProtection);
 
-  TestOldCompletionCallback cb;
-  int rv = cache->Init(&cb);
+  net::TestCompletionCallback cb;
+  int rv = cache->Init(cb.callback());
 
   if (cb.GetResult(rv) != net::OK) {
     printf("Unable to initialize cache.\n");
@@ -154,22 +155,24 @@ void StressTheCache(int iteration) {
     if (entries[slot])
       entries[slot]->Close();
 
-    rv = cache->OpenEntry(keys[key], &entries[slot], &cb);
+    net::TestCompletionCallback cb;
+    rv = cache->OpenEntry(keys[key], &entries[slot], cb.callback());
     if (cb.GetResult(rv) != net::OK) {
-      rv = cache->CreateEntry(keys[key], &entries[slot], &cb);
+      rv = cache->CreateEntry(keys[key], &entries[slot], cb.callback());
       CHECK_EQ(net::OK, cb.GetResult(rv));
     }
 
     base::snprintf(buffer->data(), kSize,
                    "i: %d iter: %d, size: %d, truncate: %d     ", i, iteration,
                    size, truncate ? 1 : 0);
-    rv = entries[slot]->WriteData(0, 0, buffer, size, &cb, truncate);
+    rv = entries[slot]->WriteData(0, 0, buffer, size, cb.callback(), truncate);
     CHECK_EQ(size, cb.GetResult(rv));
 
     if (rand() % 100 > 80) {
       key = rand() % kNumKeys;
-      rv = cache->DoomEntry(keys[key], &cb);
-      cb.GetResult(rv);
+      net::TestCompletionCallback cb2;
+      rv = cache->DoomEntry(keys[key], cb2.callback());
+      cb2.GetResult(rv);
     }
 
     if (!(i % 100))
@@ -181,37 +184,34 @@ void StressTheCache(int iteration) {
 // waiting for the debugger to attach.
 bool g_crashing = false;
 
-class CrashTask : public Task {
- public:
-  CrashTask() {}
-  ~CrashTask() {}
+// RunSoon() and CrashCallback() reference each other, unfortunately.
+void RunSoon(MessageLoop* target_loop);
 
-  virtual void Run() {
-    // Keep trying to run.
-    RunSoon(MessageLoop::current());
+void CrashCallback() {
+  // Keep trying to run.
+  RunSoon(MessageLoop::current());
 
-    if (g_crashing)
-      return;
+  if (g_crashing)
+    return;
 
-    if (rand() % 100 > 30) {
-      printf("sweet death...\n");
+  if (rand() % 100 > 30) {
+    printf("sweet death...\n");
 #if defined(OS_WIN)
-      // Windows does more work on _exit() that we would like, so we use Kill.
-      base::KillProcessById(base::GetCurrentProcId(), kExpectedCrash, false);
+    // Windows does more work on _exit() that we would like, so we use Kill.
+    base::KillProcessById(base::GetCurrentProcId(), kExpectedCrash, false);
 #elif defined(OS_POSIX)
-      // On POSIX, _exit() will terminate the process with minimal cleanup,
-      // and it is cleaner than killing.
-      _exit(kExpectedCrash);
+    // On POSIX, _exit() will terminate the process with minimal cleanup,
+    // and it is cleaner than killing.
+    _exit(kExpectedCrash);
 #endif
-    }
   }
+}
 
-  static void RunSoon(MessageLoop* target_loop) {
-    int task_delay = 10000;  // 10 seconds
-    CrashTask* task = new CrashTask();
-    target_loop->PostDelayedTask(FROM_HERE, task, task_delay);
-  }
-};
+void RunSoon(MessageLoop* target_loop) {
+  const int kTaskDelay = 10000;  // 10 seconds
+  target_loop->PostDelayedTask(
+      FROM_HERE, base::Bind(&CrashCallback), kTaskDelay);
+}
 
 // We leak everything here :)
 bool StartCrashThread() {
@@ -219,7 +219,7 @@ bool StartCrashThread() {
   if (!thread->Start())
     return false;
 
-  CrashTask::RunSoon(thread->message_loop());
+  RunSoon(thread->message_loop());
   return true;
 }
 
@@ -271,7 +271,7 @@ int main(int argc, const char* argv[]) {
 #endif
 
   // Some time for the memory manager to flush stuff.
-  base::PlatformThread::Sleep(3000);
+  base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(3));
   MessageLoop message_loop(MessageLoop::TYPE_IO);
 
   char* end;

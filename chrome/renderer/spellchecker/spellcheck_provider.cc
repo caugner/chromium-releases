@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,13 @@
 #include "base/command_line.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/spellcheck_messages.h"
+#include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/renderer/spellchecker/spellcheck.h"
 #include "content/public/renderer/render_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextCheckingCompletion.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextCheckingResult.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebTextCheckingType.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
@@ -21,15 +23,16 @@ using WebKit::WebTextCheckingCompletion;
 using WebKit::WebTextCheckingResult;
 using WebKit::WebVector;
 
-SpellCheckProvider::SpellCheckProvider(content::RenderView* render_view,
-                                       SpellCheck* spellcheck)
+SpellCheckProvider::SpellCheckProvider(
+    content::RenderView* render_view,
+    chrome::ChromeContentRendererClient* renderer_client)
     : content::RenderViewObserver(render_view),
 #if defined(OS_MACOSX)
       has_document_tag_(false),
 #endif
       document_tag_(0),
       spelling_panel_visible_(false),
-      spellcheck_(spellcheck) {
+      chrome_content_renderer_client_(renderer_client) {
   if (render_view)  // NULL in unit tests.
     render_view->GetWebView()->setSpellCheckClient(this);
 }
@@ -48,21 +51,20 @@ void SpellCheckProvider::RequestTextChecking(
     const WebString& text,
     int document_tag,
     WebTextCheckingCompletion* completion) {
+#if defined(OS_MACOSX)
   // Text check (unified request for grammar and spell check) is only
-  // available for browser process, so we ask the system sellchecker
+  // available for browser process, so we ask the system spellchecker
   // over IPC or return an empty result if the checker is not
   // available.
-  if (!is_using_platform_spelling_engine()) {
-    completion->didFinishCheckingText
-        (std::vector<WebTextCheckingResult>());
-    return;
-  }
-
-  Send(new SpellCheckHostMsg_PlatformRequestTextCheck(
+  Send(new SpellCheckHostMsg_RequestTextCheck(
       routing_id(),
       text_check_completions_.Add(completion),
       document_tag,
       text));
+#else
+    completion->didFinishCheckingText(
+        std::vector<WebTextCheckingResult>());
+#endif  // !OS_MACOSX
 }
 
 bool SpellCheckProvider::OnMessageReceived(const IPC::Message& message) {
@@ -79,6 +81,7 @@ bool SpellCheckProvider::OnMessageReceived(const IPC::Message& message) {
 }
 
 void SpellCheckProvider::FocusedNodeChanged(const WebKit::WebNode& unused) {
+#if defined(OS_MACOSX)
   bool enabled = false;
   WebKit::WebNode node = render_view()->GetFocusedNode();
   if (!node.isNull())
@@ -92,6 +95,7 @@ void SpellCheckProvider::FocusedNodeChanged(const WebKit::WebNode& unused) {
   }
 
   Send(new SpellCheckHostMsg_ToggleSpellCheck(routing_id(), enabled, checked));
+#endif  // OS_MACOSX
 }
 
 void SpellCheckProvider::spellCheck(
@@ -103,9 +107,9 @@ void SpellCheckProvider::spellCheck(
 
   string16 word(text);
   // Will be NULL during unit tests.
-  if (spellcheck_) {
+  if (chrome_content_renderer_client_) {
     std::vector<string16> suggestions;
-    spellcheck_->SpellCheckWord(
+    chrome_content_renderer_client_->spellcheck()->SpellCheckWord(
         word.c_str(), word.size(), document_tag_,
         &offset, &length, optional_suggestions ? & suggestions : NULL);
     if (optional_suggestions)
@@ -116,6 +120,34 @@ void SpellCheckProvider::spellCheck(
       Send(new SpellCheckHostMsg_NotifyChecked(routing_id(), word, 0 < length));
     }
   }
+}
+
+void SpellCheckProvider::checkTextOfParagraph(
+    const WebKit::WebString& text,
+    WebKit::WebTextCheckingTypeMask mask,
+    WebKit::WebVector<WebKit::WebTextCheckingResult>* results) {
+#if !defined(OS_MACOSX)
+  // Since Mac has its own spell checker, this method will not be used on Mac.
+
+  if (!results)
+    return;
+
+  if (!(mask & WebKit::WebTextCheckingTypeSpelling))
+    return;
+
+  EnsureDocumentTag();
+
+  // Will be NULL during unit tets.
+  if (!chrome_content_renderer_client_)
+    return;
+
+  std::vector<WebKit::WebTextCheckingResult> tmp_results;
+  chrome_content_renderer_client_->spellcheck()->SpellCheckParagraph(
+      string16(text),
+      document_tag_,
+      &tmp_results);
+  *results = tmp_results;
+#endif
 }
 
 void SpellCheckProvider::requestCheckingOfText(
@@ -129,14 +161,18 @@ WebString SpellCheckProvider::autoCorrectWord(const WebString& word) {
   if (command_line.HasSwitch(switches::kExperimentalSpellcheckerFeatures)) {
     EnsureDocumentTag();
     // Will be NULL during unit tests.
-    if (spellcheck_)
-      return spellcheck_->GetAutoCorrectionWord(word, document_tag_);
+    if (chrome_content_renderer_client_) {
+      return chrome_content_renderer_client_->spellcheck()->
+          GetAutoCorrectionWord(word, document_tag_);
+    }
   }
   return string16();
 }
 
 void SpellCheckProvider::showSpellingUI(bool show) {
+#if defined(OS_MACOSX)
   Send(new SpellCheckHostMsg_ShowSpellingPanel(routing_id(), show));
+#endif
 }
 
 bool SpellCheckProvider::isShowingSpellingUI() {
@@ -145,12 +181,10 @@ bool SpellCheckProvider::isShowingSpellingUI() {
 
 void SpellCheckProvider::updateSpellingUIWithMisspelledWord(
     const WebString& word) {
+#if defined(OS_MACOSX)
   Send(new SpellCheckHostMsg_UpdateSpellingPanelWithMisspelledWord(routing_id(),
                                                                    word));
-}
-
-bool SpellCheckProvider::is_using_platform_spelling_engine() const {
-  return spellcheck_ && spellcheck_->is_using_platform_spelling_engine();
+#endif
 }
 
 void SpellCheckProvider::OnAdvanceToNextMisspelling() {
@@ -201,8 +235,4 @@ void SpellCheckProvider::EnsureDocumentTag() {
     has_document_tag_ = true;
   }
 #endif
-}
-
-void SpellCheckProvider::SetSpellCheck(SpellCheck* spellcheck) {
-  spellcheck_ = spellcheck;
 }

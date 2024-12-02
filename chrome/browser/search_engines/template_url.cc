@@ -18,10 +18,13 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/common/guid.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/user_metrics.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/favicon_size.h"
+
+using content::UserMetricsAction;
+
 // TODO(pastarmovj): Remove google_update_settings and user_metrics when the
 // CollectRLZMetrics function is not needed anymore.
 
@@ -53,6 +56,8 @@ static const char kGoogleBaseSuggestURLParameter[] =
     "google:baseSuggestURL";
 static const char kGoogleBaseSuggestURLParameterFull[] =
     "{google:baseSuggestURL}";
+static const char kGoogleInstantEnabledParameter[] =
+    "google:instantEnabledParameter";
 static const char kGoogleInstantFieldTrialGroupParameter[] =
     "google:instantFieldTrialGroupParameter";
 static const char kGoogleOriginalQueryForSuggestionParameter[] =
@@ -149,6 +154,8 @@ bool TemplateURLRef::ParseParameter(size_t start,
     replacements->push_back(Replacement(GOOGLE_BASE_URL, start));
   } else if (parameter == kGoogleBaseSuggestURLParameter) {
     replacements->push_back(Replacement(GOOGLE_BASE_SUGGEST_URL, start));
+  } else if (parameter == kGoogleInstantEnabledParameter) {
+    replacements->push_back(Replacement(GOOGLE_INSTANT_ENABLED, start));
   } else if (parameter == kGoogleInstantFieldTrialGroupParameter) {
     replacements->push_back(Replacement(GOOGLE_INSTANT_FIELD_TRIAL_GROUP,
                                         start));
@@ -395,6 +402,10 @@ std::string TemplateURLRef::ReplaceSearchTermsUsingTermsData(
         url.insert(i->index, search_terms_data.GoogleBaseSuggestURLValue());
         break;
 
+      case GOOGLE_INSTANT_ENABLED:
+        url.insert(i->index, search_terms_data.InstantEnabledParam());
+        break;
+
       case GOOGLE_INSTANT_FIELD_TRIAL_GROUP:
         url.insert(i->index, search_terms_data.InstantFieldTrialUrlParam());
         break;
@@ -577,9 +588,9 @@ void TemplateURLRef::CollectRLZMetrics() const {
            !google_util::IsOrganic(brand)) {
         // Now we know we should have had RLZ token check if there was one.
         if (url().find("rlz=") != std::string::npos)
-          UserMetrics::RecordAction(UserMetricsAction("SearchWithRLZ"));
+          content::RecordAction(UserMetricsAction("SearchWithRLZ"));
         else
-          UserMetrics::RecordAction(UserMetricsAction("SearchWithoutRLZ"));
+          content::RecordAction(UserMetricsAction("SearchWithoutRLZ"));
       }
       return;
     }

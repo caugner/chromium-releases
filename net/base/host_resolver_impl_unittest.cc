@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -394,7 +394,7 @@ TEST_F(HostResolverImplTest, AsynchronousLookup) {
 
   const struct addrinfo* ainfo = addrlist.head();
   EXPECT_EQ(static_cast<addrinfo*>(NULL), ainfo->ai_next);
-  EXPECT_EQ(sizeof(struct sockaddr_in), ainfo->ai_addrlen);
+  EXPECT_EQ(sizeof(struct sockaddr_in), static_cast<size_t>(ainfo->ai_addrlen));
 
   const struct sockaddr* sa = ainfo->ai_addr;
   const struct sockaddr_in* sa_in = (const struct sockaddr_in*) sa;
@@ -402,6 +402,45 @@ TEST_F(HostResolverImplTest, AsynchronousLookup) {
   EXPECT_TRUE(htonl(0xc0a8012a) == sa_in->sin_addr.s_addr);
 }
 
+TEST_F(HostResolverImplTest, FailedAsynchronousLookup) {
+  AddressList addrlist;
+  const int kPortnum = 80;
+
+  scoped_refptr<RuleBasedHostResolverProc> resolver_proc(
+      new RuleBasedHostResolverProc(NULL));
+  resolver_proc->AddSimulatedFailure("just.testing");
+
+  scoped_ptr<HostResolver> host_resolver(
+      CreateHostResolverImpl(resolver_proc));
+
+  HostResolver::RequestInfo info(HostPortPair("just.testing", kPortnum));
+  CapturingBoundNetLog log(CapturingNetLog::kUnbounded);
+  int err = host_resolver->Resolve(info, &addrlist, callback_, NULL,
+                                   log.bound());
+  EXPECT_EQ(ERR_IO_PENDING, err);
+
+  CapturingNetLog::EntryList entries;
+  log.GetEntries(&entries);
+
+  EXPECT_EQ(1u, entries.size());
+  EXPECT_TRUE(LogContainsBeginEvent(
+      entries, 0, NetLog::TYPE_HOST_RESOLVER_IMPL));
+
+  MessageLoop::current()->Run();
+
+  ASSERT_TRUE(callback_called_);
+  ASSERT_EQ(ERR_NAME_NOT_RESOLVED, callback_result_);
+
+  log.GetEntries(&entries);
+
+  EXPECT_EQ(2u, entries.size());
+  EXPECT_TRUE(LogContainsEndEvent(
+      entries, 1, NetLog::TYPE_HOST_RESOLVER_IMPL));
+
+  // Also test that the error is not cached!
+  err = host_resolver->ResolveFromCache(info, &addrlist, log.bound());
+  EXPECT_EQ(ERR_DNS_CACHE_MISS, err);
+}
 
 // Using WaitingHostResolverProc you can simulate very long lookups.
 class WaitingHostResolverProc : public HostResolverProc {
@@ -525,7 +564,7 @@ TEST_F(HostResolverImplTest, NumericIPv4Address) {
 
   const struct addrinfo* ainfo = addrlist.head();
   EXPECT_EQ(static_cast<addrinfo*>(NULL), ainfo->ai_next);
-  EXPECT_EQ(sizeof(struct sockaddr_in), ainfo->ai_addrlen);
+  EXPECT_EQ(sizeof(struct sockaddr_in), static_cast<size_t>(ainfo->ai_addrlen));
 
   const struct sockaddr* sa = ainfo->ai_addr;
   const struct sockaddr_in* sa_in = (const struct sockaddr_in*) sa;
@@ -552,7 +591,8 @@ TEST_F(HostResolverImplTest, NumericIPv6Address) {
 
   const struct addrinfo* ainfo = addrlist.head();
   EXPECT_EQ(static_cast<addrinfo*>(NULL), ainfo->ai_next);
-  EXPECT_EQ(sizeof(struct sockaddr_in6), ainfo->ai_addrlen);
+  EXPECT_EQ(sizeof(struct sockaddr_in6),
+            static_cast<size_t>(ainfo->ai_addrlen));
 
   const struct sockaddr* sa = ainfo->ai_addr;
   const struct sockaddr_in6* sa_in6 = (const struct sockaddr_in6*) sa;
@@ -832,7 +872,7 @@ class DeleteWithinCallbackVerifier : public ResolveRequest::Delegate {
 
     // Quit after returning from OnCompleted (to give it a chance at
     // incorrectly running the cancelled tasks).
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   }
 
  private:
@@ -1513,7 +1553,7 @@ TEST_F(HostResolverImplTest, DisallowNonCachedResponses) {
 
   const struct addrinfo* ainfo = addrlist.head();
   EXPECT_EQ(static_cast<addrinfo*>(NULL), ainfo->ai_next);
-  EXPECT_EQ(sizeof(struct sockaddr_in), ainfo->ai_addrlen);
+  EXPECT_EQ(sizeof(struct sockaddr_in), static_cast<size_t>(ainfo->ai_addrlen));
 
   const struct sockaddr* sa = ainfo->ai_addr;
   const struct sockaddr_in* sa_in = reinterpret_cast<const sockaddr_in*>(sa);

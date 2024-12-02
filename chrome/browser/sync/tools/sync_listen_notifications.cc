@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,10 +39,13 @@ class NotificationPrinter : public sync_notifier::SyncNotifierObserver {
   virtual ~NotificationPrinter() {}
 
   virtual void OnIncomingNotification(
-      const syncable::ModelTypePayloadMap& type_payloads) OVERRIDE {
+      const syncable::ModelTypePayloadMap& type_payloads,
+      sync_notifier::IncomingNotificationSource source) OVERRIDE {
     for (syncable::ModelTypePayloadMap::const_iterator it =
              type_payloads.begin(); it != type_payloads.end(); ++it) {
-      LOG(INFO) << "Notification: type = "
+      LOG(INFO) << (source == sync_notifier::REMOTE_NOTIFICATION ?
+                    "Remote" : "Local")
+                << " Notification: type = "
                 << syncable::ModelTypeToString(it->first)
                 << ", payload = " << it->second;
     }
@@ -136,15 +139,8 @@ int main(int argc, char* argv[]) {
   sync_notifier->SetUniqueId(kUniqueId);
   sync_notifier->SetState("");
   sync_notifier->UpdateCredentials(email, token);
-  {
-    // Listen for notifications for all known types.
-    syncable::ModelTypeSet types;
-    for (int i = syncable::FIRST_REAL_MODEL_TYPE;
-         i < syncable::MODEL_TYPE_COUNT; ++i) {
-      types.insert(syncable::ModelTypeFromInt(i));
-    }
-    sync_notifier->UpdateEnabledTypes(types);
-  }
+  // Listen for notifications for all known types.
+  sync_notifier->UpdateEnabledTypes(syncable::ModelTypeSet::All());
 
   ui_loop.Run();
 

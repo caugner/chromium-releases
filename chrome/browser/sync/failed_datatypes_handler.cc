@@ -19,19 +19,19 @@ syncable::ModelTypeSet FailedDatatypesHandler::GetFailedTypes() const {
   syncable::ModelTypeSet result;
   for (std::list<SyncError>::const_iterator it = errors_.begin();
        it != errors_.end(); ++it) {
-    DCHECK(result.count(it->type()) == 0);
-    result.insert(it->type());
+    DCHECK(!result.Has(it->type()));
+    result.Put(it->type());
   }
   return result;
 }
 
 bool FailedDatatypesHandler::UpdateFailedDatatypes(
     DataTypeManager::ConfigureResult result) {
-  syncable::ModelTypeSet types = GetFailedTypes();
+  const syncable::ModelTypeSet types = GetFailedTypes();
   bool any_new_failed_types = false;
   for (std::list<SyncError>::iterator it = result.errors.begin();
        it != result.errors.end(); ++it) {
-    DCHECK(types.count(it->type()) == 0);
+    DCHECK(!types.Has(it->type()));
     any_new_failed_types = true;
     errors_.push_back(*it);
   }

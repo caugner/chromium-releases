@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/api/syncable_service.h"
 #include "chrome/browser/sync/glue/app_data_type_controller.h"
 #include "chrome/browser/sync/glue/app_notification_data_type_controller.h"
@@ -41,7 +43,6 @@
 #include "chrome/browser/sync/glue/typed_url_model_associator.h"
 #include "chrome/browser/sync/profile_sync_components_factory_impl.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/webdata/autocomplete_syncable_service.h"
 #include "chrome/browser/webdata/autofill_profile_syncable_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
@@ -88,14 +89,6 @@ ProfileSyncComponentsFactoryImpl::ProfileSyncComponentsFactoryImpl(
       command_line_(command_line) {
 }
 
-ProfileSyncService* ProfileSyncComponentsFactoryImpl::CreateProfileSyncService(
-    const std::string& cros_user) {
-
-  ProfileSyncService* pss = new ProfileSyncService(
-      this, profile_, new SigninManager(), cros_user);
-  return pss;
-}
-
 void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
     ProfileSyncService* pss) {
   // App sync is enabled by default.  Register unless explicitly
@@ -109,7 +102,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
   // disabled.
   if (!command_line_->HasSwitch(switches::kDisableSyncAutofill)) {
     pss->RegisterDataTypeController(
-        new AutofillDataTypeController(this, profile_));
+        new AutofillDataTypeController(this, profile_, pss));
   }
 
   // Bookmark sync is enabled by default.  Register unless explicitly
@@ -130,7 +123,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
   // disabled.
   if (!command_line_->HasSwitch(switches::kDisableSyncPasswords)) {
     pss->RegisterDataTypeController(
-        new PasswordDataTypeController(this, profile_));
+        new PasswordDataTypeController(this, profile_, pss));
   }
 
   // Preference sync is enabled by default.  Register unless explicitly
@@ -151,7 +144,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
   if (!profile_->GetPrefs()->GetBoolean(prefs::kSavingBrowserHistoryDisabled) &&
       !command_line_->HasSwitch(switches::kDisableSyncTypedUrls)) {
     pss->RegisterDataTypeController(
-        new TypedUrlDataTypeController(this, profile_));
+        new TypedUrlDataTypeController(this, profile_, pss));
   }
 
   // Search Engine sync is enabled by default.  Register only if explicitly
@@ -181,7 +174,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
 
   if (!command_line_->HasSwitch(switches::kDisableSyncAutofillProfile)) {
     pss->RegisterDataTypeController(
-        new AutofillProfileDataTypeController(this, profile_));
+        new AutofillProfileDataTypeController(this, profile_, pss));
   }
 
   // App notifications sync is enabled by default.  Register only if

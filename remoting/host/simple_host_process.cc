@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -11,8 +11,6 @@
 // 2. Accepts connection through libjingle.
 // 3. Receive mouse / keyboard events through libjingle.
 // 4. Sends screen capture through libjingle.
-
-#include <stdlib.h>
 
 #include <iostream>
 #include <string>
@@ -28,9 +26,11 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/test/mock_chrome_application_mac.h"
+#include "base/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "base/threading/thread.h"
 #include "crypto/nss_util.h"
+#include "net/base/network_change_notifier.h"
 #include "remoting/base/constants.h"
 #include "remoting/host/capturer_fake.h"
 #include "remoting/host/chromoting_host.h"
@@ -38,12 +38,17 @@
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/event_executor.h"
 #include "remoting/host/heartbeat_sender.h"
+#include "remoting/host/host_key_pair.h"
 #include "remoting/host/host_secret.h"
 #include "remoting/host/it2me_host_user_interface.h"
-#include "remoting/host/log_to_server.h"
 #include "remoting/host/json_host_config.h"
+#include "remoting/host/log_to_server.h"
 #include "remoting/host/register_support_host_request.h"
+#include "remoting/host/signaling_connector.h"
+#include "remoting/jingle_glue/xmpp_signal_strategy.h"
 #include "remoting/proto/video.pb.h"
+#include "remoting/protocol/it2me_host_authenticator_factory.h"
+#include "remoting/protocol/me2me_host_authenticator_factory.h"
 
 #if defined(TOOLKIT_USES_GTK)
 #include "ui/gfx/gtk_util.h"
@@ -55,157 +60,96 @@
 HMODULE g_hModule = NULL;
 #endif
 
-using remoting::ChromotingHost;
-using remoting::DesktopEnvironment;
-using remoting::kChromotingTokenDefaultServiceName;
-using remoting::kXmppAuthServiceConfigPath;
-using remoting::It2MeHostUserInterface;
 using remoting::protocol::CandidateSessionConfig;
 using remoting::protocol::ChannelConfig;
-using std::string;
-using std::wstring;
+using remoting::protocol::NetworkSettings;
 
-#if defined(OS_WIN)
-const wchar_t kDefaultConfigPath[] = L".ChromotingConfig.json";
-const wchar_t kHomeDrive[] = L"HOMEDRIVE";
-const wchar_t kHomePath[] = L"HOMEPATH";
-// TODO(sergeyu): Use environment utils from base/environment.h.
-const wchar_t* GetEnvironmentVar(const wchar_t* x) { return _wgetenv(x); }
-#else
-const char kDefaultConfigPath[] = ".ChromotingConfig.json";
-static char* GetEnvironmentVar(const char* x) { return getenv(x); }
-#endif
+namespace {
+
+const FilePath::CharType kDefaultConfigPath[] =
+    FILE_PATH_LITERAL(".ChromotingConfig.json");
+
+const char kHomeDrive[] = "HOMEDRIVE";
+const char kHomePath[] = "HOMEPATH";
 
 const char kFakeSwitchName[] = "fake";
 const char kIT2MeSwitchName[] = "it2me";
 const char kConfigSwitchName[] = "config";
 const char kVideoSwitchName[] = "video";
+const char kDisableNatTraversalSwitchName[] = "disable-nat-traversal";
+const char kMinPortSwitchName[] = "min-port";
+const char kMaxPortSwitchName[] = "max-port";
 
 const char kVideoSwitchValueVerbatim[] = "verbatim";
 const char kVideoSwitchValueZip[] = "zip";
 const char kVideoSwitchValueVp8[] = "vp8";
 const char kVideoSwitchValueVp8Rtp[] = "vp8rtp";
 
+}  // namespace
+
+namespace remoting {
+
 class SimpleHost {
  public:
   SimpleHost()
-      : fake_(false),
+      : message_loop_(MessageLoop::TYPE_UI),
+        file_io_thread_("FileIO"),
+        context_(message_loop_.message_loop_proxy()),
+        fake_(false),
         is_it2me_(false) {
+    context_.Start();
+    file_io_thread_.Start();
+    network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
   }
 
   int Run() {
-    // |message_loop| is declared early so that any code we call into which
-    // requires a current message-loop won't complain.
-    // It needs to be a UI message loop to keep runloops spinning on the Mac.
-    MessageLoop message_loop(MessageLoop::TYPE_UI);
-
-    remoting::ChromotingHostContext context(
-        base::MessageLoopProxy::current());
-    context.Start();
-
-    base::Thread file_io_thread("FileIO");
-    file_io_thread.Start();
-
     FilePath config_path = GetConfigPath();
-    scoped_refptr<remoting::JsonHostConfig> config =
-        new remoting::JsonHostConfig(
-            config_path, file_io_thread.message_loop_proxy());
+    scoped_refptr<JsonHostConfig> config = new JsonHostConfig(
+        config_path, file_io_thread_.message_loop_proxy());
     if (!config->Read()) {
       LOG(ERROR) << "Failed to read configuration file "
                  << config_path.value();
-      context.Stop();
       return 1;
     }
 
-    // For the simple host, we assume we always use the ClientLogin token for
-    // chromiumsync because we do not have an HTTP stack with which we can
-    // easily request an OAuth2 access token even if we had a RefreshToken for
-    // the account.
-    config->SetString(kXmppAuthServiceConfigPath,
-                      kChromotingTokenDefaultServiceName);
-
-    // Initialize AccessVerifier.
-    // TODO(jamiewalch): For the IT2Me case, the access verifier is passed to
-    // RegisterSupportHostRequest::Init, so transferring ownership of it to the
-    // ChromotingHost could cause a crash condition if SetIT2MeAccessCode is
-    // called after the ChromotingHost is destroyed (for example, at shutdown).
-    // Fix this.
-    scoped_ptr<remoting::RegisterSupportHostRequest> register_request;
-    scoped_ptr<remoting::HeartbeatSender> heartbeat_sender;
-    scoped_ptr<remoting::LogToServer> log_to_server;
-    if (is_it2me_) {
-      register_request.reset(new remoting::RegisterSupportHostRequest());
-      if (!register_request->Init(
-              config, base::Bind(&SimpleHost::SetIT2MeAccessCode,
-                                 base::Unretained(this)))) {
-        return 1;
-      }
-    }
-    log_to_server.reset(new remoting::LogToServer(
-        context.network_message_loop()));
-
-    // Construct a chromoting host.
-    scoped_ptr<DesktopEnvironment> desktop_environment;
-    if (fake_) {
-      remoting::Capturer* capturer =
-          new remoting::CapturerFake();
-      remoting::EventExecutor* event_executor =
-          remoting::EventExecutor::Create(context.desktop_message_loop(),
-                                          capturer);
-      desktop_environment.reset(
-          new DesktopEnvironment(&context, capturer, event_executor));
-    } else {
-      desktop_environment.reset(DesktopEnvironment::Create(&context));
+    if (!config->GetString(kHostIdConfigPath, &host_id_)) {
+      LOG(ERROR) << "host_id is not defined in the config.";
+      return 1;
     }
 
-    host_ = ChromotingHost::Create(
-        &context, config, desktop_environment.get(), false);
-    host_->set_it2me(is_it2me_);
-
-    scoped_ptr<It2MeHostUserInterface> it2me_host_user_interface;
-    if (is_it2me_) {
-      it2me_host_user_interface.reset(new It2MeHostUserInterface(host_,
-                                                                 &context));
-      it2me_host_user_interface->Init();
-      host_->AddStatusObserver(it2me_host_user_interface.get());
+    if (!key_pair_.Load(config)) {
+      return 1;
     }
 
-    if (protocol_config_.get()) {
-      host_->set_protocol_config(protocol_config_.release());
+    std::string host_secret_hash_string;
+    if (!config->GetString(kHostSecretHashConfigPath,
+                           &host_secret_hash_string)) {
+      host_secret_hash_string = "plain:";
     }
 
-    if (is_it2me_) {
-      host_->AddStatusObserver(register_request.get());
-    } else {
-      // Initialize HeartbeatSender.
-      heartbeat_sender.reset(
-          new remoting::HeartbeatSender(context.network_message_loop(),
-                                        config));
-      if (!heartbeat_sender->Init())
-        return 1;
-      host_->AddStatusObserver(heartbeat_sender.get());
-    }
-    host_->AddStatusObserver(log_to_server.get());
-
-    // Let the chromoting host run until the shutdown task is executed.
-    host_->Start();
-
-    // Set an empty shared-secret for Me2Me.
-    // TODO(lambroslambrou): This is a temporary fix, pending a Me2Me-specific
-    // AuthenticatorFactory - crbug.com/105214.
-    if (!is_it2me_) {
-      context.network_message_loop()->PostTask(
-          FROM_HERE, base::Bind(&ChromotingHost::SetSharedSecret, host_.get(),
-                                ""));
+    if (!host_secret_hash_.Parse(host_secret_hash_string)) {
+      LOG(ERROR) << "Invalid host_secret_hash.";
+      return false;
     }
 
-    message_loop.MessageLoop::Run();
+    // Use an XMPP connection to the Talk network for session signalling.
+    if (!config->GetString(kXmppLoginConfigPath, &xmpp_login_) ||
+        !config->GetString(kXmppAuthTokenConfigPath, &xmpp_auth_token_)) {
+      LOG(ERROR) << "XMPP credentials are not defined in the config.";
+      return 1;
+    }
+    if (!config->GetString(kXmppAuthServiceConfigPath, &xmpp_auth_service_)) {
+      // For the simple host, we assume we always use the ClientLogin token for
+      // chromiumsync because we do not have an HTTP stack with which we can
+      // easily request an OAuth2 access token even if we had a RefreshToken for
+      // the account.
+      xmpp_auth_service_ = kChromotingTokenDefaultServiceName;
+    }
 
-    // And then stop the chromoting context.
-    context.Stop();
-    file_io_thread.Stop();
+    context_.network_message_loop()->PostTask(FROM_HERE, base::Bind(
+        &SimpleHost::StartHost, base::Unretained(this)));
 
-    host_ = NULL;
+    message_loop_.MessageLoop::Run();
 
     return 0;
   }
@@ -219,18 +163,24 @@ class SimpleHost {
     protocol_config_.reset(protocol_config);
   }
 
+  NetworkSettings* network_settings() { return &network_settings_; }
+
  private:
-  // TODO(wez): This only needs to be a member because it needs access to the
-  // ChromotingHost, which has to be created after the SupportAccessVerifier.
-  void SetIT2MeAccessCode(bool successful, const std::string& support_id,
-                          const base::TimeDelta& lifetime) {
+  static void SetIT2MeAccessCode(scoped_refptr<ChromotingHost> host,
+                                 HostKeyPair* key_pair,
+                                 bool successful,
+                                 const std::string& support_id,
+                                 const base::TimeDelta& lifetime) {
     if (successful) {
-      std::string host_secret = remoting::GenerateSupportHostSecret();
+      std::string host_secret = GenerateSupportHostSecret();
       std::string access_code = support_id + host_secret;
       std::cout << "Support id: " << access_code << std::endl;
 
-      // Tell the ChromotingHost the access code, to use as shared-secret.
-      host_->SetSharedSecret(access_code);
+      scoped_ptr<protocol::AuthenticatorFactory> factory(
+          new protocol::It2MeHostAuthenticatorFactory(
+              key_pair->GenerateCertificate(), *key_pair->private_key(),
+              access_code));
+      host->SetAuthenticatorFactory(factory.Pass());
     } else {
       LOG(ERROR) << "If you haven't done so recently, try running"
                  << " remoting/tools/register_host.py.";
@@ -241,28 +191,112 @@ class SimpleHost {
     if (!config_path_.empty())
       return config_path_;
 
+    scoped_ptr<base::Environment> env(base::Environment::Create());
+
 #if defined(OS_WIN)
-    wstring home_path = GetEnvironmentVar(kHomeDrive);
-    home_path += GetEnvironmentVar(kHomePath);
+    std::string home_drive;
+    env->GetVar(kHomeDrive, &home_drive);
+    std::string home_path;
+    env->GetVar(kHomePath, &home_path);
+    return FilePath(UTF8ToWide(home_drive))
+        .Append(UTF8ToWide(home_path))
+        .Append(kDefaultConfigPath);
 #else
-    string home_path = GetEnvironmentVar(base::env_vars::kHome);
-#endif
+    std::string home_path;
+    env->GetVar(base::env_vars::kHome, &home_path);
     return FilePath(home_path).Append(kDefaultConfigPath);
+#endif
   }
+
+  void StartHost() {
+    signal_strategy_.reset(
+        new XmppSignalStrategy(context_.jingle_thread(), xmpp_login_,
+                               xmpp_auth_token_, xmpp_auth_service_));
+    signaling_connector_.reset(new SignalingConnector(signal_strategy_.get()));
+
+    if (fake_) {
+      Capturer* capturer = new CapturerFake();
+      EventExecutor* event_executor =
+          EventExecutor::Create(context_.desktop_message_loop(), capturer);
+      desktop_environment_.reset(
+          new DesktopEnvironment(&context_, capturer, event_executor));
+    } else {
+      desktop_environment_.reset(DesktopEnvironment::Create(&context_));
+    }
+
+    host_ = new ChromotingHost(&context_, signal_strategy_.get(),
+                               desktop_environment_.get(), network_settings_);
+
+    ServerLogEntry::Mode mode =
+        is_it2me_ ? ServerLogEntry::IT2ME : ServerLogEntry::ME2ME;
+    log_to_server_.reset(new LogToServer(host_, mode, signal_strategy_.get()));
+
+    if (is_it2me_) {
+      it2me_host_user_interface_.reset(
+          new It2MeHostUserInterface(host_, &context_));
+      it2me_host_user_interface_->Init();
+    }
+
+    if (protocol_config_.get()) {
+      host_->set_protocol_config(protocol_config_.release());
+    }
+
+    if (is_it2me_) {
+      register_request_.reset(new RegisterSupportHostRequest(
+          signal_strategy_.get(), &key_pair_,
+          base::Bind(&SimpleHost::SetIT2MeAccessCode, host_, &key_pair_)));
+    } else {
+      heartbeat_sender_.reset(
+          new HeartbeatSender(host_id_, signal_strategy_.get(), &key_pair_));
+    }
+
+    host_->Start();
+
+    // Create a Me2Me authenticator factory.
+    if (!is_it2me_) {
+      scoped_ptr<protocol::AuthenticatorFactory> factory(
+          new protocol::Me2MeHostAuthenticatorFactory(
+              xmpp_login_, key_pair_.GenerateCertificate(),
+              *key_pair_.private_key(), host_secret_hash_));
+      host_->SetAuthenticatorFactory(factory.Pass());
+    }
+  }
+
+  MessageLoop message_loop_;
+  base::Thread file_io_thread_;
+  ChromotingHostContext context_;
+  scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
 
   FilePath config_path_;
   bool fake_;
   bool is_it2me_;
+  NetworkSettings network_settings_;
   scoped_ptr<CandidateSessionConfig> protocol_config_;
+
+  std::string host_id_;
+  HostKeyPair key_pair_;
+  protocol::SharedSecretHash host_secret_hash_;
+  std::string xmpp_login_;
+  std::string xmpp_auth_token_;
+  std::string xmpp_auth_service_;
+
+  scoped_ptr<SignalStrategy> signal_strategy_;
+  scoped_ptr<SignalingConnector> signaling_connector_;
+  scoped_ptr<DesktopEnvironment> desktop_environment_;
+  scoped_ptr<LogToServer> log_to_server_;
+  scoped_ptr<It2MeHostUserInterface> it2me_host_user_interface_;
+  scoped_ptr<RegisterSupportHostRequest> register_request_;
+  scoped_ptr<HeartbeatSender> heartbeat_sender_;
 
   scoped_refptr<ChromotingHost> host_;
 };
+
+} // namespace remoting
 
 int main(int argc, char** argv) {
 #if defined(OS_MACOSX)
   // Needed so we don't leak objects when threads are created.
   base::mac::ScopedNSAutoreleasePool pool;
-  mock_cr_app::RegisterMockCrApp();
 #endif
 
   CommandLine::Init(argc, argv);
@@ -275,7 +309,7 @@ int main(int argc, char** argv) {
   gfx::GtkInitFromCommandLine(*cmd_line);
 #endif  // TOOLKIT_USES_GTK
 
-  SimpleHost simple_host;
+  remoting::SimpleHost simple_host;
 
   if (cmd_line->HasSwitch(kConfigSwitchName)) {
     simple_host.set_config_path(
@@ -285,7 +319,7 @@ int main(int argc, char** argv) {
   simple_host.set_is_it2me(cmd_line->HasSwitch(kIT2MeSwitchName));
 
   if (cmd_line->HasSwitch(kVideoSwitchName)) {
-    string video_codec = cmd_line->GetSwitchValueASCII(kVideoSwitchName);
+    std::string video_codec = cmd_line->GetSwitchValueASCII(kVideoSwitchName);
     scoped_ptr<CandidateSessionConfig> config(
         CandidateSessionConfig::CreateDefault());
     config->mutable_video_configs()->clear();
@@ -308,6 +342,35 @@ int main(int argc, char** argv) {
     config->mutable_video_configs()->push_back(ChannelConfig(
         transport, remoting::protocol::kDefaultStreamVersion, codec));
     simple_host.set_protocol_config(config.release());
+  }
+
+  simple_host.network_settings()->allow_nat_traversal =
+      !cmd_line->HasSwitch(kDisableNatTraversalSwitchName);
+
+  if (cmd_line->HasSwitch(kMinPortSwitchName)) {
+    std::string min_port_str =
+        cmd_line->GetSwitchValueASCII(kMinPortSwitchName);
+    int min_port = 0;
+    if (!base::StringToInt(min_port_str, &min_port) ||
+        min_port < 0 || min_port > 65535) {
+      LOG(ERROR) << "Invalid min-port value: " << min_port
+                 << ". Expected integer in range [0, 65535].";
+      return 1;
+    }
+    simple_host.network_settings()->min_port = min_port;
+  }
+
+  if (cmd_line->HasSwitch(kMaxPortSwitchName)) {
+    std::string max_port_str =
+        cmd_line->GetSwitchValueASCII(kMaxPortSwitchName);
+    int max_port = 0;
+    if (!base::StringToInt(max_port_str, &max_port) ||
+        max_port < 0 || max_port > 65535) {
+      LOG(ERROR) << "Invalid max-port value: " << max_port
+                 << ". Expected integer in range [0, 65535].";
+      return 1;
+    }
+    simple_host.network_settings()->max_port = max_port;
   }
 
   return simple_host.Run();

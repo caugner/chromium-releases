@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,16 @@
 
 #include "base/logging.h"
 #include "base/string_piece.h"
+#include "base/string_split.h"
 #include "base/utf_string_conversions.h"
+#include "grit/app_locale_settings.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "third_party/skia/include/core/SkPaint.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/linux_util.h"
+#include "ui/gfx/pango_util.h"
 
 #if !defined(USE_WAYLAND) && defined(TOOLKIT_USES_GTK)
 #include <gdk/gdk.h>
@@ -30,27 +34,6 @@ namespace {
 // GNOME/KDE is a non-scalable one. The name should be listed in the
 // IsFallbackFontAllowed function in skia/ext/SkFontHost_fontconfig_direct.cpp.
 const char* kFallbackFontFamilyName = "sans";
-
-// Returns the number of pixels in a point.
-// - multiply a point size by this to get pixels ("device units")
-// - divide a pixel size by this to get points
-float GetPixelsInPoint() {
-  static float pixels_in_point = 1.0;
-  static bool determined_value = false;
-
-  if (!determined_value) {
-    // http://goo.gl/UIh5m: "This is a scale factor between points specified in
-    // a PangoFontDescription and Cairo units.  The default value is 96, meaning
-    // that a 10 point font will be 13 units high. (10 * 96. / 72. = 13.3)."
-    double pango_dpi = gfx::GetPangoResolution();
-    if (pango_dpi <= 0)
-      pango_dpi = 96.0;
-    pixels_in_point = pango_dpi / 72.0;  // 72 points in an inch
-    determined_value = true;
-  }
-
-  return pixels_in_point;
-}
 
 // Retrieves the pango metrics for a pango font description. Caches the metrics
 // and never frees them. The metrics objects are relatively small and
@@ -81,41 +64,41 @@ PangoFontMetrics* GetPangoFontMetrics(PangoFontDescription* desc) {
   }
 }
 
-// Find the best match font for |family_name| in the same way as Skia
-// to make sure CreateFont() successfully creates a default font.  In
-// Skia, it only checks the best match font.  If it failed to find
-// one, SkTypeface will be NULL for that font family.  It eventually
-// causes a segfault.  For example, family_name = "Sans" and system
-// may have various fonts.  The first font family in FcPattern will be
-// "DejaVu Sans" but a font family returned by FcFontMatch will be "VL
-// PGothic".  In this case, SkTypeface for "Sans" returns NULL even if
-// the system has a font for "Sans" font family.  See FontMatch() in
-// skia/ports/SkFontHost_fontconfig.cpp for more detail.
-std::string FindBestMatchFontFamilyName(const char* family_name) {
+// Returns the available font family that best (in FontConfig's eyes) matches
+// the supplied list of family names.
+std::string FindBestMatchFontFamilyName(
+    const std::vector<std::string>& family_names) {
   FcPattern* pattern = FcPatternCreate();
-  FcValue fcvalue;
-  fcvalue.type = FcTypeString;
-  char* family_name_copy = strdup(family_name);
-  fcvalue.u.s = reinterpret_cast<FcChar8*>(family_name_copy);
-  FcPatternAdd(pattern, FC_FAMILY, fcvalue, 0);
+  for (std::vector<std::string>::const_iterator it = family_names.begin();
+       it != family_names.end(); ++it) {
+    FcValue fcvalue;
+    fcvalue.type = FcTypeString;
+    fcvalue.u.s = reinterpret_cast<const FcChar8*>(it->c_str());
+    FcPatternAdd(pattern, FC_FAMILY, fcvalue, FcTrue /* append */);
+  }
+
   FcConfigSubstitute(0, pattern, FcMatchPattern);
   FcDefaultSubstitute(pattern);
   FcResult result;
   FcPattern* match = FcFontMatch(0, pattern, &result);
-  DCHECK(match) << "Could not find font: " << family_name;
-  FcChar8* match_family;
+  DCHECK(match) << "Could not find font";
+  FcChar8* match_family = NULL;
   FcPatternGetString(match, FC_FAMILY, 0, &match_family);
-
   std::string font_family(reinterpret_cast<char*>(match_family));
-  FcPatternDestroy(match);
   FcPatternDestroy(pattern);
-  free(family_name_copy);
+  FcPatternDestroy(match);
   return font_family;
 }
 
+// Returns a Pango font description (suitable for parsing by
+// pango_font_description_from_string()) for the default UI font.
 std::string GetDefaultFont() {
 #if defined(USE_WAYLAND) || !defined(TOOLKIT_USES_GTK)
+#if defined(OS_CHROMEOS)
+  return l10n_util::GetStringUTF8(IDS_UI_FONT_FAMILY_CROS);
+#else
   return "sans 10";
+#endif    // defined(OS_CHROMEOS)
 #else
   GtkSettings* settings = gtk_settings_get_default();
 
@@ -129,7 +112,7 @@ std::string GetDefaultFont() {
   std::string default_font = std::string(font_name);
   g_free(font_name);
   return default_font;
-#endif
+#endif  // defined(USE_WAYLAND) || !defined(TOOLKIT_USES_GTK)
 }
 
 }  // namespace
@@ -163,26 +146,12 @@ PlatformFontPango::PlatformFontPango(const Font& other) {
 }
 
 PlatformFontPango::PlatformFontPango(NativeFont native_font) {
-  const char* family_name = pango_font_description_get_family(native_font);
+  std::vector<std::string> family_names;
+  base::SplitString(pango_font_description_get_family(native_font), ',',
+                    &family_names);
+  std::string font_family = FindBestMatchFontFamilyName(family_names);
+  InitWithNameAndSize(font_family, gfx::GetPangoFontSizeInPixels(native_font));
 
-  gint size_in_pixels = 0;
-  if (pango_font_description_get_size_is_absolute(native_font)) {
-    // If the size is absolute, then it's in Pango units rather than points.
-    // There are PANGO_SCALE Pango units in a device unit (pixel).
-    size_in_pixels = pango_font_description_get_size(native_font) / PANGO_SCALE;
-  } else {
-    // Otherwise, we need to convert from points.
-    size_in_pixels =
-        pango_font_description_get_size(native_font) * GetPixelsInPoint() /
-        PANGO_SCALE;
-  }
-
-  // Find best match font for |family_name| to make sure we can get
-  // a SkTypeface for the default font.
-  // TODO(agl): remove this.
-  std::string font_family = FindBestMatchFontFamilyName(family_name);
-
-  InitWithNameAndSize(font_family, size_in_pixels);
   int style = 0;
   if (pango_font_description_get_weight(native_font) == PANGO_WEIGHT_BOLD) {
     // TODO(davemoore) What should we do about other weights? We currently
@@ -263,13 +232,6 @@ int PlatformFontPango::GetBaseline() const {
 int PlatformFontPango::GetAverageCharacterWidth() const {
   const_cast<PlatformFontPango*>(this)->InitPangoMetrics();
   return SkScalarRound(average_width_pixels_);
-}
-
-int PlatformFontPango::GetStringWidth(const string16& text) const {
-  int width = 0, height = 0;
-  CanvasSkia::SizeStringInt(text, Font(const_cast<PlatformFontPango*>(this)),
-                            &width, &height, gfx::Canvas::NO_ELLIPSIS);
-  return width;
 }
 
 int PlatformFontPango::GetExpectedTextWidth(int length) const {
@@ -425,15 +387,16 @@ void PlatformFontPango::InitPangoMetrics() {
         PANGO_SCALE;
 
     // First get the Pango-based width (converting from Pango units to pixels).
-    double pango_width_pixels =
+    const double pango_width_pixels =
         pango_font_metrics_get_approximate_char_width(pango_metrics) /
         PANGO_SCALE;
 
     // Yes, this is how Microsoft recommends calculating the dialog unit
     // conversions.
-    int text_width_pixels = GetStringWidth(
-        ASCIIToUTF16("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"));
-    double dialog_units_pixels = (text_width_pixels / 26 + 1) / 2;
+    const int text_width_pixels = CanvasSkia::GetStringWidth(
+        ASCIIToUTF16("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"),
+        Font(this));
+    const double dialog_units_pixels = (text_width_pixels / 26 + 1) / 2;
     average_width_pixels_ = std::min(pango_width_pixels, dialog_units_pixels);
     pango_font_description_free(pango_desc);
   }

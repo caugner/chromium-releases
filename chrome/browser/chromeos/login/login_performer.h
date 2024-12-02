@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@
 
 #include "base/basictypes.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
+#include "chrome/browser/chromeos/login/online_attempt_host.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "content/public/browser/notification_observer.h"
@@ -50,14 +50,17 @@ namespace chromeos {
 // 2 things make LoginPerfrormer instance exist longer:
 // 1. ScreenLock active (pending correct new password input)
 // 2. Pending online auth request.
+// TODO(nkostylev): Cleanup ClientLogin related code, update class description.
 class LoginPerformer : public LoginStatusConsumer,
-                       public content::NotificationObserver {
+                       public content::NotificationObserver,
+                       public OnlineAttemptHost::Delegate {
  public:
   // Delegate class to get notifications from the LoginPerformer.
   class Delegate : public LoginStatusConsumer {
    public:
     virtual ~Delegate() {}
     virtual void WhiteListCheckFailed(const std::string& email) = 0;
+    virtual void OnOnlineChecked(const std::string& email, bool success) = 0;
   };
 
   explicit LoginPerformer(Delegate* delegate);
@@ -108,7 +111,6 @@ class LoginPerformer : public LoginStatusConsumer,
     return last_login_failure_.reason() == LoginFailure::LOGIN_TIMED_OUT;
   }
 
-  void set_captcha(const std::string& captcha) { captcha_ = captcha; }
   void set_delegate(Delegate* delegate) { delegate_ = delegate; }
 
   typedef enum AuthorizationMode {
@@ -118,6 +120,10 @@ class LoginPerformer : public LoginStatusConsumer,
     AUTH_MODE_EXTENSION
   } AuthorizationMode;
   AuthorizationMode auth_mode() const { return auth_mode_; }
+
+ protected:
+  // Implements OnlineAttemptHost::Delegate.
+  virtual void OnChecked(const std::string& username, bool success) OVERRIDE;
 
  private:
   // content::NotificationObserver implementation:
@@ -162,15 +168,12 @@ class LoginPerformer : public LoginStatusConsumer,
   // Used for logging in.
   scoped_refptr<Authenticator> authenticator_;
 
+  // Used to make auxiliary online check.
+  OnlineAttemptHost online_attempt_host_;
+
   // Represents last login failure that was encountered when communicating to
   // sign-in server. LoginFailure.None() by default.
   LoginFailure last_login_failure_;
-
-  // String entered by the user as an answer to a CAPTCHA challenge.
-  std::string captcha_;
-
-  // Token representing the specific CAPTCHA challenge.
-  std::string captcha_token_;
 
   // Cached credentials data when password change is detected.
   GaiaAuthConsumer::ClientLoginResult cached_credentials_;

@@ -446,7 +446,7 @@ TEST_F(PrerenderManagerTest, PendingPrerenderTest) {
 }
 
 // Tests that a PrerenderManager created for a browser session in the control
-// group will not be able to override FINAL_STATUS_CONTROL_GROUP.
+// group works as expected.
 TEST_F(PrerenderManagerTest, ControlGroup) {
   RestorePrerenderMode restore_prerender_mode;
   PrerenderManager::SetMode(
@@ -455,7 +455,7 @@ TEST_F(PrerenderManagerTest, ControlGroup) {
   DummyPrerenderContents* prerender_contents =
       prerender_manager()->CreateNextPrerenderContents(
           url,
-          FINAL_STATUS_CONTROL_GROUP);
+          FINAL_STATUS_MANAGER_SHUTDOWN);
   EXPECT_TRUE(prerender_manager()->AddSimplePrerender(url));
   EXPECT_FALSE(prerender_contents->has_started());
 }

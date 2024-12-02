@@ -48,9 +48,7 @@ PepperTransportSocketAdapter::PepperTransportSocketAdapter(
       observer_(observer),
       transport_(transport),
       connected_(false),
-      get_address_pending_(false),
-      read_callback_(NULL),
-      write_callback_(NULL) {
+      get_address_pending_(false) {
   callback_factory_.Initialize(this);
 }
 
@@ -65,10 +63,11 @@ void PepperTransportSocketAdapter::AddRemoteCandidate(
     transport_->ReceiveRemoteAddress(candidate);
 }
 
-int PepperTransportSocketAdapter::Read(net::IOBuffer* buf, int buf_len,
-                                       net::OldCompletionCallback* callback) {
+int PepperTransportSocketAdapter::Read(
+    net::IOBuffer* buf, int buf_len,
+    const net::CompletionCallback& callback) {
   DCHECK(CalledOnValidThread());
-  DCHECK(!read_callback_);
+  DCHECK(read_callback_.is_null());
   DCHECK(!read_buffer_);
 
   if (!transport_.get())
@@ -87,10 +86,11 @@ int PepperTransportSocketAdapter::Read(net::IOBuffer* buf, int buf_len,
   return result;
 }
 
-int PepperTransportSocketAdapter::Write(net::IOBuffer* buf, int buf_len,
-                                        net::OldCompletionCallback* callback) {
+int PepperTransportSocketAdapter::Write(
+    net::IOBuffer* buf, int buf_len,
+    const net::CompletionCallback& callback) {
   DCHECK(CalledOnValidThread());
-  DCHECK(!write_callback_);
+  DCHECK(write_callback_.is_null());
   DCHECK(!write_buffer_);
 
   if (!transport_.get())
@@ -123,7 +123,8 @@ bool PepperTransportSocketAdapter::SetSendBufferSize(int32 size) {
   return false;
 }
 
-int PepperTransportSocketAdapter::Connect(net::OldCompletionCallback* callback) {
+int PepperTransportSocketAdapter::Connect(
+    const net::CompletionCallback& callback) {
   DCHECK(CalledOnValidThread());
 
   if (!transport_.get())
@@ -254,36 +255,36 @@ void PepperTransportSocketAdapter::OnNextAddress(int32_t result) {
 
 void PepperTransportSocketAdapter::OnConnect(int result) {
   DCHECK(CalledOnValidThread());
-  DCHECK(connect_callback_);
+  DCHECK(!connect_callback_.is_null());
 
   if (result == PP_OK)
     connected_ = true;
 
-  net::OldCompletionCallback* callback = connect_callback_;
-  connect_callback_ = NULL;
-  callback->Run(PPErrorToNetError(result));
+  net::CompletionCallback callback = connect_callback_;
+  connect_callback_.Reset();
+  callback.Run(PPErrorToNetError(result));
 }
 
 void PepperTransportSocketAdapter::OnRead(int32_t result) {
   DCHECK(CalledOnValidThread());
-  DCHECK(read_callback_);
+  DCHECK(!read_callback_.is_null());
   DCHECK(read_buffer_);
 
-  net::OldCompletionCallback* callback = read_callback_;
-  read_callback_ = NULL;
+  net::CompletionCallback callback = read_callback_;
+  read_callback_.Reset();
   read_buffer_ = NULL;
-  callback->Run(PPErrorToNetError(result));
+  callback.Run(PPErrorToNetError(result));
 }
 
 void PepperTransportSocketAdapter::OnWrite(int32_t result) {
   DCHECK(CalledOnValidThread());
-  DCHECK(write_callback_);
+  DCHECK(!write_callback_.is_null());
   DCHECK(write_buffer_);
 
-  net::OldCompletionCallback* callback = write_callback_;
-  write_callback_ = NULL;
+  net::CompletionCallback callback = write_callback_;
+  write_callback_.Reset();
   write_buffer_ = NULL;
-  callback->Run(PPErrorToNetError(result));
+  callback.Run(PPErrorToNetError(result));
 }
 
 }  // namespace protocol

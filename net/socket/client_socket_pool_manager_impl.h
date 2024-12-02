@@ -23,8 +23,6 @@ namespace net {
 class CertVerifier;
 class ClientSocketFactory;
 class ClientSocketPoolHistograms;
-class DnsCertProvenanceChecker;
-class DnsRRResolver;
 class HttpProxyClientSocketPool;
 class HostResolver;
 class NetLog;
@@ -35,6 +33,7 @@ class SSLClientSocketPool;
 class SSLConfigService;
 class SSLHostInfoFactory;
 class TransportClientSocketPool;
+class TransportSecurityState;
 
 namespace internal {
 
@@ -63,9 +62,9 @@ class ClientSocketPoolManagerImpl : public base::NonThreadSafe,
                               HostResolver* host_resolver,
                               CertVerifier* cert_verifier,
                               OriginBoundCertService* origin_bound_cert_service,
-                              DnsRRResolver* dnsrr_resolver,
-                              DnsCertProvenanceChecker* dns_cert_checker,
+                              TransportSecurityState* transport_security_state,
                               SSLHostInfoFactory* ssl_host_info_factory,
+                              const std::string& ssl_session_cache_shard,
                               ProxyService* proxy_service,
                               SSLConfigService* ssl_config_service);
   virtual ~ClientSocketPoolManagerImpl();
@@ -109,9 +108,9 @@ class ClientSocketPoolManagerImpl : public base::NonThreadSafe,
   HostResolver* const host_resolver_;
   CertVerifier* const cert_verifier_;
   OriginBoundCertService* const origin_bound_cert_service_;
-  DnsRRResolver* const dnsrr_resolver_;
-  DnsCertProvenanceChecker* const dns_cert_checker_;
+  TransportSecurityState* const transport_security_state_;
   SSLHostInfoFactory* const ssl_host_info_factory_;
+  const std::string ssl_session_cache_shard_;
   ProxyService* const proxy_service_;
   const scoped_refptr<SSLConfigService> ssl_config_service_;
 

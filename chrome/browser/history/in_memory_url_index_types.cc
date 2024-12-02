@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,12 @@
 
 #include <algorithm>
 #include <iterator>
+#include <set>
 
 #include "base/i18n/break_iterator.h"
 #include "base/i18n/case_conversion.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 
 namespace history {
 
@@ -92,70 +94,6 @@ bool ScoredHistoryMatch::MatchScoreGreater(const ScoredHistoryMatch& m1,
   return m1.raw_score > m2.raw_score;
 }
 
-// InMemoryURLIndex's Private Data ---------------------------------------------
-
-URLIndexPrivateData::URLIndexPrivateData() {}
-
-URLIndexPrivateData::~URLIndexPrivateData() {}
-
-void URLIndexPrivateData::Clear() {
-  word_list_.clear();
-  available_words_.clear();
-  word_map_.clear();
-  char_word_map_.clear();
-  word_id_history_map_.clear();
-  history_id_word_map_.clear();
-  history_info_map_.clear();
-}
-
-void URLIndexPrivateData::AddToHistoryIDWordMap(HistoryID history_id,
-                                               WordID word_id) {
-  HistoryIDWordMap::iterator iter = history_id_word_map_.find(history_id);
-  if (iter != history_id_word_map_.end()) {
-    WordIDSet& word_id_set(iter->second);
-    word_id_set.insert(word_id);
-  } else {
-    WordIDSet word_id_set;
-    word_id_set.insert(word_id);
-    history_id_word_map_[history_id] = word_id_set;
-  }
-}
-
-WordIDSet URLIndexPrivateData::WordIDSetForTermChars(
-    const Char16Set& term_chars) {
-  WordIDSet word_id_set;
-  for (Char16Set::const_iterator c_iter = term_chars.begin();
-       c_iter != term_chars.end(); ++c_iter) {
-    CharWordIDMap::iterator char_iter = char_word_map_.find(*c_iter);
-    if (char_iter == char_word_map_.end()) {
-      // A character was not found so there are no matching results: bail.
-      word_id_set.clear();
-      break;
-    }
-    WordIDSet& char_word_id_set(char_iter->second);
-    // It is possible for there to no longer be any words associated with
-    // a particular character. Give up in that case.
-    if (char_word_id_set.empty()) {
-      word_id_set.clear();
-      break;
-    }
-
-    if (c_iter == term_chars.begin()) {
-      // First character results becomes base set of results.
-      word_id_set = char_word_id_set;
-    } else {
-      // Subsequent character results get intersected in.
-      WordIDSet new_word_id_set;
-      std::set_intersection(word_id_set.begin(), word_id_set.end(),
-                            char_word_id_set.begin(), char_word_id_set.end(),
-                            std::inserter(new_word_id_set,
-                                          new_word_id_set.begin()));
-      word_id_set.swap(new_word_id_set);
-    }
-  }
-  return word_id_set;
-}
-
 // Utility Functions -----------------------------------------------------------
 
 String16Set String16SetFromString16(const string16& uni_string) {
@@ -193,6 +131,20 @@ Char16Set Char16SetFromString16(const string16& term) {
   for (string16::const_iterator iter = term.begin(); iter != term.end(); ++iter)
     characters.insert(*iter);
   return characters;
+}
+
+bool IsInlineablePrefix(const string16& prefix) {
+  CR_DEFINE_STATIC_LOCAL(std::set<string16>, prefixes, ());
+  if (prefixes.empty()) {
+    prefixes.insert(ASCIIToUTF16("ftp://ftp."));
+    prefixes.insert(ASCIIToUTF16("ftp://www."));
+    prefixes.insert(ASCIIToUTF16("ftp://"));
+    prefixes.insert(ASCIIToUTF16("https://www."));
+    prefixes.insert(ASCIIToUTF16("https://"));
+    prefixes.insert(ASCIIToUTF16("http://www."));
+    prefixes.insert(ASCIIToUTF16("http://"));
+  }
+  return prefixes.count(prefix) != 0;
 }
 
 }  // namespace history

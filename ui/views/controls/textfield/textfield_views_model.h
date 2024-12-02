@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,10 +65,6 @@ class VIEWS_EXPORT TextfieldViewsModel {
   explicit TextfieldViewsModel(Delegate* delegate);
   virtual ~TextfieldViewsModel();
 
-  void set_is_password(bool is_password) {
-    is_password_ = is_password;
-  }
-
   // Edit related methods.
 
   const string16& GetText() const;
@@ -127,8 +123,9 @@ class VIEWS_EXPORT TextfieldViewsModel {
 
   // Moves the cursor, see RenderText for additional details.
   // The current composition text will be confirmed.
-  void MoveCursorLeft(gfx::BreakType break_type, bool select);
-  void MoveCursorRight(gfx::BreakType break_type, bool select);
+  void MoveCursor(gfx::BreakType break_type,
+                  gfx::VisualCursorDirection direction,
+                  bool select);
 
   // Moves the selection to the specified selection in |selection|.
   // If there is composition text, it will be confirmed, which will update the
@@ -182,16 +179,13 @@ class VIEWS_EXPORT TextfieldViewsModel {
   // Redo edit. Returns true if redo changed the text.
   bool Redo();
 
-  // Returns visible text. If the field is password, it returns the
-  // sequence of "*".
-  string16 GetVisibleText() const;
-
   // Cuts the currently selected text and puts it to clipboard. Returns true
   // if text has changed after cutting.
   bool Cut();
 
-  // Copies the currently selected text and puts it to clipboard.
-  void Copy();
+  // Copies the currently selected text and puts it to clipboard. Returns true
+  // if something was copied to the clipboard.
+  bool Copy();
 
   // Pastes text from the clipboard at current cursor position. Returns true
   // if text has changed after pasting.
@@ -249,9 +243,6 @@ class VIEWS_EXPORT TextfieldViewsModel {
   FRIEND_TEST_ALL_PREFIXES(TextfieldViewsModelTest, UndoRedo_CutCopyPasteTest);
   FRIEND_TEST_ALL_PREFIXES(TextfieldViewsModelTest, UndoRedo_ReplaceTest);
 
-  // Returns the visible text given |start| and |end|.
-  string16 GetVisibleText(size_t start, size_t end) const;
-
   // Insert the given |text|. |mergeable| indicates if this insert
   // operation can be merged to previous edit in the edit history.
   void InsertTextInternal(const string16& text, bool mergeable);
@@ -301,9 +292,6 @@ class VIEWS_EXPORT TextfieldViewsModel {
 
   // The stylized text, cursor, selection, and the visual layout model.
   scoped_ptr<gfx::RenderText> render_text_;
-
-  // True if the text is the password.
-  bool is_password_;
 
   typedef std::list<internal::Edit*> EditHistory;
   EditHistory edit_history_;

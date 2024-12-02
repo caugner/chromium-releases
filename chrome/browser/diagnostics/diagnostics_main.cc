@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -278,7 +278,7 @@ class TestController : public DiagnosticsModel::Observer {
       writer_->WriteResult(false, L"Diagnostics start", L"ICU failure");
       return;
     }
-    ResourceBundle::InitSharedInstance("");
+    ResourceBundle::InitSharedInstanceWithLocale("");
     int count = model->GetTestAvailableCount();
     writer_->WriteInfoText(base::StringPrintf(
         L"%d available test(s)\n\n", count));
@@ -353,6 +353,7 @@ int DiagnosticsMain(const CommandLine& command_line) {
   controller.Run(model);
   delete model;
 
+  console->OnQuit();
   delete console;
   return 0;
 }

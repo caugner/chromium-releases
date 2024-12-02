@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/debug/trace_event.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/time.h"
@@ -22,8 +23,7 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/nine_box.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/download/download_item.h"
-#include "content/browser/download/download_manager.h"
+#include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -47,6 +47,10 @@ const int kMenuButtonWidth = 16;
 // Padding on left and right of items in dangerous download prompt.
 const int kDangerousElementPadding = 3;
 
+// Minimum width of the dangerous download message at which we will start
+// wrapping.
+const int kDangerousTextWidth = 200;
+
 // Amount of space we allot to showing the filename. If the filename is too wide
 // it will be elided.
 const int kTextWidth = 140;
@@ -64,6 +68,9 @@ const int kNewItemAnimationDurationMs = 800;
 
 // How long the 'download complete/interrupted' animation should last for.
 const int kCompleteAnimationDurationMs = 2500;
+
+// Height of the body.
+const int kBodyHeight = download_util::kSmallProgressIconSize;
 
 // Width of the body area of the download item.
 // TODO(estade): get rid of the fudge factor. http://crbug.com/18692
@@ -89,6 +96,8 @@ NineBox* DownloadItemGtk::menu_nine_box_prelight_ = NULL;
 NineBox* DownloadItemGtk::menu_nine_box_active_ = NULL;
 
 NineBox* DownloadItemGtk::dangerous_nine_box_ = NULL;
+
+using content::DownloadItem;
 
 DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
                                  BaseDownloadItemModel* download_model)
@@ -560,7 +569,8 @@ void DownloadItemGtk::UpdateDangerWarning() {
     string16 dangerous_warning;
 
     // The dangerous download label text is different for different cases.
-    if (get_download()->GetDangerType() == DownloadStateInfo::DANGEROUS_URL) {
+    if (get_download()->GetDangerType() ==
+            content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL) {
       // TODO(noelutz): handle malicious content warning.
       // Safebrowsing shows the download URL leads to malicious file.
       dangerous_warning =
@@ -568,7 +578,7 @@ void DownloadItemGtk::UpdateDangerWarning() {
     } else {
       // It's a dangerous file type (e.g.: an executable).
       DCHECK(get_download()->GetDangerType() ==
-             DownloadStateInfo::DANGEROUS_FILE);
+             content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE);
       if (ChromeDownloadManagerDelegate::IsExtensionDownload(get_download())) {
         dangerous_warning =
             l10n_util::GetStringUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION);
@@ -595,17 +605,27 @@ void DownloadItemGtk::UpdateDangerWarning() {
     // Until we switch to vector graphics, force the font size.
     gtk_util::ForceFontSizePixels(dangerous_label_, kTextSize);
 
-    // Get the label width when displaying in one line, and reduce it to 60% to
-    // wrap the label into two lines.
     gtk_widget_set_size_request(dangerous_label_, -1, -1);
     gtk_label_set_line_wrap(GTK_LABEL(dangerous_label_), FALSE);
 
     GtkRequisition req;
     gtk_widget_size_request(dangerous_label_, &req);
 
-    gint label_width = req.width * 6 / 10;
-    gtk_label_set_line_wrap(GTK_LABEL(dangerous_label_), TRUE);
-    gtk_widget_set_size_request(dangerous_label_, label_width, -1);
+    gint label_width = req.width;
+    if (req.width > kDangerousTextWidth) {
+      // If the label width exceeds kDangerousTextWidth, we try line wrapping
+      // starting at 60% and increasing in 10% intervals of the full width until
+      // we have a label that fits within the height constraints of the shelf.
+      gtk_label_set_line_wrap(GTK_LABEL(dangerous_label_), TRUE);
+      int full_width = req.width;
+      int tenths = 6;
+      do {
+        label_width = full_width * tenths / 10;
+        gtk_widget_set_size_request(dangerous_label_, label_width, -1);
+        gtk_widget_size_request(dangerous_label_, &req);
+      } while (req.height > kBodyHeight && ++tenths <= 10);
+      DCHECK(req.height <= kBodyHeight);
+    }
 
     // The width will depend on the text. We must do this each time we possibly
     // change the label above.
@@ -617,17 +637,17 @@ void DownloadItemGtk::UpdateDangerWarning() {
 
 void DownloadItemGtk::UpdateDangerIcon() {
   if (theme_service_->UsingNativeTheme()) {
-    const char* stock =
-        get_download()->GetDangerType() == DownloadStateInfo::DANGEROUS_URL ?
-        GTK_STOCK_DIALOG_ERROR : GTK_STOCK_DIALOG_WARNING;
+    const char* stock = get_download()->GetDangerType() ==
+        content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL ?
+            GTK_STOCK_DIALOG_ERROR : GTK_STOCK_DIALOG_WARNING;
     gtk_image_set_from_stock(
         GTK_IMAGE(dangerous_image_), stock, GTK_ICON_SIZE_SMALL_TOOLBAR);
   } else {
     // Set the warning icon.
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    int pixbuf_id =
-        get_download()->GetDangerType() == DownloadStateInfo::DANGEROUS_URL ?
-        IDR_SAFEBROWSING_WARNING : IDR_WARNING;
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    int pixbuf_id = get_download()->GetDangerType() ==
+        content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL ?
+            IDR_SAFEBROWSING_WARNING : IDR_WARNING;
     GdkPixbuf* download_pixbuf = rb.GetNativeImageNamed(pixbuf_id);
     gtk_image_set_from_pixbuf(GTK_IMAGE(dangerous_image_), download_pixbuf);
   }
@@ -699,17 +719,21 @@ void DownloadItemGtk::InitNineBoxes() {
 }
 
 gboolean DownloadItemGtk::OnHboxExpose(GtkWidget* widget, GdkEventExpose* e) {
+  TRACE_EVENT0("ui::gtk", "DownloadItemGtk::OnHboxExpose");
   if (theme_service_->UsingNativeTheme()) {
-    int border_width = GTK_CONTAINER(widget)->border_width;
-    int x = widget->allocation.x + border_width;
-    int y = widget->allocation.y + border_width;
-    int width = widget->allocation.width - border_width * 2;
-    int height = widget->allocation.height - border_width * 2;
+    GtkAllocation allocation;
+    gtk_widget_get_allocation(widget, &allocation);
+    int border_width = gtk_container_get_border_width(GTK_CONTAINER(widget));
+    int x = allocation.x + border_width;
+    int y = allocation.y + border_width;
+    int width = allocation.width - border_width * 2;
+    int height = allocation.height - border_width * 2;
 
     if (IsDangerous()) {
       // Draw a simple frame around the area when we're displaying the warning.
-      gtk_paint_shadow(widget->style, widget->window,
-                       static_cast<GtkStateType>(widget->state),
+      gtk_paint_shadow(gtk_widget_get_style(widget),
+                       gtk_widget_get_window(widget),
+                       gtk_widget_get_state(widget),
                        static_cast<GtkShadowType>(GTK_SHADOW_OUT),
                        &e->area, widget, "frame",
                        x, y, width, height);
@@ -721,23 +745,18 @@ gboolean DownloadItemGtk::OnHboxExpose(GtkWidget* widget, GdkEventExpose* e) {
       // the button, we instruct GTK to draw the entire button...with a
       // doctored clip rectangle to the left part of the button sans
       // separator. We then repeat this for the right button.
-      GtkStyle* style = body_.get()->style;
+      GtkStyle* style = gtk_widget_get_style(body_.get());
 
-      GtkAllocation left_allocation = body_.get()->allocation;
-      GdkRectangle left_clip = {
-        left_allocation.x, left_allocation.y,
-        left_allocation.width, left_allocation.height
-      };
+      GtkAllocation left_clip;
+      gtk_widget_get_allocation(body_.get(), &left_clip);
 
-      GtkAllocation right_allocation = menu_button_->allocation;
-      GdkRectangle right_clip = {
-        right_allocation.x, right_allocation.y,
-        right_allocation.width, right_allocation.height
-      };
+      GtkAllocation right_clip;
+      gtk_widget_get_allocation(menu_button_, &right_clip);
 
       GtkShadowType body_shadow =
           GTK_BUTTON(body_.get())->depressed ? GTK_SHADOW_IN : GTK_SHADOW_OUT;
-      gtk_paint_box(style, widget->window,
+      gtk_paint_box(style,
+                    gtk_widget_get_window(widget),
                     gtk_widget_get_state(body_.get()),
                     body_shadow,
                     &left_clip, widget, "button",
@@ -745,7 +764,8 @@ gboolean DownloadItemGtk::OnHboxExpose(GtkWidget* widget, GdkEventExpose* e) {
 
       GtkShadowType menu_shadow =
           GTK_BUTTON(menu_button_)->depressed ? GTK_SHADOW_IN : GTK_SHADOW_OUT;
-      gtk_paint_box(style, widget->window,
+      gtk_paint_box(style,
+                    gtk_widget_get_window(widget),
                     gtk_widget_get_state(menu_button_),
                     menu_shadow,
                     &right_clip, widget, "button",
@@ -755,19 +775,22 @@ gboolean DownloadItemGtk::OnHboxExpose(GtkWidget* widget, GdkEventExpose* e) {
       // is hard and relies on copying GTK internals, so instead steal the
       // allocation of the gtk arrow which is close enough (and will error on
       // the conservative side).
-      GtkAllocation arrow_allocation = arrow_->allocation;
-      gtk_paint_vline(style, widget->window,
+      GtkAllocation arrow_allocation;
+      gtk_widget_get_allocation(arrow_, &arrow_allocation);
+      gtk_paint_vline(style,
+                      gtk_widget_get_window(widget),
                       gtk_widget_get_state(widget),
                       &e->area, widget, "button",
                       arrow_allocation.y,
                       arrow_allocation.y + arrow_allocation.height,
-                      left_allocation.x + left_allocation.width);
+                      left_clip.x + left_clip.width);
     }
   }
   return FALSE;
 }
 
 gboolean DownloadItemGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e) {
+  TRACE_EVENT0("ui::gtk", "DownloadItemGtk::OnExpose");
   if (!theme_service_->UsingNativeTheme()) {
     bool is_body = widget == body_.get();
 
@@ -814,23 +837,28 @@ gboolean DownloadItemGtk::OnButtonPress(GtkWidget* button,
 
 gboolean DownloadItemGtk::OnProgressAreaExpose(GtkWidget* widget,
                                                GdkEventExpose* event) {
+  TRACE_EVENT0("ui::gtk", "DownloadItemGtk::OnProgressAreaExpose");
+
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget, &allocation);
+
   // Create a transparent canvas.
   gfx::CanvasSkiaPaint canvas(event, false);
   if (complete_animation_.is_animating()) {
     if (get_download()->IsInterrupted()) {
       download_util::PaintDownloadInterrupted(&canvas,
-          widget->allocation.x, widget->allocation.y,
+          allocation.x, allocation.y,
           complete_animation_.GetCurrentValue(),
           download_util::SMALL);
     } else {
       download_util::PaintDownloadComplete(&canvas,
-          widget->allocation.x, widget->allocation.y,
+          allocation.x, allocation.y,
           complete_animation_.GetCurrentValue(),
           download_util::SMALL);
     }
   } else if (get_download()->IsInProgress()) {
     download_util::PaintDownloadProgress(&canvas,
-        widget->allocation.x, widget->allocation.y,
+        allocation.x, allocation.y,
         progress_angle_,
         get_download()->PercentComplete(),
         download_util::SMALL);
@@ -842,7 +870,7 @@ gboolean DownloadItemGtk::OnProgressAreaExpose(GtkWidget* widget,
   if (icon_small_) {
     const int offset = download_util::kSmallProgressIconOffset;
     canvas.DrawBitmapInt(*icon_small_,
-        widget->allocation.x + offset, widget->allocation.y + offset);
+        allocation.x + offset, allocation.y + offset);
   }
 
   return TRUE;
@@ -872,6 +900,7 @@ void DownloadItemGtk::ShowPopupMenu(GtkWidget* button,
 
 gboolean DownloadItemGtk::OnDangerousPromptExpose(GtkWidget* widget,
                                                   GdkEventExpose* event) {
+  TRACE_EVENT0("ui::gtk", "DownloadItemGtk::OnDangerousPromptExpose");
   if (!theme_service_->UsingNativeTheme()) {
     // The hbox renderer will take care of the border when in GTK mode.
     dangerous_nine_box_->RenderToWidget(widget);

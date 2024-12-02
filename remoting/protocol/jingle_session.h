@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,9 @@
 #define REMOTING_PROTOCOL_JINGLE_SESSION_H_
 
 #include "base/memory/ref_counted.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "net/base/completion_callback.h"
+#include "remoting/protocol/authenticator.h"
 #include "remoting/protocol/session.h"
 #include "third_party/libjingle/source/talk/base/sigslot.h"
 #include "third_party/libjingle/source/talk/p2p/base/session.h"
@@ -15,7 +16,6 @@
 namespace remoting {
 namespace protocol {
 
-class Authenticator;
 class JingleChannelConnector;
 class JingleSessionManager;
 
@@ -25,9 +25,13 @@ class JingleSessionManager;
 class JingleSession : public protocol::Session,
                       public sigslot::has_slots<> {
  public:
+  virtual ~JingleSession();
+
   // Session interface.
   virtual void SetStateChangeCallback(
       const StateChangeCallback& callback) OVERRIDE;
+  virtual void SetRouteChangeCallback(
+      const RouteChangeCallback& callback) OVERRIDE;
   virtual Error error() OVERRIDE;
   virtual void CreateStreamChannel(
       const std::string& name,
@@ -49,14 +53,13 @@ class JingleSession : public protocol::Session,
 
   typedef std::map<std::string, JingleChannelConnector*> ChannelConnectorsMap;
 
-  // Takes ownership of |authenticator|.
   JingleSession(JingleSessionManager* jingle_session_manager,
                 cricket::Session* cricket_session,
-                Authenticator* authenticator);
-  virtual ~JingleSession();
+                scoped_ptr<Authenticator> authenticator);
 
   // Called by JingleSessionManager.
-  void set_candidate_config(const CandidateSessionConfig* candidate_config);
+  void set_candidate_config(
+      scoped_ptr<CandidateSessionConfig> candidate_config);
 
   // Sends session-initiate for new session.
   void SendSessionInitiate();
@@ -74,12 +77,15 @@ class JingleSession : public protocol::Session,
   bool InitializeConfigFromDescription(
       const cricket::SessionDescription* description);
 
-  // Used for Session.SignalState sigslot.
+  // Handlers for |cricket_session_| signals.
   void OnSessionState(cricket::BaseSession* session,
                       cricket::BaseSession::State state);
-  // Used for Session.SignalError sigslot.
   void OnSessionError(cricket::BaseSession* session,
                       cricket::BaseSession::Error error);
+  void OnSessionInfoMessage(cricket::Session* session,
+                            const buzz::XmlElement* message);
+  void OnTerminateReason(cricket::Session* session,
+                         const std::string& reason);
 
   void OnInitiate();
   void OnAccept();
@@ -88,6 +94,8 @@ class JingleSession : public protocol::Session,
   // Notifies upper layer about incoming connection and
   // accepts/rejects connection.
   void AcceptConnection();
+
+  void ProcessAuthenticationStep();
 
   void AddChannelConnector(const std::string& name,
                            JingleChannelConnector* connector);
@@ -98,13 +106,18 @@ class JingleSession : public protocol::Session,
   void OnChannelConnectorFinished(const std::string& name,
                                   JingleChannelConnector* connector);
 
+  void OnRouteChange(cricket::TransportChannel* channel,
+                     const cricket::Candidate& candidate);
+
   const cricket::ContentInfo* GetContentInfo() const;
 
   void SetState(State new_state);
 
-  static cricket::SessionDescription* CreateSessionDescription(
-      const CandidateSessionConfig* candidate_config,
-      const buzz::XmlElement* authenticator_message);
+  static Error RejectionReasonToError(Authenticator::RejectionReason reason);
+
+  static scoped_ptr<cricket::SessionDescription> CreateSessionDescription(
+      scoped_ptr<CandidateSessionConfig> candidate_config,
+      scoped_ptr<buzz::XmlElement> authenticator_message);
 
   // JingleSessionManager that created this session. Guaranteed to
   // exist throughout the lifetime of the session.
@@ -114,6 +127,7 @@ class JingleSession : public protocol::Session,
 
   State state_;
   StateChangeCallback state_change_callback_;
+  RouteChangeCallback route_change_callback_;
 
   Error error_;
 
@@ -135,7 +149,12 @@ class JingleSession : public protocol::Session,
   // Channels that are currently being connected.
   ChannelConnectorsMap channel_connectors_;
 
-  ScopedRunnableMethodFactory<JingleSession> task_factory_;
+  // Termination reason. Needs to be stored because
+  // SignalReceivedTerminateReason handler is not allowed to destroy
+  // the object.
+  std::string terminate_reason_;
+
+  base::WeakPtrFactory<JingleSession> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(JingleSession);
 };

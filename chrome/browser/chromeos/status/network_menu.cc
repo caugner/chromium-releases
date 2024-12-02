@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -524,9 +524,10 @@ void MainMenuModel::InitMenuItems(bool should_open_button_options) {
   string16 label;
 
   // Ethernet
-  bool ethernet_available = cros->ethernet_available();
+  // Only display an ethernet icon if enabled, and an ethernet network exists.
   bool ethernet_enabled = cros->ethernet_enabled();
-  if (ethernet_available && ethernet_enabled) {
+  const chromeos::EthernetNetwork* ethernet_network = cros->ethernet_network();
+  if (ethernet_enabled && ethernet_network) {
     bool ethernet_connected = cros->ethernet_connected();
     bool ethernet_connecting = cros->ethernet_connecting();
 
@@ -542,11 +543,7 @@ void MainMenuModel::InitMenuItems(bool should_open_button_options) {
     if (ethernet_connecting || ethernet_connected)
       flag |= FLAG_ASSOCIATED;
     SkBitmap icon;
-    if (cros->ethernet_network()) {
-      icon = NetworkMenuIcon::GetBitmap(cros->ethernet_network());
-    } else {
-      icon = *rb.GetBitmapNamed(IDR_STATUSBAR_WIRED);
-    }
+    icon = NetworkMenuIcon::GetBitmap(ethernet_network);
     menu_items_.push_back(MenuItem(ui::MenuModel::TYPE_COMMAND,
                                    label, icon, std::string(), flag));
   }
@@ -652,7 +649,8 @@ void MainMenuModel::InitMenuItems(bool should_open_button_options) {
       }
 
       int flag = FLAG_CELLULAR;
-      bool isActive = active_cellular &&
+      // If wifi is associated, then cellular is not active.
+      bool isActive = !cros->wifi_network() && active_cellular &&
           cell_networks[i]->service_path() == active_cellular->service_path() &&
           (cell_networks[i]->connecting() || cell_networks[i]->connected());
       bool supports_data_plan =

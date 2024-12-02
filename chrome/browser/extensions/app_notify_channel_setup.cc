@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,11 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
+#include "base/metrics/histogram.h"
 #include "base/stringprintf.h"
-#include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/token_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
@@ -81,7 +82,8 @@ AppNotifyChannelSetup::AppNotifyChannelSetup(
       callback_id_(callback_id),
       delegate_(delegate),
       ui_(ui),
-      state_(INITIAL) {}
+      state_(INITIAL),
+      oauth2_access_token_failure_(false) {}
 
 AppNotifyChannelSetup::~AppNotifyChannelSetup() {}
 
@@ -147,18 +149,43 @@ URLFetcher* AppNotifyChannelSetup::CreateURLFetcher(
 bool AppNotifyChannelSetup::ShouldPromptForLogin() const {
   std::string username = profile_->GetPrefs()->GetString(
       prefs::kGoogleServicesUsername);
-  // Prompt for login if either the user has not logged in at all or
-  // if the user is logged in but there is no OAuth2 login token.
-  // The latter happens for users who are already logged in before the
-  // code to generate OAuth2 login token is released.
+  // Prompt for login if either:
+  // 1. the user has not logged in at all or
+  // 2. if the user is logged in but there is no OAuth2 login token.
+  //    The latter happens for users who are already logged in before the
+  //    code to generate OAuth2 login token is released.
+  // 3. If the OAuth2 login token does not work anymore.
+  //    This can happen if the user explicitly revoked access to Google Chrome
+  //    from Google Accounts page.
   return username.empty() ||
-         !profile_->GetTokenService()->HasOAuthLoginToken();
+         !profile_->GetTokenService()->HasOAuthLoginToken() ||
+         oauth2_access_token_failure_;
 }
+
+namespace {
+
+enum LoginNeededHistogram {
+  LOGIN_NEEDED,
+  LOGIN_NOT_NEEDED,
+  LOGIN_NEEDED_BOUNDARY
+};
+
+enum LoginSuccessHistogram {
+  LOGIN_SUCCESS,
+  LOGIN_FAILURE,
+  LOGIN_SUCCESS_BOUNDARY
+};
+
+}  // namespace
 
 void AppNotifyChannelSetup::BeginLogin() {
   CHECK_EQ(INITIAL, state_);
   state_ = LOGIN_STARTED;
-  if (ShouldPromptForLogin()) {
+  bool login_needed = ShouldPromptForLogin();
+  UMA_HISTOGRAM_ENUMERATION("AppNotify.ChannelSetupBegin",
+                            login_needed ? LOGIN_NEEDED : LOGIN_NOT_NEEDED,
+                            LOGIN_NEEDED_BOUNDARY);
+  if (login_needed) {
     ui_->PromptSyncSetup(this);
     // We'll get called back in OnSyncSetupResult
   } else {
@@ -168,12 +195,15 @@ void AppNotifyChannelSetup::BeginLogin() {
 
 void AppNotifyChannelSetup::EndLogin(bool success) {
   CHECK_EQ(LOGIN_STARTED, state_);
+  UMA_HISTOGRAM_ENUMERATION("AppNotify.ChannelSetupLoginResult",
+                            success ? LOGIN_SUCCESS : LOGIN_FAILURE,
+                            LOGIN_SUCCESS_BOUNDARY);
   if (success) {
     state_ = LOGIN_DONE;
     BeginGetAccessToken();
   } else {
     state_ = ERROR_STATE;
-    ReportResult("", kChannelSetupCanceledByUser);
+    ReportResult("", USER_CANCELLED);
   }
 }
 
@@ -198,9 +228,19 @@ void AppNotifyChannelSetup::EndGetAccessToken(bool success) {
   if (success) {
     state_ = FETCH_ACCESS_TOKEN_DONE;
     BeginRecordGrant();
+  } else if (!oauth2_access_token_failure_) {
+    oauth2_access_token_failure_ = true;
+    // If access token generation fails, then it means somehow the
+    // OAuth2 login scoped token became invalid. One way this can happen
+    // is if a user explicitly revoked access to Google Chrome from
+    // Google Accounts page. In such a case, we should try to show the
+    // login setup again to the user, but only if we have not already
+    // done so once (to avoid infinite loop).
+    state_ = INITIAL;
+    BeginLogin();
   } else {
     state_ = ERROR_STATE;
-    ReportResult("", kChannelSetupInternalError);
+    ReportResult("", INTERNAL_ERROR);
   }
 }
 
@@ -227,12 +267,12 @@ void AppNotifyChannelSetup::EndRecordGrant(const URLFetcher* source) {
     } else {
       // Successfully done with HTTP request, but got an explicit error.
       state_ = ERROR_STATE;
-      ReportResult("", kChannelSetupAuthError);
+      ReportResult("", AUTH_ERROR);
     }
   } else {
     // Could not do HTTP request.
     state_ = ERROR_STATE;
-    ReportResult("", kChannelSetupInternalError);
+    ReportResult("", INTERNAL_ERROR);
   }
 }
 
@@ -258,34 +298,54 @@ void AppNotifyChannelSetup::EndGetChannelId(const URLFetcher* source) {
       bool result = ParseCWSChannelServiceResponse(data, &channel_id);
       if (result) {
         state_ = CHANNEL_ID_SETUP_DONE;
-        ReportResult(channel_id, "");
+        ReportResult(channel_id, NONE);
       } else {
         state_ = ERROR_STATE;
-        ReportResult("", kChannelSetupInternalError);
+        ReportResult("", INTERNAL_ERROR);
       }
     } else {
       // Successfully done with HTTP request, but got an explicit error.
       state_ = ERROR_STATE;
-      ReportResult("", kChannelSetupAuthError);
+      ReportResult("", AUTH_ERROR);
     }
   } else {
     // Could not do HTTP request.
     state_ = ERROR_STATE;
-    ReportResult("", kChannelSetupInternalError);
+    ReportResult("", INTERNAL_ERROR);
   }
 }
 
 void AppNotifyChannelSetup::ReportResult(
     const std::string& channel_id,
-    const std::string& error) {
+    SetupError error) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   CHECK(state_ == CHANNEL_ID_SETUP_DONE || state_ == ERROR_STATE);
 
+  UMA_HISTOGRAM_ENUMERATION("AppNotification.ChannelSetupFinalResult",
+                            error, SETUP_ERROR_BOUNDARY);
   if (delegate_.get()) {
-    delegate_->AppNotifyChannelSetupComplete(channel_id, error, this);
+    delegate_->AppNotifyChannelSetupComplete(
+        channel_id, GetErrorString(error), this);
   }
   Release(); // Matches AddRef in Start.
 }
+
+// static
+std::string AppNotifyChannelSetup::GetErrorString(SetupError error) {
+  switch (error) {
+    case NONE:           return "";
+    case AUTH_ERROR:     return kChannelSetupAuthError;
+    case INTERNAL_ERROR: return kChannelSetupInternalError;
+    case USER_CANCELLED: return kChannelSetupCanceledByUser;
+    case SETUP_ERROR_BOUNDARY: {
+      CHECK(false);
+      break;
+    }
+  }
+  CHECK(false) << "Unhandled enum value";
+  return std::string();
+}
+
 
 // static
 GURL AppNotifyChannelSetup::GetCWSChannelServiceURL() {

@@ -19,11 +19,14 @@
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::UserMetricsAction;
 
 namespace chromeos {
 
@@ -75,16 +78,16 @@ void CrosLanguageOptionsHandler::GetLocalizedValues(
 void CrosLanguageOptionsHandler::RegisterMessages() {
   LanguageOptionsHandlerCommon::RegisterMessages();
 
-  web_ui_->RegisterMessageCallback("inputMethodDisable",
+  web_ui()->RegisterMessageCallback("inputMethodDisable",
       base::Bind(&CrosLanguageOptionsHandler::InputMethodDisableCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("inputMethodEnable",
+  web_ui()->RegisterMessageCallback("inputMethodEnable",
       base::Bind(&CrosLanguageOptionsHandler::InputMethodEnableCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("inputMethodOptionsOpen",
+  web_ui()->RegisterMessageCallback("inputMethodOptionsOpen",
       base::Bind(&CrosLanguageOptionsHandler::InputMethodOptionsOpenCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("uiLanguageRestart",
+  web_ui()->RegisterMessageCallback("uiLanguageRestart",
       base::Bind(&CrosLanguageOptionsHandler::RestartCallback,
                  base::Unretained(this)));
 }
@@ -202,15 +205,15 @@ string16 CrosLanguageOptionsHandler::GetProductName() {
 
 void CrosLanguageOptionsHandler::SetApplicationLocale(
     const std::string& language_code) {
-  Profile::FromWebUI(web_ui_)->ChangeAppLocale(
+  Profile::FromWebUI(web_ui())->ChangeAppLocale(
       language_code, Profile::APP_LOCALE_CHANGED_VIA_SETTINGS);
 }
 
 void CrosLanguageOptionsHandler::RestartCallback(const ListValue* args) {
-  UserMetrics::RecordAction(UserMetricsAction("LanguageOptions_SignOut"));
+  content::RecordAction(UserMetricsAction("LanguageOptions_SignOut"));
 
   Browser* browser = Browser::GetBrowserForController(
-      &web_ui_->tab_contents()->controller(), NULL);
+      &web_ui()->GetWebContents()->GetController(), NULL);
   if (browser)
     browser->ExecuteCommand(IDC_EXIT);
 }
@@ -220,7 +223,7 @@ void CrosLanguageOptionsHandler::InputMethodDisableCallback(
   const std::string input_method_id = UTF16ToASCII(ExtractStringValue(args));
   const std::string action = base::StringPrintf(
       "LanguageOptions_DisableInputMethod_%s", input_method_id.c_str());
-  UserMetrics::RecordComputedAction(action);
+  content::RecordComputedAction(action);
 }
 
 void CrosLanguageOptionsHandler::InputMethodEnableCallback(
@@ -228,7 +231,7 @@ void CrosLanguageOptionsHandler::InputMethodEnableCallback(
   const std::string input_method_id = UTF16ToASCII(ExtractStringValue(args));
   const std::string action = base::StringPrintf(
       "LanguageOptions_EnableInputMethod_%s", input_method_id.c_str());
-  UserMetrics::RecordComputedAction(action);
+  content::RecordComputedAction(action);
 }
 
 void CrosLanguageOptionsHandler::InputMethodOptionsOpenCallback(
@@ -236,7 +239,7 @@ void CrosLanguageOptionsHandler::InputMethodOptionsOpenCallback(
   const std::string input_method_id = UTF16ToASCII(ExtractStringValue(args));
   const std::string action = base::StringPrintf(
       "InputMethodOptions_Open_%s", input_method_id.c_str());
-  UserMetrics::RecordComputedAction(action);
+  content::RecordComputedAction(action);
 }
 
 } // namespace chromeos

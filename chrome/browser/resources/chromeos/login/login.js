@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,8 +71,16 @@ cr.define('cr.ui', function() {
   Oobe.setUpdateProgress = function(progress) {};
   Oobe.setUpdateMessage = function(message) {};
   Oobe.showUpdateCurtain = function(enable) {};
-  Oobe.setTpmPassword = function(password) {}
-  Oobe.reloadContent = function(data) {}
+  Oobe.setTpmPassword = function(password) {};
+  Oobe.reloadContent = function(data) {};
+
+  /**
+   * Updates version label visibilty.
+   * @param {boolean} show True if version label should be visible.
+   */
+  Oobe.showVersion = function(show) {
+    Oobe.getInstance().showVersion(show);
+  };
 
   /**
    * Update body class to switch between OOBE UI and Login UI.
@@ -90,6 +98,13 @@ cr.define('cr.ui', function() {
   };
 
   /**
+   * Disables signin UI.
+   */
+  Oobe.disableSigninUI = function() {
+    DisplayManager.disableSigninUI();
+  };
+
+  /**
    * Shows signin UI.
    * @param {string} opt_email An optional email for signin UI.
    */
@@ -99,9 +114,11 @@ cr.define('cr.ui', function() {
 
   /**
    * Resets sign-in input fields.
+   * @param {boolean} forceOnline Whether online sign-in should be forced.
+   * If |forceOnline| is false previously used sign-in type will be used.
    */
-  Oobe.resetSigninUI = function() {
-    DisplayManager.resetSigninUI();
+  Oobe.resetSigninUI = function(forceOnline) {
+    DisplayManager.resetSigninUI(forceOnline);
   };
 
   /**

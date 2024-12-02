@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "net/http/http_stream_factory_impl.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/client_socket_handle.h"
+#include "net/socket/ssl_client_socket.h"
 
 namespace net {
 
@@ -34,7 +35,7 @@ class HttpStreamFactoryImpl::Job {
       const HttpRequestInfo& request_info,
       const SSLConfig& server_ssl_config,
       const SSLConfig& proxy_ssl_config,
-      const BoundNetLog& net_log);
+      NetLog* net_log);
   ~Job();
 
   // Start initiates the process of creating a new HttpStream. |request| will be
@@ -65,6 +66,7 @@ class HttpStreamFactoryImpl::Job {
   void Orphan(const Request* request);
 
   bool was_npn_negotiated() const;
+  SSLClientSocket::NextProto protocol_negotiated() const;
   bool using_spdy() const;
   const BoundNetLog& net_log() const { return net_log_; }
 
@@ -80,6 +82,7 @@ class HttpStreamFactoryImpl::Job {
 
  private:
   enum State {
+    STATE_START,
     STATE_RESOLVE_PROXY,
     STATE_RESOLVE_PROXY_COMPLETE,
 
@@ -134,6 +137,7 @@ class HttpStreamFactoryImpl::Job {
   // argument receive the result from the previous state.  If a method returns
   // ERR_IO_PENDING, then the result from OnIOComplete will be passed to the
   // next state method as the result arg.
+  int DoStart();
   int DoResolveProxy();
   int DoResolveProxyComplete(int result);
   int DoWaitForJob();
@@ -205,7 +209,7 @@ class HttpStreamFactoryImpl::Job {
   SSLConfig proxy_ssl_config_;
   const BoundNetLog net_log_;
 
-  OldCompletionCallbackImpl<Job> io_callback_;
+  CompletionCallback io_callback_;
   scoped_ptr<ClientSocketHandle> connection_;
   HttpNetworkSession* const session_;
   HttpStreamFactoryImpl* const stream_factory_;
@@ -228,8 +232,10 @@ class HttpStreamFactoryImpl::Job {
   // proceed.
   Job* blocking_job_;
 
-  // |dependent_job_| is dependent on |this|. Notify it when it's ok to proceed.
-  Job* dependent_job_;
+  // |waiting_job_| is a Job waiting to see if |this| can reuse a connection.
+  // If |this| is unable to do so, we'll notify |waiting_job_| that it's ok to
+  // proceed and then race the two Jobs.
+  Job* waiting_job_;
 
   // True if handling a HTTPS request, or using SPDY with SSL
   bool using_ssl_;
@@ -257,6 +263,9 @@ class HttpStreamFactoryImpl::Job {
 
   // True if we negotiated NPN.
   bool was_npn_negotiated_;
+
+  // Protocol negotiated with the server.
+  SSLClientSocket::NextProto protocol_negotiated_;
 
   // 0 if we're not preconnecting. Otherwise, the number of streams to
   // preconnect.

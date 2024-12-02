@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,15 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/signin_manager_fake.h"
+#include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/sync/glue/data_type_manager.h"
 #include "chrome/browser/sync/glue/data_type_manager_mock.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
-#include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
@@ -37,6 +39,7 @@ class ProfileSyncServiceStartupTest : public testing::Test {
  public:
   ProfileSyncServiceStartupTest()
       : ui_thread_(BrowserThread::UI, &ui_loop_),
+        file_thread_(BrowserThread::FILE),
         io_thread_(BrowserThread::IO),
         profile_(new TestingProfile) {}
 
@@ -44,6 +47,7 @@ class ProfileSyncServiceStartupTest : public testing::Test {
   }
 
   virtual void SetUp() {
+    file_thread_.Start();
     io_thread_.StartIOThread();
     profile_->CreateRequestContext();
     CreateSyncService();
@@ -60,28 +64,42 @@ class ProfileSyncServiceStartupTest : public testing::Test {
     // posting on the IO thread).
     ui_loop_.RunAllPending();
     io_thread_.Stop();
+    file_thread_.Stop();
     ui_loop_.RunAllPending();
   }
 
  protected:
   // Overridden below by ProfileSyncServiceStartupCrosTest.
   virtual void CreateSyncService() {
+    SigninManager* signin = static_cast<SigninManager*>(
+      SigninManagerFactory::GetInstance()->SetTestingFactoryAndUse(
+          profile_.get(), FakeSigninManager::Build));
+    signin->SetAuthenticatedUsername("test_user");
     service_.reset(new TestProfileSyncService(
-        &factory_, profile_.get(), "", true, base::Closure()));
+        new ProfileSyncComponentsFactoryMock(),
+        profile_.get(),
+        signin,
+        ProfileSyncService::MANUAL_START,
+        true,
+        base::Closure()));
   }
 
   DataTypeManagerMock* SetUpDataTypeManager() {
     DataTypeManagerMock* data_type_manager = new DataTypeManagerMock();
-    EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).
+    EXPECT_CALL(*factory_mock(), CreateDataTypeManager(_, _)).
         WillOnce(Return(data_type_manager));
     return data_type_manager;
   }
 
+  ProfileSyncComponentsFactoryMock* factory_mock() {
+   return static_cast<ProfileSyncComponentsFactoryMock*>(service_->factory());
+  }
+
   MessageLoop ui_loop_;
   content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
   content::TestBrowserThread io_thread_;
   scoped_ptr<TestingProfile> profile_;
-  ProfileSyncComponentsFactoryMock factory_;
   scoped_ptr<TestProfileSyncService> service_;
   ProfileSyncServiceObserverMock observer_;
 };
@@ -89,8 +107,15 @@ class ProfileSyncServiceStartupTest : public testing::Test {
 class ProfileSyncServiceStartupCrosTest : public ProfileSyncServiceStartupTest {
  protected:
   virtual void CreateSyncService() {
+    SigninManager* signin = SigninManagerFactory::GetForProfile(profile_.get());
+    signin->SetAuthenticatedUsername("test_user");
     service_.reset(new TestProfileSyncService(
-        &factory_, profile_.get(), "test_user", true, base::Closure()));
+        new ProfileSyncComponentsFactoryMock(),
+        profile_.get(),
+        signin,
+        ProfileSyncService::AUTO_START,
+        true,
+        base::Closure()));
   }
 };
 
@@ -100,6 +125,9 @@ TEST_F(ProfileSyncServiceStartupTest, StartFirstTime) {
 
   // We've never completed startup.
   profile_->GetPrefs()->ClearPref(prefs::kSyncHasSetupCompleted);
+  // Make sure SigninManager doesn't think we're signed in (undoes the call to
+  // SetAuthenticatedUsername() in CreateSyncService()).
+  SigninManagerFactory::GetForProfile(profile_.get())->SignOut();
 
   // Should not actually start, rather just clean things up and wait
   // to be enabled.
@@ -121,15 +149,14 @@ TEST_F(ProfileSyncServiceStartupTest, StartFirstTime) {
 
   // Create some tokens in the token service; the service will startup when
   // it is notified that tokens are available.
-  service_->OnUserSubmittedAuth("test_user", "", "", "");
+  service_->signin()->StartSignIn("test_user", "", "", "");
   profile_->GetTokenService()->IssueAuthTokenForTest(
       GaiaConstants::kSyncService, "sync_token");
   profile_->GetTokenService()->IssueAuthTokenForTest(
       GaiaConstants::kGaiaOAuth2LoginRefreshToken, "oauth2_login_token");
 
-  syncable::ModelTypeSet set;
-  set.insert(syncable::BOOKMARKS);
-  service_->OnUserChoseDatatypes(false, set);
+  service_->OnUserChoseDatatypes(
+      false, syncable::ModelTypeSet(syncable::BOOKMARKS));
   EXPECT_TRUE(service_->ShouldPushChanges());
 }
 
@@ -168,7 +195,7 @@ TEST_F(ProfileSyncServiceStartupTest, ManagedStartup) {
   // Disable sync through policy.
   profile_->GetPrefs()->SetBoolean(prefs::kSyncManaged, true);
 
-  EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).Times(0);
+  EXPECT_CALL(*factory_mock(), CreateDataTypeManager(_, _)).Times(0);
   EXPECT_CALL(observer_, OnStateChanged()).Times(AnyNumber());
 
   // Service should not be started by Initialize() since it's managed.
@@ -199,7 +226,7 @@ TEST_F(ProfileSyncServiceStartupTest, SwitchManaged) {
   // When switching back to unmanaged, the state should change, but the service
   // should not start up automatically (kSyncSetupCompleted will be false).
   Mock::VerifyAndClearExpectations(data_type_manager);
-  EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).Times(0);
+  EXPECT_CALL(*factory_mock(), CreateDataTypeManager(_, _)).Times(0);
   EXPECT_CALL(observer_, OnStateChanged()).Times(AnyNumber());
   profile_->GetPrefs()->ClearPref(prefs::kSyncManaged);
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,8 +18,10 @@
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/tab_contents/navigation_entry.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/web_contents.h"
+
+using content::NavigationEntry;
 
 namespace keys = extension_page_actions_module_constants;
 
@@ -33,7 +35,6 @@ const char kIconIndexOutOfBounds[] = "Page action icon index out of bounds.";
 const char kNoIconSpecified[] = "Page action has no icons to show.";
 }
 
-// TODO(EXTENSIONS_DEPRECATED): obsolete API.
 bool PageActionFunction::SetPageActionEnabled(bool enable) {
   std::string page_action_id;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &page_action_id));
@@ -80,8 +81,9 @@ bool PageActionFunction::SetPageActionEnabled(bool enable) {
   }
 
   // Make sure the URL hasn't changed.
-  NavigationEntry* entry = contents->controller().GetActiveEntry();
-  if (!entry || url != entry->url().spec()) {
+  NavigationEntry* entry =
+      contents->web_contents()->GetController().GetActiveEntry();
+  if (!entry || url != entry->GetURL().spec()) {
     error_ = ExtensionErrorUtils::FormatErrorMessage(kUrlNotActiveError, url);
     return false;
   }

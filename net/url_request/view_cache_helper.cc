@@ -4,6 +4,8 @@
 
 #include "net/url_request/view_cache_helper.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/stringprintf.h"
 #include "net/base/escape.h"
 #include "net/base/io_buffer.h"
@@ -46,19 +48,12 @@ ViewCacheHelper::ViewCacheHelper()
       index_(0),
       data_(NULL),
       next_state_(STATE_NONE),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          cache_callback_(this, &ViewCacheHelper::OnIOComplete)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          entry_callback_(new CancelableOldCompletionCallback<ViewCacheHelper>(
-              this, &ViewCacheHelper::OnIOComplete))) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
 
 ViewCacheHelper::~ViewCacheHelper() {
   if (entry_)
     entry_->Close();
-
-  // Cancel any pending entry callback.
-  entry_callback_->Cancel();
 }
 
 int ViewCacheHelper::GetEntryInfoHTML(const std::string& key,
@@ -219,7 +214,9 @@ int ViewCacheHelper::DoGetBackend() {
   if (!http_cache)
     return ERR_FAILED;
 
-  return http_cache->GetBackend(&disk_cache_, &cache_callback_);
+  return http_cache->GetBackend(
+      &disk_cache_, base::Bind(&ViewCacheHelper::OnIOComplete,
+                               base::Unretained(this)));
 }
 
 int ViewCacheHelper::DoGetBackendComplete(int result) {
@@ -242,7 +239,9 @@ int ViewCacheHelper::DoGetBackendComplete(int result) {
 
 int ViewCacheHelper::DoOpenNextEntry() {
   next_state_ = STATE_OPEN_NEXT_ENTRY_COMPLETE;
-  return disk_cache_->OpenNextEntry(&iter_, &entry_, &cache_callback_);
+  return disk_cache_->OpenNextEntry(
+      &iter_, &entry_,
+      base::Bind(&ViewCacheHelper::OnIOComplete, base::Unretained(this)));
 }
 
 int ViewCacheHelper::DoOpenNextEntryComplete(int result) {
@@ -262,7 +261,9 @@ int ViewCacheHelper::DoOpenNextEntryComplete(int result) {
 
 int ViewCacheHelper::DoOpenEntry() {
   next_state_ = STATE_OPEN_ENTRY_COMPLETE;
-  return disk_cache_->OpenEntry(key_, &entry_, &cache_callback_);
+  return disk_cache_->OpenEntry(
+      key_, &entry_,
+      base::Bind(&ViewCacheHelper::OnIOComplete, base::Unretained(this)));
 }
 
 int ViewCacheHelper::DoOpenEntryComplete(int result) {
@@ -280,16 +281,16 @@ int ViewCacheHelper::DoOpenEntryComplete(int result) {
 int ViewCacheHelper::DoReadResponse() {
   next_state_ = STATE_READ_RESPONSE_COMPLETE;
   buf_len_ = entry_->GetDataSize(0);
-  entry_callback_->AddRef();
   if (!buf_len_)
     return buf_len_;
 
   buf_ = new IOBuffer(buf_len_);
-  return entry_->ReadData(0, 0, buf_, buf_len_, entry_callback_);
+  return entry_->ReadData(
+      0, 0, buf_, buf_len_,
+      base::Bind(&ViewCacheHelper::OnIOComplete, weak_factory_.GetWeakPtr()));
 }
 
 int ViewCacheHelper::DoReadResponseComplete(int result) {
-  entry_callback_->Release();
   if (result && result == buf_len_) {
     HttpResponseInfo response;
     bool truncated;
@@ -325,16 +326,16 @@ int ViewCacheHelper::DoReadData() {
 
   next_state_ = STATE_READ_DATA_COMPLETE;
   buf_len_ = entry_->GetDataSize(index_);
-  entry_callback_->AddRef();
   if (!buf_len_)
     return buf_len_;
 
   buf_ = new IOBuffer(buf_len_);
-  return entry_->ReadData(index_, 0, buf_, buf_len_, entry_callback_);
+  return entry_->ReadData(
+      index_, 0, buf_, buf_len_,
+      base::Bind(&ViewCacheHelper::OnIOComplete, weak_factory_.GetWeakPtr()));
 }
 
 int ViewCacheHelper::DoReadDataComplete(int result) {
-  entry_callback_->Release();
   if (result && result == buf_len_) {
     HexDump(buf_->data(), buf_len_, data_);
   }

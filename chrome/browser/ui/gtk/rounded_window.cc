@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -205,10 +205,13 @@ gboolean OnRoundedWindowExpose(GtkWidget* widget,
   RoundedWindowData* data = static_cast<RoundedWindowData*>(
       g_object_get_data(G_OBJECT(widget), kRoundedData));
 
-  if (data->expected_width != widget->allocation.width ||
-      data->expected_height != widget->allocation.height) {
-    data->expected_width = widget->allocation.width;
-    data->expected_height = widget->allocation.height;
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget, &allocation);
+
+  if (data->expected_width != allocation.width ||
+      data->expected_height != allocation.height) {
+    data->expected_width = allocation.width;
+    data->expected_height = allocation.height;
 
     // We need to update the shape of the status bubble whenever our GDK
     // window changes shape.
@@ -217,7 +220,8 @@ gboolean OnRoundedWindowExpose(GtkWidget* widget,
     GdkRegion* mask_region = gdk_region_polygon(&mask_points[0],
                                                 mask_points.size(),
                                                 GDK_EVEN_ODD_RULE);
-    gdk_window_shape_combine_region(widget->window, mask_region, 0, 0);
+    gdk_window_shape_combine_region(gtk_widget_get_window(widget),
+                                    mask_region, 0, 0);
     gdk_region_destroy(mask_region);
   }
 
@@ -288,7 +292,7 @@ void StopActingAsRoundedWindow(GtkWidget* widget) {
   g_object_set_data(G_OBJECT(widget), kRoundedData, NULL);
 
   if (gtk_widget_get_realized(widget))
-    gdk_window_shape_combine_mask(widget->window, NULL, 0, 0);
+    gdk_window_shape_combine_mask(gtk_widget_get_window(widget), NULL, 0, 0);
 
   if (gtk_widget_get_visible(widget))
     gtk_widget_queue_draw(widget);

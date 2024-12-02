@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,8 @@
 #include "ui/gfx/image/cairo_cached_surface.h"
 #include "ui/gfx/image/image.h"
 #include "webkit/glue/webkit_glue.h"
+
+using content::OpenURLParams;
 
 namespace {
 
@@ -81,11 +83,12 @@ const char* GetChromiumUrl() {
 gboolean OnEventBoxExpose(GtkWidget* event_box,
                           GdkEventExpose* expose,
                           gboolean user_data) {
-  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(event_box->window));
+  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(
+      gtk_widget_get_window(event_box)));
   gdk_cairo_rectangle(cr, &expose->area);
   cairo_clip(cr);
 
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   gfx::CairoCachedSurface* background =
       rb.GetNativeImageNamed(IDR_ABOUT_BACKGROUND_COLOR).ToCairo();
   background->SetSource(cr, event_box, 0, 0);
@@ -100,7 +103,7 @@ gboolean OnEventBoxExpose(GtkWidget* event_box,
 }  // namespace
 
 void ShowAboutDialogForProfile(GtkWindow* parent, Profile* profile) {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   static GdkPixbuf* background = rb.GetNativeImageNamed(IDR_ABOUT_BACKGROUND);
 
   // Build the dialog.
@@ -113,7 +116,9 @@ void ShowAboutDialogForProfile(GtkWindow* parent, Profile* profile) {
   // The layout of this dialog is special because the logo should be flush
   // with the edges of the window.
   gtk_widget_set_name(dialog, "about-dialog");
+#if !GTK_CHECK_VERSION(2, 22, 0)
   gtk_dialog_set_has_separator(GTK_DIALOG(dialog), FALSE);
+#endif
 
   GtkWidget* close_button = gtk_dialog_add_button(GTK_DIALOG(dialog),
       GTK_STOCK_CLOSE, GTK_RESPONSE_CLOSE);

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,12 +13,14 @@
 #include "chrome/browser/printing/background_printing_manager.h"
 #include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "content/public/browser/notification_service.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 TestingBrowserProcess::TestingBrowserProcess()
-    : module_ref_count_(0),
+    : notification_service_(content::NotificationService::Create()),
+      module_ref_count_(0),
       app_locale_("en"),
       local_state_(NULL),
       io_thread_(NULL) {
@@ -28,11 +30,10 @@ TestingBrowserProcess::~TestingBrowserProcess() {
   EXPECT_FALSE(local_state_);
 }
 
-void TestingBrowserProcess::EndSession() {
+void TestingBrowserProcess::ResourceDispatcherHostCreated() {
 }
 
-ResourceDispatcherHost* TestingBrowserProcess::resource_dispatcher_host() {
-  return NULL;
+void TestingBrowserProcess::EndSession() {
 }
 
 MetricsService* TestingBrowserProcess::metrics_service() {
@@ -43,23 +44,9 @@ IOThread* TestingBrowserProcess::io_thread() {
   return io_thread_;
 }
 
-base::Thread* TestingBrowserProcess::file_thread() {
-  return NULL;
-}
-
-base::Thread* TestingBrowserProcess::db_thread() {
-  return NULL;
-}
-
 WatchDogThread* TestingBrowserProcess::watchdog_thread() {
   return NULL;
 }
-
-#if defined(OS_CHROMEOS)
-base::Thread* TestingBrowserProcess::web_socket_proxy_thread() {
-  return NULL;
-}
-#endif
 
 ProfileManager* TestingBrowserProcess::profile_manager() {
   return profile_manager_.get();
@@ -87,10 +74,6 @@ IconManager* TestingBrowserProcess::icon_manager() {
 }
 
 ThumbnailGenerator* TestingBrowserProcess::GetThumbnailGenerator() {
-  return NULL;
-}
-
-SidebarManager* TestingBrowserProcess::sidebar_manager() {
   return NULL;
 }
 
@@ -237,6 +220,10 @@ ComponentUpdateService* TestingBrowserProcess::component_updater() {
 }
 
 CRLSetFetcher* TestingBrowserProcess::crl_set_fetcher() {
+  return NULL;
+}
+
+AudioManager* TestingBrowserProcess::audio_manager() {
   return NULL;
 }
 

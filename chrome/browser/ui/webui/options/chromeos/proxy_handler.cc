@@ -10,6 +10,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -79,8 +80,8 @@ void ProxyHandler::GetLocalizedValues(
 
 void ProxyHandler::SetNetworkName(const std::string& name) {
   StringValue network(name);
-  web_ui_->CallJavascriptFunction("options.ProxyOptions.setNetworkName",
-                                  network);
+  web_ui()->CallJavascriptFunction("options.ProxyOptions.setNetworkName",
+                                   network);
 }
 
 }  // namespace chromeos

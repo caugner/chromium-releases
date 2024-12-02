@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "ppapi/c/ppb_var.h"
+#include "ppapi/proxy/plugin_array_buffer_var.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/proxy_object_var.h"
@@ -105,8 +106,7 @@ PP_Var PluginVarTracker::GetHostObject(const PP_Var& plugin_object) const {
   }
 
   // Make a var with the host ID.
-  PP_Var ret;
-  ret.type = PP_VARTYPE_OBJECT;
+  PP_Var ret = { PP_VARTYPE_OBJECT };
   ret.value.as_id = object->host_var_id();
   return ret;
 }
@@ -141,19 +141,8 @@ void PluginVarTracker::ReleaseHostObject(PluginDispatcher* dispatcher,
   ReleaseVar(found->second);
 }
 
-int PluginVarTracker::GetRefCountForObject(const PP_Var& plugin_object) {
-  VarMap::iterator found = GetLiveVar(plugin_object);
-  if (found == live_vars_.end())
-    return -1;
-  return found->second.ref_count;
-}
-
-int PluginVarTracker::GetTrackedWithNoReferenceCountForObject(
-    const PP_Var& plugin_object) {
-  VarMap::iterator found = GetLiveVar(plugin_object);
-  if (found == live_vars_.end())
-    return -1;
-  return found->second.track_with_no_reference_count;
+ArrayBufferVar* PluginVarTracker::CreateArrayBuffer(uint32 size_in_bytes) {
+  return new PluginArrayBufferVar(size_in_bytes);
 }
 
 int32 PluginVarTracker::AddVarInternal(Var* var, AddVarRefMode mode) {
@@ -230,8 +219,7 @@ PP_Var PluginVarTracker::GetOrCreateObjectVarID(ProxyObjectVar* object) {
     object->AssignVarID(var_id);
   }
 
-  PP_Var ret;
-  ret.type = PP_VARTYPE_OBJECT;
+  PP_Var ret = { PP_VARTYPE_OBJECT };
   ret.value.as_id = var_id;
   return ret;
 }

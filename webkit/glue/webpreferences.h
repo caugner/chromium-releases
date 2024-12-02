@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -48,6 +48,7 @@ struct WEBKIT_GLUE_EXPORT WebPreferences {
   bool web_security_enabled;
   bool javascript_can_open_windows_automatically;
   bool loads_images_automatically;
+  bool images_enabled;
   bool plugins_enabled;
   bool dom_paste_enabled;
   bool developer_extras_enabled;
@@ -89,6 +90,7 @@ struct WEBKIT_GLUE_EXPORT WebPreferences {
   bool show_composited_layer_tree;
   bool show_fps_counter;
   bool asynchronous_spell_checking_enabled;
+  bool unified_textchecker_enabled;
   bool accelerated_compositing_enabled;
   bool threaded_compositing_enabled;
   bool force_compositing_mode;
@@ -96,10 +98,13 @@ struct WEBKIT_GLUE_EXPORT WebPreferences {
   bool composite_to_texture_enabled;
   bool fixed_position_compositing_enabled;
   bool accelerated_layers_enabled;
+  bool accelerated_animation_enabled;
   bool accelerated_video_enabled;
   bool accelerated_2d_canvas_enabled;
-  bool accelerated_drawing_enabled;
+  bool accelerated_painting_enabled;
+  bool accelerated_filters_enabled;
   bool accelerated_plugins_enabled;
+  bool partial_swap_enabled;
   bool memory_info_enabled;
   bool interactive_form_validation_enabled;
   bool fullscreen_enabled;
@@ -109,6 +114,7 @@ struct WEBKIT_GLUE_EXPORT WebPreferences {
   bool enable_scroll_animator;
   bool hixie76_websocket_protocol_enabled;
   bool visual_word_movement_enabled;
+  bool per_tile_painting_enabled;
   // We try to keep the default values the same as the default values in
   // chrome, except for the cases where it would require lots of extra work for
   // the embedder to use the same default value.

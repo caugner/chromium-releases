@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,10 @@
 
 class FindBar;
 class NativePanelTesting;
-class TabContents;
+
+namespace content {
+class WebContents;
+}
 
 namespace gfx {
 class Rect;
@@ -49,11 +52,11 @@ class NativePanel {
   virtual void ShowTaskManagerForPanel() = 0;
   virtual FindBar* CreatePanelFindBar() = 0;
   virtual void NotifyPanelOnUserChangedTheme() = 0;
-  virtual void PanelTabContentsFocused(TabContents* tab_contents) = 0;
+  virtual void PanelWebContentsFocused(content::WebContents* contents) = 0;
   virtual void PanelCut() = 0;
   virtual void PanelCopy() = 0;
   virtual void PanelPaste() = 0;
-  virtual void DrawAttention() = 0;
+  virtual void DrawAttention(bool draw_attention) = 0;
   virtual bool IsDrawingAttention() const = 0;
   virtual bool PreHandlePanelKeyboardEvent(
       const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) = 0;
@@ -80,6 +83,10 @@ class NativePanel {
   // Brings the panel to the top of the z-order without activating it. This
   // will make sure that the panel is not obscured by other top-most windows.
   virtual void EnsurePanelFullyVisible() = 0;
+
+  // Sets whether the panel app icon is visible (usually refers to the app icons
+  // in the desktop bar).
+  virtual void SetPanelAppIconVisibility(bool visible) = 0;
 };
 
 // A NativePanel utility interface used for accessing elements of the

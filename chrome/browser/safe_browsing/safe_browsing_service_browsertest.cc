@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -26,8 +26,8 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/test/test_browser_thread.h"
 #include "crypto/sha2.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -35,7 +35,7 @@
 using base::Histogram;
 using base::StatisticsRecorder;
 using content::BrowserThread;
-
+using content::WebContents;
 using ::testing::_;
 using ::testing::Mock;
 using ::testing::StrictMock;
@@ -381,8 +381,8 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
   }
 
   bool ShowingInterstitialPage() {
-    TabContents* contents = browser()->GetSelectedTabContents();
-    InterstitialPage* interstitial_page = contents->interstitial_page();
+    WebContents* contents = browser()->GetSelectedWebContents();
+    InterstitialPage* interstitial_page = contents->GetInterstitialPage();
     return interstitial_page != NULL;
   }
 

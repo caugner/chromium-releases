@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Native Client Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -12,6 +12,7 @@ import sdk_update
 import string
 import subprocess
 import sys
+import urllib2
 
 HELP='''"Usage: %prog [-b bundle] [options]"
 
@@ -52,7 +53,8 @@ BUILD_TOOLS_OUT = os.path.join(NACL_SDK_ROOT, 'scons-out', 'build', 'obj',
 
 BUNDLE_SDK_TOOLS = 'sdk_tools'
 BUNDLE_PEPPER_MATCHER = re.compile('^pepper_([0-9]+)$')
-IGNORE_OPTIONS = set(['gsutil', 'manifest_file', 'upload', 'root_url'])
+IGNORE_OPTIONS = set([
+    'archive_id', 'gsutil', 'manifest_file', 'upload', 'root_url'])
 
 
 class Error(Exception):
@@ -133,7 +135,7 @@ class UpdateSDKManifest(sdk_update.SDKManifest):
 
     Args:
       options: the object containing the remaining unused options attributes.
-      bundl_name: The name of the bundle, or None if it's missing.'''
+      bundle_name: The name of the bundle, or None if it's missing.'''
     # Any option left in the list should have value = None
     for key, val in options.__dict__.items():
       if val != None and key not in IGNORE_OPTIONS:
@@ -162,6 +164,27 @@ class UpdateSDKManifest(sdk_update.SDKManifest):
       self._UpdateBundle(options)
     self._VerifyAllOptionsConsumed(options, bundle_name)
     self._ValidateManifest()
+
+  def ValidateManifestLinks(self):
+    '''Validates all the links in the manifest file and throws if one is bad'''
+    valid = True
+    for bundle in self._manifest_data[sdk_update.BUNDLES_KEY]:
+      for archive in bundle.GetArchives():
+        stream = None
+        try:
+          print "Checking size of data at link: %s" % archive.GetUrl()
+          stream = urllib2.urlopen(archive.GetUrl())
+          server_size = int(stream.info()[sdk_update.HTTP_CONTENT_LENGTH])
+          if server_size != archive.GetSize():
+            sys.stderr.write('Size mismatch for %s. Expected %s but got %s\n' %
+                             (archive.GetUrl(), archive.GetSize(), server_size))
+            sys.stderr.flush()
+            valid = False
+        finally:
+          if stream:
+            stream.close()
+    if not valid:
+      raise Error('Files on server do not match the manifest file')
 
 
 class GsUtil(object):
@@ -272,11 +295,20 @@ class UpdateSDKManifestFile(sdk_update.SDKManifestFile):
       raise Error('Need to specify a bundle version')
     if options.bundle_revision is None:
       raise Error('Need to specify a bundle revision')
+    if options.bundle_name == 'pepper':
+      self.options.bundle_name = 'pepper_%s' % options.bundle_version
     if options.desc is None:
       options.desc = ('Chrome %s bundle, revision %s' %
                       (options.bundle_version, options.bundle_revision))
-    root_url = '%s/pepper_%s_%s' % (options.root_url, options.bundle_version,
-                                    options.bundle_revision)
+    root_url = options.root_url
+    if options.archive_id:
+      # Support archive names like trunk.113440 or 17.0.963.3, which is how
+      # the Chrome builders archive things.
+      root_url = '/'.join([root_url, options.archive_id])
+    else:
+      # This is the old archive naming scheme
+      root_url = '%s/pepper_%s_%s' % (root_url, options.bundle_version,
+                                      options.bundle_revision)
     options.mac_arch_url = '/'.join([root_url, 'naclsdk_mac.tgz'])
     options.linux_arch_url = '/'.join([root_url, 'naclsdk_linux.tgz'])
     options.win_arch_url = '/'.join([root_url, 'naclsdk_win.exe'])
@@ -301,6 +333,17 @@ class UpdateSDKManifestFile(sdk_update.SDKManifestFile):
     self.WriteFile()
 
 
+def CommandPush(options, args, manifest_file):
+  '''Check the manifest file and push it to the server if it's okay'''
+  print 'Running Push with options=%s and args=%s' % (options, args)
+  manifest = manifest_file._manifest
+  manifest.UpdateManifest(options)
+  print 'Validating links within manifest file'
+  manifest.ValidateManifestLinks()
+  print 'Copying manifest file to server'
+  manifest_file.gsutil.Copy(options.manifest_file, 'naclsdk_manifest.json')
+
+
 def main(argv):
   '''Main entry for update_manifest.py'''
 
@@ -308,6 +351,13 @@ def main(argv):
   parser = optparse.OptionParser(usage=HELP)
 
   # Setup options
+  parser.add_option(
+      '-a', '--archive-id', dest='archive_id',
+      default=None,
+      help='Archive identifier, produced by the Chromium builders; string '
+           'like "trunk.113440" or "17.0.963.3".  Used with --root-url to '
+           'build the full archive URL. If not set the archive id defaults to '
+           '"pepper_<version>_<revision>"')
   parser.add_option(
       '-b', '--bundle-version', dest='bundle_version',
       type='int',
@@ -346,7 +396,7 @@ def main(argv):
       '-r', '--recommended', dest='recommended',
       choices=sdk_update.YES_NO_LITERALS,
       default=None,
-      help='Required: whether this bundle is recommended. one of "yes" or "no"')
+      help='Required: whether this bundle is recommended. One of "yes" or "no"')
   parser.add_option(
       '-R', '--root-url', dest='root_url',
       default='http://commondatastorage.googleapis.com/nativeclient-mirror/'
@@ -378,13 +428,22 @@ def main(argv):
 
   # Parse options and arguments and check.
   (options, args) = parser.parse_args(argv)
-  if len(args) > 0:
-    parser.error('These arguments were not understood: %s' % args)
-
   manifest_file = UpdateSDKManifestFile(options)
-  manifest_file.HandleBundles()
-  manifest_file.UpdateWithOptions()
+  if len(args) == 0:
+    manifest_file.HandleBundles()
+    manifest_file.UpdateWithOptions()
+    return 0
 
+  COMMANDS = {
+      'push': CommandPush
+      }
+  def CommandUnknown(options, args, manifest_file):
+    raise Error("Unknown command %s" % args[0])
+  try:
+    COMMANDS.get(args[0], CommandUnknown)(options, args, manifest_file)
+  except Error as error:
+    print "Error: %s" % error
+    return 1
   return 0
 
 

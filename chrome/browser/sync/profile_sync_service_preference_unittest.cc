@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,11 @@
 #include "base/location.h"
 #include "base/stl_util.h"
 #include "base/string_piece.h"
-#include "base/task.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/api/sync_data.h"
 #include "chrome/browser/sync/glue/generic_change_processor.h"
@@ -119,22 +121,31 @@ class ProfileSyncServicePreferenceTest
     if (service_.get())
       return false;
 
+    SigninManager* signin = SigninManagerFactory::GetForProfile(profile_.get());
+    signin->SetAuthenticatedUsername("test");
+    ProfileSyncComponentsFactoryMock* factory =
+        new ProfileSyncComponentsFactoryMock();
     service_.reset(new TestProfileSyncService(
-        &factory_, profile_.get(), "test", false, callback));
+        factory,
+        profile_.get(),
+        signin,
+        ProfileSyncService::AUTO_START,
+        false,
+        callback));
     pref_sync_service_ = reinterpret_cast<PrefModelAssociator*>(
         prefs_->GetSyncableService());
     if (!pref_sync_service_)
       return false;
-    EXPECT_CALL(factory_, CreatePreferenceSyncComponents(_, _)).
+    EXPECT_CALL(*factory, CreatePreferenceSyncComponents(_, _)).
         WillOnce(BuildPrefSyncComponents(service_.get(),
                                          pref_sync_service_,
                                          &model_associator_,
                                          &change_processor_));
 
-    EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).
+    EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
         WillOnce(ReturnNewDataTypeManager());
 
-    dtc_ = new PreferenceDataTypeController(&factory_,
+    dtc_ = new PreferenceDataTypeController(factory,
                                             profile_.get(),
                                             service_.get());
     service_->RegisterDataTypeController(dtc_);
@@ -309,7 +320,7 @@ TEST_F(ProfileSyncServicePreferenceTest, ModelAssociationCloudHasData) {
   urls_to_restore->Append(Value::CreateStringValue(example_url1_));
   urls_to_restore->Append(Value::CreateStringValue(example_url2_));
   cloud_data[prefs::kURLsToRestoreOnStartup] = urls_to_restore;
-  cloud_data[prefs::kDefaultCharset] =
+  cloud_data[prefs::kGlobalDefaultCharset] =
       Value::CreateStringValue(non_default_charset_value_);
 
   AddPreferenceEntriesHelper helper(this, cloud_data);
@@ -334,13 +345,13 @@ TEST_F(ProfileSyncServicePreferenceTest, ModelAssociationCloudHasData) {
   EXPECT_TRUE(GetPreferenceValue(prefs::kURLsToRestoreOnStartup).
               Equals(expected_urls.get()));
 
-  value.reset(GetSyncedValue(prefs::kDefaultCharset));
+  value.reset(GetSyncedValue(prefs::kGlobalDefaultCharset));
   ASSERT_TRUE(value.get());
   EXPECT_TRUE(static_cast<const StringValue*>(value.get())->
               GetAsString(&string_value));
   EXPECT_EQ(non_default_charset_value_, string_value);
   EXPECT_EQ(non_default_charset_value_,
-            prefs_->GetString(prefs::kDefaultCharset));
+            prefs_->GetString(prefs::kGlobalDefaultCharset));
   STLDeleteValues(&cloud_data);
 }
 

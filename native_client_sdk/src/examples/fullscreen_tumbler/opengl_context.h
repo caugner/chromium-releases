@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,12 +17,13 @@
 #include <algorithm>
 #include <string>
 
-#include "examples/fullscreen_tumbler/opengl_context_ptrs.h"
 #include "ppapi/c/ppb_opengles2.h"
 #include "ppapi/cpp/graphics_3d.h"
 #include "ppapi/cpp/graphics_3d_client.h"
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/size.h"
+
+#include "opengl_context_ptrs.h"
 
 namespace tumbler {
 

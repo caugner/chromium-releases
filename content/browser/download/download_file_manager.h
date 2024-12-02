@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -47,29 +47,45 @@
 #include "base/gtest_prod_util.h"
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
-#include "content/browser/download/download_id.h"
 #include "content/browser/download/interrupt_reasons.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/download_id.h"
 #include "net/base/net_errors.h"
 #include "ui/gfx/native_widget_types.h"
 
 struct DownloadCreateInfo;
-class DownloadFile;
-class DownloadManager;
 class DownloadRequestHandle;
 class FilePath;
 class ResourceDispatcherHost;
 
 namespace content {
 class DownloadBuffer;
+class DownloadFile;
+class DownloadManager;
 }
 
 // Manages all in progress downloads.
 class CONTENT_EXPORT DownloadFileManager
     : public base::RefCountedThreadSafe<DownloadFileManager> {
  public:
-  explicit DownloadFileManager(ResourceDispatcherHost* rdh);
+  class DownloadFileFactory {
+   public:
+    virtual ~DownloadFileFactory() {}
+
+    virtual content::DownloadFile* CreateFile(
+        DownloadCreateInfo* info,
+        const DownloadRequestHandle& request_handle,
+        content::DownloadManager* download_manager,
+        bool calculate_hash) = 0;
+  };
+
+  // Takes ownership of the factory.
+  // Passing in a NULL for |factory| will cause a default
+  // |DownloadFileFactory| to be used.
+  DownloadFileManager(ResourceDispatcherHost* rdh,
+                      DownloadFileFactory* factory);
 
   // Called on shutdown on the UI thread.
   void Shutdown();
@@ -80,14 +96,15 @@ class CONTENT_EXPORT DownloadFileManager
 
   // Handlers for notifications sent from the IO thread and run on the
   // FILE thread.
-  void UpdateDownload(DownloadId global_id, content::DownloadBuffer* buffer);
+  void UpdateDownload(content::DownloadId global_id,
+                      content::DownloadBuffer* buffer);
 
   // |reason| is the reason for interruption, if one occurs.
   // |security_info| contains SSL information (cert_id, cert_status,
   // security_bits, ssl_connection_status), which can be used to
   // fine-tune the error message.  It is empty if the transaction
   // was not performed securely.
-  void OnResponseCompleted(DownloadId global_id,
+  void OnResponseCompleted(content::DownloadId global_id,
                            InterruptReason reason,
                            const std::string& security_info);
 
@@ -96,22 +113,23 @@ class CONTENT_EXPORT DownloadFileManager
   // download file, as far as the DownloadFileManager is concerned -- if
   // anything happens to the download file after they are called, it will
   // be ignored.
-  void CancelDownload(DownloadId id);
-  void CompleteDownload(DownloadId id);
+  void CancelDownload(content::DownloadId id);
+  void CompleteDownload(content::DownloadId id);
 
   // Called on FILE thread by DownloadManager at the beginning of its shutdown.
-  void OnDownloadManagerShutdown(DownloadManager* manager);
+  void OnDownloadManagerShutdown(content::DownloadManager* manager);
 
   // The DownloadManager in the UI thread has provided an intermediate
   // .crdownload name for the download specified by |id|.
-  void RenameInProgressDownloadFile(DownloadId id, const FilePath& full_path);
+  void RenameInProgressDownloadFile(content::DownloadId id,
+                                    const FilePath& full_path);
 
   // The DownloadManager in the UI thread has provided a final name for the
   // download specified by |id|.
   // |overwrite_existing_file| prevents uniquification, and is used for SAFE
   // downloads, as the user may have decided to overwrite the file.
   // Sent from the UI thread and run on the FILE thread.
-  void RenameCompletingDownloadFile(DownloadId id,
+  void RenameCompletingDownloadFile(content::DownloadId id,
                                     const FilePath& full_path,
                                     bool overwrite_existing_file);
 
@@ -123,6 +141,7 @@ class CONTENT_EXPORT DownloadFileManager
 
  private:
   friend class base::RefCountedThreadSafe<DownloadFileManager>;
+  friend class DownloadFileManagerTest;
   friend class DownloadManagerTest;
   FRIEND_TEST_ALL_PREFIXES(DownloadManagerTest, StartDownload);
 
@@ -140,22 +159,24 @@ class CONTENT_EXPORT DownloadFileManager
   // process.
   void CreateDownloadFile(DownloadCreateInfo* info,
                           const DownloadRequestHandle& request_handle,
-                          DownloadManager* download_manager,
+                          content::DownloadManager* download_manager,
                           bool hash_needed);
 
   // Called only on the download thread.
-  DownloadFile* GetDownloadFile(DownloadId global_id);
+  content::DownloadFile* GetDownloadFile(content::DownloadId global_id);
 
   // Called only from RenameInProgressDownloadFile and
   // RenameCompletingDownloadFile on the FILE thread.
   // |rename_error| indicates what error caused the cancel.
-  void CancelDownloadOnRename(DownloadId global_id, net::Error rename_error);
+  void CancelDownloadOnRename(content::DownloadId global_id,
+                              net::Error rename_error);
 
   // Erases the download file with the given the download |id| and removes
   // it from the maps.
-  void EraseDownload(DownloadId global_id);
+  void EraseDownload(content::DownloadId global_id);
 
-  typedef base::hash_map<DownloadId, DownloadFile*> DownloadFileMap;
+  typedef base::hash_map<content::DownloadId, content::DownloadFile*>
+      DownloadFileMap;
 
   // A map of all in progress downloads.  It owns the download files.
   DownloadFileMap downloads_;
@@ -165,6 +186,7 @@ class CONTENT_EXPORT DownloadFileManager
   base::RepeatingTimer<DownloadFileManager> update_timer_;
 
   ResourceDispatcherHost* resource_dispatcher_host_;
+  scoped_ptr<DownloadFileFactory> download_file_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadFileManager);
 };

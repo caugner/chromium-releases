@@ -17,30 +17,12 @@
 namespace net {
 
 class CertVerifier;
-class DnsCertProvenanceChecker;
-class DnsRRResolver;
 class OriginBoundCertService;
 class SSLCertRequestInfo;
 class SSLHostInfo;
 class SSLHostInfoFactory;
 class SSLInfo;
-struct RRResponse;
-
-// DNSSECProvider is an interface to an object that can return DNSSEC data.
-class DNSSECProvider {
- public:
-  // GetDNSSECRecords will either:
-  //   1) set |*out| to NULL and return OK.
-  //   2) set |*out| to a pointer, which is owned by this object, and return OK.
-  //   3) return IO_PENDING and call |callback| on the current MessageLoop at
-  //      some point in the future. Once the callback has been made, this
-  //      function will return OK if called again.
-  virtual int GetDNSSECRecords(RRResponse** out,
-                               OldCompletionCallback* callback) = 0;
-
- private:
-  ~DNSSECProvider() {}
-};
+class TransportSecurityState;
 
 // This struct groups together several fields which are used by various
 // classes related to SSLClientSocket.
@@ -48,26 +30,28 @@ struct SSLClientSocketContext {
   SSLClientSocketContext()
       : cert_verifier(NULL),
         origin_bound_cert_service(NULL),
-        dnsrr_resolver(NULL),
-        dns_cert_checker(NULL),
+        transport_security_state(NULL),
         ssl_host_info_factory(NULL) {}
 
   SSLClientSocketContext(CertVerifier* cert_verifier_arg,
                          OriginBoundCertService* origin_bound_cert_service_arg,
-                         DnsRRResolver* dnsrr_resolver_arg,
-                         DnsCertProvenanceChecker* dns_cert_checker_arg,
-                         SSLHostInfoFactory* ssl_host_info_factory_arg)
+                         TransportSecurityState* transport_security_state_arg,
+                         SSLHostInfoFactory* ssl_host_info_factory_arg,
+                         const std::string& ssl_session_cache_shard_arg)
       : cert_verifier(cert_verifier_arg),
         origin_bound_cert_service(origin_bound_cert_service_arg),
-        dnsrr_resolver(dnsrr_resolver_arg),
-        dns_cert_checker(dns_cert_checker_arg),
-        ssl_host_info_factory(ssl_host_info_factory_arg) {}
+        transport_security_state(transport_security_state_arg),
+        ssl_host_info_factory(ssl_host_info_factory_arg),
+        ssl_session_cache_shard(ssl_session_cache_shard_arg) {}
 
   CertVerifier* cert_verifier;
   OriginBoundCertService* origin_bound_cert_service;
-  DnsRRResolver* dnsrr_resolver;
-  DnsCertProvenanceChecker* dns_cert_checker;
+  TransportSecurityState* transport_security_state;
   SSLHostInfoFactory* ssl_host_info_factory;
+  // ssl_session_cache_shard is an opaque string that identifies a shard of the
+  // SSL session cache. SSL sockets with the same ssl_session_cache_shard may
+  // resume each other's SSL sessions but we'll never sessions between shards.
+  const std::string ssl_session_cache_shard;
 };
 
 // A client socket that uses SSL as the transport layer.
@@ -84,7 +68,7 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
   // an agreement about the application level protocol to speak over a
   // connection.
   enum NextProtoStatus {
-    // WARNING: These values are serialised to disk. Don't change them.
+    // WARNING: These values are serialized to disk. Don't change them.
 
     kNextProtoUnsupported = 0,  // The server doesn't support NPN.
     kNextProtoNegotiated = 1,   // We agreed on a protocol.
@@ -101,6 +85,7 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
     kProtoHTTP11 = 1,
     kProtoSPDY1 = 2,
     kProtoSPDY2 = 3,
+    kProtoSPDY21 = 4,
   };
 
   // Gets the SSL connection information of the socket.
@@ -127,6 +112,8 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
 
   static NextProto NextProtoFromString(const std::string& proto_string);
 
+  static const char* NextProtoToString(SSLClientSocket::NextProto next_proto);
+
   static const char* NextProtoStatusToString(
       const SSLClientSocket::NextProtoStatus status);
 
@@ -136,21 +123,40 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
 
   static bool IgnoreCertError(int error, int load_flags);
 
+  // ClearSessionCache clears the SSL session cache, used to resume SSL
+  // sessions.
+  static void ClearSessionCache();
+
   virtual bool was_npn_negotiated() const;
 
   virtual bool set_was_npn_negotiated(bool negotiated);
 
-  virtual void UseDNSSEC(DNSSECProvider*) { }
-
   virtual bool was_spdy_negotiated() const;
 
   virtual bool set_was_spdy_negotiated(bool negotiated);
+
+  virtual SSLClientSocket::NextProto protocol_negotiated() const;
+
+  virtual void set_protocol_negotiated(
+      SSLClientSocket::NextProto protocol_negotiated);
+
+  // Returns true if an origin bound certificate was sent on this connection.
+  // This may be useful for protocols, like SPDY, which allow the same
+  // connection to be shared between multiple origins, each of which need
+  // an origin bound certificate.
+  virtual bool was_origin_bound_cert_sent() const;
+
+  virtual bool set_was_origin_bound_cert_sent(bool sent);
 
  private:
   // True if NPN was responded to, independent of selecting SPDY or HTTP.
   bool was_npn_negotiated_;
   // True if NPN successfully negotiated SPDY.
   bool was_spdy_negotiated_;
+  // Protocol that we negotiated with the server.
+  SSLClientSocket::NextProto protocol_negotiated_;
+  // True if an origin bound certificate was sent.
+  bool was_origin_bound_cert_sent_;
 };
 
 }  // namespace net

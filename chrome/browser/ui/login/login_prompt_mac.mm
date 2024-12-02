@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/login/login_prompt.h"
 #import "chrome/browser/ui/login/login_prompt_mac.h"
 
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/string16.h"
 #include "base/string_util.h"
@@ -16,16 +17,16 @@
 #include "chrome/browser/ui/login/login_model.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "net/url_request/url_request.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
-using webkit_glue::PasswordForm;
+using content::WebContents;
+using webkit::forms::PasswordForm;
 
 // ----------------------------------------------------------------------------
 // LoginHandlerMac
@@ -74,7 +75,7 @@ class LoginHandlerMac : public LoginHandler,
     // control).  However, that's OK since any UI interaction in those functions
     // will occur via an InvokeLater on the UI thread, which is guaranteed
     // to happen after this is called (since this was InvokeLater'd first).
-    TabContents* requesting_contents = GetTabContentsForLogin();
+    WebContents* requesting_contents = GetWebContentsForLogin();
     DCHECK(requesting_contents);
 
     TabContentsWrapper* wrapper =
@@ -135,8 +136,8 @@ LoginHandler* LoginHandler::Create(net::AuthChallengeInfo* auth_info,
 
 - (id)initWithLoginHandler:(LoginHandlerMac*)handler {
   NSString* nibPath =
-      [base::mac::MainAppBundle() pathForResource:@"HttpAuthLoginSheet"
-                                          ofType:@"nib"];
+      [base::mac::FrameworkBundle() pathForResource:@"HttpAuthLoginSheet"
+                                             ofType:@"nib"];
   if ((self = [super initWithWindowNibPath:nibPath
                                      owner:self])) {
     handler_ = handler;

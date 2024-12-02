@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,16 +25,10 @@ void SendAccessibilityNotification(int type, AccessibilityEventInfo* info) {
   }
 }
 
-void SendAccessibilityVolumeNotification(double volume, bool is_muted) {
-  Profile* profile = ProfileManager::GetDefaultProfile();
-  AccessibilityVolumeInfo info(profile, volume, is_muted);
-  SendAccessibilityNotification(
-      chrome::NOTIFICATION_ACCESSIBILITY_VOLUME_CHANGED, &info);
-}
-
 AccessibilityControlInfo::AccessibilityControlInfo(
-    Profile* profile, const std::string& control_name)
-    : AccessibilityEventInfo(profile), name_(control_name) {
+    Profile* profile, const std::string& name)
+    : AccessibilityEventInfo(profile),
+      name_(name) {
 }
 
 AccessibilityControlInfo::~AccessibilityControlInfo() {
@@ -43,6 +37,8 @@ AccessibilityControlInfo::~AccessibilityControlInfo() {
 void AccessibilityControlInfo::SerializeToDict(DictionaryValue *dict) const {
   dict->SetString(keys::kNameKey, name_);
   dict->SetString(keys::kTypeKey, type());
+  if (!context_.empty())
+    dict->SetString(keys::kContextKey, context_);
 }
 
 AccessibilityWindowInfo::AccessibilityWindowInfo(Profile* profile,
@@ -55,8 +51,10 @@ const char* AccessibilityWindowInfo::type() const {
 }
 
 AccessibilityButtonInfo::AccessibilityButtonInfo(Profile* profile,
-                                                 const std::string& button_name)
+                                                 const std::string& button_name,
+                                                 const std::string& context)
     : AccessibilityControlInfo(profile, button_name) {
+  set_context(context);
 }
 
 const char* AccessibilityButtonInfo::type() const {
@@ -64,8 +62,11 @@ const char* AccessibilityButtonInfo::type() const {
 }
 
 AccessibilityLinkInfo::AccessibilityLinkInfo(Profile* profile,
-                                             const std::string& link_name)
-      : AccessibilityControlInfo(profile, link_name) { }
+                                             const std::string& link_name,
+                                             const std::string& context)
+    : AccessibilityControlInfo(profile, link_name) {
+  set_context(context);
+}
 
 const char* AccessibilityLinkInfo::type() const {
   return keys::kTypeLink;
@@ -74,6 +75,7 @@ const char* AccessibilityLinkInfo::type() const {
 AccessibilityRadioButtonInfo::AccessibilityRadioButtonInfo(
     Profile* profile,
     const std::string& name,
+    const std::string& context,
     bool checked,
     int item_index,
     int item_count)
@@ -81,6 +83,7 @@ AccessibilityRadioButtonInfo::AccessibilityRadioButtonInfo(
       checked_(checked),
       item_index_(item_index),
       item_count_(item_count) {
+  set_context(context);
 }
 
 const char* AccessibilityRadioButtonInfo::type() const {
@@ -97,9 +100,11 @@ void AccessibilityRadioButtonInfo::SerializeToDict(
 
 AccessibilityCheckboxInfo::AccessibilityCheckboxInfo(Profile* profile,
                                                      const std::string& name,
+                                                     const std::string& context,
                                                      bool checked)
     : AccessibilityControlInfo(profile, name),
       checked_(checked) {
+  set_context(context);
 }
 
 const char* AccessibilityCheckboxInfo::type() const {
@@ -113,11 +118,13 @@ void AccessibilityCheckboxInfo::SerializeToDict(DictionaryValue *dict) const {
 
 AccessibilityTabInfo::AccessibilityTabInfo(Profile* profile,
                                            const std::string& tab_name,
+                                           const std::string& context,
                                            int tab_index,
                                            int tab_count)
     : AccessibilityControlInfo(profile, tab_name),
       tab_index_(tab_index),
       tab_count_(tab_count) {
+  set_context(context);
 }
 
 const char* AccessibilityTabInfo::type() const {
@@ -132,6 +139,7 @@ void AccessibilityTabInfo::SerializeToDict(DictionaryValue *dict) const {
 
 AccessibilityComboBoxInfo::AccessibilityComboBoxInfo(Profile* profile,
                                                      const std::string& name,
+                                                     const std::string& context,
                                                      const std::string& value,
                                                      int item_index,
                                                      int item_count)
@@ -139,6 +147,7 @@ AccessibilityComboBoxInfo::AccessibilityComboBoxInfo(Profile* profile,
       value_(value),
       item_index_(item_index),
       item_count_(item_count) {
+  set_context(context);
 }
 
 const char* AccessibilityComboBoxInfo::type() const {
@@ -154,12 +163,14 @@ void AccessibilityComboBoxInfo::SerializeToDict(DictionaryValue *dict) const {
 
 AccessibilityTextBoxInfo::AccessibilityTextBoxInfo(Profile* profile,
                                                    const std::string& name,
+                                                   const std::string& context,
                                                    bool password)
     : AccessibilityControlInfo(profile, name),
       value_(""),
       password_(password),
       selection_start_(0),
       selection_end_(0) {
+  set_context(context);
 }
 
 const char* AccessibilityTextBoxInfo::type() const {
@@ -176,6 +187,7 @@ void AccessibilityTextBoxInfo::SerializeToDict(DictionaryValue *dict) const {
 
 AccessibilityListBoxInfo::AccessibilityListBoxInfo(Profile* profile,
                                                    const std::string& name,
+                                                   const std::string& context,
                                                    const std::string& value,
                                                    int item_index,
                                                    int item_count)
@@ -183,6 +195,7 @@ AccessibilityListBoxInfo::AccessibilityListBoxInfo(Profile* profile,
       value_(value),
       item_index_(item_index),
       item_count_(item_count) {
+  set_context(context);
 }
 
 const char* AccessibilityListBoxInfo::type() const {
@@ -196,36 +209,6 @@ void AccessibilityListBoxInfo::SerializeToDict(DictionaryValue *dict) const {
   dict->SetInteger(keys::kItemCountKey, item_count_);
 }
 
-AccessibilityVolumeInfo::AccessibilityVolumeInfo(Profile* profile,
-                                                 double volume,
-                                                 bool is_muted)
-    : AccessibilityEventInfo(profile),
-      volume_(volume),
-      is_muted_(is_muted) {
-  DCHECK(profile);
-  DCHECK_GE(volume, 0.0);
-  DCHECK_LE(volume, 100.0);
-}
-
-void AccessibilityVolumeInfo::SerializeToDict(DictionaryValue *dict) const {
-  dict->SetDouble(keys::kVolumeKey, volume_);
-  dict->SetBoolean(keys::kIsVolumeMutedKey, is_muted_);
-}
-
-ScreenUnlockedEventInfo::ScreenUnlockedEventInfo(Profile* profile)
-    : AccessibilityEventInfo(profile) {
-}
-
-void ScreenUnlockedEventInfo::SerializeToDict(DictionaryValue *dict) const {
-}
-
-WokeUpEventInfo::WokeUpEventInfo(Profile* profile)
-    : AccessibilityEventInfo(profile) {
-}
-
-void WokeUpEventInfo::SerializeToDict(DictionaryValue *dict) const {
-}
-
 AccessibilityMenuInfo::AccessibilityMenuInfo(Profile* profile,
                                              const std::string& menu_name)
     : AccessibilityControlInfo(profile, menu_name) {
@@ -237,6 +220,7 @@ const char* AccessibilityMenuInfo::type() const {
 
 AccessibilityMenuItemInfo::AccessibilityMenuItemInfo(Profile* profile,
                                                      const std::string& name,
+                                                     const std::string& context,
                                                      bool has_submenu,
                                                      int item_index,
                                                      int item_count)
@@ -244,6 +228,7 @@ AccessibilityMenuItemInfo::AccessibilityMenuItemInfo(Profile* profile,
       has_submenu_(has_submenu),
       item_index_(item_index),
       item_count_(item_count) {
+  set_context(context);
 }
 
 const char* AccessibilityMenuItemInfo::type() const {

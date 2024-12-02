@@ -66,8 +66,8 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   // the response body.
   virtual HttpStream* CreateConnectResponseStream() OVERRIDE;
 
-  // StreamSocket methods:
-  virtual int Connect(OldCompletionCallback* callback) OVERRIDE;
+  // StreamSocket implementation.
+  virtual int Connect(const CompletionCallback& callback) OVERRIDE;
   virtual void Disconnect() OVERRIDE;
   virtual bool IsConnected() const OVERRIDE;
   virtual bool IsConnectedAndIdle() const OVERRIDE;
@@ -79,19 +79,19 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   virtual int64 NumBytesRead() const OVERRIDE;
   virtual base::TimeDelta GetConnectTimeMicros() const OVERRIDE;
 
-  // Socket methods:
+  // Socket implementation.
   virtual int Read(IOBuffer* buf,
                    int buf_len,
-                   OldCompletionCallback* callback) OVERRIDE;
+                   const CompletionCallback& callback) OVERRIDE;
   virtual int Write(IOBuffer* buf,
                     int buf_len,
-                    OldCompletionCallback* callback) OVERRIDE;
+                    const CompletionCallback& callback) OVERRIDE;
   virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
   virtual bool SetSendBufferSize(int32 size) OVERRIDE;
   virtual int GetPeerAddress(AddressList* address) const OVERRIDE;
   virtual int GetLocalAddress(IPEndPoint* address) const OVERRIDE;
 
-  // SpdyStream::Delegate methods:
+  // SpdyStream::Delegate implementation.
   virtual bool OnSendHeadersComplete(int status) OVERRIDE;
   virtual int OnSendBody() OVERRIDE;
   virtual int OnSendBodyComplete(int status, bool* eof) OVERRIDE;
@@ -128,7 +128,6 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   // and returns the number of bytes read.
   int PopulateUserReadBuffer();
 
-  OldCompletionCallbackImpl<SpdyProxyClientSocket> io_callback_;
   State next_state_;
 
   // Pointer to the SPDY Stream that this sits on top of.
@@ -136,9 +135,9 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
 
   // Stores the callback to the layer above, called on completing Read() or
   // Connect().
-  OldCompletionCallback* read_callback_;
+  CompletionCallback read_callback_;
   // Stores the callback to the layer above, called on completing Write().
-  OldCompletionCallback* write_callback_;
+  CompletionCallback write_callback_;
 
   // CONNECT request and response.
   HttpRequestInfo request_;

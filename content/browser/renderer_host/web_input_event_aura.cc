@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,14 +16,20 @@ WebKit::WebMouseWheelEvent MakeUntranslatedWebMouseWheelEventFromNativeEvent(
     base::NativeEvent native_event);
 WebKit::WebKeyboardEvent MakeWebKeyboardEventFromNativeEvent(
     base::NativeEvent native_event);
+WebKit::WebGestureEvent MakeWebGestureEventFromNativeEvent(
+    base::NativeEvent native_event);
 WebKit::WebTouchPoint* UpdateWebTouchEventFromNativeEvent(
     base::NativeEvent native_event, WebKit::WebTouchEvent* web_event);
 #else
 WebKit::WebMouseEvent MakeWebMouseEventFromAuraEvent(aura::MouseEvent* event);
 WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
     aura::MouseEvent* event);
+WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
+    aura::ScrollEvent* event);
 WebKit::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
     aura::KeyEvent* event);
+WebKit::WebGestureEvent MakeWebGestureEventFromAuraEvent(
+    aura::GestureEvent* event);
 WebKit::WebTouchPoint* UpdateWebTouchEventFromAuraEvent(
     aura::TouchEvent* event, WebKit::WebTouchEvent* web_event);
 #endif
@@ -65,10 +71,9 @@ WebKit::WebMouseEvent MakeWebMouseEvent(aura::MouseEvent* event) {
   webkit_event.windowX = webkit_event.x = event->x();
   webkit_event.windowY = webkit_event.y = event->y();
 
-  const gfx::Point host_point =
-      ui::EventLocationFromNative(event->native_event());
-  webkit_event.globalX = host_point.x();
-  webkit_event.globalY = host_point.y();
+  const gfx::Point root_point = event->root_location();
+  webkit_event.globalX = root_point.x();
+  webkit_event.globalY = root_point.y();
 
   return webkit_event;
 }
@@ -88,10 +93,31 @@ WebKit::WebMouseWheelEvent MakeWebMouseWheelEvent(aura::MouseEvent* event) {
   webkit_event.windowX = webkit_event.x = event->x();
   webkit_event.windowY = webkit_event.y = event->y();
 
-  const gfx::Point host_point =
-      ui::EventLocationFromNative(event->native_event());
-  webkit_event.globalX = host_point.x();
-  webkit_event.globalY = host_point.y();
+  const gfx::Point root_point = event->root_location();
+  webkit_event.globalX = root_point.x();
+  webkit_event.globalY = root_point.y();
+
+  return webkit_event;
+}
+
+WebKit::WebMouseWheelEvent MakeWebMouseWheelEvent(aura::ScrollEvent* event) {
+#if defined(OS_WIN)
+  // Construct an untranslated event from the platform event data.
+  WebKit::WebMouseWheelEvent webkit_event =
+      MakeUntranslatedWebMouseWheelEventFromNativeEvent(event->native_event());
+#else
+  WebKit::WebMouseWheelEvent webkit_event =
+      MakeWebMouseWheelEventFromAuraEvent(event);
+#endif
+
+  // Replace the event's coordinate fields with translated position data from
+  // |event|.
+  webkit_event.windowX = webkit_event.x = event->x();
+  webkit_event.windowY = webkit_event.y = event->y();
+
+  const gfx::Point root_point = event->root_location();
+  webkit_event.globalX = root_point.x();
+  webkit_event.globalY = root_point.y();
 
   return webkit_event;
 }
@@ -109,6 +135,24 @@ WebKit::WebKeyboardEvent MakeWebKeyboardEvent(aura::KeyEvent* event) {
 #else
   return MakeWebKeyboardEventFromAuraEvent(event);
 #endif
+}
+
+WebKit::WebGestureEvent MakeWebGestureEvent(aura::GestureEvent* event) {
+  WebKit::WebGestureEvent gesture_event;
+#if defined(OS_WIN)
+  gesture_event = MakeWebGestureEventFromNativeEvent(event->native_event());
+#else
+  gesture_event = MakeWebGestureEventFromAuraEvent(event);
+#endif
+
+  gesture_event.x = event->x();
+  gesture_event.y = event->y();
+
+  const gfx::Point root_point = event->root_location();
+  gesture_event.globalX = root_point.x();
+  gesture_event.globalY = root_point.y();
+
+  return gesture_event;
 }
 
 WebKit::WebTouchPoint* UpdateWebTouchEvent(aura::TouchEvent* event,

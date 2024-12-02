@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,6 +84,13 @@ ListValue* MakeRepeatedValue(const F& fields, V* (*converter_fn)(T)) {
 #define SET_INT64(field) SET(field, MakeInt64Value)
 #define SET_INT64_REP(field) SET_REP(field, MakeInt64Value)
 #define SET_STR(field) SET(field, Value::CreateStringValue)
+#define SET_STR_REP(field) \
+  value->Set(#field, \
+             MakeRepeatedValue<const std::string&, \
+                               google::protobuf::RepeatedPtrField< \
+                                   std::string >, \
+                               StringValue>(proto.field(), \
+                                            Value::CreateStringValue))
 
 #define SET_EXTENSION(ns, field, fn)                                    \
   do {                                                                  \
@@ -175,8 +182,18 @@ DictionaryValue* PasswordSpecificsDataToValue(
   return value;
 }
 
-DictionaryValue* AppNotificationSpecificsToValue(
-    const sync_pb::AppNotificationSpecifics& proto) {
+DictionaryValue* DeviceInformationToValue(
+    const sync_pb::DeviceInformation& proto) {
+  DictionaryValue* value = new DictionaryValue();
+  SET_STR(cache_guid);
+  SET_STR(name);
+  SET_STR(platform);
+  SET_STR(chrome_version);
+  return value;
+}
+
+DictionaryValue* AppNotificationToValue(
+    const sync_pb::AppNotification& proto) {
   DictionaryValue* value = new DictionaryValue();
   SET_STR(guid);
   SET_STR(app_id);
@@ -200,6 +217,9 @@ DictionaryValue* AppSpecificsToValue(
   DictionaryValue* value = new DictionaryValue();
   SET(extension, ExtensionSpecificsToValue);
   SET(notification_settings, AppSettingsToValue);
+  SET_STR(app_launch_ordinal);
+  SET_STR(page_ordinal);
+
   return value;
 }
 
@@ -219,10 +239,10 @@ DictionaryValue* AutofillProfileSpecificsToValue(
   SET_STR(label);
   SET_STR(guid);
 
-  SET_STR(name_first);
-  SET_STR(name_middle);
-  SET_STR(name_last);
-  SET_STR(email_address);
+  SET_STR_REP(name_first);
+  SET_STR_REP(name_middle);
+  SET_STR_REP(name_last);
+  SET_STR_REP(email_address);
   SET_STR(company_name);
 
   SET_STR(address_home_line1);
@@ -232,8 +252,7 @@ DictionaryValue* AutofillProfileSpecificsToValue(
   SET_STR(address_home_zip);
   SET_STR(address_home_country);
 
-  SET_STR(phone_home_whole_number);
-  SET_STR(phone_fax_whole_number);
+  SET_STR_REP(phone_home_whole_number);
   return value;
 }
 
@@ -286,6 +305,7 @@ DictionaryValue* NigoriSpecificsToValue(
   SET_BOOL(encrypt_search_engines);
   SET_BOOL(sync_tabs);
   SET_BOOL(encrypt_everything);
+  SET_REP(device_information, DeviceInformationToValue);
   return value;
 }
 
@@ -360,7 +380,7 @@ DictionaryValue* EntitySpecificsToValue(
     const sync_pb::EntitySpecifics& specifics) {
   DictionaryValue* value = new DictionaryValue();
   SET_EXTENSION(sync_pb, app, AppSpecificsToValue);
-  SET_EXTENSION(sync_pb, app_notification, AppNotificationSpecificsToValue);
+  SET_EXTENSION(sync_pb, app_notification, AppNotificationToValue);
   SET_EXTENSION(sync_pb, app_setting, AppSettingSpecificsToValue);
   SET_EXTENSION(sync_pb, autofill, AutofillSpecificsToValue);
   SET_EXTENSION(sync_pb, autofill_profile, AutofillProfileSpecificsToValue);
@@ -386,6 +406,7 @@ DictionaryValue* EntitySpecificsToValue(
 #undef SET_INT64
 #undef SET_INT64_REP
 #undef SET_STR
+#undef SET_STR_REP
 
 #undef SET_EXTENSION
 

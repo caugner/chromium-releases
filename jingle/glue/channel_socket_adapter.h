@@ -33,11 +33,11 @@ class TransportChannelSocketAdapter : public net::Socket,
   // Must be called before the session and the channel are destroyed.
   void Close(int error_code);
 
-  // Socket interface.
+  // Socket implementation.
   virtual int Read(net::IOBuffer* buf, int buf_len,
-                   net::OldCompletionCallback* callback) OVERRIDE;
+                   const net::CompletionCallback& callback) OVERRIDE;
   virtual int Write(net::IOBuffer* buf, int buf_len,
-                    net::OldCompletionCallback* callback) OVERRIDE;
+                    const net::CompletionCallback& callback) OVERRIDE;
 
   virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
   virtual bool SetSendBufferSize(int32 size) OVERRIDE;
@@ -52,11 +52,11 @@ class TransportChannelSocketAdapter : public net::Socket,
 
   cricket::TransportChannel* channel_;
 
-  net::OldCompletionCallback* read_callback_;  // Not owned.
+  net::CompletionCallback read_callback_;
   scoped_refptr<net::IOBuffer> read_buffer_;
   int read_buffer_size_;
 
-  net::OldCompletionCallback* write_callback_;  // Not owned.
+  net::CompletionCallback write_callback_;
   scoped_refptr<net::IOBuffer> write_buffer_;
   int write_buffer_size_;
 

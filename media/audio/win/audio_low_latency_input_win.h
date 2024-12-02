@@ -78,7 +78,7 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   // the audio manager who is creating this object.
   WASAPIAudioInputStream(AudioManagerWin* manager,
                          const AudioParameters& params,
-                         ERole device_role);
+                         const std::string& device_id);
   // The dtor is typically called by the AudioManager only and it is usually
   // triggered by calling AudioInputStream::Close().
   virtual ~WASAPIAudioInputStream();
@@ -89,9 +89,13 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   virtual void Stop() OVERRIDE;
   virtual void Close() OVERRIDE;
 
-  // Retrieves the stream format that the audio engine uses for its internal
+  // Retrieves the sample rate used by the audio engine for its internal
   // processing/mixing of shared-mode streams.
   static double HardwareSampleRate(ERole device_role);
+
+  // Retrieves the number of audio channels used by the audio engine for its
+  // internal processing/mixing of shared-mode streams.
+  static uint32 HardwareChannelCount(ERole device_role);
 
   bool started() const { return started_; }
 
@@ -103,11 +107,15 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   void HandleError(HRESULT err);
 
   // The Open() method is divided into these sub methods.
-  HRESULT SetCaptureDevice(ERole device_role);
+  HRESULT SetCaptureDevice();
   HRESULT ActivateCaptureDevice();
   HRESULT GetAudioEngineStreamFormat();
   bool DesiredFormatIsSupported();
   HRESULT InitializeAudioEngine();
+
+  // Retrieves the stream format that the audio engine uses for its internal
+  // processing/mixing of shared-mode streams.
+  static HRESULT GetMixFormat(ERole device_role, WAVEFORMATEX** device_format);
 
   // Initializes the COM library for use by the calling thread and set the
   // thread's concurrency model to multi-threaded.
@@ -145,8 +153,10 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   // Length of the audio endpoint buffer.
   size_t endpoint_buffer_size_frames_;
 
-  // Defines the role that the system has assigned to an audio endpoint device.
-  ERole device_role_;
+  // Contains the unique name of the selected endpoint device.
+  // Note that AudioManagerBase::kDefaultDeviceId represents the default
+  // device role and is not a valid ID as such.
+  std::string device_id_;
 
   // Conversion factor used in delay-estimation calculations.
   // Converts a raw performance counter value to 100-nanosecond unit.

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,10 +44,6 @@
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/tooltip_manager_gtk.h"
 #include "ui/views/widget/widget_delegate.h"
-
-#if defined(HAVE_IBUS)
-#include "ui/views/ime/input_method_ibus.h"
-#endif
 
 using ui::OSExchangeData;
 using ui::OSExchangeDataProviderGtk;
@@ -171,6 +167,7 @@ GtkWindowType WindowTypeToGtkWindowType(Widget::InitParams::Type type) {
   switch (type) {
     case Widget::InitParams::TYPE_BUBBLE:
     case Widget::InitParams::TYPE_WINDOW:
+    case Widget::InitParams::TYPE_PANEL:
     case Widget::InitParams::TYPE_WINDOW_FRAMELESS:
       return GTK_WINDOW_TOPLEVEL;
     default:
@@ -358,14 +355,14 @@ NativeWidgetGtk::NativeWidgetGtk(internal::NativeWidgetDelegate* delegate)
       has_focus_(false),
       always_on_top_(false),
       is_double_buffered_(false),
-      should_handle_menu_key_release_(false),
       dragged_view_(NULL),
       painted_(false),
       has_pointer_grab_(false),
       has_keyboard_grab_(false),
       grab_notify_signal_id_(0),
       is_menu_(false),
-      signal_registrar_(new ui::GtkSignalRegistrar) {
+      signal_registrar_(new ui::GtkSignalRegistrar),
+      destroy_signal_registrar_(new ui::GtkSignalRegistrar) {
   static bool installed_message_loop_observer = false;
   if (!installed_message_loop_observer) {
     installed_message_loop_observer = true;
@@ -376,19 +373,24 @@ NativeWidgetGtk::NativeWidgetGtk(internal::NativeWidgetDelegate* delegate)
 }
 
 NativeWidgetGtk::~NativeWidgetGtk() {
-  // We need to delete the input method before calling DestroyRootView(),
-  // because it'll set focus_manager_ to NULL.
   if (ownership_ == Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET) {
     DCHECK(widget_ == NULL);
     delete delegate_;
   } else {
-    // Disconnect from GObjectDestructorFILO because we're
-    // deleting the NativeWidgetGtk.
     bool has_widget = !!widget_;
-    if (has_widget)
+    if (has_widget) {
+      // Disconnect all signal handlers registered with this object,
+      // except one for "destroy", before deleting the NativeWidgetGtk.
       ui::GObjectDestructorFILO::GetInstance()->Disconnect(
           G_OBJECT(widget_), &OnDestroyedThunk, this);
+      signal_registrar_.reset();
+    }
     CloseNow();
+    // If gtk_widget_destroy didn't fire destroy signal for whatever reason,
+    // fail in debug build and call OnDestroy() for release build.
+    DCHECK(!widget_);
+    if (widget_)
+      OnDestroy(widget_);
     // Call OnNativeWidgetDestroyed because we're not calling
     // OnDestroyedThunk
     if (has_widget)
@@ -563,33 +565,8 @@ void NativeWidgetGtk::ActiveWindowChanged(GdkWindow* active_window) {
 bool NativeWidgetGtk::HandleKeyboardEvent(const KeyEvent& key) {
   if (!GetWidget()->GetFocusManager())
     return false;
-
-  const int key_code = key.key_code();
-  bool handled = false;
-
-  // Always reset |should_handle_menu_key_release_| unless we are handling a
-  // VKEY_MENU key release event. It ensures that VKEY_MENU accelerator can only
-  // be activated when handling a VKEY_MENU key release event which is preceded
-  // by an un-handled VKEY_MENU key press event.
-  if (key_code != ui::VKEY_MENU || key.type() != ui::ET_KEY_RELEASED)
-    should_handle_menu_key_release_ = false;
-
-  if (key.type() == ui::ET_KEY_PRESSED) {
-    // VKEY_MENU is triggered by key release event.
-    // FocusManager::OnKeyEvent() returns false when the key has been consumed.
-    if (key_code != ui::VKEY_MENU)
-      handled = !GetWidget()->GetFocusManager()->OnKeyEvent(key);
-    else
-      should_handle_menu_key_release_ = true;
-  } else if (key_code == ui::VKEY_MENU && should_handle_menu_key_release_ &&
-             (key.flags() & ~ui::EF_ALT_DOWN) == 0) {
-    // Trigger VKEY_MENU when only this key is pressed and released, and both
-    // press and release events are not handled by others.
-    ui::Accelerator accelerator(ui::VKEY_MENU, false, false, false);
-    handled = GetWidget()->GetFocusManager()->ProcessAccelerator(accelerator);
-  }
-
-  return handled;
+  // FocusManager::OnKeyEvent() returns false when the key has been consumed.
+  return !GetWidget()->GetFocusManager()->OnKeyEvent(key);
 }
 
 bool NativeWidgetGtk::SuppressFreezeUpdates() {
@@ -672,24 +649,6 @@ void NativeWidgetGtk::InitNativeWidget(const Widget::InitParams& params) {
                              GDK_WINDOW_TYPE_HINT_MENU);
   }
 
-  if (View::get_use_acceleration_when_possible()) {
-    if (ui::Compositor::compositor_factory()) {
-      compositor_ = (*ui::Compositor::compositor_factory())(this);
-    } else {
-      gint width, height;
-      gdk_drawable_get_size(window_contents_->window, &width, &height);
-      compositor_ = ui::Compositor::Create(this,
-          GDK_WINDOW_XID(window_contents_->window),
-          gfx::Size(width, height));
-    }
-    if (compositor_.get()) {
-      View* root_view = delegate_->AsWidget()->GetRootView();
-      root_view->SetPaintToLayer(true);
-      compositor_->SetRootLayer(root_view->layer());
-      root_view->SetFillsBoundsOpaquely(!transparent_);
-    }
-  }
-
   delegate_->OnNativeWidgetCreated();
 
   if (opacity_ != 255)
@@ -741,8 +700,12 @@ void NativeWidgetGtk::InitNativeWidget(const Widget::InitParams& params) {
                              G_CALLBACK(&OnFocusInThunk), this);
   signal_registrar_->Connect(widget_, "focus_out_event",
                              G_CALLBACK(&OnFocusOutThunk), this);
-  signal_registrar_->Connect(widget_, "destroy",
-                             G_CALLBACK(&OnDestroyThunk), this);
+
+  // Use the dedicated registrar for destory so that other handlers
+  // can be unregistered first.
+  destroy_signal_registrar_->Connect(widget_, "destroy",
+                                     G_CALLBACK(&OnDestroyThunk), this);
+
   signal_registrar_->Connect(widget_, "show",
                              G_CALLBACK(&OnShowThunk), this);
   signal_registrar_->Connect(widget_, "map",
@@ -859,9 +822,6 @@ void NativeWidgetGtk::CalculateOffsetToAncestorWithLayer(
     ui::Layer** layer_parent) {
 }
 
-void NativeWidgetGtk::ReorderLayers() {
-}
-
 void NativeWidgetGtk::ViewRemoved(View* view) {
   if (drop_target_.get())
     drop_target_->ResetTargetViewIfEquals(view);
@@ -949,17 +909,8 @@ bool NativeWidgetGtk::HasMouseCapture() const {
 
 InputMethod* NativeWidgetGtk::CreateInputMethod() {
   // Create input method when pure views is enabled but not on views desktop.
-  // TODO(suzhe): Always enable input method when we start to use
-  // RenderWidgetHostViewViews in normal ChromeOS.
   if (views::Widget::IsPureViews()) {
-#if defined(HAVE_IBUS)
-    InputMethod* input_method =
-        InputMethodIBus::IsInputMethodIBusEnabled() ?
-        static_cast<InputMethod*>(new InputMethodIBus(this)) :
-        static_cast<InputMethod*>(new InputMethodGtk(this));
-#else
     InputMethod* input_method = new InputMethodGtk(this);
-#endif
     input_method->Init(GetWidget());
     return input_method;
   }
@@ -1014,7 +965,9 @@ void NativeWidgetGtk::SetAccessibleRole(ui::AccessibilityTypes::Role role) {
 void NativeWidgetGtk::SetAccessibleState(ui::AccessibilityTypes::State state) {
 }
 
-void NativeWidgetGtk::BecomeModal() {
+void NativeWidgetGtk::InitModalType(ui::ModalType modal_type) {
+  if (modal_type == ui::MODAL_TYPE_NONE)
+    return;
   gtk_window_set_modal(GetNativeWindow(), true);
 }
 
@@ -1294,6 +1247,19 @@ gfx::Rect NativeWidgetGtk::GetWorkAreaBoundsInScreen() const {
 }
 
 void NativeWidgetGtk::SetInactiveRenderingDisabled(bool value) {
+}
+
+Widget::MoveLoopResult NativeWidgetGtk::RunMoveLoop() {
+  NOTIMPLEMENTED();
+  return Widget::MOVE_LOOP_CANCELED;
+}
+
+void NativeWidgetGtk::EndMoveLoop() {
+  NOTIMPLEMENTED();
+}
+
+void NativeWidgetGtk::SetVisibilityChangedAnimationsEnabled(bool value) {
+  // Nothing needed on gtk.
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1603,18 +1569,22 @@ gboolean NativeWidgetGtk::OnScroll(GtkWidget* widget, GdkEventScroll* event) {
   return delegate_->OnMouseEvent(mouse_event);
 }
 
-gboolean NativeWidgetGtk::OnFocusIn(GtkWidget* widget, GdkEventFocus* event) {
+gboolean NativeWidgetGtk::OnFocusIn(GtkWidget* gtk_widget,
+                                    GdkEventFocus* event) {
   if (has_focus_)
     return false;  // This is the second focus-in event in a row, ignore it.
   has_focus_ = true;
 
-  should_handle_menu_key_release_ = false;
+  Widget* widget = GetWidget();
 
-  if (!GetWidget()->is_top_level())
+  if (widget->GetFocusManager())
+    widget->GetFocusManager()->ResetMenuKeyState();
+
+  if (!widget->is_top_level())
     return false;
 
   // Only top-level Widget should have an InputMethod instance.
-  InputMethod* input_method = GetWidget()->GetInputMethod();
+  InputMethod* input_method = widget->GetInputMethod();
   if (input_method)
     input_method->OnFocus();
 
@@ -1624,7 +1594,7 @@ gboolean NativeWidgetGtk::OnFocusIn(GtkWidget* widget, GdkEventFocus* event) {
     // Sets initial focus here. On X11/Gtk, window creation
     // is asynchronous and a focus request has to be made after a window
     // gets created.
-    GetWidget()->SetInitialFocus();
+    widget->SetInitialFocus();
   }
   return false;
 }
@@ -1710,6 +1680,7 @@ void NativeWidgetGtk::OnGrabNotify(GtkWidget* widget, gboolean was_grabbed) {
 
 void NativeWidgetGtk::OnDestroy(GtkWidget* object) {
   signal_registrar_.reset();
+  destroy_signal_registrar_.reset();
   if (grab_notify_signal_id_) {
     g_signal_handler_disconnect(window_contents_, grab_notify_signal_id_);
     grab_notify_signal_id_ = 0;
@@ -1717,6 +1688,9 @@ void NativeWidgetGtk::OnDestroy(GtkWidget* object) {
   delegate_->OnNativeWidgetDestroying();
   if (!child_)
     ActiveWindowWatcherX::RemoveObserver(this);
+  if (widget_)
+    SetNativeWindowProperty(kNativeWidgetKey, NULL);
+
   // Note that this handler is hooked to GtkObject::destroy.
   // NULL out pointers here since we might still be in an observer list
   // until deletion happens.
@@ -1769,12 +1743,8 @@ void NativeWidgetGtk::ScheduleDraw() {
 }
 
 void NativeWidgetGtk::DispatchKeyEventPostIME(const KeyEvent& key) {
-  // Always reset |should_handle_menu_key_release_| unless we are handling a
-  // VKEY_MENU key release event. It ensures that VKEY_MENU accelerator can only
-  // be activated when handling a VKEY_MENU key release event which is preceded
-  // by an unhandled VKEY_MENU key press event. See also HandleKeyboardEvent().
-  if (key.key_code() != ui::VKEY_MENU || key.type() != ui::ET_KEY_RELEASED)
-    should_handle_menu_key_release_ = false;
+  if (GetWidget()->GetFocusManager())
+    GetWidget()->GetFocusManager()->MaybeResetMenuKeyState(key);
 
   // Send the key event to View hierarchy first.
   bool handled = delegate_->OnKeyEvent(key);

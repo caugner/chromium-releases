@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,9 +24,11 @@ const char kAboutVersionURL[] = "about:version";
 
 // Add Chrome UI URLs as necessary, in alphabetical order.
 // Be sure to add the corresponding kChromeUI*Host constant below.
+// This is the About Chrome page.
+const char kChromeUIAboutPageFrameURL[] = "chrome://about-page-frame/";
+// This is a WebUI page that lists other WebUI pages.
 const char kChromeUIAboutURL[] = "chrome://about/";
 const char kChromeUIBookmarksURL[] = "chrome://bookmarks/";
-const char kChromeUIBugReportURL[] = "chrome://bugreport/";
 const char kChromeUICertificateViewerURL[] = "chrome://view-cert/";
 const char kChromeUIChromeURLsURL[] = "chrome://chrome-urls/";
 const char kChromeUICloudPrintResourcesURL[] = "chrome://cloudprintresources/";
@@ -39,8 +41,10 @@ const char kChromeUIDevToolsURL[] = "chrome-devtools://devtools/";
 const char kChromeUIDownloadsURL[] = "chrome://downloads/";
 const char kChromeUIEditSearchEngineDialogURL[] = "chrome://editsearchengine/";
 const char kChromeUIExtensionIconURL[] = "chrome://extension-icon/";
+const char kChromeUIExtensionsFrameURL[] = "chrome://extensions-frame/";
 const char kChromeUIExtensionsURL[] = "chrome://extensions/";
 const char kChromeUIFaviconURL[] = "chrome://favicon/";
+const char kChromeUIFeedbackURL[] = "chrome://feedback/";
 const char kChromeUIFlagsURL[] = "chrome://flags/";
 const char kChromeUIFlashURL[] = "chrome://flash/";
 const char kChromeUIGpuCleanURL[] = "chrome://gpuclean";
@@ -59,17 +63,23 @@ const char kChromeUINetInternalsURL[] = "chrome://net-internals/";
 const char kChromeUINetworkViewCacheURL[] = "chrome://view-http-cache/";
 const char kChromeUINewProfile[] = "chrome://newprofile/";
 const char kChromeUINewTabURL[] = "chrome://newtab/";
+const char kChromeUIOmniboxURL[] = "chrome://omnibox/";
 const char kChromeUIPluginsURL[] = "chrome://plugins/";
 const char kChromeUIPolicyURL[] = "chrome://policy/";
 const char kChromeUIPrintURL[] = "chrome://print/";
 const char kChromeUISessionsURL[] = "chrome://sessions/";
 const char kChromeUISettingsURL[] = "chrome://settings/";
+// settings-frame is the URL used to directly access the new settings page in
+// the UberPage, AKA options2.
+const char kChromeUISettingsFrameURL[] = "chrome://settings-frame/";
 const char kChromeUIShorthangURL[] = "chrome://shorthang/";
 const char kChromeUISSLClientCertificateSelectorURL[] = "chrome://select-cert/";
 const char kChromeUISyncPromoURL[] = "chrome://syncpromo/";
 const char kChromeUITaskManagerURL[] = "chrome://tasks/";
 const char kChromeUITermsURL[] = "chrome://terms/";
 const char kChromeUIThumbnailURL[] = "chrome://thumb/";
+const char kChromeUIUberURL[] = "chrome://chrome/";
+const char kChromeUIUberFrameURL[] = "chrome://uber-frame/";
 const char kChromeUIVersionURL[] = "chrome://version/";
 const char kChromeUIWorkersURL[] = "chrome://workers/";
 
@@ -102,23 +112,20 @@ const char kChromeUIFileManagerURL[] = "chrome://files/";
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
 const char kChromeUICollectedCookiesURL[] = "chrome://collected-cookies/";
 const char kChromeUIHttpAuthURL[] = "chrome://http-auth/";
-const char kChromeUIRepostFormWarningURL[] = "chrome://repost-form-warning/";
-#endif
-
-#if defined(USE_AURA)
-const char kChromeUIAppListURL[] = "chrome://app-list/";
+const char kChromeUITabModalConfirmDialogURL[] =
+    "chrome://tab-modal-confirm-dialog/";
 #endif
 
 // Add Chrome UI hosts here, in alphabetical order.
 // Add hosts to kChromePaths in browser_about_handler.cc to be listed by
 // chrome://chrome-urls (about:about) and the built-in AutocompleteProvider.
 const char kChromeUIAboutHost[] = "about";
+const char kChromeUIAboutPageFrameHost[] = "about-page-frame";
 const char kChromeUIAppCacheInternalsHost[] = "appcache-internals";
 const char kChromeUIBlankHost[] = "blank";
 const char kChromeUIBlobInternalsHost[] = "blob-internals";
 const char kChromeUIBookmarksHost[] = "bookmarks";
 const char kChromeUIBrowserCrashHost[] = "inducebrowsercrashforrealz";
-const char kChromeUIBugReportHost[] = "bugreport";
 const char kChromeUICacheHost[] = "cache";
 const char kChromeUICertificateViewerHost[] = "view-cert";
 const char kChromeUIChromeURLsHost[] = "chrome-urls";
@@ -136,8 +143,10 @@ const char kChromeUIDNSHost[] = "dns";
 const char kChromeUIDownloadsHost[] = "downloads";
 const char kChromeUIEditSearchEngineDialogHost[] = "editsearchengine";
 const char kChromeUIExtensionIconHost[] = "extension-icon";
+const char kChromeUIExtensionsFrameHost[] = "extensions-frame";
 const char kChromeUIExtensionsHost[] = "extensions";
 const char kChromeUIFaviconHost[] = "favicon";
+const char kChromeUIFeedbackHost[] = "feedback";
 const char kChromeUIFlagsHost[] = "flags";
 const char kChromeUIFlashHost[] = "flash";
 const char kChromeUIGpuCleanHost[] = "gpuclean";
@@ -157,8 +166,10 @@ const char kChromeUIMediaInternalsHost[] = "media-internals";
 const char kChromeUIMemoryHost[] = "memory";
 const char kChromeUIMemoryRedirectHost[] = "memory-redirect";
 const char kChromeUINetInternalsHost[] = "net-internals";
+const char kChromeUINetworkActionPredictorHost[] = "network-action-predictor";
 const char kChromeUINetworkViewCacheHost[] = "view-http-cache";
 const char kChromeUINewTabHost[] = "newtab";
+const char kChromeUIOmniboxHost[] = "omnibox";
 const char kChromeUIPluginsHost[] = "plugins";
 const char kChromeUIPolicyHost[] = "policy";
 const char kChromeUIPrintHost[] = "print";
@@ -167,6 +178,7 @@ const char kChromeUIQuotaInternalsHost[] = "quota-internals";
 const char kChromeUIResourcesHost[] = "resources";
 const char kChromeUISessionsHost[] = "sessions";
 const char kChromeUISettingsHost[] = "settings";
+const char kChromeUISettingsFrameHost[] = "settings-frame";
 const char kChromeUIShorthangHost[] = "shorthang";
 const char kChromeUISSLClientCertificateSelectorHost[] = "select-cert";
 const char kChromeUIStatsHost[] = "stats";
@@ -180,6 +192,8 @@ const char kChromeUITermsHost[] = "terms";
 const char kChromeUIThumbnailHost[] = "thumb";
 const char kChromeUITouchIconHost[] = "touch-icon";
 const char kChromeUITracingHost[] = "tracing";
+const char kChromeUIUberFrameHost[] = "uber-frame";
+const char kChromeUIUberHost[] = "chrome";
 const char kChromeUIVersionHost[] = "version";
 const char kChromeUIWorkersHost[] = "workers";
 
@@ -230,11 +244,7 @@ const char kChromeUIFileManagerHost[] = "files";
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
 const char kChromeUICollectedCookiesHost[] = "collected-cookies";
 const char kChromeUIHttpAuthHost[] = "http-auth";
-const char kChromeUIRepostFormWarningHost[] = "repost-form-warning";
-#endif
-
-#if defined(USE_AURA)
-const char kChromeUIAppListHost[] = "app-list";
+const char kChromeUITabModalConfirmDialogHost[] = "tab-modal-confirm-dialog";
 #endif
 
 // Option sub pages.
@@ -266,85 +276,126 @@ const char kSyncGoogleDashboardURL[] = "https://www.google.com/dashboard/";
 
 const char kPasswordManagerLearnMoreURL[] =
 #if defined(OS_CHROMEOS)
-    "https://www.google.com/support/chromeos/bin/answer.py?answer=95606";
+    "https://support.google.com/chromeos/?p=settings_password";
 #else
-    "https://www.google.com/support/chrome/bin/answer.py?answer=95606";
+    "https://support.google.com/chrome/?p=settings_password";
 #endif
 
 const char kChromeHelpURL[] =
 #if defined(OS_CHROMEOS)
-  "https://www.google.com/support/chromeos/";
+#if defined(OFFICIAL_BUILD)
+    "chrome-extension://honijodknafkokifofgiaalefdiedpko/main.html";
 #else
-  "https://www.google.com/support/chrome/";
+    "https://support.google.com/chromeos/?p=wrench";
+#endif  // defined(OFFICIAL_BUILD
+#else
+    "https://support.google.com/chrome/?p=wrench";
+#endif
+
+const char kSettingsSearchHelpURL[] =
+#if defined(OS_CHROMEOS)
+    "https://support.google.com/chromeos/?p=settings_search_help";
+#else
+    "https://support.google.com/chrome/?p=settings_search_help";
+#endif
+
+const char kAboutGoogleTranslateURL[] =
+#if defined(OS_CHROMEOS)
+    "https://support.google.com/chromeos/?p=ib_translation_bar";
+#else
+    "https://support.google.com/chrome/?p=ib_translation_bar";
+#endif
+
+const char kAutofillHelpURL[] =
+#if defined(OS_CHROMEOS)
+    "https://support.google.com/chromeos/?p=settings_autofill";
+#else
+    "https://support.google.com/chrome/?p=settings_autofill";
+#endif
+
+const char kInstantLearnMoreURL[] =
+#if defined(OS_CHROMEOS)
+    "https://support.google.com/chromeos/?p=settings_instant_policy";
+#else
+    "https://support.google.com/chrome/?p=settings_instant_policy";
 #endif
 
 const char kPageInfoHelpCenterURL[] =
 #if defined(OS_CHROMEOS)
-    "https://www.google.com/support/chromeos/bin/answer.py?answer=95617";
+    "https://support.google.com/chromeos/?p=ui_security_indicator";
 #else
-    "https://www.google.com/support/chrome/bin/answer.py?answer=95617";
+    "https://support.google.com/chrome/?p=ui_security_indicator";
 #endif
 
 const char kCrashReasonURL[] =
 #if defined(OS_CHROMEOS)
-    "https://www.google.com/support/chromeos/bin/answer.py?answer=1047340";
+    "https://support.google.com/chromeos/?p=e_awsnap";
 #else
-    "https://www.google.com/support/chrome/bin/answer.py?answer=95669";
+    "https://support.google.com/chrome/?p=e_awsnap";
 #endif
 
 const char kKillReasonURL[] =
-    "http://www.google.com/support/chrome/bin/answer.py?answer=1270364";
+#if defined(OS_CHROMEOS)
+    "https://support.google.com/chromeos/?p=e_deadjim";
+#else
+    "https://support.google.com/chrome/?p=e_deadjim";
+#endif
 
 const char kPrivacyLearnMoreURL[] =
 #if defined(OS_CHROMEOS)
-    "https://www.google.com/support/chromeos/bin/answer.py?answer=1047334";
+    "https://support.google.com/chromeos/?p=settings_privacy";
 #else
-    "https://www.google.com/support/chrome/bin/answer.py?answer=114836";
+    "https://support.google.com/chrome/?p=settings_privacy";
 #endif
 
 const char kChromiumProjectURL[] = "http://code.google.com/chromium/";
 
 const char kLearnMoreReportingURL[] =
-    "https://www.google.com/support/chrome/bin/answer.py?answer=96817";
+    "https://support.google.com/chrome/?p=ui_usagestat";
 
 const char kOutdatedPluginLearnMoreURL[] =
-    "https://www.google.com/support/chrome/bin/answer.py?answer=1181003";
+    "https://support.google.com/chrome/?p=ib_outdated_plugin";
 
 const char kBlockedPluginLearnMoreURL[] =
-    "https://www.google.com/support/chrome/bin/answer.py?answer=1247383";
+    "https://support.google.com/chrome/?p=ib_blocked_plugin";
 
 const char kSpeechInputAboutURL[] =
-    "https://www.google.com/support/chrome/bin/answer.py?answer=1407892";
+    "https://support.google.com/chrome/?p=ui_speech_input";
 
 const char kLearnMoreRegisterProtocolHandlerURL[] =
-    "http://www.google.com/support/chrome/bin/answer.py?answer=1382847";
+    "https://support.google.com/chrome/?p=ib_protocol_handler";
 
 const char kSyncLearnMoreURL[] =
-    "http://www.google.com/support/chrome/bin/answer.py?answer=165139";
+    "https://support.google.com/chrome/?p=settings_sign_in";
 
 const char kDownloadScanningLearnMoreURL[] =
-    "http://www.google.com/support/chrome/bin/answer.py?answer=99020";
+    "https://support.google.com/chrome/?p=ib_download_scan";
 
 const char kSyncEverythingLearnMoreURL[] =
-    "https://www.google.com/support/chrome/bin/answer.py?answer=185277";
+    "https://support.google.com/chrome/?p=settings_sync_all";
 
-#if defined(OS_CHROMEOS)
 const char kCloudPrintLearnMoreURL[] =
-    "https://www.google.com/support/chromeos/bin/topic.py?topic=29023";
+#if defined(OS_CHROMEOS)
+    "https://support.google.com/chromeos/?p=settings_cloud_print";
+#else
+    "https://support.google.com/chrome/?p=settings_cloud_print";
 #endif
 
 const char kInvalidPasswordHelpURL[] =
-    "http://www.google.com/support/accounts/bin/answer.py?ctx=ch&answer=27444";
+    "https://support.google.com/accounts/bin/answer.py?ctx=ch&answer=27444";
 
 const char kCanNotAccessAccountURL[] =
-    "http://www.google.com/support/accounts/bin/answer.py?answer=48598";
+    "https://support.google.com/accounts/bin/answer.py?answer=48598";
 
 const char kSyncEncryptionHelpURL[] =
 #if defined(OS_CHROMEOS)
-    "http://www.google.com/support/chromeos/bin/answer.py?answer=1181035";
+    "https://support.google.com/chromeos/?p=settings_encryption";
 #else
-    "http://www.google.com/support/chrome/bin/answer.py?answer=1181035";
+    "https://support.google.com/chrome/?p=settings_encryption";
 #endif
+
+const char kSyncErrorsHelpURL[] =
+    "https://support.google.com/chrome/?p=settings_sync_error";
 
 const char kSyncCreateNewAccountURL[] =
     "https://www.google.com/accounts/NewAccount?service=chromiumsync";

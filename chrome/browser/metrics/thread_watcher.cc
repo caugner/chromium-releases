@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,10 +71,6 @@ void ThreadUnresponsive_IO() {
   CHECK(false);
 }
 
-void ThreadUnresponsive_WEB_SOCKET_PROXY() {
-  CHECK(false);
-}
-
 #if defined(COMPILER_MSVC)
 MSVC_POP_WARNING()
 #pragma optimize("", on)
@@ -88,7 +84,7 @@ void CrashBecauseThreadWasUnresponsive(BrowserThread::ID thread_id) {
       return ThreadUnresponsive_UI();
     case BrowserThread::DB:
       return ThreadUnresponsive_DB();
-    case BrowserThread::WEBKIT:
+    case BrowserThread::WEBKIT_DEPRECATED:
       return ThreadUnresponsive_WEBKIT();
     case BrowserThread::FILE:
       return ThreadUnresponsive_FILE();
@@ -100,10 +96,6 @@ void CrashBecauseThreadWasUnresponsive(BrowserThread::ID thread_id) {
       return ThreadUnresponsive_CACHE();
     case BrowserThread::IO:
       return ThreadUnresponsive_IO();
-#if defined(OS_CHROMEOS)
-    case BrowserThread::WEB_SOCKET_PROXY:
-      return ThreadUnresponsive_WEB_SOCKET_PROXY();
-#endif
     case BrowserThread::ID_COUNT:
       CHECK(false);  // This shouldn't actually be reached!
       break;
@@ -238,7 +230,7 @@ void ThreadWatcher::PostPingMessage() {
           FROM_HERE,
           base::Bind(&ThreadWatcher::OnCheckResponsiveness,
                      weak_ptr_factory_.GetWeakPtr(), ping_sequence_number_),
-          unresponsive_time_.InMilliseconds());
+          unresponsive_time_);
   } else {
     // Watched thread might have gone away, stop watching it.
     DeActivateThreadWatching();
@@ -274,7 +266,7 @@ void ThreadWatcher::OnPongMessage(uint64 ping_sequence_number) {
       FROM_HERE,
       base::Bind(&ThreadWatcher::PostPingMessage,
                  weak_ptr_factory_.GetWeakPtr()),
-      sleep_time_.InMilliseconds());
+      sleep_time_);
 }
 
 void ThreadWatcher::OnCheckResponsiveness(uint64 ping_sequence_number) {
@@ -303,7 +295,7 @@ void ThreadWatcher::OnCheckResponsiveness(uint64 ping_sequence_number) {
       FROM_HERE,
       base::Bind(&ThreadWatcher::OnCheckResponsiveness,
                  weak_ptr_factory_.GetWeakPtr(), ping_sequence_number_),
-      unresponsive_time_.InMilliseconds());
+      unresponsive_time_);
   responsive_ = false;
 }
 
@@ -383,7 +375,7 @@ void ThreadWatcher::GotNoResponse() {
 
   // Crash the browser if the watched thread is to be crashed on hang and if the
   // number of other threads responding is equal to live_threads_threshold_.
-  if (crash_on_hang_ && responding_thread_count == live_threads_threshold_) {
+  if (crash_on_hang_ && responding_thread_count <= live_threads_threshold_) {
     static bool crashed_once = false;
     if (!crashed_once) {
       crashed_once = true;
@@ -410,7 +402,7 @@ const int ThreadWatcherList::kUnresponsiveSeconds = 2;
 // static
 const int ThreadWatcherList::kUnresponsiveCount = 9;
 // static
-const int ThreadWatcherList::kLiveThreadsThreshold = 1;
+const int ThreadWatcherList::kLiveThreadsThreshold = 3;
 
 // static
 void ThreadWatcherList::StartWatchingAll(const CommandLine& command_line) {
@@ -431,7 +423,7 @@ void ThreadWatcherList::StartWatchingAll(const CommandLine& command_line) {
                  unresponsive_threshold,
                  crash_on_hang_thread_names,
                  live_threads_threshold),
-      base::TimeDelta::FromSeconds(120).InMilliseconds());
+      base::TimeDelta::FromSeconds(120));
 }
 
 // static
@@ -572,6 +564,11 @@ void ThreadWatcherList::InitializeAndStartWatching(
   ThreadWatcherList* thread_watcher_list = new ThreadWatcherList();
   CHECK(thread_watcher_list);
 
+  BrowserThread::PostTask(
+      BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(&StartupTimeBomb::DisarmStartupTimeBomb));
+
   const base::TimeDelta kSleepTime =
       base::TimeDelta::FromSeconds(kSleepSeconds);
   const base::TimeDelta kUnresponsiveTime =
@@ -596,11 +593,6 @@ void ThreadWatcherList::InitializeAndStartWatching(
   StartWatching(BrowserThread::CACHE, "CACHE", kSleepTime, kUnresponsiveTime,
                 unresponsive_threshold, crash_on_hang_thread_names,
                 live_threads_threshold);
-
-  BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&StartupTimeBomb::DisarmStartupTimeBomb));
 }
 
 // static
@@ -715,17 +707,11 @@ void ThreadWatcherObserver::Observe(
 // WatchDogThread methods and members.
 
 // This lock protects g_watchdog_thread.
-static base::LazyInstance<base::Lock,
-                          base::LeakyLazyInstanceTraits<base::Lock> >
+static base::LazyInstance<base::Lock>::Leaky
     g_watchdog_lock = LAZY_INSTANCE_INITIALIZER;
 
 // The singleton of this class.
 static WatchDogThread* g_watchdog_thread = NULL;
-
-
-// The WatchDogThread object must outlive any tasks posted to the IO thread
-// before the Quit task.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(WatchDogThread);
 
 WatchDogThread::WatchDogThread() : Thread("BrowserWatchdog") {
 }
@@ -744,28 +730,28 @@ bool WatchDogThread::CurrentlyOnWatchDogThread() {
 // static
 bool WatchDogThread::PostTask(const tracked_objects::Location& from_here,
                               const base::Closure& task) {
-  return PostTaskHelper(from_here, task, 0);
+  return PostTaskHelper(from_here, task, base::TimeDelta());
 }
 
 // static
 bool WatchDogThread::PostDelayedTask(const tracked_objects::Location& from_here,
                                      const base::Closure& task,
-                                     int64 delay_ms) {
-  return PostTaskHelper(from_here, task, delay_ms);
+                                     base::TimeDelta delay) {
+  return PostTaskHelper(from_here, task, delay);
 }
 
 // static
 bool WatchDogThread::PostTaskHelper(
     const tracked_objects::Location& from_here,
     const base::Closure& task,
-    int64 delay_ms) {
+    base::TimeDelta delay) {
   {
     base::AutoLock lock(g_watchdog_lock.Get());
 
     MessageLoop* message_loop = g_watchdog_thread ?
         g_watchdog_thread->message_loop() : NULL;
     if (message_loop) {
-      message_loop->PostDelayedTask(from_here, task, delay_ms);
+      message_loop->PostDelayedTask(from_here, task, delay);
       return true;
     }
   }
@@ -857,23 +843,38 @@ StartupTimeBomb::~StartupTimeBomb() {
 
 void StartupTimeBomb::Arm(const base::TimeDelta& duration) {
   DCHECK_EQ(thread_id_, base::PlatformThread::CurrentId());
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!startup_watchdog_);
-  startup_watchdog_ = new StartupWatchDogThread(duration);
-  startup_watchdog_->Arm();
+  // TODO(rtenneti): http://crbug.com/112970. Don't arm the startup timebomb
+  // until we fix breakpad code not to crash in logging::DumpWithoutCrashing().
+  // startup_watchdog_ = new StartupWatchDogThread(duration);
+  // startup_watchdog_->Arm();
+  return;
 }
 
 void StartupTimeBomb::Disarm() {
   DCHECK_EQ(thread_id_, base::PlatformThread::CurrentId());
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (startup_watchdog_) {
     startup_watchdog_->Disarm();
+    startup_watchdog_->Cleanup();
+    DeleteStartupWatchdog();
+  }
+}
+
+void StartupTimeBomb::DeleteStartupWatchdog() {
+  DCHECK_EQ(thread_id_, base::PlatformThread::CurrentId());
+  if (startup_watchdog_->IsJoinable()) {
     // Allow the watchdog thread to shutdown on UI. Watchdog thread shutdowns
     // very fast.
     base::ThreadRestrictions::SetIOAllowed(true);
     delete startup_watchdog_;
     startup_watchdog_ = NULL;
+    return;
   }
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&StartupTimeBomb::DeleteStartupWatchdog,
+                 base::Unretained(this)),
+      base::TimeDelta::FromSeconds(10));
 }
 
 // static
@@ -908,10 +909,10 @@ void ShutdownWatcherHelper::Arm(const base::TimeDelta& duration) {
 
   chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
   if (channel == chrome::VersionInfo::CHANNEL_STABLE) {
-    actual_duration *= 50;
+    actual_duration *= 20;
   } else if (channel == chrome::VersionInfo::CHANNEL_BETA ||
              channel == chrome::VersionInfo::CHANNEL_DEV) {
-    actual_duration *= 25;
+    actual_duration *= 10;
   }
 
 #if defined(OS_WIN)

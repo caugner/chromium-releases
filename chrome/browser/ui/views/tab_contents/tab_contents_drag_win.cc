@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "base/bind.h"
 #include "base/file_path.h"
 #include "base/message_loop.h"
-#include "base/task.h"
+#include "base/pickle.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
@@ -23,10 +23,12 @@
 #include "chrome/common/url_constants.h"
 #include "content/browser/download/drag_download_file.h"
 #include "content/browser/download/drag_download_util.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/web_contents.h"
 #include "net/base/net_util.h"
+#include "ui/base/clipboard/clipboard_util_win.h"
+#include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/views/drag_utils.h"
 #include "webkit/glue/webdropdata.h"
 
@@ -118,10 +120,10 @@ void TabContentsDragWin::StartDragging(const WebDropData& drop_data,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   drag_source_ = new WebDragSource(view_->GetNativeView(),
-                                   view_->GetTabContents());
+                                   view_->GetWebContents());
 
-  const GURL& page_url = view_->GetTabContents()->GetURL();
-  const std::string& page_encoding = view_->GetTabContents()->encoding();
+  const GURL& page_url = view_->GetWebContents()->GetURL();
+  const std::string& page_encoding = view_->GetWebContents()->GetEncoding();
 
   // If it is not drag-out, do the drag-and-drop in the current UI thread.
   if (drop_data.download_metadata.empty()) {
@@ -213,7 +215,7 @@ void TabContentsDragWin::PrepareDragForDownload(
                            download_url,
                            page_url,
                            page_encoding,
-                           view_->GetTabContents());
+                           view_->GetWebContents());
   ui::OSExchangeData::DownloadFileInfo file_download(FilePath(),
                                                      download_file.get());
   data->SetDownloadFileInfo(file_download);
@@ -274,6 +276,7 @@ void TabContentsDragWin::DoDragging(const WebDropData& drop_data,
                                     const gfx::Point& image_offset) {
   ui::OSExchangeData data;
 
+  // TODO(dcheng): Figure out why this is mutually exclusive.
   if (!drop_data.download_metadata.empty()) {
     PrepareDragForDownload(drop_data, &data, page_url, page_encoding);
 
@@ -293,6 +296,12 @@ void TabContentsDragWin::DoDragging(const WebDropData& drop_data,
       data.SetString(drop_data.plain_text);
     if (drop_data.url.is_valid())
       PrepareDragForUrl(drop_data, &data);
+    if (!drop_data.custom_data.empty()) {
+      Pickle pickle;
+      ui::WriteCustomDataToPickle(drop_data.custom_data, &pickle);
+      data.SetPickledData(ui::ClipboardUtil::GetWebCustomDataFormat()->cfFormat,
+                          pickle);
+    }
   }
 
   // Set drag image.

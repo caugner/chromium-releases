@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
+#include "base/time.h"
 #include "base/threading/non_thread_safe.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/auth.h"
@@ -47,10 +48,6 @@ class AppCacheInterceptor;
 class AppCacheRequestHandlerTest;
 class AppCacheURLRequestJobTest;
 }
-
-namespace base {
-class Time;
-}  // namespace base
 
 // Temporary layering violation to allow existing users of a deprecated
 // interface.
@@ -265,12 +262,13 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
     // safe thing and Cancel() the request or decide to proceed by calling
     // ContinueDespiteLastError().  cert_error is a ERR_* error code
     // indicating what's wrong with the certificate.
-    // If |is_hsts_host| is true then the host in question is an HSTS host
-    // which demands a higher level of security. In this case, errors must not
-    // be bypassable by the user.
+    // If |fatal| is true then the host in question demands a higher level
+    // of security (due e.g. to HTTP Strict Transport Security, user
+    // preference, or built-in policy). In this case, errors must not be
+    // bypassable by the user.
     virtual void OnSSLCertificateError(URLRequest* request,
                                        const SSLInfo& ssl_info,
-                                       bool is_hsts_host);
+                                       bool fatal);
 
     // Called when reading cookies to allow the delegate to block access to the
     // cookie. This method will never be invoked when LOAD_DO_NOT_SEND_COOKIES
@@ -381,18 +379,7 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
   // appropriate value before calling Start().
   //
   // When uploading data, bytes_len must be non-zero.
-  // When uploading a file range, length must be non-zero. If length
-  // exceeds the end-of-file, the upload is clipped at end-of-file. If the
-  // expected modification time is provided (non-zero), it will be used to
-  // check if the underlying file has been changed or not. The granularity of
-  // the time comparison is 1 second since time_t precision is used in WebKit.
   void AppendBytesToUpload(const char* bytes, int bytes_len);  // takes a copy
-  void AppendFileRangeToUpload(const FilePath& file_path,
-                               uint64 offset, uint64 length,
-                               const base::Time& expected_modification_time);
-  void AppendFileToUpload(const FilePath& file_path) {
-    AppendFileRangeToUpload(file_path, 0, kuint64max, base::Time());
-  }
 
   // Indicates that the request body should be sent using chunked transfer
   // encoding. This method may only be called before Start() is called.
@@ -456,6 +443,9 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
   // the response status line.  Restrictions on GetResponseHeaders apply.
   void GetAllResponseHeaders(std::string* headers);
 
+  // The time when |this| was constructed.
+  base::TimeTicks creation_time() const { return creation_time_; }
+
   // The time at which the returned response was requested.  For cached
   // responses, this is the last time the cache entry was validated.
   const base::Time& request_time() const {
@@ -470,18 +460,6 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
 
   // Indicate if this response was fetched from disk cache.
   bool was_cached() const { return response_info_.was_cached; }
-
-  // True if response could use alternate protocol. However, browser will
-  // ignore the alternate protocol if spdy is not enabled.
-  bool was_fetched_via_spdy() const {
-    return response_info_.was_fetched_via_spdy;
-  }
-
-  // Returns true if the URLRequest was delivered after NPN is negotiated,
-  // using either SPDY or HTTP.
-  bool was_npn_negotiated() const {
-    return response_info_.was_npn_negotiated;
-  }
 
   // Returns true if the URLRequest was delivered through a proxy.
   bool was_fetched_via_proxy() const {
@@ -716,8 +694,7 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
   void NotifyAuthRequired(AuthChallengeInfo* auth_info);
   void NotifyAuthRequiredComplete(NetworkDelegate::AuthRequiredResponse result);
   void NotifyCertificateRequested(SSLCertRequestInfo* cert_request_info);
-  void NotifySSLCertificateError(const SSLInfo& ssl_info,
-                                 bool is_hsts_host);
+  void NotifySSLCertificateError(const SSLInfo& ssl_info, bool fatal);
   bool CanGetCookies(const CookieList& cookie_list) const;
   bool CanSetCookie(const std::string& cookie_line,
                     CookieOptions* options) const;
@@ -813,6 +790,8 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
   // the authentication challenge being handled by |NotifyAuthRequired|.
   AuthCredentials auth_credentials_;
   scoped_refptr<AuthChallengeInfo> auth_info_;
+
+  base::TimeTicks creation_time_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequest);
 };

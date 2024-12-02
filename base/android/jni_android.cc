@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <map>
 
-#include "base/android/scoped_java_ref.h"
 #include "base/atomicops.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
@@ -41,7 +40,7 @@ struct MethodIdentifier {
 };
 
 typedef std::map<MethodIdentifier, jmethodID> MethodIDMap;
-base::LazyInstance<MethodIDMap, base::LeakyLazyInstanceTraits<MethodIDMap> >
+base::LazyInstance<MethodIDMap>::Leaky
     g_method_id_map = LAZY_INSTANCE_INITIALIZER;
 const base::subtle::AtomicWord kUnlocked = 0;
 const base::subtle::AtomicWord kLocked = 1;
@@ -55,7 +54,6 @@ namespace android {
 JNIEnv* AttachCurrentThread() {
   if (!g_jvm)
     return NULL;
-
   JNIEnv* env = NULL;
   jint ret = g_jvm->AttachCurrentThread(&env, NULL);
   DCHECK_EQ(ret, JNI_OK);
@@ -74,9 +72,9 @@ void InitVM(JavaVM* vm) {
   g_jvm = vm;
 }
 
-void InitApplicationContext(jobject context) {
+void InitApplicationContext(const JavaRef<jobject>& context) {
   DCHECK(!g_application_context);
-  g_application_context = context;
+  g_application_context = context.env()->NewGlobalRef(context.obj());
 }
 
 jobject GetApplicationContext() {

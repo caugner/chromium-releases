@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,22 +11,20 @@
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/policy/enterprise_metrics.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/policy/proto/cloud_policy.pb.h"
 #include "chrome/browser/policy/proto/device_management_local.pb.h"
 #include "chrome/browser/policy/proto/old_generic_format.pb.h"
-#include "policy/configuration_policy_type.h"
-#include "policy/policy_constants.h"
+
+namespace em = enterprise_management;
 
 namespace policy {
 
-// Decodes a CloudPolicySettings object into two maps with mandatory and
-// recommended settings, respectively. The implementation is generated code
-// in policy/cloud_policy_generated.cc.
-void DecodePolicy(const em::CloudPolicySettings& policy,
-                  PolicyMap* mandatory, PolicyMap* recommended);
+// Decodes a CloudPolicySettings object into a PolicyMap. All the policies will
+// be POLICY_SCOPE_USER. The PolicyLevel is decoded from the protobuf.
+// The implementation is generated code in policy/cloud_policy_generated.cc.
+void DecodePolicy(const em::CloudPolicySettings& policy, PolicyMap* map);
 
 UserPolicyCache::UserPolicyCache(const FilePath& backing_file_path,
                                  bool wait_for_policy_fetch)
@@ -105,8 +103,7 @@ void UserPolicyCache::OnDiskCacheLoaded(
 }
 
 bool UserPolicyCache::DecodePolicyData(const em::PolicyData& policy_data,
-                                       PolicyMap* mandatory,
-                                       PolicyMap* recommended) {
+                                       PolicyMap* policies) {
   // TODO(jkummerow): Verify policy_data.device_token(). Needs final
   // specification which token we're actually sending / expecting to get back.
   em::CloudPolicySettings policy;
@@ -114,8 +111,8 @@ bool UserPolicyCache::DecodePolicyData(const em::PolicyData& policy_data,
     LOG(WARNING) << "Failed to parse CloudPolicySettings protobuf.";
     return false;
   }
-  DecodePolicy(policy, mandatory, recommended);
-  MaybeDecodeOldstylePolicy(policy_data.policy_value(), mandatory, recommended);
+  DecodePolicy(policy, policies);
+  MaybeDecodeOldstylePolicy(policy_data.policy_value(), policies);
   return true;
 }
 
@@ -132,10 +129,9 @@ using google::protobuf::RepeatedPtrField;
 
 void UserPolicyCache::MaybeDecodeOldstylePolicy(
     const std::string& policy_data,
-    PolicyMap* mandatory,
-    PolicyMap* recommended) {
+    PolicyMap* policies) {
   // Return immediately if we already have policy information in the maps.
-  if (!mandatory->empty() || !recommended->empty())
+  if (!policies->empty())
     return;
   em::LegacyChromeSettingsProto policy;
   // Return if the input string doesn't match the protobuf definition.
@@ -157,7 +153,7 @@ void UserPolicyCache::MaybeDecodeOldstylePolicy(
         result.Set(named_value->name(), decoded_value);
     }
   }
-  mandatory->LoadFrom(&result, GetChromePolicyDefinitionList());
+  policies->LoadFrom(&result, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER);
 }
 
 Value* UserPolicyCache::DecodeIntegerValue(

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,6 @@
 #include "chrome/browser/sync/engine/process_updates_command.h"
 #include "chrome/browser/sync/engine/resolve_conflicts_command.h"
 #include "chrome/browser/sync/engine/store_timestamps_command.h"
-#include "chrome/browser/sync/engine/syncer_end_command.h"
 #include "chrome/browser/sync/engine/syncer_types.h"
 #include "chrome/browser/sync/engine/syncproto.h"
 #include "chrome/browser/sync/engine/verify_updates_command.h"
@@ -82,20 +81,8 @@ const char* SyncerStepToString(const SyncerStep step)
 }
 #undef ENUM_CASE
 
-Syncer::ScopedSyncStartStopTracker::ScopedSyncStartStopTracker(
-    sessions::SyncSession* session) : session_(session) {
-  session_->mutable_status_controller()->
-      SetSyncInProgressAndUpdateStartTime(true);
-}
-
-Syncer::ScopedSyncStartStopTracker::~ScopedSyncStartStopTracker() {
-  session_->mutable_status_controller()->
-      SetSyncInProgressAndUpdateStartTime(false);
-}
-
 Syncer::Syncer()
-    : early_exit_requested_(false),
-      pre_conflict_resolution_closure_(NULL) {
+    : early_exit_requested_(false) {
 }
 
 Syncer::~Syncer() {}
@@ -122,8 +109,7 @@ void Syncer::SyncShare(sessions::SyncSession* session,
 
   ScopedSessionContextConflictResolver scoped(session->context(),
                                               &resolver_);
-
-  ScopedSyncStartStopTracker start_stop_tracker(session);
+  session->mutable_status_controller()->UpdateStartTime();
   SyncerStep current_step = first_step;
 
   SyncerStep next_step = current_step;
@@ -146,6 +132,8 @@ void Syncer::SyncShare(sessions::SyncSession* session,
         session->context()->extensions_monitor()->GetAndClearRecords(
             session->mutable_extensions_activity());
         session->context()->PruneUnthrottledTypes(base::TimeTicks::Now());
+        session->SendEventNotification(SyncEngineEvent::SYNC_CYCLE_BEGIN);
+
         next_step = CLEANUP_DISABLED_TYPES;
         break;
       case CLEANUP_DISABLED_TYPES: {
@@ -156,7 +144,8 @@ void Syncer::SyncShare(sessions::SyncSession* session,
       }
       case DOWNLOAD_UPDATES: {
         DownloadUpdatesCommand download_updates;
-        download_updates.Execute(session);
+        session->mutable_status_controller()->set_last_download_updates_result(
+            download_updates.Execute(session));
         next_step = PROCESS_CLIENT_COMMAND;
         break;
       }
@@ -234,34 +223,27 @@ void Syncer::SyncShare(sessions::SyncSession* session,
       }
       case POST_COMMIT_MESSAGE: {
         PostCommitMessageCommand post_commit_command;
-        post_commit_command.Execute(session);
+        session->mutable_status_controller()->set_last_post_commit_result(
+            post_commit_command.Execute(session));
         next_step = PROCESS_COMMIT_RESPONSE;
         break;
       }
       case PROCESS_COMMIT_RESPONSE: {
         session->mutable_status_controller()->reset_num_conflicting_commits();
         ProcessCommitResponseCommand process_response_command;
-        process_response_command.Execute(session);
+        session->mutable_status_controller()->
+            set_last_process_commit_response_result(
+                process_response_command.Execute(session));
         next_step = BUILD_AND_PROCESS_CONFLICT_SETS;
         break;
       }
       case BUILD_AND_PROCESS_CONFLICT_SETS: {
         BuildAndProcessConflictSetsCommand build_process_conflict_sets;
         build_process_conflict_sets.Execute(session);
-        if (session->status_controller().conflict_sets_built())
-          next_step = SYNCER_END;
-        else
-          next_step = RESOLVE_CONFLICTS;
+        next_step = RESOLVE_CONFLICTS;
         break;
       }
       case RESOLVE_CONFLICTS: {
-
-        // Trigger the pre_conflict_resolution_closure_, which is a testing
-        // hook for the unit tests, if it is non-NULL.
-        if (pre_conflict_resolution_closure_) {
-          pre_conflict_resolution_closure_->Run();
-        }
-
         StatusController* status = session->mutable_status_controller();
         status->reset_conflicts_resolved();
         ResolveConflictsCommand resolve_conflicts_command;
@@ -288,12 +270,15 @@ void Syncer::SyncShare(sessions::SyncSession* session,
         apply_updates.Execute(session);
         int after_blocking_conflicting_updates =
             status->TotalNumBlockingConflictingItems();
+        // If the following call sets the conflicts_resolved value to true,
+        // SyncSession::HasMoreToSync() will send us into another sync cycle
+        // after this one completes.
+        //
+        // TODO(rlarocque, 109072): Make conflict resolution not require
+        // extra sync cycles/GetUpdates.
         status->update_conflicts_resolved(before_blocking_conflicting_updates >
                                           after_blocking_conflicting_updates);
-        if (status->conflicts_resolved())
-          next_step = RESOLVE_CONFLICTS;
-        else
-          next_step = SYNCER_END;
+        next_step = SYNCER_END;
         break;
       }
       case CLEAR_PRIVATE_DATA: {
@@ -303,8 +288,7 @@ void Syncer::SyncShare(sessions::SyncSession* session,
         break;
       }
       case SYNCER_END: {
-        SyncerEndCommand syncer_end_command;
-        syncer_end_command.Execute(session);
+        session->SendEventNotification(SyncEngineEvent::SYNC_CYCLE_ENDED);
         next_step = SYNCER_END;
         break;
       }

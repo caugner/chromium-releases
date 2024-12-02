@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,18 +8,26 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/intents/web_intent_picker.h"
+#include "chrome/browser/ui/intents/web_intent_picker_model.h"
+#include "chrome/browser/ui/intents/web_intent_picker_model_observer.h"
 
+class InlineHtmlContentDelegate;
+class TabContentsWrapper;
 @class WebIntentBubbleController;
 
 // A bridge class that enables communication between ObjectiveC and C++.
-class WebIntentPickerCocoa : public WebIntentPicker {
+class WebIntentPickerCocoa : public WebIntentPicker,
+                             public WebIntentPickerModelObserver {
  public:
   // |browser| and |delegate| cannot be NULL.
   // |wrapper| is unused.
   WebIntentPickerCocoa(Browser* browser,
                        TabContentsWrapper* wrapper,
-                       WebIntentPickerDelegate* delegate);
+                       WebIntentPickerDelegate* delegate,
+                       WebIntentPickerModel* model);
   virtual ~WebIntentPickerCocoa();
 
   // WebIntentPickerDelegate forwarding API.
@@ -29,22 +37,45 @@ class WebIntentPickerCocoa : public WebIntentPicker {
   void set_controller(WebIntentBubbleController* controller);
 
   // WebIntentPicker:
-  virtual void SetServiceURLs(const std::vector<GURL>& urls) OVERRIDE;
-  virtual void SetServiceIcon(size_t index, const SkBitmap& icon) OVERRIDE;
-  virtual void SetDefaultServiceIcon(size_t index) OVERRIDE;
   virtual void Close() OVERRIDE;
-  virtual TabContents* SetInlineDisposition(const GURL& url) OVERRIDE;
+
+  // WebIntentPickerModelObserver implementation.
+  virtual void OnModelChanged(WebIntentPickerModel* model) OVERRIDE;
+  virtual void OnFaviconChanged(WebIntentPickerModel* model,
+                                size_t index) OVERRIDE;
+  virtual void OnInlineDisposition(WebIntentPickerModel* model) OVERRIDE;
 
  private:
-
   // Weak pointer to the |delegate_| to notify about user choice/cancellation.
   WebIntentPickerDelegate* delegate_;
 
+  // The picker model. Weak reference.
+  WebIntentPickerModel* model_;
+
+  Browser* browser_;  // The browser we're in. Weak Reference.
+
   WebIntentBubbleController* controller_;  // Weak reference.
 
+  // Factory for weak ptrs, used for delayed callbacks.
+  base::WeakPtrFactory<WebIntentPickerCocoa> weak_ptr_factory_;
+
+  // Tab contents wrapper to hold intent page if inline disposition is used.
+  scoped_ptr<TabContentsWrapper> inline_disposition_tab_contents_;
+
+  // Delegate for inline disposition tab contents.
+  scoped_ptr<InlineHtmlContentDelegate> inline_disposition_delegate_;
+
+  // Indicate that we invoked a service, instead of just closing/cancelling.
+  bool service_invoked;
+
+  // Post a delayed task to do layout, if it isn't already pending.
+  void PerformDelayedLayout();
+
+  // Re-layout the intent picker.
+  void PerformLayout();
+
   // Default constructor, for testing only.
-  WebIntentPickerCocoa()
-      : delegate_(NULL), controller_(NULL) {}
+  WebIntentPickerCocoa();
 
   // For testing access.
   friend class WebIntentBubbleControllerTest;

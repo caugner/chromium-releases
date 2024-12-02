@@ -1,8 +1,8 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/browser/download/download_id.h"
+#include "content/public/browser/download_id.h"
 
 #include <algorithm>
 #include <map>
@@ -12,17 +12,17 @@
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/download/mock_download_manager.h"
-#include "content/browser/download/mock_download_manager_delegate.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
 using content::BrowserThreadImpl;
+using content::DownloadId;
+using content::DownloadManager;
 
 class DownloadIdTest : public testing::Test {
  public:
   DownloadIdTest()
-      : download_manager_delegate_(new MockDownloadManagerDelegate),
-        ui_thread_(BrowserThread::UI, &message_loop_) {
+      : ui_thread_(BrowserThread::UI, &message_loop_) {
     num_managers_ = ARRAYSIZE_UNSAFE(download_managers_);
     std::vector<MockDownloadManager*> managers;
     managers.resize(num_managers_);
@@ -30,7 +30,7 @@ class DownloadIdTest : public testing::Test {
     // Create the download managers.
     for (i = 0; i < num_managers_; ++i) {
       managers[i] =
-          new MockDownloadManager(download_manager_delegate_.get(), NULL, NULL);
+          new MockDownloadManager();
     }
     // Sort by pointer value.
     std::sort(managers.begin(), managers.end());
@@ -47,7 +47,6 @@ class DownloadIdTest : public testing::Test {
   }
 
  protected:
-  scoped_ptr<MockDownloadManagerDelegate> download_manager_delegate_;
   scoped_refptr<DownloadManager> download_managers_[2];
   MessageLoopForUI message_loop_;
   // Necessary to delete |DownloadManager|s.

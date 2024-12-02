@@ -17,12 +17,11 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
-#include "base/task.h"
 #include "base/time.h"
 #include "net/base/cookie_store.h"
 #include "net/base/net_export.h"
@@ -150,7 +149,6 @@ class NET_EXPORT CookieMonster : public CookieStore {
   bool InitializeFrom(const CookieList& list);
 
   typedef base::Callback<void(const CookieList& cookies)> GetCookieListCallback;
-  typedef base::Callback<void(int num_deleted)> DeleteCallback;
   typedef base::Callback<void(bool success)> DeleteCookieCallback;
 
   // Sets a cookie given explicit user-provided cookie attributes. The cookie
@@ -193,13 +191,6 @@ class NET_EXPORT CookieMonster : public CookieStore {
   // Deletes all of the cookies.
   void DeleteAllAsync(const DeleteCallback& callback);
 
-  // Deletes all of the cookies that have a creation_date greater than or equal
-  // to |delete_begin| and less than |delete_end|
-  // Returns the number of cookies that have been deleted.
-  void DeleteAllCreatedBetweenAsync(const base::Time& delete_begin,
-                                    const base::Time& delete_end,
-                                    const DeleteCallback& callback);
-
   // Deletes all cookies that match the host of the given URL
   // regardless of path.  This includes all http_only and secure cookies,
   // but does not include any domain cookies that may apply to this host.
@@ -238,12 +229,13 @@ class NET_EXPORT CookieMonster : public CookieStore {
   // Must be called before creating a CookieMonster instance.
   static void EnableFileScheme();
 
-  // Flush the backing store (if any) to disk and post the given task when done.
+  // Flush the backing store (if any) to disk and post the given callback when
+  // done.
   // WARNING: THE CALLBACK WILL RUN ON A RANDOM THREAD. IT MUST BE THREAD SAFE.
   // It may be posted to the current thread, or it may run on the thread that
   // actually does the flushing. Your Task should generally post a notification
   // to the thread you actually want to be notified on.
-  void FlushStore(Task* completion_task);
+  void FlushStore(const base::Closure& callback);
 
   // CookieStore implementation.
 
@@ -272,6 +264,14 @@ class NET_EXPORT CookieMonster : public CookieStore {
   virtual void DeleteCookieAsync(
       const GURL& url, const std::string& cookie_name,
       const base::Closure& callback) OVERRIDE;
+
+  // Deletes all of the cookies that have a creation_date greater than or equal
+  // to |delete_begin| and less than |delete_end|
+  // Returns the number of cookies that have been deleted.
+  virtual void DeleteAllCreatedBetweenAsync(
+      const base::Time& delete_begin,
+      const base::Time& delete_end,
+      const DeleteCallback& callback) OVERRIDE;
 
   virtual CookieMonster* GetCookieMonster() OVERRIDE;
 
@@ -990,8 +990,8 @@ class CookieMonster::PersistentCookieStore
   // must be deleted upon destruction.
   virtual void SetClearLocalStateOnExit(bool clear_local_state) = 0;
 
-  // Flush the store and post the given Task when complete.
-  virtual void Flush(Task* completion_task) = 0;
+  // Flushes the store and posts |callback| when complete.
+  virtual void Flush(const base::Closure& callback) = 0;
 
  protected:
   PersistentCookieStore() {}

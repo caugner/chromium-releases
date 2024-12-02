@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,7 +26,7 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -50,6 +50,10 @@
 #include "chrome/browser/ui/views/restart_message_box.h"
 #include "chrome/installer/util/install_util.h"
 #endif  // defined(OS_WIN)
+
+using content::OpenURLParams;
+using content::Referrer;
+using content::UserMetricsAction;
 
 // The amount of vertical space separating the error label at the bottom from
 // the rest of the text.
@@ -404,11 +408,11 @@ void AboutChromeView::Layout() {
   views::DialogClientView* dialog_client_view = GetDialogClientView();
   int max_x = parent_bounds.width();
   if (dialog_client_view->ok_button() &&
-      dialog_client_view->ok_button()->IsVisible()) {
+      dialog_client_view->ok_button()->visible()) {
     max_x = std::min(dialog_client_view->ok_button()->x(), max_x);
   }
   if (dialog_client_view->cancel_button() &&
-      dialog_client_view->cancel_button()->IsVisible()) {
+      dialog_client_view->cancel_button()->visible()) {
     max_x = std::min(dialog_client_view->cancel_button()->x(), max_x);
   }
   update_label_.SetHorizontalAlignment(views::Label::ALIGN_LEFT);
@@ -594,8 +598,8 @@ bool AboutChromeView::CanMaximize() const {
   return false;
 }
 
-bool AboutChromeView::IsModal() const {
-  return true;
+ui::ModalType AboutChromeView::GetModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 
 bool AboutChromeView::Accept() {
@@ -623,7 +627,9 @@ void AboutChromeView::LinkClicked(views::Link* source, int event_flags) {
   }
 
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
-  browser->OpenURL(url, GURL(), NEW_WINDOW, content::PAGE_TRANSITION_LINK);
+  OpenURLParams params(
+      url, Referrer(), NEW_WINDOW, content::PAGE_TRANSITION_LINK, false);
+  browser->OpenURL(params);
 }
 
 #if defined(OS_WIN) && !defined(USE_AURA)
@@ -663,19 +669,19 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
 
   switch (result) {
     case UPGRADE_STARTED:
-      UserMetrics::RecordAction(UserMetricsAction("Upgrade_Started"));
+      content::RecordAction(UserMetricsAction("Upgrade_Started"));
       show_throbber = true;
       update_label_.SetText(
           UTF16ToWide(l10n_util::GetStringUTF16(IDS_UPGRADE_STARTED)));
       break;
     case UPGRADE_CHECK_STARTED:
-      UserMetrics::RecordAction(UserMetricsAction("UpgradeCheck_Started"));
+      content::RecordAction(UserMetricsAction("UpgradeCheck_Started"));
       show_throbber = true;
       update_label_.SetText(
           UTF16ToWide(l10n_util::GetStringUTF16(IDS_UPGRADE_CHECK_STARTED)));
       break;
     case UPGRADE_IS_AVAILABLE:
-      UserMetrics::RecordAction(
+      content::RecordAction(
           UserMetricsAction("UpgradeCheck_UpgradeIsAvailable"));
       DCHECK(!google_updater_);  // Should have been nulled out already.
       google_updater_ = new GoogleUpdate();
@@ -708,11 +714,10 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
           Version::GetVersionFromString(version_info.Version()));
       if (!installed_version.get() ||
           (installed_version->CompareTo(*running_version) <= 0)) {
-        UserMetrics::RecordAction(
+        content::RecordAction(
             UserMetricsAction("UpgradeCheck_AlreadyUpToDate"));
         string16 update_label_text = l10n_util::GetStringFUTF16(
             IDS_UPGRADE_ALREADY_UP_TO_DATE,
-            l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
             ASCIIToUTF16(version_info.Version()));
         if (base::i18n::IsRTL()) {
           update_label_text.push_back(
@@ -726,21 +731,19 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
     }
     case UPGRADE_SUCCESSFUL: {
       if (result == UPGRADE_ALREADY_UP_TO_DATE)
-        UserMetrics::RecordAction(
+        content::RecordAction(
             UserMetricsAction("UpgradeCheck_AlreadyUpgraded"));
       else
-        UserMetrics::RecordAction(UserMetricsAction("UpgradeCheck_Upgraded"));
+        content::RecordAction(UserMetricsAction("UpgradeCheck_Upgraded"));
       restart_button_visible_ = true;
-      const string16& update_string =
-          UTF16ToWide(l10n_util::GetStringFUTF16(
-              IDS_UPGRADE_SUCCESSFUL_RELAUNCH,
-              l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+      const string16& update_string = UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_UPGRADE_SUCCESSFUL_RELAUNCH));
       update_label_.SetText(update_string);
       show_success_indicator = true;
       break;
     }
     case UPGRADE_ERROR: {
-      UserMetrics::RecordAction(UserMetricsAction("UpgradeCheck_Error"));
+      content::RecordAction(UserMetricsAction("UpgradeCheck_Error"));
       if (!error_message.empty() && error_label_) {
         error_label_->SetText(
             l10n_util::GetStringFUTF16(IDS_ABOUT_BOX_ERROR_DURING_UPDATE_CHECK,

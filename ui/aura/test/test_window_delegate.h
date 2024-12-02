@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,10 +30,8 @@ class TestWindowDelegate : public WindowDelegate {
   virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE;
   virtual bool OnMouseEvent(MouseEvent* event) OVERRIDE;
   virtual ui::TouchStatus OnTouchEvent(TouchEvent* event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(GestureEvent* event) OVERRIDE;
   virtual bool CanFocus() OVERRIDE;
-  virtual bool ShouldActivate(Event* event) OVERRIDE;
-  virtual void OnActivated() OVERRIDE;
-  virtual void OnLostActive() OVERRIDE;
   virtual void OnCaptureLost() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void OnWindowDestroying() OVERRIDE;
@@ -63,33 +61,6 @@ class ColorTestWindowDelegate : public TestWindowDelegate {
   ui::KeyboardCode last_key_code_;
 
   DISALLOW_COPY_AND_ASSIGN(ColorTestWindowDelegate);
-};
-
-class ActivateWindowDelegate : public TestWindowDelegate {
- public:
-  ActivateWindowDelegate();
-  explicit ActivateWindowDelegate(bool activate);
-
-  void set_activate(bool v) { activate_ = v; }
-  int activated_count() const { return activated_count_; }
-  int lost_active_count() const { return lost_active_count_; }
-  int should_activate_count() const { return should_activate_count_; }
-  void Clear() {
-    activated_count_ = lost_active_count_ = should_activate_count_ = 0;
-  }
-
-  // Overridden from TestWindowDelegate:
-  virtual bool ShouldActivate(Event* event) OVERRIDE;
-  virtual void OnActivated() OVERRIDE;
-  virtual void OnLostActive() OVERRIDE;
-
- private:
-  bool activate_;
-  int activated_count_;
-  int lost_active_count_;
-  int should_activate_count_;
-
-  DISALLOW_COPY_AND_ASSIGN(ActivateWindowDelegate);
 };
 
 }  // namespace test

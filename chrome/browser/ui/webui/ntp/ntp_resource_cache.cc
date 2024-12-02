@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,13 +20,14 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/ntp/ntp_login_handler.h"
-#include "chrome/browser/ui/webui/sync_promo_ui.h"
+#include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/browser/ui/webui/sync_setup_handler.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -279,8 +280,6 @@ void NTPResourceCache::CreateNewTabHTML() {
   // (in GetLocalizedValues) and should have more legible names.
   // Show the profile name in the title and most visited labels if the current
   // profile is not the default.
-  string16 apps = l10n_util::GetStringUTF16(IDS_NEW_TAB_APPS);
-  string16 title = l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE);
   DictionaryValue localized_strings;
   localized_strings.SetString("bookmarkbarattached",
       profile_->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar) ?
@@ -289,14 +288,16 @@ void NTPResourceCache::CreateNewTabHTML() {
       ThemeServiceFactory::GetForProfile(profile_)->HasCustomImage(
           IDR_THEME_NTP_ATTRIBUTION) ?
       "true" : "false");
-  localized_strings.SetString("apps", apps);
-  localized_strings.SetString("title", title);
+  localized_strings.SetString("title",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE));
   localized_strings.SetString("mostvisited",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_MOST_VISITED));
   localized_strings.SetString("restoreThumbnailsShort",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RESTORE_THUMBNAILS_SHORT_LINK));
   localized_strings.SetString("recentlyclosed",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED));
+  localized_strings.SetString("webStoreTitle",
+      l10n_util::GetStringUTF16(IDS_EXTENSION_WEB_STORE_TITLE));
   localized_strings.SetString("closedwindowsingle",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_SINGLE));
   localized_strings.SetString("closedwindowmultiple",
@@ -310,9 +311,7 @@ void NTPResourceCache::CreateNewTabHTML() {
   localized_strings.SetString("removethumbnailtooltip",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_REMOVE_THUMBNAIL_TOOLTIP));
   localized_strings.SetString("appuninstall",
-      l10n_util::GetStringFUTF16(
-          IDS_NEW_TAB_APP_UNINSTALL,
-          l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
+      l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
   localized_strings.SetString("appoptions",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_OPTIONS));
   localized_strings.SetString("appdisablenotifications",
@@ -333,6 +332,11 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_SYNC_START_SYNC_BUTTON_LABEL));
   localized_strings.SetString("syncLinkText",
       l10n_util::GetStringUTF16(IDS_SYNC_ADVANCED_OPTIONS));
+  localized_strings.SetString("webStoreLink",
+      GetUrlWithLang(GURL(extension_urls::GetWebstoreLaunchURL())));
+  localized_strings.SetBoolean("isWebStoreExperimentEnabled",
+      NewTabUI::IsWebStoreExperimentEnabled());
+
 #if defined(OS_CHROMEOS)
   localized_strings.SetString("expandMenu",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_CLOSE_MENU_EXPAND));
@@ -343,7 +347,7 @@ void NTPResourceCache::CreateNewTabHTML() {
 
   // Don't initiate the sync related message passing with the page if the sync
   // code is not present.
-  if (profile_->GetProfileSyncService())
+  if (ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile_))
     localized_strings.SetString("syncispresent", "true");
   else
     localized_strings.SetString("syncispresent", "false");

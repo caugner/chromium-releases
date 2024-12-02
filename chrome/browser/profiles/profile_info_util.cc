@@ -21,7 +21,7 @@ gfx::Image GetAvatarIconForMenu(const gfx::Image& image,
   int length = std::min(kAvatarIconWidth, kAvatarIconHeight) - 2;
   SkBitmap bmp = skia::ImageOperations::Resize(
       image, skia::ImageOperations::RESIZE_BEST, length, length);
-  gfx::CanvasSkia canvas(kAvatarIconWidth, kAvatarIconHeight, false);
+  gfx::CanvasSkia canvas(gfx::Size(kAvatarIconWidth, kAvatarIconHeight), false);
 
   // Draw the icon centered on the canvas.
   int x = (kAvatarIconWidth - length) / 2;
@@ -30,7 +30,7 @@ gfx::Image GetAvatarIconForMenu(const gfx::Image& image,
 
   // Draw a gray border on the inside of the icon.
   SkColor color = SkColorSetARGB(83, 0, 0, 0);
-  canvas.DrawRectInt(color, x, y, length - 1, length - 1);
+  canvas.DrawRect(gfx::Rect(x, y, length - 1, length - 1), color);
 
   return gfx::Image(new SkBitmap(canvas.ExtractBitmap()));
 }
@@ -43,7 +43,7 @@ gfx::Image GetAvatarIconForWebUI(const gfx::Image& image,
   int length = std::min(kAvatarIconWidth, kAvatarIconHeight) - 2;
   SkBitmap bmp = skia::ImageOperations::Resize(
       image, skia::ImageOperations::RESIZE_BEST, length, length);
-  gfx::CanvasSkia canvas(kAvatarIconWidth, kAvatarIconHeight, false);
+  gfx::CanvasSkia canvas(gfx::Size(kAvatarIconWidth, kAvatarIconHeight), false);
 
   // Draw the icon centered on the canvas.
   int x = (kAvatarIconWidth - length) / 2;
@@ -64,7 +64,7 @@ gfx::Image GetAvatarIconForTitleBar(const gfx::Image& image,
       std::min(dst_width, dst_height)) - 2;
   SkBitmap bmp = skia::ImageOperations::Resize(
       image, skia::ImageOperations::RESIZE_BEST, length, length);
-  gfx::CanvasSkia canvas(dst_width, dst_height, false);
+  gfx::CanvasSkia canvas(gfx::Size(dst_width, dst_height), false);
 
   // Draw the icon on the bottom center of the canvas.
   int x1 = (dst_width - length) / 2;

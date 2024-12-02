@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/third_party/icu/icu_utf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/test/webdriver/commands/response.h"
@@ -430,7 +429,7 @@ bool ElementToggleCommand::DoesPost() {
 void ElementToggleCommand::ExecutePost(Response* const response) {
   std::string script = base::StringPrintf(
       "return (%s).apply(null, arguments);",
-      atoms::asString(atoms::TOGGLE).c_str());
+      atoms::asString(atoms::CLICK).c_str());
 
   ListValue args;
   args.Append(element.ToValue());
@@ -587,17 +586,9 @@ Error* ElementValueCommand::SendKeys() const {
 
   // Flatten the given array of strings into one.
   string16 keys;
-  for (size_t i = 0; i < key_list->GetSize(); ++i) {
-    string16 keys_list_part;
-    key_list->GetString(i, &keys_list_part);
-    for (size_t j = 0; j < keys_list_part.size(); ++j) {
-      if (CBU16_IS_SURROGATE(keys_list_part[j])) {
-        return new Error(kBadRequest,
-                         "ChromeDriver only supports characters in the BMP");
-      }
-    }
-    keys.append(keys_list_part);
-  }
+  Error* error = FlattenStringArray(key_list, &keys);
+  if (error)
+    return error;
 
   return session_->SendKeys(element, keys);
 }

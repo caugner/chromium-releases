@@ -1,4 +1,4 @@
-/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  *
@@ -36,7 +36,7 @@ button {
 }
 
 #oobe {
-  margin-bottom: 140px;  /* Make content higher than absolute vertical center */
+  margin-bottom: 60px;  /* Compensate top header to center content. */
 }
 
 #inner-container {
@@ -60,7 +60,6 @@ button {
 hr.shadow {
   -webkit-mask: -webkit-linear-gradient(left, rgba(0,0,0,0),
                                         black 50%, rgba(0,0,0,0));
-  -webkit-mask-clip: padding-box;
   border: none;
   opacity: 0.3
 }
@@ -72,10 +71,10 @@ hr.top {
 }
 
 hr.bottom {
-  background: -webkit-linear-gradient(bottom, top,
-                                      rgba(0,0,0,0.2)), rgba(0,0,0,0.0));
+  background: -webkit-linear-gradient(bottom,
+                                      rgba(0,0,0,0.2), rgba(0,0,0,0.0));
   border-bottom: 1px solid rgba(0,0,0,0.5);
-  height: 2px;
+  height: 4px;
   z-index: 0;
 }
 
@@ -99,7 +98,8 @@ hr.bottom {
 
 #header span,
 #user-image-screen-curtain p,
-.label {
+.label,
+.menu-control {
   cursor: default;
 }
 
@@ -221,6 +221,7 @@ html[dir=rtl]  .step.left {
 .menu-control {
   font-family: inherit;
   line-height: 20px;
+  position: relative;
   width: 250px;
 }
 
@@ -336,9 +337,6 @@ html[dir=rtl] #user-image-preview {
   color: dimGray;
   font-size: smaller;
   margin: 8px 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 #footer {
@@ -363,6 +361,8 @@ html[dir=rtl] #user-image-preview {
 #oobe.signin #signin-button,
 #oobe.user-image #ok-button,
 #oobe.oauth-enrollment #oauth-enroll-cancel-button,
+#oobe.oauth-enrollment #oauth-enroll-try-again-button,
+#oobe.oauth-enrollment #oauth-enroll-explain-button,
 #oobe.oauth-enrollment #oauth-enroll-done-button {
   display: block;
 }
@@ -604,13 +604,25 @@ button {
 }
 
 #oauth-enroll-signin-frame {
-  bottom: 0;
-  display: -webkit-box;
+  border: 0 none;
   height: 100%;
-  left: 0;
+  width: 100%;
+}
+
+#oauth-enroll-signin-frame-container {
+  box-sizing: border-box;
+  height: 100%;
+  padding-bottom: 20px;
+  width: 100%;
+}
+
+#oauth-enroll-signin-link-container {
+  bottom: 0;
   position: absolute;
   right: 0;
-  top: 0;
+}
+
+#oauth-enroll-step-signin {
   width: 100%;
 }
 
@@ -648,7 +660,11 @@ button {
   vertical-align: top;
 }
 
-#oauth-enroll-error-retry {
+#oauth-enroll-explain-message {
+  white-space: pre-line;
+}
+
+.oauth-enroll-link {
   color: -webkit-link;
   cursor: pointer;
   text-decoration: underline;

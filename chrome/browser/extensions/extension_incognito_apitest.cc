@@ -13,8 +13,10 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "net/base/mock_host_resolver.h"
+
+using content::WebContents;
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoNoScript) {
   ASSERT_TRUE(StartTestServer());
@@ -31,12 +33,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoNoScript) {
 
   Browser* otr_browser = BrowserList::FindTabbedBrowser(
       browser()->profile()->GetOffTheRecordProfile(), false);
-  TabContents* tab = otr_browser->GetSelectedTabContents();
+  WebContents* tab = otr_browser->GetSelectedWebContents();
 
   // Verify the script didn't run.
   bool result = false;
   ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      tab->render_view_host(), L"",
+      tab->GetRenderViewHost(), L"",
       L"window.domAutomationController.send(document.title == 'Unmodified')",
       &result));
   EXPECT_TRUE(result);
@@ -68,12 +70,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoYesScript) {
 
   Browser* otr_browser = BrowserList::FindTabbedBrowser(
       browser()->profile()->GetOffTheRecordProfile(), false);
-  TabContents* tab = otr_browser->GetSelectedTabContents();
+  WebContents* tab = otr_browser->GetSelectedWebContents();
 
   // Verify the script ran.
   bool result = false;
   ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      tab->render_view_host(), L"",
+      tab->GetRenderViewHost(), L"",
       L"window.domAutomationController.send(document.title == 'modified')",
       &result));
   EXPECT_TRUE(result);
@@ -89,9 +91,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_DontCreateIncognitoProfile) {
   ASSERT_FALSE(browser()->profile()->HasOffTheRecordProfile());
 }
 
-// Tests that the APIs in an incognito-enabled extension work properly.
-// Flaky - see crbug.com/77951.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FLAKY_Incognito) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Incognito) {
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(StartTestServer());
 

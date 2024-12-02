@@ -13,6 +13,8 @@
 #include "ppapi/c/dev/ppb_transport_dev.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_errors.h"
+#include "ppapi/shared_impl/callback_tracker.h"
+#include "ppapi/shared_impl/ppapi_globals.h"
 #include "ppapi/shared_impl/var.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
@@ -24,6 +26,7 @@
 
 using ppapi::StringVar;
 using ppapi::thunk::PPB_Transport_API;
+using ppapi::TrackedCallback;
 using webkit_glue::P2PTransport;
 
 namespace webkit {
@@ -67,12 +70,9 @@ WebKit::WebFrame* GetFrameForResource(const ::ppapi::Resource* resource) {
 
 PPB_Transport_Impl::PPB_Transport_Impl(PP_Instance instance)
     : Resource(instance),
+      type_(PP_TRANSPORTTYPE_DATAGRAM),
       started_(false),
-      writable_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          channel_write_callback_(this, &PPB_Transport_Impl::OnWritten)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          channel_read_callback_(this, &PPB_Transport_Impl::OnRead)) {
+      writable_(false) {
 }
 
 PPB_Transport_Impl::~PPB_Transport_Impl() {
@@ -261,8 +261,7 @@ int32_t PPB_Transport_Impl::Connect(PP_CompletionCallback callback) {
   if (!plugin_module)
     return PP_ERROR_FAILED;
 
-  connect_callback_ = new TrackedCompletionCallback(
-      plugin_module->GetCallbackTracker(), pp_resource(), callback);
+  connect_callback_ = new TrackedCallback(this, callback);
   return PP_OK_COMPLETIONPENDING;
 }
 
@@ -273,7 +272,7 @@ int32_t PPB_Transport_Impl::GetNextAddress(PP_Var* address,
   if (!p2p_transport_.get())
     return PP_ERROR_FAILED;
 
-  if (next_address_callback_.get() && !next_address_callback_->completed())
+  if (TrackedCallback::IsPending(next_address_callback_))
     return PP_ERROR_INPROGRESS;
 
   PluginModule* plugin_module = ResourceHelper::GetPluginModule(this);
@@ -281,14 +280,12 @@ int32_t PPB_Transport_Impl::GetNextAddress(PP_Var* address,
     return PP_ERROR_FAILED;
 
   if (!local_candidates_.empty()) {
-    *address = StringVar::StringToPPVar(plugin_module->pp_module(),
-                                        local_candidates_.front());
+    *address = StringVar::StringToPPVar(local_candidates_.front());
     local_candidates_.pop_front();
     return PP_OK;
   }
 
-  next_address_callback_ = new TrackedCompletionCallback(
-      plugin_module->GetCallbackTracker(), pp_resource(), callback);
+  next_address_callback_ = new TrackedCallback(this, callback);
   return PP_OK_COMPLETIONPENDING;
 }
 
@@ -311,7 +308,7 @@ int32_t PPB_Transport_Impl::Recv(void* data, uint32_t len,
   if (!p2p_transport_.get())
     return PP_ERROR_FAILED;
 
-  if (recv_callback_.get() && !recv_callback_->completed())
+  if (TrackedCallback::IsPending(recv_callback_))
     return PP_ERROR_INPROGRESS;
 
   net::Socket* channel = p2p_transport_->GetChannel();
@@ -324,11 +321,11 @@ int32_t PPB_Transport_Impl::Recv(void* data, uint32_t len,
 
   scoped_refptr<net::IOBuffer> buffer =
       new net::WrappedIOBuffer(static_cast<const char*>(data));
-  int result = MapNetError(channel->Read(buffer, len, &channel_read_callback_));
-  if (result == PP_OK_COMPLETIONPENDING) {
-    recv_callback_ = new TrackedCompletionCallback(
-        plugin_module->GetCallbackTracker(), pp_resource(), callback);
-  }
+  int result = MapNetError(
+      channel->Read(buffer, len, base::Bind(&PPB_Transport_Impl::OnRead,
+                                            base::Unretained(this))));
+  if (result == PP_OK_COMPLETIONPENDING)
+    recv_callback_ = new TrackedCallback(this, callback);
 
   return result;
 }
@@ -340,7 +337,7 @@ int32_t PPB_Transport_Impl::Send(const void* data, uint32_t len,
   if (!p2p_transport_.get())
     return PP_ERROR_FAILED;
 
-  if (send_callback_.get() && !send_callback_->completed())
+  if (TrackedCallback::IsPending(send_callback_))
     return PP_ERROR_INPROGRESS;
 
   net::Socket* channel = p2p_transport_->GetChannel();
@@ -353,12 +350,11 @@ int32_t PPB_Transport_Impl::Send(const void* data, uint32_t len,
 
   scoped_refptr<net::IOBuffer> buffer =
       new net::WrappedIOBuffer(static_cast<const char*>(data));
-  int result = MapNetError(channel->Write(buffer, len,
-                                          &channel_write_callback_));
-  if (result == PP_OK_COMPLETIONPENDING) {
-    send_callback_ = new TrackedCompletionCallback(
-        plugin_module->GetCallbackTracker(), pp_resource(), callback);
-  }
+  int result = MapNetError(
+      channel->Write(buffer, len, base::Bind(&PPB_Transport_Impl::OnWritten,
+                                             base::Unretained(this))));
+  if (result == PP_OK_COMPLETIONPENDING)
+    send_callback_ = new TrackedCallback(this, callback);
 
   return result;
 }
@@ -369,9 +365,8 @@ int32_t PPB_Transport_Impl::Close() {
 
   p2p_transport_.reset();
 
-  PluginModule* plugin_module = ResourceHelper::GetPluginModule(this);
-  if (plugin_module)
-    plugin_module->GetCallbackTracker()->AbortAll();
+  ::ppapi::PpapiGlobals::Get()->GetCallbackTrackerForInstance(
+      pp_instance())->PostAbortForResource(pp_resource());
   return PP_OK;
 }
 
@@ -379,45 +374,30 @@ void PPB_Transport_Impl::OnCandidateReady(const std::string& address) {
   // Store the candidate first before calling the callback.
   local_candidates_.push_back(address);
 
-  if (next_address_callback_.get() && !next_address_callback_->completed()) {
-    scoped_refptr<TrackedCompletionCallback> callback;
-    callback.swap(next_address_callback_);
-    callback->Run(PP_OK);
-  }
+  if (TrackedCallback::IsPending(next_address_callback_))
+    TrackedCallback::ClearAndRun(&next_address_callback_, PP_OK);
 }
 
 void PPB_Transport_Impl::OnStateChange(webkit_glue::P2PTransport::State state) {
   writable_ = (state | webkit_glue::P2PTransport::STATE_WRITABLE) != 0;
-  if (writable_ && connect_callback_.get() && !connect_callback_->completed()) {
-    scoped_refptr<TrackedCompletionCallback> callback;
-    callback.swap(connect_callback_);
-    callback->Run(PP_OK);
-  }
+  if (writable_ && TrackedCallback::IsPending(connect_callback_))
+    TrackedCallback::ClearAndRun(&connect_callback_, PP_OK);
 }
 
 void PPB_Transport_Impl::OnError(int error) {
   writable_ = false;
-  if (connect_callback_.get() && !connect_callback_->completed()) {
-    scoped_refptr<TrackedCompletionCallback> callback;
-    callback.swap(connect_callback_);
-    callback->Run(PP_ERROR_FAILED);
-  }
+  if (TrackedCallback::IsPending(connect_callback_))
+    TrackedCallback::ClearAndRun(&connect_callback_, PP_ERROR_FAILED);
 }
 
 void PPB_Transport_Impl::OnRead(int result) {
-  DCHECK(recv_callback_.get() && !recv_callback_->completed());
-
-  scoped_refptr<TrackedCompletionCallback> callback;
-  callback.swap(recv_callback_);
-  callback->Run(MapNetError(result));
+  DCHECK(TrackedCallback::IsPending(recv_callback_));
+  TrackedCallback::ClearAndRun(&recv_callback_, MapNetError(result));
 }
 
 void PPB_Transport_Impl::OnWritten(int result) {
-  DCHECK(send_callback_.get() && !send_callback_->completed());
-
-  scoped_refptr<TrackedCompletionCallback> callback;
-  callback.swap(send_callback_);
-  callback->Run(MapNetError(result));
+  DCHECK(TrackedCallback::IsPending(send_callback_));
+  TrackedCallback::ClearAndRun(&send_callback_, MapNetError(result));
 }
 
 }  // namespace ppapi

@@ -1,8 +1,8 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/prefs/incognito_user_pref_store.h"
+#include "chrome/browser/prefs/overlay_user_pref_store.h"
 
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
@@ -27,6 +27,10 @@ void OverlayUserPrefStore::AddObserver(PrefStore::Observer* observer) {
 
 void OverlayUserPrefStore::RemoveObserver(PrefStore::Observer* observer) {
   observers_.RemoveObserver(observer);
+}
+
+size_t OverlayUserPrefStore::NumberOfObservers() const {
+  return observers_.size();
 }
 
 bool OverlayUserPrefStore::IsInitializationComplete() const {
@@ -114,16 +118,6 @@ void OverlayUserPrefStore::ReadPrefsAsync(
   OnInitializationCompleted(true);
 }
 
-bool OverlayUserPrefStore::WritePrefs() {
-  // We do not write our content intentionally.
-  return true;
-}
-
-void OverlayUserPrefStore::ScheduleWritePrefs() {
-  underlay_->ScheduleWritePrefs();
-  // We do not write our content intentionally.
-}
-
 void OverlayUserPrefStore::CommitPendingWrite() {
   underlay_->CommitPendingWrite();
   // We do not write our content intentionally.
@@ -133,11 +127,11 @@ void OverlayUserPrefStore::ReportValueChanged(const std::string& key) {
   FOR_EACH_OBSERVER(PrefStore::Observer, observers_, OnPrefValueChanged(key));
 }
 
-void OverlayUserPrefStore::RegisterOverlayProperty(const std::string& key) {
-  RegisterOverlayProperty(key, key);
+void OverlayUserPrefStore::RegisterOverlayPref(const std::string& key) {
+  RegisterOverlayPref(key, key);
 }
 
-void OverlayUserPrefStore::RegisterOverlayProperty(
+void OverlayUserPrefStore::RegisterOverlayPref(
     const std::string& overlay_key,
     const std::string& underlay_key) {
   DCHECK(!overlay_key.empty()) << "Overlay key is empty";

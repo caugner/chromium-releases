@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -66,25 +66,29 @@ GtkIMContextWrapper::GtkIMContextWrapper(RenderWidgetHostViewGtk* host_view)
   // context_ is for full input method support.
   // context_simple_ is for supporting dead/compose keys when input method is
   // disabled by webkit, eg. in password input box.
-  g_signal_connect(context_, "preedit_start",
+  g_signal_connect(context_, "preedit-start",
                    G_CALLBACK(HandlePreeditStartThunk), this);
-  g_signal_connect(context_, "preedit_end",
+  g_signal_connect(context_, "preedit-end",
                    G_CALLBACK(HandlePreeditEndThunk), this);
-  g_signal_connect(context_, "preedit_changed",
+  g_signal_connect(context_, "preedit-changed",
                    G_CALLBACK(HandlePreeditChangedThunk), this);
   g_signal_connect(context_, "commit",
                    G_CALLBACK(HandleCommitThunk), this);
+  g_signal_connect(context_, "retrieve-surrounding",
+                   G_CALLBACK(HandleRetrieveSurroundingThunk), this);
 
-  g_signal_connect(context_simple_, "preedit_start",
+  g_signal_connect(context_simple_, "preedit-start",
                    G_CALLBACK(HandlePreeditStartThunk), this);
-  g_signal_connect(context_simple_, "preedit_end",
+  g_signal_connect(context_simple_, "preedit-end",
                    G_CALLBACK(HandlePreeditEndThunk), this);
-  g_signal_connect(context_simple_, "preedit_changed",
+  g_signal_connect(context_simple_, "preedit-changed",
                    G_CALLBACK(HandlePreeditChangedThunk), this);
   g_signal_connect(context_simple_, "commit",
                    G_CALLBACK(HandleCommitThunk), this);
+  g_signal_connect(context_simple_, "retrieve-surrounding",
+                   G_CALLBACK(HandleRetrieveSurroundingThunk), this);
 
-  GtkWidget* widget = host_view->native_view();
+  GtkWidget* widget = host_view->GetNativeView();
   DCHECK(widget);
 
   g_signal_connect(widget, "realize",
@@ -563,13 +567,32 @@ void GtkIMContextWrapper::HandlePreeditEnd() {
   // signal may be fired before "commit" signal.
 }
 
+gboolean GtkIMContextWrapper::HandleRetrieveSurrounding(GtkIMContext* context) {
+  if (!is_enabled_)
+    return TRUE;
+
+  std::string text;
+  size_t cursor_index = 0;
+
+  if (!is_enabled_ || !host_view_->RetrieveSurrounding(&text, &cursor_index)) {
+    gtk_im_context_set_surrounding(context, "", 0, 0);
+    return TRUE;
+  }
+
+  gtk_im_context_set_surrounding(context, text.c_str(), text.length(),
+      cursor_index);
+
+  return TRUE;
+}
+
 void GtkIMContextWrapper::HandleHostViewRealize(GtkWidget* widget) {
   // We should only set im context's client window once, because when setting
   // client window.im context may destroy and recreate its internal states and
   // objects.
-  if (widget->window) {
-    gtk_im_context_set_client_window(context_, widget->window);
-    gtk_im_context_set_client_window(context_simple_, widget->window);
+  GdkWindow* gdk_window = gtk_widget_get_window(widget);
+  if (gdk_window) {
+    gtk_im_context_set_client_window(context_, gdk_window);
+    gtk_im_context_set_client_window(context_simple_, gdk_window);
   }
 }
 
@@ -611,6 +634,11 @@ void GtkIMContextWrapper::HandlePreeditChangedThunk(
 void GtkIMContextWrapper::HandlePreeditEndThunk(
     GtkIMContext* context, GtkIMContextWrapper* self) {
   self->HandlePreeditEnd();
+}
+
+gboolean GtkIMContextWrapper::HandleRetrieveSurroundingThunk(
+    GtkIMContext* context, GtkIMContextWrapper* self) {
+  return self->HandleRetrieveSurrounding(context);
 }
 
 void GtkIMContextWrapper::HandleHostViewRealizeThunk(

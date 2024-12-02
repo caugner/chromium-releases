@@ -1,8 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/gtk/avatar_menu_item_gtk.h"
+
+#include <gdk/gdkkeysyms.h>
 
 #include "base/bind.h"
 #include "base/message_loop.h"
@@ -82,16 +84,64 @@ gboolean AvatarMenuItemGtk::OnProfileClick(GtkWidget* widget,
   return FALSE;
 }
 
+gboolean AvatarMenuItemGtk::OnProfileKeyPress(GtkWidget* widget,
+                                              GdkEventKey* event) {
+  // delegate_->EditProfile() will close the avatar bubble which in turn
+  // try to destroy this AvatarMenuItemGtk.
+  // This is not OK to do this from the signal handler, so we'll
+  // defer it.
+  if (event->keyval == GDK_Return ||
+      event->keyval == GDK_ISO_Enter ||
+      event->keyval == GDK_KP_Enter) {
+    if (item_.active)
+      MessageLoop::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&AvatarMenuItemGtk::EditProfile,
+                     weak_factory_.GetWeakPtr()));
+    else
+      MessageLoop::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&AvatarMenuItemGtk::OpenProfile,
+                     weak_factory_.GetWeakPtr()));
+  }
+
+  return FALSE;
+}
+
+void AvatarMenuItemGtk::ShowStatusLabel() {
+  gtk_widget_show(status_label_);
+  gtk_widget_hide(link_alignment_);
+}
+
+void AvatarMenuItemGtk::ShowEditLink() {
+  gtk_widget_hide(status_label_);
+  gtk_widget_show(link_alignment_);
+}
+
+gboolean AvatarMenuItemGtk::OnProfileFocusIn(GtkWidget* widget,
+                                             GdkEventFocus* event) {
+  if (item_.active)
+    ShowEditLink();
+
+  return FALSE;
+}
+
+gboolean AvatarMenuItemGtk::OnProfileFocusOut(GtkWidget* widget,
+                                              GdkEventFocus* event) {
+  if (item_.active)
+    ShowStatusLabel();
+
+  return FALSE;
+}
+
 gboolean AvatarMenuItemGtk::OnProfileEnter(GtkWidget* widget,
                                            GdkEventCrossing* event) {
   if (event->detail == GDK_NOTIFY_INFERIOR)
     return FALSE;
 
   gtk_widget_modify_bg(widget, GTK_STATE_NORMAL, &highlighted_color_);
-  if (item_.active) {
-    gtk_widget_hide(status_label_);
-    gtk_widget_show(link_alignment_);
-  }
+  if (item_.active)
+    ShowEditLink();
 
   return FALSE;
 }
@@ -102,10 +152,8 @@ gboolean AvatarMenuItemGtk::OnProfileLeave(GtkWidget* widget,
     return FALSE;
 
   gtk_widget_modify_bg(widget, GTK_STATE_NORMAL, unhighlighted_color_);
-  if (item_.active) {
-    gtk_widget_show(status_label_);
-    gtk_widget_hide(link_alignment_);
-  }
+  if (item_.active)
+    ShowStatusLabel();
 
   return FALSE;
 }
@@ -151,6 +199,23 @@ void AvatarMenuItemGtk::OnEditProfileLinkClicked(GtkWidget* link) {
                  weak_factory_.GetWeakPtr()));
 }
 
+gboolean AvatarMenuItemGtk::OnEventBoxExpose(GtkWidget* widget,
+                                             GdkEventExpose* event) {
+  // Draw the focus rectangle.
+  if (gtk_widget_has_focus(widget)) {
+    GtkAllocation allocation;
+    gtk_widget_get_allocation(widget, &allocation);
+    gtk_paint_focus(gtk_widget_get_style(widget),
+                    gtk_widget_get_window(widget),
+                    gtk_widget_get_state(widget),
+                    &event->area, widget, NULL,
+                    0, 0,
+                    allocation.width, allocation.height);
+  }
+
+  return TRUE;
+}
+
 void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
   widget_.Own(gtk_event_box_new());
 
@@ -160,6 +225,14 @@ void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
       G_CALLBACK(OnProfileEnterThunk), this);
   g_signal_connect(widget_.get(), "leave-notify-event",
       G_CALLBACK(OnProfileLeaveThunk), this);
+  g_signal_connect(widget_.get(), "focus-in-event",
+      G_CALLBACK(OnProfileFocusInThunk), this);
+  g_signal_connect(widget_.get(), "focus-out-event",
+      G_CALLBACK(OnProfileFocusOutThunk), this);
+  g_signal_connect(widget_.get(), "key-press-event",
+      G_CALLBACK(OnProfileKeyPressThunk), this);
+  g_signal_connect_after(widget_.get(), "expose-event",
+      G_CALLBACK(OnEventBoxExposeThunk), this);
 
   GtkWidget* item_hbox = gtk_hbox_new(FALSE, ui::kControlSpacing);
   GdkPixbuf* avatar_pixbuf = NULL;
@@ -168,12 +241,9 @@ void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
   // of the profile icon.
   if (item_.active) {
     const SkBitmap* avatar_image = item_.icon.ToSkBitmap();
-    gfx::CanvasSkia canvas(avatar_image->width(),
-                           avatar_image->height(),
-                           /* is_opaque */ true);
-    canvas.DrawBitmapInt(*avatar_image, 0, 0);
+    gfx::CanvasSkia canvas(*avatar_image, /* is_opaque */ true);
 
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     SkBitmap check_image = rb.GetImageNamed(IDR_PROFILE_SELECTED);
     gfx::Rect check_rect(0, 0, check_image.width(), check_image.height());
     int y = avatar_image->height() - check_image.height();
@@ -197,7 +267,7 @@ void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
   string16 elided_name = ui::ElideText(item_.name,
                                        gfx::Font(),
                                        kUserNameMaxWidth,
-                                       /* elide_in_middle */ false);
+                                       ui::ELIDE_AT_END);
   if (item_.active) {
     name_label = gtk_util::CreateBoldLabel(UTF16ToUTF8(elided_name));
   } else {
@@ -222,6 +292,10 @@ void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
     // The "edit your profile" link.
     edit_profile_link_ = gtk_chrome_link_button_new(
         l10n_util::GetStringUTF8(IDS_PROFILES_EDIT_PROFILE_LINK).c_str());
+    // Fix for bug#107348. edit link steals focus from menu item which
+    // hides edit link button in focus-out-event handler,
+    // so, it misses the click event.
+    gtk_widget_set_can_focus(edit_profile_link_, FALSE);
 
     link_alignment_ = gtk_alignment_new(0, 0, 0, 0);
     gtk_container_add(GTK_CONTAINER(link_alignment_), edit_profile_link_);

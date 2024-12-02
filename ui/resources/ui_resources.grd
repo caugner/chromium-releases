@@ -127,18 +127,33 @@
         <include name="IDR_CLOSE_SA" file="close_sa.png" type="BINDATA" />
         <include name="IDR_CLOSE_SA_H" file="close_sa_h.png" type="BINDATA" />
         <include name="IDR_CLOSE_SA_P" file="close_sa_p.png" type="BINDATA" />
+        <include name="IDR_DISCLOSURE_ARROW" file="discloure_arrow.png" type="BINDATA" />
         <include name="IDR_MENU_ARROW" file="menu_arrow.png" type="BINDATA" />
         <include name="IDR_MENU_CHECK" file="menu_check.png" type="BINDATA" />
       </if>
 
       <!-- Images only used by Aura. -->
       <if expr="pp_ifdef('use_aura')">
-        <include name="IDR_AURA_LAUNCHER_ICON_CHROME" file="aura/chromium-32.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_BROWSER_SHORTCUT" file="aura/chromium-32.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_NEW_BROWSER" file="aura/new_browser.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_NEW_BROWSER_HOT" file="aura/new_browser_h.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_NEW_BROWSER_PUSHED" file="aura/new_browser_p.png" type="BINDATA" />
         <include name="IDR_AURA_LAUNCHER_OVERFLOW" file="aura/launcher_overflow.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_OVERFLOW_HOT" file="aura/launcher_overflow_h.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_OVERFLOW_PUSHED" file="aura/launcher_overflow_p.png" type="BINDATA" />
         <include name="IDR_AURA_LAUNCHER_TABBED_BROWSER_1" file="aura/browser_instance_1.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_TABBED_BROWSER_1_HOT" file="aura/browser_instance_1_h.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_TABBED_BROWSER_1_PUSHED" file="aura/browser_instance_1_p.png" type="BINDATA" />
         <include name="IDR_AURA_LAUNCHER_TABBED_BROWSER_2" file="aura/browser_instance_2.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_TABBED_BROWSER_2_HOT" file="aura/browser_instance_2_h.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_TABBED_BROWSER_2_PUSHED" file="aura/browser_instance_2_p.png" type="BINDATA" />
         <include name="IDR_AURA_LAUNCHER_TABBED_BROWSER_3" file="aura/browser_instance_3.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_TABBED_BROWSER_3_HOT" file="aura/browser_instance_3_h.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_TABBED_BROWSER_3_PUSHED" file="aura/browser_instance_3_p.png" type="BINDATA" />
         <include name="IDR_AURA_LAUNCHER_ICON_APPLIST" file="aura/applist.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_ICON_APPLIST_HOT" file="aura/applist_h.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_ICON_APPLIST_PUSHED" file="aura/applist_p.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_BACKGROUND" file="aura/launcher_background.png" type="BINDATA" />
         <include name="IDR_AURA_SHADOW_RECT_TOP_LEFT" file="aura/shadow_rect_top_left.png" type="BINDATA" />
         <include name="IDR_AURA_SHADOW_RECT_TOP" file="aura/shadow_rect_top.png" type="BINDATA" />
         <include name="IDR_AURA_SHADOW_RECT_TOP_RIGHT" file="aura/shadow_rect_top_right.png" type="BINDATA" />
@@ -148,7 +163,7 @@
         <include name="IDR_AURA_SHADOW_RECT_BOTTOM" file="aura/shadow_rect_bottom.png" type="BINDATA" />
         <include name="IDR_AURA_SHADOW_RECT_BOTTOM_RIGHT" file="aura/shadow_rect_bottom_right.png" type="BINDATA" />
         <include name="IDR_AURA_STATUS_MOCK" file="aura/statusbar.png" type="BINDATA" />
-        <include name="IDR_AURA_WALLPAPER" file="aura/damask.png" type="BINDATA" />
+        <include name="IDR_AURA_WALLPAPER" file="aura/wallpaper.png" type="BINDATA" />
         <include name="IDR_AURA_WINDOW_CLOSE_ICON" file="aura/slab_close.png" type="BINDATA" />
         <include name="IDR_AURA_WINDOW_BOTTOM_LEFT" file="aura/window_bottom_left.png" type="BINDATA" />
         <include name="IDR_AURA_WINDOW_BOTTOM_RIGHT" file="aura/window_bottom_right.png" type="BINDATA" />

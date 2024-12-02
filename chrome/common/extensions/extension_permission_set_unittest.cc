@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -178,6 +178,7 @@ TEST(ExtensionAPIPermissionTest, PlatformAppPermissions) {
   blacklist.insert(ExtensionAPIPermission::kWebRequest);
   blacklist.insert(ExtensionAPIPermission::kWebRequestBlocking);
   blacklist.insert(ExtensionAPIPermission::kWebSocketProxyPrivate);
+  blacklist.insert(ExtensionAPIPermission::kWebstorePrivate);
 
   ExtensionAPIPermissionSet perms = info->GetAll();
   size_t count = 0;
@@ -199,6 +200,7 @@ TEST(ExtensionAPIPermissionTest, ComponentOnlyPermissions) {
   private_perms.insert(ExtensionAPIPermission::kFileBrowserPrivate);
   private_perms.insert(ExtensionAPIPermission::kMediaPlayerPrivate);
   private_perms.insert(ExtensionAPIPermission::kMetricsPrivate);
+  private_perms.insert(ExtensionAPIPermission::kSystemPrivate);
   private_perms.insert(ExtensionAPIPermission::kWebstorePrivate);
 
   ExtensionAPIPermissionSet perms = info->GetAll();
@@ -210,7 +212,7 @@ TEST(ExtensionAPIPermissionTest, ComponentOnlyPermissions) {
               info->GetByID(*i)->is_component_only());
   }
 
-  EXPECT_EQ(6, count);
+  EXPECT_EQ(7, count);
 }
 
 TEST(ExtensionPermissionSetTest, EffectiveHostPermissions) {
@@ -576,6 +578,8 @@ TEST(ExtensionPermissionSetTest, HasLessPrivilegesThan) {
       false, true },  // http://a -> http://a,tabs
     { "permissions5", {"bookmarks", NULL},
       {NULL}, false, true },  // bookmarks -> bookmarks,history
+    { "equivalent_warnings", {NULL}, {NULL},
+      false, false },  // tabs --> tabs, webNavigation
 #if !defined(OS_CHROMEOS)  // plugins aren't allowed in ChromeOS
     { "permissions4", {NULL},
       {NULL}, true, false },  // plugin -> plugin,tabs
@@ -647,8 +651,9 @@ TEST(ExtensionPermissionSetTest, PermissionMessages) {
   // permissions.
   skip.insert(ExtensionAPIPermission::kCookie);
 
-  // The proxy, and webRequest permissions are warned as part of host
+  // The ime, proxy, and webRequest permissions are warned as part of host
   // permission checks.
+  skip.insert(ExtensionAPIPermission::kInput);
   skip.insert(ExtensionAPIPermission::kProxy);
   skip.insert(ExtensionAPIPermission::kWebRequest);
   skip.insert(ExtensionAPIPermission::kWebRequestBlocking);
@@ -662,15 +667,17 @@ TEST(ExtensionPermissionSetTest, PermissionMessages) {
   skip.insert(ExtensionAPIPermission::kExperimental);
 
   // These are private.
-  skip.insert(ExtensionAPIPermission::kWebstorePrivate);
+  skip.insert(ExtensionAPIPermission::kChromeAuthPrivate);
+  skip.insert(ExtensionAPIPermission::kChromeosInfoPrivate);
+  skip.insert(ExtensionAPIPermission::kChromePrivate);
   skip.insert(ExtensionAPIPermission::kFileBrowserPrivate);
+  skip.insert(ExtensionAPIPermission::kInputMethodPrivate);
   skip.insert(ExtensionAPIPermission::kMediaPlayerPrivate);
   skip.insert(ExtensionAPIPermission::kMetricsPrivate);
-  skip.insert(ExtensionAPIPermission::kChromeAuthPrivate);
-  skip.insert(ExtensionAPIPermission::kChromePrivate);
-  skip.insert(ExtensionAPIPermission::kChromeosInfoPrivate);
+  skip.insert(ExtensionAPIPermission::kSystemPrivate);
+  skip.insert(ExtensionAPIPermission::kTerminalPrivate);
   skip.insert(ExtensionAPIPermission::kWebSocketProxyPrivate);
-  skip.insert(ExtensionAPIPermission::kInputMethodPrivate);
+  skip.insert(ExtensionAPIPermission::kWebstorePrivate);
 
   // Warned as part of host permissions.
   skip.insert(ExtensionAPIPermission::kDevtools);
@@ -704,7 +711,6 @@ TEST(ExtensionPermissionSetTest, DefaultFunctionAccess) {
     { "non_existing_permission", false },
     // Test default module/package permission.
     { "browserAction",  true },
-    { "browserActions", true },
     { "devtools",       true },
     { "extension",      true },
     { "i18n",           true },
@@ -729,6 +735,38 @@ TEST(ExtensionPermissionSetTest, DefaultFunctionAccess) {
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTests); ++i) {
     EXPECT_EQ(kTests[i].expect_success,
               empty->HasAccessToFunction(kTests[i].permission_name));
+  }
+}
+
+// Tests the default permissions (empty API permission set).
+TEST(ExtensionPermissionSetTest, DefaultAnyAPIAccess) {
+  const struct {
+    const char* api_name;
+    bool expect_success;
+  } kTests[] = {
+    // Negative test.
+    { "non_existing_permission", false },
+    // Test default module/package permission.
+    { "browserAction",  true },
+    { "devtools",       true },
+    { "extension",      true },
+    { "i18n",           true },
+    { "pageAction",     true },
+    { "pageActions",    true },
+    { "test",           true },
+    // Some negative tests.
+    { "bookmarks",      false },
+    { "cookies",        false },
+    { "history",        false },
+    // Negative APIs that have positive individual functions.
+    { "management",     true},
+    { "tabs",           true},
+  };
+
+  scoped_refptr<ExtensionPermissionSet> empty = new ExtensionPermissionSet();
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTests); ++i) {
+    EXPECT_EQ(kTests[i].expect_success,
+              empty->HasAnyAccessToAPI(kTests[i].api_name));
   }
 }
 

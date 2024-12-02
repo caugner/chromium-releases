@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,16 @@
 #pragma once
 
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "content/public/renderer/content_renderer_client.h"
 
 namespace content {
 
+class ShellRenderProcessObserver;
+
 class ShellContentRendererClient : public ContentRendererClient {
  public:
+  ShellContentRendererClient();
   virtual ~ShellContentRendererClient();
   virtual void RenderThreadStarted() OVERRIDE;
   virtual void RenderViewCreated(RenderView* render_view) OVERRIDE;
@@ -31,6 +35,16 @@ class ShellContentRendererClient : public ContentRendererClient {
       const WebKit::WebURLError& error,
       std::string* error_html,
       string16* error_description) OVERRIDE;
+  virtual webkit_media::WebMediaPlayerImpl* OverrideCreateWebMediaPlayer(
+      RenderView* render_view,
+      WebKit::WebFrame* frame,
+      WebKit::WebMediaPlayerClient* client,
+      base::WeakPtr<webkit_media::WebMediaPlayerDelegate> delegate,
+      media::FilterCollection* collection,
+      WebKit::WebAudioSourceProvider* audio_source_provider,
+      media::MessageLoopFactory* message_loop_factory,
+      webkit_media::MediaStreamClient* media_stream_client,
+      media::MediaLog* media_log) OVERRIDE;
   virtual bool RunIdleHandlerWhenWidgetsHidden() OVERRIDE;
   virtual bool AllowPopup(const GURL& creator) OVERRIDE;
   virtual bool ShouldFork(WebKit::WebFrame* frame,
@@ -65,7 +79,9 @@ class ShellContentRendererClient : public ContentRendererClient {
                                       const std::string& value) OVERRIDE;
   virtual void RegisterPPAPIInterfaceFactories(
       webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) OVERRIDE;
-  virtual bool AllowSocketAPI(const GURL& url) OVERRIDE;
+
+ private:
+  scoped_ptr<ShellRenderProcessObserver> shell_observer_;
 };
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,21 +23,25 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/first_run/first_run_import_observer.h"
+#include "chrome/browser/first_run/first_run_internal.h"
 #include "chrome/browser/importer/importer_host.h"
 #include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/importer/importer_progress_dialog.h"
+#include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/worker_thread_ticker.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/user_metrics.h"
 #include "google_update_idl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -45,6 +49,8 @@
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
+
+using content::UserMetricsAction;
 
 namespace {
 
@@ -102,7 +108,7 @@ bool CreateChromeDesktopShortcut() {
   if (!PathService::Get(base::FILE_EXE, &chrome_exe))
     return false;
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  if (!dist)
+  if (!dist || !dist->CanCreateDesktopShortcuts())
     return false;
   return ShellUtil::CreateChromeDesktopShortcut(
       dist,
@@ -129,6 +135,15 @@ bool CreateChromeQuickLaunchShortcut() {
       chrome_exe.value(),
       ShellUtil::CURRENT_USER,  // create only for current user.
       true);  // create if doesn't exist.
+}
+
+void PlatformSetup(Profile* profile) {
+  if (CreateChromeDesktopShortcut())
+    profile->GetPrefs()->SetBoolean(prefs::kProfileShortcutCreated, true);
+
+  // Windows 7 has deprecated the quick launch bar.
+  if (base::win::GetVersion() < base::win::VERSION_WIN7)
+    CreateChromeQuickLaunchShortcut();
 }
 
 }  // namespace
@@ -178,7 +193,7 @@ void FirstRun::DoDelayedInstallExtensions() {
 
 namespace {
 
-// This class is used by FirstRun::ImportSettings to determine when the import
+// This class is used by first_run::ImportSettings to determine when the import
 // process has ended and what was the result of the operation as reported by
 // the process exit code. This class executes in the context of the main chrome
 // process.
@@ -295,32 +310,59 @@ bool DecodeImportParams(const std::string& encoded,
   return true;
 }
 
+#if !defined(USE_AURA)
+// Imports browser items in this process. The browser and the items to
+// import are encoded in the command line.
+int ImportFromBrowser(Profile* profile,
+                      const CommandLine& cmdline) {
+  std::string import_info = cmdline.GetSwitchValueASCII(switches::kImport);
+  if (import_info.empty()) {
+    NOTREACHED();
+    return false;
+  }
+  int importer_type = 0;
+  int items_to_import = 0;
+  int skip_first_run_ui = 0;
+  HWND parent_window = NULL;
+  if (!DecodeImportParams(import_info, &importer_type, &items_to_import,
+                          &skip_first_run_ui, &parent_window)) {
+    NOTREACHED();
+    return false;
+  }
+  scoped_refptr<ImporterHost> importer_host(new ImporterHost);
+  FirstRunImportObserver importer_observer;
+
+  scoped_refptr<ImporterList> importer_list(new ImporterList(NULL));
+  importer_list->DetectSourceProfilesHack();
+
+  // If |skip_first_run_ui|, we run in headless mode.  This means that if
+  // there is user action required the import is automatically canceled.
+  if (skip_first_run_ui > 0)
+    importer_host->set_headless();
+
+  importer::ShowImportProgressDialog(
+      parent_window,
+      static_cast<uint16>(items_to_import),
+      importer_host,
+      &importer_observer,
+      importer_list->GetSourceProfileForImporterType(importer_type),
+      profile,
+      true);
+  importer_observer.RunLoop();
+  return importer_observer.import_result();
+}
+#endif  // !defined(USE_AURA)
+
 }  // namespace
 
-// static
-void FirstRun::PlatformSetup() {
-  CreateChromeDesktopShortcut();
-  // Windows 7 has deprecated the quick launch bar.
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
-    CreateChromeQuickLaunchShortcut();
-}
+namespace first_run {
+namespace internal{
 
-// static
-FilePath FirstRun::MasterPrefsPath() {
-  // The standard location of the master prefs is next to the chrome binary.
-  FilePath master_prefs;
-  if (!PathService::Get(base::DIR_EXE, &master_prefs))
-    return FilePath();
-  return master_prefs.AppendASCII(installer::kDefaultMasterPrefs);
-}
-
-// static
-bool FirstRun::ImportSettings(Profile* profile,
-                              int importer_type,
-                              int items_to_import,
-                              const FilePath& import_bookmarks_path,
-                              bool skip_first_run_ui,
-                              HWND parent_window) {
+bool ImportSettingsWin(Profile* profile,
+                       int importer_type,
+                       int items_to_import,
+                       const FilePath& import_bookmarks_path,
+                       bool skip_first_run_ui) {
   const CommandLine& cmdline = *CommandLine::ForCurrentProcess();
   CommandLine import_cmd(cmdline.GetProgram());
 
@@ -366,55 +408,85 @@ bool FirstRun::ImportSettings(Profile* profile,
   return (import_runner.exit_code() == content::RESULT_CODE_NORMAL_EXIT);
 }
 
-// static
-bool FirstRun::ImportSettings(Profile* profile,
-                              scoped_refptr<ImporterHost> importer_host,
-                              scoped_refptr<ImporterList> importer_list,
-                              int items_to_import) {
-  return ImportSettings(
+bool ImportSettings(Profile* profile,
+                    scoped_refptr<ImporterHost> importer_host,
+                    scoped_refptr<ImporterList> importer_list,
+                    int items_to_import) {
+  return internal::ImportSettingsWin(
       profile,
       importer_list->GetSourceProfileAt(0).importer_type,
       items_to_import,
       FilePath(),
-      false,
-      NULL);
+      false);
 }
 
-int FirstRun::ImportFromBrowser(Profile* profile,
-                                const CommandLine& cmdline) {
-  std::string import_info = cmdline.GetSwitchValueASCII(switches::kImport);
-  if (import_info.empty()) {
-    NOTREACHED();
+bool GetFirstRunSentinelFilePath(FilePath* path) {
+  FilePath first_run_sentinel;
+
+  FilePath exe_path;
+  if (!PathService::Get(base::DIR_EXE, &exe_path))
     return false;
+  if (InstallUtil::IsPerUserInstall(exe_path.value().c_str())) {
+    first_run_sentinel = exe_path;
+  } else {
+    if (!PathService::Get(chrome::DIR_USER_DATA, &first_run_sentinel))
+      return false;
   }
-  int importer_type = 0;
-  int items_to_import = 0;
-  int skip_first_run_ui = 0;
-  HWND parent_window = NULL;
-  if (!DecodeImportParams(import_info, &importer_type, &items_to_import,
-                          &skip_first_run_ui, &parent_window)) {
-    NOTREACHED();
-    return false;
-  }
-  scoped_refptr<ImporterHost> importer_host(new ImporterHost);
-  FirstRunImportObserver importer_observer;
 
-  scoped_refptr<ImporterList> importer_list(new ImporterList(NULL));
-  importer_list->DetectSourceProfilesHack();
-
-  // If |skip_first_run_ui|, we run in headless mode.  This means that if
-  // there is user action required the import is automatically canceled.
-  if (skip_first_run_ui > 0)
-    importer_host->set_headless();
-
-  importer::ShowImportProgressDialog(
-      parent_window,
-      static_cast<uint16>(items_to_import),
-      importer_host,
-      &importer_observer,
-      importer_list->GetSourceProfileForImporterType(importer_type),
-      profile,
-      true);
-  importer_observer.RunLoop();
-  return importer_observer.import_result();
+  *path = first_run_sentinel.AppendASCII(kSentinelFile);
+  return true;
 }
+
+}  // namespace internal
+}  // namespace first_run
+
+namespace first_run {
+
+void AutoImport(
+    Profile* profile,
+    bool homepage_defined,
+    int import_items,
+    int dont_import_items,
+    bool make_chrome_default,
+    ProcessSingleton* process_singleton) {
+#if !defined(USE_AURA)
+  // We need to avoid dispatching new tabs when we are importing because
+  // that will lead to data corruption or a crash. Because there is no UI for
+  // the import process, we pass NULL as the window to bring to the foreground
+  // when a CopyData message comes in; this causes the message to be silently
+  // discarded, which is the correct behavior during the import process.
+  process_singleton->Lock(NULL);
+
+  PlatformSetup(profile);
+
+  scoped_refptr<ImporterHost> importer_host;
+  importer_host = new ImporterHost;
+
+  internal::AutoImportPlatformCommon(importer_host, profile, homepage_defined,
+                                     import_items, dont_import_items,
+                                     make_chrome_default);
+
+  process_singleton->Unlock();
+  CreateSentinel();
+#endif  // !defined(USE_AURA)
+}
+
+int ImportNow(Profile* profile, const CommandLine& cmdline) {
+  int return_code = internal::ImportBookmarkFromFileIfNeeded(profile, cmdline);
+#if !defined(USE_AURA)
+  if (cmdline.HasSwitch(switches::kImport)) {
+    return_code = ImportFromBrowser(profile, cmdline);
+  }
+#endif
+  return return_code;
+}
+
+FilePath MasterPrefsPath() {
+  // The standard location of the master prefs is next to the chrome binary.
+  FilePath master_prefs;
+  if (!PathService::Get(base::DIR_EXE, &master_prefs))
+    return FilePath();
+  return master_prefs.AppendASCII(installer::kDefaultMasterPrefs);
+}
+
+}  // namespace first_run

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,14 @@
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/common/result_codes.h"
 
 using content::BrowserThread;
+using content::UserMetricsAction;
 
 // static
 void ExtensionFunctionDeleteTraits::Destruct(const ExtensionFunction* x) {
@@ -104,6 +105,10 @@ const std::string ExtensionFunction::GetError() {
   return error_;
 }
 
+void ExtensionFunction::SetError(const std::string& error) {
+  error_ = error;
+}
+
 void ExtensionFunction::Run() {
   if (!RunImpl())
     SendResponse(false);
@@ -135,7 +140,7 @@ void ExtensionFunction::HandleBadMessage(base::ProcessHandle process) {
     CHECK(false);
   } else {
     NOTREACHED();
-    UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_EFD"));
+    content::RecordAction(UserMetricsAction("BadMessageTerminate_EFD"));
     if (process)
       base::KillProcess(process, content::RESULT_CODE_KILLED_BAD_MESSAGE,
                         false);

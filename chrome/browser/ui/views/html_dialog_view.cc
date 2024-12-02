@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,12 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/window.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/webui/html_dialog_controller.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/views/events/event.h"
 #include "ui/views/widget/root_view.h"
@@ -24,24 +25,33 @@
 #include "ui/views/widget/native_widget_gtk.h"
 #endif
 
+#if defined(USE_AURA)
+#include "ui/aura/event.h"
+#include "ui/views/widget/native_widget_aura.h"
+#endif
+
 class RenderWidgetHost;
+
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 namespace browser {
 
 // Declared in browser_dialogs.h so that others don't need to depend on our .h.
 gfx::NativeWindow ShowHtmlDialog(gfx::NativeWindow parent,
                                  Profile* profile,
+                                 Browser* browser,
                                  HtmlDialogUIDelegate* delegate,
                                  DialogStyle style) {
-  // It's not always safe to display an html dialog with an off the record
-  // profile.  If the last browser with that profile is closed it will go
-  // away.
-  DCHECK(!profile->IsOffTheRecord() || delegate->IsDialogModal());
-  HtmlDialogView* html_view = new HtmlDialogView(profile, delegate);
+  HtmlDialogView* html_view = new HtmlDialogView(profile, browser, delegate);
   browser::CreateViewsWindow(parent, html_view, style);
   html_view->InitDialog();
   html_view->GetWidget()->Show();
   return html_view->GetWidget()->GetNativeWindow();
+}
+
+void CloseHtmlDialog(gfx::NativeWindow window) {
+  views::Widget::GetWidgetForNativeWindow(window)->Close();
 }
 
 }  // namespace browser
@@ -50,11 +60,13 @@ gfx::NativeWindow ShowHtmlDialog(gfx::NativeWindow parent,
 // HtmlDialogView, public:
 
 HtmlDialogView::HtmlDialogView(Profile* profile,
+                               Browser* browser,
                                HtmlDialogUIDelegate* delegate)
     : DOMView(),
       HtmlDialogTabContentsDelegate(profile),
       initialized_(false),
-      delegate_(delegate) {
+      delegate_(delegate),
+      dialog_controller_(new HtmlDialogController(this, profile, browser)) {
 }
 
 HtmlDialogView::~HtmlDialogView() {
@@ -98,10 +110,8 @@ bool HtmlDialogView::CanResize() const {
   return true;
 }
 
-bool HtmlDialogView::IsModal() const {
-  if (delegate_)
-    return delegate_->IsDialogModal();
-  return false;
+ui::ModalType HtmlDialogView::GetModalType() const {
+  return GetDialogModalType();
 }
 
 string16 HtmlDialogView::GetWindowTitle() const {
@@ -141,8 +151,10 @@ const views::Widget* HtmlDialogView::GetWidget() const {
 ////////////////////////////////////////////////////////////////////////////////
 // HtmlDialogUIDelegate implementation:
 
-bool HtmlDialogView::IsDialogModal() const {
-  return IsModal();
+ui::ModalType HtmlDialogView::GetDialogModalType() const {
+  if (delegate_)
+    return delegate_->GetDialogModalType();
+  return ui::MODAL_TYPE_NONE;
 }
 
 string16 HtmlDialogView::GetDialogTitle() const {
@@ -177,12 +189,16 @@ void HtmlDialogView::OnDialogClosed(const std::string& json_retval) {
   if (delegate_) {
     HtmlDialogUIDelegate* dialog_delegate = delegate_;
     delegate_ = NULL;  // We will not communicate further with the delegate.
+
+    // Store the dialog content area size.
+    dialog_delegate->StoreDialogSize(GetContentsBounds().size());
+
     dialog_delegate->OnDialogClosed(json_retval);
   }
   GetWidget()->Close();
 }
 
-void HtmlDialogView::OnCloseContents(TabContents* source,
+void HtmlDialogView::OnCloseContents(WebContents* source,
                                      bool* out_close_dialog) {
   if (delegate_)
     delegate_->OnCloseContents(source, out_close_dialog);
@@ -201,9 +217,9 @@ bool HtmlDialogView::HandleContextMenu(const ContextMenuParams& params) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// TabContentsDelegate implementation:
+// content::WebContentsDelegate implementation:
 
-void HtmlDialogView::MoveContents(TabContents* source, const gfx::Rect& pos) {
+void HtmlDialogView::MoveContents(WebContents* source, const gfx::Rect& pos) {
   // The contained web page wishes to resize itself. We let it do this because
   // if it's a dialog we know about, we trust it not to be mean to the user.
   GetWidget()->SetBounds(pos);
@@ -214,7 +230,10 @@ void HtmlDialogView::MoveContents(TabContents* source, const gfx::Rect& pos) {
 // they're all browser-specific. (This may change in the future.)
 void HtmlDialogView::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
 #if defined(USE_AURA)
-  // TODO(saintlou): Need to provide some Aura handling.
+  aura::KeyEvent aura_event(event.os_event->native_event(), false);
+  views::NativeWidgetAura* aura_widget =
+      static_cast<views::NativeWidgetAura*>(GetWidget()->native_widget());
+  aura_widget->OnKeyEvent(&aura_event);
 #elif defined(OS_WIN)
   // Any unhandled keyboard/character messages should be defproced.
   // This allows stuff like F10, etc to work correctly.
@@ -230,11 +249,40 @@ void HtmlDialogView::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
 #endif
 }
 
-void HtmlDialogView::CloseContents(TabContents* source) {
+void HtmlDialogView::CloseContents(WebContents* source) {
   bool close_dialog = false;
   OnCloseContents(source, &close_dialog);
   if (close_dialog)
     OnDialogClosed(std::string());
+}
+
+content::WebContents* HtmlDialogView::OpenURLFromTab(
+    content::WebContents* source,
+    const content::OpenURLParams& params) {
+  content::WebContents* new_contents = NULL;
+  if (delegate_ &&
+      delegate_->HandleOpenURLFromTab(source, params, &new_contents)) {
+    return new_contents;
+  }
+  return HtmlDialogTabContentsDelegate::OpenURLFromTab(source, params);
+}
+
+void HtmlDialogView::AddNewContents(content::WebContents* source,
+                                    content::WebContents* new_contents,
+                                    WindowOpenDisposition disposition,
+                                    const gfx::Rect& initial_pos,
+                                    bool user_gesture) {
+  if (delegate_ && delegate_->HandleAddNewContents(
+          source, new_contents, disposition, initial_pos, user_gesture)) {
+    return;
+  }
+  HtmlDialogTabContentsDelegate::AddNewContents(
+      source, new_contents, disposition, initial_pos, user_gesture);
+}
+
+void HtmlDialogView::LoadingStateChanged(content::WebContents* source) {
+  if (delegate_)
+    delegate_->OnLoadingStateChanged(source);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -244,14 +292,14 @@ void HtmlDialogView::InitDialog() {
   // Now Init the DOMView. This view runs in its own process to render the html.
   DOMView::Init(profile(), NULL);
 
-  TabContents* tab_contents = dom_contents_->tab_contents();
-  tab_contents->set_delegate(this);
+  WebContents* web_contents = dom_contents_->web_contents();
+  web_contents->SetDelegate(this);
 
   // Set the delegate. This must be done before loading the page. See
   // the comment above HtmlDialogUI in its header file for why.
   HtmlDialogUI::GetPropertyAccessor().SetProperty(
-      tab_contents->property_bag(), this);
-  tab_watcher_.reset(new TabFirstRenderWatcher(tab_contents, this));
+      web_contents->GetPropertyBag(), this);
+  tab_watcher_.reset(new TabFirstRenderWatcher(web_contents, this));
 
   DOMView::LoadURL(GetDialogContentURL());
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -299,7 +299,9 @@ void CanvasSkia::SizeStringInt(const string16& text,
     // DrawText() can run extremely slowly (e.g. several seconds).  So in this
     // case, we turn character breaking off to get a more accurate "desired"
     // width and avoid the slowdown.
-    if (flags & (gfx::Canvas::MULTI_LINE | gfx::Canvas::CHARACTER_BREAK))
+    int multiline_charbreak =
+        gfx::Canvas::MULTI_LINE | gfx::Canvas::CHARACTER_BREAK;
+    if ((flags & multiline_charbreak) == multiline_charbreak)
       flags &= ~gfx::Canvas::CHARACTER_BREAK;
 
     // Weird undocumented behavior: if the width is 0, DoDrawText() won't
@@ -415,10 +417,11 @@ void CanvasSkia::DrawStringWithHalo(const string16& text,
 
   // Create a temporary buffer filled with the halo color. It must leave room
   // for the 1-pixel border around the text.
-  CanvasSkia text_canvas(w + 2, h + 2, true);
+  gfx::Size size(w + 2, h + 2);
+  CanvasSkia text_canvas(size, true);
   SkPaint bkgnd_paint;
   bkgnd_paint.setColor(halo_color);
-  text_canvas.DrawRectInt(0, 0, w + 2, h + 2, bkgnd_paint);
+  text_canvas.DrawRect(gfx::Rect(gfx::Point(), size), bkgnd_paint);
 
   // Draw the text into the temporary buffer. This will have correct
   // ClearType since the background color is the same as the halo color.
@@ -428,7 +431,7 @@ void CanvasSkia::DrawStringWithHalo(const string16& text,
   // opaque. We have to do this first since pixelShouldGetHalo will check for
   // 0 to see if a pixel has been modified to transparent, and black text that
   // Windows draw will look transparent to it!
-  skia::MakeOpaque(text_canvas.sk_canvas(), 0, 0, w + 2, h + 2);
+  skia::MakeOpaque(text_canvas.sk_canvas(), 0, 0, size.width(), size.height());
 
   uint32_t halo_premul = SkPreMultiplyColor(halo_color);
   SkBitmap& text_bitmap = const_cast<SkBitmap&>(
@@ -451,11 +454,6 @@ void CanvasSkia::DrawStringWithHalo(const string16& text,
   DrawBitmapInt(text_bitmap, x - 1, y - 1);
 }
 
-ui::TextureID CanvasSkia::GetTextureID() {
-  // TODO(wjmaclean)
-  return 0;
-}
-
 void CanvasSkia::DrawFadeTruncatingString(
       const string16& text,
       CanvasSkia::TruncateFadeMode truncate_mode,
@@ -466,8 +464,8 @@ void CanvasSkia::DrawFadeTruncatingString(
   int flags = NO_ELLIPSIS;
 
   // If the whole string fits in the destination then just draw it directly.
-  int total_string_width;
-  int total_string_height;
+  int total_string_width = 0;
+  int total_string_height = 0;
   SizeStringInt(text, font, &total_string_width, &total_string_height,
                 flags | TEXT_VALIGN_TOP);
 

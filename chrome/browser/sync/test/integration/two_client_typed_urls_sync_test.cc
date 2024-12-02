@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,8 +88,35 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, Add) {
   AssertAllProfilesHaveSameURLsAsVerifier();
 }
 
+IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, AddExpired) {
+  const string16 kHistoryUrl(
+      ASCIIToUTF16("http://www.add-one-history.google.com/"));
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+
+  // Populate one client with a URL, should sync to the other.
+  GURL new_url(kHistoryUrl);
+  // Create a URL with a timestamp 1 year before today.
+  base::Time timestamp = base::Time::Now() - base::TimeDelta::FromDays(365);
+  AddUrlToHistoryWithTimestamp(0,
+                               new_url,
+                               content::PAGE_TRANSITION_TYPED,
+                               history::SOURCE_BROWSED,
+                               timestamp);
+  std::vector<history::URLRow> urls = GetTypedUrlsFromClient(0);
+  ASSERT_EQ(1U, urls.size());
+  ASSERT_EQ(new_url, urls[0].url());
+
+  // Let sync finish.
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+
+  // Second client should still have no URLs since this one is expired.
+  urls = GetTypedUrlsFromClient(1);
+  ASSERT_EQ(0U, urls.size());
+}
+
 // TCM: 3705291
-IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, AddThenDelete) {
+// flaky, see crbug.com/108511
+IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, FLAKY_AddThenDelete) {
   const string16 kHistoryUrl(
       ASCIIToUTF16("http://www.add-one-history.google.com/"));
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -149,7 +176,8 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, DisableEnableSync) {
   AssertAllProfilesHaveSameURLsAsVerifier();
 }
 
-IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, AddOneDeleteOther) {
+// flaky, see crbug.com/108511
+IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, FLAKY_AddOneDeleteOther) {
   const string16 kHistoryUrl(
       ASCIIToUTF16("http://www.add-one-delete-history.google.com/"));
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -179,8 +207,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, AddOneDeleteOther) {
   AssertAllProfilesHaveSameURLsAsVerifier();
 }
 
+// flaky, see crbug.com/108511
 IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest,
-                       AddOneDeleteOtherAddAgain) {
+                       FLAKY_AddOneDeleteOtherAddAgain) {
   const string16 kHistoryUrl(
       ASCIIToUTF16("http://www.add-delete-add-history.google.com/"));
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";

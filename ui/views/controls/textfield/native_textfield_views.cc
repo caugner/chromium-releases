@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,15 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
+#include "grit/app_locale_settings.h"
 #include "grit/ui_strings.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/insets.h"
@@ -76,9 +79,14 @@ NativeTextfieldViews::NativeTextfieldViews(Textfield* parent)
   // Lowercase is not supported.
   DCHECK_NE(parent->style(), Textfield::STYLE_LOWERCASE);
 
+#if defined(OS_CHROMEOS)
+  GetRenderText()->SetFontList(gfx::FontList(l10n_util::GetStringUTF8(
+      IDS_UI_FONT_FAMILY_CROS)));
+#else
+  GetRenderText()->SetFontList(gfx::FontList(textfield_->font()));
+#endif
   // Set the default text style.
   gfx::StyleRange default_style;
-  default_style.font = textfield_->font();
   default_style.foreground = textfield_->text_color();
   GetRenderText()->set_default_style(default_style);
   GetRenderText()->ApplyDefaultStyle();
@@ -143,7 +151,7 @@ bool NativeTextfieldViews::OnKeyReleased(const KeyEvent& event) {
 bool NativeTextfieldViews::GetDropFormats(
     int* formats,
     std::set<OSExchangeData::CustomFormat>* custom_formats) {
-  if (!textfield_->IsEnabled() || textfield_->read_only())
+  if (!textfield_->enabled() || textfield_->read_only())
     return false;
   // TODO(msw): Can we support URL, FILENAME, etc.?
   *formats = ui::OSExchangeData::STRING;
@@ -151,8 +159,7 @@ bool NativeTextfieldViews::GetDropFormats(
 }
 
 bool NativeTextfieldViews::CanDrop(const OSExchangeData& data) {
-  return textfield_->IsEnabled() && !textfield_->read_only() &&
-         data.HasString();
+  return textfield_->enabled() && !textfield_->read_only() && data.HasString();
 }
 
 int NativeTextfieldViews::OnDragUpdated(const DropTargetEvent& event) {
@@ -295,11 +302,14 @@ void NativeTextfieldViews::WriteDragDataForView(views::View* sender,
   DCHECK_NE(ui::DragDropTypes::DRAG_NONE,
             GetDragOperationsForView(sender, press_pt));
   data->SetString(GetSelectedText());
+  TextfieldController* controller = textfield_->GetController();
+  if (controller)
+    controller->OnWriteDragData(data);
 }
 
 int NativeTextfieldViews::GetDragOperationsForView(views::View* sender,
                                                    const gfx::Point& p) {
-  if (!textfield_->IsEnabled() || !GetRenderText()->IsPointInSelection(p))
+  if (!textfield_->enabled() || !GetRenderText()->IsPointInSelection(p))
     return ui::DragDropTypes::DRAG_NONE;
   if (sender == this && !textfield_->read_only())
     return ui::DragDropTypes::DRAG_MOVE | ui::DragDropTypes::DRAG_COPY;
@@ -323,6 +333,8 @@ void NativeTextfieldViews::UpdateText() {
   model_->SetText(textfield_->text());
   OnCaretBoundsChanged();
   SchedulePaint();
+  textfield_->GetWidget()->NotifyAccessibilityEvent(
+      textfield_, ui::AccessibilityTypes::EVENT_TEXT_CHANGED, true);
 }
 
 void NativeTextfieldViews::AppendText(const string16& text) {
@@ -388,24 +400,25 @@ void NativeTextfieldViews::UpdateReadOnly() {
 }
 
 void NativeTextfieldViews::UpdateFont() {
-  // Update the default text style.
-  gfx::StyleRange default_style(GetRenderText()->default_style());
-  default_style.font = textfield_->font();
-  GetRenderText()->set_default_style(default_style);
-  GetRenderText()->ApplyDefaultStyle();
-
+#if defined(OS_CHROMEOS)
+  // For ChromeOS, we support a pre-defined font list per locale. UpdateFont()
+  // only changes the font size, not the font family names.
+  GetRenderText()->SetFontSize(textfield_->font().GetFontSize());
+#else
+  GetRenderText()->SetFontList(gfx::FontList(textfield_->font()));
+#endif
   OnCaretBoundsChanged();
 }
 
-void NativeTextfieldViews::UpdateIsPassword() {
-  model_->set_is_password(textfield_->IsPassword());
+void NativeTextfieldViews::UpdateIsObscured() {
+  // TODO(benrg): GetRenderText()->SetObscured(textfield_->IsObscured());
   OnCaretBoundsChanged();
   SchedulePaint();
   OnTextInputTypeChanged();
 }
 
 void NativeTextfieldViews::UpdateEnabled() {
-  SetEnabled(textfield_->IsEnabled());
+  SetEnabled(textfield_->enabled());
   SchedulePaint();
   OnTextInputTypeChanged();
 }
@@ -458,6 +471,8 @@ void NativeTextfieldViews::SelectRange(const ui::Range& range) {
   model_->SelectRange(range);
   OnCaretBoundsChanged();
   SchedulePaint();
+  textfield_->GetWidget()->NotifyAccessibilityEvent(
+      textfield_, ui::AccessibilityTypes::EVENT_SELECTION_CHANGED, true);
 }
 
 void NativeTextfieldViews::GetSelectionModel(gfx::SelectionModel* sel) const {
@@ -521,6 +536,10 @@ void NativeTextfieldViews::ClearEditHistory() {
   model_->ClearEditHistory();
 }
 
+int NativeTextfieldViews::GetFontHeight() {
+  return GetRenderText()->GetFont().GetHeight();
+}
+
 /////////////////////////////////////////////////////////////////
 // NativeTextfieldViews, ui::SimpleMenuModel::Delegate overrides:
 
@@ -545,8 +564,7 @@ bool NativeTextfieldViews::IsCommandIdEnabled(int command_id) const {
     case IDS_APP_SELECT_ALL:
       return true;
     default:
-      NOTREACHED();
-      return false;
+      return textfield_->GetController()->IsCommandIdEnabled(command_id);
   }
 }
 
@@ -562,10 +580,10 @@ void NativeTextfieldViews::ExecuteCommand(int command_id) {
   switch (command_id) {
     case IDS_APP_CUT:
       if (editable)
-        text_changed = model_->Cut();
+        text_changed = Cut();
       break;
     case IDS_APP_COPY:
-      model_->Copy();
+      Copy();
       break;
     case IDS_APP_PASTE:
       if (editable)
@@ -579,7 +597,7 @@ void NativeTextfieldViews::ExecuteCommand(int command_id) {
       SelectAll();
       break;
     default:
-      NOTREACHED() << "unknown command: " << command_id;
+      textfield_->GetController()->ExecuteCommand(command_id);
       break;
   }
 
@@ -686,6 +704,10 @@ ui::TextInputType NativeTextfieldViews::GetTextInputType() const {
   return textfield_->GetTextInputType();
 }
 
+bool NativeTextfieldViews::CanComposeInline() const {
+  return true;
+}
+
 gfx::Rect NativeTextfieldViews::GetCaretBounds() {
   return GetRenderText()->GetUpdatedCursorBounds();
 }
@@ -695,9 +717,7 @@ bool NativeTextfieldViews::HasCompositionText() {
 }
 
 bool NativeTextfieldViews::GetTextRange(ui::Range* range) {
-  // We don't allow the input method to retrieve or delete content from a
-  // password box.
-  if (GetTextInputType() != ui::TEXT_INPUT_TYPE_TEXT)
+  if (!ImeEditingAllowed())
     return false;
 
   model_->GetTextRange(range);
@@ -705,7 +725,7 @@ bool NativeTextfieldViews::GetTextRange(ui::Range* range) {
 }
 
 bool NativeTextfieldViews::GetCompositionTextRange(ui::Range* range) {
-  if (GetTextInputType() != ui::TEXT_INPUT_TYPE_TEXT)
+  if (!ImeEditingAllowed())
     return false;
 
   model_->GetCompositionTextRange(range);
@@ -713,7 +733,7 @@ bool NativeTextfieldViews::GetCompositionTextRange(ui::Range* range) {
 }
 
 bool NativeTextfieldViews::GetSelectionRange(ui::Range* range) {
-  if (GetTextInputType() != ui::TEXT_INPUT_TYPE_TEXT)
+  if (!ImeEditingAllowed())
     return false;
 
   gfx::SelectionModel sel;
@@ -724,7 +744,7 @@ bool NativeTextfieldViews::GetSelectionRange(ui::Range* range) {
 }
 
 bool NativeTextfieldViews::SetSelectionRange(const ui::Range& range) {
-  if (GetTextInputType() != ui::TEXT_INPUT_TYPE_TEXT || !range.IsValid())
+  if (!ImeEditingAllowed() || !range.IsValid())
     return false;
 
   OnBeforeUserAction();
@@ -734,7 +754,7 @@ bool NativeTextfieldViews::SetSelectionRange(const ui::Range& range) {
 }
 
 bool NativeTextfieldViews::DeleteRange(const ui::Range& range) {
-  if (GetTextInputType() != ui::TEXT_INPUT_TYPE_TEXT || range.is_empty())
+  if (!ImeEditingAllowed() || range.is_empty())
     return false;
 
   OnBeforeUserAction();
@@ -750,7 +770,7 @@ bool NativeTextfieldViews::DeleteRange(const ui::Range& range) {
 bool NativeTextfieldViews::GetTextFromRange(
     const ui::Range& range,
     string16* text) {
-  if (GetTextInputType() != ui::TEXT_INPUT_TYPE_TEXT || !range.IsValid())
+  if (!ImeEditingAllowed() || !range.IsValid())
     return false;
 
   ui::Range text_range;
@@ -799,6 +819,7 @@ void NativeTextfieldViews::RepaintCursor() {
 }
 
 void NativeTextfieldViews::PaintTextAndCursor(gfx::Canvas* canvas) {
+  TRACE_EVENT0("views", "NativeTextfieldViews::PaintTextAndCursor");
   canvas->Save();
   GetRenderText()->set_cursor_visible(is_drop_cursor_visible_ ||
       (is_cursor_visible_ && !model_->HasSelection()));
@@ -838,73 +859,55 @@ bool NativeTextfieldViews::HandleKeyEvent(const KeyEvent& key_event) {
         break;
       case ui::VKEY_X:
         if (control && editable)
-          cursor_changed = text_changed = model_->Cut();
+          cursor_changed = text_changed = Cut();
         break;
       case ui::VKEY_C:
         if (control)
-          model_->Copy();
+          Copy();
         break;
       case ui::VKEY_V:
         if (control && editable)
           cursor_changed = text_changed = Paste();
         break;
       case ui::VKEY_RIGHT:
-        model_->MoveCursorRight(
-            control ? gfx::WORD_BREAK : gfx::CHARACTER_BREAK, selection);
-        cursor_changed = true;
-        break;
       case ui::VKEY_LEFT:
-        model_->MoveCursorLeft(
-            control ? gfx::WORD_BREAK : gfx::CHARACTER_BREAK, selection);
+        model_->MoveCursor(
+            control ? gfx::WORD_BREAK : gfx::CHARACTER_BREAK,
+            (key_code == ui::VKEY_RIGHT) ? gfx::CURSOR_RIGHT : gfx::CURSOR_LEFT,
+            selection);
         cursor_changed = true;
         break;
       case ui::VKEY_END:
       case ui::VKEY_HOME:
         if ((key_code == ui::VKEY_HOME) ==
             (GetRenderText()->GetTextDirection() == base::i18n::RIGHT_TO_LEFT))
-          model_->MoveCursorRight(gfx::LINE_BREAK, selection);
+          model_->MoveCursor(gfx::LINE_BREAK, gfx::CURSOR_RIGHT, selection);
         else
-          model_->MoveCursorLeft(gfx::LINE_BREAK, selection);
+          model_->MoveCursor(gfx::LINE_BREAK, gfx::CURSOR_LEFT, selection);
         cursor_changed = true;
         break;
       case ui::VKEY_BACK:
-        if (!editable)
-          break;
-        if (!model_->HasSelection()) {
-          if (selection && control) {
-            // If both shift and control are pressed, then erase upto the
-            // beginning of the buffer in ChromeOS. In windows, do nothing.
-#if defined(OS_WIN)
-            break;
-#else
-            model_->MoveCursorLeft(gfx::LINE_BREAK, true);
-#endif
-          } else if (control) {
-            // If only control is pressed, then erase the previous word.
-            model_->MoveCursorLeft(gfx::WORD_BREAK, true);
-          }
-        }
-        text_changed = model_->Backspace();
-        cursor_changed = true;
-        break;
       case ui::VKEY_DELETE:
         if (!editable)
           break;
         if (!model_->HasSelection()) {
+          gfx::VisualCursorDirection direction = (key_code == ui::VKEY_DELETE) ?
+              gfx::CURSOR_RIGHT : gfx::CURSOR_LEFT;
           if (selection && control) {
-            // If both shift and control are pressed, then erase upto the
-            // end of the buffer in ChromeOS. In windows, do nothing.
+            // If both shift and control are pressed, then erase up to the
+            // beginning/end of the buffer in ChromeOS. In windows, do nothing.
 #if defined(OS_WIN)
             break;
 #else
-            model_->MoveCursorRight(gfx::LINE_BREAK, true);
+            model_->MoveCursor(gfx::LINE_BREAK, direction, true);
 #endif
           } else if (control) {
-            // If only control is pressed, then erase the next word.
-            model_->MoveCursorRight(gfx::WORD_BREAK, true);
+            // If only control is pressed, then erase the previous/next word.
+            model_->MoveCursor(gfx::WORD_BREAK, direction, true);
           }
         }
-        cursor_changed = text_changed = model_->Delete();
+        cursor_changed = text_changed = (key_code == ui::VKEY_BACK) ?
+            model_->Backspace() : model_->Delete();
         break;
       case ui::VKEY_INSERT:
         GetRenderText()->ToggleInsertMode();
@@ -937,11 +940,20 @@ void NativeTextfieldViews::PropagateTextChange() {
 
 void NativeTextfieldViews::UpdateAfterChange(bool text_changed,
                                              bool cursor_changed) {
-  if (text_changed)
+  if (text_changed) {
     PropagateTextChange();
+    textfield_->GetWidget()->NotifyAccessibilityEvent(
+        textfield_, ui::AccessibilityTypes::EVENT_TEXT_CHANGED, true);
+  }
   if (cursor_changed) {
     is_cursor_visible_ = true;
     RepaintCursor();
+    if (!text_changed) {
+      // TEXT_CHANGED implies SELECTION_CHANGED, so we only need to fire
+      // this if only the selection changed.
+      textfield_->GetWidget()->NotifyAccessibilityEvent(
+          textfield_, ui::AccessibilityTypes::EVENT_SELECTION_CHANGED, true);
+    }
   }
   if (text_changed || cursor_changed) {
     OnCaretBoundsChanged();
@@ -959,6 +971,8 @@ void NativeTextfieldViews::UpdateContextMenu() {
     context_menu_contents_->AddSeparator();
     context_menu_contents_->AddItemWithStringId(IDS_APP_SELECT_ALL,
                                                 IDS_APP_SELECT_ALL);
+    textfield_->GetController()->UpdateContextMenu(
+        context_menu_contents_.get());
 
     context_menu_delegate_.reset(
         new views::MenuModelAdapter(context_menu_contents_.get()));
@@ -1004,6 +1018,26 @@ void NativeTextfieldViews::OnAfterUserAction() {
   TextfieldController* controller = textfield_->GetController();
   if (controller)
     controller->OnAfterUserAction(textfield_);
+}
+
+bool NativeTextfieldViews::Cut() {
+  if (model_->Cut()) {
+    TextfieldController* controller = textfield_->GetController();
+    if (controller)
+      controller->OnAfterCutOrCopy();
+    return true;
+  }
+  return false;
+}
+
+bool NativeTextfieldViews::Copy() {
+  if (model_->Copy()) {
+    TextfieldController* controller = textfield_->GetController();
+    if (controller)
+      controller->OnAfterCutOrCopy();
+    return true;
+  }
+  return false;
 }
 
 bool NativeTextfieldViews::Paste() {
@@ -1061,6 +1095,13 @@ void NativeTextfieldViews::HandleMousePressEvent(const MouseEvent& event) {
     }
     SchedulePaint();
   }
+}
+
+bool NativeTextfieldViews::ImeEditingAllowed() const {
+  // We don't allow the input method to retrieve or delete content from a
+  // password field.
+  ui::TextInputType t = GetTextInputType();
+  return (t != ui::TEXT_INPUT_TYPE_NONE && t != ui::TEXT_INPUT_TYPE_PASSWORD);
 }
 
 // static

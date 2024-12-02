@@ -4,7 +4,7 @@
 
 // This file contains a list of defective WebGL conformance tests. The expected
 // format is:
-//  {BUG#} {MAC,WIN,LINUX} : {TEST_NAME} = {FAIL,TIMEOUT}
+//  {BUG#} {MAC,WIN,LINUX,RELEASE,DEBUG} : {TEST_NAME} = {PASS,FAIL,TIMEOUT}
 //
 // Examples:
 //  91530 MAC WIN LINUX : context_lost_restored = TIMEOUT
@@ -20,15 +20,13 @@
 // TIMEOUT TESTS
 // -----------------------------------------------------------------------------
 
-103804 MAC WIN LINUX : conformance_textures_tex_input_validation = TIMEOUT
+// The following two tests TIMEOUT on GPU Linux Tests (dbg)(1), with ATI card.
+WONTFIX LINUX DEBUG : conformance_more_conformance_quickCheckAPI_B1 = TIMEOUT
+WONTFIX LINUX DEBUG : conformance_more_conformance_quickCheckAPI_G_I = TIMEOUT
 
 // -----------------------------------------------------------------------------
 // FAILING TESTS
 // -----------------------------------------------------------------------------
-
-103573 WIN : conformance_glsl_functions_glsl_function_atan = FAIL
-103573 WIN : conformance_glsl_functions_glsl_function_atan_xy = FAIL
-103573 WIN : conformance_glsl_functions_glsl_function_mod_gentype = FAIL
 
 103759 MAC WIN LINUX : conformance_more_functions_readPixelsBadArgs = FAIL
 103759 MAC WIN LINUX : conformance_more_functions_texImage2DHTML = FAIL

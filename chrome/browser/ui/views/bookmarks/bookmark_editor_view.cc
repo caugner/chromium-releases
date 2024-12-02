@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,7 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/menu/menu_2.h"
 #include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/controls/tree/tree_view.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
@@ -104,8 +105,8 @@ bool BookmarkEditorView::IsDialogButtonEnabled(ui::DialogButton button) const {
   return true;
 }
 
-bool BookmarkEditorView::IsModal() const {
-  return true;
+ui::ModalType BookmarkEditorView::GetModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 
 bool BookmarkEditorView::CanResize() const {
@@ -280,6 +281,9 @@ void BookmarkEditorView::ShowContextMenuForView(View* source,
   running_menu_for_root_ =
       (tree_model_->GetParent(tree_view_->GetSelectedNode()) ==
        tree_model_->GetRoot());
+#if defined(USE_AURA)
+  NOTIMPLEMENTED();
+#else
   if (!context_menu_contents_.get()) {
     context_menu_contents_.reset(new ui::SimpleMenuModel(this));
     context_menu_contents_->AddItemWithStringId(IDS_EDIT, IDS_EDIT);
@@ -290,6 +294,7 @@ void BookmarkEditorView::ShowContextMenuForView(View* source,
     context_menu_.reset(new views::Menu2(context_menu_contents_.get()));
   }
   context_menu_->RunContextMenuAt(p);
+#endif
 }
 
 void BookmarkEditorView::Init() {
@@ -299,19 +304,16 @@ void BookmarkEditorView::Init() {
 
   title_tf_.set_parent_owned(false);
 
-  std::wstring title;
+  string16 title;
   GURL url;
   if (details_.type == EditDetails::EXISTING_NODE) {
     title = details_.existing_node->GetTitle();
     url = details_.existing_node->url();
   } else if (details_.type == EditDetails::NEW_FOLDER) {
-    title = UTF16ToWide(
-        l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_NEW_FOLDER_NAME));
+    title = l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_NEW_FOLDER_NAME);
   } else if (details_.type == EditDetails::NEW_URL) {
-    string16 title16;
     bookmark_utils::GetURLAndTitleToBookmarkFromCurrentTab(profile_,
-        &url, &title16);
-    title = UTF16ToWide(title16);
+        &url, &title);
   }
   title_tf_.SetText(title);
   title_tf_.SetController(this);
@@ -325,8 +327,7 @@ void BookmarkEditorView::Init() {
     tree_view_->set_lines_at_root(true);
     new_folder_button_.reset(new views::NativeTextButton(
         this,
-        UTF16ToWide(l10n_util::GetStringUTF16(
-            IDS_BOOKMARK_EDITOR_NEW_FOLDER_BUTTON))));
+        l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_NEW_FOLDER_BUTTON)));
     new_folder_button_->set_parent_owned(false);
     tree_view_->set_context_menu_controller(this);
 
@@ -385,7 +386,7 @@ void BookmarkEditorView::Init() {
         net::UnescapeRule::SPACES, NULL, NULL, NULL);
 
     url_tf_ = new views::Textfield;
-    url_tf_->SetText(UTF16ToWide(url_text));
+    url_tf_->SetText(url_text);
     url_tf_->SetController(this);
     url_tf_->SetAccessibleName(url_label_->GetText());
 
@@ -399,7 +400,7 @@ void BookmarkEditorView::Init() {
   if (show_tree_) {
     layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
     layout->StartRow(1, single_column_view_set_id);
-    layout->AddView(tree_view_);
+    layout->AddView(tree_view_->CreateParentIfNecessary());
   }
 
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
@@ -460,7 +461,9 @@ void BookmarkEditorView::Reset() {
   tree_view_->SetModel(tree_model_.get());
   tree_view_->SetController(this);
 
+#if !defined(USE_AURA)
   context_menu_.reset();
+#endif
 
   if (parent())
     ExpandAndSelect();

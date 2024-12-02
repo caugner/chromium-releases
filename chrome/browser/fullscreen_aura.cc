@@ -6,14 +6,15 @@
 
 #include "base/logging.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/aura/desktop.h"
+#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/base/ui_base_types.h"
 
 namespace {
 
 bool CheckIfFullscreenWindowExists(aura::Window* window) {
-  if (window->GetIntProperty(aura::kShowStateKey) == ui::SHOW_STATE_FULLSCREEN)
+  if (window->GetIntProperty(aura::client::kShowStateKey) ==
+      ui::SHOW_STATE_FULLSCREEN)
     return true;
   aura::Window::Windows children = window->children();
   for (aura::Window::Windows::const_iterator i = children.begin();
@@ -31,5 +32,5 @@ bool IsFullScreenMode() {
   // This is used only by notification_ui_manager.cc. On aura, notification
   // will be managed in panel. This is temporary to get certain feature running
   // until we implement it for aura.
-  return CheckIfFullscreenWindowExists(aura::Desktop::GetInstance());
+  return CheckIfFullscreenWindowExists(aura::RootWindow::GetInstance());
 }

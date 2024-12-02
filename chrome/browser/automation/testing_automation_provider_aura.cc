@@ -1,9 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/automation/testing_automation_provider.h"
 
+#include "ash/wm/window_util.h"
 #include "base/logging.h"
 #include "chrome/browser/automation/automation_window_tracker.h"
 #include "ui/aura/client/aura_constants.h"
@@ -13,7 +14,7 @@
 void TestingAutomationProvider::ActivateWindow(int handle) {
   aura::Window* window = window_tracker_->GetResource(handle);
   if (window) {
-    window->Activate();
+    ash::ActivateWindow(window);
   }
 }
 
@@ -22,7 +23,7 @@ void TestingAutomationProvider::IsWindowMaximized(int handle,
                                                   bool* success) {
   aura::Window* window = window_tracker_->GetResource(handle);
   if (window) {
-    int show_state = window->GetIntProperty(aura::kShowStateKey);
+    int show_state = window->GetIntProperty(aura::client::kShowStateKey);
     *is_maximized = (show_state == ui::SHOW_STATE_MAXIMIZED);
     *success = true;
   } else {
@@ -31,10 +32,7 @@ void TestingAutomationProvider::IsWindowMaximized(int handle,
 }
 
 void TestingAutomationProvider::TerminateSession(int handle, bool* success) {
-  // TODO(benrg): what should this do in aura? It's
-  // currently unimplemented in most other providers.
   *success = false;
-  NOTIMPLEMENTED();
 }
 
 void TestingAutomationProvider::GetWindowBounds(int handle,
@@ -82,4 +80,3 @@ void TestingAutomationProvider::GetWindowTitle(int handle, string16* text) {
   DCHECK(window);
   *text = window->title();
 }
-

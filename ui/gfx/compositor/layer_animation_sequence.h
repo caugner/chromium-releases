@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/linked_ptr.h"
 #include "base/observer_list.h"
 #include "base/time.h"
@@ -77,8 +78,14 @@ class COMPOSITOR_EXPORT LayerAnimationSequence {
   // Called when the animator schedules this sequence.
   void OnScheduled();
 
+  // Called when the animator is destroyed.
+  void OnAnimatorDestroyed();
+
  private:
   typedef std::vector<linked_ptr<LayerAnimationElement> > Elements;
+
+  FRIEND_TEST_ALL_PREFIXES(LayerAnimatorTest,
+                           ObserverReleasedBeforeAnimationSequenceEnds);
 
   // Notifies the observers that this sequence has been scheduled.
   void NotifyScheduled();

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "base/values.h"
 #include "chrome/common/json_pref_store.h"
 
+class CommandLine;
 class DefaultPrefStore;
 class FilePath;
 class PersistentPrefStore;
@@ -52,7 +53,6 @@ class PrefService : public base::NonThreadSafe {
   // A helper class to store all the information associated with a preference.
   class Preference {
    public:
-
     // The type of the preference is determined by the type with which it is
     // registered. This type needs to be a boolean, integer, double, string,
     // dictionary (a branch), or list.  You shouldn't need to construct this on
@@ -77,6 +77,10 @@ class PrefService : public base::NonThreadSafe {
     // Since managed prefs have the highest priority, this also indicates
     // whether the pref is actually being controlled by the policy setting.
     bool IsManaged() const;
+
+    // Returns true if the Preference is recommended, i.e. set by an admin
+    // policy but the user is allowed to change it.
+    bool IsRecommended() const;
 
     // Returns true if the Preference has a value set by an extension, even if
     // that value is being overridden by a higher-priority source.
@@ -161,17 +165,8 @@ class PrefService : public base::NonThreadSafe {
   // and is managed.
   bool IsManagedPreference(const char* pref_name) const;
 
-  // Writes the data to disk. The return value only reflects whether
-  // serialization was successful; we don't know whether the data actually made
-  // it on disk (since it's on a different thread).  This should only be used if
-  // we need to save immediately (basically, during shutdown).  Otherwise, you
-  // should use ScheduleSavePersistentPrefs.
-  bool SavePersistentPrefs();
-
-  // Serializes the data and schedules save using ImportantFileWriter.
-  void ScheduleSavePersistentPrefs();
-
-  // Lands pending writes to disk.
+  // Lands pending writes to disk. This should only be used if we need to save
+  // immediately (basically, during shutdown).
   void CommitPendingWrite();
 
   // Make the PrefService aware of a pref.
@@ -243,6 +238,8 @@ class PrefService : public base::NonThreadSafe {
   void RegisterInt64Pref(const char* path,
                          int64 default_value,
                          PrefSyncStatus sync_status);
+  // Unregisters a preference.
+  void UnregisterPreference(const char* path);
 
   // If the path is valid and the value at the end of the path matches the type
   // specified, it will return the specified value.  Otherwise, the default
@@ -299,6 +296,10 @@ class PrefService : public base::NonThreadSafe {
   // SyncableService getter.
   // TODO(zea): Have PrefService implement SyncableService directly.
   SyncableService* GetSyncableService();
+
+  // Tell our PrefValueStore to update itself using |command_line|.
+  // Do not call this after having derived an incognito or per tab pref service.
+  void UpdateCommandLinePrefStore(CommandLine* command_line);
 
  protected:
   // Construct a new pref service. This constructor is what
@@ -392,6 +393,11 @@ class PrefService : public base::NonThreadSafe {
 
   // The model associator that maintains the links with the sync db.
   scoped_ptr<PrefModelAssociator> pref_sync_associator_;
+
+  // Whether CreateIncognitoPrefService() or
+  // CreatePrefServiceWithPerTabPrefStore() have been called to create a
+  // "forked" PrefService.
+  bool pref_service_forked_;
 
   DISALLOW_COPY_AND_ASSIGN(PrefService);
 };

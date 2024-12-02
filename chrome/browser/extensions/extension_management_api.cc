@@ -20,7 +20,7 @@
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/webui/extension_icon_source.h"
+#include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/extension.h"
@@ -123,10 +123,10 @@ static DictionaryValue* CreateExtensionInfo(const Extension& extension,
 }
 
 static void AddExtensionInfo(ListValue* list,
-                             const ExtensionList& extensions,
+                             const ExtensionSet& extensions,
                              bool enabled,
                              ExtensionPrefs* prefs) {
-  for (ExtensionList::const_iterator i = extensions.begin();
+  for (ExtensionSet::const_iterator i = extensions.begin();
        i != extensions.end(); ++i) {
     const Extension& extension = **i;
 
@@ -212,6 +212,7 @@ class SafeManifestJSONParser : public UtilityProcessHost::Client {
   void StartWorkOnIOThread() {
     CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
     utility_host_ = new UtilityProcessHost(this, BrowserThread::IO);
+    utility_host_->set_use_linux_zygote(true);
     utility_host_->Send(new ChromeUtilityMsg_ParseJSON(manifest_));
   }
 

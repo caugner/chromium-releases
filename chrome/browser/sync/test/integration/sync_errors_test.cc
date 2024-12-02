@@ -6,7 +6,9 @@
 #include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/browser/sync/protocol/sync_protocol_error.h"
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
+#include "chrome/browser/sync/test/integration/passwords_helper.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
+#include "chrome/common/net/gaia/google_service_auth_error.h"
 
 using bookmarks_helper::AddFolder;
 using bookmarks_helper::SetTitle;
@@ -102,4 +104,22 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest,
   ASSERT_EQ(status.sync_protocol_error.url, protocol_error.url);
   ASSERT_EQ(status.sync_protocol_error.error_description,
       protocol_error.error_description);
+}
+
+IN_PROC_BROWSER_TEST_F(SyncErrorTest, AuthErrorTest) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+
+  const BookmarkNode* node1 = AddFolder(0, 0, L"title1");
+  SetTitle(0, node1, L"new_title1");
+  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion("Sync."));
+
+  TriggerAuthError();
+
+  const BookmarkNode* node2 = AddFolder(0, 0, L"title2");
+  SetTitle(0, node2, L"new_title2");
+  ASSERT_FALSE(GetClient(0)->AwaitFullSyncCompletion("Must get auth error."));
+  ASSERT_EQ(GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS,
+            GetClient(0)->service()->GetAuthError().state());
+  ASSERT_EQ(ProfileSyncService::Status::OFFLINE_UNSYNCED,
+            GetClient(0)->GetStatus().summary);
 }

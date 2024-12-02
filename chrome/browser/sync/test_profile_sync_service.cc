@@ -1,17 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/test_profile_sync_service.h"
 
+#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/internal_api/user_share.h"
 #include "chrome/browser/sync/js/js_reply_handler.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
+#include "chrome/browser/sync/protocol/encryption.pb.h"
 #include "chrome/browser/sync/sessions/session_state.h"
-#include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/test/test_http_bridge_factory.h"
@@ -26,23 +27,6 @@ using syncable::DirectoryManager;
 using syncable::ModelType;
 using syncable::ScopedDirLookup;
 using sync_api::UserShare;
-
-namespace {
-
-class FakeSigninManager : public SigninManager {
- public:
-  FakeSigninManager() {}
-  virtual ~FakeSigninManager() {}
-
-  virtual void StartSignIn(const std::string& username,
-                           const std::string& password,
-                           const std::string& login_token,
-                           const std::string& login_captcha) OVERRIDE {
-    SetUsername(username);
-  }
-};
-
-}  // namespace
 
 namespace browser_sync {
 
@@ -62,25 +46,29 @@ SyncBackendHostForProfileSyncTest::~SyncBackendHostForProfileSyncTest() {}
 void SyncBackendHostForProfileSyncTest::
     SimulateSyncCycleCompletedInitialSyncEnded(
     const tracked_objects::Location& location) {
-  syncable::ModelTypeBitSet sync_ended;
+  syncable::ModelTypeSet sync_ended;
   if (!fail_initial_download_)
-    sync_ended.set();
+    sync_ended = syncable::ModelTypeSet::All();
   std::string download_progress_markers[syncable::MODEL_TYPE_COUNT];
-  core_->HandleSyncCycleCompletedOnFrontendLoop(new SyncSessionSnapshot(
+  HandleSyncCycleCompletedOnFrontendLoop(new SyncSessionSnapshot(
       SyncerStatus(), ErrorCounters(), 0, false,
       sync_ended, download_progress_markers, false, false, 0, 0, 0, false,
-      SyncSourceInfo(), 0, base::Time::Now()));
+      SyncSourceInfo(), 0, base::Time::Now(), false));
 }
 
-sync_api::HttpPostProviderFactory*
-    SyncBackendHostForProfileSyncTest::MakeHttpBridgeFactory(
-        const scoped_refptr<net::URLRequestContextGetter>& getter) {
-  return new browser_sync::TestHttpBridgeFactory;
+namespace {
+
+sync_api::HttpPostProviderFactory* MakeTestHttpBridgeFactory() {
+  return new browser_sync::TestHttpBridgeFactory();
 }
+
+}  // namespace
 
 void SyncBackendHostForProfileSyncTest::InitCore(
-    const Core::DoInitializeOptions& options) {
-  Core::DoInitializeOptions test_options = options;
+    const DoInitializeOptions& options) {
+  DoInitializeOptions test_options = options;
+  test_options.make_http_bridge_factory_fn =
+      base::Bind(&MakeTestHttpBridgeFactory);
   test_options.credentials.email = "testuser@gmail.com";
   test_options.credentials.sync_token = "token";
   test_options.restored_key_for_bootstrapping = "";
@@ -97,16 +85,16 @@ void SyncBackendHostForProfileSyncTest::InitCore(
 void SyncBackendHostForProfileSyncTest::StartConfiguration(
     const base::Closure& callback) {
   SyncBackendHost::FinishConfigureDataTypesOnFrontendLoop();
-  if (initialization_state_ == DOWNLOADING_NIGORI) {
-    syncable::ModelTypeBitSet sync_ended;
+  if (IsDownloadingNigoriForTest()) {
+    syncable::ModelTypeSet sync_ended;
 
     if (!fail_initial_download_)
-      sync_ended.set(syncable::NIGORI);
+      sync_ended.Put(syncable::NIGORI);
     std::string download_progress_markers[syncable::MODEL_TYPE_COUNT];
-    core_->HandleSyncCycleCompletedOnFrontendLoop(new SyncSessionSnapshot(
+    HandleSyncCycleCompletedOnFrontendLoop(new SyncSessionSnapshot(
         SyncerStatus(), ErrorCounters(), 0, false,
         sync_ended, download_progress_markers, false, false, 0, 0, 0, false,
-        SyncSourceInfo(), 0, base::Time::Now()));
+        SyncSourceInfo(), 0, base::Time::Now(), false));
   }
 }
 
@@ -137,10 +125,14 @@ browser_sync::SyncBackendHostForProfileSyncTest*
 TestProfileSyncService::TestProfileSyncService(
     ProfileSyncComponentsFactory* factory,
     Profile* profile,
-    const std::string& test_user,
+    SigninManager* signin,
+    ProfileSyncService::StartBehavior behavior,
     bool synchronous_backend_initialization,
     const base::Closure& callback)
-    : ProfileSyncService(factory, profile, new FakeSigninManager(), test_user),
+    : ProfileSyncService(factory,
+                         profile,
+                         signin,
+                         behavior),
       synchronous_backend_initialization_(
           synchronous_backend_initialization),
       synchronous_sync_configuration_(false),
@@ -150,7 +142,8 @@ TestProfileSyncService::TestProfileSyncService(
   SetSyncSetupCompleted();
 }
 
-TestProfileSyncService::~TestProfileSyncService() {}
+TestProfileSyncService::~TestProfileSyncService() {
+}
 
 void TestProfileSyncService::SetInitialSyncEndedForAllTypes() {
   UserShare* user_share = GetUserShare();
@@ -207,7 +200,7 @@ void TestProfileSyncService::OnBackendInitialized(
 
   ProfileSyncService::OnBackendInitialized(backend, success);
   if (success && send_passphrase_required)
-    OnPassphraseRequired(sync_api::REASON_DECRYPTION);
+    OnPassphraseRequired(sync_api::REASON_DECRYPTION, sync_pb::EncryptedData());
 
   // TODO(akalin): Figure out a better way to do this.
   if (synchronous_backend_initialization_) {

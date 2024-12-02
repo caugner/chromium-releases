@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -221,7 +221,7 @@ void PpbGraphics3DRpcServer::PPB_Graphics3DTrusted_CreateRaw(
     PP_Resource share_context,
     nacl_abi_size_t attrib_list_size, int32_t* attrib_list,
     PP_Resource* resource_id) {
-  DebugPrintf("PPB_Graphics3DTrusted_CreateRaw: instance: %"NACL_PRIu32"\n",
+  DebugPrintf("PPB_Graphics3DTrusted_CreateRaw: instance: %"NACL_PRId32"\n",
               instance);
   NaClSrpcClosureRunner runner(done);
   rpc->result = NACL_SRPC_RESULT_APP_ERROR;
@@ -244,40 +244,26 @@ void PpbGraphics3DRpcServer::PPB_Graphics3DTrusted_InitCommandBuffer(
     NaClSrpcRpc* rpc,
     NaClSrpcClosure* done,
     PP_Resource resource_id,
-    int32_t size,
     int32_t* success) {
   DebugPrintf("PPB_Graphics3DTrusted_InitCommandBuffer(...) resource_id: %d\n",
       resource_id);
   NaClSrpcClosureRunner runner(done);
   rpc->result = NACL_SRPC_RESULT_APP_ERROR;
-  if ((size > kMaxAllowedBufferSize) || (size < 0))
-    return;
   *success = ppapi_proxy::PPBGraphics3DTrustedInterface()->InitCommandBuffer(
-      resource_id, size);
+      resource_id);
   rpc->result = NACL_SRPC_RESULT_OK;
 }
 
-
-void PpbGraphics3DRpcServer::PPB_Graphics3DTrusted_GetRingBuffer(
+void PpbGraphics3DRpcServer::PPB_Graphics3DTrusted_SetGetBuffer(
     NaClSrpcRpc* rpc,
     NaClSrpcClosure* done,
     PP_Resource resource_id,
-    NaClSrpcImcDescType* shm_desc,
-    int32_t* shm_size) {
-  DebugPrintf("PPB_Graphics3DTrusted_GetRingBuffer\n");
-  nacl::DescWrapperFactory factory;
-  nacl::scoped_ptr<nacl::DescWrapper> desc_wrapper;
+    int32_t transfer_buffer_id) {
+  DebugPrintf("PPB_Graphics3DTrusted_SetGetBuffer\n");
   NaClSrpcClosureRunner runner(done);
   rpc->result = NACL_SRPC_RESULT_APP_ERROR;
-
-  int native_handle = 0;
-  uint32_t native_size = 0;
-  ppapi_proxy::PPBGraphics3DTrustedInterface()->GetRingBuffer(
-      resource_id, &native_handle, &native_size);
-  desc_wrapper.reset(factory.ImportShmHandle(
-      (NaClHandle)native_handle, native_size));
-  *shm_desc = desc_wrapper->desc();
-  *shm_size = native_size;
+  ppapi_proxy::PPBGraphics3DTrustedInterface()->SetGetBuffer(
+      resource_id, transfer_buffer_id);
   rpc->result = NACL_SRPC_RESULT_OK;
 }
 
@@ -401,7 +387,9 @@ void PpbGraphics3DRpcServer::PPB_Graphics3DTrusted_GetTransferBuffer(
       GetTransferBuffer(resource_id, id, &native_handle, &native_size);
   desc_wrapper.reset(factory.ImportShmHandle(
       (NaClHandle)native_handle, native_size));
-  *shm_desc = desc_wrapper->desc();
+  // todo(nfullagar): Dup the handle instead of leak caused by bumping the ref.
+  // bug: https://chromiumcodereview.appspot.com/9610008
+  *shm_desc = NaClDescRef(desc_wrapper->desc());
   *shm_size = native_size;
   rpc->result = NACL_SRPC_RESULT_OK;
 

@@ -10,12 +10,14 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
+
+using content::WebContents;
 
 class RenderViewHostTest : public InProcessBrowserTest {
  public:
@@ -30,7 +32,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostTest,
   ui_test_utils::NavigateToURL(browser(), empty_url);
 
   RenderViewHost* rvh =
-      browser()->GetSelectedTabContents()->render_view_host();
+      browser()->GetSelectedWebContents()->GetRenderViewHost();
 
   {
     Value* value = rvh->ExecuteJavascriptAndGetValue(string16(),
@@ -161,12 +163,13 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostTest,
   }
 }
 
-class RenderViewHostTestTabContentsObserver : public TabContentsObserver {
+class RenderViewHostTestWebContentsObserver
+    : public content::WebContentsObserver {
  public:
-  explicit RenderViewHostTestTabContentsObserver(TabContents* tab_contents)
-      : TabContentsObserver(tab_contents),
+  explicit RenderViewHostTestWebContentsObserver(WebContents* web_contents)
+      : content::WebContentsObserver(web_contents),
         navigation_count_(0) {}
-  virtual ~RenderViewHostTestTabContentsObserver() {}
+  virtual ~RenderViewHostTestWebContentsObserver() {}
 
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
@@ -191,13 +194,13 @@ class RenderViewHostTestTabContentsObserver : public TabContentsObserver {
   GURL base_url_;
   int navigation_count_;
 
-  DISALLOW_COPY_AND_ASSIGN(RenderViewHostTestTabContentsObserver);
+  DISALLOW_COPY_AND_ASSIGN(RenderViewHostTestWebContentsObserver);
 };
 
 IN_PROC_BROWSER_TEST_F(RenderViewHostTest, FrameNavigateSocketAddress) {
   ASSERT_TRUE(test_server()->Start());
-  RenderViewHostTestTabContentsObserver observer(
-      browser()->GetSelectedTabContents());
+  RenderViewHostTestWebContentsObserver observer(
+      browser()->GetSelectedWebContents());
 
   GURL test_url = test_server()->GetURL("files/simple.html");
   ui_test_utils::NavigateToURL(browser(), test_url);
@@ -209,8 +212,8 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostTest, FrameNavigateSocketAddress) {
 
 IN_PROC_BROWSER_TEST_F(RenderViewHostTest, BaseURLParam) {
   ASSERT_TRUE(test_server()->Start());
-  RenderViewHostTestTabContentsObserver observer(
-      browser()->GetSelectedTabContents());
+  RenderViewHostTestWebContentsObserver observer(
+      browser()->GetSelectedWebContents());
 
   // Base URL is not set if it is the same as the URL.
   GURL test_url = test_server()->GetURL("files/simple.html");

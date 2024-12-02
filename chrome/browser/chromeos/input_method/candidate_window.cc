@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -602,11 +602,16 @@ class CandidateWindowController::Impl : public CandidateWindowView::Observer,
   // Initializes the candidate window. Returns true on success.
   bool Init();
 
+  void AddObserver(CandidateWindowController::Observer* observer);
+  void RemoveObserver(CandidateWindowController::Observer* observer);
+
  private:
   // CandidateWindowView::Observer implementation.
   virtual void OnCandidateCommitted(int index,
                                     int button,
                                     int flags);
+  virtual void OnCandidateWindowOpened();
+  virtual void OnCandidateWindowClosed();
 
   // Creates the candidate window view.
   void CreateView();
@@ -639,6 +644,8 @@ class CandidateWindowController::Impl : public CandidateWindowView::Observer,
   // This is the outer frame of the infolist window view. The frame will
   // own |infolist_window_|.
   scoped_ptr<views::Widget> infolist_frame_;
+
+  ObserverList<CandidateWindowController::Observer> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(Impl);
 };
@@ -833,7 +840,9 @@ CandidateWindowView::CandidateWindowView(views::Widget* parent_frame)
       footer_area_(NULL),
       previous_shortcut_column_width_(0),
       previous_candidate_column_width_(0),
-      previous_annotation_column_width_(0) {
+      previous_annotation_column_width_(0),
+      is_suggestion_window_location_available_(false),
+      was_candidate_window_open_(false) {
 }
 
 CandidateWindowView::~CandidateWindowView() {
@@ -879,47 +888,66 @@ void CandidateWindowView::Init() {
 
 void CandidateWindowView::HideAll() {
   parent_frame_->Hide();
+  NotifyIfCandidateWindowOpenedOrClosed();
+}
+
+void CandidateWindowView::UpdateParentArea() {
+  if (candidate_area_->IsShown() ||
+      header_area_->IsShown() ||
+      footer_area_->IsShown() ||
+      preedit_area_->IsShown()) {
+    ResizeAndMoveParentFrame();
+    parent_frame_->Show();
+  } else {
+    parent_frame_->Hide();
+  }
+  NotifyIfCandidateWindowOpenedOrClosed();
 }
 
 void CandidateWindowView::HideLookupTable() {
   candidate_area_->Hide();
-  if (preedit_area_->IsShown())
-    ResizeAndMoveParentFrame();
-  else
-    parent_frame_->Hide();
-}
-
-InformationTextArea* CandidateWindowView::GetAuxiliaryTextArea() {
-  return (lookup_table_.orientation == InputMethodLookupTable::kHorizontal ?
-          header_area_ : footer_area_);
+  UpdateParentArea();
 }
 
 void CandidateWindowView::HideAuxiliaryText() {
-  GetAuxiliaryTextArea()->Hide();
-  ResizeAndMoveParentFrame();
+  header_area_->Hide();
+  footer_area_->Hide();
+  UpdateParentArea();
 }
 
 void CandidateWindowView::ShowAuxiliaryText() {
-  GetAuxiliaryTextArea()->Show();
-  ResizeAndMoveParentFrame();
+  // If candidate_area is not shown, shows auxiliary text at header_area.
+  // We expect both header_area_ and footer_area_ contain same value.
+  if (!candidate_area_->IsShown()) {
+    header_area_->Show();
+    footer_area_->Hide();
+  } else {
+    // If candidate_area is shown, shows auxiliary text with orientation.
+    if (lookup_table_.orientation == InputMethodLookupTable::kHorizontal) {
+      header_area_->Show();
+      footer_area_->Hide();
+    } else {
+      footer_area_->Show();
+      header_area_->Hide();
+    }
+  }
+  UpdateParentArea();
 }
 
 void CandidateWindowView::UpdateAuxiliaryText(const std::string& utf8_text) {
-  GetAuxiliaryTextArea()->SetText(utf8_text);
+  header_area_->SetText(utf8_text);
+  footer_area_->SetText(utf8_text);
+  ShowAuxiliaryText();
 }
 
 void CandidateWindowView::HidePreeditText() {
   preedit_area_->Hide();
-  if (candidate_area_->IsShown())
-    ResizeAndMoveParentFrame();
-  else
-    parent_frame_->Hide();
+  UpdateParentArea();
 }
 
 void CandidateWindowView::ShowPreeditText() {
   preedit_area_->Show();
-  ResizeAndMoveParentFrame();
-  parent_frame_->Show();
+  UpdateParentArea();
 }
 
 void CandidateWindowView::UpdatePreeditText(const std::string& utf8_text) {
@@ -928,13 +956,40 @@ void CandidateWindowView::UpdatePreeditText(const std::string& utf8_text) {
 
 void CandidateWindowView::ShowLookupTable() {
   candidate_area_->Show();
-  ResizeAndMoveParentFrame();
-  parent_frame_->Show();
+  UpdateParentArea();
+}
+
+void CandidateWindowView::NotifyIfCandidateWindowOpenedOrClosed() {
+  bool is_open = IsCandidateWindowOpen();
+  if (!was_candidate_window_open_ && is_open) {
+    FOR_EACH_OBSERVER(Observer, observers_, OnCandidateWindowOpened());
+  } else if (was_candidate_window_open_ && !is_open) {
+    FOR_EACH_OBSERVER(Observer, observers_, OnCandidateWindowClosed());
+  }
+  was_candidate_window_open_ = is_open;
 }
 
 bool CandidateWindowView::ShouldUpdateCandidateViews(
     const InputMethodLookupTable& old_table,
     const InputMethodLookupTable& new_table) {
+
+  // Check if mozc lookup table location is changed.
+  if (old_table.mozc_candidates.has_window_location() ||
+      new_table.mozc_candidates.has_window_location()) {
+
+    if (!old_table.mozc_candidates.IsInitialized() ||
+        !new_table.mozc_candidates.IsInitialized()) {
+      return true;
+    }
+
+    std::string old_serialized_msg;
+    std::string new_serialized_msg;
+
+    old_table.mozc_candidates.SerializeToString(&old_serialized_msg);
+    new_table.mozc_candidates.SerializeToString(&new_serialized_msg);
+    return old_serialized_msg != new_serialized_msg;
+  }
+
   // Check if most table contents are identical.
   if (old_table.page_size == new_table.page_size &&
       old_table.orientation == new_table.orientation &&
@@ -958,6 +1013,24 @@ void CandidateWindowView::UpdateCandidates(
   if (should_update) {
     // Initialize candidate views if necessary.
     MaybeInitializeCandidateViews(new_lookup_table);
+
+    // Store mozc specific window location.
+    if (new_lookup_table.mozc_candidates.has_window_location() &&
+        new_lookup_table.mozc_candidates.window_location() ==
+            mozc::commands::Candidates::COMPOSITION) {
+      DCHECK(new_lookup_table.mozc_candidates.has_composition_rectangle());
+      suggestion_window_location_.set_x(
+          new_lookup_table.mozc_candidates.composition_rectangle().x());
+      suggestion_window_location_.set_y(
+          new_lookup_table.mozc_candidates.composition_rectangle().y());
+      suggestion_window_location_.set_width(
+          new_lookup_table.mozc_candidates.composition_rectangle().width());
+      suggestion_window_location_.set_height(
+          new_lookup_table.mozc_candidates.composition_rectangle().height());
+      is_suggestion_window_location_available_ = true;
+    } else {
+      is_suggestion_window_location_available_ = false;
+    }
 
     // Compute the index of the current page.
     const int current_page_index = ComputePageIndex(new_lookup_table);
@@ -1131,6 +1204,11 @@ void CandidateWindowView::MaybeInitializeCandidateViews(
   layout->Layout(candidate_area_contents);
 }
 
+bool CandidateWindowView::IsCandidateWindowOpen() const {
+  return !is_suggestion_window_location_available_ &&
+      candidate_area_->visible() && candidate_area_->IsShown();
+}
+
 void CandidateWindowView::SelectCandidateAt(int index_in_page) {
   const int current_page_index = ComputePageIndex(lookup_table_);
   if (current_page_index < 0) {
@@ -1183,8 +1261,16 @@ void CandidateWindowView::CommitCandidate() {
 }
 
 void CandidateWindowView::ResizeAndMoveParentFrame() {
-  const int x = cursor_location_.x();
-  const int y = cursor_location_.y();
+  // If rendering operation comes from mozc-engine, uses mozc specific location,
+  // otherwise lookup table is shown under the cursor.
+  const int x = is_suggestion_window_location_available_ ?
+      suggestion_window_location_.x() : cursor_location_.x();
+  // To avoid lookup-table overlapping, uses maximum y-position of mozc specific
+  // location and cursor location, because mozc-engine does not consider about
+  // multi-line composition.
+  const int y = is_suggestion_window_location_available_ ?
+      std::max(suggestion_window_location_.y(), cursor_location_.y()) :
+      cursor_location_.y();
   const int height = cursor_location_.height();
   const int horizontal_offset = GetHorizontalOffset();
 
@@ -1664,6 +1750,26 @@ void CandidateWindowController::Impl::OnCandidateCommitted(int index,
   ibus_ui_controller_->NotifyCandidateClicked(index, button, flags);
 }
 
+void CandidateWindowController::Impl::OnCandidateWindowOpened() {
+  FOR_EACH_OBSERVER(CandidateWindowController::Observer, observers_,
+                    CandidateWindowOpened());
+}
+
+void CandidateWindowController::Impl::OnCandidateWindowClosed() {
+  FOR_EACH_OBSERVER(CandidateWindowController::Observer, observers_,
+                    CandidateWindowClosed());
+}
+
+void CandidateWindowController::Impl::AddObserver(
+    CandidateWindowController::Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void CandidateWindowController::Impl::RemoveObserver(
+    CandidateWindowController::Observer* observer) {
+  observers_.RemoveObserver(observer);
+}
+
 void CandidateWindowController::Impl::OnConnectionChange(bool connected) {
   if (!connected) {
     candidate_window_->HideAll();
@@ -1681,6 +1787,16 @@ CandidateWindowController::~CandidateWindowController() {
 
 bool CandidateWindowController::Init() {
   return impl_->Init();
+}
+
+void CandidateWindowController::AddObserver(
+    CandidateWindowController::Observer* observer) {
+  impl_->AddObserver(observer);
+}
+
+void CandidateWindowController::RemoveObserver(
+    CandidateWindowController::Observer* observer) {
+  impl_->RemoveObserver(observer);
 }
 
 }  // namespace input_method

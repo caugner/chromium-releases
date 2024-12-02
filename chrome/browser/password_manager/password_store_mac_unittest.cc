@@ -20,7 +20,7 @@
 #include "content/test/test_browser_thread.h"
 
 using content::BrowserThread;
-using webkit_glue::PasswordForm;
+using webkit::forms::PasswordForm;
 using testing::_;
 using testing::DoAll;
 using testing::WithArg;
@@ -31,7 +31,7 @@ class MockPasswordStoreConsumer : public PasswordStoreConsumer {
 public:
   MOCK_METHOD2(OnPasswordStoreRequestDone,
                void(CancelableRequestProvider::Handle,
-                    const std::vector<webkit_glue::PasswordForm*>&));
+                    const std::vector<webkit::forms::PasswordForm*>&));
 };
 
 ACTION(STLDeleteElements0) {
@@ -90,9 +90,7 @@ class PasswordStoreMacInternalsTest : public testing::Test {
         "abc", "123", false },
     };
 
-    // Save some extra slots for use by AddInternetPassword.
-    unsigned int capacity = arraysize(test_data) + 3;
-    keychain_ = new MockKeychain(capacity);
+    keychain_ = new MockKeychain();
 
     for (unsigned int i = 0; i < arraysize(test_data); ++i) {
       keychain_->AddTestItem(test_data[i]);
@@ -907,7 +905,7 @@ class PasswordStoreMacTest : public testing::Test {
     FilePath db_file = db_dir_.path().AppendASCII("login.db");
     ASSERT_TRUE(login_db_->Init(db_file));
 
-    keychain_ = new MockKeychain(3);
+    keychain_ = new MockKeychain();
 
     store_ = new PasswordStoreMac(keychain_, login_db_);
     ASSERT_TRUE(store_->Init());
@@ -915,7 +913,7 @@ class PasswordStoreMacTest : public testing::Test {
 
   virtual void TearDown() {
     store_->Shutdown();
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     MessageLoop::current()->Run();
   }
 

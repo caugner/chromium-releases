@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,11 +22,13 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::NavigationEntry;
 
 class SessionServiceTest : public BrowserWithTestWindowTest,
                            public content::NotificationObserver {
@@ -69,15 +71,15 @@ class SessionServiceTest : public BrowserWithTestWindowTest,
                         const TabNavigation& navigation,
                         int index,
                         bool select) {
-    NavigationEntry entry;
-    entry.set_url(navigation.virtual_url());
-    entry.set_referrer(navigation.referrer());
-    entry.set_title(navigation.title());
-    entry.set_content_state(navigation.state());
-    entry.set_transition_type(navigation.transition());
-    entry.set_has_post_data(
+    scoped_ptr<NavigationEntry> entry(NavigationEntry::Create());
+    entry->SetURL(navigation.virtual_url());
+    entry->SetReferrer(navigation.referrer());
+    entry->SetTitle(navigation.title());
+    entry->SetContentState(navigation.state());
+    entry->SetTransitionType(navigation.transition());
+    entry->SetHasPostData(
         navigation.type_mask() & TabNavigation::HAS_POST_DATA);
-    service()->UpdateTabNavigation(window_id, tab_id, index, entry);
+    service()->UpdateTabNavigation(window_id, tab_id, index, *entry.get());
     if (select)
       service()->SetSelectedNavigationIndex(window_id, tab_id, index);
   }
@@ -622,38 +624,6 @@ TEST_F(SessionServiceTest, PinnedTrue) {
   EXPECT_TRUE(CreateAndWriteSessionWithOneTab(true, true));
 }
 
-class GetCurrentSessionCallbackHandler {
- public:
-  void OnGotSession(int handle, std::vector<SessionWindow*>* windows) {
-    EXPECT_EQ(1U, windows->size());
-    EXPECT_EQ(2U, (*windows)[0]->tabs.size());
-    EXPECT_EQ(2U, (*windows)[0]->tabs[0]->navigations.size());
-    EXPECT_EQ(GURL("http://bar/1"),
-              (*windows)[0]->tabs[0]->navigations[0].virtual_url());
-    EXPECT_EQ(GURL("http://bar/2"),
-              (*windows)[0]->tabs[0]->navigations[1].virtual_url());
-    EXPECT_EQ(2U, (*windows)[0]->tabs[1]->navigations.size());
-    EXPECT_EQ(GURL("http://foo/1"),
-              (*windows)[0]->tabs[1]->navigations[0].virtual_url());
-    EXPECT_EQ(GURL("http://foo/2"),
-              (*windows)[0]->tabs[1]->navigations[1].virtual_url());
-  }
-};
-
-TEST_F(SessionServiceTest, GetCurrentSession) {
-  AddTab(browser(), GURL("http://foo/1"));
-  NavigateAndCommitActiveTab(GURL("http://foo/2"));
-  AddTab(browser(), GURL("http://bar/1"));
-  NavigateAndCommitActiveTab(GURL("http://bar/2"));
-
-  CancelableRequestConsumer consumer;
-  GetCurrentSessionCallbackHandler handler;
-  service()->GetCurrentSession(
-      &consumer,
-      base::Bind(&GetCurrentSessionCallbackHandler::OnGotSession,
-                 base::Unretained(&handler)));
-}
-
 // Test that the notification for SESSION_SERVICE_SAVED is working properly.
 TEST_F(SessionServiceTest, SavedSessionNotification) {
   content::NotificationRegistrar registrar_;
@@ -682,4 +652,25 @@ TEST_F(SessionServiceTest, CloseTabUserGesture) {
   ReadWindows(&(windows.get()));
 
   ASSERT_TRUE(windows->empty());
+}
+
+// Verifies SetWindowBounds maps SHOW_STATE_DEFAULT to SHOW_STATE_NORMAL.
+TEST_F(SessionServiceTest, DontPersistDefault) {
+  SessionID tab_id;
+  ASSERT_NE(window_id.id(), tab_id.id());
+  TabNavigation nav1(0, GURL("http://google.com"),
+                     content::Referrer(GURL("http://www.referrer.com"),
+                                       WebKit::WebReferrerPolicyDefault),
+                     ASCIIToUTF16("abc"), "def",
+                     content::PAGE_TRANSITION_QUALIFIER_MASK);
+  helper_.PrepareTabInWindow(window_id, tab_id, 0, true);
+  UpdateNavigation(window_id, tab_id, nav1, 0, true);
+  service()->SetWindowBounds(window_id,
+                             window_bounds,
+                             ui::SHOW_STATE_DEFAULT);
+
+  ScopedVector<SessionWindow> windows;
+  ReadWindows(&(windows.get()));
+  ASSERT_EQ(1U, windows->size());
+  EXPECT_EQ(ui::SHOW_STATE_NORMAL, windows[0]->show_state);
 }

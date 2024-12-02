@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,13 +16,16 @@
 #include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_child_process_host.h"
+#include "content/public/browser/browser_child_process_host_iterator.h"
+#include "content/public/browser/child_process_data.h"
 #include "content/browser/renderer_host/backing_store_manager.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/navigation_entry.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/process_type.h"
 #include "grit/chromium_strings.h"
@@ -34,7 +37,10 @@
 #include "content/browser/zygote_host_linux.h"
 #endif
 
+using content::BrowserChildProcessHostIterator;
 using content::BrowserThread;
+using content::NavigationEntry;
+using content::WebContents;
 
 // static
 std::string ProcessMemoryInformation::GetRendererTypeNameInEnglish(
@@ -129,15 +135,15 @@ void MemoryDetails::CollectChildInfoOnIOThread() {
   std::vector<ProcessMemoryInformation> child_info;
 
   // Collect the list of child processes.
-  for (BrowserChildProcessHost::Iterator iter; !iter.Done(); ++iter) {
+  for (BrowserChildProcessHostIterator iter; !iter.Done(); ++iter) {
     ProcessMemoryInformation info;
-    info.pid = base::GetProcId(iter->handle());
+    info.pid = base::GetProcId(iter.GetData().handle);
     if (!info.pid)
       continue;
 
-    info.type = iter->type();
+    info.type = iter.GetData().type;
     info.renderer_type = ProcessMemoryInformation::RENDERER_UNKNOWN;
-    info.titles.push_back(iter->name());
+    info.titles.push_back(iter.GetData().name);
     child_info.push_back(info);
   }
 
@@ -201,7 +207,7 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
           continue;
 
         const RenderViewHost* host = static_cast<const RenderViewHost*>(widget);
-        RenderViewHostDelegate* host_delegate = host->delegate();
+        content::RenderViewHostDelegate* host_delegate = host->delegate();
         DCHECK(host_delegate);
         GURL url = host_delegate->GetURL();
         content::ViewType type = host_delegate->GetRenderViewType();
@@ -229,11 +235,11 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
             }
           }
         }
-        TabContents* contents = host_delegate->GetAsTabContents();
+        WebContents* contents = host_delegate->GetAsWebContents();
         if (!contents) {
           if (extension_process_map->Contains(host->process()->GetID())) {
             const Extension* extension =
-                extension_service->GetExtensionByURL(url);
+                extension_service->extensions()->GetByID(url.host());
             if (extension) {
               string16 title = UTF8ToUTF16(extension->name());
               process.titles.push_back(title);
@@ -263,7 +269,7 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
           continue;
         }
 
-        // Since We have a TabContents and and the renderer type hasn't been
+        // Since We have a WebContents and and the renderer type hasn't been
         // set yet, it must be a normal tabbed renderer.
         if (process.renderer_type == ProcessMemoryInformation::RENDERER_UNKNOWN)
           process.renderer_type = ProcessMemoryInformation::RENDERER_NORMAL;
@@ -285,14 +291,14 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
         //
         // Either the pending or last committed entries can be NULL.
         const NavigationEntry* pending_entry =
-            contents->controller().pending_entry();
+            contents->GetController().GetPendingEntry();
         const NavigationEntry* last_committed_entry =
-            contents->controller().GetLastCommittedEntry();
+            contents->GetController().GetLastCommittedEntry();
         if ((last_committed_entry &&
-             LowerCaseEqualsASCII(last_committed_entry->virtual_url().spec(),
+             LowerCaseEqualsASCII(last_committed_entry->GetVirtualURL().spec(),
                                   chrome::kChromeUIMemoryURL)) ||
             (pending_entry &&
-             LowerCaseEqualsASCII(pending_entry->virtual_url().spec(),
+             LowerCaseEqualsASCII(pending_entry->GetVirtualURL().spec(),
                                   chrome::kChromeUIMemoryURL)))
           process.is_diagnostics = true;
       }

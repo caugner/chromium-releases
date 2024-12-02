@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,6 @@
 #include "chrome/browser/extensions/apps_promo.h"
 #include "chrome/browser/extensions/extension_icon_manager.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
-#include "chrome/browser/extensions/extension_permissions_api.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_sync_data.h"
@@ -37,10 +36,12 @@
 #include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/extensions/sandboxed_extension_unpacker.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/browser/shell_integration.h"
 #include "chrome/browser/sync/api/sync_change.h"
 #include "chrome/browser/sync/api/syncable_service.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -74,6 +75,7 @@ class ExtensionInputMethodEventRouter;
 namespace extensions {
 class ComponentLoader;
 class SettingsFrontend;
+class SocketController;
 }
 
 // This is an interface class to encapsulate the dependencies that
@@ -86,7 +88,7 @@ class ExtensionServiceInterface : public SyncableService {
   typedef bool (*ExtensionFilter)(const Extension&);
 
   virtual ~ExtensionServiceInterface() {}
-  virtual const ExtensionList* extensions() const = 0;
+  virtual const ExtensionSet* extensions() const = 0;
   virtual PendingExtensionManager* pending_extension_manager() = 0;
 
   // Install an update.  Return true if the install can be started.
@@ -129,7 +131,8 @@ class ExtensionService
     : public ExtensionServiceInterface,
       public ExternalExtensionProviderInterface::VisitorInterface,
       public base::SupportsWeakPtr<ExtensionService>,
-      public content::NotificationObserver {
+      public content::NotificationObserver,
+      public ImageLoadingTracker::Observer {
  public:
   using base::SupportsWeakPtr<ExtensionService>::AsWeakPtr;
 
@@ -192,9 +195,13 @@ class ExtensionService
   virtual ~ExtensionService();
 
   // Gets the list of currently installed extensions.
-  virtual const ExtensionList* extensions() const OVERRIDE;
-  const ExtensionList* disabled_extensions() const;
-  const ExtensionList* terminated_extensions() const;
+  virtual const ExtensionSet* extensions() const OVERRIDE;
+  const ExtensionSet* disabled_extensions() const;
+  const ExtensionSet* terminated_extensions() const;
+
+  // Retuns a set of all installed, disabled, and terminated extensions and
+  // transfers ownership to caller.
+  const ExtensionSet* GenerateInstalledExtensionsSet() const;
 
   // Gets the object managing the set of pending extensions.
   virtual PendingExtensionManager* pending_extension_manager() OVERRIDE;
@@ -218,6 +225,25 @@ class ExtensionService
 
   virtual void SetAppNotificationDisabled(const std::string& extension_id,
       bool value);
+
+  // Getters and setters for the position of Apps in the NTP. The setters
+  // will trigger a sync if needed.
+  // The getters return invalid StringOridinals for non-app extensions and
+  // setting ordinals for non-apps is an error.
+  StringOrdinal GetAppLaunchOrdinal(const std::string& extension_id) const;
+  void SetAppLaunchOrdinal(const std::string& extension_id,
+                           const StringOrdinal& app_launch_ordinal);
+  StringOrdinal GetPageOrdinal(const std::string& extension_id) const;
+  void SetPageOrdinal(const std::string& extension_id,
+                      const StringOrdinal& page_ordinal);
+
+  // Updates the app launcher value for the moved extension so that it is now
+  // located after the given predecessor and before the successor. This will
+  // trigger a sync if needed. Empty strings are used to indicate no successor
+  // or predecessor.
+  void OnExtensionMoved(const std::string& moved_extension_id,
+                        const std::string& predecessor_extension_id,
+                        const std::string& successor_extension_id);
 
   // Returns true if the given extension can see events and data from another
   // sub-profile (incognito to original profile, or vice versa).
@@ -259,8 +285,14 @@ class ExtensionService
   // Initialize and start all installed extensions.
   void Init();
 
-  // Initialize the event routers after import has finished.
+  // To delay some initialization until after import has finished, register
+  // for the notification.
+  // TODO(yoz): remove InitEventRoutersAterImport.
   void InitEventRoutersAfterImport();
+  void RegisterForImportFinished();
+
+  // Complete some initialization after being notified that import has finished.
+  void InitAfterImport();
 
   // Start up the extension event routers.
   void InitEventRouters();
@@ -320,17 +352,9 @@ class ExtensionService
   virtual void DisableExtension(const std::string& extension_id);
 
   // Updates the |extension|'s granted permissions lists to include all
-  // permissions in the |extension|'s manifest.
-  void GrantPermissions(const Extension* extension);
-
-  // Updates the |extension|'s granted permissions lists to include all
   // permissions in the |extension|'s manifest and re-enables the
   // extension.
   void GrantPermissionsAndEnableExtension(const Extension* extension);
-
-  // Sets the |extension|'s active permissions to |permissions|.
-  void UpdateActivePermissions(const Extension* extension,
-                               const ExtensionPermissionSet* permissions);
 
   // Check for updates (or potentially new extensions from external providers)
   void CheckForExternalUpdates();
@@ -352,20 +376,6 @@ class ExtensionService
 
   // The App that represents the web store.
   const Extension* GetWebStoreApp();
-
-  // Lookup an extension by |url|.
-  const Extension* GetExtensionByURL(const GURL& url);
-
-  // Returns the extension whose web extent contains |url|.
-  const Extension* GetExtensionByWebExtent(const GURL& url);
-
-  // Returns the disabled extension whose web extent contains |url|.
-  const Extension* GetDisabledExtensionByWebExtent(const GURL& url);
-
-  // Returns an extension that contains any URL that overlaps with the given
-  // extent, if one exists.
-  const Extension* GetExtensionByOverlappingWebExtent(
-      const URLPatternSet& extent);
 
   // Returns true if |url| should get extension api bindings and be permitted
   // to make api calls. Note that this is independent of what extension
@@ -389,7 +399,9 @@ class ExtensionService
 
   // Called by the backend when an extension has been installed.
   void OnExtensionInstalled(
-      const Extension* extension, bool from_webstore, int page_index);
+      const Extension* extension,
+      bool from_webstore,
+      const StringOrdinal& page_ordinal);
 
   // Initializes the |extension|'s active permission set and disables the
   // extension if the privilege level has increased (e.g., due to an upgrade).
@@ -459,10 +471,6 @@ class ExtensionService
     return app_notification_manager_.get();
   }
 
-  ExtensionPermissionsManager* permissions_manager() {
-    return &permissions_manager_;
-  }
-
   ExtensionBrowserEventRouter* browser_event_router() {
     return browser_event_router_.get();
   }
@@ -501,14 +509,15 @@ class ExtensionService
   void AddProviderForTesting(ExternalExtensionProviderInterface* test_provider);
 
   // ExternalExtensionProvider::Visitor implementation.
-  virtual void OnExternalExtensionFileFound(const std::string& id,
+  virtual bool OnExternalExtensionFileFound(const std::string& id,
                                             const Version* version,
                                             const FilePath& path,
                                             Extension::Location location,
-                                            int creation_flags)
+                                            int creation_flags,
+                                            bool mark_acknowledged)
       OVERRIDE;
 
-  virtual void OnExternalExtensionUpdateUrlFound(const std::string& id,
+  virtual bool OnExternalExtensionUpdateUrlFound(const std::string& id,
                                                  const GURL& update_url,
                                                  Extension::Location location)
       OVERRIDE;
@@ -524,16 +533,18 @@ class ExtensionService
 
   // Marks alertable extensions as acknowledged, after the user presses the
   // accept button.
-  void HandleExtensionAlertAccept(const ExtensionGlobalError& global_error,
-                                  Browser* browser);
+  void HandleExtensionAlertAccept();
+
+  // Given a (presumably just-installed) extension id, mark that extension as
+  // acknowledged.
+  void AcknowledgeExternalExtension(const std::string& id);
 
   // Opens the Extensions page because the user wants to get more details
   // about the alerts.
-  void HandleExtensionAlertDetails(const ExtensionGlobalError& global_error,
-                                   Browser* browser);
+  void HandleExtensionAlertDetails(Browser* browser);
 
-  // Displays the extension alert in the last-active browser window.
-  void ShowExtensionAlert(ExtensionGlobalError* global_error);
+  // Called when the extension alert is closed.
+  void HandleExtensionAlertClosed();
 
   // content::NotificationObserver
   virtual void Observe(int type,
@@ -563,6 +574,16 @@ class ExtensionService
     return &extension_warnings_;
   }
 
+  // Call only from IO thread.
+  extensions::SocketController* socket_controller();
+
+  // Implement ImageLoadingTracker::Observer. |tracker_| is used to
+  // load the application's icon, which is done when we start creating an
+  // application's shortcuts. This method receives the icon, and completes
+  // the process of installing the shortcuts.
+  virtual void OnImageLoaded(SkBitmap* image,
+                             const ExtensionResource& resource,
+                             int index) OVERRIDE;
  private:
   // Bundle of type (app or extension)-specific sync stuff.
   struct SyncBundle {
@@ -630,7 +651,7 @@ class ExtensionService
   // Appends sync data objects for every extension in |extensions|
   // that passes |filter|.
   void GetSyncDataListHelper(
-      const ExtensionList& extensions,
+      const ExtensionSet& extensions,
       const SyncBundle& bundle,
       std::vector<ExtensionSyncData>* sync_data_list) const;
 
@@ -677,6 +698,10 @@ class ExtensionService
   // a NaCl module to see those changes reflected in the PluginList.
   void UpdatePluginListWithNaClModules();
 
+  // Start the process of installing an application shortcut.
+  // The process is finished when OnImageLoaded is called.
+  void StartInstallApplicationShortcut(const Extension* extension);
+
   NaClModuleInfoList::iterator FindNaClModule(const GURL& url);
 
   // The profile this ExtensionService is part of.
@@ -690,16 +715,13 @@ class ExtensionService
 
   // The current list of installed extensions.
   // TODO(aa): This should use chrome/common/extensions/extension_set.h.
-  ExtensionList extensions_;
+  ExtensionSet extensions_;
 
   // The list of installed extensions that have been disabled.
-  ExtensionList disabled_extensions_;
+  ExtensionSet disabled_extensions_;
 
   // The list of installed extensions that have been terminated.
-  ExtensionList terminated_extensions_;
-
-  // Used to quickly check if an extension was terminated.
-  std::set<std::string> terminated_extension_ids_;
+  ExtensionSet terminated_extensions_;
 
   // Hold the set of pending extensions.
   PendingExtensionManager pending_extension_manager_;
@@ -763,9 +785,6 @@ class ExtensionService
   // Keeps track of app notifications.
   scoped_refptr<AppNotificationManager> app_notification_manager_;
 
-  // Keeps track of extension permissions.
-  ExtensionPermissionsManager permissions_manager_;
-
   // Keeps track of favicon-sized omnibox icons for extensions.
   ExtensionIconManager omnibox_icon_manager_;
   ExtensionIconManager omnibox_popup_icon_manager_;
@@ -816,7 +835,17 @@ class ExtensionService
   // Contains an entry for each warning that shall be currently shown.
   ExtensionWarningSet extension_warnings_;
 
+  // We need to control destruction of this object (it needs to happen on the
+  // IO thread), so we don't get to use any RAII devices with it.
+  extensions::SocketController* socket_controller_;
+
   extensions::ProcessMap process_map_;
+
+  // Fields used when installing application shortcuts.
+  ShellIntegration::ShortcutInfo shortcut_info_;
+  ImageLoadingTracker tracker_;
+
+  scoped_ptr<ExtensionGlobalError> extension_global_error_;
 
   FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
                            InstallAppsWithUnlimtedStorage);

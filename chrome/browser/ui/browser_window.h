@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/fullscreen_exit_bubble_type.h"
 #include "chrome/common/content_settings_types.h"
-#include "content/browser/tab_contents/navigation_entry.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
@@ -29,12 +28,22 @@ class ToolbarView;
 #endif
 struct NativeWebKeyboardEvent;
 
+namespace content {
+class WebContents;
+struct SSLStatus;
+}
+
 namespace gfx {
 class Rect;
 class Size;
 }
 
 class Extension;
+
+enum DevToolsDockSide {
+  DEVTOOLS_DOCK_SIDE_BOTTOM = 0,
+  DEVTOOLS_DOCK_SIDE_RIGHT = 1
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserWindow interface
@@ -77,7 +86,8 @@ class BrowserWindow {
   virtual bool IsActive() const = 0;
 
   // Flashes the taskbar item associated with this frame.
-  virtual void FlashFrame() = 0;
+  // Set |flash| to true to initiate flashing, false to stop flashing.
+  virtual void FlashFrame(bool flash) = 0;
 
   // Return a platform dependent identifier for this frame. On Windows, this
   // returns an HWND.
@@ -108,6 +118,9 @@ class BrowserWindow {
   // Inform the frame that the dev tools window for the selected tab has
   // changed.
   virtual void UpdateDevTools() = 0;
+
+  // Requests that the docked dev tools window changes its dock mode.
+  virtual void SetDevToolsDockSide(DevToolsDockSide side) = 0;
 
   // Update any loading animations running in the window. |should_animate| is
   // true if there are tabs loading and the animations should continue, false
@@ -194,6 +207,17 @@ class BrowserWindow {
   // Returns whether the tool bar is visible or not.
   virtual bool IsToolbarVisible() const = 0;
 
+  // Returns the rect where the resize corner should be drawn by the render
+  // widget host view (on top of what the renderer returns). We return an empty
+  // rect to identify that there shouldn't be a resize corner (in the cases
+  // where we take care of it ourselves at the browser level).
+  virtual gfx::Rect GetRootWindowResizerRect() const = 0;
+
+  // Returns whether the window is a panel. This is not always synonomous
+  // with the associated browser having type panel since some environments
+  // may draw popups in panel windows.
+  virtual bool IsPanel() const = 0;
+
   // Tells the frame not to render as inactive until the next activation change.
   // This is required on Windows when dropdown selects are shown to prevent the
   // select from deactivating the browser frame. A stub implementation is
@@ -202,9 +226,10 @@ class BrowserWindow {
 
   // Shows a confirmation dialog box for setting the default search engine
   // described by |template_url|. Takes ownership of |template_url|.
-  virtual void ConfirmSetDefaultSearchProvider(TabContents* tab_contents,
-                                               TemplateURL* template_url,
-                                               Profile* profile) {
+  virtual void ConfirmSetDefaultSearchProvider(
+      content::WebContents* web_contents,
+      TemplateURL* template_url,
+      Profile* profile) {
     // TODO(levin): Implement this for non-Windows platforms and make it pure.
     // http://crbug.com/38475
   }
@@ -239,9 +264,6 @@ class BrowserWindow {
   // Returns the DownloadShelf.
   virtual DownloadShelf* GetDownloadShelf() = 0;
 
-  // Shows the repost form confirmation dialog box.
-  virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) = 0;
-
   // Shows the collected cookies dialog box.
   virtual void ShowCollectedCookiesDialog(TabContentsWrapper* tab_contents) = 0;
 
@@ -261,9 +283,9 @@ class BrowserWindow {
   // during infobar animations).
   virtual int GetExtraRenderViewHeight() const = 0;
 
-  // Notification that |tab_contents| got the focus through user action (click
+  // Notification that |contents| got the focus through user action (click
   // on the page).
-  virtual void TabContentsFocused(TabContents* tab_contents) = 0;
+  virtual void WebContentsFocused(content::WebContents* contents) = 0;
 
   // Shows the page info using the specified information.
   // |url| is the url of the page/frame the info applies to, |ssl| is the SSL
@@ -271,7 +293,7 @@ class BrowserWindow {
   // showing how many times that URL has been visited is added to the page info.
   virtual void ShowPageInfo(Profile* profile,
                             const GURL& url,
-                            const NavigationEntry::SSLStatus& ssl,
+                            const content::SSLStatus& ssl,
                             bool show_history) = 0;
 
   // Shows the app menu (for accessibility).
@@ -345,16 +367,16 @@ class BrowserWindow {
   // changed. We might choose to update the window size to accomodate this
   // change.
   // Note that this won't be fired if we change tabs.
-  virtual void UpdatePreferredSize(TabContents* tab_contents,
+  virtual void UpdatePreferredSize(content::WebContents* web_contents,
                                    const gfx::Size& pref_size) {}
 
   // Construct a BrowserWindow implementation for the specified |browser|.
   static BrowserWindow* CreateBrowserWindow(Browser* browser);
 
-  // Shows the avatar bubble inside |tab_contents|. The bubble is positioned
-  // relative to |rect|. |rect| should be in the |tab_contents| coordinate
+  // Shows the avatar bubble inside |web_contents|. The bubble is positioned
+  // relative to |rect|. |rect| should be in the |web_contents| coordinate
   // system.
-  virtual void ShowAvatarBubble(TabContents* tab_contents,
+  virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) = 0;
 
   // Shows the avatar bubble on the window frame off of the avatar button.
@@ -388,9 +410,6 @@ class BrowserWindowTesting {
 
   // Returns the TabContentsContainer.
   virtual views::View* GetTabContentsContainerView() const = 0;
-
-  // Returns the TabContentsContainer.
-  virtual views::View* GetSidebarContainerView() const = 0;
 
   // Returns the ToolbarView.
   virtual ToolbarView* GetToolbarView() const = 0;
