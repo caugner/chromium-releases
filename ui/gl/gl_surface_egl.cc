@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "ui/gl/gl_surface_egl.h"
 
 #include <stddef.h>
@@ -339,7 +344,10 @@ GLDisplayEGL* GLSurfaceEGL::GetGLDisplayEGL() {
       GpuPreference::kDefault);
 }
 
-GLSurfaceEGL::~GLSurfaceEGL() = default;
+GLSurfaceEGL::~GLSurfaceEGL() {
+  // InvalidateWeakPtrs should be called from the concrete dtors.
+  CHECK(!HasWeakPtrs());
+}
 
 #if BUILDFLAG(IS_ANDROID)
 NativeViewGLSurfaceEGL::NativeViewGLSurfaceEGL(
@@ -380,6 +388,11 @@ bool NativeViewGLSurfaceEGL::Initialize(GLSurfaceFormat format) {
   // the platform-dependant quirks, if any, before creating the surface.
   if (!InitializeNativeWindow()) {
     LOG(ERROR) << "Error trying to initialize the native window.";
+    return false;
+  }
+
+  if (!GetConfig()) {
+    LOG(ERROR) << "No suitable EGL configs found for initialization.";
     return false;
   }
 
@@ -981,6 +994,7 @@ void NativeViewGLSurfaceEGL::SetVSyncEnabled(bool enabled) {
 }
 
 NativeViewGLSurfaceEGL::~NativeViewGLSurfaceEGL() {
+  InvalidateWeakPtrs();
   Destroy();
 }
 
@@ -997,6 +1011,11 @@ bool PbufferGLSurfaceEGL::Initialize(GLSurfaceFormat format) {
   if (display_->GetDisplay() == EGL_NO_DISPLAY) {
     LOG(ERROR) << "Trying to create PbufferGLSurfaceEGL with invalid "
                << "display.";
+    return false;
+  }
+
+  if (!GetConfig()) {
+    LOG(ERROR) << "No suitable EGL configs found for initialization.";
     return false;
   }
 
@@ -1132,6 +1151,7 @@ void* PbufferGLSurfaceEGL::GetShareHandle() {
 }
 
 PbufferGLSurfaceEGL::~PbufferGLSurfaceEGL() {
+  InvalidateWeakPtrs();
   Destroy();
 }
 
@@ -1181,6 +1201,7 @@ void* SurfacelessEGL::GetShareHandle() {
 }
 
 SurfacelessEGL::~SurfacelessEGL() {
+  InvalidateWeakPtrs();
 }
 
 }  // namespace gl

@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "components/viz/service/display/delegated_ink_trail_data.h"
 
 #include <string>
@@ -155,8 +160,7 @@ void DelegatedInkTrailData::ErasePointsOlderThanMetadata(
   // drawn by the app. Since the metadata timestamp will only increase, we can
   // safely erase every point earlier than it and be left only with the points
   // that can be drawn.
-  while (points_.size() > 0 && points_.begin()->first < metadata->timestamp() &&
-         points_.begin()->second != metadata->point())
+  while (points_.size() > 0 && points_.begin()->first < metadata->timestamp())
     points_.erase(points_.begin());
 }
 
