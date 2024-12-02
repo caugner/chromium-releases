@@ -46,6 +46,7 @@ struct AXTreeUpdate;
 
 namespace blink {
 
+class AbstractInlineTextBox;
 class AriaNotificationOptions;
 class AXObject;
 class AccessibleNode;
@@ -55,7 +56,6 @@ class HTMLTableElement;
 class HTMLFrameOwnerElement;
 class HTMLSelectElement;
 class LocalFrameView;
-class NGAbstractInlineTextBox;
 struct PhysicalRect;
 
 class CORE_EXPORT AXObjectCache : public GarbageCollected<AXObjectCache> {
@@ -78,6 +78,7 @@ class CORE_EXPORT AXObjectCache : public GarbageCollected<AXObjectCache> {
   // A Freeze() occurs during a serialization run.
   virtual void Freeze() = 0;
   virtual void Thaw() = 0;
+  virtual bool IsFrozen() const = 0;
 
   // Ensure that accessibility is clean and up-to-date for both the main and
   // popup document. Ensures layout is clean as well.
@@ -105,7 +106,7 @@ class CORE_EXPORT AXObjectCache : public GarbageCollected<AXObjectCache> {
   virtual void Remove(Node*) = 0;
   virtual void RemoveSubtreeWhenSafe(Node*, bool remove_root = true) = 0;
   virtual void RemovePopup(Document*) = 0;
-  virtual void Remove(NGAbstractInlineTextBox*) = 0;
+  virtual void Remove(AbstractInlineTextBox*) = 0;
 
   virtual const Element* RootAXEditableElement(const Node*) = 0;
 
@@ -121,6 +122,9 @@ class CORE_EXPORT AXObjectCache : public GarbageCollected<AXObjectCache> {
   virtual void NodeIsConnected(Node*) = 0;
   // Called when a node is attached to the layout tree.
   virtual void NodeIsAttached(Node*) = 0;
+  // Called when a subtree is attached to the layout tree because of
+  // content-visibility or previously display:none content gaining layout.
+  virtual void SubtreeIsAttached(Node*) = 0;
 
   // Called to process queued subtree removals when flat tree traversal is safe.
   virtual void ProcessSubtreeRemovals() = 0;
@@ -201,6 +205,8 @@ class CORE_EXPORT AXObjectCache : public GarbageCollected<AXObjectCache> {
   virtual AXID GetExistingAXID(Node*) = 0;
 
   virtual AXObject* ObjectFromAXID(AXID) const = 0;
+
+  virtual AXObject* Root() = 0;
 
   virtual AXID GenerateAXID() const = 0;
 
@@ -300,6 +306,28 @@ class CORE_EXPORT AXObjectCache : public GarbageCollected<AXObjectCache> {
   AXObjectCache() = default;
 
   static AXObjectCacheCreateFunction create_function_;
+};
+
+class ScopedFreezeAXCache : public GarbageCollected<ScopedFreezeAXCache> {
+ public:
+  explicit ScopedFreezeAXCache(AXObjectCache& cache) : cache_(&cache) {
+    CHECK(!cache.IsFrozen());
+    cache.Freeze();
+  }
+
+  ScopedFreezeAXCache(const ScopedFreezeAXCache&) = delete;
+  ScopedFreezeAXCache& operator=(const ScopedFreezeAXCache&) = delete;
+
+  ~ScopedFreezeAXCache() {
+    CHECK(cache_);
+    CHECK(cache_->IsFrozen());
+    cache_->Thaw();
+  }
+
+  void Trace(Visitor* visitor) const { visitor->Trace(cache_); }
+
+ private:
+  WeakMember<AXObjectCache> cache_;
 };
 
 }  // namespace blink

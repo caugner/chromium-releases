@@ -16,6 +16,7 @@
 #include "base/observer_list.h"
 #include "base/scoped_observation.h"
 #include "chrome/browser/ash/accessibility/accessibility_manager.h"
+#include "chrome/browser/ash/app_mode/kiosk_controller.h"
 #include "chrome/browser/ash/login/choobe_flow_controller.h"
 #include "chrome/browser/ash/login/demo_mode/demo_session.h"
 #include "chrome/browser/ash/login/enrollment/auto_enrollment_check_screen.h"
@@ -65,6 +66,7 @@
 #include "chrome/browser/ash/login/screens/quick_start_screen.h"
 #include "chrome/browser/ash/login/screens/recommend_apps_screen.h"
 #include "chrome/browser/ash/login/screens/recovery_eligibility_screen.h"
+#include "chrome/browser/ash/login/screens/remote_activity_notification_screen.h"
 #include "chrome/browser/ash/login/screens/saml_confirm_password_screen.h"
 #include "chrome/browser/ash/login/screens/signin_fatal_error_screen.h"
 #include "chrome/browser/ash/login/screens/smart_privacy_protection_screen.h"
@@ -72,7 +74,6 @@
 #include "chrome/browser/ash/login/screens/terms_of_service_screen.h"
 #include "chrome/browser/ash/login/screens/theme_selection_screen.h"
 #include "chrome/browser/ash/login/screens/touchpad_scroll_screen.h"
-#include "chrome/browser/ash/login/screens/tpm_error_screen.h"
 #include "chrome/browser/ash/login/screens/update_screen.h"
 #include "chrome/browser/ash/login/screens/user_allowlist_check_screen.h"
 #include "chrome/browser/ash/login/screens/user_creation_screen.h"
@@ -307,6 +308,7 @@ class WizardController : public OobeUI::Observer {
   void ShowSyncConsentScreen();
   void ShowFingerprintSetupScreen();
   void ShowRecommendAppsScreen();
+  void ShowRemoteActivityNotificationScreen();
   void ShowAppDownloadingScreen();
   void ShowWrongHWIDScreen();
   void ShowAutoEnrollmentCheckScreen();
@@ -402,6 +404,7 @@ class WizardController : public OobeUI::Observer {
   void FinishAuthFactorsSetup();
   // End of Local authentication setup sub-group
   void OnRecommendAppsScreenExit(RecommendAppsScreen::Result result);
+  void OnRemoteActivityNotificationScreenExit();
   void OnAppDownloadingScreenExit();
   void OnAssistantOptInFlowScreenExit(AssistantOptInFlowScreen::Result result);
   void OnMultiDeviceSetupScreenExit(MultiDeviceSetupScreen::Result result);
@@ -416,7 +419,6 @@ class WizardController : public OobeUI::Observer {
   void OnFamilyLinkNoticeScreenExit(FamilyLinkNoticeScreen::Result result);
   void OnOnlineAuthenticationScreenExit(OnlineAuthenticationScreen::Result);
   void OnUserAllowlistCheckScreenExit(UserAllowlistCheckScreen::Result);
-  void OnTpmErrorScreenExit(TpmErrorScreen::Result result);
   void OnPasswordChangeLegacyScreenExit(
       GaiaPasswordChangedScreenLegacy::Result result);
   void OnPasswordChangeScreenExit(GaiaPasswordChangedScreen::Result result);
@@ -482,8 +484,8 @@ class WizardController : public OobeUI::Observer {
   // Update the status area visibility for `screen`.
   void UpdateStatusAreaVisibilityForScreen(OobeScreenId screen_id);
 
-  // Launched kiosk app configured for auto-launch.
-  void AutoLaunchKioskApp(KioskAppType app_type);
+  // Launch the given `app` configured for Kiosk auto-launch.
+  void AutoLaunchKioskApp(const KioskApp& app);
 
   // Called when LocalState is initialized.
   void OnLocalStateInitialized(bool /* succeeded */);
@@ -538,6 +540,10 @@ class WizardController : public OobeUI::Observer {
   // When --tpm-is-dynamic switch is set, pre-enrollment TPM check relies on
   // the TPM being un-owned until enrollment. b/187429309
   void MaybeTakeTPMOwnership();
+
+  // Hides the current screen if it's not set to `nullptr` and sets it to
+  // `nullptr`.
+  void ResetCurrentScreen();
 
   std::unique_ptr<policy::AutoEnrollmentController> auto_enrollment_controller_;
   std::unique_ptr<ChoobeFlowController> choobe_flow_controller_;

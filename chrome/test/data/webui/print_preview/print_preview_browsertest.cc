@@ -583,6 +583,26 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewDestinationStoreTest, LoadSaveToDriveCros) {
 IN_PROC_BROWSER_TEST_F(PrintPreviewDestinationStoreTest, SaveToDriveDisabled) {
   RunTestCase("SaveToDriveDisabled");
 }
+
+IN_PROC_BROWSER_TEST_F(PrintPreviewDestinationStoreTest,
+                       ObserveLocalPrintersAfterSuccessfulSearch) {
+  RunTestCase("ObserveLocalPrintersAfterSuccessfulSearch");
+}
+
+IN_PROC_BROWSER_TEST_F(PrintPreviewDestinationStoreTest,
+                       ObserveLocalPrintersAfterNoSearch) {
+  RunTestCase("ObserveLocalPrintersAfterNoSearch");
+}
+
+IN_PROC_BROWSER_TEST_F(PrintPreviewDestinationStoreTest,
+                       LocalPrintersUpdatedEventPrintersAdded) {
+  RunTestCase("LocalPrintersUpdatedEventPrintersAdded");
+}
+
+IN_PROC_BROWSER_TEST_F(PrintPreviewDestinationStoreTest,
+                       LocalPrintersUpdatedEventStatusUpdate) {
+  RunTestCase("LocalPrintersUpdatedEventStatusUpdate");
+}
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS)

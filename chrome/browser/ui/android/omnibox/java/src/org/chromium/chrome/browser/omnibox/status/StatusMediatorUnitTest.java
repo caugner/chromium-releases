@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -52,9 +53,11 @@ import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.components.content_settings.CookieBlocking3pcdStatus;
 import org.chromium.components.content_settings.CookieControlsBreakageConfidenceLevel;
 import org.chromium.components.content_settings.CookieControlsBridge;
 import org.chromium.components.content_settings.CookieControlsBridgeJni;
+import org.chromium.components.content_settings.CookieControlsStatus;
 import org.chromium.components.permissions.PermissionDialogController;
 import org.chromium.components.search_engines.TemplateUrlService;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
@@ -63,9 +66,7 @@ import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.url.JUnitTestGURLs;
 
-/**
- * Unit tests for {@link StatusMediator}.
- */
+/** Unit tests for {@link StatusMediator}. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public final class StatusMediatorUnitTest {
@@ -106,8 +107,9 @@ public final class StatusMediatorUnitTest {
 
     @Before
     public void setUp() {
-        mContext = new ContextThemeWrapper(
-                ContextUtils.getApplicationContext(), R.style.Theme_BrowserUI_DayNight);
+        mContext =
+                new ContextThemeWrapper(
+                        ContextUtils.getApplicationContext(), R.style.Theme_BrowserUI_DayNight);
         mResources = mContext.getResources();
         mWindowAndroid = new WindowAndroid(mContext);
 
@@ -139,13 +141,21 @@ public final class StatusMediatorUnitTest {
         mTemplateUrlServiceSupplier = new OneshotSupplierImpl<>();
         ObservableSupplierImpl<MerchantTrustSignalsCoordinator>
                 merchantTrustSignalsCoordinatorObservableSupplier = new ObservableSupplierImpl<>();
-        mMediator = new StatusMediator(mModel, mResources, mContext,
-                mUrlBarEditingTextStateProvider, isTablet, mLocationBarDataProvider,
-                mPermissionDialogController, mSearchEngineLogoUtils, mTemplateUrlServiceSupplier,
-                ()
-                        -> mProfile,
-                mPageInfoIPHController, mWindowAndroid,
-                merchantTrustSignalsCoordinatorObservableSupplier);
+        mMediator =
+                new StatusMediator(
+                        mModel,
+                        mResources,
+                        mContext,
+                        mUrlBarEditingTextStateProvider,
+                        isTablet,
+                        mLocationBarDataProvider,
+                        mPermissionDialogController,
+                        mSearchEngineLogoUtils,
+                        mTemplateUrlServiceSupplier,
+                        () -> mProfile,
+                        mPageInfoIPHController,
+                        mWindowAndroid,
+                        merchantTrustSignalsCoordinatorObservableSupplier);
         mTemplateUrlServiceSupplier.set(mTemplateUrlService);
         merchantTrustSignalsCoordinatorObservableSupplier.set(mMerchantTrustSignalsCoordinator);
     }
@@ -155,7 +165,8 @@ public final class StatusMediatorUnitTest {
     public void searchEngineLogo_isGoogleLogo() {
         mMediator.setUrlHasFocus(true);
         mMediator.setShowIconsWhenUrlFocused(true);
-        Assert.assertEquals(R.drawable.ic_logo_googleg_20dp,
+        Assert.assertEquals(
+                R.drawable.ic_logo_googleg_20dp,
                 mModel.get(StatusProperties.STATUS_ICON_RESOURCE).getIconResForTesting());
     }
 
@@ -165,9 +176,11 @@ public final class StatusMediatorUnitTest {
         // Tooltip and hover highlight should be set when StatusViewIcon is visible.
         mMediator.setStatusIconShown(true);
         StatusViewBinder.applyStatusIconAndTooltipProperties(mModel, mStatusView);
-        Assert.assertEquals(R.string.accessibility_menu_info,
+        Assert.assertEquals(
+                R.string.accessibility_menu_info,
                 mModel.get(StatusProperties.STATUS_VIEW_TOOLTIP_TEXT));
-        Assert.assertEquals(R.drawable.status_view_ripple,
+        Assert.assertEquals(
+                R.drawable.status_view_ripple,
                 mModel.get(StatusProperties.STATUS_VIEW_HOVER_HIGHLIGHT));
 
         // Tooltip and hover highlight should NOT be set when StatusViewIcon is gone.
@@ -245,7 +258,8 @@ public final class StatusMediatorUnitTest {
         mMediator.setUrlHasFocus(false);
         mMediator.setShowIconsWhenUrlFocused(true);
         mMediator.setUrlFocusChangePercent(1f);
-        Assert.assertEquals(R.drawable.ic_logo_googleg_20dp,
+        Assert.assertEquals(
+                R.drawable.ic_logo_googleg_20dp,
                 mModel.get(StatusProperties.STATUS_ICON_RESOURCE).getIconResForTesting());
     }
 
@@ -257,7 +271,8 @@ public final class StatusMediatorUnitTest {
         doReturn(TEST_SEARCH_URL).when(mUrlBarEditingTextStateProvider).getTextWithAutocomplete();
 
         mMediator.updateLocationBarIconForDefaultMatchCategory(false);
-        Assert.assertEquals(R.drawable.ic_globe_24dp,
+        Assert.assertEquals(
+                R.drawable.ic_globe_24dp,
                 mModel.get(StatusProperties.STATUS_ICON_RESOURCE).getIconResForTesting());
     }
 
@@ -269,7 +284,8 @@ public final class StatusMediatorUnitTest {
         doReturn(TEST_SEARCH_URL).when(mUrlBarEditingTextStateProvider).getTextWithAutocomplete();
 
         mMediator.updateLocationBarIconForDefaultMatchCategory(false);
-        Assert.assertEquals(R.drawable.ic_globe_24dp,
+        Assert.assertEquals(
+                R.drawable.ic_globe_24dp,
                 mModel.get(StatusProperties.STATUS_ICON_RESOURCE).getIconResForTesting());
     }
 
@@ -281,7 +297,8 @@ public final class StatusMediatorUnitTest {
         doReturn(TEST_SEARCH_URL).when(mUrlBarEditingTextStateProvider).getTextWithAutocomplete();
 
         mMediator.updateLocationBarIconForDefaultMatchCategory(true);
-        Assert.assertNotEquals(R.drawable.ic_globe_24dp,
+        Assert.assertNotEquals(
+                R.drawable.ic_globe_24dp,
                 mModel.get(StatusProperties.STATUS_ICON_RESOURCE).getIconResForTesting());
     }
 
@@ -295,7 +312,8 @@ public final class StatusMediatorUnitTest {
 
         mMediator.updateLocationBarIconForDefaultMatchCategory(false);
         mMediator.updateLocationBarIconForDefaultMatchCategory(true);
-        Assert.assertNotEquals(R.drawable.ic_globe_24dp,
+        Assert.assertNotEquals(
+                R.drawable.ic_globe_24dp,
                 mModel.get(StatusProperties.STATUS_ICON_RESOURCE).getIconResForTesting());
     }
 
@@ -328,7 +346,8 @@ public final class StatusMediatorUnitTest {
         mMediator.updateSecurityIcon(0, 0, 0);
 
         Assert.assertTrue(mMediator.maybeUpdateStatusIconForSearchEngineIcon());
-        Assert.assertEquals(R.drawable.ic_logo_googleg_20dp,
+        Assert.assertEquals(
+                R.drawable.ic_logo_googleg_20dp,
                 mModel.get(StatusProperties.STATUS_ICON_RESOURCE).getIconResForTesting());
     }
 
@@ -373,16 +392,19 @@ public final class StatusMediatorUnitTest {
     @Test
     @SmallTest
     public void resolveUrlBarTextWithAutocomplete_urlBarTextEmpty() {
-        Assert.assertEquals("Empty urlBarText should resolve to empty urlBarTextWithAutocomplete",
-                "", mMediator.resolveUrlBarTextWithAutocomplete(""));
+        Assert.assertEquals(
+                "Empty urlBarText should resolve to empty urlBarTextWithAutocomplete",
+                "",
+                mMediator.resolveUrlBarTextWithAutocomplete(""));
     }
 
     @Test
     @SmallTest
     public void resolveUrlBarTextWithAutocomplete_urlBarTextMismatchesAutocompleteText() {
         doReturn("https://foo.com").when(mUrlBarEditingTextStateProvider).getTextWithAutocomplete();
-        String msg = "The urlBarText should only resolve to the autocomplete text if it's a "
-                + "substring of the autocomplete text.";
+        String msg =
+                "The urlBarText should only resolve to the autocomplete text if it's a "
+                        + "substring of the autocomplete text.";
         Assert.assertEquals(
                 msg, "https://foo.com", mMediator.resolveUrlBarTextWithAutocomplete("foo.com"));
         Assert.assertEquals(msg, "bar.com", mMediator.resolveUrlBarTextWithAutocomplete("bar.com"));
@@ -419,28 +441,34 @@ public final class StatusMediatorUnitTest {
         mMediator.updateVerboseStatus(ConnectionSecurityLevel.SECURE, true, true);
         // When both states, offline, and preview are enabled, paint preview has
         // the highest priority.
-        Assert.assertEquals("Incorrect text for paint preview status text",
+        Assert.assertEquals(
+                "Incorrect text for paint preview status text",
                 R.string.location_bar_paint_preview_page_status,
                 mModel.get(StatusProperties.VERBOSE_STATUS_TEXT_STRING_RES));
-        Assert.assertEquals("Incorrect color for paint preview status text",
+        Assert.assertEquals(
+                "Incorrect color for paint preview status text",
                 MaterialColors.getColor(mContext, R.attr.colorPrimary, TAG),
                 mModel.get(StatusProperties.VERBOSE_STATUS_TEXT_COLOR));
         mMediator.setBrandedColorScheme(BrandedColorScheme.LIGHT_BRANDED_THEME);
-        Assert.assertEquals("Incorrect color for paint preview status text",
+        Assert.assertEquals(
+                "Incorrect color for paint preview status text",
                 mContext.getColor(R.color.locationbar_status_preview_color_dark),
                 mModel.get(StatusProperties.VERBOSE_STATUS_TEXT_COLOR));
 
         // When only offline is enabled, it should be shown.
         mMediator.updateVerboseStatus(ConnectionSecurityLevel.SECURE, true, false);
         mMediator.setBrandedColorScheme(BrandedColorScheme.DARK_BRANDED_THEME);
-        Assert.assertEquals("Incorrect text for offline page status text",
+        Assert.assertEquals(
+                "Incorrect text for offline page status text",
                 R.string.location_bar_verbose_status_offline,
                 mModel.get(StatusProperties.VERBOSE_STATUS_TEXT_STRING_RES));
-        Assert.assertEquals("Incorrect color for offline page status text",
+        Assert.assertEquals(
+                "Incorrect color for offline page status text",
                 mContext.getColor(R.color.locationbar_status_offline_color_light),
                 mModel.get(StatusProperties.VERBOSE_STATUS_TEXT_COLOR));
         mMediator.setBrandedColorScheme(BrandedColorScheme.LIGHT_BRANDED_THEME);
-        Assert.assertEquals("Incorrect color for offline page status text",
+        Assert.assertEquals(
+                "Incorrect color for offline page status text",
                 mContext.getColor(R.color.locationbar_status_offline_color_dark),
                 mModel.get(StatusProperties.VERBOSE_STATUS_TEXT_COLOR));
     }
@@ -506,7 +534,8 @@ public final class StatusMediatorUnitTest {
         mMediator.showStoreIcon(
                 mWindowAndroid, JUnitTestGURLs.BLUE_1.getSpec(), mStoreIconDrawable, 0, true);
         Assert.assertTrue(mMediator.isStoreIconShowing());
-        Assert.assertEquals(IconTransitionType.ROTATE,
+        Assert.assertEquals(
+                IconTransitionType.ROTATE,
                 mModel.get(StatusProperties.STATUS_ICON_RESOURCE).getTransitionType());
         Assert.assertNotNull(
                 mModel.get(StatusProperties.STATUS_ICON_RESOURCE).getAnimationFinishedCallback());
@@ -540,7 +569,8 @@ public final class StatusMediatorUnitTest {
         mMediator.showStoreIcon(
                 mWindowAndroid, JUnitTestGURLs.BLUE_1.getSpec(), mStoreIconDrawable, 0, false);
         Assert.assertTrue(mMediator.isStoreIconShowing());
-        Assert.assertEquals(IconTransitionType.ROTATE,
+        Assert.assertEquals(
+                IconTransitionType.ROTATE,
                 mModel.get(StatusProperties.STATUS_ICON_RESOURCE).getTransitionType());
         Assert.assertNotNull(
                 mModel.get(StatusProperties.STATUS_ICON_RESOURCE).getAnimationFinishedCallback());
@@ -588,6 +618,63 @@ public final class StatusMediatorUnitTest {
         // explicitly reported.
         mMediator.onPageLoadStopped();
         Assert.assertNotEquals(COOKIE_CONTROLS_ICON, getIconIdentifierForTesting());
+    }
+
+    @Test
+    @SmallTest
+    public void iphReminder3pcd_trackingProtectionsEnabled_cookieBlockingEnabled() {
+        mMediator.setUrlHasFocus(true);
+        mMediator.setCookieControlsBridge(mCookieControlsBridge);
+
+        mMediator.onStatusChanged(
+                CookieControlsStatus.ENABLED,
+                /* enforcement= */ 0,
+                CookieBlocking3pcdStatus.LIMITED,
+                /* expiration= */ 0);
+        Assert.assertNotEquals(COOKIE_CONTROLS_ICON, getIconIdentifierForTesting());
+
+        // IPH should be shown
+        mMediator.onPageLoadStopped();
+        verify(mPageInfoIPHController, times(1))
+                .showCookieControlsReminderIPH(anyInt(), anyInt(), any(Runnable.class));
+    }
+
+    @Test
+    @SmallTest
+    public void iphReminder3pcd_trackingProtectionsEnabled_cookieBlockingDisabled() {
+        mMediator.setUrlHasFocus(true);
+        mMediator.setCookieControlsBridge(mCookieControlsBridge);
+
+        mMediator.onStatusChanged(
+                CookieControlsStatus.DISABLED,
+                /* enforcement= */ 0,
+                CookieBlocking3pcdStatus.LIMITED,
+                /* expiration= */ 0);
+        Assert.assertNotEquals(COOKIE_CONTROLS_ICON, getIconIdentifierForTesting());
+
+        // IPH should NOT be shown
+        mMediator.onPageLoadStopped();
+        verify(mPageInfoIPHController, never())
+                .showCookieControlsReminderIPH(anyInt(), anyInt(), any(Runnable.class));
+    }
+
+    @Test
+    @SmallTest
+    public void iphReminder3pcd_trackingProtectionsDisabled_cookieBlockingEnabled() {
+        mMediator.setUrlHasFocus(true);
+        mMediator.setCookieControlsBridge(mCookieControlsBridge);
+
+        mMediator.onStatusChanged(
+                CookieControlsStatus.ENABLED,
+                /* enforcement= */ 0,
+                CookieBlocking3pcdStatus.NOT_IN3PCD,
+                /* expiration= */ 0);
+        Assert.assertNotEquals(COOKIE_CONTROLS_ICON, getIconIdentifierForTesting());
+
+        // IPH should NOT be shown
+        mMediator.onPageLoadStopped();
+        verify(mPageInfoIPHController, never())
+                .showCookieControlsReminderIPH(anyInt(), anyInt(), any(Runnable.class));
     }
 
     @Test

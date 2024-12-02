@@ -126,6 +126,25 @@ const int kAllCountryIds[] = {'A' << 8 | 'D', 'A' << 8 | 'E', 'A' << 8 | 'F',
                               'Y' << 8 | 'E', 'Y' << 8 | 'T', 'Z' << 8 | 'A',
                               'Z' << 8 | 'M', 'Z' << 8 | 'W', -1};
 
+void CheckUrlIsEmptyOrSecure(const std::string url) {
+  ASSERT_TRUE(url.empty() || url.starts_with("{google:") ||
+              url.starts_with(url::kHttpsScheme));
+}
+
+void CheckTemplateUrlRefIsCryptographic(const TemplateURLRef& url_ref) {
+  TestingSearchTermsData search_terms_data("https://www.google.com/");
+  if (!url_ref.IsValid(search_terms_data)) {
+    ADD_FAILURE() << url_ref.GetURL();
+    return;
+  }
+
+  // Double parentheses around the string16 constructor to prevent the compiler
+  // from parsing it as a function declaration.
+  TemplateURLRef::SearchTermsArgs search_term_args((std::u16string()));
+  GURL url(url_ref.ReplaceSearchTerms(search_term_args, search_terms_data));
+  EXPECT_TRUE(url.is_empty() || url.SchemeIsCryptographic()) << url;
+}
+
 }  // namespace
 
 class TemplateURLPrepopulateDataTest : public testing::Test {
@@ -188,6 +207,35 @@ TEST_F(TemplateURLPrepopulateDataTest, NumberOfEntriesPerCountryConsistency) {
           << " for country "
           << country_codes::CountryIDToCountryString(country_id);
     }
+  }
+}
+
+// Verifies that the order of the randomly shuffled search engines stays
+// constant per-profile.
+TEST_F(TemplateURLPrepopulateDataTest,
+       SearchEnginesOrderDoesNotChangePerProfile) {
+  feature_list_.Reset();
+  feature_list_.InitAndEnableFeature(switches::kSearchEngineChoice);
+  // Pick any EEA country
+  const int kFranceCountryId = country_codes::CountryCharsToCountryID('F', 'R');
+  prefs_.SetInteger(country_codes::kCountryIDAtInstall, kFranceCountryId);
+
+  // Fetch the list of search engines twice and make sure the order stays the
+  // same.
+  std::vector<std::unique_ptr<TemplateURLData>> t_urls_1 =
+      TemplateURLPrepopulateData::GetPrepopulatedEngines(
+          &prefs_,
+          /*default_search_provider_index=*/nullptr);
+  std::vector<std::unique_ptr<TemplateURLData>> t_urls_2 =
+      TemplateURLPrepopulateData::GetPrepopulatedEngines(
+          &prefs_,
+          /*default_search_provider_index=*/nullptr);
+
+  ASSERT_EQ(t_urls_1.size(), t_urls_2.size());
+  for (size_t i = 0; i < t_urls_1.size(); i++) {
+    // Each prepopulated engine has a unique prepopulate_id, so we simply
+    // compare those.
+    ASSERT_EQ(t_urls_1[i]->prepopulate_id, t_urls_2[i]->prepopulate_id);
   }
 }
 
@@ -362,6 +410,29 @@ TEST_F(TemplateURLPrepopulateDataTest, ProvidersFromPrepopulated) {
                 SearchTermsData()));
 }
 
+// Verifies that all built-in search providers available across all countries
+// use https urls.
+TEST_F(TemplateURLPrepopulateDataTest, PrepopulatedAreHttps) {
+  for (int country_id : kAllCountryIds) {
+    prefs_.SetInteger(country_codes::kCountryIDAtInstall, country_id);
+
+    std::vector<std::unique_ptr<TemplateURLData>> t_urls =
+        TemplateURLPrepopulateData::GetPrepopulatedEngines(&prefs_, nullptr);
+
+    ASSERT_FALSE(t_urls.empty());
+    for (const auto& t_url : t_urls) {
+      CheckUrlIsEmptyOrSecure(t_url->url());
+      CheckUrlIsEmptyOrSecure(t_url->image_url);
+      CheckUrlIsEmptyOrSecure(t_url->image_translate_url);
+      CheckUrlIsEmptyOrSecure(t_url->new_tab_url);
+      CheckUrlIsEmptyOrSecure(t_url->contextual_search_url);
+      CheckUrlIsEmptyOrSecure(t_url->suggestions_url);
+      CheckUrlIsEmptyOrSecure(t_url->favicon_url.scheme());
+      CheckUrlIsEmptyOrSecure(t_url->logo_url.scheme());
+    }
+  }
+}
+
 TEST_F(TemplateURLPrepopulateDataTest, GetEngineTypeBasic) {
   EXPECT_EQ(SEARCH_ENGINE_OTHER, GetEngineType("http://example.com/"));
   EXPECT_EQ(SEARCH_ENGINE_ASK, GetEngineType("http://www.ask.com/"));
@@ -448,24 +519,6 @@ TEST_F(TemplateURLPrepopulateDataTest, CheckSearchURLDetection) {
         << "Search url is incorrectly detected for " << search_url;
   }
 }
-
-namespace {
-
-void CheckTemplateUrlRefIsCryptographic(const TemplateURLRef& url_ref) {
-  TestingSearchTermsData search_terms_data("https://www.google.com/");
-  if (!url_ref.IsValid(search_terms_data)) {
-    ADD_FAILURE() << url_ref.GetURL();
-    return;
-  }
-
-  // Double parentheses around the string16 constructor to prevent the compiler
-  // from parsing it as a function declaration.
-  TemplateURLRef::SearchTermsArgs search_term_args((std::u16string()));
-  GURL url(url_ref.ReplaceSearchTerms(search_term_args, search_terms_data));
-  EXPECT_TRUE(url.is_empty() || url.SchemeIsCryptographic()) << url;
-}
-
-}  // namespace
 
 TEST_F(TemplateURLPrepopulateDataTest, HttpsUrls) {
   // Search engines that don't use HTTPS URLs.

@@ -179,11 +179,9 @@ const gpu::GPUInfo GetGPUInfo() {
 // This function converts the major and minor versions to the proto accepted
 // value. For example, if the version is 3.2, the return value is 0x00030002.
 unsigned GetGLVersionInfo(const gpu::GPUInfo& gpu_info) {
-  gfx::ExtensionSet extensionSet(
-      gfx::MakeExtensionSet(gpu_info.active_gpu().gl_extensions));
-  gl::GLVersionInfo glVersionInfo(gpu_info.active_gpu().gl_version.c_str(),
-                                  gpu_info.active_gpu().gl_renderer.c_str(),
-                                  extensionSet);
+  gfx::ExtensionSet extensionSet(gfx::MakeExtensionSet(gpu_info.gl_extensions));
+  gl::GLVersionInfo glVersionInfo(gpu_info.gl_version.c_str(),
+                                  gpu_info.gl_renderer.c_str(), extensionSet);
 
   unsigned major_version = glVersionInfo.major_version;
   unsigned minor_version = glVersionInfo.minor_version;
@@ -195,32 +193,23 @@ unsigned GetGLVersionInfo(const gpu::GPUInfo& gpu_info) {
 }
 
 gfx::ExtensionSet GetGLExtensions(const gpu::GPUInfo& gpu_info) {
-  gfx::ExtensionSet extensionSet(
-      gfx::MakeExtensionSet(gpu_info.active_gpu().gl_extensions));
+  gfx::ExtensionSet extensionSet(gfx::MakeExtensionSet(gpu_info.gl_extensions));
 
   return extensionSet;
 }
 
 const std::string& GetDeviceFingerprint(const arc::ArcFeatures& arc_features) {
-  return arc_features.build_props.at("ro.build.fingerprint");
+  return arc_features.build_props.fingerprint;
 }
 
 const std::string& GetAndroidSdkVersion(const arc::ArcFeatures& arc_features) {
-  return arc_features.build_props.at("ro.build.version.sdk");
+  return arc_features.build_props.sdk_version;
 }
 
 std::vector<std::string> GetCpuAbiList(const arc::ArcFeatures& arc_features) {
-  auto abi_list = arc_features.build_props.find("ro.product.cpu.abilist");
-  // ARC T+ uses a different property for the ABI List.
-  if (abi_list == arc_features.build_props.end()) {
-    abi_list = arc_features.build_props.find("ro.system.product.cpu.abilist");
-  }
-
-  CHECK(abi_list != arc_features.build_props.end()) << "ARC must have an ABI";
-
   // The property value will be a comma separated list, e.g. "x86_64,x86".
-  return base::SplitString(abi_list->second, ",", base::TRIM_WHITESPACE,
-                           base::SPLIT_WANT_ALL);
+  return base::SplitString(arc_features.build_props.abi_list, ",",
+                           base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 }
 
 std::string CompressAndEncodeProtoMessageOnBlockingThread(

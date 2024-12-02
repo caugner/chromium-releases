@@ -36,6 +36,7 @@
 #include "chrome/browser/content_settings/chrome_content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/file_system_access/chrome_file_system_access_permission_context.h"
+#include "chrome/browser/file_system_access/file_system_access_features.h"
 #include "chrome/browser/file_system_access/file_system_access_permission_context_factory.h"
 #include "chrome/browser/hid/hid_chooser_context.h"
 #include "chrome/browser/hid/hid_chooser_context_factory.h"
@@ -1459,12 +1460,12 @@ base::Value::List SiteSettingsHandler::PopulateCookiesAndUsageData(
           url::Origin::Create(GURL(*origin_info.FindString("origin")));
       bool is_partitioned =
           origin_info.FindBool("isPartitioned").value_or(false);
-      if (!is_partitioned) {
-        // Only unpartitioned storage has a size.
-        const auto& size_info_it = origin_size_map.find(origin);
-        if (size_info_it != origin_size_map.end())
-          origin_info.Set("usage", static_cast<double>(size_info_it->second));
+
+      const auto& size_info_it = origin_size_map.find(origin);
+      if (size_info_it != origin_size_map.end()) {
+        origin_info.Set("usage", static_cast<double>(size_info_it->second));
       }
+
       const auto& host_cookie_num_it = host_cookie_map.find(
           {origin.host(), (is_partitioned ? etld_plus1 : absl::nullopt)});
       if (host_cookie_num_it != host_cookie_map.end()) {
@@ -1861,6 +1862,13 @@ void SiteSettingsHandler::HandleResetCategoryPermissionForPattern(
   if (content_type == ContentSettingsType::NOTIFICATIONS) {
     SendNotificationPermissionReviewList();
   }
+
+  if (content_type == ContentSettingsType::COOKIES &&
+      primary_pattern.MatchesAllHosts() &&
+      !secondary_pattern.MatchesAllHosts()) {
+    base::RecordAction(base::UserMetricsAction(
+        "ThirdPartyCookies.SettingsSiteException.Removed"));
+  }
 }
 
 void SiteSettingsHandler::HandleSetCategoryPermissionForPattern(
@@ -1932,6 +1940,13 @@ void SiteSettingsHandler::HandleSetCategoryPermissionForPattern(
 
   if (content_type == ContentSettingsType::NOTIFICATIONS) {
     SendNotificationPermissionReviewList();
+  }
+
+  if (content_type == ContentSettingsType::COOKIES &&
+      primary_pattern.MatchesAllHosts() &&
+      !secondary_pattern.MatchesAllHosts()) {
+    base::RecordAction(base::UserMetricsAction(
+        "ThirdPartyCookies.SettingsSiteException.Added"));
   }
 }
 
@@ -2397,6 +2412,9 @@ void SiteSettingsHandler::HandleClearSiteGroupDataAndCookies(
         net::SchemefulSite(ConvertEtldToOrigin(*etld_plus_one, true));
     http_top_level_site =
         net::SchemefulSite(ConvertEtldToOrigin(*etld_plus_one, false));
+  } else if (absl::optional<url::Origin> origin = grouping_key.GetOrigin()) {
+    https_top_level_site = net::SchemefulSite(*origin);
+    http_top_level_site = net::SchemefulSite(*origin);
   }
 
   AllowJavascript();
@@ -2692,7 +2710,7 @@ void SiteSettingsHandler::SendNotificationPermissionReviewList() {
   // HandleSetCategoryPermissionForPattern.
   FireWebUIListener(
       site_settings::kNotificationPermissionsReviewListMaybeChangedEvent,
-      service->PopulateNotificationPermissionReviewData(profile_));
+      service->PopulateNotificationPermissionReviewData());
 }
 
 }  // namespace settings

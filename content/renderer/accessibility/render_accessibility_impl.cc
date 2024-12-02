@@ -94,30 +94,6 @@ void SetAccessibilityCrashKey(ui::AXMode mode) {
 
 namespace content {
 
-// Create this on the stack to freeze BlinkAXTreeSource and automatically
-// un-freeze it when it goes out of scope.
-class ScopedFreezeAXTreeSource {
- public:
-  explicit ScopedFreezeAXTreeSource(blink::WebAXContext* context)
-      : context_(context) {
-    if (context_) {
-      context_->Freeze();
-    }
-  }
-
-  ScopedFreezeAXTreeSource(const ScopedFreezeAXTreeSource&) = delete;
-  ScopedFreezeAXTreeSource& operator=(const ScopedFreezeAXTreeSource&) = delete;
-
-  ~ScopedFreezeAXTreeSource() {
-    if (context_) {
-      context_->Thaw();
-    }
-  }
-
- private:
-  raw_ptr<blink::WebAXContext, ExperimentalRenderer> context_;
-};
-
 RenderAccessibilityImpl::RenderAccessibilityImpl(
     RenderAccessibilityManager* const render_accessibility_manager,
     RenderFrameImpl* const render_frame,
@@ -150,15 +126,6 @@ RenderAccessibilityImpl::RenderAccessibilityImpl(
   // Do not ignore SVG grouping (<g>) elements on ChromeOS, which is needed so
   // Select-to-Speak can read SVG text nodes in natural reading order.
   settings->SetAccessibilityIncludeSvgGElement(true);
-#endif
-
-#if BUILDFLAG(IS_FUCHSIA)
-  // TODO(crbug.com/1477047): WebSemanticsTest expects the events to be posted
-  // on a different thread.
-  // https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/src/ui/a11y/lib/semantics/tests/web_semantics_tests.cc#232
-  // The test facility needs to be updated, but we need sometime to make the
-  // change.
-  serialize_post_lifecycle_ = false;
 #endif
 
   // Optionally disable AXMenuList, which makes the internal pop-up menu
@@ -246,18 +213,6 @@ void RenderAccessibilityImpl::AccessibilityModeChanged(const ui::AXMode& mode) {
   SetAccessibilityCrashKey(mode);
 
   // Initialize features based on the accessibility mode.
-#if !BUILDFLAG(IS_ANDROID)
-  // Inline text boxes can be enabled globally on all except Android.
-  // On Android they can be requested for just a specific node.
-  WebView* web_view = render_frame_->GetWebView();
-  DCHECK(web_view);
-  WebSettings* settings = web_view->GetSettings();
-  DCHECK(settings);
-  // TODO(accessibility) Remove inline text box setting and just use the AXMode.
-  bool use_inline_textboxes = mode.has_mode(ui::AXMode::kInlineTextBoxes);
-  settings->SetInlineTextBoxAccessibilityEnabled(use_inline_textboxes);
-#endif  // !BUILDFLAG(IS_ANDROID)
-
   StartOrStopLabelingImages(old_mode, mode);
 
   if (ax_context_) {
@@ -339,7 +294,6 @@ void RenderAccessibilityImpl::HitTest(
 
   // If the result was in the same frame, return the result.
   ui::AXNodeData data;
-  ScopedFreezeAXTreeSource freeze(ax_context_.get());
   ax_object.Serialize(&data, ax_context_->GetAXMode());
   if (!data.HasStringAttribute(ax::mojom::StringAttribute::kChildTreeId)) {
     // Optionally fire an event, if requested to. This is a good fit for
@@ -461,6 +415,7 @@ void RenderAccessibilityImpl::PerformAction(const ui::AXActionData& data) {
     case ax::mojom::Action::kScrollDown:
     case ax::mojom::Action::kScrollLeft:
     case ax::mojom::Action::kScrollRight:
+    case ax::mojom::Action::kStitchChildTree:
       target->PerformAction(data);
       break;
     case ax::mojom::Action::kCustomAction:
@@ -478,7 +433,6 @@ void RenderAccessibilityImpl::PerformAction(const ui::AXActionData& data) {
         CreateAXImageAnnotator();
         // Rebuild the document tree so that images become annotated.
         DCHECK(ax_context_);
-        ScopedFreezeAXTreeSource freeze(ax_context_.get());
         ax_context_->MarkDocumentDirty();
       }
       break;
@@ -582,6 +536,11 @@ void RenderAccessibilityImpl::HandleAXEvent(const ui::AXEvent& event) {
     } else {
       legacy_event_schedule_mode_ =
           LegacyEventScheduleMode::kProcessEventsImmediately;
+    }
+    if (event.event_type == ax::mojom::Event::kLoadStart) {
+      loading_stage_ = LoadingStage::kPreload;
+    } else if (event.event_type == ax::mojom::Event::kLoadComplete) {
+      loading_stage_ = LoadingStage::kLoadCompleted;
     }
   }
 
@@ -1319,7 +1278,6 @@ void RenderAccessibilityImpl::SendPendingAccessibilityEvents() {
     ax_context_->UpdateAXForAllDocuments();
   }
 
-  ScopedFreezeAXTreeSource freeze(ax_context_.get());
   WebAXObject root = ComputeRoot();
 #if DCHECK_IS_ON()
   // Never causes a document lifecycle change during serialization,
@@ -1421,6 +1379,18 @@ void RenderAccessibilityImpl::SendPendingAccessibilityEvents() {
       "Accessibility.Performance.SendPendingAccessibilityEvents",
       elapsed_time_ms);
 
+  if (loading_stage_ == LoadingStage::kPostLoad) {
+    // Track serialization after document load in order to measure the
+    // contribution of serialization to interaction latency.
+    UMA_HISTOGRAM_TIMES(
+        "Accessibility.Performance.SendPendingAccessibilityEvents.PostLoad",
+        elapsed_time_ms);
+  }
+
+  if (loading_stage_ == LoadingStage::kLoadCompleted) {
+    loading_stage_ = LoadingStage::kPostLoad;
+  }
+
   if (ukm_timer_->Elapsed() >= kMinUKMDelay) {
     MaybeSendUKM();
   }
@@ -1491,7 +1461,6 @@ void RenderAccessibilityImpl::OnGetImageData(const ui::AXActionTarget* target,
     return;
   }
   const WebAXObject& obj = blink_target->WebAXObject();
-  ScopedFreezeAXTreeSource freeze(ax_context_.get());
   obj.SetImageAsDataNodeId(max_size);
 
   const WebDocument& document = GetMainDocument();
@@ -1684,7 +1653,6 @@ blink::WebAXObject RenderAccessibilityImpl::GetPluginRoot() {
   if (!ax_context_)
     return WebAXObject();
   ax_context_->UpdateAXForAllDocuments();
-  ScopedFreezeAXTreeSource freeze(ax_context_.get());
   return ax_context_->GetPluginRoot();
 }
 

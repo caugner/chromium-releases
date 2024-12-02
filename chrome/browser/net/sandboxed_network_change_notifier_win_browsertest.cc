@@ -43,6 +43,22 @@ namespace content {
 
 namespace {
 
+void UninstallAllMatchingDevices(base::win::ScopedDevInfo dev_info) {
+  SP_DEVINFO_DATA device_info_data = {};
+  device_info_data.cbSize = sizeof(SP_DEVINFO_DATA);
+
+  DWORD member_index = 0;
+  while (::SetupDiEnumDeviceInfo(dev_info.get(), member_index,
+                                 &device_info_data)) {
+    // Explicitly continue on failure, to make sure that all devices are
+    // correctly removed.
+    std::ignore = ::DiUninstallDevice(/*hwndParent=*/nullptr, dev_info.get(),
+                                      &device_info_data, /*Flags=*/0,
+                                      /*NeedReboot=*/nullptr);
+    member_index++;
+  }
+}
+
 absl::optional<base::ScopedClosureRunner> InstallAdapter(
     const base::FilePath& inf,
     const std::wstring hwid) {
@@ -92,9 +108,8 @@ absl::optional<base::ScopedClosureRunner> InstallAdapter(
     return absl::nullopt;
   }
 
-  return base::ScopedClosureRunner(base::BindOnce(
-      [](DEVINST devinst) { std::ignore = ::CM_Uninstall_DevNode(devinst, 0); },
-      deviceInfoData.DevInst));
+  return base::ScopedClosureRunner(
+      base::BindOnce(&UninstallAllMatchingDevices, std::move(dev_info)));
 }
 
 class MockNetworkChangeManagerClient

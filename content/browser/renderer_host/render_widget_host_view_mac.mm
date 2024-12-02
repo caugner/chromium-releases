@@ -231,13 +231,6 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget)
 
   host()->SetView(this);
 
-  // Let the page-level input event router know about our surface ID
-  // namespace for surface-based hit testing.
-  if (host()->delegate() && host()->delegate()->GetInputEventRouter()) {
-    host()->delegate()->GetInputEventRouter()->AddFrameSinkIdOwner(
-        GetFrameSinkId(), this);
-  }
-
   RenderWidgetHostOwnerDelegate* owner_delegate = host()->owner_delegate();
   if (owner_delegate) {
     // TODO(mostynb): actually use prefs.  Landing this as a separate CL
@@ -487,6 +480,11 @@ void RenderWidgetHostViewMac::Hide() {
   ns_view_->SetVisible(is_visible_);
   browser_compositor_->SetViewVisible(is_visible_);
   WasOccluded();
+
+  if (base::FeatureList::IsEnabled(::features::kHideDelegatedFrameHostMac)) {
+    browser_compositor_->GetDelegatedFrameHost()->WasHidden(
+        DelegatedFrameHost::HiddenCause::kOther);
+  }
 }
 
 void RenderWidgetHostViewMac::WasUnOccluded() {

@@ -7,12 +7,14 @@
 #include <sstream>
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/containers/contains.h"
 #include "base/i18n/time_formatting.h"
 #include "base/json/values_util.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_tokenizer.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
@@ -49,6 +51,10 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/path_util.h"
+#include "extensions/common/file_util.h"
+#include "extensions/common/mojom/manifest.mojom-shared.h"
+#include "extensions/common/switches.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace safe_browsing {
@@ -94,6 +100,15 @@ using OffstoreExtensionVerdict =
 constexpr char kFileDataProcessTimestampPref[] = "last_processed_timestamp";
 constexpr char kFileDataDictPref[] = "file_data";
 constexpr char kManifestFile[] = "manifest.json";
+
+// Specifies the default for `num_checks_per_upload_interval_`
+// NOTE: With a value of 1, the telemetry service will perform checks at the
+// upload interval itself and will only write a report to disk if the upload
+// fails.
+constexpr int kNumChecksPerUploadInterval = 1;
+
+// Specifies the upload interval for extension telemetry reports.
+base::TimeDelta kUploadIntervalSeconds = base::Seconds(3600);
 
 // Delay before the Telemetry Service checks its last upload time.
 base::TimeDelta kStartupUploadCheckDelaySeconds = base::Seconds(15);
@@ -234,8 +249,8 @@ ExtensionTelemetryService::ExtensionTelemetryService(
       extension_registry_(extensions::ExtensionRegistry::Get(profile)),
       extension_prefs_(extensions::ExtensionPrefs::Get(profile)),
       enabled_(false),
-      current_reporting_interval_(
-          base::Seconds(kExtensionTelemetryUploadIntervalSeconds.Get())),
+      current_reporting_interval_(kUploadIntervalSeconds),
+      num_checks_per_upload_interval_(kNumChecksPerUploadInterval),
       offstore_file_data_collection_duration_limit_(
           kOffstoreFileDataCollectionDurationLimitSeconds) {
   // Register for SB preference change notifications.
@@ -354,14 +369,14 @@ void ExtensionTelemetryService::SetEnabled(bool enable) {
     if (current_reporting_interval_.is_positive()) {
       int max_files_supported =
           ExtensionTelemetryPersister::MaxFilesSupported();
-      int writes_per_interval = std::min(
-          max_files_supported, kExtensionTelemetryWritesPerInterval.Get());
+      int checks_per_interval =
+          std::min(max_files_supported, num_checks_per_upload_interval_);
       // Configure persister for the maximum number of reports to be persisted
       // on disk. This number is the sum of reports written at every
       // write interval plus an additional allocation (3) for files written at
       // browser/profile shutdown.
       int max_reports_to_persist =
-          std::min(writes_per_interval + 3, max_files_supported);
+          std::min(checks_per_interval + 3, max_files_supported);
       // Instantiate persister which is used to read/write telemetry reports to
       // disk and start timer for sending periodic telemetry reports.
       persister_ = base::SequenceBound<ExtensionTelemetryPersister>(
@@ -370,7 +385,7 @@ void ExtensionTelemetryService::SetEnabled(bool enable) {
                base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN}),
           max_reports_to_persist, profile_->GetPath());
       persister_.AsyncCall(&ExtensionTelemetryPersister::PersisterInit);
-      timer_.Start(FROM_HERE, current_reporting_interval_ / writes_per_interval,
+      timer_.Start(FROM_HERE, current_reporting_interval_ / checks_per_interval,
                    this, &ExtensionTelemetryService::PersistOrUploadData);
     }
     // Post this task with a delay to avoid running right at Chrome startup
@@ -581,10 +596,12 @@ void ExtensionTelemetryService::PersistOrUploadData() {
 std::unique_ptr<ExtensionTelemetryReportRequest>
 ExtensionTelemetryService::CreateReport() {
   // Don't create a telemetry report if there were no signals generated (i.e.,
-  // extension store is empty) AND there are no installed extensions currently.
-  extensions::ExtensionSet installed_extensions =
+  // extension store is empty) AND there are no installed or command-line
+  // extensions present.
+  extensions::ExtensionSet extensions_to_report =
       extension_registry_->GenerateInstalledExtensionsSet();
-  if (extension_store_.empty() && installed_extensions.empty()) {
+  extensions_to_report.InsertAll(commandline_extensions_);
+  if (extension_store_.empty() && extensions_to_report.empty()) {
     return nullptr;
   }
 
@@ -617,16 +634,16 @@ ExtensionTelemetryService::CreateReport() {
     reports_pb->AddAllocated(report_entry_pb.release());
   }
 
-  // Create per-extension reports for all the installed extensions. Exclude
+  // Create per-extension reports for the remaining extensions, i.e., exclude
   // extension store extensions since reports have already been created for
-  // them. Note that these installed extension reports will only contain
+  // them. Note that these remaining extension reports will only contain
   // extension information (and no signal data).
   for (const auto& entry : extension_store_) {
-    installed_extensions.Remove(entry.first /* extension_id */);
+    extensions_to_report.Remove(/*extension_id=*/entry.first);
   }
 
   for (const scoped_refptr<const extensions::Extension>& installed_entry :
-       installed_extensions) {
+       extensions_to_report) {
     auto report_entry_pb =
         std::make_unique<ExtensionTelemetryReportRequest_Report>();
 
@@ -643,7 +660,7 @@ ExtensionTelemetryService::CreateReport() {
   extension_store_.clear();
 
   telemetry_report_pb->set_creation_timestamp_msec(
-      base::Time::Now().ToJavaTime());
+      base::Time::Now().InMillisecondsSinceUnixEpoch());
   return telemetry_report_pb;
 }
 
@@ -663,8 +680,8 @@ ExtensionTelemetryService::GetTokenFetcher() {
 
 void ExtensionTelemetryService::DumpReportForTest(
     const ExtensionTelemetryReportRequest& report) {
-  base::Time creation_time =
-      base::Time::FromJavaTime(report.creation_timestamp_msec());
+  base::Time creation_time = base::Time::FromMillisecondsSinceUnixEpoch(
+      report.creation_timestamp_msec());
   std::stringstream ss;
   ss << "Report creation time: "
      << base::UTF16ToUTF8(TimeFormatShortDateAndTimeWithTimeZone(creation_time))
@@ -675,8 +692,8 @@ void ExtensionTelemetryService::DumpReportForTest(
 
   for (const auto& report_pb : reports) {
     const auto& extension_pb = report_pb.extension();
-    base::Time install_time =
-        base::Time::FromJavaTime(extension_pb.install_timestamp_msec());
+    base::Time install_time = base::Time::FromMillisecondsSinceUnixEpoch(
+        extension_pb.install_timestamp_msec());
     ss << "\nExtensionId: " << extension_pb.id() << "\n"
        << "  Name: " << extension_pb.name() << "\n"
        << "  Version: " << extension_pb.version() << "\n"
@@ -768,8 +785,10 @@ void ExtensionTelemetryService::DumpReportForTest(
           for (const auto& remote_host_info_pb : remote_host_infos) {
             ss << "    RemoteHostInfo:\n"
                << "      URL: " << remote_host_info_pb.url() << "\n"
-               << "      ConnectionProtocal: "
+               << "      ConnectionProtocol: "
                << remote_host_info_pb.connection_protocol() << "\n"
+               << "      ContactedBy: " << remote_host_info_pb.contacted_by()
+               << "\n"
                << "      count: " << remote_host_info_pb.contact_count()
                << "\n";
           }
@@ -939,7 +958,8 @@ ExtensionTelemetryService::GetExtensionInfoForReport(
   extension_info->set_name(extension.name());
   extension_info->set_version(extension.version().GetString());
   extension_info->set_install_timestamp_msec(
-      extension_prefs_->GetLastUpdateTime(extension.id()).ToJavaTime());
+      extension_prefs_->GetLastUpdateTime(extension.id())
+          .InMillisecondsSinceUnixEpoch());
   extension_info->set_is_default_installed(
       extension.was_installed_by_default());
   extension_info->set_is_oem_installed(extension.was_installed_by_oem());
@@ -1004,7 +1024,7 @@ void ExtensionTelemetryService::StartOffstoreFileDataCollection() {
   offstore_extension_dirs_.clear();
   offstore_extension_file_data_contexts_.clear();
   GetOffstoreExtensionDirs();
-  RemoveUninstalledExtensionsFileDataFromPref();
+  RemoveStaleExtensionsFileDataFromPref();
 
   // Gather context to process offstore extensions.
   const auto& pref_dict = GetExtensionTelemetryFileData(*pref_service_);
@@ -1034,6 +1054,50 @@ void ExtensionTelemetryService::StartOffstoreFileDataCollection() {
   CollectOffstoreFileData();
 }
 
+void ExtensionTelemetryService::CollectCommandLineExtensionInfo() {
+  if (!base::FeatureList::IsEnabled(
+          kExtensionTelemetryFileDataForCommandLineExtensions)) {
+    return;
+  }
+
+  // Only collect commandline extension information once.
+  if (collected_commandline_extension_info_) {
+    return;
+  }
+  collected_commandline_extension_info_ = true;
+
+  // If there are no commandline extensions, do nothing.
+  base::CommandLine* cmdline(base::CommandLine::ForCurrentProcess());
+  if (!cmdline || !cmdline->HasSwitch(extensions::switches::kLoadExtension)) {
+    return;
+  }
+
+  // Otherwise, store an extension object for each extension specified in the
+  // commandline. Note that the extension is not installed.
+  base::CommandLine::StringType path_list =
+      cmdline->GetSwitchValueNative(extensions::switches::kLoadExtension);
+  base::StringTokenizerT<base::CommandLine::StringType,
+                         base::CommandLine::StringType::const_iterator>
+      t(path_list, FILE_PATH_LITERAL(","));
+  while (t.GetNext()) {
+    auto tmp_path = extensions::path_util::ResolveHomeDirectory(
+        base::FilePath(t.token_piece()));
+    auto extension_path = base::MakeAbsoluteFilePath(tmp_path);
+    std::string error;
+    // Use default creation flags. Since we are not installing the extension,
+    // it doesn't really mattter.
+    int flags = extensions::Extension::FOLLOW_SYMLINKS_ANYWHERE |
+                extensions::Extension::ALLOW_FILE_ACCESS |
+                extensions::Extension::REQUIRE_MODERN_MANIFEST_VERSION;
+    scoped_refptr<extensions::Extension> extension =
+        extensions::file_util::LoadExtension(
+            extension_path, ManifestLocation::kCommandLine, flags, &error);
+    if (error.empty()) {
+      commandline_extensions_.Insert(extension);
+    }
+  }
+}
+
 void ExtensionTelemetryService::GetOffstoreExtensionDirs() {
   const extensions::ExtensionSet installed_extensions =
       extension_registry_->GenerateInstalledExtensionsSet();
@@ -1044,23 +1108,31 @@ void ExtensionTelemetryService::GetOffstoreExtensionDirs() {
       offstore_extension_dirs_[extension->id()] = extension->path();
     }
   }
+
+  // Also add any extensions that were part of the --load-extension commandline
+  // switch if applicable.
+  CollectCommandLineExtensionInfo();
+  for (const auto& extension : commandline_extensions_) {
+    offstore_extension_dirs_[extension->id()] = extension->path();
+  }
+
   RecordNumOffstoreExtensions(offstore_extension_dirs_.size());
 }
 
-void ExtensionTelemetryService::RemoveUninstalledExtensionsFileDataFromPref() {
+void ExtensionTelemetryService::RemoveStaleExtensionsFileDataFromPref() {
   ScopedDictPrefUpdate pref_update(pref_service_,
                                    prefs::kExtensionTelemetryFileData);
   base::Value::Dict& pref_dict = pref_update.Get();
 
-  std::vector<extensions::ExtensionId> uninstalled_extensions;
+  std::vector<extensions::ExtensionId> stale_extensions;
   for (auto&& offstore : pref_dict) {
     if (offstore_extension_dirs_.find(offstore.first) ==
         offstore_extension_dirs_.end()) {
-      uninstalled_extensions.emplace_back(offstore.first);
+      stale_extensions.emplace_back(offstore.first);
     }
   }
 
-  for (const auto& extension : uninstalled_extensions) {
+  for (const auto& extension : stale_extensions) {
     pref_dict.Remove(extension);
   }
 }
@@ -1122,6 +1194,8 @@ void ExtensionTelemetryService::StopOffstoreFileDataCollection() {
   offstore_file_data_collection_timer_.Stop();
   offstore_extension_dirs_.clear();
   offstore_extension_file_data_contexts_.clear();
+  commandline_extensions_.Clear();
+  collected_commandline_extension_info_ = false;
 }
 
 void ExtensionTelemetryService::ProcessOffstoreExtensionVerdicts(

@@ -21,7 +21,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/feature_engagement/public/event_constants.h"
 #include "components/feature_engagement/public/feature_constants.h"
-#include "components/signin/public/base/signin_switches.h"
+#include "components/search_engines/search_engine_choice_utils.h"
 #include "ui/base/interaction/element_tracker.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/accessible_pane_view.h"
@@ -69,12 +69,6 @@ ui::ElementContext BrowserFeaturePromoController::GetAnchorContext() const {
 bool BrowserFeaturePromoController::CanShowPromoForElement(
     ui::TrackedElement* anchor_element) const {
   auto* const profile = browser_view_->GetProfile();
-  // Temporarily turn off IPH in incognito as a concern was raised that
-  // the IPH backend ignores incognito and writes to the parent profile.
-  // See https://bugs.chromium.org/p/chromium/issues/detail?id=1128728#c30
-  if (profile->IsIncognitoProfile()) {
-    return false;
-  }
 
   // Verify that there are no required notices pending.
   UserEducationService* const ue_service =
@@ -98,7 +92,8 @@ bool BrowserFeaturePromoController::CanShowPromoForElement(
   // Turn off IPH while a required search engine choice dialog is visible or
   // pending.
 #if BUILDFLAG(ENABLE_SEARCH_ENGINE_CHOICE)
-  if (base::FeatureList::IsEnabled(switches::kSearchEngineChoice)) {
+  if (search_engines::IsChoiceScreenFlagEnabled(
+          search_engines::ChoicePromo::kDialog)) {
     Browser& browser = *browser_view_->browser();
     SearchEngineChoiceService* search_engine_choice_service =
         SearchEngineChoiceServiceFactory::GetForProfile(browser.profile());

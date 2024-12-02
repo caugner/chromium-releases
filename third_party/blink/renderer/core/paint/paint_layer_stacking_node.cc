@@ -184,7 +184,7 @@ static LayoutObject* ChildOfFlexboxOrGridParentOrGrandparent(
   if (!parent) {
     return nullptr;
   }
-  if (parent->IsLayoutNGFlexibleBox() || parent->IsLayoutNGGrid()) {
+  if (parent->IsFlexibleBox() || parent->IsLayoutGrid()) {
     return &layer->GetLayoutObject();
   }
 
@@ -192,7 +192,7 @@ static LayoutObject* ChildOfFlexboxOrGridParentOrGrandparent(
   if (!grandparent) {
     return nullptr;
   }
-  if (grandparent->IsLayoutNGFlexibleBox() || grandparent->IsLayoutNGGrid()) {
+  if (grandparent->IsFlexibleBox() || grandparent->IsLayoutGrid()) {
     return parent;
   }
   return nullptr;
@@ -205,6 +205,10 @@ static bool OrderLessThan(const PaintLayer* first, const PaintLayer* second) {
   LayoutObject* second_ancestor =
       ChildOfFlexboxOrGridParentOrGrandparent(second);
   if (!first_ancestor || !second_ancestor) {
+    return false;
+  }
+
+  if (first_ancestor->Parent() != second_ancestor->Parent()) {
     return false;
   }
 

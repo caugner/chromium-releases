@@ -57,6 +57,7 @@
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/service_worker/service_worker_host.h"
 #include "content/browser/speech/speech_recognition_dispatcher_host.h"
+#include "content/browser/storage_access/storage_access_handle.h"
 #include "content/browser/tracing/trace_report/trace_report.mojom.h"
 #include "content/browser/tracing/trace_report/trace_report_internals_ui.h"
 #include "content/browser/wake_lock/wake_lock_service_impl.h"
@@ -101,7 +102,6 @@
 #include "net/base/features.h"
 #include "services/device/public/mojom/battery_monitor.mojom.h"
 #include "services/device/public/mojom/pressure_manager.mojom.h"
-#include "services/device/public/mojom/sensor_provider.mojom.h"
 #include "services/device/public/mojom/vibration_manager.mojom.h"
 #include "services/metrics/public/mojom/ukm_interface.mojom.h"
 #include "services/metrics/ukm_recorder_factory_impl.h"
@@ -120,6 +120,7 @@
 #include "third_party/blink/public/mojom/background_fetch/background_fetch.mojom.h"
 #include "third_party/blink/public/mojom/background_sync/background_sync.mojom.h"
 #include "third_party/blink/public/mojom/blob/blob_url_store.mojom.h"
+#include "third_party/blink/public/mojom/blob/file_backed_blob_factory.mojom.h"
 #include "third_party/blink/public/mojom/bluetooth/web_bluetooth.mojom.h"
 #include "third_party/blink/public/mojom/buckets/bucket_manager_host.mojom.h"
 #include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom.h"
@@ -166,10 +167,12 @@
 #include "third_party/blink/public/mojom/presentation/presentation.mojom.h"
 #include "third_party/blink/public/mojom/push_messaging/push_messaging.mojom.h"
 #include "third_party/blink/public/mojom/quota/quota_manager_host.mojom.h"
+#include "third_party/blink/public/mojom/sensor/web_sensor_provider.mojom.h"
 #include "third_party/blink/public/mojom/sms/webotp_service.mojom.h"
 #include "third_party/blink/public/mojom/speculation_rules/speculation_rules.mojom.h"
 #include "third_party/blink/public/mojom/speech/speech_recognizer.mojom.h"
 #include "third_party/blink/public/mojom/speech/speech_synthesis.mojom.h"
+#include "third_party/blink/public/mojom/storage_access/storage_access_handle.mojom.h"
 #include "third_party/blink/public/mojom/usb/web_usb_service.mojom.h"
 #include "third_party/blink/public/mojom/wake_lock/wake_lock.mojom.h"
 #include "third_party/blink/public/mojom/webaudio/audio_context_manager.mojom.h"
@@ -288,10 +291,18 @@ void BindTextDetection(
 }
 
 #if !BUILDFLAG(IS_CHROMEOS)
-void BindWebNNContextProvider(
+void BindWebNNContextProviderForRenderFrame(
     RenderFrameHost* host,
     mojo::PendingReceiver<webnn::mojom::WebNNContextProvider> receiver) {
   auto* process_host = static_cast<RenderProcessHostImpl*>(host->GetProcess());
+  process_host->GetGpuClient()->BindWebNNContextProvider(std::move(receiver));
+}
+
+void BindWebNNContextProviderForDedicatedWorker(
+    DedicatedWorkerHost* host,
+    mojo::PendingReceiver<webnn::mojom::WebNNContextProvider> receiver) {
+  auto* process_host =
+      static_cast<RenderProcessHostImpl*>(host->GetProcessHost());
   process_host->GetGpuClient()->BindWebNNContextProvider(std::move(receiver));
 }
 #endif
@@ -896,7 +907,7 @@ void PopulateFrameBinders(RenderFrameHostImpl* host, mojo::BinderMap* map) {
   map->Add<device::mojom::GamepadMonitor>(
       base::BindRepeating(&device::GamepadMonitor::Create));
 
-  map->Add<device::mojom::SensorProvider>(base::BindRepeating(
+  map->Add<blink::mojom::WebSensorProvider>(base::BindRepeating(
       &RenderFrameHostImpl::GetSensorProvider, base::Unretained(host)));
 
   map->Add<device::mojom::VibrationManager>(
@@ -917,8 +928,8 @@ void PopulateFrameBinders(RenderFrameHostImpl* host, mojo::BinderMap* map) {
 #if !BUILDFLAG(IS_CHROMEOS)
   if (base::FeatureList::IsEnabled(
           webnn::features::kEnableMachineLearningNeuralNetworkService)) {
-    map->Add<webnn::mojom::WebNNContextProvider>(
-        base::BindRepeating(&BindWebNNContextProvider, base::Unretained(host)));
+    map->Add<webnn::mojom::WebNNContextProvider>(base::BindRepeating(
+        &BindWebNNContextProviderForRenderFrame, base::Unretained(host)));
   }
 #endif
 
@@ -1254,6 +1265,8 @@ void PopulateBinderMapWithContext(
 
   map->Add<blink::mojom::OriginTrialStateHost>(
       base::BindRepeating(&OriginTrialStateHostImpl::Create));
+  map->Add<blink::mojom::StorageAccessHandle>(
+      base::BindRepeating(&StorageAccessHandle::Create));
 }
 
 void PopulateBinderMap(RenderFrameHostImpl* host, mojo::BinderMap* map) {
@@ -1299,6 +1312,16 @@ void PopulateDedicatedWorkerBinders(DedicatedWorkerHost* host,
                           host->GetProcessHost()->GetID()),
       base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::USER_VISIBLE}));
+
+#if !BUILDFLAG(IS_CHROMEOS)
+  if (base::FeatureList::IsEnabled(
+          webnn::features::kEnableMachineLearningNeuralNetworkService)) {
+    // base::Unretained(host->GetProcessHost()) is safe because the map is owned
+    // by |DedicatedWorkerHost::broker_|.
+    map->Add<webnn::mojom::WebNNContextProvider>(base::BindRepeating(
+        &BindWebNNContextProviderForDedicatedWorker, base::Unretained(host)));
+  }
+#endif
 
 #if !BUILDFLAG(IS_ANDROID)
   map->Add<blink::mojom::DirectSocketsService>(
@@ -1382,6 +1405,8 @@ void PopulateBinderMapWithContext(
     map->Add<device::mojom::PressureManager>(
         BindPressureManagerWorkerForOrigin(host));
   }
+  map->Add<blink::mojom::FileBackedBlobFactory>(BindWorkerReceiverForOrigin(
+      &RenderProcessHostImpl::BindFileBackedBlobFactory, host));
 }
 
 void PopulateBinderMap(DedicatedWorkerHost* host, mojo::BinderMap* map) {
@@ -1482,6 +1507,8 @@ void PopulateBinderMapWithContext(
     map->Add<device::mojom::PressureManager>(
         BindPressureManagerWorkerForOrigin(host));
   }
+  map->Add<blink::mojom::FileBackedBlobFactory>(BindWorkerReceiverForOrigin(
+      &RenderProcessHostImpl::BindFileBackedBlobFactory, host));
 }
 
 void PopulateBinderMap(SharedWorkerHost* host, mojo::BinderMap* map) {
@@ -1603,6 +1630,9 @@ void PopulateBinderMapWithContext(
       BindServiceWorkerReceiverForStorageKey(
           &RenderProcessHostImpl::BindQuotaManagerHost, host));
   map->Add<blink::mojom::NotificationService>(BindNotificationService(host));
+  map->Add<blink::mojom::FileBackedBlobFactory>(
+      BindServiceWorkerReceiverForOrigin(
+          &RenderProcessHostImpl::BindFileBackedBlobFactory, host));
 
   // This is called when `host` is constructed. ServiceWorkerVersion, which
   // constructs `host`, checks that context() is not null and also uses

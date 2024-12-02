@@ -224,7 +224,7 @@ class FontAccessDelegate;
 class HidDelegate;
 class IdentityRequestDialogController;
 class LoginDelegate;
-class MDocProvider;
+class DigitalCredentialProvider;
 class MediaObserver;
 class NavigationHandle;
 class NavigationThrottle;
@@ -917,6 +917,20 @@ class CONTENT_EXPORT ContentBrowserClient {
       RenderFrameHost* render_frame_host,
       InterestGroupManager::InterestGroupDataKey data_key);
 
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
+  enum class AttributionReportingOsApiState {
+    kDisabled = 0,
+    kEnabled = 1,
+    kMaxValue = kEnabled,
+  };
+
+  // Allows the embedder to control the type of attribution reporting allowed.
+  // Web, Os, both or none
+  virtual network::mojom::AttributionSupport GetAttributionSupport(
+      AttributionReportingOsApiState state,
+      content::WebContents* web_contents);
+
   enum class AttributionReportingOperation {
     kSource,
     kTrigger,
@@ -927,15 +941,21 @@ class CONTENT_EXPORT ContentBrowserClient {
     kOsTrigger,
     kOsSourceVerboseDebugReport,
     kOsTriggerVerboseDebugReport,
+    kSourceTransitionalDebugReporting,
+    kTriggerTransitionalDebugReporting,
+    kOsSourceTransitionalDebugReporting,
+    kOsTriggerTransitionalDebugReporting,
     kAny,
   };
 
   // Allows the embedder to control if Attribution Reporting API operations can
   // happen in a given context. Origins must be provided for a given operation
   // as follows:
-  //   - `kSource` and `kOsSource` must provide a non-null `source_origin` and
-  //   `reporting_origin`
-  //   - `kTrigger` and `kOsTrigger` must provide a non-null
+  //   - `kSource`, `kOsSource`, `kSourceTransitionalDebugReporting` and
+  //   `kOsSourceTransitionalDebugReporting` must provide a non-null
+  //   `source_origin` and `reporting_origin`
+  //   - `kTrigger`, `kOsTrigger`, `kTriggerTransitionalDebugReporting` and
+  //   `kOsTriggerTransitionalDebugReporting` must provide a non-null
   //   `destination_origin` and `reporting_origin`
   //   - `kReport` must provide all non-null origins
   //   - `kAny` may provide all null origins. It checks whether conversion
@@ -949,19 +969,13 @@ class CONTENT_EXPORT ContentBrowserClient {
       const url::Origin* destination_origin,
       const url::Origin* reporting_origin);
 
-  // Allows the embedder to control if web attribution reporting is allowed.
-  // This method must be idempotent.
-  virtual bool IsWebAttributionReportingAllowed();
-
   // Allows the embedder to control if an OS source event should register as
   // a Web OS or OS (App) source.
-  // This method must be idempotent.
   virtual bool ShouldUseOsWebSourceAttributionReporting(
       content::RenderFrameHost* rfh);
 
   // Allows the embedder to control if an OS trigger event should register as
   // a Web OS or OS (App) trigger.
-  // This method must be idempotent.
   virtual bool ShouldUseOsWebTriggerAttributionReporting(
       content::RenderFrameHost* rfh);
 
@@ -1323,11 +1337,16 @@ class CONTENT_EXPORT ContentBrowserClient {
       mojo::BinderMapWithContext<RenderFrameHost*>* map) {}
 
   // Allows the embedder to control when Mojo interface binders are run for a
-  // frame that is being prerendered.
+  // frame that is in a managed mode, such as prerendering and preview mode.
   //
   // Prerender2 limits inactivated pages' capabilities by controlling when to
   // bind Mojo interfaces. See content/browser/preloading/prerender/README.md
   // for more about capability control.
+  //
+  // Preview mode follows the same limits that Prerender2 defines, and the page
+  // behaves as a prerendered page in Blink. But as the preview page is visible
+  // to users, we relax the restriction a little to permit rendering related
+  // operations.
   //
   // The embedder can add entries to `policy_map` for interfaces that it
   // registers in `RegisterBrowserInterfaceBindersForFrame()` and
@@ -1338,6 +1357,8 @@ class CONTENT_EXPORT ContentBrowserClient {
   // created for prerendering a page that is same-origin to the page that
   // triggered the prerender.
   virtual void RegisterMojoBinderPoliciesForSameOriginPrerendering(
+      MojoBinderPolicyMap& policy_map) {}
+  virtual void RegisterMojoBinderPoliciesForPreview(
       MojoBinderPolicyMap& policy_map) {}
 
   // Allows to register browser interfaces which are exposed to a service worker
@@ -2196,7 +2217,8 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual bool ShouldSandboxNetworkService();
 
   // Returns true if system DNS resolution should be run outside of the network
-  // service.
+  // service. This is useful if the network service is sandboxed but system DNS
+  // resolution cannot run sandboxed.
   virtual bool ShouldRunOutOfProcessSystemDnsResolution();
 
   // Browser-side API to log blink UseCounters for events that don't occur in
@@ -2487,8 +2509,9 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual std::unique_ptr<IdentityRequestDialogController>
   CreateIdentityRequestDialogController(WebContents* web_contents);
 
-  // Creates an mdoc provider to fetch mdocs from native apps.
-  virtual std::unique_ptr<MDocProvider> CreateMDocProvider();
+  // Creates a digital credential provider to fetch from native apps.
+  virtual std::unique_ptr<DigitalCredentialProvider>
+  CreateDigitalCredentialProvider();
 
   // Returns true if JS dialogs from an iframe with different origin from the
   // main frame should be disallowed.
@@ -2601,6 +2624,24 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual bool IsThirdPartyStoragePartitioningAllowed(
       content::BrowserContext* browser_context,
       const url::Origin& top_level_origin);
+
+  // Checks whether credentials should be included in fenced frame automatic
+  // beacon requests, based on user cookie settings. Any cookies sent in an
+  // automatic beacon response header will be honored and stored.
+  //
+  // `destination_url` is the URL that the automatic beacon is being sent to,
+  // and the URL whose origin's cookies will be accessed.
+  //
+  // `top_frame_origin` is the main frame of the page that ran the auction that
+  // resulted in the creation of the FencedFrameReporter that called this
+  // function.
+  //
+  // TODO(crbug.com/1496395): After 3PCD, this will be dead code and should be
+  // removed.
+  virtual bool AreDeprecatedAutomaticBeaconCredentialsAllowed(
+      content::BrowserContext* browser_context,
+      const GURL& destination_url,
+      const url::Origin& top_frame_origin);
 
   // Checks if file or directory pickers from the file system access web API
   // require a user gesture (transient activation). They usually do, but this

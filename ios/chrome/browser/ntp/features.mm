@@ -54,7 +54,7 @@ BASE_FEATURE(kEnableFeedBackgroundRefresh,
 
 BASE_FEATURE(kEnableFeedInvisibleForegroundRefresh,
              "EnableFeedInvisibleForegroundRefresh",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kCreateDiscoverFeedServiceEarly,
              "CreateDiscoverFeedServiceEarly",
@@ -92,6 +92,10 @@ BASE_FEATURE(kContentPushNotifications,
 
 BASE_FEATURE(kIOSLargeFakebox,
              "IOSLargeFakebox",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kIOSHideFeedWithSearchChoice,
+             "IOSHideFeedWithSearchChoice",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Key for NSUserDefaults containing a bool indicating whether the next run
@@ -133,6 +137,8 @@ const char kFeedUnseenRefreshThresholdInSeconds[] =
     "FeedUnseenRefreshThresholdInSeconds";
 const char kEnableFeedUseInteractivityInvalidationForForegroundRefreshes[] =
     "EnableFeedUseInteractivityInvalidationForForegroundRefreshes";
+const char kIOSHideFeedWithSearchChoiceTargeted[] =
+    "IOSHideFeedWithSearchChoiceTargeted";
 
 bool IsWebChannelsEnabled() {
   std::string launched_countries[6] = {"AU", "CA", "GB", "NZ", "US", "ZA"};
@@ -270,7 +276,7 @@ bool IsFeedAppCloseForegroundRefreshEnabled() {
   return base::GetFieldTrialParamByFeatureAsBool(
       kEnableFeedInvisibleForegroundRefresh,
       kEnableFeedAppCloseForegroundRefresh,
-      /*default=*/false);
+      /*default=*/true);
 }
 
 bool IsFeedAppCloseBackgroundRefreshEnabled() {
@@ -345,6 +351,12 @@ bool IsFeedUseInteractivityInvalidationForForegroundRefreshesEnabled() {
       /*default=*/false);
 }
 
+bool IsIOSHideFeedWithSearchChoiceTargeted() {
+  return base::GetFieldTrialParamByFeatureAsBool(
+      kIOSHideFeedWithSearchChoice, kIOSHideFeedWithSearchChoiceTargeted,
+      /*default=*/false);
+}
+
 bool IsFeedCardMenuSignInPromoEnabled() {
   return base::FeatureList::IsEnabled(kEnableFeedCardMenuSignInPromo);
 }
@@ -375,4 +387,8 @@ bool IsContentPushNotificationsEnabled() {
 
 bool IsIOSLargeFakeboxEnabled() {
   return base::FeatureList::IsEnabled(kIOSLargeFakebox);
+}
+
+bool IsIOSHideFeedWithSearchChoiceEnabled() {
+  return base::FeatureList::IsEnabled(kIOSHideFeedWithSearchChoice);
 }

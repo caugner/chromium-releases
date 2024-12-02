@@ -4,6 +4,7 @@
 
 #include "components/search_engines/search_engine_choice_utils.h"
 
+#include "base/check.h"
 #include "base/check_deref.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
@@ -102,6 +103,16 @@ const base::flat_set<int> GetEeaChoiceCountries() {
   });
 }
 
+SearchEngineType GetDefaultSearchEngineType(
+    TemplateURLService& template_url_service) {
+  const TemplateURL* default_search_engine =
+      template_url_service.GetDefaultSearchProvider();
+
+  return default_search_engine ? default_search_engine->GetEngineType(
+                                     template_url_service.search_terms_data())
+                               : SEARCH_ENGINE_OTHER;
+}
+
 }  // namespace
 
 const char kSearchEngineChoiceScreenNavigationConditionsHistogram[] =
@@ -113,15 +124,35 @@ const char kSearchEngineChoiceScreenProfileInitConditionsHistogram[] =
 const char kSearchEngineChoiceScreenEventsHistogram[] =
     "Search.ChoiceScreenEvents";
 
+const char kDefaultSearchEngineChoiceLocationHistogram[] =
+    "Search.DefaultSearchEngineChoiceLocation";
+
+const char kSearchEngineChoiceScreenDefaultSearchEngineTypeHistogram[] =
+    "Search.ChoiceScreenDefaultSearchEngineType";
+
+// Returns whether the choice screen flag is generally enabled for the specific
+// user flow.
+bool IsChoiceScreenFlagEnabled(ChoicePromo promo) {
+  switch (promo) {
+    case ChoicePromo::kAny:
+      return base::FeatureList::IsEnabled(switches::kSearchEngineChoice) ||
+             base::FeatureList::IsEnabled(switches::kSearchEngineChoiceFre);
+    case ChoicePromo::kDialog:
+      return base::FeatureList::IsEnabled(switches::kSearchEngineChoice);
+    case ChoicePromo::kFre:
+      return base::FeatureList::IsEnabled(switches::kSearchEngineChoiceFre);
+  }
+}
+
 bool ShouldShowUpdatedSettings(PrefService& profile_prefs) {
-  return base::FeatureList::IsEnabled(switches::kSearchEngineChoice) &&
+  return IsChoiceScreenFlagEnabled(ChoicePromo::kAny) &&
          IsEeaChoiceCountry(GetSearchEngineChoiceCountryId(&profile_prefs));
 }
 
 bool ShouldShowChoiceScreen(const policy::PolicyService& policy_service,
                             const ProfileProperties& profile_properties,
                             TemplateURLService* template_url_service) {
-  if (!base::FeatureList::IsEnabled(switches::kSearchEngineChoice)) {
+  if (!IsChoiceScreenFlagEnabled(ChoicePromo::kAny)) {
     return false;
   }
 
@@ -141,21 +172,18 @@ bool ShouldShowChoiceScreen(const policy::PolicyService& policy_service,
     return true;
   }
 
-  // TODO(b/302687046): Change `template_url_service` to a reference once the
-  // code is updated on iOS side.
-  if (template_url_service) {
-    // A custom search engine will have a `prepopulate_id` of 0.
-    const int kCustomSearchEnginePrepopulateId = 0;
-    const TemplateURL* default_search_engine =
-        template_url_service->GetDefaultSearchProvider();
-    // Don't show the dialog if the user as a custom search engine set a
-    // default.
-    if (default_search_engine->prepopulate_id() ==
-        kCustomSearchEnginePrepopulateId) {
-      RecordChoiceScreenProfileInitCondition(
-          SearchEngineChoiceScreenConditions::kHasCustomSearchEngine);
-      return false;
-    }
+  CHECK(template_url_service);
+  // A custom search engine will have a `prepopulate_id` of 0.
+  const int kCustomSearchEnginePrepopulateId = 0;
+  const TemplateURL* default_search_engine =
+      template_url_service->GetDefaultSearchProvider();
+  // Don't show the dialog if the user as a custom search engine set a
+  // default.
+  if (default_search_engine && default_search_engine->prepopulate_id() ==
+                                   kCustomSearchEnginePrepopulateId) {
+    RecordChoiceScreenProfileInitCondition(
+        SearchEngineChoiceScreenConditions::kHasCustomSearchEngine);
+    return false;
   }
 
   PrefService& prefs = CHECK_DEREF(profile_properties.pref_service.get());
@@ -219,6 +247,48 @@ void RecordChoiceScreenProfileInitCondition(
 void RecordChoiceScreenEvent(SearchEngineChoiceScreenEvents event) {
   base::UmaHistogramEnumeration(
       search_engines::kSearchEngineChoiceScreenEventsHistogram, event);
+}
+
+void RecordChoiceScreenDefaultSearchProviderType(SearchEngineType engine_type) {
+  base::UmaHistogramEnumeration(
+      kSearchEngineChoiceScreenDefaultSearchEngineTypeHistogram, engine_type,
+      SEARCH_ENGINE_MAX);
+}
+
+void RecordChoiceMade(PrefService* profile_prefs,
+                      ChoiceMadeLocation choice_location,
+                      TemplateURLService* template_url_service) {
+  // Record the histogram even if the feature is not enabled.
+  base::UmaHistogramEnumeration(
+      search_engines::kDefaultSearchEngineChoiceLocationHistogram,
+      choice_location);
+
+  if (!IsChoiceScreenFlagEnabled(ChoicePromo::kAny)) {
+    return;
+  }
+
+  // Don't modify the pref if the user is not in the EEA region.
+  if (!search_engines::IsEeaChoiceCountry(
+          search_engines::GetSearchEngineChoiceCountryId(profile_prefs))) {
+    return;
+  }
+
+  // Don't modify the pref if it was already set.
+  if (profile_prefs->HasPrefPath(
+          prefs::kDefaultSearchProviderChoiceScreenCompletionTimestamp)) {
+    return;
+  }
+
+  // TODO(b/307713013): Remove the check for `template_url_service` when the
+  // function is used on the iOS side.
+  if (template_url_service) {
+    search_engines::RecordChoiceScreenDefaultSearchProviderType(
+        GetDefaultSearchEngineType(*template_url_service));
+  }
+
+  profile_prefs->SetInt64(
+      prefs::kDefaultSearchProviderChoiceScreenCompletionTimestamp,
+      base::Time::Now().ToDeltaSinceWindowsEpoch().InSeconds());
 }
 
 }  // namespace search_engines

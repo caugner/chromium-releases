@@ -4,10 +4,10 @@
 
 #include "net/websockets/websocket_channel.h"
 
-#include <limits.h>
 #include <stddef.h>
 #include <string.h>
 
+#include <algorithm>
 #include <iostream>
 #include <iterator>
 #include <string>
@@ -15,9 +15,10 @@
 #include <utility>
 #include <vector>
 
+#include "base/check.h"
+#include "base/dcheck_is_on.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
-#include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -26,15 +27,21 @@
 #include "base/strings/string_piece.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
+#include "net/base/auth.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/io_buffer.h"
+#include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
+#include "net/base/isolation_info.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
+#include "net/cookies/site_for_cookies.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/log/net_log_with_source.h"
+#include "net/ssl/ssl_info.h"
 #include "net/test/test_with_task_environment.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
@@ -363,7 +370,8 @@ std::vector<std::unique_ptr<WebSocketFrame>> CreateFrameVector(
     if (source_frame.data) {
       auto buffer = base::MakeRefCounted<IOBuffer>(frame_length);
       result_frame_data->push_back(buffer);
-      memcpy(buffer->data(), source_frame.data, frame_length);
+      std::copy(source_frame.data, source_frame.data + frame_length,
+                buffer->data());
       result_frame->payload = buffer->data();
     }
     result_frames.push_back(std::move(result_frame));
@@ -599,7 +607,8 @@ class EchoeyFakeWebSocketStream : public FakeWebSocketStream {
     for (const auto& frame : *frames) {
       auto buffer = base::MakeRefCounted<IOBuffer>(
           static_cast<size_t>(frame->header.payload_length));
-      memcpy(buffer->data(), frame->payload, frame->header.payload_length);
+      std::copy(frame->payload, frame->payload + frame->header.payload_length,
+                buffer->data());
       frame->payload = buffer->data();
       buffers_.push_back(buffer);
     }

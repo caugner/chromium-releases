@@ -18,14 +18,17 @@
 #include "base/functional/callback.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "content/browser/interest_group/additional_bid_result.h"
 #include "content/browser/interest_group/auction_nonce_manager.h"
 #include "content/browser/interest_group/auction_result.h"
 #include "content/browser/interest_group/auction_worklet_manager.h"
 #include "content/browser/interest_group/bidding_and_auction_response.h"
 #include "content/browser/interest_group/header_direct_from_seller_signals.h"
 #include "content/browser/interest_group/interest_group_auction_reporter.h"
+#include "content/browser/interest_group/interest_group_caching_storage.h"
 #include "content/browser/interest_group/interest_group_pa_report_util.h"
 #include "content/browser/interest_group/interest_group_storage.h"
 #include "content/browser/interest_group/subresource_url_builder.h"
@@ -168,7 +171,7 @@ class CONTENT_EXPORT InterestGroupAuction
   };
 
   struct CONTENT_EXPORT BidState {
-    BidState();
+    explicit BidState(const SingleStorageInterestGroup&& bidder);
     ~BidState();
 
     BidState(BidState&&);
@@ -194,10 +197,7 @@ class CONTENT_EXPORT InterestGroupAuction
     void BeginTracingKAnonScoring();
     void EndTracingKAnonScoring();
 
-    // Use a unique pointer so this can be more safely moved to the
-    // InterestGroupAuctionReporter. Doing so both preserves pointers, and make
-    // sure there's a crash if this is dereferenced after move.
-    std::unique_ptr<StorageInterestGroup> bidder;
+    const SingleStorageInterestGroup bidder;
 
     // Set of render keys that are k-anonymous and correspond to ad or ad
     // component render URLs for this interest group.
@@ -455,6 +455,7 @@ class CONTENT_EXPORT InterestGroupAuction
       AuctionNonceManager* auction_nonce_manager,
       InterestGroupManagerImpl* interest_group_manager,
       AuctionMetricsRecorder* auction_metrics_recorder,
+      AdAuctionPageData* ad_auction_page_data,
       base::Time auction_start_time,
       IsInterestGroupApiAllowedCallback is_interest_group_api_allowed_callback,
       base::RepeatingCallback<
@@ -820,7 +821,8 @@ class CONTENT_EXPORT InterestGroupAuction
 
   // Invoked whenever the interest groups for a buyer have loaded. Adds
   // `interest_groups` to `bid_states_`.
-  void OnInterestGroupRead(std::vector<StorageInterestGroup> interest_groups);
+  void OnInterestGroupRead(
+      scoped_refptr<StorageInterestGroups> interest_groups);
 
   // Invoked when the interest groups for an entire component auction have
   // loaded. If `success` is false, removes the component auction.
@@ -875,6 +877,11 @@ class CONTENT_EXPORT InterestGroupAuction
   // are ready.
   void ScoreQueuedBidsIfReady();
 
+  // Performs errors handling when an error is encountered while decoding an
+  // additional bid. The caller of this should return immediately after calling
+  // this function.
+  void HandleAdditionalBidError(AdditionalBidResult result, std::string error);
+
   // If we're in the bidding and scoring phase, and
   // `encoded_signed_additional_bids_` has been filled in, starts of the process
   // of converting these into actual bids, keeping track of it via
@@ -904,7 +911,7 @@ class CONTENT_EXPORT InterestGroupAuction
   // True if all bids have been generated (or decoded from additional_bids) and
   // scored and all config promises resolved.
   bool IsBiddingAndScoringPhaseComplete() const {
-    CHECK(started_bidding_and_scoring_phase_);
+    CHECK_EQ(bidding_and_scoring_phase_state_, PhaseState::kDuring);
     return num_scoring_dependencies_ == 0 && bids_being_scored_ == 0 &&
            unscored_bids_.empty();
   }
@@ -1172,6 +1179,9 @@ class CONTENT_EXPORT InterestGroupAuction
   // Start time of the BiddingAndScoring phase for UKM metrics.
   base::TimeTicks bidding_and_scoring_phase_start_time_;
 
+  // Time at which we began decoding the additional bids.
+  base::TimeTicks decode_additional_bids_start_time_;
+
   // Invoked in the bidding and scoring phase, once the seller worklet has
   // loaded. May be null.
   base::OnceClosure on_seller_receiver_callback_;
@@ -1186,8 +1196,10 @@ class CONTENT_EXPORT InterestGroupAuction
   // AuctionWorkletManager.
   bool seller_worklet_received_ = false;
 
-  // True once we enter the bidding and scoring phase.
-  bool started_bidding_and_scoring_phase_ = false;
+  enum class PhaseState { kBefore, kDuring, kAfter };
+  // Note: this should only be used for real bidding and scoring phase, not
+  // when StartFromServerResponse is used.
+  PhaseState bidding_and_scoring_phase_state_ = PhaseState::kBefore;
 
   // Number of things that are pending that are needed to score everything.
   // This includes bidders that are still attempting to generate bids ---
@@ -1323,7 +1335,7 @@ class CONTENT_EXPORT InterestGroupAuction
   mojo::ReceiverSet<auction_worklet::mojom::ScoreAdClient, std::unique_ptr<Bid>>
       score_ad_receivers_;
 
-  data_decoder::DataDecoder data_decoder_;
+  raw_ptr<data_decoder::DataDecoder> data_decoder_;
 
   base::WeakPtrFactory<InterestGroupAuction> weak_ptr_factory_{this};
 };

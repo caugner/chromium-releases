@@ -6,11 +6,13 @@
 
 #include "base/barrier_closure.h"
 #include "base/json/values_util.h"
+#include "base/metrics/user_metrics.h"
 #include "base/rand_util.h"
 #include "base/time/time.h"
 #include "chrome/browser/password_manager/account_password_store_factory.h"
 #include "chrome/browser/password_manager/affiliation_service_factory.h"
-#include "chrome/browser/password_manager/password_store_factory.h"
+#include "chrome/browser/password_manager/profile_password_store_factory.h"
+#include "chrome/browser/ui/safety_hub/password_status_check_result.h"
 #include "chrome/browser/ui/safety_hub/safety_hub_constants.h"
 #include "chrome/browser/ui/safety_hub/safety_hub_prefs.h"
 #include "chrome/common/chrome_features.h"
@@ -173,8 +175,8 @@ base::Value::Dict GetNoPasswordCardData(bool password_saving_allowed) {
 PasswordStatusCheckService::PasswordStatusCheckService(Profile* profile)
     : profile_(profile) {
   scoped_refptr<password_manager::PasswordStoreInterface> profile_store =
-      PasswordStoreFactory::GetForProfile(profile_,
-                                          ServiceAccessType::IMPLICIT_ACCESS);
+      ProfilePasswordStoreFactory::GetForProfile(
+          profile_, ServiceAccessType::IMPLICIT_ACCESS);
 
   scoped_refptr<password_manager::PasswordStoreInterface> account_store =
       AccountPasswordStoreFactory::GetForProfile(
@@ -205,24 +207,21 @@ void PasswordStatusCheckService::Shutdown() {
 
 void PasswordStatusCheckService::StartRepeatedUpdates() {
   if (ShouldFindNewCheckTime(profile_)) {
-    base::TimeDelta update_interval =
+    const base::TimeDelta update_interval =
         features::kBackgroundPasswordCheckInterval.Get();
-
-    base::TimeDelta random_delta = base::Microseconds(
-        base::RandGenerator(update_interval.InMicroseconds()));
-    base::Time scheduled_check_time = base::Time::Now() + random_delta;
-
-    SetPasswordCheckSchedulePrefsWithInterval(scheduled_check_time);
+    SetPasswordCheckSchedulePrefsWithInterval(
+        base::Time::Now() + base::RandTimeDeltaUpTo(update_interval));
   }
 
-  // If the scheduled time for the password check is in the future, it should
+  // If the scheduled time for the password check is not yet overdue, it should
   // run at that time. If password check is overdue, pick a random time in the
   // next hour.
   base::TimeDelta password_check_run_delta =
-      GetScheduledPasswordCheckTime() > base::Time::Now()
-          ? GetScheduledPasswordCheckTime() - base::Time::Now()
-          : base::Microseconds(base::RandGenerator(
-                safety_hub::kPasswordCheckOverdueTimeWindow.InMicroseconds()));
+      GetScheduledPasswordCheckTime() - base::Time::Now();
+  if (password_check_run_delta.is_negative()) {
+    password_check_run_delta =
+        base::RandTimeDeltaUpTo(safety_hub::kPasswordCheckOverdueTimeWindow);
+  }
 
   password_check_timer_.Start(
       FROM_HERE, password_check_run_delta,
@@ -266,6 +265,7 @@ void PasswordStatusCheckService::RunPasswordCheckAsync() {
   }
 
   password_check_delegate_->StartPasswordCheck();
+  base::RecordAction(base::UserMetricsAction("SafetyHub_PasswordCheckRun"));
 }
 
 void PasswordStatusCheckService::OnSavedPasswordsChanged(
@@ -365,7 +365,7 @@ void PasswordStatusCheckService::InitializePasswordCheckInfrastructure() {
   saved_passwords_presenter_ =
       std::make_unique<password_manager::SavedPasswordsPresenter>(
           AffiliationServiceFactory::GetForProfile(profile_),
-          PasswordStoreFactory::GetForProfile(
+          ProfilePasswordStoreFactory::GetForProfile(
               profile_, ServiceAccessType::IMPLICIT_ACCESS),
           AccountPasswordStoreFactory::GetForProfile(
               profile_, ServiceAccessType::IMPLICIT_ACCESS));
@@ -386,12 +386,14 @@ void PasswordStatusCheckService::UpdateInsecureCredentialCount() {
   weak_credential_count_ = 0;
   reused_credential_count_ = 0;
 
+  latest_result_ = std::make_unique<PasswordStatusCheckResult>();
   for (const auto& entry : insecure_credentials) {
     if (entry.IsMuted()) {
       continue;
     }
     if (password_manager::IsCompromised(entry)) {
       compromised_credential_count_++;
+      latest_result_->AddToCompromisedOrigins(entry.GetURL().spec());
     }
     if (entry.IsWeak()) {
       weak_credential_count_++;
@@ -503,4 +505,9 @@ base::Value::Dict PasswordStatusCheckService::GetPasswordCardData(
   }
 
   return GetNoWeakOrReusedPasswordCardData(signed_in);
+}
+
+const PasswordStatusCheckResult& PasswordStatusCheckService::GetCachedResult()
+    const {
+  return *latest_result_;
 }

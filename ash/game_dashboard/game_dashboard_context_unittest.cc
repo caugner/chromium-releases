@@ -20,18 +20,16 @@
 #include "ash/game_dashboard/game_dashboard_utils.h"
 #include "ash/game_dashboard/game_dashboard_widget.h"
 #include "ash/game_dashboard/test_game_dashboard_delegate.h"
+#include "ash/public/cpp/arc_game_controls_flag.h"
 #include "ash/public/cpp/capture_mode/capture_mode_test_api.h"
 #include "ash/public/cpp/style/dark_light_mode_controller.h"
 #include "ash/public/cpp/window_properties.h"
-#include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/style/color_palette_controller.h"
 #include "ash/style/icon_button.h"
-#include "ash/style/mojom/color_scheme.mojom-shared.h"
 #include "ash/style/pill_button.h"
 #include "ash/style/switch.h"
 #include "ash/system/unified/feature_tile.h"
-#include "ash/wallpaper/wallpaper_controller_test_api.h"
 #include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/overview/overview_observer.h"
 #include "base/check.h"
@@ -40,7 +38,6 @@
 #include "chromeos/ui/frame/frame_header.h"
 #include "chromeos/ui/wm/window_util.h"
 #include "extensions/common/constants.h"
-#include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/keycodes/keyboard_codes_posix.h"
@@ -85,7 +82,7 @@ class GameDashboardContextTest : public GameDashboardTestBase {
 
   // Starts the video recording from `CaptureModeBarView`.
   void ClickOnStartRecordingButtonInCaptureModeBarView() {
-    auto* start_recording_button = GetStartRecordingButton();
+    PillButton* start_recording_button = GetStartRecordingButton();
     ASSERT_TRUE(start_recording_button);
     LeftClickOn(start_recording_button);
     WaitForRecordingToStart();
@@ -119,6 +116,12 @@ class GameDashboardContextTest : public GameDashboardTestBase {
       game_window_->SetProperty(kArcGameControlsFlagsKey,
                                 ArcGameControlsFlag::kKnown);
     }
+
+    auto* game_dashboard_button_widget =
+        test_api_->GetGameDashboardButton()->GetWidget();
+    CHECK(game_dashboard_button_widget);
+    ASSERT_FALSE(game_dashboard_button_widget->CanActivate());
+    ASSERT_FALSE(game_dashboard_button_widget->IsActive());
   }
 
   // Opens the main menu and toolbar, and checks Game Controls UI states. At the
@@ -595,6 +598,49 @@ TEST_F(GameDashboardContextTest, GameControlsMenuFunctions) {
       /*setup_exists=*/false);
 }
 
+// Verify Game Dashboard button is disabled and toolbar hides in the edit mode.
+TEST_F(GameDashboardContextTest, GameControlsEditMode) {
+  CreateGameWindow(/*is_arc_window=*/true);
+  // Game Controls is available, not empty, enabled and hint on.
+  game_window_->SetProperty(
+      kArcGameControlsFlagsKey,
+      static_cast<ArcGameControlsFlag>(
+          ArcGameControlsFlag::kKnown | ArcGameControlsFlag::kAvailable |
+          ArcGameControlsFlag::kEnabled | ArcGameControlsFlag::kHint));
+  auto* game_dashboard_button = test_api_->GetGameDashboardButton();
+  EXPECT_TRUE(game_dashboard_button->GetEnabled());
+  LeftClickOn(game_dashboard_button);
+  EXPECT_TRUE(test_api_->GetMainMenuWidget());
+  // Show the toolbar.
+  test_api_->OpenTheToolbar();
+  auto* tool_bar_widget = test_api_->GetToolbarWidget();
+  EXPECT_TRUE(tool_bar_widget);
+  EXPECT_TRUE(tool_bar_widget->IsVisible());
+
+  // Enter Game Controls edit mode.
+  LeftClickOn(test_api_->GetMainMenuGameControlsDetailsButton());
+  EXPECT_TRUE(game_dashboard_utils::IsFlagSet(
+      game_window_->GetProperty(kArcGameControlsFlagsKey),
+      ArcGameControlsFlag::kEdit));
+  EXPECT_FALSE(test_api_->GetMainMenuWidget());
+  EXPECT_FALSE(tool_bar_widget->IsVisible());
+  // In the edit mode, Game Dashboard button is disabled and it doesn't show
+  // menu after clicked. The toolbar is also hidden if it shows up.
+  EXPECT_FALSE(game_dashboard_button->GetEnabled());
+  LeftClickOn(game_dashboard_button);
+  EXPECT_FALSE(test_api_->GetMainMenuWidget());
+  // Exit edit mode and verify Game Dashboard button and toolbar are resumed.
+  ArcGameControlsFlag flags =
+      game_window_->GetProperty(kArcGameControlsFlagsKey);
+  flags = game_dashboard_utils::UpdateFlag(flags, ArcGameControlsFlag::kEdit,
+                                           /*enable_flag=*/false);
+  game_window_->SetProperty(kArcGameControlsFlagsKey, flags);
+  EXPECT_TRUE(game_dashboard_button->GetEnabled());
+  LeftClickOn(game_dashboard_button);
+  EXPECT_TRUE(test_api_->GetMainMenuWidget());
+  EXPECT_TRUE(tool_bar_widget->IsVisible());
+}
+
 // Verifies that when one game window starts a recording session, it's
 // record game buttons are enabled and the other game's record game buttons
 // are disabled.
@@ -901,7 +947,7 @@ TEST_P(GameTypeGameDashboardContextTest,
 TEST_P(GameTypeGameDashboardContextTest, OpenAndCloseToolbarWidget) {
   if (IsArcGame()) {
     game_window_->SetProperty(
-        ash::kArcGameControlsFlagsKey,
+        kArcGameControlsFlagsKey,
         static_cast<ArcGameControlsFlag>(ArcGameControlsFlag::kKnown |
                                          ArcGameControlsFlag::kAvailable));
   }
@@ -1205,7 +1251,7 @@ TEST_P(GameTypeGameDashboardContextTest, MoveAndHideToolbarWidget) {
 class OnOverviewModeEndedWaiter : public OverviewObserver {
  public:
   OnOverviewModeEndedWaiter()
-      : overview_controller_(Shell::Get()->overview_controller()) {
+      : overview_controller_(OverviewController::Get()) {
     CHECK(overview_controller_);
     overview_controller_->AddObserver(this);
   }
@@ -1230,8 +1276,6 @@ class OnOverviewModeEndedWaiter : public OverviewObserver {
 // Verifies that in overview mode, the Game Dashboard button is not visible, the
 // main menu is closed, and the toolbar visibility is unchanged.
 TEST_P(GameTypeGameDashboardContextTest, OverviewMode) {
-  auto* overview_controller = Shell::Get()->overview_controller();
-  ASSERT_TRUE(overview_controller);
   auto* game_dashboard_button_widget =
       test_api_->GetGameDashboardButtonWidget();
   ASSERT_TRUE(game_dashboard_button_widget);
@@ -1253,6 +1297,7 @@ TEST_P(GameTypeGameDashboardContextTest, OverviewMode) {
   EXPECT_TRUE(main_menu_widget->IsVisible());
 
   EnterOverview();
+  auto* overview_controller = OverviewController::Get();
   ASSERT_TRUE(overview_controller->InOverviewSession());
 
   // Verify states in overview mode.

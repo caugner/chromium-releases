@@ -347,18 +347,20 @@ void PopulateResourceRequest(const ResourceRequestHead& src,
   dest->keepalive = src.GetKeepalive();
   dest->browsing_topics = src.GetBrowsingTopics();
   dest->ad_auction_headers = src.GetAdAuctionHeaders();
-  dest->shared_storage_writable = src.GetSharedStorageWritable();
+  dest->shared_storage_writable_eligible =
+      src.GetSharedStorageWritableEligible();
   dest->has_user_gesture = src.HasUserGesture();
   dest->enable_load_timing = true;
   dest->enable_upload_progress = src.ReportUploadProgress();
   dest->throttling_profile_id = src.GetDevToolsToken();
   dest->trust_token_params = ConvertTrustTokenParams(src.TrustTokenParams());
+  dest->target_address_space = src.GetTargetAddressSpace();
 
   if (base::UnguessableToken window_id = src.GetFetchWindowId())
     dest->fetch_window_id = absl::make_optional(window_id);
 
-  if (src.GetDevToolsId().has_value()) {
-    dest->devtools_request_id = src.GetDevToolsId().value().Ascii();
+  if (!src.GetDevToolsId().IsNull()) {
+    dest->devtools_request_id = src.GetDevToolsId().Ascii();
   }
 
   if (src.GetDevToolsStackId().has_value()) {

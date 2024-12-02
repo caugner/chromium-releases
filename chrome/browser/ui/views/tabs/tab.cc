@@ -231,7 +231,8 @@ Tab::Tab(TabSlotController* controller)
   // onto opaque parts of a not-entirely-opaque layer.
   title_->SetSkipSubpixelRenderingOpacityCheck(true);
 
-  if (features::IsChromeRefresh2023()) {
+  if (features::IsChromeRefresh2023() &&
+      base::FeatureList::IsEnabled(features::kChromeRefresh2023TopChromeFont)) {
     title_->SetTextContext(views::style::CONTEXT_LABEL);
     title_->SetTextStyle(views::style::STYLE_BODY_4_EMPHASIS);
   }
@@ -540,7 +541,8 @@ bool Tab::OnMousePressed(const ui::MouseEvent& event) {
 }
 
 bool Tab::OnMouseDragged(const ui::MouseEvent& event) {
-  controller_->ContinueDrag(this, event);
+  // TODO: ensure ignoring return value is ok.
+  std::ignore = controller_->ContinueDrag(this, event);
   return true;
 }
 

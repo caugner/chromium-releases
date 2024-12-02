@@ -9,15 +9,16 @@
 #include "build/branding_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_selections.h"
 #include "chrome/browser/search_engine_choice/search_engine_choice_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "components/search_engines/search_engine_choice_utils.h"
 #include "components/search_engines/template_url_service.h"
-#include "components/signin/public/base/signin_switches.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chromeos/components/kiosk/kiosk_utils.h"
+#include "chromeos/components/mgs/managed_guest_session_utils.h"
 #endif
 
 namespace {
@@ -35,6 +36,8 @@ SearchEngineChoiceServiceFactory::SearchEngineChoiceServiceFactory()
           "SearchEngineChoiceServiceFactory",
           ProfileSelections::Builder()
               .WithRegular(ProfileSelection::kOriginalOnly)
+              .WithAshInternals(ProfileSelection::kNone)
+              .WithGuest(ProfileSelection::kNone)
               .Build()) {
   DependsOn(TemplateURLServiceFactory::GetInstance());
 }
@@ -63,16 +66,18 @@ SearchEngineChoiceServiceFactory::ScopedChromeBuildOverrideForTesting(
   return base::AutoReset<bool>(&g_is_chrome_build, force_chrome_build);
 }
 
+// static
 bool SearchEngineChoiceServiceFactory::IsProfileEligibleForChoiceScreen(
     const policy::PolicyService& policy_service,
-    Profile& profile) const {
-  if (!base::FeatureList::IsEnabled(switches::kSearchEngineChoice)) {
+    Profile& profile) {
+  if (!search_engines::IsChoiceScreenFlagEnabled(
+          search_engines::ChoicePromo::kAny)) {
     return false;
   }
 
   bool is_regular_profile = profile.IsRegularProfile();
 #if BUILDFLAG(IS_CHROMEOS)
-  is_regular_profile &= !profiles::IsManagedGuestSession() &&
+  is_regular_profile &= !chromeos::IsManagedGuestSession() &&
                         !chromeos::IsKioskSession() &&
                         !profiles::IsChromeAppKioskSession();
 #endif
@@ -88,6 +93,15 @@ bool SearchEngineChoiceServiceFactory::IsProfileEligibleForChoiceScreen(
       {.is_regular_profile = is_regular_profile,
        .pref_service = profile.GetPrefs()},
       template_url_service);
+}
+
+// static
+bool SearchEngineChoiceServiceFactory::
+    IsProfileEligibleForChoiceScreenForTesting(
+        const policy::PolicyService& policy_service,
+        Profile& profile) {
+  CHECK_IS_TEST();
+  return IsProfileEligibleForChoiceScreen(policy_service, profile);
 }
 
 std::unique_ptr<KeyedService>

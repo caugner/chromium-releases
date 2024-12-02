@@ -61,8 +61,6 @@ component("color") {
     "color_recipe.h",
     "color_transform.cc",
     "color_transform.h",
-    "temp_palette.cc",
-    "temp_palette.h",
   ]
 
   configs += [ "//build/config/compiler:prevent_unsafe_narrowing" ]
@@ -106,6 +104,7 @@ source_set("unit_tests") {
     "color_provider_utils_unittest.cc",
     "color_recipe_unittest.cc",
     "color_transform_unittest.cc",
+    "sys_color_mixer_unittest.cc",
   ]
 
   deps = [

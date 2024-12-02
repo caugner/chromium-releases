@@ -634,13 +634,6 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
         TakeContentToVisibleTimeRequest(host()));
   }
 
-  // Let the page-level input event router know about our frame sink ID
-  // for surface-based hit testing.
-  if (ShouldRouteEvents()) {
-    host()->delegate()->GetInputEventRouter()->AddFrameSinkIdOwner(
-        GetFrameSinkId(), this);
-  }
-
   host()->SetView(this);
   touch_selection_controller_client_manager_ =
       std::make_unique<TouchSelectionControllerClientManagerAndroid>(this);
@@ -697,6 +690,10 @@ RenderWidgetHostViewAndroid::SubscribeToSurfaceIdChanges(
 
 void RenderWidgetHostViewAndroid::OnSurfaceIdChanged() {
   surface_id_changed_callbacks_.Notify(GetCurrentSurfaceId());
+
+  if (selection_popup_controller_) {
+    selection_popup_controller_->ChildLocalSurfaceIdChanged();
+  }
 }
 
 void RenderWidgetHostViewAndroid::InitAsChild(gfx::NativeView parent_view) {
@@ -1164,10 +1161,14 @@ bool RenderWidgetHostViewAndroid::IsShowing() {
 }
 
 void RenderWidgetHostViewAndroid::SelectAroundCaretAck(
+    int startOffset,
+    int endOffset,
+    int surroundingTextLength,
     blink::mojom::SelectAroundCaretResultPtr result) {
   if (!selection_popup_controller_)
     return;
-  selection_popup_controller_->OnSelectAroundCaretAck(std::move(result));
+  selection_popup_controller_->OnSelectAroundCaretAck(
+      startOffset, endOffset, surroundingTextLength, std::move(result));
 }
 
 gfx::Rect RenderWidgetHostViewAndroid::GetViewBounds() {
