@@ -167,15 +167,14 @@ function checkViewsAfterLogLoaded() {
     sockets: true,
     spdy: true,
     quic: true,
+    sdch: true,
     httpCache: true,
     modules: true,
     tests: false,
     hsts: false,
-    logs: false,
     prerender: true,
-    bandwidth: false,
-    chromeos: false,
-    visualizer: false
+    bandwidth: true,
+    chromeos: false
   };
   NetInternalsTest.checkTabHandleVisibility(tabVisibilityState, false);
 }
@@ -198,15 +197,14 @@ function checkViewsAfterNetLogLoggerLogLoaded() {
     sockets: false,
     spdy: false,
     quic: false,
+    sdch: false,
     httpCache: false,
     modules: false,
     tests: false,
     hsts: false,
-    logs: false,
     prerender: false,
     bandwidth: false,
-    chromeos: false,
-    visualizer: false
+    chromeos: false
   };
   NetInternalsTest.checkTabHandleVisibility(tabVisibilityState, false);
 }

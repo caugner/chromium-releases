@@ -113,7 +113,7 @@ PrintPreviewWebUITest.prototype = {
    */
   setLocalDestinations: function() {
     var localDestsSetEvent =
-      new Event(print_preview.NativeLayer.EventType.LOCAL_DESTINATIONS_SET);
+        new Event(print_preview.NativeLayer.EventType.LOCAL_DESTINATIONS_SET);
     localDestsSetEvent.destinationInfos = this.localDestinationInfos_;
     this.nativeLayer_.dispatchEvent(localDestsSetEvent);
   },
@@ -125,7 +125,7 @@ PrintPreviewWebUITest.prototype = {
    */
   setCapabilities: function(device) {
     var capsSetEvent =
-      new Event(print_preview.NativeLayer.EventType.CAPABILITIES_SET);
+        new Event(print_preview.NativeLayer.EventType.CAPABILITIES_SET);
     capsSetEvent.settingsInfo = device;
     this.nativeLayer_.dispatchEvent(capsSetEvent);
   },
@@ -338,6 +338,16 @@ function getCddTemplate(printerId) {
   };
 }
 
+TEST_F('PrintPreviewWebUITest', 'TestPrintPreviewRestoreLocalDestination',
+    function() {
+  this.initialSettings_.serializedAppStateStr_ =
+      '{"version":2,"selectedDestinationId":"ID",' +
+      '"selectedDestinationOrigin":"local"}';
+  this.setInitialSettings();
+
+  testDone();
+});
+
 TEST_F('PrintPreviewWebUITest', 'TestSystemDialogLinkIsHiddenInAppKioskMode',
     function() {
   if (cr.isChromeOS) {
@@ -474,8 +484,10 @@ TEST_F('PrintPreviewWebUITest', 'PrintScalingDisabledForPlugin', function() {
   this.setCapabilities(getCddTemplate("FooDevice"));
 
   // Indicate that the PDF does not support scaling by default.
-  cr.dispatchSimpleEvent(
-      this.nativeLayer_, print_preview.NativeLayer.EventType.DISABLE_SCALING);
+  var printPresetOptionsEvent = new Event(
+      print_preview.NativeLayer.EventType.PRINT_PRESET_OPTIONS);
+  printPresetOptionsEvent.optionsFromDocument = {disableScaling: true};
+  this.nativeLayer_.dispatchEvent(printPresetOptionsEvent);
 
   var otherOptions = $('other-options-settings');
   checkSectionVisible(otherOptions, true);
@@ -483,6 +495,32 @@ TEST_F('PrintPreviewWebUITest', 'PrintScalingDisabledForPlugin', function() {
       otherOptions.querySelector('.fit-to-page-container'), true);
   expectFalse(
       otherOptions.querySelector('.fit-to-page-checkbox').checked);
+
+  this.waitForAnimationToEnd('other-options-collapsible');
+});
+
+// When the number of copies print preset is set for source 'PDF', we update
+// copies value if capability is supported by printer.
+TEST_F('PrintPreviewWebUITest', 'CheckNumCopiesPrintPreset', function() {
+  this.initialSettings_.isDocumentModifiable_ = false;
+  this.setInitialSettings();
+  this.setLocalDestinations();
+  this.setCapabilities(getCddTemplate("FooDevice"));
+
+  // Indicate that the number of copies print preset is set for source PDF.
+  var printPresetOptions = {
+    disableScaling: true,
+    copies: 2
+  };
+  var printPresetOptionsEvent = new Event(
+      print_preview.NativeLayer.EventType.PRINT_PRESET_OPTIONS);
+  printPresetOptionsEvent.optionsFromDocument = printPresetOptions;
+  this.nativeLayer_.dispatchEvent(printPresetOptionsEvent);
+
+  checkSectionVisible($('copies-settings'), true);
+  expectEquals(
+      printPresetOptions.copies,
+      parseInt($('copies-settings').querySelector('.copies').value));
 
   this.waitForAnimationToEnd('other-options-collapsible');
 });
@@ -859,4 +897,51 @@ TEST_F('PrintPreviewWebUITest', 'TestNoPDFPluginErrorMessage', function() {
   expectEquals(false, customMessageEl.hidden);
 
   testDone();
+});
+
+// Test custom localized paper names.
+TEST_F('PrintPreviewWebUITest', 'TestCustomPaperNames', function() {
+  this.setInitialSettings();
+  this.setLocalDestinations();
+
+  var customLocalizedMediaName = 'Vendor defined localized media name';
+  var customMediaName = 'Vendor defined media name';
+
+  var device = getCddTemplate("FooDevice");
+  device.capabilities.printer.media_size = {
+    option: [
+      { name: 'CUSTOM',
+        width_microns: 15900,
+        height_microns: 79400,
+        is_default: true,
+        custom_display_name_localized: [
+          { locale: navigator.language,
+            value: customLocalizedMediaName
+          }
+        ]
+      },
+      { name: 'CUSTOM',
+        width_microns: 15900,
+        height_microns: 79400,
+        custom_display_name: customMediaName
+      }
+    ]
+  };
+
+  this.setCapabilities(device);
+
+  this.expandMoreSettings();
+
+  checkSectionVisible($('media-size-settings'), true);
+  var mediaSelect = $('media-size-settings').querySelector('.settings-select');
+  // Check the default media item.
+  expectEquals(
+      customLocalizedMediaName,
+      mediaSelect.options[mediaSelect.selectedIndex].text);
+  // Check the other media item.
+  expectEquals(
+      customMediaName,
+      mediaSelect.options[mediaSelect.selectedIndex == 0 ? 1 : 0].text);
+
+  this.waitForAnimationToEnd('more-settings');
 });

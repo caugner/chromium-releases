@@ -743,7 +743,8 @@ TEST_F('RangeHistoryWebUITest', 'monthViewEmptyMonth', function() {
     // See if the correct number of days is shown.
     var resultsDisplay = $('results-display');
     assertEquals(0, resultsDisplay.querySelectorAll('.months-results').length);
-    assertEquals(1, resultsDisplay.querySelectorAll('div').length);
+    var noResults = loadTimeData.getString('noResults');
+    assertNotEquals(-1, $('results-header').textContent.indexOf(noResults));
 
     testDone();
   });
@@ -920,9 +921,9 @@ TEST_F('HistoryWebUIRealBackendTest', 'menuButtonActivatesOneRow', function() {
   menuButton.dispatchEvent(new MouseEvent('mousedown'));
   expectFalse($('action-menu').hidden);
 
-  // Check that the 'active' item hasn't changed.
-  expectTrue(entries[0].classList.contains('active'));
-  expectFalse(entries[2].classList.contains('active'));
+  // Check that the 'active' item has changed.
+  expectTrue(entries[2].classList.contains('active'));
+  expectFalse(entries[0].classList.contains('active'));
 
   testDone();
 });
