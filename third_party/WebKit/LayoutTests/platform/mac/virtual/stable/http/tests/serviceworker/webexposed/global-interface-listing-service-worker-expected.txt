@@ -752,6 +752,7 @@ interface ReadableStream
 interface Request
     attribute @@toStringTag
     getter bodyUsed
+    getter cache
     getter credentials
     getter headers
     getter integrity
@@ -807,11 +808,6 @@ interface ServiceWorkerRegistration : EventTarget
     method unregister
     method update
     setter onupdatefound
-interface SharedArrayBuffer
-    attribute @@toStringTag
-    getter byteLength
-    method constructor
-    method slice
 interface StorageManager
     attribute @@toStringTag
     method constructor
@@ -989,7 +985,6 @@ interface WritableStream
     method constructor
     method getWriter
 [GLOBAL OBJECT]
-    attribute Atomics
     attribute console
     attribute internals
     getter clients

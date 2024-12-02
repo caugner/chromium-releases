@@ -14,7 +14,6 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_test_util.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
@@ -24,8 +23,10 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/re2/src/re2/re2.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/message_center/notification.h"
 #include "ui/message_center/notification_delegate.h"
 
+using message_center::Notification;
 using testing::_;
 using testing::ByMove;
 using testing::Return;
@@ -44,10 +45,9 @@ class NotificationBuilder {
                       base::string16(),
                       base::string16(),
                       gfx::Image(),
-                      message_center::NotifierId(GURL()),
                       base::string16(),
                       GURL(),
-                      id,
+                      message_center::NotifierId(GURL()),
                       message_center::RichNotificationData(),
                       new message_center::NotificationDelegate()) {}
 
@@ -313,7 +313,7 @@ TEST_F(NotificationPlatformBridgeLinuxTest, NotifyAndCloseFormat) {
 
   CreateNotificationBridgeLinux();
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("").GetResult(), nullptr);
   notification_bridge_linux_->Close("", "");
 }
@@ -331,7 +331,7 @@ TEST_F(NotificationPlatformBridgeLinuxTest, ProgressPercentageAddedToSummary) {
 
   CreateNotificationBridgeLinux();
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("")
           .SetType(message_center::NOTIFICATION_TYPE_PROGRESS)
           .SetProgress(42)
@@ -351,7 +351,7 @@ TEST_F(NotificationPlatformBridgeLinuxTest, NotificationListItemsInBody) {
 
   CreateNotificationBridgeLinux();
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("")
           .SetType(message_center::NOTIFICATION_TYPE_MULTIPLE)
           .SetItems(std::vector<message_center::NotificationItem>{
@@ -379,10 +379,10 @@ TEST_F(NotificationPlatformBridgeLinuxTest, NotificationTimeoutsNoPersistence) {
 
   CreateNotificationBridgeLinux();
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("1").SetNeverTimeout(false).GetResult(), nullptr);
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("2").SetNeverTimeout(true).GetResult(), nullptr);
 }
 
@@ -401,7 +401,7 @@ TEST_F(NotificationPlatformBridgeLinuxTest,
       std::vector<std::string>{"actions", "body", "persistence"}, true, true,
       true);
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("1").GetResult(), nullptr);
 }
 
@@ -438,7 +438,7 @@ TEST_F(NotificationPlatformBridgeLinuxTest, NotificationImages) {
 
   CreateNotificationBridgeLinux();
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("")
           .SetType(message_center::NOTIFICATION_TYPE_IMAGE)
           .SetImage(original_image)
@@ -460,7 +460,7 @@ TEST_F(NotificationPlatformBridgeLinuxTest, NotificationAttribution) {
 
   CreateNotificationBridgeLinux();
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("")
           .SetMessage(base::ASCIIToUTF16("Body text"))
           .SetOriginUrl(GURL("https://google.com/search?q=test&ie=UTF8"))
@@ -490,7 +490,7 @@ TEST_F(NotificationPlatformBridgeLinuxTest, EscapeHtml) {
 
   CreateNotificationBridgeLinux();
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("")
           .SetMessage(
               base::ASCIIToUTF16("<span id='1' class=\"2\">&#39;</span>"))
@@ -514,10 +514,10 @@ TEST_F(NotificationPlatformBridgeLinuxTest, Silent) {
 
   CreateNotificationBridgeLinux();
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("1").SetSilent(false).GetResult(), nullptr);
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("2").SetSilent(true).GetResult(), nullptr);
 }
 
@@ -553,31 +553,31 @@ TEST_F(NotificationPlatformBridgeLinuxTest, OriginUrlFormat) {
   CreateNotificationBridgeLinux(std::vector<std::string>{"actions", "body"},
                                 true, true, true);
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("1")
           .SetOriginUrl(GURL("https://google.com"))
           .GetResult(),
       nullptr);
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("2")
           .SetOriginUrl(GURL("https://mail.google.com"))
           .GetResult(),
       nullptr);
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("3")
           .SetOriginUrl(GURL("https://123.123.123.123"))
           .GetResult(),
       nullptr);
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("4")
           .SetOriginUrl(GURL("https://a.b.c.co.uk/file.html"))
           .GetResult(),
       nullptr);
   notification_bridge_linux_->Display(
-      NotificationCommon::PERSISTENT, "", "", false,
+      NotificationHandler::Type::WEB_PERSISTENT, "", false,
       NotificationBuilder("5")
           .SetOriginUrl(GURL(
               "https://google.com.blahblahblahblahblahblahblah.evilsite.com"))

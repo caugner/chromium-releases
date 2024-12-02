@@ -52,7 +52,7 @@
 #include "chrome/browser/chromeos/login/screens/network_error.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
 #include "chrome/browser/chromeos/login/ui/login_feedback.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_display.h"
 #include "chrome/browser/chromeos/login/users/multi_profile_user_controller.h"
@@ -131,7 +131,6 @@ const char kSourceAccountPicker[] = "account-picker";
 
 // Constants for lock screen apps activity state values:
 const char kNoLockScreenApps[] = "LOCK_SCREEN_APPS_STATE.NONE";
-const char kBackgroundLockScreenApps[] = "LOCK_SCREEN_APPS_STATE.BACKGROUND";
 const char kForegroundLockScreenApps[] = "LOCK_SCREEN_APPS_STATE.FOREGROUND";
 const char kAvailableLockScreenApps[] = "LOCK_SCREEN_APPS_STATE.AVAILABLE";
 
@@ -538,6 +537,8 @@ void SigninScreenHandler::RegisterMessages() {
               &SigninScreenHandler::HandleCloseLockScreenApp);
   AddCallback("requestNewLockScreenNote",
               &SigninScreenHandler::HandleRequestNewNoteAction);
+  AddCallback("newNoteLaunchAnimationDone",
+              &SigninScreenHandler::HandleNewNoteLaunchAnimationDone);
 }
 
 void SigninScreenHandler::Show(const LoginScreenContext& context) {
@@ -1116,9 +1117,6 @@ void SigninScreenHandler::OnLockScreenNoteStateChanged(
     case ash::mojom::TrayActionState::kActive:
       lock_screen_apps_state = kForegroundLockScreenApps;
       break;
-    case ash::mojom::TrayActionState::kBackground:
-      lock_screen_apps_state = kBackgroundLockScreenApps;
-      break;
     case ash::mojom::TrayActionState::kAvailable:
       lock_screen_apps_state = kAvailableLockScreenApps;
       break;
@@ -1160,6 +1158,10 @@ void SigninScreenHandler::HandleAuthenticateUser(const AccountId& account_id,
   UserContext user_context(account_id);
   user_context.SetKey(Key(password));
   user_context.SetIsUsingPin(authenticated_by_pin);
+  const user_manager::User* user =
+      user_manager::UserManager::Get()->FindUser(account_id);
+  DCHECK(user);
+  user_context.SetUserType(user->GetType());
   if (account_id.GetAccountType() == AccountType::ACTIVE_DIRECTORY)
     user_context.SetUserType(user_manager::USER_TYPE_ACTIVE_DIRECTORY);
   delegate_->Login(user_context, SigninSpecifics());
@@ -1238,9 +1240,8 @@ void SigninScreenHandler::HandleRemoveUser(const AccountId& account_id) {
 }
 
 void SigninScreenHandler::HandleShowAddUser(const base::ListValue* args) {
-  TRACE_EVENT_ASYNC_STEP_INTO0("ui",
-                               "ShowLoginWebUI",
-                               LoginDisplayHostImpl::kShowLoginWebUIid,
+  TRACE_EVENT_ASYNC_STEP_INTO0("ui", "ShowLoginWebUI",
+                               LoginDisplayHostWebUI::kShowLoginWebUIid,
                                "ShowAddUser");
   std::string email;
   // |args| can be null if it's OOBE.
@@ -1349,8 +1350,8 @@ void SigninScreenHandler::HandleLoginVisible(const std::string& source) {
         chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
         content::NotificationService::AllSources(),
         content::NotificationService::NoDetails());
-    TRACE_EVENT_ASYNC_END0(
-        "ui", "ShowLoginWebUI", LoginDisplayHostImpl::kShowLoginWebUIid);
+    TRACE_EVENT_ASYNC_END0("ui", "ShowLoginWebUI",
+                           LoginDisplayHostWebUI::kShowLoginWebUIid);
   }
   webui_visible_ = true;
   if (preferences_changed_delayed_)
@@ -1544,6 +1545,10 @@ void SigninScreenHandler::HandleRequestNewNoteAction(
   } else {
     NOTREACHED() << "Unknown request type " << request_type;
   }
+}
+
+void SigninScreenHandler::HandleNewNoteLaunchAnimationDone() {
+  lock_screen_apps::StateController::Get()->NewNoteLaunchAnimationDone();
 }
 
 void SigninScreenHandler::HandleCloseLockScreenApp() {

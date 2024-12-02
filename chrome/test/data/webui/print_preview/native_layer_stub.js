@@ -15,6 +15,7 @@ cr.define('print_preview', function() {
         'getPrinterCapabilities',
         'hidePreview',
         'print',
+        'saveAppState',
         'setupPrinter',
       ]);
 
@@ -82,18 +83,18 @@ cr.define('print_preview', function() {
         requestId: requestId,
       });
       if (destination.id == this.badPrinterId_) {
-        var rejectString = print_preview.PreviewArea.EventType.SETTINGS_INVALID;
+        let rejectString = print_preview.PreviewArea.EventType.SETTINGS_INVALID;
         rejectString = rejectString.substring(
             rejectString.lastIndexOf('.') + 1, rejectString.length);
         return Promise.reject(rejectString);
       }
-      var pageRanges = printTicketStore.pageRange.getDocumentPageRanges();
+      const pageRanges = printTicketStore.pageRange.getDocumentPageRanges();
       if (pageRanges.length == 0) {  // assume full length document, 1 page.
         cr.webUIListenerCallback('page-count-ready', 1, requestId, 100);
         cr.webUIListenerCallback('page-preview-ready', 0, 0, requestId);
       } else {
-        var pages = pageRanges.reduce(function(soFar, range) {
-          for (var page = range.from; page <= range.to; page++) {
+        const pages = pageRanges.reduce(function(soFar, range) {
+          for (let page = range.from; page <= range.to; page++) {
             soFar.push(page);
           }
           return soFar;
@@ -124,7 +125,6 @@ cr.define('print_preview', function() {
     print(
       destination,
       printTicketStore,
-      cloudPrintInterface,
       documentInfo,
       opt_isOpenPdfInPreview,
       opt_showSystemDialog
@@ -132,7 +132,6 @@ cr.define('print_preview', function() {
       this.methodCalled('print', {
         destination: destination,
         printTicketStore: printTicketStore,
-        cloudPrintInterface: cloudPrintInterface,
         documentInfo: documentInfo,
         openPdfInPreview: opt_isOpenPdfInPreview || false,
         showSystemDialog: opt_showSystemDialog || false,
@@ -160,7 +159,9 @@ cr.define('print_preview', function() {
     recordInHistogram() {}
 
     /** @override */
-    saveAppState() {}
+    saveAppState(appState) {
+      this.methodCalled('saveAppState', appState);
+    }
 
     /**
      * @param {!print_preview.NativeInitialSettings} settings The settings

@@ -15,12 +15,12 @@ crbug.com/410974 virtual/scroll_customization/fast/scroll-behavior/scroll-custom
 crbug.com/410974 virtual/scroll_customization/fast/scroll-behavior/scroll-customization/scrollstate-distribute-to-scroll-chain-descendant.html [ Leak ]
 
 # -----------------------------------------------------------------
-# Untriaged but known leaks of SuspendableObject (fast).
+# Untriaged but known leaks of PausableObject (fast).
 # -----------------------------------------------------------------
 crbug.com/661182 fast/loader/open-in-srcdoc-unload.html [ Leak ]
 
 # -----------------------------------------------------------------
-# Untriaged but known leaks of SuspendableObject (http).
+# Untriaged but known leaks of PausableObject (http).
 # -----------------------------------------------------------------
 crbug.com/506754 http/tests/serviceworker/chromium/resolve-after-window-close.html [ Leak ]
 crbug.com/506754 virtual/mojo-loading/http/tests/serviceworker/chromium/resolve-after-window-close.html [ Leak ]
@@ -39,10 +39,14 @@ crbug.com/672740 virtual/mojo-loading/http/tests/security/mixedContent/websocket
 
 crbug.com/755625 external/wpt/beacon/beacon-error.window.html [ Leak ]
 
+crbug.com/786995 virtual/threaded/http/tests/devtools/tracing/timeline-style/timeline-style-recalc-all-invalidator-types.js [ Leak Pass ]
+
 # -----------------------------------------------------------------
 # Flakily leaks
 # -----------------------------------------------------------------
 crbug.com/762353 external/wpt/beacon/headers/header-referrer-no-referrer.html [ Leak Pass ]
+crbug.com/651742 external/wpt/content-security-policy/connect-src/connect-src-beacon-allowed.sub.html [ Leak Pass ]
+crbug.com/780386 external/wpt/html/dom/reflection-grouping.html [ Leak Pass ]
 
 # -----------------------------------------------------------------
 # Not revert suspected CL as jam@ request, expected to be fixed soon.

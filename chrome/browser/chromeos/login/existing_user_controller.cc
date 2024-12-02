@@ -286,6 +286,14 @@ bool IsArcEnabledFromPolicy(
   return false;
 }
 
+// Returns true if the device is enrolled to an Active Directory domain
+// according to InstallAttributes (proxied through BrowserPolicyConnector).
+bool IsActiveDirectoryManaged() {
+  return g_browser_process->platform_part()
+      ->browser_policy_connector_chromeos()
+      ->IsActiveDirectoryManaged();
+}
+
 }  // namespace
 
 // static
@@ -548,9 +556,7 @@ void ExistingUserController::PerformLogin(
     login_performer_.reset(nullptr);
     login_performer_.reset(new ChromeLoginPerformer(this));
   }
-  policy::BrowserPolicyConnectorChromeOS* connector =
-      g_browser_process->platform_part()->browser_policy_connector_chromeos();
-  if (connector->IsActiveDirectoryManaged() &&
+  if (IsActiveDirectoryManaged() &&
       user_context.GetUserType() != user_manager::USER_TYPE_ACTIVE_DIRECTORY) {
     PerformLoginFinishedActions(false /* don't start auto login timer */);
     ShowError(IDS_LOGIN_ERROR_GOOGLE_ACCOUNT_NOT_ALLOWED,
@@ -558,7 +564,8 @@ void ExistingUserController::PerformLogin(
     return;
   }
   if (user_context.GetAccountId().GetAccountType() ==
-      AccountType::ACTIVE_DIRECTORY) {
+          AccountType::ACTIVE_DIRECTORY &&
+      user_context.GetAuthFlow() == UserContext::AUTH_FLOW_OFFLINE) {
     DCHECK(user_context.GetKey()->GetKeyType() == Key::KEY_TYPE_PASSWORD_PLAIN);
     // Try to get kerberos TGT while we have user's password typed on the pod
     // screen. Failure to get TGT here is OK - that could mean e.g. Active
@@ -1035,7 +1042,8 @@ void ExistingUserController::OnOldEncryptionDetected(
   pre_signin_policy_fetcher_ = base::MakeUnique<policy::PreSigninPolicyFetcher>(
       DBusThreadManager::Get()->GetCryptohomeClient(),
       DBusThreadManager::Get()->GetSessionManagerClient(),
-      std::move(cloud_policy_client), user_context.GetAccountId(),
+      std::move(cloud_policy_client), IsActiveDirectoryManaged(),
+      user_context.GetAccountId(),
       cryptohome::KeyDefinition(user_context.GetKey()->GetSecret(),
                                 std::string(), cryptohome::PRIV_DEFAULT));
   pre_signin_policy_fetcher_->FetchPolicy(

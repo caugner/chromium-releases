@@ -51,10 +51,10 @@ layer at (0,0) size 450x500
           LayoutSVGInlineText {#text} at (-81.64,1) size 163.28x18
             chunk 1 (middle anchor) text run 1 at (-81.64,15.00) startOffset 0 endOffset 26 width 163.28: "referenced text via <tref>"
       LayoutSVGContainer {g} at (-47.23,-28) size 94.47x47 [transform={m=((1.00,0.00)(0.00,1.00)) t=(225.00,225.00)}]
-        LayoutSVGText {text} at (-43.31,-28) size 86.61x36 contains 1 chunk(s)
+        LayoutSVGText {text} at (-43.31,-28) size 86.63x36 contains 1 chunk(s)
           LayoutSVGInlineText {#text} at (-43.31,-28) size 24.98x36
             chunk 1 (middle anchor) text run 1 at (-43.32,0.00) startOffset 0 endOffset 2 width 24.99: "sa"
-          LayoutSVGTSpan {tspan} at (-43.31,-28) size 86.61x36
+          LayoutSVGTSpan {tspan} at (-43.31,-28) size 86.63x36
             LayoutSVGInlineText {#text} at (-18.31,-28) size 24.98x36
               chunk 1 (middle anchor) text run 1 at (-18.33,0.00) startOffset 0 endOffset 1 width 24.99: "m"
           LayoutSVGInlineText {#text} at (6.66,-28) size 36.64x36
@@ -128,9 +128,7 @@ layer at (0,0) size 450x500
           LayoutSVGText {text} at (-42.48,-28) size 84.97x36 contains 1 chunk(s)
             LayoutSVGInlineText {#text} at (-42.48,-28) size 84.97x36
               chunk 1 (middle anchor) text run 1 at (-42.49,0.00) startOffset 0 endOffset 6 width 84.98: "sample"
-        LayoutSVGResourceLinearGradient {linearGradient} [id="gradient"] [gradientUnits=userSpaceOnUse] [start=(-50,-25)] [end=(50,25)]
-          LayoutSVGGradientStop {stop} [offset=0.00] [color=#0000FF]
-          LayoutSVGGradientStop {stop} [offset=1.00] [color=#008000]
+        LayoutSVGResourceLinearGradient {linearGradient} [id="gradient"] [gradientUnits=userSpaceOnUse] [stops=( #0000FF@0.00 #008000@1.00 )] [start=(-50,-25)] [end=(50,25)]
       LayoutSVGContainer {g} at (-51.09,-25) size 102.19x50 [transform={m=((1.00,0.00)(0.00,1.00)) t=(350.00,370.00)}]
         LayoutSVGRect {rect} at (-50,-25) size 100x50 [fill={[type=LINEAR-GRADIENT] [id="gradient"]}] [x=-50.00] [y=-25.00] [width=100.00] [height=50.00]
           [clipPath="textClip"] LayoutSVGResourceClipper {clipPath} at (-42.48,-28) size 84.97x36

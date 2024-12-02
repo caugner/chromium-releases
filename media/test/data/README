@@ -194,6 +194,15 @@ test-25fps.vp9.md5:
   MD5 of RGB thumbnail rendered version of test-25fps.vp9. Written out by
   video_decode_accelerator_unittest.
 
+test-25fps.vp9_2:
+  Similar to test-25fps.vp9, substituting the option "--profile=0" with
+  "--profile=2 --bit-depth=10" to vpxenc. (Note that vpxenc must have been
+  configured with the option --enable-vp9-highbitdepth).
+
+test-25fps.vp9_2.md5:
+  MD5 of RGB thumbnail rendered version of test-25fps.vp9_@. Written out by
+  video_decode_accelerator_unittest.
+
 // VDA test files: bear
 bear.h264:
   Using ffmpeg version 0.8.6-4:0.8.6-0ubuntu0.12.04.1, generated with
@@ -247,7 +256,7 @@ bear_320x192_40frames.yuv
 // VP9 parser test files:
 bear-vp9.ivf
   - Created using "avconv -i bear-vp9.webm -vcodec copy -an -f ivf bear-vp9.ivf".
-bear-vp9.ivf.context 
+bear-vp9.ivf.context
 test-25fps.vp9.context
   - Manually dumped from libvpx with bear-vp9.ivf and test-25fps.vp9. See
     vp9_parser_unittest.cc for description of their format.
